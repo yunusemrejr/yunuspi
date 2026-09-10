@@ -14,4 +14,8 @@ jobs:
         with:
           node-version: '24'
       - run: node scripts/check-public.mjs
+      - name: Install execution isolation prerequisite
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap python3
       - run: node --test tests/*.test.mjs
+        env:
+          PI_REQUIRE_ISOLATION_TEST: '1'

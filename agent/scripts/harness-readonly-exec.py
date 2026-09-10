@@ -12,6 +12,8 @@ import sys
 def main():
     if platform.system() != 'Linux':
         raise RuntimeError('Linux bubblewrap runtime required')
+    if not os.access('/usr/bin/bwrap', os.X_OK):
+        raise RuntimeError('required executable unavailable: /usr/bin/bwrap; install bubblewrap before running guarded commands')
     if len(sys.argv) < 4 or sys.argv[2] != '--':
         raise RuntimeError('invalid guarded command')
     protected = os.path.realpath(sys.argv[1])

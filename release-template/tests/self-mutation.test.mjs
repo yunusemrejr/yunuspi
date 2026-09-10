@@ -61,8 +61,9 @@ test('real namespace prevents mutation while allowing project work',t=>{
   const run=code=>spawnSync(python,['-I',wrapper,f.protectedDir,'--',python,'-c',code],{cwd:f.project,encoding:'utf8'});
   const probe=run("open('normal','w').write('ok')");
   if(probe.status!==0) {
-   const unavailable = probe.error?.code === 'ENOENT' || /Linux bubblewrap runtime required|No such file or directory: '\/usr\/bin\/bwrap'|bwrap:.*(?:Operation not permitted|Permission denied|No permissions to create|Creating new namespace failed|namespace)/i.test(probe.stderr ?? '');
+   const unavailable = probe.error?.code === 'ENOENT' || /Linux bubblewrap runtime required|required executable unavailable: \/usr\/bin\/bwrap|bwrap:.*(?:Operation not permitted|Permission denied|No permissions to create|Creating new namespace failed|namespace)/i.test(probe.stderr ?? '');
    assert.ok(unavailable, `Namespace probe failed unexpectedly: ${probe.stderr ?? probe.error}`);
+   assert.notEqual(process.env.PI_REQUIRE_ISOLATION_TEST, '1', `Required namespace integration unavailable: ${probe.stderr ?? probe.error}`);
    assert.ok(!fs.existsSync(path.join(f.project,'normal')),'failed isolation must not execute payload');
    assert.equal(fs.readFileSync(path.join(f.protectedDir,'original'),'utf8'),'unchanged');
    t.skip('Real namespace integration unavailable on this host; payload did not execute. Portable fail-closed checks ran separately.');return;
