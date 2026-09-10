@@ -1,3 +1,4 @@
+import { guardedCommand, SELF_MUTATION_ALLOWED } from "../../../../lib/self-mutation-guard.ts";
 import { spawn } from "node:child_process";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -1185,10 +1186,12 @@ function runVerifyCommand(command: AcceptanceVerifyCommand, defaultCwd: string, 
 		// Keep enough lookahead to redact any secret beginning in the visible
 		// 12k prefix, but never accumulate unlimited subprocess output.
 		const outputLimit = 12001 + Math.max(0, ...Object.values(verifyRedactionEnv(command.env)).map(value => value.length));
-		const child = spawn(quoteExecutableForShell(command.command), {
+		const commandText = quoteExecutableForShell(command.command);
+		const guarded = SELF_MUTATION_ALLOWED ? { command: commandText, args: [] } : guardedCommand("/bin/sh", ["-c", commandText]);
+		const child = spawn(guarded.command, guarded.args, {
 			cwd,
 			env: effectiveVerifyEnv(command.env),
-			shell: true,
+			shell: SELF_MUTATION_ALLOWED,
 			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,

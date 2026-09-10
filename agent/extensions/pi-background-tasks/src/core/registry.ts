@@ -1,3 +1,4 @@
+import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
@@ -914,7 +915,8 @@ export class BackgroundTaskRegistry {
           ? baseInvocation
           : shellInvocation(commandToSpawn, this.platform, this.env);
       if (outputFailure !== undefined) throw new Error(outputFailure);
-      const child = this.spawn(invocation.shell, invocation.args, {
+      const guarded = guardedCommand(invocation.shell, invocation.args);
+      const child = this.spawn(guarded.command, guarded.args, {
         cwd: ctx.cwd,
         detached: this.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],

@@ -25,6 +25,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { guardedCommand } from "./lib/self-mutation-guard.ts";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
@@ -232,9 +233,10 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			}
 			const shellConfig = getShellConfig();
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
+			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command]);
 			const child = spawn(
-				shellConfig.shell,
-				commandFromStdin ? shellConfig.args : [...shellConfig.args, command],
+				guarded.command,
+				guarded.args,
 				{
 					cwd,
 					detached: process.platform !== "win32",

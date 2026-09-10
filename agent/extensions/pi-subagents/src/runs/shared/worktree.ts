@@ -1,3 +1,4 @@
+import { guardedCommand } from "../../../../lib/self-mutation-guard.ts";
 import { runManagedGit } from "./git-command.ts";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -333,7 +334,8 @@ function runWorktreeSetupHook(
 	hook: ResolvedWorktreeSetupHook,
 	input: WorktreeSetupHookInput,
 ): string[] {
-	const result = spawnSync(hook.hookPath, [], {
+	const guarded = guardedCommand(hook.hookPath, []);
+	const result = spawnSync(guarded.command, guarded.args, {
 		windowsHide: true,
 		cwd: input.worktreePath,
 		encoding: "utf-8",

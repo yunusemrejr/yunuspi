@@ -58,6 +58,8 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 
+import { selfMutationDenial, SELF_MUTATION_ALLOWED, SELF_MUTATION_GUIDANCE } from "./lib/self-mutation-guard.ts";
+
 const HOME = os.homedir();
 
 // Protected directories - operations blocked unless inside project
@@ -1104,6 +1106,13 @@ export function invalidShellPath(command: string): string | undefined {
 }
 
 export default function filesystemSafetyExtension(pi: ExtensionAPI) {
+	let maintenanceReminded = false;
+	pi.on("session_start", () => { maintenanceReminded = false; });
+	pi.on("before_agent_start", () => {
+		if (!SELF_MUTATION_ALLOWED || maintenanceReminded) return;
+		maintenanceReminded = true;
+		return { message: { customType: "harness-maintenance-safety", content: SELF_MUTATION_GUIDANCE, display: false } };
+	});
 	const approved = new Map<string, "file" | "directory">(),
 		denied = new Set<string>();
 	const pending = new Map<string, Promise<boolean>>();
@@ -1227,6 +1236,8 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			return undefined;
 		}
 
+		const harnessDenial = selfMutationDenial(filePath, ctx.cwd);
+		if (harnessDenial) return { block: true, reason: harnessDenial };
 		const invalidPath = invalidMutationPath(filePath);
 		if (invalidPath) return { block: true, reason: invalidPath };
 		if (

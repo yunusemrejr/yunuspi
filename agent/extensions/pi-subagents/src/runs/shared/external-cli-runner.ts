@@ -1,3 +1,4 @@
+import { guardedCommand } from "../../../../lib/self-mutation-guard.ts";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
@@ -327,7 +328,8 @@ export function runExternalCli(input: {
 			}
 			appendPendingLine(chunk.subarray(start));
 		};
-		const child = spawn(preflight?.binaryPath ?? input.command, input.args ?? [], {
+		const guarded = guardedCommand(preflight?.binaryPath ?? input.command, input.args ?? []);
+		const child = spawn(guarded.command, guarded.args, {
 			cwd: input.cwd,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],

@@ -1,0 +1,13 @@
+# Harness maintenance boundary
+
+The guard captures launch-directory authority when its module first loads. Human launches from the active harness root or an ancestor can maintain it and receive a maintenance reminder. Subagents have no independent maintenance authority. Changing a tool's cwd does not change the captured authority. A resumed conversation uses the current process launch authority, not the old transcript.
+
+Direct write/edit requests resolve symlinks and nonexistent descendants before checking the active harness path. Guarded executable tools use a Linux read-only mount boundary, inherited by their descendants. Unsupported isolation fails closed. In-process scripted workflows are rejected outside maintenance because a JavaScript VM in the same process is not an operating-system sandbox.
+
+The mount boundary also makes harness ancestors read-only, preventing ancestor renames. Existing sibling project directories remain writable, but guarded commands cannot create a new entry directly inside an ancestor such as the home directory. Create project directories before launching an ordinary session. A full-tree hardlink check runs before each guarded command; measured launch overhead on the development installation was approximately 0.31 seconds, and varies with filesystem size and cache state.
+
+This is a boundary around covered agent mutation paths, not a sandbox for arbitrary third-party extensions or a hostile host user. Pi itself must still write session state. Extensions loaded into its process are trusted code; installing an extension, core patch or external broker grants it host-level capability. A separate process running as the same user, an existing browser/IPC broker, privileged services and external executables reached through such brokers are outside this boundary. Do not run Pi as root. Review additions that expose execution, file writes, subprocesses or IPC before enabling them.
+
+Hardlinks can alias the same inode through a different path. Guarded commands refuse a protected tree containing multiply linked regular files. From a maintenance session, run `python3 ~/.pi/agent/scripts/repair-harness-hardlinks.py --help`; review its dry run before applying independent-copy repair. This is a local maintenance operation, never part of public export. Concurrent changes by other host processes are outside the guard's threat model.
+
+Public export is separate from mutation protection. Use the sanitized exporter, review the generated diff, and run the public scanner before publishing. Hooks and CI provide defense in depth; no pattern scanner can identify every confidential sentence. Never publish private backup archives or session histories.

@@ -1,3 +1,4 @@
+import { guardedCommand, SELF_MUTATION_ALLOWED } from "../../../lib/self-mutation-guard.ts";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -172,10 +173,12 @@ export async function executeWorkflowHostCommand(input: {
 	let settled = false;
 
 	return new Promise((resolve, reject) => {
-		const child = spawn(quoteExecutableForShell(input.params.command), {
+		const commandText = quoteExecutableForShell(input.params.command);
+		const guarded = SELF_MUTATION_ALLOWED ? { command: commandText, args: [] } : guardedCommand("/bin/sh", ["-c", commandText]);
+		const child = spawn(guarded.command, guarded.args, {
 			cwd: input.cwd,
 			env: process.env,
-			shell: true,
+			shell: SELF_MUTATION_ALLOWED,
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 			detached: process.platform !== "win32",

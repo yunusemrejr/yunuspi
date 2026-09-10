@@ -17,6 +17,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
 - Version-specific core patches and structural verification.
+- Launch-scoped harness mutation protection and on-demand self-maintenance, browser, community promotion and organic-growth guidance; see [security boundaries](docs/SECURITY.md).
 
 The optional mini preprocessing model is not bundled with a Python environment, weights or authentication. Its client falls back to raw data when unavailable. Model-specific tests and personal development artifacts are not distribution assets.
 

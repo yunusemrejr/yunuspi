@@ -1,0 +1,9 @@
+# Verification and public releases
+
+Trace each change from registration through execution and cleanup. Permission changes need direct tools, shell/interpreter execution, background jobs, workflow execution, symlink paths, nonexistent descendants and child launch tests. Cwd is context, not transferable authority. Process wrappers must fail closed when their required isolation mechanism is unavailable; label their actual boundary and unsupported operations.
+
+For reminders and skill routing, test relevant positive requests, unrelated negatives, bounded delivery, read-receipt deduplication and child-agent delivery. For provider changes, verify exact request serialization and usage accounting using fixtures before spending on live inference. For patches, check the pinned installed version and patch reapplication behavior.
+
+Run focused regression suites and the existing read-only structural verifier. Broaden tests only when failures or shared dependencies justify it. Do not run paid smoke tests or restart active services merely to obtain a green report. Record what was measured and what remains unverified.
+
+Private backups and public exports have different contracts. Private backups may contain credentials and personal history; keep them private and verify restore structure and permissions. Public releases must be generated through the repository's sanitized exporter, reviewed and scanned before staging or pushing. Never copy the live harness wholesale or assume `.gitignore` cleans tracked history. Include generic skills and environment-variable examples; exclude personal account details, session logs, private datasets, credentials and machine-specific configuration. Scan staged content and history as the release workflow requires, preserve third-party notices and verify a fresh installation. Local secrets remain intact.

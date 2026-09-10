@@ -1,3 +1,4 @@
+import { guardedCommand, SELF_MUTATION_ALLOWED } from "../../../lib/self-mutation-guard.ts";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -443,12 +444,13 @@ async function collectWithTypeScriptLanguageServer(input: {
 	signal?: AbortSignal;
 }): Promise<WatchdogLspResult> {
 	const started = Date.now();
-	const child = spawn(input.command.command, input.command.args, {
+	const guarded = guardedCommand(input.command.command, input.command.args);
+	const child = spawn(guarded.command, guarded.args, {
 		windowsHide: true,
 		cwd: input.root,
 		stdio: "pipe",
 		env: { ...process.env, NO_COLOR: "1" },
-		shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(input.command.command),
+		shell: SELF_MUTATION_ALLOWED && process.platform === "win32" && /\.(cmd|bat)$/i.test(input.command.command),
 	});
 	const client = new JsonRpcLspClient(child);
 	const remaining = () => Math.max(1, input.config.timeoutMs - (Date.now() - started));

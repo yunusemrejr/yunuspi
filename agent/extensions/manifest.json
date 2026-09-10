@@ -48,7 +48,8 @@
     "health-log.ts",
     "render-queue.ts",
     "context-limits.ts",
-    "mini-preprocessor.ts"
+    "mini-preprocessor.ts",
+    "self-mutation-guard.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -339,6 +340,8 @@
     "extensions/pi-memory/context-salience.ts",
     "extensions/pi-memory/context-evidence.ts",
     "extensions/pi-memory/context-tools.ts",
+    "scripts/harness-readonly-exec.py",
+    "scripts/repair-harness-hardlinks.py",
     "scripts/mini-preprocessor.py",
     "scripts/lib/paragraph_selector.py"
   ]

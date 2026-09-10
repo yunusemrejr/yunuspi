@@ -1,3 +1,4 @@
+import { SELF_MUTATION_ALLOWED } from "../../../lib/self-mutation-guard.ts";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
@@ -1690,6 +1691,8 @@ function setupAbortResumeParams(params: Record<string, unknown>, result: Workflo
 }
 
 export async function runWorkflowScript(options: RunWorkflowScriptOptions): Promise<WorkflowScriptResult> {
+	// node:vm and worker_threads are not a filesystem security boundary.
+	if (!SELF_MUTATION_ALLOWED) throw new Error("Scripted JavaScript workflows are unavailable outside a human-started harness maintenance session: their worker shares Pi filesystem authority. Use declarative subagent chains, parallel tasks, swarm or fusion instead.");
 	if (!options.script.trim()) throw new Error("workflowScript must not be empty.");
 	if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1)) throw new Error("workflow script timeout must be a positive integer.");
 	if (options.globalConcurrencyLimit !== undefined && (!Number.isSafeInteger(options.globalConcurrencyLimit) || options.globalConcurrencyLimit < 1)) {

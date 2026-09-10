@@ -1,3 +1,4 @@
+import { guardedCommand } from "../../../../lib/self-mutation-guard.ts";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -53,7 +54,8 @@ function resolveBinary(command: string, env: NodeJS.ProcessEnv): string {
 }
 
 function probeWithTimeout(binaryPath: string, args: readonly string[], env: NodeJS.ProcessEnv, label: string, timeoutMs: number, cwd?: string): string {
-	const result = spawnSync(binaryPath, [...args], {
+	const guarded = guardedCommand(binaryPath, args);
+	const result = spawnSync(guarded.command, guarded.args, {
 		cwd,
 		env,
 		encoding: "utf-8",
