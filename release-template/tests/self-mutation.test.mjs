@@ -40,6 +40,19 @@ test('maintenance authority is latched at original process launch',()=>{
   assert.deepEqual(authority(harness,{PI_HARNESS_MUTATION_DENIED:'1'}),[false,true]);
  } finally {f.close();}
 });
+test('project tool guidance advertises executable native orchestration',()=>{
+ const f=fixture();try {
+  const url=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/tool-description.ts')).href;
+  const inspect=cwd=>node(cwd,`const m=await import(${JSON.stringify(url)});console.log(JSON.stringify([m.buildSubagentToolDescription(),m.buildSubagentToolPromptMetadata()]));`);
+  const project=inspect(f.project);assert.equal(project.status,0,project.stderr);
+  const [description,metadata]=JSON.parse(project.stdout);
+  assert.match(description,/workflowScript is unavailable in this project session/);
+  assert.match(description,/tasks:\[/);assert.match(description,/chain:\[/);
+  assert.doesNotMatch(metadata.promptGuidelines.join(' '),/Use one async workflowScript/);
+  const maintenance=inspect(harness);assert.equal(maintenance.status,0,maintenance.stderr);
+  assert.match(JSON.parse(maintenance.stdout)[0],/runs\.all/);
+ } finally {f.close();}
+});
 test('new targets resolve symlink ancestors and unrelated prefixes remain outside',()=>{
  const f=fixture(); try {
   try {fs.symlinkSync(f.protectedDir,path.join(f.project,'alias'),'dir');} catch(error) {
@@ -53,6 +66,34 @@ test('new targets resolve symlink ancestors and unrelated prefixes remain outsid
 test('unsupported namespace platform fails closed before launching a command',()=>{
  const f=fixture(); try {
   const result=node(f.project,`Object.defineProperty(process,'platform',{value:'unsupported-test'}); const g=await import(${JSON.stringify(moduleUrl)}); try {g.guardedCommand('arbitrary-command',[]);process.exit(99);} catch(e){if(!/No unisolated command was started/.test(e.message))throw e;}`);
+  assert.equal(result.status,0,result.stderr);
+ } finally {f.close();}
+});
+test('disappearing runtime locks do not hide hardlinks or unreadable subtrees',()=>{
+ const f=fixture(); try {
+  const script=`import importlib.util, os, sys
+from unittest.mock import patch
+spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
+guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+root=sys.argv[2]
+def vanished(*args,**kwargs):
+ kwargs['onerror'](FileNotFoundError(2,'vanished lock',os.path.join(root,'lock')))
+ yield root, [], ['vanished-file','original']
+with patch.object(guard.os,'walk',vanished): guard.check_hardlinks(root)
+os.link(os.path.join(root,'original'),os.path.join(root,'alias'))
+with patch.object(guard.os,'walk',vanished):
+ try: guard.check_hardlinks(root)
+ except RuntimeError as error: assert 'hard-linked' in str(error)
+ else: raise AssertionError('hardlink was not rejected after transient disappearance')
+def unreadable(*args,**kwargs):
+ kwargs['onerror'](PermissionError(13,'denied',root))
+ yield root,[],[]
+with patch.object(guard.os,'walk',unreadable):
+ try: guard.check_hardlinks(root)
+ except PermissionError: pass
+ else: raise AssertionError('unreadable subtree was accepted')
+`;
+  const result=spawnSync('python3',['-B','-c',script,wrapper,f.protectedDir],{encoding:'utf8'});
   assert.equal(result.status,0,result.stderr);
  } finally {f.close();}
 });

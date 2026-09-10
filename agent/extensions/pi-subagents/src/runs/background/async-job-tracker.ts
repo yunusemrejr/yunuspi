@@ -36,6 +36,7 @@ interface AsyncJobTrackerOptions {
 	widgetEnabled?: boolean;
 	platform?: NodeJS.Platform;
 	onJobTerminal?: () => void;
+	onLifecycle?: (data: {runId:string;sessionId?:string;mode?:string;state:string;results:any[];parallelGroups?:any[];events?:Record<string,number>}) => void;
 	watch?: typeof fs.watch;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
@@ -67,6 +68,23 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 	restoreActiveJobs: (ctx?: ExtensionContext) => void;
 	dispose: () => void;
 } {
+	// Observe transition metadata once, independent of UI expansion/animation.
+	// Never count a workflow coordinator, a pending stage, or a status poll as a child.
+	const activityKeys=new Map<string,string>();
+	const publishActivity=(job:AsyncJobState, observed?:any)=>{
+		if(!options.onLifecycle||job.sessionId!==state.currentSessionId)return;
+		const source=observed??job;
+		const mode=source.mode??job.mode,stateNow=source.state??job.status;
+		let results:any[]=[];
+		if(Array.isArray(source.workflowChildren?.children))results=source.workflowChildren.children.filter((r:any)=>r.state!=='pending').map((r:any,index:number)=>({index,workflowKey:r.childId,runId:r.runId,status:r.state}));
+		else if(Array.isArray(source.steps)&&source.steps.length)results=source.steps.flatMap((r:any,index:number)=>r.status==='pending'?[]:[{index:r.index??index,runId:r.runId,workflowKey:r.workflowKey,status:r.status??'unknown'}]);
+		else if(mode==='single')results=[{index:0,status:stateNow}];
+		const data={runId:job.asyncId,sessionId:job.sessionId,mode,state:stateNow,results,parallelGroups:source.parallelGroups??job.parallelGroups,...(source.activityMetrics?{events:source.activityMetrics}:{})};
+		const key=JSON.stringify(data);
+		if(activityKeys.get(job.asyncId)===key)return;
+		try{options.onLifecycle(data);activityKeys.set(job.asyncId,key);}catch(error){console.error('Subagent lifecycle persistence failed:',error);}
+	};
+
 	const completionRetentionMs = options.completionRetentionMs ?? 10000;
 	const livenessIntervalMs = options.pollIntervalMs ?? DEFAULT_LIVENESS_INTERVAL_MS;
 	const resultsDir = options.resultsDir ?? DIRS.results;
@@ -492,6 +510,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 						scheduleCleanup(job.asyncId);
 					}
 				}
+				publishActivity(job,status);
 				return widgetRenderKey(job, widgetExpanded) !== widgetStateBefore;
 			}
 			if (job.status === "queued") {
@@ -517,6 +536,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 			rememberFleetJob(state, job);
 			if (!hasLiveNestedDescendants(job.nestedChildren) && !state.cleanupTimers.has(job.asyncId)) scheduleCleanup(job.asyncId);
 		}
+		publishActivity(job);
 		return widgetRenderKey(job, widgetExpanded) !== widgetStateBefore;
 	};
 
@@ -686,6 +706,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 			controlEventCursor: 0,
 		});
 		const job = state.asyncJobs.get(info.id)!;
+		publishActivity(job);
 		rememberFleetJob(state, job);
 		watchJob(job);
 		scheduleJobRefresh(info.id, 0);
@@ -717,12 +738,13 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 				console.error(`Failed to refresh nested async descendants for '${job.asyncDir}':`, error);
 			}
 		}
-		if (job) rememberFleetJob(state, job);
+		if (job) { rememberFleetJob(state, job); publishActivity(job); }
 		rerenderLastWidget();
 		if (!nestedRefreshFailed && !hasLiveNestedDescendants(job?.nestedChildren)) scheduleCleanup(asyncId);
 	};
 
 	const dispose = () => {
+		activityKeys.clear();
 		if (state.poller) clearInterval(state.poller);
 		state.poller = null;
 		rootWatcher?.close();

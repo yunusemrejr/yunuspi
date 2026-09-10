@@ -9,6 +9,23 @@ import stat
 import sys
 
 
+def check_hardlinks(protected):
+    def scan_error(error):
+        # Runtime lock directories can disappear between scandir calls. Their
+        # absence is not an unreadable subtree; permission/I/O errors still fail.
+        if not isinstance(error, FileNotFoundError):
+            raise error
+    for directory, dirs, files in os.walk(protected, followlinks=False, onerror=scan_error):
+        for name in files:
+            candidate = os.path.join(directory, name)
+            try:
+                info = os.lstat(candidate)
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+                raise RuntimeError('harness has hard-linked files; a maintenance session must replace them with independent copies before guarded execution')
+
+
 def main():
     if platform.system() != 'Linux':
         raise RuntimeError('Linux bubblewrap runtime required')
@@ -22,17 +39,7 @@ def main():
     # An already-existing alias outside the protected tree would otherwise have
     # the outside path's permissions. Refuse instead of pretending path rules
     # protect inode aliases. This bounded-by-tree scan is intentional.
-    def scan_error(error):
-        raise error  # An unreadable subtree is not evidence of no inode aliases.
-    for directory, dirs, files in os.walk(protected, followlinks=False, onerror=scan_error):
-        for name in files:
-            candidate = os.path.join(directory, name)
-            try:
-                info = os.lstat(candidate)
-            except FileNotFoundError:
-                continue
-            if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-                raise RuntimeError('harness has hard-linked files; a maintenance session must replace them with independent copies before guarded execution')
+    check_hardlinks(protected)
     os.environ['PI_HARNESS_MUTATION_DENIED'] = '1'
     # A separate PID namespace and fresh procfs prevent /proc/<host-pid>/root
     # aliases to the parent's writable mounts. Capabilities are removed after

@@ -12,7 +12,7 @@ import { routeSkills, skillTaskText } from "./skill-routing.ts";
 const ENTRY = "relevant-guidance";
 const LIMIT = 24; // distinct hints per session/workspace, including reloads
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
-const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|deploy|migrate|redesign|update|repair|refine|polish|animate|optimize)\b/i;
+const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
 const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
 const env = /\b(production|deploy(?:ment)?|ci\/cd|server|migration|database|postgres|mysql|sqlite)\b/i;
 const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
@@ -100,7 +100,8 @@ export function createRelevantGuidance(pi: any) {
     for (const part of parts) {
       if (!/\b(check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|without tools|no tools)\b/i.test(part)) continue;
       if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
-        if (/\b(mean|median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part))
+        if (/\b(median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part)
+          || /\b(?:calculate|compute|measure|compare|check|verify|estimate)\b[^;.!?]{0,80}\b(?:the |an? )?(?:arithmetic |geometric |harmonic |weighted )?mean\b/i.test(part.replace(/\bI mean\b/gi, ' ')))
           utilityHint('math_check','Numerical evidence: math_check computes summaries, regression/classification metrics, vector comparisons and exact split-ID overlap. Supply actual observations; undefined metrics remain null and exact-ID checks cannot rule out all leakage.');
         if (/\b(unicode|charset|mojibake|bidi|zero.width|line endings|nfc|(?:image|png|jpeg|gif|webp) (?:dimensions|size))\b/i.test(part))
           utilityHint('artifact_check','Artifact checks: artifact_check inspects Unicode controls/normalization or local image header dimensions. Use a specific workspace path or text. It does not verify font rendering, full image decoding or visual quality.');
@@ -120,7 +121,7 @@ export function createRelevantGuidance(pi: any) {
           utilityHint('context_slice','Scoped code context: context_slice ranks functions and imports from explicit workspace source files against the task. Inspect hashes, ranges and omissions; use ordinary reads before edits. A slice is not whole-project coverage.');
         if (/\b(callers?|callees?|references?|dependencies|dependency graph|type definitions?)\b/i.test(part))
           utilityHint('symbol_expand','Dependency context: symbol_expand follows bounded syntax candidates within explicit files and can augment with an already-running LSP. Read resolution and freshness metadata; names alone do not establish bindings.');
-        if (/\b(diff|changes|changed functions|patch)\b/i.test(part))
+        if (/\b(diff|changed functions|patch)\b/i.test(part) || /\bchanges\b/i.test(part) && /\b(code|functions?|symbols?|implementation|source)\b/i.test(part))
           utilityHint('ast_diff','Change context: ast_diff compares supplied before/after source structurally. Keep raw patches for applying or reviewing exact edits, and verify behavior separately.');
       }
       if (/\b(syntax|type errors?|type.check|parse errors?)\b/i.test(part))
@@ -136,8 +137,8 @@ export function createRelevantGuidance(pi: any) {
   const orient = () => add({ key: "workspace", tool: "project_report",
     text: 'Environment-sensitive work: project_report({view:"workspace"}) gives local/Git facts and bounded folder relationships (workspace members, local dependencies, module candidates). Inspect relevant shared contracts/tests before choosing edit scope; related folders are not automatically edit targets. Read relevant existing deployment/database instructions; establish local versus remote targets and protected data. A remote URL is not production identity or authorization.' });
   const uiHints = () => {
-    skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 75);
-    add({ key: "render", tool: "render_see", text: 'UI verification: render_see can inspect the local rendered result (output:"text" or "both"). Use pixels when judging appearance; DOM facts and measured bounds/overflow alone do not prove visual quality. Use only supported vision and report verification limits.' });
+    skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
+    add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
   };
   const snapshot = () => ({ version: 1, cwd, shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64) });
   return {
@@ -339,7 +340,7 @@ export function createRelevantGuidance(pi: any) {
     candidates(): Hint[] {
       if (!enabled() || runCount >= 4) return [];
       return [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (isTopic(h.key) ? topicCount < 2 : shown.size < LIMIT) && (!h.tool || tools().has(h.tool) && !used.has(h.tool)) && (!h.skill || !read.has(h.skill)))
-        .filter(h=>runCount < 3 || (h.priority ?? 0) >= 80 && urgentCount === 0)
+        .filter(h=>runCount < 3 || h.key.startsWith("signal:") && urgentCount === 0)
         .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0))
         .filter((h, index, all) => !isTopic(h.key) || all.slice(0,index).filter(x=>isTopic(x.key)).length < 2-topicCount)
         .filter((h, index, all) => isTopic(h.key) || all.slice(0,index).filter(x=>!isTopic(x.key)).length < LIMIT-shown.size)
@@ -349,7 +350,7 @@ export function createRelevantGuidance(pi: any) {
       for (const h of hints) { if (wasShown(h.key)) continue;
         if (isTopic(h.key)) { topicSeen.set(h.key, requestNumber); topicCount++; if (topicSeen.size > 64) topicSeen.delete(topicSeen.keys().next().value!); }
         else shown.add(h.key);
-        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {} runCount++; if ((h.priority ?? 0) >= 80) urgentCount++; }
+        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {} runCount++; if (h.key.startsWith("signal:")) urgentCount++; }
       if (hints.length) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* avoid blocking work */ }
     },
   };

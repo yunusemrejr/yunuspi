@@ -715,7 +715,6 @@ const runs = Object.freeze({
   },
   all(items) {
     const { calls, launched } = launchRunsAll(items);
-    if (launched.length > 1) parentPort.postMessage({ type: "activityMetrics", kind: "swarms" });
     return trackRunObservation(launched.map(({ key, callId }) => ({ key, operation: "run", callId })), Promise.all(launched.map(({ promise }) => promise)).then((results) => wrapRunsAllResults(results.map(decorateWorkflowChildResult), calls.map(({ key }) => key))));
   },
   lanes(laneSpecs) {
@@ -1129,6 +1128,8 @@ export interface RunWorkflowScriptOptions {
 	onTrace?: (trace: WorkflowScriptTraceEntry[]) => void;
 	onLanePlan?: (lanes: WorkflowLanePlan[]) => void;
 	onEmit?: (emits: unknown[]) => void;
+	/** Host-only durable accounting; suppresses the process-local sink when provided. */
+	onMetric?: (kind: "swarms" | "fusions" | "recoveries") => void;
 }
 
 function combinedAbortSignal(signals: AbortSignal[]): AbortSignal {
@@ -1693,7 +1694,7 @@ function setupAbortResumeParams(params: Record<string, unknown>, result: Workflo
 
 export async function runWorkflowScript(options: RunWorkflowScriptOptions): Promise<WorkflowScriptResult> {
 	const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
-	const recordMetric = (kind: string) => { try { metrics?.(kind); } catch {} };
+	const recordMetric = (kind: "swarms" | "fusions" | "recoveries") => { try { if(options.onMetric)options.onMetric(kind);else metrics?.(kind); } catch {} };
 	// node:vm and worker_threads are not a filesystem security boundary.
 	if (!SELF_MUTATION_ALLOWED) throw new Error("Scripted JavaScript workflows are unavailable outside a human-started harness maintenance session: their worker shares Pi filesystem authority. Use declarative subagent chains, parallel tasks, swarm or fusion instead.");
 	if (!options.script.trim()) throw new Error("workflowScript must not be empty.");
@@ -1722,6 +1723,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 	const stoppedLaunches = new Set<string>();
 	const childStopControllers = new Map<string, AbortController>();
 	const batchAdmissions = new Map<string, Promise<void>>();
+	const batchLaunches = new Map<string, Set<string>>();
 	const observedRunCalls = new Set<number>();
 	const observedSteerCalls = new Set<number>();
 	const observedHostCalls = new Set<number>();
@@ -1947,7 +1949,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				}
 				return;
 			}
-			if (message.type === "activityMetrics" && message.kind === "swarms") { recordMetric("swarms"); return; }
 			if (message.type !== "call" || typeof message.callId !== "number" || typeof message.method !== "string" || !isRecord(message.args)) return;
 
 			const respond = (promise: Promise<unknown>, responsePath?: string, onBoundaryError?: (error: unknown) => void) => {
@@ -1997,8 +1998,8 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				// no trace entry, no launch, no acceptance-recovery barrier.
 				const config = message.args.config as Partial<SwarmRecoveryConfig & FusionConfig> | undefined;
 				if (message.method === "recover") return respond(Promise.resolve().then(() => { const result = planChildRespawn(message.args.results, config); recordMetric("recoveries"); return result; }));
-				if (message.method === "fuse") return respond(Promise.resolve().then(() => { const result = fuseChildOutputs(message.args.results, config); recordMetric("fusions"); return result; }));
-				return respond(Promise.resolve().then(() => { const result = fuseFragments(message.args.fragments, config); recordMetric("fusions"); return result; }));
+				if (message.method === "fuse") return respond(Promise.resolve().then(() => { const result = fuseChildOutputs(message.args.results, config); if(new Set(result.provenance.map(p=>p.owner)).size>1)recordMetric("fusions"); return result; }));
+				return respond(Promise.resolve().then(() => { const result = fuseFragments(message.args.fragments, config); if(new Set(result.provenance.map(p=>p.owner)).size>1)recordMetric("fusions"); return result; }));
 			}
 
 			if (message.method === "status") {
@@ -2237,6 +2238,11 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 						const reason = childSignal.reason;
 						const text = children.get(key)?.error ?? (reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "Workflow script aborted.");
 						return stoppedChildResult(key, text);
+					}
+					if (batch) {
+						const launched=batchLaunches.get(batch.id)??new Set<string>();
+						launched.add(key);batchLaunches.set(batch.id,launched);
+						if(launched.size===2)recordMetric('swarms');
 					}
 					const result = await options.launch(key, launchParams, childSignal, { admitted: true, batch: batch !== undefined });
 					const autoResumeParams = setupAbortResumeParams(params, result, childSignal);

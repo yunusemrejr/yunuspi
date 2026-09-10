@@ -10,7 +10,7 @@ export function registerSessionTelemetry(pi:any) {
  const flush=()=>{if(current&&dirty){pi.appendEntry('session-metrics-v1',snapshot());dirty=false;}};
  const start=(_event:any,ctx:any)=>{
   const epoch=++owner;
-  current={id:ctx.sessionManager.getSessionId(),data:{segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
+  current={id:ctx.sessionManager.getSessionId(),data:{version:2,segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
   (globalThis as any)[METRICS_SINK]=(kind:string,data:any={})=>{
    if(epoch!==owner||!current)return;
    if(kind==='hook'&&typeof data.hook==='string'&&typeof data.owner==='string'){

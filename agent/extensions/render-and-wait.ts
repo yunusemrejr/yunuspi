@@ -2,6 +2,8 @@ import {createRenderQueue} from "./lib/render-queue.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
@@ -10,6 +12,40 @@ import { runManagedCommand } from "./managed-bash.ts";
 const scripts = fileURLToPath(new URL("../scripts/", import.meta.url));
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
 const encode = (p: any) => Buffer.from(JSON.stringify(p)).toString("base64url");
+/** Trusted renderer entrypoint only: no shell or caller-supplied executable.
+ * Chromium owns the page sandbox. Nesting its sandbox in the generic command
+ * user namespace breaks the root-owned Chromium helper on ordinary projects. */
+function runCapture(params: any, output: string, tempRoot: string, cwd: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let hardKill: ReturnType<typeof setTimeout> | undefined;
+    let stopped: string | undefined;
+    const child = execFile(process.execPath, [path.join(scripts, "render-capture.mjs"), encode(params), output], {
+      cwd, detached: process.platform !== "win32", encoding: "utf8", maxBuffer: 65536,
+      env: {...process.env, TMPDIR: tempRoot, HOME: tempRoot, XDG_CACHE_HOME: path.join(tempRoot,"cache"), XDG_CONFIG_HOME: path.join(tempRoot,"config")},
+    }, (error, stdout, stderr) => {
+      clearTimeout(deadline); clearTimeout(hardKill);
+      signal?.removeEventListener("abort", abort);
+      // Reap a browser descendant if Node exited before cleaning its pipes.
+      kill("SIGKILL");
+      if (stopped) reject(new Error(stopped));
+      else if (error) reject(new Error(`Render failed: ${String(stderr || stdout || error.message).slice(-16384)}`));
+      else resolve(stdout);
+    });
+    const kill = (signal: NodeJS.Signals) => {
+      try { if (child.pid && process.platform !== "win32") process.kill(-child.pid, signal); else child.kill(signal); } catch { /* already reaped */ }
+    };
+    const stop = (reason: string) => {
+      if (stopped) return;
+      stopped = reason; kill("SIGTERM");
+      hardKill = setTimeout(() => kill("SIGKILL"), 1500); hardKill.unref();
+    };
+    const abort = () => stop("Render cancelled");
+    const deadline = setTimeout(() => stop("Render timed out"), (params.timeoutMs ?? 15000) + 3000);
+    deadline.unref(); signal?.addEventListener("abort", abort, {once:true});
+    if (signal?.aborted) abort();
+  });
+}
 export default function (pi: any) {
   const acquireRender = createRenderQueue();
   pi.registerTool({
@@ -43,7 +79,7 @@ export default function (pi: any) {
     name: "render_see",
     label: "Render and see",
     description:
-      "Inspect or capture local HTML/SVG/image/PDF or HTTP(S). output:text returns bounded live-DOM labels, controls, bounds/overflow, image alt/load status and validation state without pixels; both adds PNG. Default image for vision models, text otherwise. Supports dark/light, reduced motion and sampled CSS/WAAPI frames. Selector scopes DOM inspection and scrolls viewport images to the first match (may clip oversized elements). Oversized full-page captures return explicitly incomplete viewport evidence. Concurrent calls queue (up to four waiting, 120s queue deadline). Isolated, unauthenticated, 30s execution max; no actions/GPU. DOM facts are not visual interpretation.",
+      "Built-in browser inspection: use directly without locating/installing Playwright. Inspect or capture local HTML/SVG/image/PDF or HTTP(S). output:text returns bounded live-DOM labels, controls, bounds/overflow, image alt/load status and validation state without pixels; both adds PNG. Default image for vision models, text otherwise. Supports dark/light, reduced motion and sampled CSS/WAAPI frames. Selector scopes DOM inspection and scrolls viewport images to the first match (may clip oversized elements). Oversized full-page captures return explicitly incomplete viewport evidence. Concurrent calls queue (up to four waiting, 120s queue deadline). Isolated, unauthenticated, 30s execution max; no actions/GPU. DOM facts are not visual interpretation.",
     parameters: Type.Object({
       source: Type.String(),
       output: Type.Optional(StringEnum(["image", "text", "both"])),
@@ -100,26 +136,29 @@ export default function (pi: any) {
         for (const { n } of ranked.sort((a, b) => b.t - a.t).slice(19))
           await fs.unlink(path.join(dir, n));
         output = path.join(dir, `capture-${randomUUID()}.png`);
-        tempRoot = await fs.mkdtemp(path.join(dir, "work-"));
+        // Normal project commands cannot write inside the protected harness.
+        // Keep the trusted browser runner's profiles and capture staging
+        // outside that tree; only this trusted parent publishes the artifact.
+        tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-render-"));
+        await fs.chmod(tempRoot, 0o700);
+        await fs.writeFile(path.join(lock, "owner.json"), JSON.stringify({pid:process.pid, startedAt:new Date().toISOString(), workDir:tempRoot}), {mode:0o600});
+        const stagedOutput = path.join(tempRoot, "capture.png");
         if (!/^https?:\/\//i.test(p.source))
           p = {
             ...p,
             source: path.resolve(ctx.cwd, p.source.replace(/^@/, "")),
           };
-        const r = await runManagedCommand(
-          `TMPDIR=${quote(tempRoot)} HOME=${quote(tempRoot)} XDG_CACHE_HOME=${quote(path.join(tempRoot, "cache"))} XDG_CONFIG_HOME=${quote(path.join(tempRoot, "config"))} ${quote(process.execPath)} ${quote(path.join(scripts, "render-capture.mjs"))} ${quote(encode(p))} ${quote(output)}`,
-          ctx.cwd,
-          (p.timeoutMs ?? 15000) / 1000 + 3,
-          signal,
-          35000,
-          1500,
-        );
-        if (r.exitCode !== 0) throw new Error(`Render failed: ${r.output}`);
-        const details = JSON.parse(r.output.trim());
+        const captureResult = await runCapture(p, stagedOutput, tempRoot, ctx.cwd, signal);
+        const details = JSON.parse(captureResult.trim());
         signal?.throwIfAborted();
         const content: any[] = [];
         if (details.output) {
+          const staged = await fs.lstat(stagedOutput);
+          if (!staged.isFile() || staged.isSymbolicLink() || staged.size > 20 * 1024 * 1024)
+            throw new Error("Render returned an invalid capture artifact");
+          await fs.copyFile(stagedOutput, output);
           await fs.chmod(output, 0o600);
+          details.output = output;
           if (canSee) {
             const image = await fs.readFile(output);
             content.push({

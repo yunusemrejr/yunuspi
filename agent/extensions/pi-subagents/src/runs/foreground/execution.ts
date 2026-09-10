@@ -699,6 +699,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});
+		proc.once("spawn", () => { try { options.onProcessStarted?.(); } catch { /* Observability cannot alter child execution. */ } });
 		const jsonlWriter = createJsonlWriter(shared.jsonlPath, proc.stdout);
 		let processClosed = false;
 		let lifecycleFinished = false;
@@ -2392,6 +2393,10 @@ export async function runSync(
 	// Capture the strict contract before consumer-owned objects can be mutated
 	// after a detached receipt is published.
 	const strictContract = isAgentContractV1(options.agentContract);
+	let processObserved=false;
+	const lifecycle=(status: "running" | "completed" | "failed" | "stopped" | "paused")=>{
+		try { options.onLifecycle?.(status); } catch { /* Telemetry must not change execution. */ }
+	};
 	let detachedReason: string | undefined;
 	let publishedReceipt: SingleResult | undefined;
 	let activeDetachAttempt: ((reason?: string) => boolean) | undefined;
@@ -2408,6 +2413,10 @@ export async function runSync(
 
 	const completion = runSyncCompletion(runtimeCwd, agents, agentName, task, {
 		...options,
+		onProcessStarted: () => {
+			if (!processObserved) { processObserved=true; lifecycle('running'); }
+			try { options.onProcessStarted?.(); } catch {}
+		},
 		signal: originController.signal,
 		onDetachedExit: undefined,
 		onDetachReceipt: (detachedReceipt) => {
@@ -2490,6 +2499,7 @@ export async function runSync(
 
 	let terminalCallbackInvoked = false;
 	void authoritativeCompletion.then((terminalResult) => {
+		if (processObserved) lifecycle(terminalResult.stopped ? 'stopped' : terminalResult.interrupted ? 'paused' : terminalResult.exitCode === 0 && !terminalResult.error ? 'completed' : 'failed');
 		if (!detachedReason || terminalCallbackInvoked) return;
 		terminalCallbackInvoked = true;
 		terminalResult.detached = undefined;
@@ -2501,6 +2511,7 @@ export async function runSync(
 			// contained here; each consumer owns cleanup through its own finally block.
 		}
 	}).catch(() => {
+		if (processObserved) lifecycle('failed');
 		// Attached completion rejection remains observable through the returned
 		// promise without becoming an unhandled side-channel rejection.
 	}).finally(() => {

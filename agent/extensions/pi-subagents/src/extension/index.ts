@@ -1,5 +1,5 @@
 import { readCompletionReplay } from "../runs/background/completion-replay.ts";
-import { persistSubagentCost, restoreSubagentCosts } from "./session-cost.ts";
+import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } from "./session-cost.ts";
 /**
  * Subagent Tool
  *
@@ -548,6 +548,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 	const { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs, dispose: disposeAsyncJobTracker } = createAsyncJobTracker(pi, state, DIRS.async, {
 		widgetEnabled: asyncWidgetEnabled,
+		onLifecycle: payload => persistSubagentActivity(pi, state, payload),
 		onJobTerminal: () => refreshResultDelivery(),
 	});
 	const resultWatcher = createResultWatcher(

@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 // Literal payload, deliberately NOT Function.toString(): formatting this patch
 // must not change its emitted bytes and invalidate a previously applied target.
@@ -20,9 +21,15 @@ const legacySessionCostSource = previousSessionCostSource
 export const sessionCostSource = fs.readFileSync(new URL("./session-cost-display.js", import.meta.url), "utf8").trim();
 
 export const activitySource = fs.readFileSync(new URL("../../extensions/lib/session-metrics.ts", import.meta.url), "utf8").replace("export function collectSessionMetrics", "function collectSessionMetrics").replace(/^.*\n/, "").trim();
-function transformActivity(source, bundled) {
+// Released V1 helper, before lifecycle accounting and policy-hook filtering.
+// The entire extracted helper must match this hash AND its surrounding emitted
+// code must match exactly. A marker alone never authorizes replacing local edits.
+const legacyActivityHash = '67ccc1390268047f39ce9cf6985d22bbd73f0530606d98aa5c0fcc203e4cd07b';
+const activityPrefix = 'const activityMetrics = (';
+const activitySuffix = ")(this.session.sessionManager.getEntries(), globalThis[Symbol.for('yunus-pi.metrics-view.v1')]?.(this.session.sessionManager.getSessionId?.()));";
+function activityCode(helper, bundled, version) {
   const old = bundled ? ',extensionStatuses=this.footerData.getExtensionStatuses()' : 'const extensionStatuses = this.footerData.getExtensionStatuses()';
-  const code = (bundled ? ';' : '') + `const activityMetrics = (${activitySource})(this.session.sessionManager.getEntries(), globalThis[Symbol.for('yunus-pi.metrics-view.v1')]?.(this.session.sessionManager.getSessionId?.()));
+  return (bundled ? ';' : '') + `${activityPrefix}${helper}${activitySuffix}
 let activityLine = '';
 for (const part of activityMetrics.footer) {
   const next = activityLine ? activityLine + ' · ' + part : part;
@@ -30,8 +37,21 @@ for (const part of activityMetrics.footer) {
   else activityLine = next;
 }
 if (activityLine) lines.push(theme.fg('dim', truncateToWidth(activityLine, width)));
-/* PI_SESSION_ACTIVITY_V1 */ ` + (bundled ? 'let extensionStatuses=this.footerData.getExtensionStatuses()' : old);
-  if(source.includes('PI_SESSION_ACTIVITY_V1')) { if(source.split(code).length!==2)throw Error('session activity postcondition drift'); return source; }
+/* PI_SESSION_ACTIVITY_V${version} */ ` + (bundled ? 'let extensionStatuses=this.footerData.getExtensionStatuses()' : old);
+}
+function transformActivity(source, bundled) {
+  const old = bundled ? ',extensionStatuses=this.footerData.getExtensionStatuses()' : 'const extensionStatuses = this.footerData.getExtensionStatuses()';
+  const code = activityCode(activitySource, bundled, 2);
+  if(source.includes('PI_SESSION_ACTIVITY_V2')) { if(source.split(code).length!==2||source.includes('PI_SESSION_ACTIVITY_V1'))throw Error('session activity postcondition drift'); return source; }
+  if(source.includes('PI_SESSION_ACTIVITY_V1')) {
+    const start=source.indexOf(activityPrefix), end=source.indexOf(activitySuffix,start+activityPrefix.length);
+    if(start<0||end<0)throw Error('session activity V1 migration drift: missing helper boundary');
+    const helper=source.slice(start+activityPrefix.length,end);
+    if(createHash('sha256').update(helper).digest('hex')!==legacyActivityHash)throw Error('session activity V1 migration drift: unknown helper payload');
+    const previous=activityCode(helper,bundled,1);
+    if(source.split(previous).length!==2||source.split('PI_SESSION_ACTIVITY_V1').length!==2)throw Error('session activity V1 migration drift: insertion changed');
+    return source.replace(previous,()=>code);
+  }
   if(source.split(old).length!==2)throw Error('session activity footer anchor drift');
   return source.replace(old,()=>code);
 }

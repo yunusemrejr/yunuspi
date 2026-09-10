@@ -1760,6 +1760,8 @@ export interface ExternalProcessStatus {
 }
 
 export interface AsyncStatus {
+	/** Cumulative executed workflow operations; replay replaces by run ID. */
+	activityMetrics?: Partial<Record<"swarms" | "fusions" | "recoveries", number>>;
 	lifecycleArtifactVersion?: SubagentLifecycleArtifactVersion;
 	runId: string;
 	/** Parent Pi process/window that owns local completion delivery. */
@@ -2292,6 +2294,10 @@ export interface SubagentChildStatusEvent {
 // ============================================================================
 
 export interface RunSyncOptions {
+	/** Process-backed lifecycle evidence for the owning parent session. */
+	onLifecycle?: (status: "running" | "completed" | "failed" | "stopped" | "paused") => void;
+	/** Internal notification, fired only after a native child process spawned. */
+	onProcessStarted?: () => void;
 	/** Exact discovery provenance for an unknown-agent error; omission uses defensive fallback discovery. */
 	unknownAgentDiagnosticContext?: import("../agents/agents.ts").UnknownAgentDiagnosticContext;
 	/** Opt-in global permission rules; missing tools remain allowed. */

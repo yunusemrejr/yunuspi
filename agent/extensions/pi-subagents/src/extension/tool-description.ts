@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionConfig, ToolDescriptionMode } from "../shared/types.ts";
+import { SELF_MUTATION_ALLOWED } from "../../../lib/self-mutation-guard.ts";
 
 export const DEFAULT_SUBAGENT_TOOL_DESCRIPTION = `Delegate independent work to configured native Pi subagents when it saves time; respect user limits on delegation. A child uses its configured model/thinking or inherits defaults; do not assume a particular cost or thinking level. For execution, omit action and use {agent, task?} for one child. For multi-step or parallel work, make exactly ONE top-level subagent call with async:true and launch children only inside that workflow: runs.run('key',{agent,task}) per child, await runs.all([{key,agent,task},...]) for parallel children (ordered array result — index/destructure/.map, not by key). workflowScript rejects nested async function/arrow/method helpers: use top-level await, plain helper functions, or explicit Promise chains. Every workflow has a finite supervisor deadline (10m by default; pass timeoutMs for a different bound), so a stalled script cannot hold the parent indefinitely. For bounded parallel sequential chains use runs.lanes([{key,stages:[{key,agent,task},{key,resume:'previous',task},...]}]). Swarm/fusion seams (await them; advisory, no children launched): runs.recover(results, config?) maps a failed-fanout result array to a bounded respawn plan ({degraded, respawnPlan:[{key,attempt,notBeforeMs}]}; config maxRespawnRounds/baseBackoffMs, backoff capped 60s) — launch the planned keys yourself with runs.run; runs.fuse(results, config?) merges child outputs into one advisory body, auto-parsing fenced fragment blocks from fusion-mode workers (plain outputs become complementary sections); runs.fuseFragments(fragments, config?) fuses pre-classified fragments — both return {strategy, fusedBody, provenance}. Use action:'validate' with a script input to check it without launching children. Only structuredOutput.verdict === 'blocked' blocks a stage. Use action only for management/control.
 
@@ -23,6 +24,13 @@ export const SUBAGENT_TOOL_PROMPT_SNIPPET = "Delegate independent work through a
 export const SUBAGENT_TOOL_PROMPT_GUIDELINES = [
 	"Use subagent for useful independent work, not mandatory ceremony on small tasks; honor requests not to delegate. List available agents if unsure. Use one async workflowScript for orchestration (await runs calls; runs.all returns an ordered array), and one writer per worktree. Resolve requested model/provider/thinking with action=models, then set model='provider/id:thinking'; never silently substitute. Native async runs notify on completion—do not poll to wait. See the subagent tool and skill for detailed contracts.",
 ];
+
+// Advertise only orchestration that this process can execute. The shared-VM
+// workflow guard remains authoritative; changing cwd never grants that power.
+const PROJECT_DESCRIPTION = `Delegate useful independent work to native Pi subagents while respecting user model/provider and delegation limits. For one child use {agent,task,async:true}. For parallel children use {tasks:[{agent,task},...],async:true}; for sequential stages use {chain:[{agent,task},...],async:true}. Keep one writer per worktree. Native async completion notifications wake the parent; continue independent work without polling. workflowScript is unavailable in this project session because its JavaScript worker shares harness filesystem authority. Use declarative tasks/chain or individual children; do not retry workflowScript or change cwd to enable it. Use action only for management/control.\n\n` + DEFAULT_SUBAGENT_TOOL_DESCRIPTION.split('\n\n').slice(1).join('\n\n')
+ .replace("in runs.run/runs.all child options", "in native child/task options")
+ .replace("Use the returned exact routes in a bounded runs.all workflow, then runs.fuse", "Use the returned exact routes in a bounded tasks array, then compare their outputs");
+const PROJECT_GUIDELINES = ["Use subagent for useful independent work. In this project session use native async children, tasks arrays or chains; workflowScript is unavailable. Respect requested models and one writer per worktree. Select relevant skills per child. Native completion notifications arrive without polling."];
 
 export interface ToolDescriptionOptions {
 	cwd?: string;
@@ -46,8 +54,8 @@ function isToolDescriptionMode(value: unknown): value is ToolDescriptionMode {
 export function buildSubagentToolPromptMetadata(config: Pick<ExtensionConfig, "toolDescriptionMode"> = {}): SubagentToolPromptMetadata {
 	if (config.toolDescriptionMode !== undefined) return {};
 	return {
-		promptSnippet: SUBAGENT_TOOL_PROMPT_SNIPPET,
-		promptGuidelines: SUBAGENT_TOOL_PROMPT_GUIDELINES,
+		promptSnippet: SELF_MUTATION_ALLOWED ? SUBAGENT_TOOL_PROMPT_SNIPPET : "Delegate independent work through native async children or declarative tasks/chains; respect user constraints.",
+		promptGuidelines: SELF_MUTATION_ALLOWED ? SUBAGENT_TOOL_PROMPT_GUIDELINES : PROJECT_GUIDELINES,
 	};
 }
 
@@ -66,8 +74,8 @@ export function resolveToolDescriptionMode(config: Pick<ExtensionConfig, "toolDe
  * type contract; it just renders the default text.
  */
 export function buildSubagentToolDescription(config: Pick<ExtensionConfig, "toolDescriptionMode"> = {}, options?: ToolDescriptionOptions): string {
-	if (config.toolDescriptionMode === undefined) return DEFAULT_SUBAGENT_TOOL_DESCRIPTION;
+	if (config.toolDescriptionMode === undefined) return SELF_MUTATION_ALLOWED ? DEFAULT_SUBAGENT_TOOL_DESCRIPTION : PROJECT_DESCRIPTION;
 	const mode = resolveToolDescriptionMode(config, options);
 	if (mode !== "full") warn(options, `toolDescriptionMode "${mode}" retired in this fork; using the default description.`);
-	return DEFAULT_SUBAGENT_TOOL_DESCRIPTION;
+	return SELF_MUTATION_ALLOWED ? DEFAULT_SUBAGENT_TOOL_DESCRIPTION : PROJECT_DESCRIPTION;
 }
