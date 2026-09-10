@@ -1,0 +1,66 @@
+/** Lossless JSON lexical compaction for known structured tools, at context assembly.
+ * Does not reserialize numbers/keys/escapes or mutate persisted/displayed results. */
+const STRUCTURED_TOOLS = new Set([
+  'project_report', 'module_report', 'symbol_search', 'symbol_references',
+  'session_self', 'checkpoint_read', 'todo', 'subagent', 'bg_status', 'bg_list',
+  'memory_search', 'memory_read', 'web_probe', 'web_search',
+]);
+export function compactJsonWhitespace(text: string): string {
+  if (text.length < 512 || text.length > 1_000_000 || !/^\s*[\[{]/.test(text)) return text;
+  try { JSON.parse(text); } catch { return text; }
+  let quoted = false, escaped = false, start = 0;
+  const pieces: string[] = [];
+  for (let i=0;i<text.length;i++) {
+    const c=text[i];
+    if (quoted) {
+      if (escaped) escaped=false;
+      else if(c==='\\') escaped=true;
+      else if(c==='"') quoted=false;
+    } else if(c==='"') quoted=true;
+    else if(c===' ' || c==='\n' || c==='\r' || c==='\t') {
+      if(start<i) pieces.push(text.slice(start,i));
+      start=i+1;
+    }
+  }
+  pieces.push(text.slice(start));
+  const compact=pieces.join('');
+  return text.length-compact.length>=128 ? compact : text;
+}
+export function createToolJsonCompactor() {
+  // Text-keyed memoization avoids repeated parsing of growing history. Bounded,
+  // in-memory only; cache eviction changes CPU work, never payload bytes.
+  const cache=new Map<string,string>();
+  let retained=0;
+  const compact=(text:string)=>{
+    const cached=cache.get(text); if(cached!==undefined)return cached;
+    const result=compactJsonWhitespace(text);
+    if(text.length<=1_000_000) {
+      const size=text.length+result.length;
+      while(cache.size && (retained+size>2_000_000 || cache.size>=64)) {
+        const key=cache.keys().next().value!;
+        retained-=key.length+cache.get(key)!.length; cache.delete(key);
+      }
+      cache.set(text,result); retained+=size;
+    }
+    return result;
+  };
+  return {
+    reset(){cache.clear();retained=0;},
+    transform(messages:any[]):any[] {
+      if(process.env.PI_COMPACT_TOOL_JSON==='off')return messages;
+      let changed=false;
+      const result=messages.map(message=>{
+        if(message.role!=='toolResult' || !STRUCTURED_TOOLS.has(message.toolName) || !Array.isArray(message.content))return message;
+        let changedContent=false;
+        const content=message.content.map((part:any)=>{
+          if(part?.type!=='text' || typeof part.text!=='string')return part;
+          const text=compact(part.text);if(text===part.text)return part;
+          changedContent=true;return {...part,text};
+        });
+        if(!changedContent)return message;
+        changed=true;return {...message,content};
+      });
+      return changed?result:messages;
+    },
+  };
+}

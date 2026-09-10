@@ -1,0 +1,345 @@
+{
+  "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file — retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (only pi CORE receives third-party updates). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
+  "extensions": [
+    "checkpoints.ts",
+    "siblings.ts",
+    "filesystem-safety.ts",
+    "harness-backup.ts",
+    "live-models.ts",
+    "managed-bash.ts",
+    "pi-observations.ts",
+    "provider-cmd.ts",
+    "reminders.ts",
+    "thinking.ts",
+    "timeout-guard.ts",
+    "session-signals.ts",
+    "render-and-wait.ts",
+    "scoped-snapshots.ts",
+    "provider-gate.ts",
+    "reasoning-aids.ts",
+    "health-log.ts"
+  ],
+  "lib": [
+    "stall-core.ts",
+    "output-distiller.ts",
+    "smol-extraction.ts",
+    "smol-preprocessor.ts",
+    "relevant-guidance.ts",
+    "guidance-topics.ts",
+    "guidance-topics-systems.ts",
+    "guidance-topics-domains.ts",
+    "reminders-state.ts",
+    "image-compaction.ts",
+    "session-signals.ts",
+    "scoped-snapshots.ts",
+    "checkpoint-files.ts",
+    "code-guidance-signals.ts",
+    "quality-review-signals.ts",
+    "slop-guidance-signals.ts",
+    "compact-tool-json.ts",
+    "local-models.ts",
+    "stable-tool-order.ts",
+    "skill-routing.ts",
+    "code-lexical-mask.ts",
+    "reasoning-aids.ts",
+    "small-tools.ts",
+    "numeric-checks.ts",
+    "artifact-checks.ts",
+    "health-log.ts",
+    "render-queue.ts",
+    "context-limits.ts",
+    "mini-preprocessor.ts"
+  ],
+  "forks": {
+    "extensions/pi-background-tasks": "pi-background-tasks",
+    "extensions/pi-memory": "pi-memory",
+    "extensions/rpiv-todo": "@juicesharp/rpiv-todo",
+    "extensions/pi-lens": "pi-lens",
+    "extensions/pi-subagents": "pi-subagents",
+    "extensions/pi-web-access": "pi-web-access"
+  },
+  "foldedMarkers": [
+    {
+      "file": "extensions/pi-memory/index.ts",
+      "marker": "PROJECT_SCOPE",
+      "label": "pi-memory project scope"
+    },
+    {
+      "file": "extensions/pi-lens/dist/index.js",
+      "marker": "PI_LENS_MARK_DEDUP",
+      "label": "pi-lens exact-repeat mark dedup (bundle; per-module copies deleted in fork trim)"
+    },
+    {
+      "file": "extensions/pi-subagents/src/runs/foreground/execution.ts",
+      "marker": "PI_SUBAGENT_PRESSURE",
+      "label": "subagent foreground inference gate"
+    },
+    {
+      "file": "extensions/pi-subagents/src/runs/background/subagent-runner.ts",
+      "marker": "PI_SUBAGENT_PRESSURE",
+      "label": "subagent background runner inference gate"
+    }
+  ],
+  "npmPackages": [],
+  "vendoredDeps": [
+    "@ast-grep/cli",
+    "@ast-grep/napi",
+    "@mozilla/readability",
+    "acorn",
+    "defuddle",
+    "jiti",
+    "js-yaml",
+    "linkedom",
+    "minimatch",
+    "p-limit",
+    "pidusage",
+    "promise.try",
+    "turndown",
+    "typebox",
+    "undici",
+    "unpdf",
+    "vscode-jsonrpc",
+    "web-tree-sitter",
+    "yaml",
+    "playwright"
+  ],
+  "retired": [
+    {
+      "name": "subagent-tool-description.md",
+      "retired": "2026-09-02",
+      "why": "runtime-orphaned custom tool-description file (its toolDescriptionMode: 'custom' loader retired with the tool-desc-overrides seam 2026-09-02). Delegation posture folded into the pi-subagents fork's DEFAULT_SUBAGENT_TOOL_DESCRIPTION + SUBAGENT_TOOL_PROMPT_GUIDELINES (src/extension/tool-description.ts), which now own the subagent tool prompt; file moved to backups/retired-extensions/. Do not recreate"
+    },
+    {
+      "name": "micro-agents.ts",
+      "retired": "2026-09-02",
+      "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate"
+    },
+    {
+      "name": "governor.ts",
+      "retired": "2026-09-02",
+      "why": "user direction: injection-budget broker removed permanently (no backup) — governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate"
+    },
+    {
+      "name": "governor-core.ts",
+      "retired": "2026-09-02",
+      "why": "user direction: governor policy core removed with governor.ts (see that tombstone) — no broker remains; each extension owns its own injection gating. Do not recreate"
+    },
+    {
+      "name": "capabilities.ts",
+      "retired": "2026-09-02",
+      "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
+    },
+    {
+      "name": "tool-desc-overrides.mjs",
+      "retired": "2026-09-02",
+      "why": "user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) — patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate"
+    },
+    {
+      "name": "minify-system-prompt.mjs",
+      "retired": "2026-09-02",
+      "why": "user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate"
+    },
+    {
+      "name": "pi-fff",
+      "retired": "2026-09-01",
+      "why": "user direction: fffind/ffgrep (fuzzy find/grep via @ff-labs/fff-node, native libfff_c.so through ffi-rs) removed ENTIRELY — fork source DELETED with NO backup retained (user: no rollback ability wanted), FFF_DEFER session_start-defer folded marker removed, vendored node_modules (@ff-labs/fff-node + ffi-rs + @yuuang/ffi-rs-linux-x64-gnu native platform binding) deleted with it, ~/.pi/agent/fff/ runtime state (frecency/history index) deleted, harness-backup vendored-deps machinery removed. Do not recreate"
+    },
+    {
+      "name": "context-mode",
+      "retired": "2026-09-01",
+      "why": "user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate"
+    },
+    {
+      "name": "greybeard",
+      "retired": "2026-09-01",
+      "why": "user direction: Greybeard standards engine removed entirely — fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate"
+    },
+    {
+      "name": "pi-ux.ts",
+      "retired": "2026-09-01",
+      "why": "user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate"
+    },
+    {
+      "name": "a-speech-fix.ts",
+      "retired": "2026-08-31",
+      "why": "speech-to-text misdecoding rewriter (input-hook mapping/fuzzy corrector) removed at user direction; its config speech-fix.json deleted with it; both moved to backups/retired-extensions/"
+    },
+    {
+      "name": "long-prompt-offload.ts",
+      "retired": "2026-08-31",
+      "why": "long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted"
+    },
+    {
+      "name": "pi-tinyfish.ts",
+      "retired": "2026-08-31",
+      "why": "web_search/web_fetch overlap with npm:pi-web-access; moved to backups/retired-extensions/"
+    },
+    {
+      "name": "*-auto-models.ts",
+      "retired": "2026-08-31",
+      "why": "the 7 provider auto-catalog extensions (openrouter, baseten, cerebras, friendli, lmstudio, orcarouter, together) — superseded by native pi-ai catalogs + static models.json; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/live-models.ts (single live-catalog extension for openrouter/orcarouter/together/friendli — native catalog lacks orcarouter entirely; live lists merged over the store)"
+    },
+    {
+      "name": "openrouter-provider.ts",
+      "retired": "2026-08-31",
+      "why": "provider routing redundant with native catalogs + suffix selectors; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/provider-cmd.ts (/provider + /or-provider slash command: interactive pick, order/only/sort/list/status/clear/json, persists providers.openrouter.modelOverrides[].compat.openRouterRouting)"
+    },
+    {
+      "name": "session-reviewer.ts",
+      "retired": "2026-08-31",
+      "why": "review channel superseded by checkpoints; references scrubbed"
+    },
+    {
+      "name": "session-bridge.ts",
+      "retired": "2026-08-31",
+      "why": "cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations"
+    },
+    {
+      "name": "thinking-control.ts",
+      "retired": "2026-08-31",
+      "why": "full /effort alias + dynamic thinking control superseded by minimal extensions/thinking.ts (2026-08-31, same session); pi-native /thinking stays authoritative for native level-setting"
+    },
+    {
+      "name": "context-composition.json",
+      "retired": "2026-08-31",
+      "why": "orphan of deleted pi-context-router; no writer/reader since 2026-08-12"
+    },
+    {
+      "name": "repo-recon.json",
+      "retired": "2026-08-31",
+      "why": "orphan of deleted pi-context-router; backup backups/repo-recon.json.20260831.bak"
+    },
+    {
+      "name": "telemetry.json",
+      "retired": "2026-08-31",
+      "why": "orphan of deleted pi-context-router; nothing wrote or read it since 2026-08-12"
+    },
+    {
+      "name": "ponytail",
+      "retired": "2026-08-31",
+      "why": "pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename \"pilot\" deliberately NOT tombstoned — too generic a token for word-boundary matching.)"
+    },
+    {
+      "name": "pi-goal",
+      "retired": "2026-08-31",
+      "why": "goal-tracker extension removed; todo duty is the rpiv-todo fork. Not to be confused with pi-goals.ts (older, also deleted 2026-08-12)"
+    },
+    {
+      "name": "pi-context-router.ts",
+      "retired": "2026-08-12",
+      "why": "task classifier (doctrine/memory/goal/todo/gov injection, context budgets); 2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pi-orchestrator.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pi-cache-optimizer.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pi-goals.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate (distinct from pi-goal)"
+    },
+    {
+      "name": "pi-evaluator.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pi-subagents.ts",
+      "retired": "2026-08-12",
+      "why": "extension file superseded by npm:pi-subagents (the package name stays live)"
+    },
+    {
+      "name": "pi-hermes-memory.ts",
+      "retired": "2026-08-12",
+      "why": "superseded by the pi-memory fork"
+    },
+    {
+      "name": "pi-agent-extensions.ts",
+      "retired": "2026-08-12",
+      "why": "todo duty moved to the rpiv-todo fork"
+    },
+    {
+      "name": "pi-capabilities.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pi-mcp-adapter.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "loop.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "ultimate-pi.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "auto-recover.ts",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "DOCTRINE.md",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "harness-config.json",
+      "retired": "2026-08-12",
+      "why": "2026-08-12 refactor — do not recreate"
+    },
+    {
+      "name": "pressure-journal.mjs",
+      "retired": "2026-09-01",
+      "why": "patch module folded into retry-429-policy.mjs (single owner per file: both edited pi-ai retry.js/retryAssistantCall and that pairing broke once); moved to backups/retired-patches/"
+    },
+    {
+      "name": "auto-update-extensions.mjs",
+      "retired": "2026-09-01",
+      "why": "dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/"
+    },
+    {
+      "name": "auto-apply-extensions.sh",
+      "retired": "2026-09-01",
+      "why": "sole consumer of the PI_AUTOUPDATE banner trigger; removed with it (auto-update.sh also no longer runs pi update --extensions)"
+    },
+    {
+      "name": "tool-loader.ts",
+      "retired": "2026-09-01",
+      "why": "user direction: default pi tool exposure restored. Its reason to exist was the oversized tool/skill surface of context-mode + greybeard + pi-ux, all retired 2026-09-01; gating 6 groups (files/intel/web/memory/delegate/bg) behind `load_tools` no longer pays for itself. Removed: load_tools + skills catalogue tools, session_start group deactivation, turn_end settle re-apply, drift warning, JIT skills/pi-docs prompt strips, deferred-skill path tracking. Consequence (accepted): every registered tool schema ships every turn (~86KB at 15 extensions) and the skills/pi-docs prompt blocks are no longer stripped. File moved to backups/retired-extensions/tool-loader.ts. Do not recreate"
+    }
+  ],
+  "supportFiles": [
+    "scripts/render-capture.mjs",
+    "scripts/render-page-state.mjs",
+    "scripts/workspace-facts.mjs",
+    "scripts/wait-condition.mjs",
+    "extensions/pi-memory/priming.ts",
+    "extensions/pi-memory/project-identity.ts",
+    "extensions/pi-memory/mutation.ts",
+    "extensions/pi-background-tasks/src/core/completion-wake.ts",
+    "extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs",
+    "extensions/pi-lens/semantic-radar/rank-features.mjs",
+    "extensions/pi-lens/semantic-radar/neural-ranker.mjs",
+    "extensions/pi-lens/semantic-radar/reuse-ranker-model.json",
+    "extensions/pi-lens/context-code.mjs",
+    "extensions/pi-lens/context-lsp.mjs",
+    "extensions/pi-lens/context-tools.ts",
+    "extensions/pi-memory/context-salience.ts",
+    "extensions/pi-memory/context-evidence.ts",
+    "extensions/pi-memory/context-tools.ts",
+    "scripts/mini-preprocessor.py",
+    "scripts/lib/paragraph_selector.py"
+  ]
+}

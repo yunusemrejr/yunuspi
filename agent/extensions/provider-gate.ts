@@ -1,0 +1,277 @@
+/**
+ * provider-gate.ts — executable cooldown enforcement at the request-control
+ * layer (fix_provider_cooldown_enforcement).
+ *
+ * INVARIANT: a provider/model marked cooling-down must NEVER be called merely
+ * because Pi's normal tool-continuation loop wants another turn. This
+ * extension sits at the ONE seam every inference request passes through —
+ * the `before_provider_request` hook inside the provider send path (see
+ * sdk.js onPayload: the hook runs after payload assembly, before the HTTP
+ * call, for the main agent loop, tool-result continuations, retries, subagent
+ * children and auxiliary calls alike) — and enforces the shared state from
+ * pi-subagents/src/runs/shared/provider-health.ts:
+ *
+ *   1. resolve provider/model, consult shared provider health/rate state,
+ *   2. estimate request token pressure (chars/4 over the payload messages),
+ *   3. record the outgoing request in the shared pressure window,
+ *   4. while the route/provider is cooling: DEFER the request in place
+ *      (bounded in-gate wait; the SAME payload goes out once eligible — the
+ *      pending tool-result continuation resumes automatically, no "go on"
+ *      required, no provider call to announce the cooldown),
+ *   5. beyond the in-gate budget: DENY by throwing
+ *      `PI_AUTONOMOUS_REQUEST_DENIED` (the patched request seam re-throws
+ *      exactly this code, so the request never reaches the provider) with a
+ *      rate-limit-class message, so the existing cooldown-class retry
+ *      machinery owns the longer wait (fixed 25s between re-requests,
+ *      ~2min budget, pause until the user's next message) — and every
+ *      re-request passes through this gate again.
+ *
+ * Failure recording rides `message_end`: a failed assistant message is
+ * classified (quota-rate / provider-outage / route-failure / model-failure /
+ * deterministic) and declared as executable cooldown BEFORE the next request
+ * can fire; a successful assistant message clears it. This works in main
+ * sessions AND subagent children (extensions load in every pi process), so
+ * the shared file coordinates the whole fleet.
+ *
+ * Status messages describe policy and point at the inspectable state file
+ * (provider-health.json); they never masquerade as enforcement — the
+ * enforcement is the gate above.
+ *
+ * Kill switches (tests / debugging): PI_PROVIDER_GATE=off disables the gate;
+ * PI_PROVIDER_GATE_MAX_WAIT_MS overrides the in-gate wait budget. The gate
+ * fails OPEN when a request cannot be attributed to a provider/model (it
+ * never blocks on unknown text) and skips loopback/mock endpoints.
+ */
+
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+	GateDeniedError,
+	estimateTokens,
+	gateRequest,
+	recordFailure,
+	recordSuccess,
+	economyRateIdentity,
+	invalidateEconomyUsage,
+	snapshot,
+} from "./pi-subagents/src/runs/shared/provider-health.ts";
+
+type AnyCtx = ExtensionContext | undefined;
+
+interface RouteRef {
+	provider: string;
+	model: string;
+	baseUrl?: string;
+}
+
+function gateDisabled(): boolean {
+	return process.env.PI_PROVIDER_GATE === "off";
+}
+
+function sessionLabel(ctx: AnyCtx): string | undefined {
+	try {
+		const file = ctx?.sessionManager?.getSessionFile?.();
+		return file ? file.split("/").pop() : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Resolve the provider for an outgoing payload. The payload carries only the
+ * model id; the provider comes from the session's current model when it
+ * matches, otherwise from the model registry (auxiliary calls may use a
+ * different model). Returns undefined when the attribution is uncertain —
+ * the gate fails OPEN rather than cooling an unverified provider.
+ */
+function resolveRoute(payload: any, ctx: AnyCtx): RouteRef | undefined {
+	const model =
+		typeof payload?.model === "string" && payload.model
+			? payload.model
+			: undefined;
+	if (!model) return undefined;
+	if (ctx?.model?.id === model && typeof ctx.model.provider === "string") {
+		return {
+			provider: ctx.model.provider,
+			model,
+			...(typeof ctx.model.baseUrl === "string"
+				? { baseUrl: ctx.model.baseUrl }
+				: {}),
+		};
+	}
+	try {
+		const matches = (ctx?.modelRegistry?.getAvailable?.() ?? []).filter(
+			(m: any) => m?.id === model && typeof m?.provider === "string",
+		);
+		// The payload has no provider field. A shared model id therefore cannot
+		// be attributed safely: choosing the first catalog row can block the
+		// wrong provider while the actual cooling provider is called.
+		if (matches.length !== 1) return undefined;
+		return {
+			provider: matches[0].provider,
+			model,
+			...(typeof matches[0].baseUrl === "string"
+				? { baseUrl: matches[0].baseUrl }
+				: {}),
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function isLoopback(route: RouteRef): boolean {
+	if (typeof route.baseUrl !== "string") return false;
+	try {
+		const url = new URL(route.baseUrl);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+		// URL normalizes IPv4 shorthand and IPv4-mapped IPv6. Match the whole
+		// hostname: localhost.example and 127.example are real remote hosts.
+		const host = url.hostname.toLowerCase();
+		return host === "localhost" || host === "localhost." ||
+			host === "0.0.0.0" || host === "[::1]" ||
+			/^127\.\d+\.\d+\.\d+$/.test(host) ||
+			/^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host);
+	} catch {
+		return false;
+	}
+}
+
+function setStatus(ctx: AnyCtx, text: string): void {
+	try {
+		ctx?.ui?.setStatus?.("provider-gate", text);
+	} catch {
+		/* headless contexts have no status line */
+	}
+}
+
+export default function providerGateExtension(pi: ExtensionAPI): void {
+	if (process.env.PI_PROVIDER_GATE === "off") return;
+
+    let pendingAttempts=0;
+    let timing: {provider:string; model:string; session:string|undefined; started:number}|undefined;
+    for (const event of ["session_start","session_switch","session_tree","session_shutdown","agent_end"] as const) pi.on(event,()=>{pendingAttempts=0;timing=undefined;});
+
+	// THE GATE — runs for every inference request in this process.
+	pi.on("before_provider_request", async (event: any, ctx: any) => {
+		if (gateDisabled()) return undefined;
+		const payload = event?.payload;
+		const route = resolveRoute(payload, ctx as AnyCtx);
+		if (!route) {timing=undefined;return undefined;} // fail-open: unattributable requests are never blocked
+		if (isLoopback(route)) return undefined; // mocks/loopback are not fleet traffic
+		pendingAttempts++;
+        timing=undefined; // Any overlapping/retried request invalidates attribution.
+		const estTokens = estimateTokens(payload);
+		try {
+			const outcome = await gateRequest({
+				provider: route.provider,
+				model: route.model,
+				estTokens,
+				session: sessionLabel(ctx as AnyCtx),
+				signal: (ctx as any)?.signal,
+			});
+			if (outcome.deferredMs > 0) {
+				setStatus(
+					ctx as AnyCtx,
+					`provider-gate: deferred ${route.provider}/${route.model} ${Math.round(outcome.deferredMs / 1000)}s (cooldown elapsed; same continuation resumed)`,
+				);
+			} else {
+				setStatus(ctx as AnyCtx, "");
+			}
+            if(pendingAttempts===1)timing={provider:route.provider,model:route.model,session:sessionLabel(ctx),started:performance.now()};
+			return undefined; // allow the payload unchanged
+		} catch (err) {
+            pendingAttempts=Math.max(0,pendingAttempts-1);timing=undefined;
+			if (err instanceof GateDeniedError) {
+				const d = err.details;
+				setStatus(
+					ctx as AnyCtx,
+					`provider-gate: ${route.provider}/${route.model} cooling ${Math.ceil(d.waitMs / 1000)}s` +
+						` (${d.kind ?? "unknown"} via ${d.source ?? "unknown"}); state: provider-health.json`,
+				);
+			}
+			throw err; // GateDeniedError carries PI_AUTONOMOUS_REQUEST_DENIED — the patched seam re-throws it before the HTTP call
+		}
+	});
+
+	// Failure/success recording — the source of the shared executable state.
+	pi.on("message_end", (event: any, ctx: any) => {
+		const message = event?.message;
+		if (!message || message.role !== "assistant") return;
+		const provider =
+			typeof message.provider === "string" ? message.provider : undefined;
+		const model = typeof message.model === "string" ? message.model : undefined;
+        const observedElapsed = pendingAttempts===1 && timing && timing.provider===provider && timing.model===model && timing.session===sessionLabel(ctx) ? performance.now()-timing.started : undefined;
+        pendingAttempts=Math.max(0,pendingAttempts-1);timing=undefined;
+		if (!provider) return;
+		if (message.stopReason === "error") {
+			const recorded = recordFailure({
+				provider,
+				model,
+				errorMessage: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
+				source: "message_end",
+			});
+            if (!recorded) invalidateEconomyUsage(provider,model);
+			if (recorded) {
+				setStatus(
+					undefined,
+					`provider-gate: ${provider}/${model ?? "?"} ${recorded.kind} cooldown until ${new Date(recorded.cooldownUntil).toISOString()} (source: message_end)`,
+				);
+			}
+			return;
+		}
+		if (
+			(message.stopReason === "stop" || message.stopReason === "toolUse") &&
+			message.usage &&
+			typeof message.usage.input === "number"
+		) {
+			const usage = message.usage;
+            const current = ctx?.model;
+            const cost = current?.provider===provider && current?.id===model ? current.cost : undefined;
+            const validContent = Array.isArray(message.content) && message.content.some((part: any) =>
+                (part?.type === "text" && typeof part.text === "string" && part.text.trim().length>0)
+                || (part?.type === "toolCall" && typeof part.name === "string" && part.arguments && typeof part.arguments === "object" && !Array.isArray(part.arguments)));
+            const economyUsage = validContent && Number.isSafeInteger(message.timestamp) && message.timestamp<=Date.now() && Date.now()-message.timestamp<=300_000 && cost && [cost.input,cost.output,cost.cacheRead,cost.cacheWrite].every((n:unknown)=>typeof n === "number"&&Number.isFinite(n)&&n>=0)
+                && [usage.input,usage.output,usage.cacheRead,usage.cacheWrite].every((n:unknown)=>typeof n === "number"&&Number.isSafeInteger(n)&&n>=0)
+                && typeof usage.cost?.total === "number" && Number.isFinite(usage.cost.total) && usage.cost.total>=0
+                ? {...(typeof observedElapsed==="number" && observedElapsed>=0 && observedElapsed<=600_000 ? {elapsedMs:observedElapsed}:{}),messageAt:message.timestamp,input:usage.input,output:usage.output,cacheRead:usage.cacheRead,cacheWrite:usage.cacheWrite,costUsd:usage.cost.total,
+                    rates:economyRateIdentity(cost,current.baseUrl,current.api)} : undefined;
+            recordSuccess({ provider, model, inputTokens: usage.input, economyUsage });
+		}
+	});
+
+	// Observability surface: /provider-health prints the shared state —
+	// per-provider cooldown-until, source, failure classification, request
+	// pressure, deferred continuations, last result.
+	pi.registerCommand?.("provider-health", {
+		description:
+			"Show shared provider cooldown/rate state (provider-health.json)",
+		handler: () => {
+			const snap = snapshot();
+			const lines: string[] = [
+				`state: ${snap.file}`,
+				`updated: ${snap.updatedAt ? new Date(snap.updatedAt).toISOString() : "never"}`,
+			];
+			for (const p of snap.providers) {
+				const cooling = p.cooldownUntil > Date.now();
+				lines.push(
+					`${p.provider}: ${cooling ? `COOLING until ${new Date(p.cooldownUntil).toISOString()}` : "ok"}` +
+						` (source: ${p.cooldownSource ?? "-"}, last: ${p.failure ? `${p.failure.kind} x${p.failure.consecutive} @${p.failure.source}` : p.lastResult?.ok ? "ok" : "-"}),` +
+						` requests/60s: ${p.requestsLast60s} (~${p.estTokensLast60s} tok)` +
+						(p.models.length
+							? `; routes: ${p.models.map((m) => `${m.model}${m.cooldownUntil > Date.now() ? " (cooling)" : ""}`).join(", ")}`
+							: ""),
+				);
+			}
+			for (const p of snap.pending) {
+				lines.push(
+					`pending: ${p.route} — ${p.reason} since ${new Date(p.since).toISOString()}`,
+				);
+			}
+			if (!snap.providers.length && !snap.pending.length)
+				lines.push("no recorded provider state");
+			return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+		},
+	});
+}

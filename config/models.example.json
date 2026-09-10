@@ -1,0 +1,7 @@
+{
+  "providers": {
+    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1", "api": "openai-completions", "apiKey": "OPENROUTER_API_KEY" },
+    "deepseek": { "baseUrl": "https://api.deepseek.com/v1", "api": "openai-completions", "apiKey": "DEEPSEEK_API_KEY" },
+    "orcarouter": { "baseUrl": "https://api.orcarouter.ai/v1", "api": "openai-completions", "apiKey": "ORCAROUTER_API_KEY" }
+  }
+}

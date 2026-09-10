@@ -1,0 +1,1 @@
+{ "name": "pi-background-tasks-local-fork", "version": "2.4.2", "pi": { "extensions": ["./extensions/anthropic-attribution.ts", "./extensions/background-tasks.ts"] } }

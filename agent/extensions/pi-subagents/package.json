@@ -1,0 +1,10 @@
+{
+	"name": "pi-subagents-local-fork",
+	"version": "0.62.0",
+	"private": true,
+	"type": "module",
+	"description": "Local fork of npm:pi-subagents 0.62.0 — pi harness owns this copy; upstream updates are not applied. PI_SUBAGENT_PRESSURE folded into src/foreground/execution.ts + src/background/subagent-runner.ts. Duplicate package skills (council-mode, pi-subagents) dropped — user ~/skills copies win. 2026-08-31 minimization: nested typebox@1.1.38 removed (root vendored 1.3.18 serves all imports); external-CLI agents (claude-code/codex-exec/cursor-agent ×2) retired — no CLIs installed, zero run history, adapter machinery kept dormant; tool schema flattened 17956→5941 B and tool description 26099→4729 B.",
+	"pi": {
+		"extensions": ["./index.ts", "./fork-resources.ts"]
+	}
+}

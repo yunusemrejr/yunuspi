@@ -1,0 +1,10 @@
+{
+	"name": "pi-lens-local-fork",
+	"version": "4.1.3",
+	"type": "module",
+	"private": true,
+	"description": "Local fork of npm:pi-lens 4.1.3 (MIT) — pi harness owns this copy; upstream updates are not applied. PI_LENS_MARK_DEDUP folded into the dist bundle; dead disk copies (clients/tools trees minus worker closure) removed 2026-08-31.",
+	"pi": {
+		"extensions": ["./dist/index.js", "./fork-resources.ts"]
+	}
+}

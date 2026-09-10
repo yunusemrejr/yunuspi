@@ -1,0 +1,10 @@
+{
+	"name": "pi-web-access-local-fork",
+	"version": "0.27.0",
+	"private": true,
+	"type": "module",
+	"description": "Local fork of npm:pi-web-access 0.27.0 — pi harness owns this copy; upstream updates are not applied. Flat .ts source copied verbatim; search/fetch provider API calls unchanged.",
+	"pi": {
+		"extensions": ["./index.ts"]
+	}
+}

@@ -1,0 +1,33 @@
+{
+  "name": "pi-extensions",
+  "private": true,
+  "description": "Vendored runtime dependency root for the locally forked extensions (extensions/*-local-fork). No pi extension packages are installed here anymore — forking complete 2026-08-31. Versions are EXACT pins of the audited working tree: nothing in this file can pull updates; npm install only reconciles to these pins if a human runs it.",
+  "dependencies": {
+    "@ast-grep/cli": "0.45.2",
+    "@ast-grep/napi": "0.45.2",
+    "@mozilla/readability": "0.6.0",
+    "acorn": "8.18.0",
+    "defuddle": "0.19.3",
+    "jiti": "2.7.0",
+    "js-yaml": "5.3.0",
+    "linkedom": "0.16.11",
+    "minimatch": "10.2.6",
+    "p-limit": "6.2.0",
+    "pidusage": "4.0.1",
+    "playwright": "1.63.0",
+    "promise.try": "2.0.1",
+    "turndown": "7.2.4",
+    "typebox": "1.3.18",
+    "undici": "8.10.0",
+    "unpdf": "1.8.1",
+    "vscode-jsonrpc": "9.0.1",
+    "web-tree-sitter": "0.25.10",
+    "yaml": "2.8.3"
+  },
+  "allowScripts": {
+    "@ast-grep/cli@0.45.2": true,
+    "@google/genai@1.52.0": true,
+    "protobufjs@7.6.5": true,
+    "protobufjs@7.6.6": true
+  }
+}

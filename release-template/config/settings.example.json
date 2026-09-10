@@ -1,0 +1,8 @@
+{
+  "packages": [],
+  "skills": [],
+  "theme": "dark",
+  "enableSkillCommands": true,
+  "compaction": { "enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000, "maxContextTokens": 256000 },
+  "retry": { "enabled": true }
+}

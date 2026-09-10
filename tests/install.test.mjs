@@ -1,0 +1,30 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import assert from 'node:assert/strict';
+import {fileURLToPath} from 'node:url';
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-installer-test-'));
+const repo=path.join(root,'repo'), script=path.join(repo,'scripts/install.mjs');
+fs.mkdirSync(path.dirname(script),{recursive:true});fs.copyFileSync(fileURLToPath(new URL('../scripts/install.mjs',import.meta.url)),script);
+fs.mkdirSync(path.join(repo,'agent/extensions'),{recursive:true});fs.writeFileSync(path.join(repo,'agent/extensions/manifest.json'),'{}');
+fs.mkdirSync(path.join(repo,'config'));for(const name of ['settings','models'])fs.writeFileSync(path.join(repo,'config',name+'.example.json'),'{}');
+fs.mkdirSync(path.join(repo,'agent/npm'),{recursive:true});fs.writeFileSync(path.join(repo,'agent/test.txt'),'public');
+const target=path.join(root,'target');
+const run=(...args)=>spawnSync(process.execPath,[script,'--target',target,...args],{encoding:'utf8'});
+try {
+assert.equal(run().status,0);assert(!fs.existsSync(target));
+assert.equal(run('--apply').status,0);assert.equal(fs.readFileSync(path.join(target,'test.txt'),'utf8'),'public');
+assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target,'settings.json'))),{});
+assert.equal(fs.statSync(path.join(target,'models.json')).mode & 0o777,0o600);
+assert.equal(fs.readlinkSync(path.join(target,'extensions/node_modules')),'../npm/node_modules');
+fs.writeFileSync(path.join(target,'private.txt'),'fixture-only');
+assert.notEqual(run('--apply').status,0);assert(fs.existsSync(path.join(target,'private.txt')));
+assert.equal(run('--apply','--backup-existing').status,0);assert(!fs.existsSync(path.join(target,'private.txt')));
+const backup=fs.readdirSync(root).find(x=>x.startsWith('target.backup-'));assert(backup);assert.equal(fs.readFileSync(path.join(root,backup,'private.txt'),'utf8'),'fixture-only');
+assert.notEqual(run('--bad').status,0);
+fs.symlinkSync('/tmp',path.join(repo,'agent','unsafe-link'));assert.notEqual(run('--apply','--backup-existing').status,0);fs.unlinkSync(path.join(repo,'agent','unsafe-link'));
+const overlap=spawnSync(process.execPath,[script,'--target',path.join(repo,'nested')],{encoding:'utf8'});assert.notEqual(overlap.status,0);
+const symlinkTarget=path.join(root,'link');fs.symlinkSync(target,symlinkTarget);const linkRun=spawnSync(process.execPath,[script,'--apply','--backup-existing','--target',symlinkTarget],{encoding:'utf8'});assert.notEqual(linkRun.status,0);
+console.log('installer fixture checks passed: preview, install, relative link, overwrite refusal, backup preservation, bad args, source symlink, overlap, destination symlink');
+}finally{fs.rmSync(root,{recursive:true,force:true});}

@@ -1,0 +1,356 @@
+/** Advisory hints owned/delivered by reminders.ts. No I/O, inference, timers,
+ * tool execution, permission decisions, or scans of tool-output prose. */
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { qualityReviewSignals } from "./quality-review-signals.ts";
+import { slopGuidanceSignals } from "./slop-guidance-signals.ts";
+import { codeGuidanceSignals } from "./code-guidance-signals.ts";
+import { checkpointPath } from "./checkpoint-files.ts";
+import { matchGuidanceTopics } from "./guidance-topics.ts";
+import { routeSkills, skillTaskText } from "./skill-routing.ts";
+
+const ENTRY = "relevant-guidance";
+const LIMIT = 24; // distinct hints per session/workspace, including reloads
+const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
+const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|deploy|migrate|redesign|update|repair|refine|polish|animate|optimize)\b/i;
+const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
+const env = /\b(production|deploy(?:ment)?|ci\/cd|server|migration|database|postgres|mysql|sqlite)\b/i;
+const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
+const envFile = /(?:^|\/)(?:migrations?|\.github\/workflows|terraform)(?:\/|$)|(?:^|\/)(?:Dockerfile|compose\.ya?ml)|\.(?:sql|tf)$/i;
+type Skill = { name: string; file: string; description: string };
+type Hint = { key: string; text: string; tool?: string; skill?: string; priority?: number; sourceFile?: string; expiresAt?: number };
+
+export function createRelevantGuidance(pi: any) {
+  let cwd = "", shown = new Set<string>(), read = new Set<string>();
+  let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>();
+  let lastFailure = "", failures = 0, urgentCount = 0;
+  let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
+  let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
+  const isTopic = (key: string) => key.startsWith("topic:");
+  const wasShown = (key: string) => isTopic(key)
+    ? topicSeen.has(key) && requestNumber - topicSeen.get(key)! < 3 : shown.has(key);
+  const tools = () => new Set<string>(pi.getActiveTools?.() ?? []);
+  const enabled = () => process.env.PI_RELEVANT_GUIDANCE !== "off";
+  const add = (hint: Hint) => {
+    if (!enabled() || wasShown(hint.key) || !isTopic(hint.key) && shown.size >= LIMIT) return;
+    if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool))) return;
+    if (hint.skill && read.has(hint.skill)) return;
+    for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
+    const previous = pending.get(hint.key);
+    if (previous && (previous.priority ?? 0) >= (hint.priority ?? 0)) {
+      if (isTopic(hint.key) && hint.sourceFile) pending.set(hint.key, hint);
+      return;
+    }
+    if (!previous && pending.size >= 8) {
+      const weakest = [...pending.values()].sort((a,b)=>(a.priority ?? 0)-(b.priority ?? 0))[0];
+      if ((weakest.priority ?? 0) >= (hint.priority ?? 0)) return;
+      pending.delete(weakest.key);
+    }
+    pending.set(hint.key, hint);
+  };
+  const skillHint = (topic: string, preferred: string[], terms: RegExp, nameOnly = false, priority = 0) => {
+    // Exact known skills first; otherwise use a matching *loaded* description.
+    // No fabricated paths and no catalogue/skill-body injection.
+    const skill = preferred.map(n => skills.find(s => s.name === n)).find(Boolean)
+      ?? skills.find(s => terms.test(s.name))
+      ?? (!nameOnly ? skills.find(s => terms.test(s.description)) : undefined);
+    if (skill) add({ key: `skill:${skill.file}`, skill: skill.file, priority,
+      text: `${topic}: if useful and not already covered, read skill ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}. User instructions and project conventions take precedence.` });
+  };
+  const practice = (key: string, topic: string, preferred: string[], text: string) => {
+    const skill = preferred.map(n => skills.find(s => s.name === n)).find(Boolean);
+    if (skill) {
+      // A short operational check still helps models that overlook skill discovery.
+      if (!read.has(skill.file)) add({ key: `skill:${skill.file}`, skill: skill.file,
+        text: `${topic}: ${text} Read ${JSON.stringify(skill.file)} for the relevant workflow; user intent and project conventions win.` });
+    } else add({ key: `practice:${key}`, text: `${topic}: ${text}` });
+  };
+  const routedSkills = (prompt = "", file = "") => {
+    for (const route of routeSkills(prompt, file)) {
+      const skill = skills.find(s => s.name === route.name);
+      if (skill) add({key:`skill:${skill.file}`, skill:skill.file, priority:route.priority,
+        text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples; skip unrelated sections. User intent and project conventions take precedence.`});
+    }
+  };
+  const signalHint = (key: string, skillName: string, check: string, sourceFile?: string) => {
+    const skill = skills.find(s=>s.name === skillName);
+    // A read receipt must not hide a new code/failure signal. No raw code is echoed.
+    const workflow = skill ? read.has(skill.file)
+      ? ` Apply the relevant checks from ${JSON.stringify(skill.name)} already read.`
+      : ` Read ${JSON.stringify(skill.file)} for the relevant workflow.` : '';
+    add({key:`signal:${key}`, priority:90, sourceFile, text:check + workflow + ' This is a review cue, not proof of a defect; preserve user scope.'});
+  };
+  const topicHints = (input: {prompt?: string; file?: string; text?: string}) => {
+    const families = new Set<string>();
+    for (const topic of matchGuidanceTopics(input)) {
+      const family = topic.family ?? topic.id;
+      if (families.has(family)) continue;
+      if (families.size >= 4) break;
+      families.add(family);
+      add({
+      key: `topic:${family}`, priority: 78, sourceFile: input.file,
+      expiresAt: input.file ? toolStep + 4 : undefined,
+      text: `${topic.check} Apply only within the current task and project conventions.`,
+      });
+    }
+  };
+  const utilityHint = (tool: string, text: string) => add({key:`utility:${tool}`,tool,priority:79,text});
+  const utilityHints = (prompt: string) => {
+    const parts=prompt.replace(/```[^]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').split(/\n|[.!?](?:\s|$)|;/);
+    for (const part of parts) {
+      if (!/\b(check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|without tools|no tools)\b/i.test(part)) continue;
+      if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
+        if (/\b(mean|median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part))
+          utilityHint('math_check','Numerical evidence: math_check computes summaries, regression/classification metrics, vector comparisons and exact split-ID overlap. Supply actual observations; undefined metrics remain null and exact-ID checks cannot rule out all leakage.');
+        if (/\b(unicode|charset|mojibake|bidi|zero.width|line endings|nfc|(?:image|png|jpeg|gif|webp) (?:dimensions|size))\b/i.test(part))
+          utilityHint('artifact_check','Artifact checks: artifact_check inspects Unicode controls/normalization or local image header dimensions. Use a specific workspace path or text. It does not verify font rendering, full image decoding or visual quality.');
+        if (/\b(base64|URL (?:encod|decod)\w*|percent.encod\w*|(?:format|compact|pretty.print) (?:the )?JSON|JSON (?:format|compact)\w*)\b/i.test(part))
+          utilityHint('value_convert','Exact conversion: value_convert handles bounded JSON formatting, strict UTF-8 Base64 and URI components without executing code or writing files. Pass only the value to convert; inspect the returned result before saving it.');
+      }
+      if (process.env.PI_CONTEXT_MEMORY!=='off') {
+        if (/\b(handoff|hand.off|working state|agent context|compact context)\b/i.test(part))
+          utilityHint('handoff_capsule','Small handoff: handoff_capsule packages the goal, constraints, findings, decisions, files, failures and next action. Preserve critical state explicitly; budget overflow means use more space or full context. Pass the capsule to a fresh subagent.');
+        if (/\b(cache|reuse|retrieve)\b/i.test(part) && /\b(evidence|observations?|research|claims?)\b/i.test(part))
+          utilityHint('evidence_cache','Reusable evidence: evidence_cache stores short verbatim local-source observations with hashes and branch provenance. Query rechecks source freshness; inferred conclusions still require validation.');
+        if (/\b(rank|relevance|salience|prioriti[sz]e)\b/i.test(part) && /\b(memory|context|notes|items)\b/i.test(part))
+          utilityHint('context_score','Retention priorities: context_score ranks supplied context items locally. Label goals, constraints and unresolved work explicitly; scores are priorities, not proof or calibrated probabilities.');
+      }
+      if (process.env.PI_CONTEXT_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
+        if (/\b(code|functions?|symbols?|imports?|codebase|implementation)\b/i.test(part))
+          utilityHint('context_slice','Scoped code context: context_slice ranks functions and imports from explicit workspace source files against the task. Inspect hashes, ranges and omissions; use ordinary reads before edits. A slice is not whole-project coverage.');
+        if (/\b(callers?|callees?|references?|dependencies|dependency graph|type definitions?)\b/i.test(part))
+          utilityHint('symbol_expand','Dependency context: symbol_expand follows bounded syntax candidates within explicit files and can augment with an already-running LSP. Read resolution and freshness metadata; names alone do not establish bindings.');
+        if (/\b(diff|changes|changed functions|patch)\b/i.test(part))
+          utilityHint('ast_diff','Change context: ast_diff compares supplied before/after source structurally. Keep raw patches for applying or reviewing exact edits, and verify behavior separately.');
+      }
+      if (/\b(syntax|type errors?|type.check|parse errors?)\b/i.test(part))
+        utilityHint('lsp_diagnostics','Fresh code diagnostics: use lsp_diagnostics with explicit changed paths and serverScope:"primary" for a bounded syntax/type check. Missing servers or incomplete results are not evidence of clean code.');
+      if (/\b(lint(?:ing)?|clean code|code quality|complexity|security|duplication|duplicate code|dead code)\b/i.test(part))
+        utilityHint('lens_diagnostics','Code review evidence: lens_diagnostics({mode:"delta",paths:[...]}) retrieves scoped cached lint, complexity, security and duplication findings. A cold cache is not a clean result. Preserve existing project checks; avoid broad full-project runner refresh unless the task needs it.');
+    }
+  };
+  const engineering = () => practice("engineering", "Engineering", ["evidence-first-engineering"],
+    "Locate the existing owner and a concrete success check before changing code. Reuse its state/contracts; avoid parallel implementations and unrelated abstractions. Resolve the uncertainty that changes the next action, then implement and verify; expand investigation only on new evidence or risk. Stop when the requested behavior and relevant checks pass.");
+  const precision = () => practice("evidence", "Precision work", ["evidence-first-engineering"],
+    "Inspect actual schema, units, nulls and installed API/version contracts. Compute consequential numbers with executable code and validate counts/joins. Separate measured facts, assumptions and unverified claims; a mock proves local behavior, not a live service. Never fabricate records, endpoints, citations or successful checks.");
+  const orient = () => add({ key: "workspace", tool: "project_report",
+    text: 'Environment-sensitive work: project_report({view:"workspace"}) gives local/Git facts and bounded folder relationships (workspace members, local dependencies, module candidates). Inspect relevant shared contracts/tests before choosing edit scope; related folders are not automatically edit targets. Read relevant existing deployment/database instructions; establish local versus remote targets and protected data. A remote URL is not production identity or authorization.' });
+  const uiHints = () => {
+    skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 75);
+    add({ key: "render", tool: "render_see", text: 'UI verification: render_see can inspect the local rendered result (output:"text" or "both"). Use pixels when judging appearance; DOM facts and measured bounds/overflow alone do not prove visual quality. Use only supported vision and report verification limits.' });
+  };
+  const snapshot = () => ({ version: 1, cwd, shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64) });
+  return {
+    userInput() {
+      const hadTopics = topicSeen.size > 0;
+      requestNumber++;
+      for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
+      // A skipped suggestion is not a read receipt. Reconsider unread skills
+      // on a new user request, while background wakes keep their dedup state.
+      for (const key of shown) if (key.startsWith("skill:") && !read.has(key.slice(6)) || key === "delegation-contract") shown.delete(key);
+      if (hadTopics) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
+    },
+    restore(ctx: any) {
+      requestNumber = topicCount = toolStep = 0; topicSeen.clear();
+      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
+      lastFailure = ""; failures = urgentCount = 0;
+      skills = []; searches = polls = runCount = 0; polling = "";
+      // Entries are local session metadata, not instructions or a new state file.
+      const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const e = entries[i], d = e?.data;
+        // A compaction can remove skill bodies; do not mistake old reads for current context.
+        if (e?.type === "compaction") break;
+        if (e?.type !== "custom" || e.customType !== ENTRY || d?.version !== 1 || d.cwd !== cwd) continue;
+        shown = new Set((Array.isArray(d.shown) ? d.shown : []).filter((x: any) => typeof x === "string").slice(-LIMIT));
+        requestNumber = Number.isSafeInteger(d.requestNumber) && d.requestNumber >= 0 ? d.requestNumber : 0;
+        topicSeen = new Map((Array.isArray(d.topicSeen) ? d.topicSeen : []).slice(-64).filter((pair: any) =>
+          Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^topic:[a-z0-9-]{1,100}$/.test(pair[0]) &&
+          Number.isSafeInteger(pair[1]) && pair[1] >= 0 && pair[1] <= requestNumber && requestNumber - pair[1] < 3));
+        read = new Set((Array.isArray(d.read) ? d.read : []).filter((x: any) => typeof x === "string").slice(-48));
+        break;
+      }
+    },
+    start(event: any, ctx: any) {
+      if ((ctx.cwd ?? "") !== cwd) this.restore(ctx);
+      lastFailure = ""; failures = urgentCount = 0;
+      pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = "";
+      if (!enabled()) return;
+      const catalog = /<available_skills>([\s\S]*?)<\/available_skills>/.exec(event.systemPrompt ?? "")?.[1] ?? "";
+      skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
+        .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
+        .filter(s => path.isAbsolute(s.file) && s.file.length < 512 && s.name.length < 100);
+      const rawPrompt = String(event.prompt ?? "");
+      const prompt = skillTaskText(rawPrompt);
+      utilityHints(prompt);
+      if (/\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
+        add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
+      if (process.env.PI_REASONING_AIDS !== "off" && !/\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(prompt)) {
+        const aides = [
+          ['dependency_plan', /\b(plan|order|schedule|untangle|resolve)\b.*\b(dependenc(?:y|ies)|prerequisites|blocked tasks|task graph)\b|\b(dependency cycle|circular dependencies)\b/i, 'Known task dependencies: dependency_plan computes layers and cycle witnesses. Supply only known IDs/edges; preserve the current goal and todo owner. It does not establish resource-safe parallelism.'],
+          ['decision_frontier', /\b(compare|choose|select|trade.?offs?|prioritize)\b.*\b(latency|cost|memory|throughput|accuracy|quality metrics)\b/i, 'Numerical tradeoffs: decision_frontier removes dominated options from supplied measurements without arbitrary weights. Gather unknown values first; skip it for a simple choice or subjective preference.'],
+          ['coverage_select', /\b(select|choose|minimi[sz]e|reduce|prioritize|plan)\b.*\b(test suite|tests|checks|verification)\b.*\b(coverage|requirements|cost|redundan|overlap)\w*/i, 'Overlapping checks: coverage_select proposes a small set from explicit requirement/check coverage and costs. Preserve mandatory tests; claimed coverage is not evidence that a check passed.'],
+        ] as const;
+        for (const [tool,pattern,text] of aides) if(pattern.test(prompt)) add({key:`aid:${tool}`,tool,priority:65,text});
+      }
+      if (/\b(implement|fix|review|inspect|discover|investigate|refactor|trace|audit)\b/i.test(prompt) && /\b(monorepo|multi[- ](?:folder|repo|package)|workspace members|related (?:folders|repositories)|cross[- ](?:package|service)|codebase discovery|target scope)\b/i.test(prompt)) orient();
+      if (/\b(commit|merge|rebase|cherry.pick|push|pull request|worktrees?|branches)\b/i.test(prompt) && !/\b(no tools|without tools)\b/i.test(prompt)) {
+        add({key:"git-scope",tool:"project_report",priority:65,text:'Git work: project_report({view:"workspace"}) reports HEAD, branch, shared Git directory, local upstream divergence and operation markers. Session checkpoints are not commits. Inspect peer scope with session_coordinate when available; stage only task-owned changes and inspect the staged diff. A file may contain pre-existing changes: sharing its path does not make those changes yours. Preserve unrelated hunks and formatting; never sweep them into a commit. Preserve existing index/branch operations. For GitHub/CI, verify the exact tested/pushed commit and fresh remote evidence; cached tracking refs do not prove current remote state.'});
+      }
+      topicHints({prompt: prompt.length > 24000 ? prompt.slice(0,12000) + "\n" + prompt.slice(-12000) : prompt});
+      routedSkills(prompt);
+      codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
+      // Match narrow task intent against skills actually present in this run's catalog.
+      const specialized = [
+        ['algorithm-design', /\b(algorithm|data structure|time complexity|amortized|shortest path|dynamic programming)\b/i, 'State input assumptions and complexity; compare a tiny optimized case against an independent baseline.'],
+        ['concurrency-memory-models', /\b(atomics?|memory ordering|lock.free|linearizability|deadlock|shared.memory|multithreaded)\b/i, 'Identify synchronization and lifetime ownership; verify relevant schedules and ordering assumptions.'],
+        ['memory-resource-ownership', /\b(memory leak|use.after.free|double.free|resource lifetime|ffi|buffer ownership)\b/i, 'Trace acquire, borrow, transfer and release through success, failure and cancellation.'],
+        ['type-driven-design', /\b(typestate|algebraic data type|discriminated union|invalid states|type.driven|exhaustive matching)\b/i, 'Encode the actual domain states and validate external inputs; static types do not validate runtime data.'],
+        ['formal-model-checking', /\b(model check(?:ing|er)?|formal verification|tla|prove.*(?:safety|liveness))\b/i, 'State assumptions, properties and exploration bounds; verify the model can detect a known defect.'],
+        ['compiler-construction', /\b(compiler|parser|interpreter|ast rewrite|ir transformation|dsl)\b/i, 'Specify grammar and semantics; preserve effects and evaluation order through transformations.'],
+        ['incremental-computation', /\b(incremental computation|incremental build|dependency graph|cache invalidation|memoization)\b/i, 'Compare incremental results to clean recomputation across edit and configuration sequences.'],
+        ['property-based-testing', /\b(property.based|metamorphic|differential testing|fuzz(?:ing|er)?|generative testing)\b/i, 'Use independent properties, meaningful generators and shrinking; confirm a known defect is rejected.'],
+        ['behavioral-contracts', /\b(state machine|invariant|idempotenc[ey]|race condition|lifecycle|transition)\b/i, 'Write one failing event sequence and verify the invariant through the real owner.'],
+        ['numerical-computing', /\b(numerical|floating.point|linear algebra|matrix|jacobian|gradient check|integration tolerance)\b/i, 'Check shapes, units and an independent small answer; measure residuals and convergence.'],
+        ['optimization-modeling', /\b(constrained optimization|convex|linear program|integer program|optimality|objective function)\b/i, 'Write variables, domains and constraints, then independently verify feasibility.'],
+        ['statistical-experiments', /\b(a\/b test|causal|confidence interval|hypothesis test|statistical significance)\b/i, 'Identify the independent unit, effect and uncertainty before claiming improvement.'],
+        ['data-lineage-validation', /\b(data lineage|reconcile|join cardinality|source records|denominator|audit.*dataset)\b/i, 'Trace the claim to actual records and validate joins and denominators.'],
+        ['browser-task-recovery', /\b(browser|web page|website)\b.*\b(click|fill|submit|navigate|upload|automate|control)|\b(click|fill|submit|navigate|upload|automate|control)\b.*\b(browser|web page|website)\b/i, 'Observe current state, act, then verify the postcondition; reconcile uncertain mutations before retrying.'],
+        ['accessible-interaction-design', /\b(accessibility|accessible|keyboard navigation|focus management|screen reader|aria)\b/i, 'Verify the actual keyboard task, focus transitions and error recovery.'],
+        ['simulation-engineering', /\b(simulation|simulator|agent.based|monte carlo|physics engine)\b/i, 'Separate simulation time from rendering; validate invariants and convergence before visual polish.'],
+        ['reinforcement-learning', /\b(reinforcement learning|rl|reward function|policy gradient|rollout buffer|bandit)\b/i, 'Validate the environment and tiny trajectory targets before scaling training.'],
+        ['model-evaluation', /\b(llm eval|model eval|hallucination eval|tool.use eval|prompt comparison|evaluate.*(?:llm|grounding))\b/i, 'Score observable task outcomes and grounding; do not substitute fluent claims for evidence.'],
+        ['inference-serving', /\b(inference serving|kv.cache|quantization|continuous batching|model serving)\b/i, 'Measure latency, memory and quality on matched cached and uncached workloads.'],
+        ['performance-experiments', /\b(profile|profiling|benchmark|bottleneck|performance regression)\b/i, 'Measure completed work under matched conditions and preserve correctness.'],
+      ] as const;
+      if (/\b(build|make|create|implement|fix|review|write|analy[sz]e|train|evaluate|calculate|audit|debug|compare|inspect|solve|derive|optimize|profile|navigate|automate|control|test|design|prove|verify)\b/i.test(prompt)) {
+        for (const [name, pattern, check] of specialized) {
+          if (pattern.test(prompt) && skills.some(s => s.name === name))
+            practice(name, name.replaceAll('-', ' '), [name], check);
+        }
+      }
+      if (action.test(prompt)) {
+        if (ui.test(prompt)) uiHints();
+        if (env.test(prompt)) {
+          orient();
+          skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i);
+          if (/\b(database|migration|postgres|mysql|sqlite)\b/i.test(prompt)) skillHint("Database work", ["databases"], /\bdatabase/i);
+        }
+        // Language guidance only when the loaded catalogue actually offers it.
+        const language = /\b(php|rust|python|golang)\b/i.exec(prompt)?.[1];
+        if (language) skillHint(`${language} work`, [], new RegExp(`^${language}(?:$|[-_ ])`, "i"), true);
+      }
+      const doing = /\b(build|make|create|implement|fix|refactor|review|write|analy[sz]e|train|evaluate|animate|calculate|audit|debug|compare|inspect)\b/i.test(prompt);
+      if (doing && !/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(prompt) && /\b(image|screenshot|diagram|visuals?)\b/i.test(prompt) && ctx.model?.input?.includes("image") !== true)
+        add({ key: "visual-handoff", tool: "subagent", text: 'Visual evidence needed on a text-only or unknown-capability route: use subagent model discovery (input:image tools:true) and an eligible vision child with fresh context, the artifact and a precise read-only question. Require source-correlated image reads; a child’s claimed inspection alone is not visual evidence. Respect route/spending restrictions; do not delegate recursively. If unavailable, use supported DOM/geometry or file-metadata calculations, state their limits, and do not claim to have seen pixels.' });
+      if (doing && /\b(animation|animate|motion graphics?|keyframes?|transitions?)\b/i.test(prompt))
+        practice("motion", "Motion work", ["motion"],
+          "Define the intended sequence, duration and key moments. Use one timeline owner and inspect start/middle/end plus interruption and reduced motion where relevant. UI interaction timing is not a limit on narrative animation; a still image cannot verify motion.");
+      if (doing && /\b(machine learning|model training|train(?:ing)? (?:a |the )?model|classifier|regression model|feature engineering|ml|neural network|fine-tuning)\b/i.test(prompt))
+        practice("ml", "ML work", ["ml-engineering"],
+          "Define target, prediction time, baseline and held-out metric before tuning. Split by time/entity where needed before fitting preprocessing; exclude future or unavailable features. Record data version and executed evaluation; never invent scores or treat training metrics as generalization.");
+      if (doing && /\b(dataset|csv|parquet|statistics|benchmark|apis?|openapi|schema|precision|measurements?)\b/i.test(prompt))
+        precision();
+      if (codeSeen && /\b(implement|refactor|build|write|review)\b/i.test(prompt)) engineering();
+      if (/\b(previous session|earlier session|last session|what we decided|previous decision)\b/i.test(prompt))
+        add({ key: "history", tool: "memory_search", text: 'Prior project decisions: memory_search can retrieve saved context. Read source notes and verify they still apply; memory is historical evidence, not current environment truth.' });
+      if (/\b(original (?:request|instructions)|earlier instructions|lost context)\b/i.test(prompt))
+        add({ key: "intent", tool: "checkpoint_read", text: 'Earlier requirements: checkpoint_read can recover original instructions. Apply later user corrections within their scope; do not reconstruct missing requirements from guesses.' });
+    },
+    record(event: any) {
+      if (!enabled()) return;
+      toolStep++;
+      const name = event.toolName, input = event.input ?? {};
+      if (event.isError) {
+        if (name === 'edit') {
+          const message = (event.content ?? []).filter((item: any) => item.type === 'text').map((item: any) => String(item.text ?? '').slice(0,8000)).slice(0,4).join('\n');
+          if (/Edit without read|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[/.test(message))
+            signalHint('edit-recovery','coding-practices','The edit was rejected or only partly applied. Read the current target region before rebuilding exact oldText. Follow the actual tool result: if nothing applied, retry the corrected complete batch; if some edits applied, retry only the failed edits. Preserve concurrent changes. Do not repeat stale text or bypass the guard with a whole-file overwrite.');
+        }
+        if (['read','edit','write','bash'].includes(name)) {
+          const identity = String(input.path ?? input.command ?? '').slice(0,24000);
+          const key = name + ':' + createHash('sha256').update(identity).digest('hex');
+          failures = key === lastFailure ? failures + 1 : 1; lastFailure = key;
+          if (failures >= 3) signalHint('repeated-failure','debugging',
+            'The same tool operation failed repeatedly. Reinspect its preconditions and the latest error, form a changed hypothesis, and make one discriminating check before repeating it. A failed operation is not verified progress.');
+        }
+        return;
+      }
+      lastFailure = ""; failures = 0;
+      if (['edit','write'].includes(name)) {
+        const changedFile = typeof input.path === 'string' ? checkpointPath(input.path,cwd) : '';
+        for (const hint of pending.values()) if (isTopic(hint.key) && hint.sourceFile &&
+          (hint.sourceFile !== changedFile || name === 'write')) pending.delete(hint.key);
+        const content = name === 'write' ? input.content : input.newText;
+        // Native edits carry independent replacements. Never concatenate them:
+        // separate regions need not form a valid expression together. Bound the
+        // entire authored batch, not just each snippet, before doing review work.
+        const snippets: unknown[] = name === 'edit' && Array.isArray(input.edits)
+          ? input.edits.length <= 64 ? input.edits.map((edit: any) => edit?.newText) : []
+          : [content];
+        const validSnippets = snippets.filter((text): text is string => typeof text === 'string');
+        const bounded = validSnippets.reduce((size, text) => size + text.length, 0) <= 24000 ? validSnippets : [];
+        for (const text of bounded) topicHints({file:changedFile, text});
+        if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off' && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|generated|backups)(?:\/|$)/i.test(changedFile) && bounded.some(text=>/[\uFFFD\u200B\u202A-\u202E\u2066-\u2069]/.test(text)))
+          utilityHint('artifact_check','Unusual Unicode appeared in the authored edit. artifact_check({operation:"text",path:...}) can locate replacement characters, invisible controls and normalization differences. These may be intentional; inspect their role before changing them.');
+        const signals = bounded.flatMap(text => [...codeGuidanceSignals(changedFile,text), ...slopGuidanceSignals(changedFile,text), ...qualityReviewSignals(changedFile,text)]);
+        // Only a bounded whole-file write can clear cues from earlier snippets.
+        // An edit of a different region is not evidence that the old issue disappeared.
+        if (name === 'write' && typeof content === 'string' && content.length <= 24000) {
+          const remaining = new Set(signals.map(s=>`signal:${s.key}`));
+          for (const hint of pending.values()) if (hint.key.startsWith("signal:") && hint.sourceFile === changedFile && !remaining.has(hint.key)) pending.delete(hint.key);
+        }
+        for (const signal of signals) signalHint(signal.key,signal.skill,signal.check,changedFile);
+      }
+      if (name !== "project_report" || input.view === "workspace") used.add(name);
+      const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : "";
+      // A successful range/truncated read proves access, not that the skill was read.
+      const completeRead = (input.offset === undefined || input.offset === 1) && input.limit === undefined
+        && event.details?.truncation?.truncated !== true;
+      if (name === "read" && completeRead && file && !read.has(file) && skills.some(s => s.file === file)) {
+        add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' });
+        read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
+        try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory state only */ }
+      }
+      if (["edit", "write"].includes(name) && /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) engineering();
+      if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
+        if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
+        routedSkills("", file);
+        if (uiFile.test(file)) uiHints();
+        if (/\.(?:csv|tsv|parquet|jsonl)$/i.test(file) || /(?:^|\/)(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(file)) precision();
+        const language = /\.(php|py|rs|go)$/i.exec(file)?.[1]?.toLowerCase();
+        if (language) {
+          const label = ({php:"PHP",py:"Python",rs:"Rust",go:"Golang"} as Record<string,string>)[language];
+          skillHint(`${label} work`, [], new RegExp(`^${label}(?:$|[-_ ])`, "i"), true);
+        }
+        if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i); }
+      }
+      if (codeSeen && ["grep", "find", "ls"].includes(name) && ++searches >= 3)
+        add({ key: "navigation", tool: "symbol_search", text: 'Code exploration: symbol_search locates definitions/references; module_report can outline a file when available. Use them if text searches are not answering the question; ordinary search remains appropriate.' });
+      // Existing result owners already expose job/observation IDs. Only remind
+      // about polling after repeated status calls, never invent a new handle.
+      const status = name === "bg_status" || name === "process" && ["poll", "status", "list"].includes(input.action)
+        || name === "subagent" && input.action === "status";
+      const id = input.id ?? input.taskId ?? input.runId;
+      const key = status && typeof id === "string" && /^[\w-]{1,100}$/.test(id) ? `${name}:${id}` : "";
+      polls = key && key === polling ? polls + 1 : key ? 1 : 0; polling = key;
+      if (polls >= 3) add({ key: "polling", text: `Repeated ${name} status checks for ${JSON.stringify(id)}: retain this handle. Prefer its supported bounded wait or completion notification; inspect progress when useful and do not relaunch work just to wait.` });
+    },
+    candidates(): Hint[] {
+      if (!enabled() || runCount >= 4) return [];
+      return [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (isTopic(h.key) ? topicCount < 2 : shown.size < LIMIT) && (!h.tool || tools().has(h.tool) && !used.has(h.tool)) && (!h.skill || !read.has(h.skill)))
+        .filter(h=>runCount < 3 || (h.priority ?? 0) >= 80 && urgentCount === 0)
+        .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0))
+        .filter((h, index, all) => !isTopic(h.key) || all.slice(0,index).filter(x=>isTopic(x.key)).length < 2-topicCount)
+        .filter((h, index, all) => isTopic(h.key) || all.slice(0,index).filter(x=>!isTopic(x.key)).length < LIMIT-shown.size)
+        .slice(0, Math.min(2, runCount < 3 ? 3 - runCount : 1));
+    },
+    commit(hints: Hint[]) {
+      for (const h of hints) { if (wasShown(h.key)) continue;
+        if (isTopic(h.key)) { topicSeen.set(h.key, requestNumber); topicCount++; if (topicSeen.size > 64) topicSeen.delete(topicSeen.keys().next().value!); }
+        else shown.add(h.key);
+        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {} runCount++; if ((h.priority ?? 0) >= 80) urgentCount++; }
+      if (hints.length) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* avoid blocking work */ }
+    },
+  };
+}
