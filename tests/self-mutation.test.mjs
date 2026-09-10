@@ -48,9 +48,12 @@ test('project tool guidance advertises executable native orchestration',()=>{
   const [description,metadata]=JSON.parse(project.stdout);
   assert.match(description,/workflowScript is unavailable in this project session/);
   assert.match(description,/tasks:\[/);assert.match(description,/chain:\[/);
+  assert.ok(description.includes("skill:['name'] in native child/task options"));
+  assert.ok(!description.includes("skills:['name']"),'native calls advertise the consumed singular skill parameter');
   assert.doesNotMatch(metadata.promptGuidelines.join(' '),/Use one async workflowScript/);
   const maintenance=inspect(harness);assert.equal(maintenance.status,0,maintenance.stderr);
   assert.match(JSON.parse(maintenance.stdout)[0],/runs\.all/);
+  assert.ok(JSON.parse(maintenance.stdout)[0].includes("skills:['name'] in runs.run/runs.all child options"),'workflow child options retain their plural skills parameter');
  } finally {f.close();}
 });
 test('new targets resolve symlink ancestors and unrelated prefixes remain outside',()=>{
@@ -97,6 +100,29 @@ with patch.object(guard.os,'walk',unreadable):
   assert.equal(result.status,0,result.stderr);
  } finally {f.close();}
 });
+test('SSH projections preserve bytes and never bless untrusted or unavailable files',()=>{
+ const script=`import importlib.util, os, stat, sys
+from unittest.mock import patch
+from types import SimpleNamespace
+spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
+guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+with patch.object(guard.glob,'glob',return_value=[]), patch.object(guard.os.path,'isfile',return_value=True), patch.object(guard.os,'stat',return_value=SimpleNamespace(st_uid=1000,st_mode=stat.S_IFREG|0o644)), patch.object(guard.os,'open',side_effect=AssertionError('untrusted file opened')):
+ assert guard.ssh_config_mounts()==([],[])
+with patch.object(guard.glob,'glob',return_value=[]), patch.object(guard.os.path,'isfile',return_value=True), patch.object(guard.os,'stat',side_effect=PermissionError('unavailable')):
+ assert guard.ssh_config_mounts()==([],[])
+if hasattr(os,'memfd_create'):
+ mounts,descriptors=guard.ssh_config_mounts()
+ try:
+  for offset in range(0,len(mounts),5):
+   assert mounts[offset:offset+3]==['--perms','0400','--ro-bind-data']
+   descriptor=int(mounts[offset+3]);target=mounts[offset+4]
+   with open(target,'rb') as source: assert os.read(descriptor,1024*1024+1)==source.read()
+ finally:
+  for descriptor in descriptors: os.close(descriptor)
+`;
+ const result=spawnSync('python3',['-B','-c',script,wrapper],{encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
+});
 test('real namespace prevents mutation while allowing project work',t=>{
  const f=fixture(); try {
   const python=process.platform==='linux'?'/usr/bin/python3':'python3';
@@ -111,6 +137,10 @@ test('real namespace prevents mutation while allowing project work',t=>{
    t.skip('Real namespace integration unavailable on this host; payload did not execute. Portable fail-closed checks ran separately.');return;
   }
   const target=JSON.stringify(path.join(f.protectedDir,'original'));
+  if(fs.existsSync('/usr/bin/ssh')) {
+   const ssh=run("import subprocess; subprocess.run(['/usr/bin/ssh','-G','example.invalid'],stdout=subprocess.DEVNULL,check=True)");
+   assert.equal(ssh.status,0,`SSH system config must remain valid in the user namespace: ${ssh.stderr}`);
+  }
   for(const code of [`open(${target},'w').write('bad')`,`import os;os.chmod(${target},0o777)`,`import os;os.rename(${JSON.stringify(f.root)},${JSON.stringify(f.root+'-moved')})`,`import os;os.chdir(${JSON.stringify(f.protectedDir)});os.environ.clear();open('new','w').write('bad')`]) assert.notEqual(run(code).status,0,code);
   assert.equal(fs.readFileSync(path.join(f.protectedDir,'original'),'utf8'),'unchanged');
   fs.linkSync(path.join(f.protectedDir,'original'),path.join(f.project,'hardlink'));

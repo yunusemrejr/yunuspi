@@ -41054,7 +41054,7 @@ var init_agent_behavior_client = __esm({
             if (writesWithoutRead >= 2) {
               warnings.push({
                 type: "blind-write",
-                message: `\u26A0 BLIND WRITE \u2014 editing \`${filePath ?? "file"}\` without reading in the last ${BLIND_WRITE_WINDOW} tool calls. Read the file first to avoid assumptions.`,
+                message: `Post-write audit: \`${filePath ?? "file"}\` changed with no recent tracked read in the last ${BLIND_WRITE_WINDOW} calls. This notice was generated after the mutation; inspect the resulting diff.`, /* PI_LENS_FEEDBACK_NOTICES_V1 */
                 severity: "warning",
                 details: {
                   filePath,
@@ -60910,7 +60910,7 @@ var init_read_guard = __esm({
             });
             return verdict3;
           }
-          const verdict2 = this.blockOrWarn("zero-read", `\u{1F504} RETRYABLE \u2014 Edit without read: you have not read \`${filePath}\` in this conversation. Read it first, then retry: \`read path="${filePath}"\`.`, void 0, effectiveMode);
+          const verdict2 = this.blockOrWarn("zero-read", `\u{1F504} RETRYABLE \u2014 No verified read-tool coverage for \`${filePath}\`. Read the target range with the read tool (or a Lens source-reading tool), then retry. Shell cat/sed/grep output does not establish read-guard coverage. Use: \`read path="${filePath}"\`.`, void 0, effectiveMode);
           this.recordVerdict(filePath, "edit", touchedLines, verdict2, {
             reasonKind: "zero_read"
           });
@@ -63823,7 +63823,7 @@ ${emoji} Source gate (guard.enabled): ${diagnostics.length} error(s) in maintain
 `;
   } else if (semantic === "warning") {
     output += `
-${emoji} ${diagnostics.length} warning(s):
+${emoji} ${diagnostics.length} advisory diagnostic(s); original rule severity follows:
 `;
   } else if (semantic === "fixed") {
     output += `
@@ -64084,10 +64084,25 @@ function lensRecordWork(filePath, cwd, maintained, enforce) {
 function lensApplyEnforcement(diagnostic, ctx) {
   const state = !ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);
   const changedLine = ctx.modifiedRanges?.some((r) => (diagnostic.line ?? 1) >= r.start && (diagnostic.line ?? 1) <= r.end);
-  const eligible = state?.enforce === true && changedLine && diagnostic.severity === "error";
+  const baseline = ctx.facts.getSessionFact("session.baseline." + ctx.filePath) ?? [];
+  const preexisting = baseline.some((d) => lensDiagnosticKey(d) === lensDiagnosticKey(diagnostic));
+  const eligible = state?.enforce === true && changedLine && !preexisting && diagnostic.severity === "error";
   return diagnostic.semantic === "blocking" && !eligible
     ? { ...diagnostic, semantic: "warning", enforcementReason: "diagnostic only; no applicable source-change gate" }
     : { ...diagnostic, enforcementReason: eligible ? "guard.enabled; error in maintained source change" : "advisory" };
+}
+function lensDiagnosticKey(d) {
+  return [d.tool ?? "", d.rule ?? d.id ?? "", d.line ?? 1, d.column ?? 1, d.message ?? ""].join("\u0001");
+}
+function lensRoutineDiagnostics(visible, all, ctx, baseline) {
+  if (ctx.analysisOnly) return { visible, preexisting: 0, outside: 0, advisory: 0 };
+  const prior = new Set((baseline ?? []).map(lensDiagnosticKey));
+  const maintained = !!lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);
+  const changed = d => maintained && ctx.modifiedRanges?.some(r => (d.line ?? 1) >= r.start && (d.line ?? 1) <= r.end);
+  const preexisting = all.filter(d => prior.has(lensDiagnosticKey(d))).length;
+  const outside = all.filter(d => !prior.has(lensDiagnosticKey(d)) && !changed(d)).length;
+  const current = visible.filter(d => !prior.has(lensDiagnosticKey(d)) && changed(d));
+  return { visible: current, preexisting, outside, advisory: current.filter(d => d.severity !== "error" && d.semantic !== "fixed").length };
 }
 function lensCoverageState(ctx, rows) {
   if (ctx.analysisOnly || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;
@@ -64095,7 +64110,7 @@ function lensCoverageState(ctx, rows) {
   const napiCovered = napi && !napi.failureKind && (napi.status === "succeeded" || (napi.status === "failed" && napi.diagnosticCount > 0));
   const states = rows.flatMap((r) => {
     const result = [];
-    if (r.failureKind) result.push(r.runnerId + ": " + r.failureKind);
+    if (r.failureKind && r.failureKind !== "blocking_diagnostics") result.push(r.runnerId + ": " + r.failureKind);
     else if (r.status === "skipped" || r.status === "when_skipped") {
       if (r.skipReason && !["unsupported-language", "no-files-matched", "covered-by-lsp", "disabled"].includes(r.skipReason))
         result.push(r.runnerId + ": " + r.skipReason);
@@ -64111,7 +64126,7 @@ function lensCoverageState(ctx, rows) {
   const previous = ctx.facts.getSessionFact(key);
   ctx.facts.setSessionFact(key, signature);
   if (!signature || signature === previous || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;
-  return { id: "scanner-health", filePath: ctx.filePath, tool: "pi-lens", rule: "scanner-health", severity: "warning", semantic: "warning",
+  return { id: "scanner-health", filePath: ctx.filePath, tool: "pi-lens", rule: "scanner-health", severity: "info", semantic: "none",
     message: "Scanner status: " + signature + ". Informational, not a source repair gate; runner details are available on demand." };
 }
 
@@ -64659,6 +64674,8 @@ async function dispatchForFile(ctx, groups2, registry, onRunnerResult) {
     ctx.facts.setSessionFact(baselineRelKey, [...dedupedDiagnostics]);
   }
   const blockers = applyOutputFilters(dedupedDiagnostics).filter((d) => d.semantic === "blocking");
+  const routineScope = lensRoutineDiagnostics(visibleDiagnostics, applyOutputFilters(dedupedDiagnostics), ctx, previousBaseline);
+  visibleDiagnostics = routineScope.visible;
   const warnings = visibleDiagnostics.filter((d) => d.semantic === "warning" || d.semantic === "none");
   const fixedItems = visibleDiagnostics.filter((d) => d.semantic === "fixed");
   const worklogIdentity = {
@@ -64684,9 +64701,10 @@ async function dispatchForFile(ctx, groups2, registry, onRunnerResult) {
   const blockerOutput = formatDiagnostics(inlineBlockers, "blocking");
   let output = blockerOutput;
   if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === "error"), "warning");
+  if (routineScope.preexisting || routineScope.outside || routineScope.advisory) output += `\npi-lens: ${routineScope.preexisting} unchanged baseline, ${routineScope.outside} outside verified changed lines, ${routineScope.advisory} advisory diagnostic(s); details available with lens_diagnostics.\n`;
   output += formatDiagnostics(inlineFixed, "fixed");
   if (coverageNotice) {
-    output += formatDiagnostics([coverageNotice], "warning", 1);
+    output += "\nℹ " + coverageNotice.message + "\n";
     // Health is edge-triggered output, never cached as a repair finding.
   }
   // Pending runner status remains available in latency reports, not routine output.

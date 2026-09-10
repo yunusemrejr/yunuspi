@@ -1,3 +1,4 @@
+import { formatProgressEvidence, formatWriteProgressEvidence } from "../shared/progress-evidence.ts";
 /**
  * Rendering functions for subagent results
  */
@@ -794,7 +795,7 @@ function formatCurrentToolLine(
 function buildLiveStatusLine(progress: Pick<AgentProgress, "activityState" | "lastActivityAt">, snapshotNow?: number): string | undefined {
 	if (progress.lastActivityAt !== undefined && snapshotNow !== undefined) return formatActivityLabel(progress.lastActivityAt, progress.activityState, snapshotNow);
 	if (progress.activityState === "needs_attention") return "needs attention";
-	if (progress.activityState === "active_long_running") return "active but long-running";
+	if (progress.activityState === "active_long_running") return "long-running; progress unverified";
 	if (progress.lastActivityAt !== undefined) return "active";
 	return undefined;
 }
@@ -808,7 +809,7 @@ function statJoin(theme: Theme, parts: string[]): string {
 }
 
 function formatTokenStat(tokens: number): string {
-	return `${formatTokens(tokens)} token`;
+	return `${formatTokens(tokens)} cumulative tokens`;
 }
 
 function formatToolUseStat(count: number): string {
@@ -824,9 +825,10 @@ function formatTotalCostStat(totalCost: Details["totalCost"] | undefined): strin
 	return parts.join(" ");
 }
 
-function formatProgressStats(theme: Theme, progress: Pick<AgentProgress, "toolCount" | "tokens" | "durationMs"> | undefined, includeDuration = true): string {
+function formatProgressStats(theme: Theme, progress: Pick<AgentProgress, "toolCount" | "tokens" | "durationMs" | "progressEvidence"> | undefined, includeDuration = true): string {
 	if (!progress) return "";
 	const parts: string[] = [];
+	if (progress.progressEvidence) parts.push(`${progress.progressEvidence.toolResults} results (${progress.progressEvidence.toolErrors} failed)`);
 	if (progress.toolCount > 0) parts.push(formatToolUseStat(progress.toolCount));
 	if (progress.tokens > 0) parts.push(formatTokenStat(progress.tokens));
 	if (includeDuration && progress.durationMs > 0) parts.push(formatDuration(progress.durationMs));
@@ -963,6 +965,7 @@ function widgetStepRenderKey(step: AsyncJobStep, index: number, expanded = false
 		step.currentToolStartedAt,
 		step.currentPath,
 		step.turnCount,
+		step.progressEvidence,
 		step.toolCount,
 		step.startedAt,
 		step.endedAt,
@@ -1771,6 +1774,7 @@ function widgetStats(job: AsyncJobState, theme: Theme, projection = buildWorkflo
 function widgetStepStats(theme: Theme, step: NonNullable<AsyncJobState["steps"]>[number]): string {
 	return statJoin(theme, [
 		step.turnCount !== undefined ? `${step.turnCount} turns` : "",
+		step.progressEvidence ? formatProgressEvidence(step.progressEvidence) : "",
 		step.toolCount !== undefined ? formatToolUseStat(step.toolCount) : "",
 		step.tokens
 			? step.contextLimit !== undefined
@@ -2525,6 +2529,12 @@ function renderSingleCompact(
 	const modelDisplay = modelThinkingBadge(theme, r.model ?? r.progress?.model, r.thinking ?? r.progress?.thinking);
 	c.addChild(new Text(truncLine(`${resultGlyph(r, output, theme, isRunning, undefined, frame)} ${theme.fg("toolTitle", theme.bold(foregroundSingleDisplayName(r)))}${modelDisplay}${contextBadge}${stats ? ` ${theme.fg("dim", "·")} ${stats}` : ""}`, width), 0, 0));
 
+	if (progress?.progressEvidence) {
+		for (const line of wrapPlainText(formatWriteProgressEvidence(progress.progressEvidence), width - detailIndent.length).slice(0, 2)) {
+			c.addChild(new Text(theme.fg("dim", `${detailIndent}${line}`), 0, 0));
+		}
+	}
+
 	if (isRunning && r.progress) {
 		const task = compactTaskText(r.task);
 		if (task) c.addChild(new Text(truncLine(theme.fg("dim", `${detailIndent}task: ${task}`), width), 0, 0));
@@ -2710,6 +2720,12 @@ function renderMultiCompact(d: Details, theme: Theme, layout: MainWindowRenderLa
 		const labelPrefix = stepLabel ? `${stepLabel}: ` : "";
 		const line = `${glyph} ${labelPrefix}${themeBold(theme, agentName)}${contextModeBadge(theme, r.context)}${rowModelDisplay}${stepStats ? ` ${theme.fg("dim", "·")} ${stepStats}` : ""}${pendingLabel}`;
 		c.addChild(new Text(truncLine(`${rowIndent}${line}`, width), 0, 0));
+		if (rProg?.progressEvidence) {
+			for (const line of wrapPlainText(formatWriteProgressEvidence(rProg.progressEvidence), width - detailIndent.length).slice(0, 2)) {
+				c.addChild(new Text(theme.fg("dim", `${detailIndent}${line}`), 0, 0));
+			}
+		}
+
 		if (rRunning || rPending) {
 			const task = compactTaskText(r.task, workflowLabelForResult(d, i));
 			if (task) c.addChild(new Text(truncLine(theme.fg("dim", `${detailIndent}task: ${task}`), width), 0, 0));
@@ -2833,9 +2849,9 @@ export function renderSubagentResult(
 		const presentation = styledResultPresentation(resultPresentation(r, output, isRunning, undefined, frame), theme);
 
 		const progressInfo = isRunning && r.progress
-			? ` | ${r.progress.toolCount} tools, ${formatTokens(r.progress.tokens)} tok, ${formatDuration(r.progress.durationMs)}`
+			? ` | ${r.progress.toolCount} tools, ${formatTokens(r.progress.tokens)} cumulative tokens, ${formatDuration(r.progress.durationMs)}`
 			: r.progressSummary
-				? ` | ${r.progressSummary.toolCount} tools, ${formatTokens(r.progressSummary.tokens)} tok, ${formatDuration(r.progressSummary.durationMs)}`
+				? ` | ${r.progressSummary.toolCount} tools, ${formatTokens(r.progressSummary.tokens)} cumulative tokens, ${formatDuration(r.progressSummary.durationMs)}`
 				: "";
 
 		const w = getTermWidth() - 4;
@@ -2843,6 +2859,8 @@ export function renderSubagentResult(
 		const toolCallLines = getToolCallLines(r, expanded);
 		const c = new Container();
 		c.addChild(new Text(fit(`${presentation.glyph} ${theme.fg("toolTitle", theme.bold(foregroundSingleDisplayName(r)))}${contextBadge}${progressInfo} ${theme.fg("dim", "·")} ${presentation.label}`), 0, 0));
+		const evidence = r.progress?.progressEvidence ?? r.progressSummary?.progressEvidence;
+		if (evidence) c.addChild(new Text(theme.fg("dim", formatProgressEvidence(evidence)), 0, 0));
 		c.addChild(new Spacer(1));
 		const taskMaxLen = Math.max(20, w - 8);
 		const taskPreview = expanded || r.task.length <= taskMaxLen
@@ -2971,7 +2989,7 @@ export function renderSubagentResult(
 
 	const summaryParts = [
 		totalSummary.toolCount || totalSummary.tokens
-			? `${totalSummary.toolCount} tools, ${formatTokens(totalSummary.tokens)} tok, ${formatDuration(totalSummary.durationMs)}`
+			? `${totalSummary.toolCount} tools, ${formatTokens(totalSummary.tokens)} cumulative tokens, ${formatDuration(totalSummary.durationMs)}`
 			: "",
 		formatTotalCostStat(d.totalCost),
 	].filter(Boolean);
@@ -3061,6 +3079,7 @@ export function renderSubagentResult(
 			: `${rowPresentation.glyph} ${labelPrefix}${theme.bold(agentName)}${contextBadge}${modelDisplay}${stats} ${theme.fg("dim", "·")} ${rowPresentation.label}`;
 		const toolCallLines = getToolCallLines(r, expanded);
 		c.addChild(new Text(fit(stepHeader), 0, 0));
+		if (rProg?.progressEvidence) c.addChild(new Text(theme.fg("dim", `    ${formatProgressEvidence(rProg.progressEvidence)}`), 0, 0));
 
 		const taskMaxLen = Math.max(20, w - 12);
 		const taskPreview = expanded || r.task.length <= taskMaxLen

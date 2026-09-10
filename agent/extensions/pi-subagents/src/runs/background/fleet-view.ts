@@ -1,3 +1,4 @@
+import { formatProgressEvidence, type ChildProgressEvidence } from "../../shared/progress-evidence.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -277,9 +278,11 @@ function formatActivityFacts(input: {
 	currentPath?: string;
 	turnCount?: number;
 	toolCount?: number;
+	progressEvidence?: ChildProgressEvidence;
 	tokens?: { total: number };
 }): string | undefined {
 	const facts: string[] = [];
+	if (input.progressEvidence) facts.push(formatProgressEvidence(input.progressEvidence));
 	if (input.currentTool && input.currentToolStartedAt !== undefined) facts.push(`tool ${input.currentTool} ${formatDuration(Math.max(0, Date.now() - input.currentToolStartedAt))}`);
 	else if (input.currentTool) facts.push(`tool ${input.currentTool}`);
 	if (input.currentPath) facts.push(shortenPath(input.currentPath));
@@ -309,6 +312,7 @@ function formatForegroundFleetLines(controls: ForegroundControl[]): string[] {
 			currentPath: control.currentPath,
 			turnCount: control.turnCount,
 			toolCount: control.toolCount,
+			progressEvidence: control.progressEvidence,
 			...(control.tokens !== undefined ? { tokens: { total: control.tokens } } : {}),
 		});
 		const currentDisplayName = control.sessionName?.trim() || control.currentAgent;

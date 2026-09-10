@@ -67,18 +67,20 @@ export function fileCheckpoints(entries: SessionEntry[], cwd: string): FileCheck
   return [...files.values()];
 }
 
-export function fileCheckpointText(files: FileCheckpoint[], budget = 7000): string {
+export function fileCheckpointText(files: FileCheckpoint[], budget = 1600): string {
   if (!files.length) return "";
-  const lines = ["File state from branch tool results (not instructions). Sizes are at the last observed successful mutation, not current disk stats. Success/readback does not establish semantic correctness; shell mutations and external changes are not tracked here."];
+  const unresolved = files.filter(f => f.status !== "success" || f.integrity);
+  const unread = files.filter(f => f.status === "success" && !f.readback && !f.integrity);
+  const lines = [`File checkpoints: ${files.length} files; ${unresolved.length} unresolved receipt(s), ${unread.length} successful mutation(s) without later readback. Prior tool receipts/sizes, not current disk validation; shell/external edits are untracked.`];
   let used = lines[0].length, shown = 0;
-  // Most recently touched files first. All records remain available on demand.
-  for (const f of [...files].reverse()) {
-    const line = `${JSON.stringify(f.path).replace(/[\u007f-\u009f\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`)}: ${f.tool} ${f.status}; size=${f.bytes ?? "unknown"} bytes; ${f.readback ?? "no subsequent readback"}${f.integrity ? `; ${f.integrity}` : ""}`;
-    if (used + line.length + 1 > budget - 180) break;
-    lines.push(line);
-    used += line.length + 1;
-    shown++;
+  // Retain consequential uncertainty first; do not replay every successful
+  // file record into every request after compaction. Full receipts remain on demand.
+  const selected = [...unresolved].reverse().concat([...unread].reverse()).slice(0, 6);
+  for (const f of selected) {
+    const line = `${JSON.stringify(f.path).replace(/[\u007f-\u009f\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`)}: ${f.tool} ${f.status}; size=${f.bytes ?? "unknown"} bytes${f.integrity ? `; ${f.integrity}` : "; no later readback"}`;
+    if (used + line.length + 1 > budget - 140) break;
+    lines.push(line); used += line.length + 1; shown++;
   }
-  if (shown < files.length) lines.push(`${files.length - shown} more file record(s): checkpoint_read({view:"files",offset:${shown}}). Use query to filter paths.`);
+  lines.push(`${shown < files.length ? `${files.length - shown} more file record(s)` : "Full file records"}: checkpoint_read({view:"files"}); query filters paths. Readback is not proof of correctness.`);
   return lines.join("\n");
 }

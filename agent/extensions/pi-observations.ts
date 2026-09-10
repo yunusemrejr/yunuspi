@@ -13,7 +13,7 @@ import type {
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { distillOutput, outputDelta, MAX_OUTPUT_CHARS } from "./lib/output-distiller.ts";
+import { distillOutput, outputDelta, MAX_OUTPUT_CHARS, isSearchCommand } from "./lib/output-distiller.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
@@ -31,6 +31,7 @@ interface Reference {
 	signature: string;
 	operation?: string;
 	resultHash?: string;
+	searchOutput?: boolean;
 }
 
 function reference(entry: SessionEntry): Reference | undefined {
@@ -176,7 +177,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 				details: { ...event.details, observationId: id, deduplicated: true, observationResultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}) },
 			};
 		}
-		const ref: Reference = { version: 1, id: ++counter, signature: key, operation: signature(event.toolName, event.input, null), resultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}) };
+		const ref: Reference = { version: 1, id: ++counter, signature: key, operation: signature(event.toolName, event.input, null), resultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}), ...(event.toolName === 'bash' && isSearchCommand(event.input?.command) ? {searchOutput:true} : {}) };
 		// Do not index until message_end: parallel siblings finish out of order
 		// but persist in source order. A forward pointer could lose its original
 		// when the user forks at that result. Same-batch originals stay intact.
@@ -187,7 +188,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		if (event.toolName === "bash" && !event.isError && !event.details?.truncation && !event.details?.truncated
 			&& !event.details?.cancelled && !event.details?.aborted && (event.details?.exitCode === undefined || event.details.exitCode === 0)
 			&& ctx?.model?.cost?.input > 0 && process.env.PI_OUTPUT_DISTILLER !== "off"
-			&& pi.getActiveTools().includes("obs_read") && miniSource(text) && !distillOutput(event.toolName, text)) {
+			&& pi.getActiveTools().includes("obs_read") && miniSource(text) && !distillOutput(event.toolName, text, ref.searchOutput)) {
 			let statusSize = Infinity;
 			try {statusSize = JSON.stringify({isError:false,details:event.details ?? {}}).length;} catch {}
 			if (statusSize <= 80) return mini.select(text, ctx.model.cost.input).then(finish, () => finish());
@@ -202,6 +203,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 	pi.on("context", (event) => {
 		if (process.env.PI_OUTPUT_DISTILLER === "off" || !pi.getActiveTools().includes("obs_read")) return;
 		const baselines = new Map<string, { id: number; text: string }>();
+		const searchCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && part.name === 'bash' && isSearchCommand(part.arguments?.command) ? [part.id] : []) : []));
 		let changed = false;
 		const messages = event.messages.map((message) => {
 			if (message.role !== "toolResult" || message.content.some(part => part.type !== "text")) return message;
@@ -218,7 +220,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 			const baseline = baselines.get(ref.operation);
 			const delta = !message.isError && !details.truncation && !details.truncated && baseline
 				? outputDelta(baseline.text, raw) : undefined;
-			const summary = delta ? undefined : distillOutput(message.toolName, raw);
+			const summary = delta ? undefined : distillOutput(message.toolName, raw, ref.searchOutput || searchCalls.has(message.toolCallId));
 			const selected = !delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off" ? miniProjection(raw, selection) : undefined;
 			if (!delta && !summary && !selected) {
 				if (!message.isError && !details.truncation && !details.truncated && raw.length >= 3000) {

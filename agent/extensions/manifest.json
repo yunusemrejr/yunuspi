@@ -346,6 +346,9 @@
     "scripts/harness-readonly-exec.py",
     "scripts/repair-harness-hardlinks.py",
     "scripts/mini-preprocessor.py",
-    "scripts/lib/paragraph_selector.py"
+    "scripts/lib/paragraph_selector.py",
+    "extensions/pi-subagents/src/shared/progress-evidence.ts",
+    "extensions/pi-subagents/src/runs/shared/common-task.ts",
+    "extensions/pi-subagents/src/runs/shared/file-verification.ts"
   ]
 }

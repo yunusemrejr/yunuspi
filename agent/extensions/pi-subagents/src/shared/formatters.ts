@@ -25,16 +25,16 @@ export function formatTokens(n: number): string {
 	return `${Number((n / 1_000_000).toFixed(1))}M`;
 }
 
-export function formatTokenUsage(usage: TokenUsage, legacyLabel = "tok"): string {
+export function formatTokenUsage(usage: TokenUsage, _legacyLabel = "tok"): string {
 	return usage.window !== undefined
-		? `${formatTokens(usage.window)} window · ${formatTokens(usage.total)} spent`
-		: `${formatTokens(usage.total)} ${legacyLabel}`;
+		? `${formatTokens(usage.window)} context · ${formatTokens(usage.total)} cumulative tokens`
+		: `${formatTokens(usage.total)} cumulative tokens`;
 }
 export function formatContextUsage(usage: Pick<TokenUsage, "window" | "windowPeak">, contextLimit: number): string | undefined {
 	if (usage.window === undefined || !Number.isFinite(usage.window) || !Number.isFinite(contextLimit) || contextLimit <= 0) return undefined;
 	const peak = usage.windowPeak !== undefined && Number.isFinite(usage.windowPeak) ? usage.windowPeak : usage.window;
-	const used = Math.max(0, usage.window, peak);
-	return `ctx ${formatTokens(used)}/${formatTokens(contextLimit)} (${Math.round((used / contextLimit) * 100)}%)`;
+	const used = Math.max(0, usage.window);
+	return `context ${formatTokens(used)}/${formatTokens(contextLimit)} (${Math.round((used / contextLimit) * 100)}%)${peak > used ? `; peak ${formatTokens(peak)}` : ""}`;
 }
 
 export function formatModelThinking(model?: string, thinking?: string): string {

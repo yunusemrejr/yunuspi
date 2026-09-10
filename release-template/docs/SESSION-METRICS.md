@@ -21,6 +21,8 @@ The footer adds wrapped rows alongside existing traffic, estimated cost and cach
 
 Run `/metrics` for a scrollable panel with tool counts, child outcomes, skill names, cache totals, reported reasoning tokens, hook errors and timings, and measured payload reductions. Use arrow keys, `j`/`k`, or Page Up/Down; close with Escape, Enter, or `q`. Viewing the panel does not add messages to model context.
 
+Child status separates cumulative token traffic from current context occupancy and its peak. Cumulative traffic may exceed the model's context capacity across many turns. Observed progress reports completed tool results, failures, successful write calls and turns since the last successful write; these are activity evidence, not proof of correct edits or a runaway-loop diagnosis. Read-only work may make useful progress without any writes. Routine successful results omit the fan-out budget boilerplate; explicit status and failure details retain the budget.
+
 ## Interpretation and privacy
 
 Counters use retained session entries and observed run transitions. Async launches count immediately; completion updates the same child instead of adding another. Queued, running, completed, failed, stopped, paused and unknown states appear in the panel. Persisted workflow activity survives reload and replaces earlier cumulative values by run identity. A single async reviewer does not add a swarm or fusion.

@@ -14,6 +14,7 @@ jobs:
         with:
           node-version: '24'
       - run: node scripts/check-public.mjs
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Install execution isolation prerequisite
         run: |
           sudo apt-get update

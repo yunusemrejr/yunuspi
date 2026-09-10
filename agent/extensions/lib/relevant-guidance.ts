@@ -22,7 +22,7 @@ type Hint = { key: string; text: string; tool?: string; skill?: string; priority
 
 export function createRelevantGuidance(pi: any) {
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
-  let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>();
+  let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
@@ -31,9 +31,20 @@ export function createRelevantGuidance(pi: any) {
     ? topicSeen.has(key) && requestNumber - topicSeen.get(key)! < 3 : shown.has(key);
   const tools = () => new Set<string>(pi.getActiveTools?.() ?? []);
   const enabled = () => process.env.PI_RELEVANT_GUIDANCE !== "off";
+  const renderEnvironmentFailure = (event: any) => event.toolName === "render_see" && event.isError === true &&
+    /browser startup failure|browserType\.launch|EROFS|EACCES|EPERM|read.only file system|No usable sandbox|Chromium sandboxing failed|SUID sandbox helper|Executable doesn.t exist|Unsupported chromium channel|Cannot find (?:module|package).*playwright/i.test(
+      (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? '').slice(0,8192)).slice(0,3).join('\n').split(/; diagnostics:|\nBrowser logs:/)[0]);
+  const observeAvailability = (event: any) => {
+    if (event.toolName !== "render_see") return false;
+    const before = unavailable.has("render_see");
+    if (!event.isError) unavailable.delete("render_see");
+    else if (renderEnvironmentFailure(event)) unavailable.add("render_see");
+    return before !== unavailable.has("render_see");
+  };
   const add = (hint: Hint) => {
+    if (!hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
     if (!enabled() || wasShown(hint.key) || !isTopic(hint.key) && shown.size >= LIMIT) return;
-    if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool))) return;
+    if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool) || unavailable.has(hint.tool))) return;
     if (hint.skill && read.has(hint.skill)) return;
     for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
     const previous = pending.get(hint.key);
@@ -140,7 +151,7 @@ export function createRelevantGuidance(pi: any) {
     skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
   };
-  const snapshot = () => ({ version: 1, cwd, shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64) });
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64) });
   return {
     userInput() {
       const hadTopics = topicSeen.size > 0;
@@ -158,6 +169,14 @@ export function createRelevantGuidance(pi: any) {
       skills = []; searches = polls = runCount = 0; polling = "";
       // Entries are local session metadata, not instructions or a new state file.
       const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+      // Capability failures survive compaction; successful execution is the
+      // recovery receipt. Never infer availability from an assistant's claims.
+      unavailable = new Set();
+      for (const e of entries) {
+        if (e?.type === "custom" && e.customType === ENTRY && e.data?.cwd === cwd && Array.isArray(e.data.unavailableTools))
+          unavailable = new Set(e.data.unavailableTools.filter((name: unknown) => name === "render_see"));
+        if (e?.type === "message" && e.message?.role === "toolResult") observeAvailability(e.message);
+      }
       for (let i = entries.length - 1; i >= 0; i--) {
         const e = entries[i], d = e?.data;
         // A compaction can remove skill bodies; do not mistake old reads for current context.
@@ -262,10 +281,11 @@ export function createRelevantGuidance(pi: any) {
       if (!enabled()) return;
       toolStep++;
       const name = event.toolName, input = event.input ?? {};
+      if (observeAvailability(event)) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory only */ }
       if (event.isError) {
         if (name === 'edit') {
           const message = (event.content ?? []).filter((item: any) => item.type === 'text').map((item: any) => String(item.text ?? '').slice(0,8000)).slice(0,4).join('\n');
-          if (/Edit without read|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[/.test(message))
+          if (/Edit without read|No verified read-tool coverage|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[/.test(message))
             signalHint('edit-recovery','coding-practices','The edit was rejected or only partly applied. Read the current target region before rebuilding exact oldText. Follow the actual tool result: if nothing applied, retry the corrected complete batch; if some edits applied, retry only the failed edits. Preserve concurrent changes. Do not repeat stale text or bypass the guard with a whole-file overwrite.');
         }
         if (['read','edit','write','bash'].includes(name)) {
@@ -339,7 +359,7 @@ export function createRelevantGuidance(pi: any) {
     },
     candidates(): Hint[] {
       if (!enabled() || runCount >= 4) return [];
-      return [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (isTopic(h.key) ? topicCount < 2 : shown.size < LIMIT) && (!h.tool || tools().has(h.tool) && !used.has(h.tool)) && (!h.skill || !read.has(h.skill)))
+      return [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (isTopic(h.key) ? topicCount < 2 : shown.size < LIMIT) && (!h.tool || tools().has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)))
         .filter(h=>runCount < 3 || h.key.startsWith("signal:") && urgentCount === 0)
         .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0))
         .filter((h, index, all) => !isTopic(h.key) || all.slice(0,index).filter(x=>isTopic(x.key)).length < 2-topicCount)

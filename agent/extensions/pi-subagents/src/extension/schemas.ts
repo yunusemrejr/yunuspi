@@ -48,6 +48,9 @@ function Loose(description?: string) {
 const SubagentParamProperties = {
 	agent: Type.Optional(Type.String({ description: "Agent for one-child execution, or target for agent management actions." })),
 	task: Type.Optional(Type.String({ description: "Optional one-child task; requires agent. Cannot combine with action, workflowScript, or workflowScriptPath." })),
+	commonTask: Type.Optional(Type.String({ minLength: 1, maxLength: 48000, description: "Shared brief supplied once for native agent/tasks/chain; injected into every child task. Saves parent request duplication, not child input tokens." })),
+	tasks: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native parallel children: [{agent,task,acceptance?,cwd?,model?},...]. Use commonTask for the shared brief and short branch-specific tasks." })),
+	chain: Type.Optional(Type.Array(Type.Unsafe({ type: "object", additionalProperties: true }), { minItems: 1, maxItems: 64, description: "Native sequential steps: [{agent,task},...]; {previous} carries prior output. Supports nested parallel groups." })),
 	action: Type.Optional(Type.String({ minLength: 1, description: "Management/control action (list, get, models, status, resume, steer, create/update/delete, mission.*, watchdog.*, schedule.*). Omit for execution." })),
 	async: Type.Optional(Type.Boolean({ description: "Run in background (default unless asyncByDefault:false). false only when the parent must block." })),
 	model: Type.Optional(Type.String({ description: "Child model override (provider/id; bare ids resolve only when unique). Thinking suffix on the string, e.g. 'provider/id:high'. With action='models' it filters the registry listing instead." })),
@@ -58,7 +61,7 @@ const SubagentParamProperties = {
 	output: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "Default child output file (string) or false. Durable workflow handoff: return the child's outputReference/outputPathMapping/artifactPaths." })),
 	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Timeout. Foreground/single async runs use config timeoutMs else 30m; async composites use a 10m supervisor deadline unless explicitly overridden." })),
 	outputSchema: Loose("JSON schema for a single child's structured output."),
-	acceptance: Loose("Reviewer acceptance contract (evidence, review) for verify-style children."),
+	acceptance: Loose("Acceptance contract. files:{scope:[exact relative paths],unchanged:[files],unchangedScripts:[HTML files]} adds independent baseline checks before completion; no globs."),
 	gate: Type.Optional(Type.String({ minLength: 1, description: "Host gate command; cannot combine with acceptance." })),
 	workflowScript: Type.Optional(Type.String({ minLength: 1, description: "Inline JavaScript statement body (filesystem-free sandbox): return runs.run(key,{agent,task,...}) / await runs.all([...]) / runs.steer / runs.host / runs.status / await runs.recover(results,config?) (bounded respawn plan for failed fanout) / await runs.fuse(results,config?) or runs.fuseFragments(fragments,config?) (advisory merge, returns {strategy,fusedBody,provenance}) / emit / console. runs.all resolves to an ordered array, not a key map. Top-level await or plain helper functions only (no nested async/arrow helpers). async:false blocks the parent; never for reviews/gates." })),
 	workflowScriptPath: Type.Optional(Type.String({ minLength: 1, description: "Path to a workflow file; relative paths resolve against the request cwd. Mutually exclusive with workflowScript and workflow." })),

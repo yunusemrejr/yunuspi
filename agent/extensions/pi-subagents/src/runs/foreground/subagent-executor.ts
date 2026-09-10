@@ -1,4 +1,8 @@
+import { fileVerificationSummary } from "../shared/file-verification.ts";
+import { expandCommonTask } from "../shared/common-task.ts";
+import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import { persistSubagentActivity } from "../../extension/session-cost.ts";
+import { SELF_MUTATION_ALLOWED } from "../../../../lib/self-mutation-guard.ts";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -290,6 +294,7 @@ interface TaskParam {
 }
 
 export interface SubagentParamsLike {
+	commonTask?: string;
 	action?: string;
 	id?: string;
 	runId?: string;
@@ -344,7 +349,7 @@ export interface SubagentParamsLike {
 	runFanoutAdmitted?: boolean;
 	/** Internal inherited tool/agent ceiling for delegated child launches. */
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
-	/** Internal durable-run compatibility fields. Public callers must use workflowScript. */
+	/** Native declarative parallel and sequential execution. */
 	chain?: ChainStep[];
 	tasks?: TaskParam[];
 	concurrency?: number;
@@ -543,7 +548,7 @@ export function promptAuditRedoParams(value: unknown, rewrittenTask: string): Su
 }
 
 function formatForegroundActivity(control: SubagentState["foregroundControls"] extends Map<string, infer T> ? T : never): string | undefined {
-	const facts: string[] = [];
+	const facts: string[] = [formatProgressEvidence(control.progressEvidence)];
 	if (control.currentTool && control.currentToolStartedAt) facts.push(`tool ${control.currentTool} for ${Math.floor(Math.max(0, Date.now() - control.currentToolStartedAt) / 1000)}s`);
 	else if (control.currentTool) facts.push(`tool ${control.currentTool}`);
 	if (control.currentPath) facts.push(`path ${control.currentPath}`);
@@ -644,7 +649,7 @@ function withRunFanoutBudget(result: AgentToolResult<Details>, descriptor: RunFa
 	const runFanoutBudget = getRunFanoutBudgetSnapshot(descriptor);
 	return {
 		...result,
-		content: options.annotateContent === false
+		content: options.annotateContent === false || !("isError" in result && result.isError === true)
 			? result.content
 			: result.content.map((item, index) => index === 0 && item.type === "text" ? { ...item, text: `${formatRunFanoutBudget(runFanoutBudget)}\n${item.text}` } : item),
 		details: { ...result.details, runFanoutBudget },
@@ -698,6 +703,7 @@ function foregroundChildActivityFromProgress(progress: SingleResult["progress"] 
 		...(progress?.currentToolStartedAt !== undefined ? { currentToolStartedAt: progress.currentToolStartedAt } : {}),
 		...(progress?.currentPath ? { currentPath: progress.currentPath } : {}),
 		...(progress?.turnCount !== undefined ? { turnCount: progress.turnCount } : {}),
+		...(progress?.progressEvidence ? { progressEvidence: { ...progress.progressEvidence } } : {}),
 		...(progress?.tokens !== undefined ? { tokens: progress.tokens } : {}),
 		...(progress?.window !== undefined ? { window: progress.window } : {}),
 		...(progress?.windowPeak !== undefined ? { windowPeak: progress.windowPeak } : {}),
@@ -2264,7 +2270,7 @@ async function emitForegroundResultIntercom(input: {
 		...(result.sessionName ? { sessionName: result.sessionName } : {}),
 		status: foregroundResultIntercomStatus(result),
 		outputState: result.outputState ?? "unknown",
-		summary: resultSummaryForIntercom(result),
+		summary: [fileVerificationSummary(result.acceptance), resultSummaryForIntercom(result)].filter(Boolean).join("\n\n"),
 		index,
 		artifactPath: result.artifactPaths?.outputPath,
 		sessionPath: result.sessionFile,
@@ -3181,6 +3187,39 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 	const controlIntercomTarget = resolveRunLevelIntercomTarget(intercomBridge, contextPolicy);
 	const childIntercomTarget = resolveChildIntercomTargetFactory(intercomBridge, contextPolicy, id);
 
+
+	if (hasChain || hasTasks) {
+		const defaults = <T extends SequentialStep | ParallelTaskItem>(step: T): T => compactOptional<T>({ ...step,
+			model: step.model ?? params.model, acceptance: step.acceptance ?? params.acceptance,
+			output: step.output ?? params.output, outputMode: step.outputMode ?? params.outputMode,
+		});
+		const rawChain: ChainStep[] = hasTasks
+			? [compactOptional<ParallelStep>({ parallel: params.tasks!.map(defaults), concurrency: params.concurrency, worktree: params.worktree })]
+			: params.chain!.map((step) => isParallelStep(step)
+				? { ...step, parallel: step.parallel.map(defaults), worktree: step.worktree ?? params.worktree }
+				: isDynamicParallelStep(step) ? { ...step, parallel: defaults(step.parallel) }
+				: { ...defaults(step), worktree: step.worktree ?? params.worktree });
+		const chain = wrapChainTasksForFork(rawChain, contextPolicy);
+		const launches = collectStaticLaunchSummaries({ params: { chain: rawChain }, agents, parentModel, availableModels, currentProvider, modelScope: data.modelScope, thinkingOverrideForTask, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems });
+		const normalizedSkills = normalizeSkillInput(params.skill);
+		return executeAsyncChain(id, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
+			chain, resultMode: hasTasks ? "parallel" : "chain", goal: resolveAsyncEventGoal(undefined, rawChain),
+			agents, unknownAgentDiagnosticContext, ctx: asyncCtx, availableModels, cwd: effectiveCwd,
+			maxOutput: params.maxOutput, artifactsDir: artifactConfig.enabled ? artifactsDir : undefined, artifactConfig, shareEnabled,
+			sessionRoot, sessionFilesByFlatIndex: launches.map((launch, index) => sessionFileForTask(launch.agent, index, launch.model)),
+			thinkingOverridesByFlatIndex: launches.map((launch, index) => thinkingOverrideForTask(launch.agent, index, launch.model)),
+			contextForAgent: contextPolicy.contextForAgent, chainSkills: normalizedSkills === false ? [] : normalizedSkills,
+			agentContract: params.agentContract, fast: params.fast, dynamicFanoutMaxItems: deps.config.chain?.dynamicFanout?.maxItems,
+			maxSubagentDepth: currentMaxSubagentDepth, waitToolEnabled: deps.waitToolEnabled, waitToolDefaultTimeoutMs: deps.waitToolDefaultTimeoutMs,
+			worktreeSetupHook: deps.config.worktreeSetupHook, worktreeSetupHookTimeoutMs: deps.config.worktreeSetupHookTimeoutMs, worktreeBaseDir: deps.config.worktreeBaseDir,
+			controlConfig, controlIntercomTarget, childIntercomTarget: childIntercomTarget ? (agent, index) => childIntercomTarget(agent, index) : undefined, nestedRoute,
+			timeoutMs: data.timeoutMs, toolBudget: data.toolBudget, usageBudget: data.usageBudget, configToolBudget: data.configToolBudget,
+			callToolTimeoutMs: params.toolTimeoutMs, configToolTimeoutMs: data.configToolTimeoutMs,
+			globalConcurrencyLimit: deps.config.globalConcurrencyLimit, capabilityCeiling: data.capabilityCeiling,
+			runFanoutBudget: data.runFanoutBudget, parentWorkflowRunId: params.workflowParentRunId, workflowKey: params.workflowKey, lane: params.lane,
+			activeAsyncCapacity: data.activeAsyncCapacity,
+		}));
+	}
 
 	if (hasSingle) {
 		const a = agents.find((x) => x.name === params.agent);
@@ -4682,6 +4721,8 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const normalizedGate = normalizeGateParams(params);
 		if (!normalizedGate.ok) return buildRequestedModeError(params, normalizedGate.error);
 		let requestParams = normalizedGate.params;
+		try { requestParams = expandCommonTask(requestParams); }
+		catch (error) { return buildRequestedModeError(requestParams, error instanceof Error ? error.message : String(error)); }
 		const capacityOverrideError = validateWorkflowCapacityOverrides(requestParams);
 		if (capacityOverrideError) return buildRequestedModeError(requestParams, capacityOverrideError);
 		let workflowPreflight: import("../../shared/types.ts").WorkflowPreflightV1 | undefined;
@@ -4723,6 +4764,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			workflowResource = { permit: workflowResourcePermit, ...consumed };
 		}
 		if (requestParams.workflowScript !== undefined && normalizedAction === undefined) {
+			// Reject before reserving capacity, creating a mission or writing run state.
+			if (!SELF_MUTATION_ALLOWED) return buildRequestedModeError(requestParams,
+				'workflowScript is unavailable in this project session. No mission or child was created. Use {commonTask:"shared brief",tasks:[{agent:"worker",task:"first scope"},{agent:"worker",task:"second scope"}],async:true} for native parallel work, or chain for sequential work.');
 			const validation = validateWorkflowScript(requestParams.workflowScript);
 			if (!validation.ok) return buildRequestedModeError(requestParams,
 				`workflowScript validation failed before child launch; no children launched. ${validation.errors.slice(0, 4).map(error => `${error.line ? `Line ${error.line}: ` : ""}${error.message}`).join("; ")} Correct the script and resubmit; use escaped strings for task text containing backticks.`);
@@ -5251,6 +5295,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 										step.recentTools = progress.recentTools.map((tool) => ({ ...tool }));
 										step.recentOutput = [...progress.recentOutput];
 										step.turnCount = progress.turnCount;
+										step.progressEvidence = progress.progressEvidence;
 										step.toolCount = progress.toolCount;
 										step.model = progress.model;
 										step.thinking = progress.thinking;
@@ -6379,6 +6424,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const requestedAsync = externalAsyncRequired ? true : effectiveParams.async ?? deps.asyncByDefault;
 		const backgroundRequestedWhileClarifying = (hasChain || hasTasks) && requestedAsync && effectiveParams.clarify === true;
 		const effectiveAsync = requestedAsync && effectiveParams.clarify !== true;
+		if ((hasChain || hasTasks) && !effectiveAsync) return buildRequestedModeError(effectiveParams, "Native tasks/chain require async:true. Use an individual child for foreground execution; no child was launched.");
 		if (externalAgent && (!effectiveAsync || effectiveParams.foregroundOnly === true)) {
 			return buildRequestedModeError(effectiveParams, `Agent '${externalAgent.name}' uses runner.type='${externalAgent.runner?.type}', which currently supports async/background execution only. Omit async or pass async:true; clarify and foregroundOnly are unsupported.`);
 		}
@@ -6865,7 +6911,10 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			return Promise.resolve({ content: [{ type: "text", text: loaded.error }], isError: true, details: { mode: publicParams.action ? "management" : "workflow", results: [] } });
 		}
 		publicExecutions.add(loaded.params!);
-		return executeWithSingleDispatchGuard(id, loaded.params!, signal, onUpdate, ctx);
+		return executeWithSingleDispatchGuard(id, loaded.params!, signal, onUpdate, ctx).then((result) => {
+			const notes = [...new Set((result.details?.results ?? []).map((child) => fileVerificationSummary(child.acceptance)).filter(Boolean))];
+			return notes.length ? { ...result, content: [...result.content, { type: "text" as const, text: notes.join("\n") }] } : result;
+		});
 	};
 
 	const executeDelegated = async (

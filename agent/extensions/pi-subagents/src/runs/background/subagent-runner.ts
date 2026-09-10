@@ -1,3 +1,5 @@
+import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
+import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -1711,6 +1713,7 @@ async function runSingleStepInner(
 	let toolBudget = step.toolBudget ? initialToolBudgetState(step.toolBudget) : undefined;
 	let toolBudgetBlocked = false;
 	let actualLaunchContractDigest = step.launchContractDigest;
+	const fileBaseline = captureFileVerification(step.effectiveAcceptance?.files, step.cwd ?? ctx.cwd);
 	const mutationSnapshot = snapshotTrackedMutations(step.cwd ?? ctx.cwd);
 	let finalMutationEvidence = collectTrackedMutationEvidence(mutationSnapshot, step.cwd ?? ctx.cwd);
 
@@ -2210,6 +2213,7 @@ async function runSingleStepInner(
 	const acceptance = step.effectiveAcceptance && !finalResult?.stopped && !ctx.timeoutSignal?.aborted && !ctx.stopSignal?.aborted && !ctx.skipAcceptance?.()
 		? await evaluateAcceptance(omitUndefinedProperties({
 			acceptance: step.effectiveAcceptance,
+			fileBaseline,
 			task: taskForCompletionGuard,
 			messages: finalResult?.messages,
 			output: outputForAcceptance,
@@ -2237,7 +2241,7 @@ async function runSingleStepInner(
 		: undefined;
 	const acceptanceFailure = effectiveAcceptance ? acceptanceFailureMessage(effectiveAcceptance) : undefined;
 	const missingVisualEvidence = effectiveAcceptance?.runtimeChecks.some((check) => check.id === "visual-source-evidence" && check.status === "failed");
-	const acceptanceCanFailRun = acceptanceFailure && (missingVisualEvidence || (effectiveAcceptance?.explicit && !isAgentContractV1(step.agentContract))) && (finalResult?.exitCode ?? 1) === 0 && !finalResult?.interrupted && !timedOutAfterAcceptance && !stoppedAfterAcceptance;
+	const acceptanceCanFailRun = acceptanceFailure && (missingVisualEvidence || hasFailedFileVerification(effectiveAcceptance?.runtimeChecks ?? []) || (effectiveAcceptance?.explicit && !isAgentContractV1(step.agentContract))) && (finalResult?.exitCode ?? 1) === 0 && !finalResult?.interrupted && !timedOutAfterAcceptance && !stoppedAfterAcceptance;
 	const effectiveFinalExitCode = timedOutAfterAcceptance || stoppedAfterAcceptance ? 1 : acceptanceCanFailRun ? 1 : finalResult?.exitCode ?? 1;
 	const intercomDetachReceipt = finalResult?.finalOutput === INTERCOM_DETACH_RECEIPT;
 	const baseFinalError = stoppedAfterAcceptance
@@ -3287,6 +3291,7 @@ async function runSubagent(
 	const emittedControlEventKeys = new Set<string>();
 	const activeLongRunningSteps = new Set<number>();
 	const mutatingFailureStates = initialStatusSteps.map(() => createMutatingFailureState());
+	const progressEvidence = initialStatusSteps.map(() => createProgressEvidence());
 	const pendingToolResults: Array<{ tool: string; path?: string; mutates: boolean; startedAt?: number } | undefined> = initialStatusSteps.map(() => undefined);
 	type ActiveToolCall = { key: string; tool: string; args: string; startedAt: number; path?: string; blocksSupervisor: boolean };
 	const activeToolCalls = initialStatusSteps.map(() => new Map<string, ActiveToolCall>());
@@ -3611,6 +3616,8 @@ async function runSubagent(
 		const step = statusPayload.steps[flatIndex];
 		if (!step) return;
 		const now = Date.now();
+		progressEvidence[flatIndex] ??= createProgressEvidence();
+		step.progressEvidence = observeProgressEvidence(progressEvidence[flatIndex], event, now);
 		statusPayload.currentStep = flatIndex;
 		if (isChildWatchdogStatusEvent(event)) {
 			const next = acceptChildWatchdogEvent({

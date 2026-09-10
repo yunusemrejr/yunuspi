@@ -1,3 +1,4 @@
+import type { ChildProgressEvidence } from "./progress-evidence.ts";
 /**
  * Type definitions for the subagent extension
  */
@@ -902,6 +903,7 @@ export interface AgentProgress {
 	currentToolArgs?: string;
 	currentToolStartedAt?: number;
 	currentPath?: string;
+	progressEvidence?: ChildProgressEvidence;
 	recentTools: Array<{ tool: string; args: string; endMs: number }>;
 	recentOutput: string[];
 	toolCount: number;
@@ -937,6 +939,7 @@ interface ProgressSummary {
 	currentTool?: string;
 	currentToolArgs?: string;
 	currentToolStartedAt?: number;
+	progressEvidence?: ChildProgressEvidence;
 	recentTools?: Array<{ tool: string; args: string; endMs: number }>;
 	recentOutput?: string[];
 	toolCount: number;
@@ -993,12 +996,22 @@ export interface AcceptanceReviewGate {
 	required?: boolean;
 }
 
+export interface AcceptanceFileContract {
+	/** Exact files checked independently; HTML/PHP scope preserves existing h1 count and static container balance. */
+	scope?: string[];
+	/** Whole-file bytes must match the pre-launch baseline. */
+	unchanged?: string[];
+	/** All script blocks in each named file must match the pre-launch baseline. */
+	unchangedScripts?: string[];
+}
+
 export interface AcceptanceConfig {
 	level?: AcceptanceLevel;
 	report?: "on" | "off";
 	criteria?: Array<string | AcceptanceGate>;
 	evidence?: AcceptanceEvidenceKind[];
 	verify?: AcceptanceVerifyCommand[];
+	files?: AcceptanceFileContract;
 	review?: AcceptanceReviewGate | false;
 	stopRules?: string[];
 	reason?: string;
@@ -1021,6 +1034,7 @@ export interface ResolvedAcceptanceConfig {
 	criteria: ResolvedAcceptanceGate[];
 	evidence: AcceptanceEvidenceKind[];
 	verify: AcceptanceVerifyCommand[];
+	files?: AcceptanceFileContract;
 	review?: AcceptanceReviewGate | false;
 	stopRules: string[];
 	reason?: string;
@@ -1866,7 +1880,8 @@ export interface AsyncStatus {
 		currentToolArgs?: string;
 		currentToolStartedAt?: number;
 		currentPath?: string;
-		recentTools?: Array<{ tool: string; args: string; endMs: number }>;
+		progressEvidence?: ChildProgressEvidence;
+	recentTools?: Array<{ tool: string; args: string; endMs: number }>;
 		recentOutput?: string[];
 		turnCount?: number;
 		toolCount?: number;
@@ -2010,6 +2025,7 @@ export interface ForegroundResumeChild {
 	currentToolStartedAt?: number;
 	currentPath?: string;
 	turnCount?: number;
+	progressEvidence?: ChildProgressEvidence;
 	tokens?: number;
 	window?: number;
 	windowPeak?: number;
@@ -2072,6 +2088,7 @@ export interface ForegroundChildControl {
 	currentToolStartedAt?: number;
 	currentPath?: string;
 	turnCount?: number;
+	progressEvidence?: ChildProgressEvidence;
 	tokens?: number;
 	inputTokens?: number;
 	outputTokens?: number;
@@ -2111,6 +2128,7 @@ export interface ForegroundRunControl {
 	currentToolStartedAt?: number;
 	currentPath?: string;
 	turnCount?: number;
+	progressEvidence?: ChildProgressEvidence;
 	tokens?: number;
 	inputTokens?: number;
 	outputTokens?: number;

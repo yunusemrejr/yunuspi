@@ -14,20 +14,26 @@ export function errorFingerprint(text: string): string {
   return createHash('sha256').update(text.replace(ansi, '').replace(/\r\n/g, '\n')).digest('hex').slice(0, 16);
 }
 
-function familyOf(tool: string, text: string): OutputFamily | undefined {
+/** Search provenance is only a presentation hint, never an execution grant. */
+export function isSearchCommand(command: unknown): boolean {
+  return typeof command === 'string' && /(?:^|[;&|\n])\s*(?:\/(?:[\w.-]+\/)*)?(?:rg|grep)\b/.test(command);
+}
+const searchPointer = /^(?:\d+(?::\d+)?:|.{1,512}:\d+(?::\d+)?:)/;
+function familyOf(tool: string, text: string, search: boolean): OutputFamily | undefined {
   if (tool === 'grep' || tool === 'find' || tool === 'ls') return 'search';
   if (tool !== 'bash') return;
   if (/^diff --git /m.test(text) && /^@@ /m.test(text)) return 'git-diff';
   if (/^(?:TAP version \d|# (?:tests|pass|fail) \d|Test Suites:|Tests:|\s*[✓✗✔✖] .+|\s*(?:PASS|FAIL)\s+\S)/m.test(text)) return 'tests';
   if (/\b(?:error TS\d{3,5}|error\[E\d{3,5}\])|^.+:\d+:\d+: (?:fatal )?(?:error|warning):/m.test(text)) return 'compiler';
+  if (search && text.split('\n').some(line => line.length > 1000 && searchPointer.test(line))) return 'search';
   if (text.split('\n', 20).filter(line => /^\[?\d{4}-\d\d-\d\d[T ]\d\d:\d\d|^\[(?:INFO|DEBUG|WARN|ERROR)\]/.test(line)).length >= 5) return 'logs';
   if (/^\s*\[/.test(text)) return 'json-array';
 }
 
-export function distillOutput(tool: string, raw: string): Distillation | undefined {
+export function distillOutput(tool: string, raw: string, searchContext?: boolean | string): Distillation | undefined {
   if (raw.length < MIN_CHARS || raw.length > MAX_OUTPUT_CHARS || raw.includes('\0')) return;
   const text = raw.replace(ansi, '');
-  const family = familyOf(tool, text);
+  const family = familyOf(tool, text, searchContext === true || isSearchCommand(searchContext));
   if (!family) return;
   if (family === 'json-array') {
     let rows: unknown;
@@ -68,6 +74,24 @@ export function distillOutput(tool: string, raw: string): Distillation | undefin
   }
   const lines = text.split('\n');
   if (lines.length > 12000) return;
+  if (family === 'search' && lines.some(line => line.length > 1000)) {
+    // Minified lines must not defeat the whole-output budget. Keep the source
+    // pointer and exact prefix/suffix bytes; explicitly mark every omission.
+    // obs_read owns recovery of the original, including a match in the middle.
+    const matches=lines.flatMap((line,index)=>searchPointer.test(line)?[index]:[]);
+    const selected=new Set([...matches.slice(0,4),...matches.slice(-2)]);
+    // Compound shell commands can contain headers, source reads or failures.
+    // Keep those non-search lines verbatim rather than hiding them as matches.
+    const excerpts=lines.flatMap((line,index)=>{
+      if(searchPointer.test(line)&&!selected.has(index))return [];
+      return [line.length<=800||!searchPointer.test(line)?{line:index+1,text:line}:{line:index+1,text:line.slice(0,680)+' … [line excerpt; middle omitted] … '+line.slice(-80),omittedChars:line.length-760}];
+    });
+    const render=()=>JSON.stringify({kind:'search',totalLines:lines.length,omittedLines:lines.length-excerpts.length,complete:false,lineExcerpts:true,locationNote:'Source pointers retained as emitted; line-only results use the input file from the original command.',excerpts});
+    let body=render();
+    while(body.length>=BUDGET){const retained=excerpts.flatMap((row,index)=>searchPointer.test(lines[row.line-1])?[index]:[]);if(retained.length<=1)break;excerpts.splice(retained.at(-1)!,1);body=render();}
+    if(body.length<BUDGET&&body.length<raw.length*.75)return {family,text:body,inputChars:raw.length,outputChars:body.length,omittedLines:lines.length-excerpts.length};
+    return;
+  }
   const selected = new Set<number>();
   const keep = (index: number, radius = 0) => {
     for (let j = Math.max(0, index - radius); j <= Math.min(lines.length - 1, index + radius); j++) selected.add(j);

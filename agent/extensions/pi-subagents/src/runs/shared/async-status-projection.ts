@@ -1,4 +1,5 @@
 import { sanitizeDisplayText, truncateDisplayText } from "../../shared/display-text.ts";
+import { parseProgressEvidence, type ChildProgressEvidence } from "../../shared/progress-evidence.ts";
 import { formatModelThinking } from "../../shared/formatters.ts";
 import type { AsyncJobState, AsyncJobStep, HostStepFreshnessV1, HostStepMonitorKind, HostStepNodeV1, HostStepState, HostStepVerdict, NestedRunSummary, NestedStepSummary, SubagentRunMode, WorkflowGraphSnapshot, WorkflowPreflightLaneV1, WorkflowPreflightV1 } from "../../shared/types.ts";
 import { HOST_STEP_MAX_COUNT, HOST_STEP_MAX_DETAIL_CHARS, HOST_STEP_MAX_LABEL_CHARS, HOST_STEP_MAX_PROVIDER_CHARS, HOST_STEP_MAX_REASON_CHARS, HOST_STEP_MAX_REF_CHARS, HOST_STEP_MAX_ROLE_CHARS, HOST_STEP_MAX_TARGET_CHARS, hostStepReportName, parseHostStepNode, validHostStepNodes } from "./host-step-status.ts";
@@ -38,6 +39,7 @@ export interface AsyncStatusSnapshotActivityV1 {
 	currentToolStartedAt?: number;
 	turnCount?: number;
 	toolCount?: number;
+	progressEvidence?: ChildProgressEvidence;
 }
 
 export interface AsyncStatusSnapshotHostStepV1 {
@@ -198,12 +200,14 @@ function activityFor(source: {
 	currentToolStartedAt?: unknown;
 	turnCount?: unknown;
 	toolCount?: unknown;
+	progressEvidence?: unknown;
 }, ctx: ProjectionContext): AsyncStatusSnapshotActivityV1 | undefined {
 	const currentTool = publicOptionalText(source.currentTool, ctx.caps.maxStringLength);
 	const lastActivityAt = publicTime(source.lastActivityAt);
 	const currentToolStartedAt = publicTime(source.currentToolStartedAt);
 	const turnCount = publicCount(source.turnCount);
 	const toolCount = publicCount(source.toolCount);
+	const progressEvidence = parseProgressEvidence(source.progressEvidence);
 	const activity: AsyncStatusSnapshotActivityV1 = {
 		...(typeof source.activityState === "string" ? { state: publicText(source.activityState, "unknown", ctx.caps.maxStringLength) } : {}),
 		...(currentTool ? { currentTool } : {}),
@@ -211,6 +215,7 @@ function activityFor(source: {
 		...(currentToolStartedAt !== undefined ? { currentToolStartedAt } : {}),
 		...(turnCount !== undefined ? { turnCount } : {}),
 		...(toolCount !== undefined ? { toolCount } : {}),
+		...(progressEvidence ? { progressEvidence } : {}),
 	};
 	return Object.keys(activity).length ? activity : undefined;
 }

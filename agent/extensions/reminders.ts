@@ -236,6 +236,7 @@ export function shouldFire(
 		st.promptCount >= 2;
 	// Drift: session old enough (or enough submissions) + gap + cap.
 	const drift =
+		st.hasPending &&
 		st.driftReminders < o.driftMax &&
 		now - st.lastRemindAt >= o.remindGapMs &&
 		(now - st.startedAt >= o.driftMinAgeMs || st.promptCount >= o.driftMinRuns);
@@ -319,23 +320,22 @@ export function reminderText(
 	fire: { todo: boolean; drift: boolean; caution?: boolean },
 	dueManual: ManualReminder[],
 	context?: string[],
+	todoTasks: Array<{id?: number; subject?: string; status?: string; blockedBy?: number[]}> = [],
 ): string {
-	// Manual deliveries are directives the agent must act on; ambient-only
-	// check-ins keep the original soft, anti-nag framing.
-	const lines: string[] = [
-		dueManual.length > 0
-			? `[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~2 min until cleared with /reminder clear.`
-			: `[reminders] sid ${sid.slice(0, 6)} — soft check-in, not a new instruction.`,
-	];
+	const lines: string[] = dueManual.length > 0
+		? [`[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~2 min until cleared with /reminder clear.`]
+		: [];
 	if (context && context.length) lines.push(context.join("\n"));
 	if (fire.todo && st.hasPending) {
 		const parts: string[] = [];
 		if (st.inProgressCount > 0) parts.push(`${st.inProgressCount} in_progress`);
 		if (st.pendingCount > 0) parts.push(`${st.pendingCount} pending`);
-		lines.push(
-			`Open todos: ${parts.join(", ")} — last todo checkpoint ${fmtAgo(now, st.lastTodoActionAt)} ago. ` +
-				`Reconcile with the user's latest scope; mark verified work completed and keep at most one in_progress.`,
-		);
+		const open = todoTasks.filter(t => (t.status === "pending" || t.status === "in_progress") && Number.isSafeInteger(t.id) && typeof t.subject === "string");
+		const items = open.slice(0,3).map(t => `#${t.id} [${t.status}] ${JSON.stringify(oneLine(t.subject!,160))}${t.blockedBy?.length ? ` (blocked by ${t.blockedBy.slice(0,5).map(id=>"#"+id).join(", ")})` : ""}`).join("; ");
+		lines.push(`Open todos: ${parts.join(", ")} — last todo checkpoint ${fmtAgo(now, st.lastTodoActionAt)} ago.` +
+			(items ? ` Recorded items: ${items}${open.length>3 ? `; ${open.length-3} more (todo list)` : ""}.` : ' Use todo list to inspect the current items.') +
+			` Reconcile these recorded items with the user's latest scope; mark verified work completed and keep at most one in_progress.`);
+
 	}
 	if (fire.caution) {
 		lines.push(
@@ -410,6 +410,7 @@ function logReminderErr(where: string, err: unknown): void {
 export default function remindersExtension(pi: ExtensionAPI) {
 	// Per-session live state; sid "" (unknown) is tolerated.
 	const live = new Map<string, ReminderState>();
+	const todoSnapshots = new WeakMap<ReminderState, Array<{id?: number; subject?: string; status?: string; blockedBy?: number[]}>>();
 	const guidance = createRelevantGuidance(pi);
 	let loop = createLoopTracker();
 	let recoveryRoute: { provider: string; model: string } | undefined;
@@ -428,7 +429,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		r.delivered += 1;
 		catchUp(r, now);
 	};
-	const updateTodoCounts = (st: ReminderState, tasks: Array<{ status?: unknown }>) => {
+	const updateTodoCounts = (st: ReminderState, tasks: Array<{ id?: number; subject?: string; status?: unknown; blockedBy?: number[] }>) => {
+		todoSnapshots.set(st, tasks.filter(t => t.status === "pending" || t.status === "in_progress").map(t=>({id:t.id,subject:t.subject,status:String(t.status),blockedBy:t.blockedBy})));
 		st.pendingCount = tasks.filter((t) => t?.status === "pending").length;
 		st.inProgressCount = tasks.filter((t) => t?.status === "in_progress").length;
 		st.hasPending = st.pendingCount + st.inProgressCount > 0;
@@ -551,7 +553,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				fire,
 				dueManual,
 				[...ctxMatches.map((r) => r.text), ...hints.map((h) => `[capability hint] ${h.text}`)],
+				todoSnapshots.get(st),
 			);
+			if (!content.trim()) { writeState(sid, st); return undefined; }
 			// Advance schedules BEFORE returning: a delivered occurrence cannot
 			// re-fire from a later lifecycle event (structural dedup).
 			for (const r of dueManual) advanceDelivered(r, now);

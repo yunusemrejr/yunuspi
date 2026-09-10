@@ -1,3 +1,5 @@
+import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
+import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 /**
  * Core execution logic for running subagents
  */
@@ -307,6 +309,7 @@ interface StructuredDelegationProgressState {
 	activityState?: AgentProgress["activityState"];
 	model?: string;
 	toolCount: number;
+	progressEvidence?: AgentProgress["progressEvidence"];
 	tokens: number;
 }
 
@@ -319,6 +322,7 @@ function captureStructuredDelegationProgressState(progress: AgentProgress, resul
 		activityState: progress.activityState,
 		model: progress.model ?? result.model,
 		toolCount: progress.toolCount,
+		progressEvidence: progress.progressEvidence,
 		tokens: progress.tokens,
 	};
 }
@@ -332,6 +336,7 @@ function structuredDelegationProgressChanged(
 		|| previous.currentToolArgs !== progress.currentToolArgs
 		|| previous.activityState !== progress.activityState
 		|| previous.model !== (progress.model ?? result.model)
+		|| JSON.stringify(previous.progressEvidence) !== JSON.stringify(progress.progressEvidence)
 		|| previous.toolCount !== progress.toolCount
 		|| previous.tokens !== progress.tokens
 		|| previous.recentOutput.length !== progress.recentOutput.length) return true;
@@ -373,6 +378,7 @@ async function runSingleAttempt(
 		orcaProgressTab?: OrcaProgressTab;
 		launchWarnings: { emitted: boolean };
 		verifyModel: boolean;
+		progressEvidence: ReturnType<typeof createProgressEvidence>;
 	},
 ): Promise<SingleResult> {
 	const effectiveThinking = options.thinkingOverride ?? agent.thinking;
@@ -582,6 +588,11 @@ async function runSingleAttempt(
 		options.onControlEvent?.(event);
 	};
 
+	const progressEvidence = shared.progressEvidence;
+	// A settled attempt may reuse tool IDs on restart. Retain totals and target
+	// evidence, but never pair a new attempt with an unfinished previous call.
+	progressEvidence.pending.clear();
+	progressEvidence.settled.clear();
 	const progress: AgentProgress = {
 		index: options.index ?? 0,
 		agent: agent.name,
@@ -589,6 +600,7 @@ async function runSingleAttempt(
 		status: "running",
 		task,
 		skills: shared.resolvedSkillNames,
+		progressEvidence: { ...progressEvidence.summary },
 		recentTools: [],
 		recentOutput: [...shared.attemptNotes],
 		toolCount: 0,
@@ -612,6 +624,7 @@ async function runSingleAttempt(
 		progress.error = attemptTimeout.message;
 		result.progressSummary = {
 			toolCount: progress.toolCount,
+			progressEvidence: progress.progressEvidence,
 			tokens: progress.tokens,
 			durationMs: progress.durationMs,
 		};
@@ -750,6 +763,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			}
 			receipt.progressSummary = {
 				toolCount: receiptProgress.toolCount,
+				progressEvidence: receiptProgress.progressEvidence,
 				tokens: receiptProgress.tokens,
 				durationMs: receiptProgress.durationMs,
 			};
@@ -1132,6 +1146,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			}
 
 			const now = Date.now();
+			progress.progressEvidence = observeProgressEvidence(progressEvidence, evt, now);
 			progress.durationMs = now - startTime;
 			progress.lastActivityAt = now;
 			updateActivityState(now);
@@ -1550,6 +1565,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 		progress.durationMs = Date.now() - startTime;
 		result.progressSummary = {
 			toolCount: progress.toolCount,
+			progressEvidence: progress.progressEvidence,
 			tokens: progress.tokens,
 			durationMs: progress.durationMs,
 		};
@@ -1638,6 +1654,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 	result.progressSummary = {
 		...(childSessionName ? { sessionName: childSessionName } : {}),
 		toolCount: progress.toolCount,
+		progressEvidence: progress.progressEvidence,
 		tokens: progress.tokens,
 		durationMs: progress.durationMs,
 	};
@@ -1893,6 +1910,7 @@ async function runSyncCompletionInner(
 		dynamicGroup: options.acceptanceContext?.dynamicGroup,
 		agentContract: options.agentContract,
 	});
+	const fileBaseline = captureFileVerification(effectiveAcceptance.files, options.cwd ?? runtimeCwd);
 	const acceptancePrompt = formatAcceptancePrompt(effectiveAcceptance, { reportOptional: isAgentContractV1(options.agentContract), structuredOutput: Boolean(options.structuredOutput?.acceptanceReportPath) });
 	const taskWithAcceptance = acceptancePrompt ? `${task}\n${acceptancePrompt}` : task;
 	options.onEffectivePrompt?.(taskWithAcceptance);
@@ -1982,6 +2000,7 @@ async function runSyncCompletionInner(
 	const aggregateUsage = emptyUsage();
 	const attemptNotes: string[] = [];
 	const launchWarnings = { emitted: false };
+	const progressEvidence = createProgressEvidence();
 	let totalToolCount = 0;
 	let totalDurationMs = 0;
 
@@ -2080,6 +2099,7 @@ async function runSyncCompletionInner(
 				orcaProgressTab,
 				launchWarnings,
 				verifyModel,
+				progressEvidence,
 			});
 			lastResult = result;
 			if (!recoveringAbort && startupAttemptIndex === 0) {
@@ -2238,6 +2258,7 @@ async function runSyncCompletionInner(
 	result.progressSummary = {
 		...(childSessionName ? { sessionName: childSessionName } : {}),
 		toolCount: totalToolCount,
+		progressEvidence: { ...progressEvidence.summary },
 		tokens: aggregateUsage.input + aggregateUsage.output,
 		durationMs: totalDurationMs,
 	};
@@ -2293,6 +2314,7 @@ async function runSyncCompletionInner(
 		} else {
 			result.acceptance = await evaluateAcceptance({
 				acceptance: effectiveAcceptance,
+				fileBaseline,
 				task,
 				messages: result.messages,
 				output: acceptanceOutputByResult.get(result) ?? result.finalOutput ?? "",
@@ -2314,7 +2336,7 @@ async function runSyncCompletionInner(
 	const acceptanceFailure = acceptanceFailureMessage(result.acceptance);
 	stripAcceptanceReportsFromMessages(result.messages);
 	const missingVisualEvidence = result.acceptance.runtimeChecks.some((check) => check.id === "visual-source-evidence" && check.status === "failed");
-	if (acceptanceFailure && (missingVisualEvidence || (result.acceptance.explicit && !isAgentContractV1(options.agentContract))) && result.exitCode === 0 && !result.interrupted && !result.timedOut) {
+	if (acceptanceFailure && (missingVisualEvidence || hasFailedFileVerification(result.acceptance.runtimeChecks) || (result.acceptance.explicit && !isAgentContractV1(options.agentContract))) && result.exitCode === 0 && !result.interrupted && !result.timedOut) {
 		result.exitCode = 1;
 		if (result.savedOutputPath) {
 			result.finalOutput = finalizeSingleOutput({
@@ -2472,6 +2494,7 @@ export async function runSync(
 			progress: failedProgress,
 			progressSummary: {
 				toolCount: failedProgress.toolCount,
+				progressEvidence: failedProgress.progressEvidence,
 				tokens: failedProgress.tokens,
 				durationMs: failedProgress.durationMs,
 			},

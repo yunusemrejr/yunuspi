@@ -83,6 +83,7 @@ export async function renderCapture(p, output, signal) {
       "Invalid bounds: viewport 64–2048; timeoutMs 100–30000; readiness load/domcontentloaded/networkidle; selector <=256 chars",
     );
   let browser,
+    browserStarting = false,
     timer,
     renderer = "Poppler pdftoppm";
   const start = Date.now();
@@ -147,6 +148,7 @@ export async function renderCapture(p, output, signal) {
         if (u.username || u.password)
           throw Error("Credentials in URLs are not allowed");
       }
+      browserStarting = true;
       browser = await chromium.launch({
         channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
         headless: true,
@@ -154,6 +156,7 @@ export async function renderCapture(p, output, signal) {
         args: ["--disable-webgl", "--disable-gpu"],
         chromiumSandbox: true,
       });
+      browserStarting = false;
       if (signal?.aborted) {
         await browser.close();
         throw Error("Render cancelled");
@@ -496,9 +499,11 @@ export async function renderCapture(p, output, signal) {
         ? "cancelled"
         : e.code === "ENOENT"
           ? "ENOENT: source not found"
-          : Date.now() - start >= ms
-            ? "timeout"
-            : "render or selector failure";
+          : browserStarting
+            ? "browser startup failure"
+            : Date.now() - start >= ms
+              ? "timeout"
+              : "render or selector failure";
       throw new Error(
         `Inspection ${reason}; diagnostic details omitted to avoid exposing page values/URLs`,
       );

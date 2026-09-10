@@ -1,3 +1,5 @@
+import { fileVerificationSummary } from "../shared/file-verification.ts";
+import type { AcceptanceLedger } from "../../shared/types.ts";
 /**
  * Completion notification delivery.
  *
@@ -66,7 +68,9 @@ export interface CompletionNotification {
 	timedOut?: boolean;
 	stopped?: boolean;
 	turnBudgetExceeded?: boolean;
+	acceptance?: AcceptanceLedger;
 	results?: Array<{
+		acceptance?: AcceptanceLedger;
 		runId?: string;
 		workflowKey?: string;
 		agent?: string;
@@ -396,7 +400,8 @@ function completionBatchKey(result: CompletionNotification): string {
 
 export function buildCompletionDetails(result: CompletionNotification): SubagentNotifyDetails {
 	const agent = result.agent ?? "unknown";
-	const summary = typeof result.summary === "string" ? result.summary : "";
+	const fileChecks = [...new Set([result.acceptance, ...(result.results ?? []).map((child) => child.acceptance)].map(fileVerificationSummary).filter(Boolean))].join("\n");
+	const summary = [fileChecks, typeof result.summary === "string" ? result.summary : ""].filter(Boolean).join("\n\n");
 	const stopped = result.stopped === true
 		|| result.state === "stopped"
 		|| (result.success !== true && result.exitCode !== 0 && isUnexplainedProcessSignal(result))

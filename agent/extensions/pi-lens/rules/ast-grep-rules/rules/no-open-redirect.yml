@@ -1,7 +1,7 @@
 id: no-open-redirect
 language: TypeScript
-message: "Potential open redirect vulnerability — validate redirect URLs"
-severity: error
+message: "Review redirect target validation; a redirect call alone does not prove an open redirect"
+severity: warning
 note: |
   Redirecting to user-supplied URLs without validation can enable phishing
   attacks. Validate that redirect targets are internal paths or trusted domains.
@@ -13,3 +13,12 @@ rule:
     - pattern: location.href = $URL
     - pattern: res.redirect($URL)
     - pattern: response.redirect($URL)
+
+# Syntax-only review: safe literal internal paths cannot select another origin.
+# Other targets remain advisories; this matcher does not prove taint or missing validation.
+constraints:
+  URL:
+    not:
+      all:
+        - kind: string
+        - regex: ^['"]/([A-Za-z0-9][A-Za-z0-9/_-]*)?['"]$

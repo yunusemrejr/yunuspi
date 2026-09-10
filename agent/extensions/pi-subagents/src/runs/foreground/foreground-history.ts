@@ -41,6 +41,7 @@ function compactChild(child: ForegroundResumeChild): ForegroundResumeChild {
 		...(child.currentToolStartedAt !== undefined ? { currentToolStartedAt: child.currentToolStartedAt } : {}),
 		...(child.currentPath ? { currentPath: child.currentPath } : {}),
 		...(child.turnCount !== undefined ? { turnCount: child.turnCount } : {}),
+		...(child.progressEvidence ? { progressEvidence: { ...child.progressEvidence } } : {}),
 		...(child.tokens !== undefined ? { tokens: child.tokens } : {}),
 		...(child.toolCount !== undefined ? { toolCount: child.toolCount } : {}),
 		...(child.exitCode !== undefined ? { exitCode: child.exitCode } : {}),

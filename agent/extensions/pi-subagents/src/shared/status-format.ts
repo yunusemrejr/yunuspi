@@ -11,14 +11,14 @@ function formatActivityAge(ms: number): string {
 export function formatActivityLabel(lastActivityAt: number | undefined, activityState?: ActivityState, now = Date.now()): string | undefined {
 	if (lastActivityAt === undefined) {
 		if (activityState === "needs_attention") return "needs attention";
-		if (activityState === "active_long_running") return "active but long-running";
+		if (activityState === "active_long_running") return "long-running; progress unverified";
 		return undefined;
 	}
 	const age = formatActivityAge(Math.max(0, now - lastActivityAt));
 	if (activityState === "needs_attention") return `no activity for ${age}`;
 	if (activityState === "active_long_running") {
 		const activityAge = age === "now" ? "now" : `${age} ago`;
-		return `active but long-running · last activity ${activityAge}`;
+		return `long-running · last event ${activityAge}`;
 	}
 	return age === "now" ? "active now" : `active ${age} ago`;
 }

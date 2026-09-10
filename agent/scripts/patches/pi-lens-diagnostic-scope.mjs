@@ -41,10 +41,25 @@ function lensRecordWork(filePath, cwd, maintained, enforce) {
 function lensApplyEnforcement(diagnostic, ctx) {
   const state = !ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);
   const changedLine = ctx.modifiedRanges?.some((r) => (diagnostic.line ?? 1) >= r.start && (diagnostic.line ?? 1) <= r.end);
-  const eligible = state?.enforce === true && changedLine && diagnostic.severity === "error";
+  const baseline = ctx.facts.getSessionFact("session.baseline." + ctx.filePath) ?? [];
+  const preexisting = baseline.some((d) => lensDiagnosticKey(d) === lensDiagnosticKey(diagnostic));
+  const eligible = state?.enforce === true && changedLine && !preexisting && diagnostic.severity === "error";
   return diagnostic.semantic === "blocking" && !eligible
     ? { ...diagnostic, semantic: "warning", enforcementReason: "diagnostic only; no applicable source-change gate" }
     : { ...diagnostic, enforcementReason: eligible ? "guard.enabled; error in maintained source change" : "advisory" };
+}
+function lensDiagnosticKey(d) {
+  return [d.tool ?? "", d.rule ?? d.id ?? "", d.line ?? 1, d.column ?? 1, d.message ?? ""].join("\u0001");
+}
+function lensRoutineDiagnostics(visible, all, ctx, baseline) {
+  if (ctx.analysisOnly) return { visible, preexisting: 0, outside: 0, advisory: 0 };
+  const prior = new Set((baseline ?? []).map(lensDiagnosticKey));
+  const maintained = !!lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);
+  const changed = d => maintained && ctx.modifiedRanges?.some(r => (d.line ?? 1) >= r.start && (d.line ?? 1) <= r.end);
+  const preexisting = all.filter(d => prior.has(lensDiagnosticKey(d))).length;
+  const outside = all.filter(d => !prior.has(lensDiagnosticKey(d)) && !changed(d)).length;
+  const current = visible.filter(d => !prior.has(lensDiagnosticKey(d)) && changed(d));
+  return { visible: current, preexisting, outside, advisory: current.filter(d => d.severity !== "error" && d.semantic !== "fixed").length };
 }
 function lensCoverageState(ctx, rows) {
   if (ctx.analysisOnly || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;
@@ -52,7 +67,7 @@ function lensCoverageState(ctx, rows) {
   const napiCovered = napi && !napi.failureKind && (napi.status === "succeeded" || (napi.status === "failed" && napi.diagnosticCount > 0));
   const states = rows.flatMap((r) => {
     const result = [];
-    if (r.failureKind) result.push(r.runnerId + ": " + r.failureKind);
+    if (r.failureKind && r.failureKind !== "blocking_diagnostics") result.push(r.runnerId + ": " + r.failureKind);
     else if (r.status === "skipped" || r.status === "when_skipped") {
       if (r.skipReason && !["unsupported-language", "no-files-matched", "covered-by-lsp", "disabled"].includes(r.skipReason))
         result.push(r.runnerId + ": " + r.skipReason);
@@ -68,7 +83,7 @@ function lensCoverageState(ctx, rows) {
   const previous = ctx.facts.getSessionFact(key);
   ctx.facts.setSessionFact(key, signature);
   if (!signature || signature === previous || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;
-  return { id: "scanner-health", filePath: ctx.filePath, tool: "pi-lens", rule: "scanner-health", severity: "warning", semantic: "warning",
+  return { id: "scanner-health", filePath: ctx.filePath, tool: "pi-lens", rule: "scanner-health", severity: "info", semantic: "none",
     message: "Scanner status: " + signature + ". Informational, not a source repair gate; runner details are available on demand." };
 }
 `;
@@ -134,8 +149,10 @@ replace(
 );
 replace(
   '  let output = blockerOutput;\n  output += formatDiagnostics(inlineFixed, "fixed");',
-  '  let output = blockerOutput;\n  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === "error"), "warning");\n  output += formatDiagnostics(inlineFixed, "fixed");',
+  '  let output = blockerOutput;\n  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === "error"), "warning");\n  if (routineScope.preexisting || routineScope.outside || routineScope.advisory) output += `\\npi-lens: ${routineScope.preexisting} unchanged baseline, ${routineScope.outside} outside verified changed lines, ${routineScope.advisory} advisory diagnostic(s); details available with lens_diagnostics.\\n`;\n  output += formatDiagnostics(inlineFixed, "fixed");',
 );
+replace('  const warnings = visibleDiagnostics.filter((d) => d.semantic === "warning" || d.semantic === "none");', '  const routineScope = lensRoutineDiagnostics(visibleDiagnostics, applyOutputFilters(dedupedDiagnostics), ctx, previousBaseline);\n  visibleDiagnostics = routineScope.visible;\n  const warnings = visibleDiagnostics.filter((d) => d.semantic === "warning" || d.semantic === "none");');
+replace('    output += formatDiagnostics([coverageNotice], "warning", 1);', '    output += "\\nℹ " + coverageNotice.message + "\\n";');
 replace(
   "    warnings.push(coverageNotice);",
   "    // Health is edge-triggered output, never cached as a repair finding.",
@@ -413,6 +430,35 @@ replace(
   "      for (const [lateAuxPath, pairs] of byFile) {\n        let cached;",
   "      for (const [lateAuxPath, pairs] of byFile) {\n        if (!lensWorkState(lateAuxPath, cwd)) continue;\n        let cached;",
 );
+// Exact known V1 payload upgrades; every other existing patch postcondition remains mandatory.
+const priorPayloadUpgrades = [
+  {
+    "oldText": "// PI_LENS_DIAGNOSTIC_SCOPE\nfunction lensWorkKey(filePath) {\n  return \"session.maintained.\" + normalizeMapKey(path100.resolve(filePath));\n}\nfunction lensFileIdentity(filePath) {\n  try { const stat = fs79.statSync(filePath); return stat.dev + \":\" + stat.ino; }\n  catch { return \"missing\"; }\n}\nfunction lensWorkState(filePath, cwd) {\n  const resolved = resolveRunnerPath(cwd, filePath);\n  const state = sessionFacts?.getSessionFact(lensWorkKey(resolved));\n  if (!state || !state.maintained || !fs79.existsSync(resolved)) return void 0;\n  if (isExternalOrVendorFile(resolved, state.cwd) || isPathIgnoredByProject(resolved, state.cwd, false)) return void 0;\n  if (detectFileRole(resolved, readFilePrefix(resolved)) === \"generated\") return void 0;\n  if (state.identity !== lensFileIdentity(resolved) || state.hash !== getFileStateHash(resolved)) return void 0;\n  return state;\n}\nfunction lensRecordWork(filePath, cwd, maintained, enforce) {\n  const key = lensWorkKey(filePath);\n  const hash = getFileStateHash(filePath);\n  const identity = lensFileIdentity(filePath);\n  const previous = sessionFacts.getSessionFact(key);\n  if (previous?.hash === hash && previous.identity === identity && previous.maintained === maintained && previous.enforce === enforce) return previous;\n  const state = { cwd, maintained, enforce, hash, identity, revision: (previous?.revision ?? 0) + 1 };\n  sessionFacts.setSessionFact(key, state);\n  return state;\n}\nfunction lensApplyEnforcement(diagnostic, ctx) {\n  const state = !ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);\n  const changedLine = ctx.modifiedRanges?.some((r) => (diagnostic.line ?? 1) >= r.start && (diagnostic.line ?? 1) <= r.end);\n  const eligible = state?.enforce === true && changedLine && diagnostic.severity === \"error\";\n  return diagnostic.semantic === \"blocking\" && !eligible\n    ? { ...diagnostic, semantic: \"warning\", enforcementReason: \"diagnostic only; no applicable source-change gate\" }\n    : { ...diagnostic, enforcementReason: eligible ? \"guard.enabled; error in maintained source change\" : \"advisory\" };\n}\nfunction lensCoverageState(ctx, rows) {\n  if (ctx.analysisOnly || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;\n  const napi = rows.find((r) => r.runnerId === \"ast-grep-napi\");\n  const napiCovered = napi && !napi.failureKind && (napi.status === \"succeeded\" || (napi.status === \"failed\" && napi.diagnosticCount > 0));\n  const states = rows.flatMap((r) => {\n    const result = [];\n    if (r.failureKind) result.push(r.runnerId + \": \" + r.failureKind);\n    else if (r.status === \"skipped\" || r.status === \"when_skipped\") {\n      if (r.skipReason && ![\"unsupported-language\", \"no-files-matched\", \"covered-by-lsp\", \"disabled\"].includes(r.skipReason))\n        result.push(r.runnerId + \": \" + r.skipReason);\n    }\n    for (const id of r.unconfirmedServerIds ?? []) {\n      if (id === \"ast-grep\" && napiCovered) continue;\n      result.push(id + \": publication unconfirmed\");\n    }\n    return result;\n  });\n  const signature = [...new Set(states)].sort().join(\"; \");\n  const key = \"session.coverage-state.\" + (ctx.projectRoot ?? ctx.cwd) + \":\" + ctx.kind;\n  const previous = ctx.facts.getSessionFact(key);\n  ctx.facts.setSessionFact(key, signature);\n  if (!signature || signature === previous || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;\n  return { id: \"scanner-health\", filePath: ctx.filePath, tool: \"pi-lens\", rule: \"scanner-health\", severity: \"warning\", semantic: \"warning\",\n    message: \"Scanner status: \" + signature + \". Informational, not a source repair gate; runner details are available on demand.\" };\n}\n\nfunction createDispatchContext(filePath, cwd, pi, facts, blockingOnly, modifiedRanges, projectRoot, writeIndex, telemetryModel, telemetryProvider) {",
+    "newText": "// PI_LENS_DIAGNOSTIC_SCOPE\nfunction lensWorkKey(filePath) {\n  return \"session.maintained.\" + normalizeMapKey(path100.resolve(filePath));\n}\nfunction lensFileIdentity(filePath) {\n  try { const stat = fs79.statSync(filePath); return stat.dev + \":\" + stat.ino; }\n  catch { return \"missing\"; }\n}\nfunction lensWorkState(filePath, cwd) {\n  const resolved = resolveRunnerPath(cwd, filePath);\n  const state = sessionFacts?.getSessionFact(lensWorkKey(resolved));\n  if (!state || !state.maintained || !fs79.existsSync(resolved)) return void 0;\n  if (isExternalOrVendorFile(resolved, state.cwd) || isPathIgnoredByProject(resolved, state.cwd, false)) return void 0;\n  if (detectFileRole(resolved, readFilePrefix(resolved)) === \"generated\") return void 0;\n  if (state.identity !== lensFileIdentity(resolved) || state.hash !== getFileStateHash(resolved)) return void 0;\n  return state;\n}\nfunction lensRecordWork(filePath, cwd, maintained, enforce) {\n  const key = lensWorkKey(filePath);\n  const hash = getFileStateHash(filePath);\n  const identity = lensFileIdentity(filePath);\n  const previous = sessionFacts.getSessionFact(key);\n  if (previous?.hash === hash && previous.identity === identity && previous.maintained === maintained && previous.enforce === enforce) return previous;\n  const state = { cwd, maintained, enforce, hash, identity, revision: (previous?.revision ?? 0) + 1 };\n  sessionFacts.setSessionFact(key, state);\n  return state;\n}\nfunction lensApplyEnforcement(diagnostic, ctx) {\n  const state = !ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);\n  const changedLine = ctx.modifiedRanges?.some((r) => (diagnostic.line ?? 1) >= r.start && (diagnostic.line ?? 1) <= r.end);\n  const baseline = ctx.facts.getSessionFact(\"session.baseline.\" + ctx.filePath) ?? [];\n  const preexisting = baseline.some((d) => lensDiagnosticKey(d) === lensDiagnosticKey(diagnostic));\n  const eligible = state?.enforce === true && changedLine && !preexisting && diagnostic.severity === \"error\";\n  return diagnostic.semantic === \"blocking\" && !eligible\n    ? { ...diagnostic, semantic: \"warning\", enforcementReason: \"diagnostic only; no applicable source-change gate\" }\n    : { ...diagnostic, enforcementReason: eligible ? \"guard.enabled; error in maintained source change\" : \"advisory\" };\n}\nfunction lensDiagnosticKey(d) {\n  return [d.tool ?? \"\", d.rule ?? d.id ?? \"\", d.line ?? 1, d.column ?? 1, d.message ?? \"\"].join(\"\\u0001\");\n}\nfunction lensRoutineDiagnostics(visible, all, ctx, baseline) {\n  if (ctx.analysisOnly) return { visible, preexisting: 0, outside: 0, advisory: 0 };\n  const prior = new Set((baseline ?? []).map(lensDiagnosticKey));\n  const maintained = !!lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);\n  const changed = d => maintained && ctx.modifiedRanges?.some(r => (d.line ?? 1) >= r.start && (d.line ?? 1) <= r.end);\n  const preexisting = all.filter(d => prior.has(lensDiagnosticKey(d))).length;\n  const outside = all.filter(d => !prior.has(lensDiagnosticKey(d)) && !changed(d)).length;\n  const current = visible.filter(d => !prior.has(lensDiagnosticKey(d)) && changed(d));\n  return { visible: current, preexisting, outside, advisory: current.filter(d => d.severity !== \"error\" && d.semantic !== \"fixed\").length };\n}\nfunction lensCoverageState(ctx, rows) {\n  if (ctx.analysisOnly || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;\n  const napi = rows.find((r) => r.runnerId === \"ast-grep-napi\");\n  const napiCovered = napi && !napi.failureKind && (napi.status === \"succeeded\" || (napi.status === \"failed\" && napi.diagnosticCount > 0));\n  const states = rows.flatMap((r) => {\n    const result = [];\n    if (r.failureKind && r.failureKind !== \"blocking_diagnostics\") result.push(r.runnerId + \": \" + r.failureKind);\n    else if (r.status === \"skipped\" || r.status === \"when_skipped\") {\n      if (r.skipReason && ![\"unsupported-language\", \"no-files-matched\", \"covered-by-lsp\", \"disabled\"].includes(r.skipReason))\n        result.push(r.runnerId + \": \" + r.skipReason);\n    }\n    for (const id of r.unconfirmedServerIds ?? []) {\n      if (id === \"ast-grep\" && napiCovered) continue;\n      result.push(id + \": publication unconfirmed\");\n    }\n    return result;\n  });\n  const signature = [...new Set(states)].sort().join(\"; \");\n  const key = \"session.coverage-state.\" + (ctx.projectRoot ?? ctx.cwd) + \":\" + ctx.kind;\n  const previous = ctx.facts.getSessionFact(key);\n  ctx.facts.setSessionFact(key, signature);\n  if (!signature || signature === previous || !lensWorkState(ctx.filePath, ctx.cwd)) return void 0;\n  return { id: \"scanner-health\", filePath: ctx.filePath, tool: \"pi-lens\", rule: \"scanner-health\", severity: \"info\", semantic: \"none\",\n    message: \"Scanner status: \" + signature + \". Informational, not a source repair gate; runner details are available on demand.\" };\n}\n\nfunction createDispatchContext(filePath, cwd, pi, facts, blockingOnly, modifiedRanges, projectRoot, writeIndex, telemetryModel, telemetryProvider) {"
+  },
+  {
+    "oldText": "  let output = blockerOutput;\n  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === \"error\"), \"warning\");\n  output += formatDiagnostics(inlineFixed, \"fixed\");",
+    "newText": "  let output = blockerOutput;\n  if (!ctx.analysisOnly && lensWorkState(ctx.filePath, ctx.cwd)) output += formatDiagnostics(warnings.filter((d) => d.severity === \"error\"), \"warning\");\n  if (routineScope.preexisting || routineScope.outside || routineScope.advisory) output += `\\npi-lens: ${routineScope.preexisting} unchanged baseline, ${routineScope.outside} outside verified changed lines, ${routineScope.advisory} advisory diagnostic(s); details available with lens_diagnostics.\\n`;\n  output += formatDiagnostics(inlineFixed, \"fixed\");"
+  },
+  {
+    "oldText": "  const warnings = visibleDiagnostics.filter((d) => d.semantic === \"warning\" || d.semantic === \"none\");",
+    "newText": "  const routineScope = lensRoutineDiagnostics(visibleDiagnostics, applyOutputFilters(dedupedDiagnostics), ctx, previousBaseline);\n  visibleDiagnostics = routineScope.visible;\n  const warnings = visibleDiagnostics.filter((d) => d.semantic === \"warning\" || d.semantic === \"none\");"
+  },
+  {
+    "oldText": "    output += formatDiagnostics([coverageNotice], \"warning\", 1);",
+    "newText": "    output += \"\\nℹ \" + coverageNotice.message + \"\\n\";"
+  }
+];
+export function upgradeSource(source) {
+ let result=source;
+ for(const {oldText,newText} of priorPayloadUpgrades){
+  if(result.split(newText).length===2)continue;
+  if(result.split(oldText).length!==2)throw Error('Lens scope upgrade payload drift');
+  result=result.replace(oldText,()=>newText);
+ }
+ if(!edits.filter(e=>e.oldText).every(e=>result.includes(e.newText)))throw Error('Lens scope upgrade postcondition drift');
+ return result;
+}
 export function applySource(source) {
   let result = source;
   for (const { oldText, newText } of edits) {
@@ -442,7 +488,7 @@ export function targets(dist = DIST) {
         if (!s.includes("// PI_LENS_DIAGNOSTIC_SCOPE"))
           fs.writeFileSync(dist, applySource(s));
         else if (!targets(dist)[0].isApplied())
-          throw new Error("Partial scope patch: restore baseline and reapply");
+          fs.writeFileSync(dist, upgradeSource(s));
       },
     },
   ];

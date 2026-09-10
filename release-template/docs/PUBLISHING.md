@@ -18,11 +18,17 @@ node /tmp/yunuspi-next-release/scripts/check-public.mjs /tmp/yunuspi-next-releas
 
 The exporter also checks final bytes against exact credentials read locally, without printing them. An unreadable private configuration blocks the export. The public scanner uses high-confidence patterns, runtime path restrictions and tightly fingerprinted binary exceptions; it cannot determine every organization's confidential prose. Review the generated diff, especially new skills, provider endpoints, deployment examples, logs and screenshots.
 
-Copy only the reviewed public changes into your public checkout. Never copy the live agent folder wholesale. Run distribution tests, then stage explicit public paths and scan again. The scanner examines the Git index and all reachable commit content, so deleting a secret later does not make its history safe.
+Copy only the reviewed public changes into your public checkout. Never copy the live agent folder wholesale. Run distribution tests in a separate throwaway copy of the sanitized export, so installed test dependencies stay outside the clean release tree:
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm test
+```
+
+In the clean public checkout containing the same tested source bytes, stage explicit public paths and scan again. The scanner intentionally rejects installed dependency trees and examines the Git index and all reachable commit content, so deleting a secret later does not make its history safe.
 
 ```sh
 npm run prepare:hooks
-npm test
 npm run check:public
 git diff --cached --stat
 ```

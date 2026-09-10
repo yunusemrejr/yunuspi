@@ -1,3 +1,4 @@
+import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
@@ -215,6 +216,7 @@ function formatRememberedForegroundStatus(run: ForegroundResumeRun): string {
 			output ? `output: ${output.slice(0, 160)}` : undefined,
 		].filter(Boolean);
 		lines.push(parts.join(", "));
+		if (child.progressEvidence) lines.push(`  Observed progress: ${formatProgressEvidence(child.progressEvidence)}`);
 		if (child.sessionFile) lines.push(`  Session: ${child.sessionFile}`);
 		if (child.transcriptPath) lines.push(`  Transcript: ${child.transcriptPath}`);
 		if (child.artifactPaths?.outputPath) lines.push(`  Output: ${child.artifactPaths.outputPath}`);
@@ -551,6 +553,7 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				const display = runStatusStepDisplayName(step);
 				const phase = step.phase ? `[${step.phase}] ` : "";
 				lines.push(`${stepLineLabel(status, index)}: ${phase}${display} ${step.status}${modelText}${stepActivityText ? `, ${stepActivityText}` : ""}${steeringSuffix}${acceptanceText}${budgetText}${errorText}`);
+				lines.push(`  Observed progress: ${formatProgressEvidence(step.progressEvidence)}`);
 				lines.push(...formatTimeoutRecoveryLines(step.timeoutRecovery, "  "));
 				if (step.runner?.type === "external-cli") {
 					const runner = normalizeExternalCliRunnerStatus(step.runner);

@@ -1,3 +1,4 @@
+import { validateFileContract, verifyFileContract, verifyObservedWriteScope, type FileVerificationBaseline } from "./file-verification.ts";
 import { guardedCommand, SELF_MUTATION_ALLOWED } from "../../../../lib/self-mutation-guard.ts";
 import { spawn } from "node:child_process";
 import { spawnSync } from "node:child_process";
@@ -48,7 +49,7 @@ const VALID_EVIDENCE_KINDS: AcceptanceEvidenceKind[] = [
 const VALID_EVIDENCE = new Set<AcceptanceEvidenceKind>(VALID_EVIDENCE_KINDS);
 const ACCEPTANCE_EVIDENCE_HELP = `Supported evidence kinds: ${VALID_EVIDENCE_KINDS.join(", ")}. Example: { level: "checked", evidence: ["commands-run", "changed-files"] }.`;
 const ACCEPTANCE_OBJECT_EXAMPLE = "Example: { level: \"checked\", evidence: [\"commands-run\", \"changed-files\"] }.";
-const ACCEPTANCE_CONFIG_KEYS = new Set(["level", "report", "criteria", "evidence", "verify", "review", "stopRules", "reason"]);
+const ACCEPTANCE_CONFIG_KEYS = new Set(["level", "report", "criteria", "evidence", "verify", "review", "stopRules", "reason", "files"]);
 const ACCEPTANCE_GATE_KEYS = new Set(["id", "must", "evidence", "severity"]);
 const ACCEPTANCE_VERIFY_KEYS = new Set(["id", "command", "timeoutMs", "cwd", "env", "allowFailure"]);
 const ACCEPTANCE_REVIEW_KEYS = new Set(["agent", "focus", "required"]);
@@ -240,6 +241,7 @@ export function validateAcceptanceInput(input: unknown, pathLabel = "acceptance"
 	} else if (value.level !== undefined && (typeof value.level !== "string" || !VALID_LEVELS.has(value.level as AcceptanceLevel))) {
 		errors.push(`${pathLabel}.level must be one of auto, none, attested, checked, verified.`);
 	}
+	errors.push(...validateFileContract(value.files, `${pathLabel}.files`));
 	if (value.report !== undefined && value.report !== "on" && value.report !== "off") {
 		errors.push(`${pathLabel}.report must be on or off.`);
 	}
@@ -432,6 +434,7 @@ export function resolveEffectiveAcceptance(input: {
 			criteria,
 			evidence,
 			verify: explicit.verify ?? [],
+		files: explicit.files,
 			review: explicit.review,
 			stopRules: explicit.stopRules ?? [],
 			reason: explicit.reason,
@@ -456,6 +459,7 @@ export function resolveEffectiveAcceptance(input: {
 		criteria,
 		evidence,
 		verify: explicit.verify ?? [],
+		files: explicit.files,
 		review,
 		stopRules: explicit.stopRules ?? [],
 		reason: explicit.reason,
@@ -467,10 +471,12 @@ function acceptanceRequiresChildReport(acceptance: ResolvedAcceptanceConfig): bo
 }
 
 export function formatAcceptancePrompt(acceptance: ResolvedAcceptanceConfig, options: { reportOptional?: boolean; structuredOutput?: boolean } = {}): string {
-	if (acceptance.level === "none") return "";
-	if (options.reportOptional && !acceptanceRequiresChildReport(acceptance)) return "";
+	const filesPrompt = acceptance.files ? `\nIndependent file checks (exact cwd-relative paths): ${JSON.stringify(acceptance.files)}. Keep declared unchanged file/script bytes intact; HTML scope must retain existing h1 count and avoid new static container-balance errors. These checks do not establish rendered behavior.\n` : "";
+	if (acceptance.level === "none") return filesPrompt;
+	if (options.reportOptional && !acceptanceRequiresChildReport(acceptance)) return filesPrompt;
 	const lines = [
 		"",
+		filesPrompt,
 		"## Acceptance Contract",
 		`Acceptance level: ${acceptance.level}`,
 		"Completion is not accepted from prose alone. End with a structured acceptance report.",
@@ -1333,6 +1339,7 @@ export function checkVisualSourceEvidence(task: string, messages: readonly unkno
 
 export async function evaluateAcceptance(input: {
 	acceptance: ResolvedAcceptanceConfig;
+	fileBaseline?: FileVerificationBaseline;
 	output: string;
 	cwd: string;
 	/**
@@ -1366,6 +1373,11 @@ export async function evaluateAcceptance(input: {
 		runtimeChecks: [],
 		verifyRuns: [],
 	};
+	if (!acceptance.files && input.task && taskMayMutate(input.task)) ledger.runtimeChecks.push({ id: "file-contract:coverage", status: "not-applicable", message: "Independent file checks were not requested: no acceptance.files scope or pre-launch baseline. Worker claims do not verify preserved file/script bytes or HTML structure." });
+	ledger.runtimeChecks.push(...verifyFileContract(acceptance.files, input.fileBaseline, input.cwd), ...verifyObservedWriteScope(acceptance.files, input.messages, input.cwd));
+	if (ledger.runtimeChecks.some((check) => check.status === "failed")) {
+		ledger.status = "rejected"; ledger.evidenceStatus = "rejected"; return ledger;
+	}
 	const visualEvidence = input.task && input.messages ? checkVisualSourceEvidence(input.task, input.messages, input.cwd) : undefined;
 	if (visualEvidence) ledger.runtimeChecks.push(visualEvidence);
 	if (visualEvidence?.status === "failed") {

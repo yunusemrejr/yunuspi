@@ -137,11 +137,12 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 	if (params.resume !== undefined) {
 		return { ok: false, error: "Top-level resume execution is not available. Put resume on a workflowScript runs.run/runs.all item.", mode: "workflow" };
 	}
-	const hasLegacyOrchestration = params.tasks !== undefined || params.chain !== undefined || params.parallel !== undefined || params.concurrency !== undefined || params.chainDir !== undefined;
+	const hasLegacyOrchestration = params.parallel !== undefined || params.chainDir !== undefined;
 	if (hasLegacyOrchestration) {
-		return { ok: false, error: "Legacy top-level chain and parallel inputs were removed; use workflowScript.", mode: normalizedAction ? "management" : "workflow" };
+		return { ok: false, error: "Use native tasks/chain arrays with async:true; legacy parallel/chainDir fields and action-based execution are unsupported.", mode: normalizedAction ? "management" : "workflow" };
 	}
 	if (normalizedAction !== undefined) {
+		if (params.tasks !== undefined || params.chain !== undefined || params.concurrency !== undefined) return { ok: false, error: "Native tasks/chain execution must omit action.", mode: "management" };
 		const legacyAction = normalizedAction.toLowerCase();
 		if (legacyAction === "append-step") {
 			return { ok: false, error: "Legacy append-step control was removed from the public subagent tool; use current workflowScript orchestration.", mode: "management" };
@@ -153,7 +154,7 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 			return { ok: false, error: "action='single' is not supported. Omit action and pass { agent, task } for one child.", mode: "workflow" };
 		}
 		if (legacyAction === "parallel" || legacyAction === "tasks" || legacyAction === "chain") {
-			return { ok: false, error: "Legacy top-level chain and parallel inputs were removed; use workflowScript.", mode: "workflow" };
+			return { ok: false, error: "Use native tasks/chain arrays with async:true; legacy parallel/chainDir fields and action-based execution are unsupported.", mode: "workflow" };
 		}
 		if (normalizedAction === "validate") {
 			if (params.agent !== undefined || params.task !== undefined || params.step !== undefined) {
@@ -176,11 +177,22 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 		if (hasWorkflowInput) {
 			return { ok: false, error: "Workflow execution must omit action; only validate and schedule.create accept action with workflowScript or workflowScriptPath.", mode: "management" };
 		}
+		if (params.tasks !== undefined || params.chain !== undefined || params.concurrency !== undefined) return { ok: false, error: "Native tasks/chain execution must omit action.", mode: "management" };
 		if (params.task !== undefined) {
 			return { ok: false, error: "Structured single-child task cannot be combined with a management/control action.", mode: "management" };
 		}
 		return { ok: true, params: { ...params, action: normalizedAction } };
 	}
+	const hasNativeTasks = params.tasks !== undefined;
+	const hasNativeChain = params.chain !== undefined;
+	if (hasNativeTasks || hasNativeChain) {
+		if (hasNativeTasks && hasNativeChain || hasWorkflowInput || params.agent !== undefined || params.task !== undefined || params.step !== undefined) return { ok: false, error: "Native tasks/chain cannot be combined with each other, single-child fields, or workflow scripts.", mode: "workflow" };
+		const items = hasNativeTasks ? params.tasks : params.chain;
+		if (!Array.isArray(items) || items.length < 1 || items.length > 64 || items.some((item) => !item || typeof item !== "object" || Array.isArray(item))) return { ok: false, error: "Native tasks/chain must contain 1-64 child/step objects.", mode: "workflow" };
+		if (params.concurrency !== undefined && (typeof params.concurrency !== "number" || !Number.isSafeInteger(params.concurrency) || params.concurrency < 1)) return { ok: false, error: "concurrency must be a positive integer.", mode: "workflow" };
+		return { ok: true, params };
+	}
+	if (params.concurrency !== undefined) return { ok: false, error: "concurrency requires native tasks or chain.", mode: "workflow" };
 	if (params.step !== undefined) {
 		return { ok: false, error: "step is not a public execution field; use workflowScript for orchestration.", mode: "workflow" };
 	}
@@ -204,7 +216,7 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 		};
 	}
 	if (!hasValidWorkflowInput) {
-		return { ok: false, error: "Execution requires either { agent, task? } for one child, a named workflow resource, or a non-empty workflowScript or workflowScriptPath for orchestration.", mode: "workflow" };
+		return { ok: false, error: "Execution requires either { agent, task? } for one child, native tasks/chain, a named workflow resource, or a non-empty workflowScript or workflowScriptPath for orchestration.", mode: "workflow" };
 	}
 	return { ok: true, params };
 }
