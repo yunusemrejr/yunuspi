@@ -715,6 +715,7 @@ const runs = Object.freeze({
   },
   all(items) {
     const { calls, launched } = launchRunsAll(items);
+    if (launched.length > 1) parentPort.postMessage({ type: "activityMetrics", kind: "swarms" });
     return trackRunObservation(launched.map(({ key, callId }) => ({ key, operation: "run", callId })), Promise.all(launched.map(({ promise }) => promise)).then((results) => wrapRunsAllResults(results.map(decorateWorkflowChildResult), calls.map(({ key }) => key))));
   },
   lanes(laneSpecs) {
@@ -1691,6 +1692,8 @@ function setupAbortResumeParams(params: Record<string, unknown>, result: Workflo
 }
 
 export async function runWorkflowScript(options: RunWorkflowScriptOptions): Promise<WorkflowScriptResult> {
+	const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
+	const recordMetric = (kind: string) => { try { metrics?.(kind); } catch {} };
 	// node:vm and worker_threads are not a filesystem security boundary.
 	if (!SELF_MUTATION_ALLOWED) throw new Error("Scripted JavaScript workflows are unavailable outside a human-started harness maintenance session: their worker shares Pi filesystem authority. Use declarative subagent chains, parallel tasks, swarm or fusion instead.");
 	if (!options.script.trim()) throw new Error("workflowScript must not be empty.");
@@ -1944,6 +1947,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				}
 				return;
 			}
+			if (message.type === "activityMetrics" && message.kind === "swarms") { recordMetric("swarms"); return; }
 			if (message.type !== "call" || typeof message.callId !== "number" || typeof message.method !== "string" || !isRecord(message.args)) return;
 
 			const respond = (promise: Promise<unknown>, responsePath?: string, onBoundaryError?: (error: unknown) => void) => {
@@ -1992,9 +1996,9 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				// the host; the worker only ships plain projected data. Pure logic —
 				// no trace entry, no launch, no acceptance-recovery barrier.
 				const config = message.args.config as Partial<SwarmRecoveryConfig & FusionConfig> | undefined;
-				if (message.method === "recover") return respond(Promise.resolve().then(() => planChildRespawn(message.args.results, config)));
-				if (message.method === "fuse") return respond(Promise.resolve().then(() => fuseChildOutputs(message.args.results, config)));
-				return respond(Promise.resolve().then(() => fuseFragments(message.args.fragments, config)));
+				if (message.method === "recover") return respond(Promise.resolve().then(() => { const result = planChildRespawn(message.args.results, config); recordMetric("recoveries"); return result; }));
+				if (message.method === "fuse") return respond(Promise.resolve().then(() => { const result = fuseChildOutputs(message.args.results, config); recordMetric("fusions"); return result; }));
+				return respond(Promise.resolve().then(() => { const result = fuseFragments(message.args.fragments, config); recordMetric("fusions"); return result; }));
 			}
 
 			if (message.method === "status") {

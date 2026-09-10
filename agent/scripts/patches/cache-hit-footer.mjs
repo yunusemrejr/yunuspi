@@ -19,6 +19,22 @@ const legacySessionCostSource = previousSessionCostSource
 
 export const sessionCostSource = fs.readFileSync(new URL("./session-cost-display.js", import.meta.url), "utf8").trim();
 
+export const activitySource = fs.readFileSync(new URL("../../extensions/lib/session-metrics.ts", import.meta.url), "utf8").replace("export function collectSessionMetrics", "function collectSessionMetrics").replace(/^.*\n/, "").trim();
+function transformActivity(source, bundled) {
+  const old = bundled ? ',extensionStatuses=this.footerData.getExtensionStatuses()' : 'const extensionStatuses = this.footerData.getExtensionStatuses()';
+  const code = (bundled ? ';' : '') + `const activityMetrics = (${activitySource})(this.session.sessionManager.getEntries(), globalThis[Symbol.for('yunus-pi.metrics-view.v1')]?.(this.session.sessionManager.getSessionId?.()));
+let activityLine = '';
+for (const part of activityMetrics.footer) {
+  const next = activityLine ? activityLine + ' · ' + part : part;
+  if (activityLine && visibleWidth(next) > width) { lines.push(theme.fg('dim', truncateToWidth(activityLine, width))); activityLine = part; }
+  else activityLine = next;
+}
+if (activityLine) lines.push(theme.fg('dim', truncateToWidth(activityLine, width)));
+/* PI_SESSION_ACTIVITY_V1 */ ` + (bundled ? 'let extensionStatuses=this.footerData.getExtensionStatuses()' : old);
+  if(source.includes('PI_SESSION_ACTIVITY_V1')) { if(source.split(code).length!==2)throw Error('session activity postcondition drift'); return source; }
+  if(source.split(old).length!==2)throw Error('session activity footer anchor drift');
+  return source.replace(old,()=>code);
+}
 const marker = "PI_CACHE_HIT_FOOTER_V1";
 const call = `statsParts.push((${cacheHitSource})(this.session.sessionManager.getBranch(), this.session.state.model)); /* ${marker} */`;
 const sdkEdits = [
@@ -51,7 +67,7 @@ export function transformFooter(source, bundled = false) {
   if (source.includes(marker)) {
     if (count(source, call) !== 1 || source.includes("latestCacheHitRate"))
       throw new Error("cache-hit-footer: partial patch or postcondition drift");
-    return transformDisplay(source, bundled);
+    return transformActivity(transformDisplay(source, bundled), bundled);
   }
   for (const [oldText] of edits)
     if (count(source, oldText) !== 1)
@@ -62,7 +78,7 @@ export function transformFooter(source, bundled = false) {
     source = source.replace(oldText, () => newText);
   if (source.includes("latestCacheHitRate"))
     throw new Error("cache-hit-footer: unowned cache calculation remains");
-  return transformDisplay(source, bundled);
+  return transformActivity(transformDisplay(source, bundled), bundled);
 }
 
 function transformDisplay(source, bundled) {

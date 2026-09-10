@@ -294,12 +294,12 @@ function normalizeCuratorTimeoutSeconds(value: unknown): number | undefined {
 	return Math.min(normalized, MAX_CURATOR_TIMEOUT_SECONDS);
 }
 
-function resolveWorkflow(input: unknown, hasUI: boolean): WebSearchWorkflow {
+export function resolveWorkflow(input: unknown, hasUI: boolean): WebSearchWorkflow {
 	const normalized = typeof input === "string" ? input.trim().toLowerCase() : "";
 	if (normalized === "auto-summary") return "auto-summary";
 	if (!hasUI) return "none";
-	if (normalized === "none") return "none";
-	return "summary-review";
+	if (normalized === "summary-review") return "summary-review";
+	return "none";
 }
 
 function normalizeQueryList(queryList: unknown[]): string[] {
@@ -1225,6 +1225,10 @@ export default function (pi: ExtensionAPI) {
 	function buildSearchReturn(opts: SearchReturnOptions): AgentToolResult<Record<string, unknown>> {
 		const sc = opts.results.filter(r => !r.error).length;
 		const tr = opts.results.reduce((sum, r) => sum + r.results.length, 0);
+		if (opts.results.length > 0 && sc === 0) {
+			const error = `All ${opts.results.length} search queries failed:\n${opts.results.map(r => `- ${r.query}: ${r.error}`).join("\n")}\nTry a different provider or fetch a known source URL directly.`;
+			return { content: [{ type: "text", text: error }], details: { error, successfulQueries: 0, queryCount: opts.queryList.length } };
+		}
 
 		const hasApprovedSummary = typeof opts.approvedSummary === "string" && opts.approvedSummary.trim().length > 0;
 		let output = "";
@@ -1624,7 +1628,7 @@ export default function (pi: ExtensionAPI) {
 		name: toolNames.webSearch,
 		label: "Web Search",
 		description:
-			`Search the web using the session's default LLM (OpenAI hosted web search — active when the current model supports it or OPENAI_API_KEY is set), DuckDuckGo (no key needed, explicit-only), or Kimi (Kimi Code Plan via /login kimi-coding, explicit-only). Pass a provider array to search only those providers simultaneously, or use provider "all" for OpenAI + DuckDuckGo fan-out. Returns an AI-synthesized answer with source citations. Auto (default) uses the session model first, then DuckDuckGo. For comprehensive research, prefer queries (plural) with 2-4 varied angles over a single query — each query gets its own synthesized answer, so varying phrasing and scope gives much broader coverage. When includeContent is true, full page content is fetched in the background. Searches auto-open the interactive browser curator and stream results live; set workflow to "none" to skip curation or "auto-summary" for a model-generated summary without the browser curator.`,
+			`Search the web using the session's default LLM (OpenAI hosted web search — active when the current model supports it or OPENAI_API_KEY is set), DuckDuckGo (no key needed), or Kimi (Kimi Code Plan via /login kimi-coding, explicit-only). Pass a provider array to search only those providers simultaneously, or use provider "all" for OpenAI + DuckDuckGo fan-out. Returns source links and snippets, with a synthesized answer when the provider supports it. Auto (default) uses the session model first, then DuckDuckGo. For comprehensive research, prefer queries (plural) with 2-4 varied angles over a single query — each query gets its own synthesized answer, so varying phrasing and scope gives much broader coverage. When includeContent is true, full page content is fetched in the background. Searches run autonomously and return results directly by default, without a browser or approval. Use workflow "summary-review" only when the user requests browser curation, or "auto-summary" for a separate model-generated summary.`,
 		promptSnippet:
 			"Use for web research questions. Prefer {queries:[...]} with 2-4 varied angles over a single query for broader coverage. Omit provider unless explicitly overriding the configured default.",
 		parameters: Type.Object({
@@ -1639,7 +1643,7 @@ export default function (pi: ExtensionAPI) {
 			provider: Type.Optional(searchProviderSchema("Search provider or non-empty list of providers to search simultaneously; use all for OpenAI + DuckDuckGo fan-out, omit this field to use the configured provider, or use auto when none is configured")),
 			workflow: Type.Optional(
 				StringEnum(["none", "summary-review", "auto-summary"], {
-					description: "Search workflow mode: none = no curator, summary-review = open curator with auto summary draft (default), auto-summary = generate summary without opening curator",
+					description: "Search workflow mode: none = autonomous search, no browser or approval (default), summary-review = opt-in browser curation, auto-summary = generate summary without opening curator",
 				}),
 			),
 			proxy: Type.Optional(Type.String({
@@ -1648,7 +1652,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(callId, params, signal, onUpdate, ctx) {
-			return runWithProxy(typeof params.proxy === "string" ? params.proxy : undefined, async () => {
+			const result = await runWithProxy(typeof params.proxy === "string" ? params.proxy : undefined, async () => {
 				const rawQueryList: unknown[] = Array.isArray(params.queries)
 					? params.queries
 					: (params.query !== undefined ? expandQueryString(params.query) : []);
@@ -1824,6 +1828,13 @@ export default function (pi: ExtensionAPI) {
 					return promise;
 				}
 
+				if ([...searchResults.values()].every(result => result.error)) {
+					finish(buildSearchReturn({ queryList, results: [...searchResults.values()], urls: [], includeContent: false }));
+					await pc.browserPromise;
+					closeCurator(callId);
+					return promise;
+				}
+
 				await pc.browserPromise;
 				const curator = activeCurators.get(callId);
 				if (curator && !cancelled) {
@@ -1898,7 +1909,7 @@ export default function (pi: ExtensionAPI) {
 
 			let approvedSummary: string | undefined;
 			let summaryMeta: SummaryMeta | undefined;
-			if (workflow === "auto-summary") {
+			if (workflow === "auto-summary" && searchResults.some(result => !result.error)) {
 				if (!ctx) {
 					return {
 						content: [{ type: "text", text: "Error: Auto-summary requires an active extension context." }],
@@ -1941,6 +1952,8 @@ export default function (pi: ExtensionAPI) {
 				proxy: typeof params.proxy === "string" ? params.proxy : undefined,
 			});
 			});
+			if (typeof result.details?.error === "string") throw new Error(result.details.error);
+			return result;
 		},
 
 		renderCall(args, theme) {

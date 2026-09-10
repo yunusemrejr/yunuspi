@@ -101,9 +101,9 @@ const DESTRUCTIVE_PATTERNS = [
 	// WHY: the old class required BOTH r and f in one token, so plain `rm -r dir`
 	// slipped through every guard.
 	/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive|--force)\b/i, // rm -rf, rm -r, rm -f
-	/\brm\s+[^\n]*\*/i, // rm with wildcards
-	/\bmkfs\b/i, // mkfs
-	/\bfdisk\b/i, // fdisk
+	/\brm[ \t]+[^;\n|&]*\*/i, // rm with wildcards
+	/(?:^|[;\n|&()]|\b(?:do|then|else|exec|xargs)\s)\s*(?:(?:sudo|command|env)\s+(?:-[\w-]+\s+)*)?(?:\/[\w./-]+\/)?mkfs(?:\.[\w-]+)?(?=\s|$)/i, // executed formatter, not an inventory word
+	/(?:^|[;\n|&()]|\b(?:do|then|else|exec|xargs)\s)\s*(?:(?:sudo|command|env)\s+(?:-[\w-]+\s+)*)?(?:\/[\w./-]+\/)?fdisk(?=\s|$)/i, // executed partitioner
 	/\bdd\s+.*of=\/dev\b/i, // dd to device
 	// WHY: `\b\/\b` can never match a slash preceded by whitespace (no word
 	// boundary between ' ' and '/'), so `chmod 777 /` was never caught. Require a
@@ -708,6 +708,16 @@ function destructiveTargetsProtectedPath(
 	//   inside a heredoc body or quoted message is data, not shell syntax);
 	//   targetText — heredoc data blanked but quoted path operands kept, so
 	//   extraction/var resolution still sees real targets like '/etc' or "$HOME".
+	// A literal `chmod +x /tmp/script; <read-only audit>` must not make
+	// unrelated /proc operands look like chmod targets. Only mask this narrow,
+	// independently verified temp operation; other mutations retain all guards.
+	const permissionView = stripShellData(command, "targets");
+	for (const match of permissionView.matchAll(/(?:^|[;\n&|])\s*chmod[ \t]+\+x[ \t]+(\/(?:tmp|var\/tmp)\/[A-Za-z0-9_./-]+)(?=[ \t]*(?:[;\n&|]|$))/g)) {
+		if (isPathProtected(match[1], cwd)) continue;
+		const start = match.index + match[0].indexOf("chmod");
+		const end = match.index + match[0].length;
+		command = command.slice(0, start) + " ".repeat(end - start) + command.slice(end);
+	}
 	const gateText = stripShellData(command, "gate");
 	if (!matchesDestructivePattern(gateText)) {
 		return undefined;

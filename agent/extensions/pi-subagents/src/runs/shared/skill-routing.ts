@@ -47,7 +47,7 @@ export const skillRoutes: readonly Route[] = [
   {name:'python-software-engineering',intent:/\bpython\b/i,file:/\.(?:py|pyi|pyw)$/i,check:'Confirm environment and imports; own resources, cancellation and data/device boundaries explicitly.'},
   {name:'node-runtime-engineering',intent:/\bnode(?:\.js|js)\b|\bnode\s+(?:runtime|server|backend)\b/i,file:/\.cjs$/i,check:'Check module/runtime contracts; bound concurrency, stream buffers and shutdown.'},
   {name:'c-systems-engineering',intent:/\b(?:in|using|with|write|review|implement)\s+C(?=\s|[,.;:]|$)|\bC (?:language|code|program|compiler|standard)\b/,file:/\.c$/i,check:'State ownership, lengths and overflow/ABI contracts; verify undefined behavior before optimizing.'},
-  {name:'cpp-performance-engineering',intent:/\bc\+\+(?:\d+)?(?=$|[\s,.;:/])|\bcpp\b/i,file:/\.(?:cpp|cc|cxx|hpp|hxx|hh)$/i,check:'Preserve RAII/lifetimes and a scalar numerical baseline; optimize measured bottlenecks.'},
+  {name:'cpp-performance-engineering',scopedIntent:true,intent:/\bc\+\+(?:\d+)?(?=$|[\s,.;:/])|\bcpp\b/i,file:/\.(?:cpp|cc|cxx|hpp|hxx|hh)$/i,check:'Preserve RAII/lifetimes and a scalar numerical baseline; optimize measured bottlenecks.'},
   {name:'rust-systems-engineering',intent:/\brust\b/i,file:/\.rs$/i,check:'Check ownership and cancellation; document and test any unsafe or FFI invariant.'},
   {name:'go-service-engineering',intent:/\b[Gg]olang\b|\bGo (?:language|code|service|program|backend|module)\b|\b(?:in|using) Go(?=$|[\s,.;:])/,file:/\.go$/i,check:'Give every goroutine an owner and bounded lifetime; propagate cancellation and close resources.'},
   {name:'java-platform-engineering',intent:/\bjava\b/i,file:/\.java$/i,check:'Verify JDK/framework contracts, transaction scope and packaged runtime behavior.'},
@@ -92,7 +92,7 @@ export function routeSkills(prompt = '', file = '') {
     .filter(part=>task.test(part) && !/\b(?:do not|don't|never|without animation|static svg|explain|what is|how does)\b/i.test(part));
   const matches = skillRoutes.flatMap(route => {
     const fileMatch = !!normalized && !!route.file?.test(normalized);
-    return fileMatch || doing && (route.scopedIntent ? actionSegments.some(part=>route.intent.test(part)) : route.intent.test(bounded))
+    return fileMatch || doing && (route.scopedIntent ? actionSegments.some(part=>route.intent.test(part.replace(/(?:\S*\/)+\S*/g,' '))) : route.intent.test(bounded))
       ? [{name:route.name, check:route.check, priority:Math.max(fileMatch ? 70 : 60, route.priority ?? 0)}] : [];
   });
   // Statistical fallback never displaces explicit language/file matches.

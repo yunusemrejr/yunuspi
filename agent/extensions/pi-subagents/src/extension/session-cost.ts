@@ -7,6 +7,10 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
   if (typeof runId !== 'string' || !Array.isArray(payload.results)) return;
   const results = payload.results.map((r: any, index: number) => ({
     index: r?.index ?? index,
+    ...(typeof r?.exitCode === 'number' ? {exitCode:r.exitCode} : {}),
+    ...(r?.error ? {error:'child-error'} : {}),
+    ...(r?.stopped ? {stopped:true} : {}),
+    ...(r?.timedOut ? {timedOut:true} : {}),
     ...(typeof r?.runId === 'string' ? {runId:r.runId} : {}),
     ...(typeof r?.sessionFile === 'string' ? {sessionFile:r.sessionFile} : {}),
     usage: r?.usage ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns} : undefined,

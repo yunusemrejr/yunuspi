@@ -2,8 +2,9 @@ import { parseHTML } from "linkedom";
 import { activityMonitor } from "./activity.ts";
 import type { SearchOptions, SearchResult, SearchResponse } from "./perplexity.ts";
 
-const SEARCH_URL = "https://html.duckduckgo.com/html/";
-const SEARCH_TIMEOUT_MS = 30_000;
+const SEARCH_URL = "https://lite.duckduckgo.com/lite/";
+const SEARCH_URLS = [SEARCH_URL, "https://html.duckduckgo.com/html/"];
+const SEARCH_TIMEOUT_MS = 10_000;
 
 interface NormalizedDomainFilters {
 	allowed: string[];
@@ -67,9 +68,47 @@ export function isDuckDuckGoAvailable(): boolean {
 	return true;
 }
 
-export async function searchWithDuckDuckGo(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
-	const url = new URL(SEARCH_URL);
+export function parseDuckDuckGoResults(html: string, options: SearchOptions = {}): SearchResult[] {
+	const { document } = parseHTML(html);
+	if (document.querySelector("#challenge-form, #anomaly-form, .anomaly-modal") || /anomaly\.js|bots use DuckDuckGo/i.test(html)) {
+		throw new Error("DuckDuckGo returned a bot challenge (invalid response)");
+	}
+	const filters = normalizeDomainFilters(options.domainFilter);
+	const results: SearchResult[] = [];
+	let parseableResults = 0;
+	const seen = new Set<string>();
+	for (const anchor of document.querySelectorAll(".result__a, .result-link")) {
+		const container = anchor.closest(".result");
+		if (container?.classList.contains("result--ad")) continue;
+		const title = anchor.textContent?.trim() ?? "";
+		const resultUrl = decodeResultUrl(anchor.getAttribute("href") ?? "");
+		if (!title || !resultUrl || new URL(resultUrl).hostname.endsWith("duckduckgo.com")) continue;
+		parseableResults++;
+		if (seen.has(resultUrl) || !matchesDomainFilters(resultUrl, filters)) continue;
+		let snippet = container?.querySelector(".result__snippet")?.textContent?.trim() ?? "";
+		if (!container) {
+			// Lite places each link and its snippet in consecutive table rows.
+			let row = anchor.closest("tr")?.nextElementSibling;
+			while (row && !row.querySelector(".result-link")) {
+				const text = row.querySelector(".result-snippet")?.textContent?.trim();
+				if (text) { snippet = text; break; }
+				row = row.nextElementSibling;
+			}
+		}
+		seen.add(resultUrl);
+		results.push({ title, url: resultUrl, snippet });
+		if (results.length >= normalizeCount(options.numResults)) break;
+	}
+	if (parseableResults === 0 && !document.querySelector(".no-results, .no-results__message") && !/No results found for/i.test(document.body?.textContent ?? "")) {
+		throw new Error("DuckDuckGo returned no parseable results (invalid response)");
+	}
+	return results;
+}
+
+async function searchEndpoint(endpoint: string, query: string, options: SearchOptions): Promise<SearchResponse> {
+	const url = new URL(endpoint);
 	url.searchParams.set("q", query);
+	if (options.recencyFilter) url.searchParams.set("df", { day: "d", week: "w", month: "m", year: "y" }[options.recencyFilter]);
 	const activityId = activityMonitor.logStart({ type: "api", query });
 
 	try {
@@ -88,26 +127,7 @@ export async function searchWithDuckDuckGo(query: string, options: SearchOptions
 			throw new Error(`DuckDuckGo search error ${response.status}: ${body.slice(0, 300)}`);
 		}
 
-		const { document } = parseHTML(await response.text());
-		const filters = normalizeDomainFilters(options.domainFilter);
-		const results: SearchResult[] = [];
-		let parseableResults = 0;
-		for (const container of document.querySelectorAll(".result")) {
-			if (container.classList.contains("result--ad")) continue;
-			const anchor = container.querySelector(".result__a");
-			const title = anchor?.textContent?.trim() ?? "";
-			const href = anchor?.getAttribute("href")?.trim() ?? "";
-			const resultUrl = href ? decodeResultUrl(href) : null;
-			if (!title || !resultUrl) continue;
-			parseableResults++;
-			if (!matchesDomainFilters(resultUrl, filters)) continue;
-			const snippet = container.querySelector(".result__snippet")?.textContent?.trim() ?? "";
-			results.push({ title, url: resultUrl, snippet });
-			if (results.length >= normalizeCount(options.numResults)) break;
-		}
-		if (parseableResults === 0) {
-			throw new Error("DuckDuckGo returned no parseable results (invalid response)");
-		}
+		const results = parseDuckDuckGoResults(await response.text(), options);
 
 		activityMonitor.logComplete(activityId, response.status);
 		const answer = results.map(result => result.snippet
@@ -120,4 +140,19 @@ export async function searchWithDuckDuckGo(query: string, options: SearchOptions
 		else activityMonitor.logError(activityId, message);
 		throw err;
 	}
+}
+
+export async function searchWithDuckDuckGo(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
+	const errors: string[] = [];
+	for (const endpoint of SEARCH_URLS) {
+		options.signal?.throwIfAborted();
+		try {
+			return await searchEndpoint(endpoint, query, options);
+		} catch (err) {
+			if (options.signal?.aborted) throw err;
+			const message = err instanceof Error ? err.message : String(err);
+			errors.push(`${new URL(endpoint).hostname}: ${message}`);
+		}
+	}
+	throw new Error(`DuckDuckGo search failed: ${errors.join("; ")}`);
 }

@@ -1,8 +1,10 @@
+import {registerSessionTelemetry} from './lib/session-telemetry.ts';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createHealthLog,HEALTH_SINK} from './lib/health-log.ts';
 export default function healthLog(pi:any) {
+ registerSessionTelemetry(pi);
  let log:ReturnType<typeof createHealthLog>|undefined;
  let timer:ReturnType<typeof setInterval>|undefined;
  const calls=new Map<string,number>();

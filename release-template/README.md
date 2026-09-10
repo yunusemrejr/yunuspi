@@ -17,6 +17,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
+- Autonomous web search with bounded fallback, plus session activity counters and a `/metrics` panel for tools, agents, skills, hooks and cache usage; see [search and session metrics](docs/SESSION-METRICS.md).
 - Version-specific core patches and structural verification.
 - Launch-scoped harness mutation protection and on-demand self-maintenance, browser, community promotion and organic-growth guidance; see [security boundaries](docs/SECURITY.md).
 

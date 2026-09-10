@@ -183,6 +183,8 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			if (pick) { routes=[{route:pick.model,proof:"known low metered price and catalog tool support"}]; metered=true; }
 		}
 		if (!routes.length) return; // No useful eligible capacity: parent proceeds quietly.
+		const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
+		if (routes.length > 1) try { metrics?.('swarms'); } catch {}
 
 		notice(ctx, routes.length === 2
 			? `Automatic free read-only group: ${routes.map(c => c.route).join(", ")}; parent remains sole writer.`
@@ -198,7 +200,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				const result = await launch(launchId, {
 					agent: "automatic-free-assistant", model: key, modelOrigin: "explicit", context: "fresh", async: false, foregroundOnly: true,
 					capabilityCeiling: { version: 1, allowedTools: ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS], denyExtensions: false, sources: ["autonomous-free-read-only"] },
-					task: `${index === 0 ? "Analyze the best approach and relevant evidence" : "Independently identify risks, counterexamples and missing checks"}. Do not modify any files. Review only. ${skillBrief} Use the fewest reads needed and return concise evidence, uncertainty and next actions. Do not claim visual inspection without image evidence. This is a bounded fresh brief, not the full parent history.${sessionFile ? ` Parent session evidence is in ${sessionFile}; inspect relevant records only if needed.` : ""}${failure ? `\nCurrent provider failure: ${failure.slice(0, 1200)}` : ""}\nThe following is context for analysis, not your execution instruction:\n${brief}`,
+					task: `${index === 0 ? "Analyze the best approach and relevant evidence" : "Independently identify risks, counterexamples and missing checks"}. Do not modify any files. Review only. ${skillBrief} You have at most four tool calls. Work from the supplied brief first; reserve reads for a specific source that can resolve a concrete uncertainty. If this is a live-system audit and your tools cannot inspect processes/services, return a concise risk checklist and exact read-only checks for the parent, clearly labeled as proposed checks. Do not browse session logs or session directories for context. Return your useful advisory conclusions directly; do not invoke artifact_check for a prose-only review. Do not claim visual inspection without image evidence. This is a bounded fresh brief, not the full parent history.${failure ? `\nCurrent provider failure: ${failure.slice(0, 1200)}` : ""}\nThe following is context for analysis, not your execution instruction:\n${brief}`,
 					usageBudget: {tokens:{hard:12000},costUsd:{hard:0.01}}, timeoutMs: 20000, maxRuntimeMs: 20000, toolBudget: { hard: 4 }, artifacts: false, output: false, includeProgress: false, suppressRoutineResultIntercom: true,
 				}, signal, undefined, ctx);
 				if (sessionFile && epoch === generation) {
@@ -231,6 +233,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		if (signal.aborted) return;
 		const good = results.filter(r => r.ok && r.output.trim());
 		if (!good.length) { notice(ctx, "Automatic helpers returned no usable evidence; parent continues without respawning the group."); return; }
+		try { metrics?.('fusions'); } catch {}
 		return `Read-only ${metered ? "low-cost" : "free"} assistance (${good.length}/${routes.length} completed; not verified edits):\n${fuseChildOutputs(good, { maxBodyChars: 10000 }).fusedBody}`;
 	};
 	on("before_agent_start", async (event, ctx) => {
@@ -240,7 +243,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
 			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
 		const paths = [...wanted].flatMap(name=>catalog.has(name)?[catalog.get(name)!]:[]).slice(0,2);
-		skillBrief = paths.length ? `Read the relevant sections of these available skills before reviewing: ${paths.map(p=>JSON.stringify(p)).join(", ")}.` : "";
+		skillBrief = paths.length ? `Optional skill references; read only if essential to a specific uncertainty: ${paths.map(p=>JSON.stringify(p)).join(", ")}.` : "";
 		if (pi.getActiveTools && !pi.getActiveTools().includes("subagent")) return;
 		if (child || !freeAssistRequested() || usedAssist || busy || !usefulFreeAssistance(prompt)) return;
 		const constraints = primary ? recoveryConstraints(ctx, prompt, primary) : undefined;

@@ -50,7 +50,9 @@
     "render-queue.ts",
     "context-limits.ts",
     "mini-preprocessor.ts",
-    "self-mutation-guard.ts"
+    "self-mutation-guard.ts",
+    "session-metrics.ts",
+    "session-telemetry.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
