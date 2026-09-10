@@ -14,6 +14,7 @@ const moduleUrl = pathToFileURL(path.join(agent, 'extensions/lib/self-mutation-g
 const harness = path.dirname(agent);
 const wrapper = path.join(agent, 'scripts/harness-readonly-exec.py');
 assert.ok(fs.existsSync(wrapper), 'namespace launcher must be shipped');
+assert.ok(fs.existsSync(path.join(templateRoot, 'config/bwrap.apparmor')), 'Ubuntu namespace policy referenced by CI and installation must be shipped');
 function fixture() {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-mutation-'));
  const protectedDir = path.join(root, 'harness'), project = path.join(root, 'project');

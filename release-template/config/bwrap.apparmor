@@ -1,0 +1,7 @@
+# Ubuntu AppArmor 4+: permit this executable to create user namespaces.
+# Bubblewrap still supplies the filesystem and process isolation policy.
+abi <abi/4.0>,
+include <tunables/global>
+profile yunuspi-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
