@@ -14,6 +14,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 
 - Main-agent and subagent workflows, bounded parallel/fusion execution and failure recovery.
 - Capability-aware provider discovery, economical routing and provider-specific cache accounting.
+- Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
 - Version-specific core patches and structural verification.
