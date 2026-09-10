@@ -52,6 +52,8 @@ Start ordinary tasks in their project directory. Those sessions cannot use guard
 
 Linux executable isolation requires working Bubblewrap user namespaces and Python 3. Unsupported environments refuse guarded commands rather than run them without protection. Scripted workflows that execute arbitrary JavaScript inside the Pi process are unavailable outside maintenance sessions; use declarative subagent chains, parallel tasks, swarm or fusion instead. See [security boundaries](SECURITY.md) before enabling third-party extensions.
 
+Ubuntu 24.04+ may restrict unprivileged user namespaces through AppArmor. A `bwrap: setting up uid map: Permission denied` error can indicate that policy. An administrator can review `config/bwrap.apparmor`, check for an existing Bubblewrap profile, and load an appropriate per-executable policy with `sudo apparmor_parser -r config/bwrap.apparmor`. For persistence, install the reviewed profile under `/etc/apparmor.d/`. The supplied profile permits namespace creation for `/usr/bin/bwrap`; it does not globally disable AppArmor or its namespace restrictions. Do not replace a stricter existing organizational policy without review. See [Ubuntu's namespace restrictions](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces). The harness installer never makes this administrator-level policy change itself.
+
 ## Optional browser tooling
 
 ```sh
