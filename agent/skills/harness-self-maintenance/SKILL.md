@@ -14,3 +14,9 @@ Read the current maintenance map and extension manifest when present; use bounde
 Before changing behavior, identify the invariant and reproduce the relevant failure. Preserve manual reminders, credentials, active sessions and unrelated edits. Prefer reversible focused changes; avoid restarting the session that owns unfinished work. Read [verification and public releases](references/verification-release.md) when touching patches, process execution, permissions, exports or publishing.
 
 Verify the changed path and its most consequential failure case. Report source changes separately from installed or live behavior, including any restart still needed. Never describe an untested integration as working or promise that no failure is possible.
+
+## Repositories
+
+If the discovered harness has a Git remote — check, do not assume — keep it updated as you change the harness: after the change verifies, commit and push the durable source you edited, keeping runtime state, credentials, caches and private fixtures out of the commit. If harness rules forbid Git in the live tree, use its supported export path instead.
+
+A public repository demands more care: publish only through the sanitized exporter into a fresh staging directory, inspect the diff, run the repository's public scanner and tests, and stage reviewed public paths. Never push the live tree wholesale; commit messages and history are public too, and deleting sensitive content later does not make it safe. Rotate and remediate anything that reaches a remote. See [verification and public releases](references/verification-release.md); this installation: `PUBLIC-RELEASE.md` and `public-template/docs/PUBLISHING.md`.
