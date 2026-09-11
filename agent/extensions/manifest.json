@@ -18,7 +18,8 @@
     "scoped-snapshots.ts",
     "provider-gate.ts",
     "reasoning-aids.ts",
-    "health-log.ts"
+    "health-log.ts",
+    "continuation-notice.ts"
   ],
   "lib": [
     "stall-core.ts",
@@ -34,6 +35,7 @@
     "session-signals.ts",
     "scoped-snapshots.ts",
     "checkpoint-files.ts",
+    "continuation-notice.ts",
     "code-guidance-signals.ts",
     "quality-review-signals.ts",
     "slop-guidance-signals.ts",

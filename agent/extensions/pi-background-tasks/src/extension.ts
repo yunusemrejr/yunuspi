@@ -36,6 +36,7 @@ import {
   type FetchLatestVersionOptions,
 } from "./core/update-check.js";
 import { BackgroundTaskRegistry, MAX_TASK_TIMEOUT_SECONDS } from "./core/registry.js";
+import { registerContinuationSource } from "../../lib/continuation-notice.ts";
 import {
   installBackgroundTaskExtensionApi,
   type BackgroundTaskExtensionService,
@@ -209,6 +210,16 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       getContext: () => currentCtx,
       isShuttingDown: () => registry.isShuttingDown(),
     });
+
+  // Continuation notice: report only tasks that will resume this session by themselves.
+  registerContinuationSource({
+    name: "background tasks",
+    pending: () =>
+      registry
+        .allTasks()
+        .filter((task) => task.status === "running" && task.triggerOnCompletion === true)
+        .map((task) => `${task.name || task.id} (${task.id}) will automatically resume this session when it finishes`),
+  });
 
   function unseenFinishedTasks(): BgTask[] {
     return registry
