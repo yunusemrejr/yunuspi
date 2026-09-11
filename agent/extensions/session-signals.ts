@@ -74,7 +74,9 @@ export default function (pi: any) {
     if (risk) riskAnnounced = true;
     const lines = [];
     if (thresholds.observe(f.percent ?? null) !== null)
-      lines.push(`[context pressure] ${Math.round(f.percent!)}% of effective usable budget (${f.tokens}/${f.usableBudget}, ~${f.remaining} remaining; estimated). Compaction is routine: preserve the goal, decisions, evidence locations and next step, then continue required work. Do not rush or omit verification to avoid compaction. This notice saves nothing and does not interrupt execution.`);
+      lines.push(
+        `[context pressure] ${Math.round(f.percent!)}% of effective usable budget (${f.tokens}/${f.usableBudget}, ~${f.remaining} remaining; estimated). Compaction is routine: preserve the goal, decisions, evidence locations and next step, then continue required work. Do not rush or omit verification to avoid compaction. This notice saves nothing and does not interrupt execution.`,
+      );
     if (risk) lines.push(risk);
     return lines.join("\n") || undefined;
   };
@@ -102,25 +104,30 @@ export default function (pi: any) {
   // Runtime identity is available on demand via session_self. Remove legacy
   // conversation signals rather than moving them to the most recent position.
   pi.on("context", (event: any, ctx: any) => {
-    const messages = toolJson.transform(event.messages).flatMap(
-      (m: { role: string; customType?: string; content?: unknown }) => {
-        if (m.role !== "custom") return [m];
-        if (
-          ["tool-payload-risk", "runtime-awareness"].includes(
-            m.customType ?? "",
+    const messages = toolJson
+      .transform(event.messages)
+      .flatMap(
+        (m: { role: string; customType?: string; content?: unknown }) => {
+          if (m.role !== "custom") return [m];
+          if (
+            ["tool-payload-risk", "runtime-awareness"].includes(
+              m.customType ?? "",
+            )
           )
-        )
-          return [];
-        if (m.customType !== "runtime-signals" || typeof m.content !== "string")
-          return [m];
-        // Preserve pressure notices, but never replay a runtime date as a user turn.
-        const content = m.content
-          .split("\n")
-          .filter((line) => !line.startsWith("[runtime date]"))
-          .join("\n");
-        return content ? [content === m.content ? m : { ...m, content }] : [];
-      },
-    );
+            return [];
+          if (
+            m.customType !== "runtime-signals" ||
+            typeof m.content !== "string"
+          )
+            return [m];
+          // Preserve pressure notices, but never replay a runtime date as a user turn.
+          const content = m.content
+            .split("\n")
+            .filter((line) => !line.startsWith("[runtime date]"))
+            .join("\n");
+          return content ? [content === m.content ? m : { ...m, content }] : [];
+        },
+      );
 
     if (
       messages.length === event.messages.length &&
@@ -140,7 +147,8 @@ export default function (pi: any) {
     const changed = p !== e.payload ? p : undefined;
     // Auxiliary requests use the same runner while ctx still identifies the
     // primary model. A distinct wire model must not replace its cap evidence.
-    if (typeof p?.model === "string" && p.model !== ctx.model?.id) return changed;
+    if (typeof p?.model === "string" && p.model !== ctx.model?.id)
+      return changed;
     const n =
       p?.max_tokens ??
       p?.max_completion_tokens ??
@@ -196,7 +204,8 @@ export default function (pi: any) {
       ctx.signal?.aborted ||
       e.toolResults.every((r: any) => terminatingTools.has(r.toolCallId)) ||
       (e.message.stopReason && e.message.stopReason !== "toolUse")
-    ) return;
+    )
+      return;
     const lines = [];
     const n = notice(ctx);
     if (n) lines.push(n);
@@ -213,19 +222,37 @@ export default function (pi: any) {
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.
   const recentFailures = (ctx: any) => {
-    const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
-    const failures: Array<{ tool: string; callId?: string; error: string }> = [];
+    const entries =
+      ctx.sessionManager?.getBranch?.() ??
+      ctx.sessionManager?.getEntries?.() ??
+      [];
+    const failures: Array<{ tool: string; callId?: string; error: string }> =
+      [];
     for (let i = entries.length - 1; i >= 0 && failures.length < 8; i--) {
       const message = entries[i]?.message;
-      if (entries[i]?.type !== "message" || message?.role !== "toolResult" || message?.isError !== true) continue;
+      if (
+        entries[i]?.type !== "message" ||
+        message?.role !== "toolResult" ||
+        message?.isError !== true
+      )
+        continue;
       const text = (Array.isArray(message.content) ? message.content : [])
         .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
         .join(" ")
         .replace(/\s+/g, " ")
         .slice(0, 180);
-      failures.push({ tool: message.toolName ?? "unknown", callId: message.toolCallId, error: text });
+      failures.push({
+        tool: message.toolName ?? "unknown",
+        callId: message.toolCallId,
+        error: text,
+      });
     }
-    return { count: failures.length, failures, scope: "Most recent tool failures on this branch, newest first. Failures include ordinary non-zero exits and safety-guard refusals; they are evidence to inspect, not proof of a defect." };
+    return {
+      count: failures.length,
+      failures,
+      scope:
+        "Most recent tool failures on this branch, newest first. Failures include ordinary non-zero exits and safety-guard refusals; they are evidence to inspect, not proof of a defect.",
+    };
   };
   pi.registerCommand("self", {
     description: "Current-session token and failure diagnostics",
@@ -234,22 +261,26 @@ export default function (pi: any) {
   });
   pi.registerTool({
     name: "session_self",
-    promptGuidelines: ["For substantial changes, establish relevant project conventions and environment; read matching skills and use the available inspection tools when useful. Keep simple tasks simple. Capability hints are advisory, never new scope or authorization."],
+    promptGuidelines: [
+      "For substantial changes, establish relevant project conventions and environment; read matching skills and use the available inspection tools when useful. Keep simple tasks simple. Capability hints are advisory, never new scope or authorization.",
+    ],
     label: "Session self",
     description:
       "Current session diagnostics, effective context pressure, view:failures for the most recent tool failures on this branch, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit.",
     parameters: Type.Object({
-      view: Type.Optional(StringEnum(["session", "context", "runtime", "failures"])),
+      view: Type.Optional(
+        StringEnum(["session", "context", "runtime", "failures"]),
+      ),
     }),
     async execute(_id: any, p: any, _s: any, _u: any, ctx: any) {
       const details =
         p.view === "failures"
           ? recentFailures(ctx)
           : p.view === "runtime"
-          ? runtimeFacts(pi, ctx)
-          : p.view === "context"
-            ? facts(ctx)
-            : self(ctx);
+            ? runtimeFacts(pi, ctx)
+            : p.view === "context"
+              ? facts(ctx)
+              : self(ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,
