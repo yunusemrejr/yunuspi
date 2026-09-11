@@ -101,7 +101,9 @@ function readModelsJson(): ModelsJson {
 }
 
 function writeModelsJson(json: ModelsJson): void {
-	const tmp = `${MODELS_JSON}.provider-tmp`;
+	// PID-scoped temp name: a fixed name lets two sessions rename the same
+	// half-written file over models.json (radar/model-exclusions use pid too).
+	const tmp = `${MODELS_JSON}.${process.pid}.provider-tmp`;
 	writeFileSync(tmp, JSON.stringify(json, null, 2), { mode: 0o600 });
 	// writeFileSync's mode applies only on create; harden a stale temp file too.
 	chmodSync(tmp, 0o600);
@@ -257,14 +259,22 @@ async function fetchEndpoints(modelId: string): Promise<Endpoint[]> {
 	if (!res.ok) throw new Error(`endpoints fetch failed (HTTP ${res.status})`);
 	const body = (await res.json()) as { data?: { endpoints?: Endpoint[] } };
 	if (!Array.isArray(body.data?.endpoints)) return [];
-	return body.data.endpoints.filter((e) =>
-		e && typeof e.tag === "string" && e.tag.trim().length > 0 &&
-		!/[\u0000-\u001f\u007f]/u.test(e.tag) && (e.status ?? 0) === 0,
+	return body.data.endpoints.filter(
+		(e) =>
+			e &&
+			typeof e.tag === "string" &&
+			e.tag.trim().length > 0 &&
+			!/[\u0000-\u001f\u007f]/u.test(e.tag) &&
+			(e.status ?? 0) === 0,
 	);
 }
 
 function perMillion(v: unknown): number {
-	if ((typeof v !== "string" && typeof v !== "number") || String(v).trim() === "") return Infinity;
+	if (
+		(typeof v !== "string" && typeof v !== "number") ||
+		String(v).trim() === ""
+	)
+		return Infinity;
 	const n = Number(v) * 1_000_000;
 	return Number.isFinite(n) && n >= 0 ? n : Infinity;
 }
@@ -337,8 +347,14 @@ async function applyPin(
 
 function describePin(pin: Record<string, unknown> | undefined): string {
 	if (!pin) return "(native routing — no pin)";
-	if (["only", "order", "ignore"].some((key) => Object.hasOwn(pin, key) && !endpointTags(pin[key])) ||
-		Object.hasOwn(pin, "allow_fallbacks") && typeof pin.allow_fallbacks !== "boolean") return JSON.stringify(pin);
+	if (
+		["only", "order", "ignore"].some(
+			(key) => Object.hasOwn(pin, key) && !endpointTags(pin[key]),
+		) ||
+		(Object.hasOwn(pin, "allow_fallbacks") &&
+			typeof pin.allow_fallbacks !== "boolean")
+	)
+		return JSON.stringify(pin);
 	const p = pin as {
 		order?: string[];
 		only?: string[];
@@ -352,7 +368,10 @@ function describePin(pin: Record<string, unknown> | undefined): string {
 }
 
 function endpointTags(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((tag) => typeof tag === "string" && tag.trim().length > 0);
+	return (
+		Array.isArray(value) &&
+		value.every((tag) => typeof tag === "string" && tag.trim().length > 0)
+	);
 }
 
 // ── Subcommand implementations ────────────────────────────────────────
@@ -438,8 +457,13 @@ async function cmdSort(
 ): Promise<void> {
 	const { modelQuery, rest } = splitModelArg(ctx, tokens);
 	const key = rest[0] ?? "price";
-	if (!["price", "cheapest", "throughput", "tps", "uptime", "latency"].includes(key)) {
-		ctx.ui.notify(`/provider: unknown sort key "${key}" — use price, latency, throughput or uptime`, "warning");
+	if (
+		!["price", "cheapest", "throughput", "tps", "uptime", "latency"].includes(key)
+	) {
+		ctx.ui.notify(
+			`/provider: unknown sort key "${key}" — use price, latency, throughput or uptime`,
+			"warning",
+		);
 		return;
 	}
 	const model = resolveModel(ctx, modelQuery);
@@ -448,8 +472,14 @@ async function cmdSort(
 	if (!eps) return;
 	const sorted = sortEndpoints(eps, key);
 	const best = sorted[0]!;
-	if ((key === "price" || key === "cheapest") && !Number.isFinite(endpointCost(best))) {
-		ctx.ui.notify("/provider: no endpoint has complete valid pricing; routing was not changed", "warning");
+	if (
+		(key === "price" || key === "cheapest") &&
+		!Number.isFinite(endpointCost(best))
+	) {
+		ctx.ui.notify(
+			"/provider: no endpoint has complete valid pricing; routing was not changed",
+			"warning",
+		);
 		return;
 	}
 	await applyPin(ctx, model.id, {
@@ -521,12 +551,21 @@ async function cmdJson(
 	const value = routing as Record<string, unknown>;
 	for (const key of ["only", "order", "ignore"]) {
 		if (Object.hasOwn(value, key) && !endpointTags(value[key])) {
-			ctx.ui.notify(`/provider: routing ${key} must be an array of nonempty endpoint tags; configuration was not changed`, "warning");
+			ctx.ui.notify(
+				`/provider: routing ${key} must be an array of nonempty endpoint tags; configuration was not changed`,
+				"warning",
+			);
 			return;
 		}
 	}
-	if (Object.hasOwn(value, "allow_fallbacks") && typeof value.allow_fallbacks !== "boolean") {
-		ctx.ui.notify("/provider: routing allow_fallbacks must be a boolean; configuration was not changed", "warning");
+	if (
+		Object.hasOwn(value, "allow_fallbacks") &&
+		typeof value.allow_fallbacks !== "boolean"
+	) {
+		ctx.ui.notify(
+			"/provider: routing allow_fallbacks must be a boolean; configuration was not changed",
+			"warning",
+		);
 		return;
 	}
 	await applyPin(ctx, model.id, routing as Record<string, unknown>);

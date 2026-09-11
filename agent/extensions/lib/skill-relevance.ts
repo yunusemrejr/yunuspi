@@ -45,6 +45,29 @@ export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
   }
   return { docs, weight, strong };
 }
+/** Bounded heading outline of a skill body: H2/H3 headings with 1-based lines.
+ * Pure, so section targeting is testable without touching the filesystem. */
+export function headingOutline(markdown: string, limit = 200): Array<{ text: string; line: number }> {
+  const out: Array<{ text: string; line: number }> = [];
+  const lines = String(markdown ?? "").split("\n");
+  for (let i = 0; i < lines.length && out.length < limit; i++) {
+    const match = /^#{2,3}\s+(.+?)\s*$/.exec(lines[i]);
+    if (match) out.push({ text: match[1].slice(0, 120), line: i + 1 });
+  }
+  return out;
+}
+/** Best heading for a bounded term list; needs at least one discriminating
+ * match, so a generic "Overview" heading is never chosen for its own sake. */
+export function bestSkillSection(headings: readonly { text: string; line: number }[], terms: readonly string[]): { text: string; line: number } | undefined {
+  let best: { text: string; line: number } | undefined, bestScore = 0;
+  for (const heading of headings) {
+    const tokens = new Set(skillTerms(heading.text, 24));
+    let score = 0;
+    for (const term of terms) if (tokens.has(term)) score++;
+    if (score > bestScore) { best = heading; bestScore = score; }
+  }
+  return best;
+}
 /** Rank catalogue skills against bounded context. Requires at least two
  * matched discriminating terms and one strongly rare term; weak or generic
  * overlap yields nothing rather than a speculative recommendation. */

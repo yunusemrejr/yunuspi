@@ -1,6 +1,7 @@
 /** Advisory hints owned/delivered by reminders.ts. No I/O, inference, timers,
  * tool execution, permission decisions, or scans of tool-output prose. */
 import path from "node:path";
+import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { qualityReviewSignals } from "./quality-review-signals.ts";
 import { slopGuidanceSignals } from "./slop-guidance-signals.ts";
@@ -8,7 +9,7 @@ import { codeGuidanceSignals } from "./code-guidance-signals.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillTaskText } from "./skill-routing.ts";
-import { buildSkillIndex, rankSkills, skillTerms } from "./skill-relevance.ts";
+import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 24; // distinct hints per session/workspace, including reloads
@@ -26,6 +27,7 @@ export function createRelevantGuidance(pi: any) {
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
   let skillOffers = new Map<string, { n: number; at: number }>();
+  const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }> }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
@@ -69,27 +71,44 @@ export function createRelevantGuidance(pi: any) {
       ?? skills.find(s => terms.test(s.name))
       ?? (!nameOnly ? skills.find(s => terms.test(s.description)) : undefined);
     if (skill) add({ key: `skill:${skill.file}`, skill: skill.file, priority,
-      text: `${topic}: if useful and not already covered, read skill ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}. User instructions and project conventions take precedence.` });
+      text: `${topic}: if useful and not already covered, read skill ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User instructions and project conventions take precedence.` });
   };
   const practice = (key: string, topic: string, preferred: string[], text: string) => {
     const skill = preferred.map(n => skills.find(s => s.name === n)).find(Boolean);
     if (skill) {
       // A short operational check still helps models that overlook skill discovery.
       if (!read.has(skill.file)) add({ key: `skill:${skill.file}`, skill: skill.file,
-        text: `${topic}: ${text} Read ${JSON.stringify(skill.file)} for the relevant workflow; user intent and project conventions win.` });
+        text: `${topic}: ${text} Read ${JSON.stringify(skill.file)} for the relevant workflow.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User intent and project conventions win.` });
     } else add({ key: `practice:${key}`, text: `${topic}: ${text}` });
   };
   const routedSkills = (prompt = "", file = "") => {
     for (const route of routeSkills(prompt, file)) {
       const skill = skills.find(s => s.name === route.name);
       if (skill) add({key:`skill:${skill.file}`, skill:skill.file, priority:route.priority,
-        text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples; skip unrelated sections. User intent and project conventions take precedence.`});
+        text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples.${sectionPointer(skill.file, skillTerms(`${prompt} ${file}`, 24))} User intent and project conventions take precedence.`});
     }
   };
   const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
   const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
   // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
   const remember = (text: string) => { context = [...new Set([...context, ...skillTerms(text)])].slice(-48); };
+  // Section targeting: read only a skill's headings (bounded, cached by mtime)
+  // so a recommendation points at the useful part instead of the whole file.
+  const sectionPointer = (file: string, terms: string[]): string => {
+    if (!file || !terms.length) return "";
+    try {
+      const stat = fs.statSync(file);
+      let entry = outlines.get(file);
+      if (!entry || entry.mtimeMs !== stat.mtimeMs) {
+        if (stat.size > 96 * 1024) return "";
+        entry = { mtimeMs: stat.mtimeMs, headings: headingOutline(fs.readFileSync(file, "utf8")) };
+        if (outlines.size >= 24) outlines.delete(outlines.keys().next().value!);
+        outlines.set(file, entry);
+      }
+      const section = bestSkillSection(entry.headings, terms);
+      return section ? ` Start at ${JSON.stringify(section.text)} (line ${section.line}); skip unrelated sections.` : "";
+    } catch { return ""; }
+  };
   /** Catalog-wide relevance against the ongoing session profile. Weak or generic
    * overlap yields nothing; explicit routes and signals keep their priority. */
   const contextSkill = (priority = 55) => {
@@ -97,7 +116,7 @@ export function createRelevantGuidance(pi: any) {
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
       if (skillCovered(ranked.skill.file)) continue;
       add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file, priority,
-        text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}. Advisory; user instructions and project conventions take precedence.` });
+        text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
       return;
     }
   };
@@ -192,7 +211,7 @@ export function createRelevantGuidance(pi: any) {
     restore(ctx: any) {
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
-      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map();
+      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = "";
       // Entries are local session metadata, not instructions or a new state file.
