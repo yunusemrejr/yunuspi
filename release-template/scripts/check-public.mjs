@@ -39,7 +39,7 @@ export function scanContent(name, data) {
     ['private-key', /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
     ['provider-token', /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,})\b/],
     ['credential-url', /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/i],
-    ['personal-home-path', /(?:\/home\/|\/Users\/|[A-Z]:\\Users\\)(?!user(?:[\/\\]|\b)|example(?:[\/\\]|\b)|runner(?:[\/\\]|\b)|USERNAME\b)[A-Za-z0-9_.-]+[\/\\]/],
+    ['personal-home-path', /(?:\/home\/|\/Users\/|[A-Z]:\\Users\\)(?!user(?:[/\\]|\b)|example(?:[/\\]|\b)|runner(?:[/\\]|\b)|USERNAME\b)[A-Za-z0-9_.-]+[/\\]/],
     ['private-network-address', /\b(?:192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b/],
   ];
   for (const [rule, regex] of patterns) if (regex.test(text)) add(rule);
