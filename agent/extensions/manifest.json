@@ -40,6 +40,7 @@
     "compact-tool-json.ts",
     "local-models.ts",
     "stable-tool-order.ts",
+    "skill-relevance.ts",
     "skill-routing.ts",
     "code-lexical-mask.ts",
     "reasoning-aids.ts",

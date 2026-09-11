@@ -8,6 +8,7 @@ import { codeGuidanceSignals } from "./code-guidance-signals.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillTaskText } from "./skill-routing.ts";
+import { buildSkillIndex, rankSkills, skillTerms } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 24; // distinct hints per session/workspace, including reloads
@@ -23,6 +24,7 @@ type Hint = { key: string; text: string; tool?: string; skill?: string; priority
 export function createRelevantGuidance(pi: any) {
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
+  let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
   let lastFailure = "", failures = 0, urgentCount = 0;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
@@ -81,6 +83,21 @@ export function createRelevantGuidance(pi: any) {
       const skill = skills.find(s => s.name === route.name);
       if (skill) add({key:`skill:${skill.file}`, skill:skill.file, priority:route.priority,
         text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples; skip unrelated sections. User intent and project conventions take precedence.`});
+    }
+  };
+  const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
+  const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
+  // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
+  const remember = (text: string) => { context = [...new Set([...context, ...skillTerms(text)])].slice(-48); };
+  /** Catalog-wide relevance against the ongoing session profile. Weak or generic
+   * overlap yields nothing; explicit routes and signals keep their priority. */
+  const contextSkill = (priority = 55) => {
+    if (!skillIndex || !context.length) return;
+    for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
+      if (skillCovered(ranked.skill.file)) continue;
+      add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file, priority,
+        text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}. Advisory; user instructions and project conventions take precedence.` });
+      return;
     }
   };
   const signalHint = (key: string, skillName: string, check: string, sourceFile?: string) => {
@@ -151,7 +168,7 @@ export function createRelevantGuidance(pi: any) {
     skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
   };
-  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64) });
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12) });
   return {
     userInput() {
       const hadTopics = topicSeen.size > 0;
@@ -159,12 +176,13 @@ export function createRelevantGuidance(pi: any) {
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
       // A skipped suggestion is not a read receipt. Reconsider unread skills
       // on a new user request, while background wakes keep their dedup state.
-      for (const key of shown) if (key.startsWith("skill:") && !read.has(key.slice(6)) || key === "delegation-contract") shown.delete(key);
+      for (const key of shown) { const file = skillKey(key); if ((file && !read.has(file)) || key === "delegation-contract") shown.delete(key); }
       if (hadTopics) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
+      context = []; extensions = new Set(); skillIndex = null;
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = "";
       // Entries are local session metadata, not instructions or a new state file.
@@ -188,6 +206,8 @@ export function createRelevantGuidance(pi: any) {
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^topic:[a-z0-9-]{1,100}$/.test(pair[0]) &&
           Number.isSafeInteger(pair[1]) && pair[1] >= 0 && pair[1] <= requestNumber && requestNumber - pair[1] < 3));
         read = new Set((Array.isArray(d.read) ? d.read : []).filter((x: any) => typeof x === "string").slice(-48));
+        context = new Set((Array.isArray(d.context) ? d.context : []).filter((x: any) => typeof x === "string" && /^[a-z0-9][a-z0-9+#._-]{3,31}$/.test(x)).slice(-48));
+        extensions = new Set((Array.isArray(d.extensions) ? d.extensions : []).filter((x: any) => typeof x === "string" && /^[a-z0-9]{1,8}$/.test(x)).slice(0,12));
         break;
       }
     },
@@ -200,6 +220,7 @@ export function createRelevantGuidance(pi: any) {
       skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
         .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
         .filter(s => path.isAbsolute(s.file) && s.file.length < 512 && s.name.length < 100);
+      skillIndex = buildSkillIndex(skills);
       const rawPrompt = String(event.prompt ?? "");
       const prompt = skillTaskText(rawPrompt);
       utilityHints(prompt);
@@ -219,6 +240,8 @@ export function createRelevantGuidance(pi: any) {
       }
       topicHints({prompt: prompt.length > 24000 ? prompt.slice(0,12000) + "\n" + prompt.slice(-12000) : prompt});
       routedSkills(prompt);
+      remember(prompt);
+      contextSkill();
       codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
       // Match narrow task intent against skills actually present in this run's catalog.
       const specialized = [
@@ -337,6 +360,10 @@ export function createRelevantGuidance(pi: any) {
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
         routedSkills("", file);
+        remember(path.basename(file));
+        const extension = /\.([a-z0-9]{1,8})$/.exec(file)?.[1]?.toLowerCase() ?? "";
+        // A new file type reshapes the session profile; recompute once per type.
+        if (extension && !extensions.has(extension) && extensions.size < 12) { extensions.add(extension); contextSkill(52); }
         if (uiFile.test(file)) uiHints();
         if (/\.(?:csv|tsv|parquet|jsonl)$/i.test(file) || /(?:^|\/)(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(file)) precision();
         const language = /\.(php|py|rs|go)$/i.exec(file)?.[1]?.toLowerCase();
