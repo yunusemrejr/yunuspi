@@ -25,6 +25,7 @@ export function createRelevantGuidance(pi: any) {
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
+  let skillOffers = new Map<string, { n: number; at: number }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
@@ -168,21 +169,30 @@ export function createRelevantGuidance(pi: any) {
     skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
   };
-  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12) });
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48) });
   return {
     userInput() {
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
-      // A skipped suggestion is not a read receipt. Reconsider unread skills
-      // on a new user request, while background wakes keep their dedup state.
-      for (const key of shown) { const file = skillKey(key); if ((file && !read.has(file)) || key === "delegation-contract") shown.delete(key); }
+      // A skipped suggestion is not a read receipt, but repeated nagging is noise:
+      // re-offer an unread skill at most three times, spaced by two requests.
+      for (const key of shown) {
+        const file = skillKey(key);
+        if (!file && key !== "delegation-contract") continue;
+        if (file) {
+          const offer = skillOffers.get(key) ?? { n: 0, at: -2 };
+          if (offer.n >= 3 || requestNumber - offer.at < 2) continue;
+          skillOffers.set(key, { n: offer.n + 1, at: requestNumber });
+        }
+        shown.delete(key);
+      }
       if (hadTopics) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
-      context = []; extensions = new Set(); skillIndex = null;
+      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = "";
       // Entries are local session metadata, not instructions or a new state file.
@@ -208,6 +218,9 @@ export function createRelevantGuidance(pi: any) {
         read = new Set((Array.isArray(d.read) ? d.read : []).filter((x: any) => typeof x === "string").slice(-48));
         context = new Set((Array.isArray(d.context) ? d.context : []).filter((x: any) => typeof x === "string" && /^[a-z0-9][a-z0-9+#._-]{3,31}$/.test(x)).slice(-48));
         extensions = new Set((Array.isArray(d.extensions) ? d.extensions : []).filter((x: any) => typeof x === "string" && /^[a-z0-9]{1,8}$/.test(x)).slice(0,12));
+        skillOffers = new Map((Array.isArray(d.offers) ? d.offers : []).slice(-48).filter((pair: any) =>
+          Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^(?:skill|skillctx):\S{1,200}$/.test(pair[0]) &&
+          Number.isSafeInteger(pair[1]?.n) && pair[1].n >= 0 && pair[1].n <= 3 && Number.isSafeInteger(pair[1]?.at) && pair[1].at >= -2));
         break;
       }
     },
@@ -373,8 +386,12 @@ export function createRelevantGuidance(pi: any) {
         }
         if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i); }
       }
-      if (codeSeen && ["grep", "find", "ls"].includes(name) && ++searches >= 3)
-        add({ key: "navigation", tool: "symbol_search", text: 'Code exploration: symbol_search locates definitions/references; module_report can outline a file when available. Use them if text searches are not answering the question; ordinary search remains appropriate.' });
+      // Recognise shell text search too: bash-driven grep/rg is the common case,
+      // and it is exactly when the structural tools would answer faster.
+      const searchLike = ["grep", "find", "ls"].includes(name)
+        || (name === "bash" && /(?:^|[|;&(]\s*)(?:rg|grep|find|fd|ag|ack)\b/i.test(String(input.command ?? "").slice(0, 400)));
+      if (codeSeen && searchLike && ++searches >= 3)
+        add({ key: "navigation", tool: "symbol_search", text: 'Text search is not the only option: symbol_search ranks identifiers across the workspace (it self-builds its index; a cold index answers with a retry hint, not a wrong answer), module_report outlines one file without reading it whole, and lsp_diagnostics/lsp_navigation answer definition and reference questions. Use them when grep is guessing; ordinary search stays correct for raw text.' });
       // Existing result owners already expose job/observation IDs. Only remind
       // about polling after repeated status calls, never invent a new handle.
       const status = name === "bg_status" || name === "process" && ["poll", "status", "list"].includes(input.action)

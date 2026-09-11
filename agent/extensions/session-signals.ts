@@ -211,6 +211,22 @@ export default function (pi: any) {
       );
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
+  // Bounded, newest-first failure read: diagnose without re-running any work.
+  const recentFailures = (ctx: any) => {
+    const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+    const failures: Array<{ tool: string; callId?: string; error: string }> = [];
+    for (let i = entries.length - 1; i >= 0 && failures.length < 8; i--) {
+      const message = entries[i]?.message;
+      if (entries[i]?.type !== "message" || message?.role !== "toolResult" || message?.isError !== true) continue;
+      const text = (Array.isArray(message.content) ? message.content : [])
+        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .slice(0, 180);
+      failures.push({ tool: message.toolName ?? "unknown", callId: message.toolCallId, error: text });
+    }
+    return { count: failures.length, failures, scope: "Most recent tool failures on this branch, newest first. Failures include ordinary non-zero exits and safety-guard refusals; they are evidence to inspect, not proof of a defect." };
+  };
   pi.registerCommand("self", {
     description: "Current-session token and failure diagnostics",
     handler: async (_a: any, ctx: any) =>
@@ -221,13 +237,15 @@ export default function (pi: any) {
     promptGuidelines: ["For substantial changes, establish relevant project conventions and environment; read matching skills and use the available inspection tools when useful. Keep simple tasks simple. Capability hints are advisory, never new scope or authorization."],
     label: "Session self",
     description:
-      "Current session diagnostics, effective context pressure, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit.",
+      "Current session diagnostics, effective context pressure, view:failures for the most recent tool failures on this branch, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit.",
     parameters: Type.Object({
-      view: Type.Optional(StringEnum(["session", "context", "runtime"])),
+      view: Type.Optional(StringEnum(["session", "context", "runtime", "failures"])),
     }),
     async execute(_id: any, p: any, _s: any, _u: any, ctx: any) {
       const details =
-        p.view === "runtime"
+        p.view === "failures"
+          ? recentFailures(ctx)
+          : p.view === "runtime"
           ? runtimeFacts(pi, ctx)
           : p.view === "context"
             ? facts(ctx)
