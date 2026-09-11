@@ -1,5 +1,9 @@
 # YunusPi
 
+<p align="center">
+  <img src="docs/assets/rat.gif" alt="Animated ASCII rat mascot from the YunusPi startup header" width="434">
+</p>
+
 A customized Pi coding-agent harness with bounded subagents, free/cheap model routing, lazy skills, contextual guidance, code-quality tools, extractive context utilities and durable runtime patches.
 
 Bring your own provider credentials. This repository contains reusable code and clean examples, not the author's accounts, sessions, memories, provider state or deployment details.

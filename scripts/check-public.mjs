@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const PUBLIC_BINARY_SHA256 = {
+  "docs/assets/rat.gif": "5509522c162182f1d42e3cdc705f0cd5da93cf894bda8651dae0e550cb6bc1c6",
+  "release-template/docs/assets/rat.gif": "5509522c162182f1d42e3cdc705f0cd5da93cf894bda8651dae0e550cb6bc1c6",
   "agent/extensions/pi-lens/grammars/tree-sitter-bash.wasm": "807dcdb1380a59befb112ed8fbd3d3872c7fadaf5903a769282b50973b30696d",
   "agent/extensions/pi-lens/grammars/tree-sitter-css.wasm": "5fc615467b1b98420ed7517e5bf9e1f88468132dd903d842dfb13714f6a1cb0c",
   "agent/extensions/pi-lens/grammars/tree-sitter-html.wasm": "11b3405c1543fb012f5ed7f8ee73125076dce8b168301e1e787e4c717da6b456",

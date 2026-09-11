@@ -29,7 +29,7 @@ for(const [key,value]of Object.entries(process.env))if(/(?:API_KEY|SECRET|PASSWO
 const sourceLive=fs.readFileSync(path.join(source,'extensions/live-models.ts'),'utf8');
 const fallback=/const ORCA_FALLBACK_KEY = ("[^"\r\n]*"|'[^'\r\n]*');/.exec(sourceLive);
 if(fallback){const value=fallback[1].slice(1,-1);if(value.length>=8)secrets.add(value);}
-const allowedExt=new Set(['.ts','.js','.mjs','.cjs','.json','.jsonc','.md','.yml','.yaml','.toml','.scm','.wasm','.py','.ipynb','.sh','.service','.timer','.path','.apparmor']);
+const allowedExt=new Set(['.ts','.js','.mjs','.cjs','.json','.jsonc','.md','.yml','.yaml','.toml','.scm','.wasm','.gif','.py','.ipynb','.sh','.service','.timer','.path','.apparmor']);
 const omitted=new Set(['node_modules','.git','__pycache__','sessions','logs','memory','backups','artifacts','worktrees','local-models']);
 const stage=fs.mkdtempSync(path.join(path.dirname(output),'.yunuspi-public-'));const files=[];
 function put(rel,data,mode=0o644){const p=path.join(stage,rel);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,data,{mode});files.push({path:rel,sha256:createHash('sha256').update(data).digest('hex')});}
@@ -40,7 +40,7 @@ function copyTree(dir,prefix){for(const entry of fs.readdirSync(dir,{withFileTyp
  if(stat.isDirectory()){copyTree(p,rel);continue;}
  if(!allowedExt.has(path.extname(entry.name))&&!/^(?:LICENSE|NOTICE|COPYING)(?:\..*)?$/.test(entry.name)&&!['.gitignore','pre-push','pre-commit'].includes(entry.name))continue;
  let bytes=fs.readFileSync(p);
- if(!p.endsWith('.wasm')){
+ if(!/\.(?:wasm|gif)$/.test(p)){
   let text=bytes.toString('utf8');
   text=text.replaceAll(os.homedir(),'/home/example');
   if(rel==='agent/extensions/live-models.ts')text=text.replace(/const ORCA_FALLBACK_KEY = ("[^"\r\n]*"|'[^'\r\n]*');/,'const ORCA_FALLBACK_KEY = process.env.ORCAROUTER_API_KEY ?? "";');
