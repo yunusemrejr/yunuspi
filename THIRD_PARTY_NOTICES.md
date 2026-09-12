@@ -8,6 +8,7 @@ YunusPi includes locally modified extensions. Their original notices remain in t
 - pi-memory — retain `agent/extensions/pi-memory/LICENSE`.
 - rpiv-todo — retain `agent/extensions/rpiv-todo/LICENSE`.
 - pi-web-access — retain `agent/extensions/pi-web-access/LICENSE`.
+- Cytoscape.js 3.33.3 — MIT; graph viewer library, retained verbatim with `agent/extensions/lib/project-intelligence/viewer-assets/CYTOSCAPE-LICENSE` and upstream provenance in that directory's README.
 
 Parser WASM assets are retained from the existing pi-lens package and fingerprinted by the public checker. Preserve upstream notices when modifying or redistributing them. npm dependencies are downloaded separately from the exact lockfile and retain their respective package licenses. The Pi core is installed separately; YunusPi patches do not replace its license.
 

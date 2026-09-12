@@ -153,7 +153,8 @@ function copyTree(dir, prefix) {
   if (
    !allowedExt.has(path.extname(entry.name)) &&
    !/^(?:LICENSE|NOTICE|COPYING)(?:\..*)?$/.test(entry.name) &&
-   ![".gitignore", "pre-push", "pre-commit"].includes(entry.name)
+   ![".gitignore", "pre-push", "pre-commit"].includes(entry.name) &&
+   !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel)
   )
    continue;
   let bytes = fs.readFileSync(p);
