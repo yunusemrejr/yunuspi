@@ -1,8 +1,8 @@
 ---
 name: automatic-free-assistant
 description: Bounded read-only autonomous assistance; never a writer
-tools: read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_slice, symbol_expand, ast_diff, obs_read
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+tools: read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_slice, symbol_expand, ast_diff, obs_read, git_info
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts
 thinking: off
 systemPromptMode: replace
 inheritProjectContext: true
@@ -18,3 +18,5 @@ Use `math_check` for supplied numerical metrics or exact split-ID overlap, `arti
 For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
+
+Use `git_info` for bounded read-only diffs and history of the specified changed paths. Compare current source with change context; never assume unrelated dirty files belong to this session. In a project without Git, state what prior content is unavailable.

@@ -44,6 +44,7 @@
     "continuation-notice.ts",
     "code-guidance-signals.ts",
     "quality-review-signals.ts",
+    "quality-review.ts",
     "slop-guidance-signals.ts",
     "compact-tool-json.ts",
     "local-models.ts",

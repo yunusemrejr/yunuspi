@@ -1,6 +1,6 @@
 import type { ResolvedToolBudget, ToolBudgetConfig, ToolBudgetState } from "../../shared/types.ts";
 
-export const READ_ONLY_REASONING_TOOLS = ["dependency_plan", "decision_frontier", "coverage_select", "math_check", "artifact_check", "value_convert", "context_slice", "symbol_expand", "ast_diff", "obs_read"] as const;
+export const READ_ONLY_REASONING_TOOLS = ["dependency_plan", "decision_frontier", "coverage_select", "math_check", "artifact_check", "value_convert", "context_slice", "symbol_expand", "ast_diff", "obs_read", "git_info"] as const;
 
 export const DEFAULT_TOOL_BUDGET_BLOCK = ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS] as const;
 export const TOOL_BUDGET_ENV = "PI_SUBAGENT_TOOL_BUDGET";

@@ -92,7 +92,7 @@ export async function runGitInfo(
   const filePath = validatePath(params.path);
   const revision = validateRevision(params.revision);
   const count = Math.min(Math.max(Number(params.count) || 10, 1), 50);
-  const base = ["--no-pager", "-c", "core.pager=cat", "-c", "color.ui=false"];
+  const base = ["--no-pager", "-c", "core.pager=cat", "-c", "color.ui=false", "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"];
   let args: string[];
 
   switch (action) {
@@ -108,6 +108,8 @@ export async function runGitInfo(
       const patch = params.patch !== false;
       args = [
         "diff",
+        "--no-ext-diff",
+        "--no-textconv",
         "--no-color",
         "--stat",
         ...(patch ? ["--patch", "--unified=2"] : []),
@@ -131,6 +133,8 @@ export async function runGitInfo(
       const patch = params.patch !== false;
       args = [
         "show",
+        "--no-ext-diff",
+        "--no-textconv",
         "--no-color",
         "--stat",
         "--oneline",
@@ -155,7 +159,9 @@ export async function runGitInfo(
       timeout: 10000,
       maxBuffer: 16 * 1024 * 1024,
       env: {
-        ...process.env,
+        // A caller's Git overrides must not redirect this read to a foreign
+        // repository/index or re-enable executable diff/config helpers.
+        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
         GIT_PAGER: "cat",
         GIT_TERMINAL_PROMPT: "0",
         GIT_OPTIONAL_LOCKS: "0",
