@@ -73,3 +73,7 @@ Discipline: label every statement as **fact** (measured, source cited) / **specu
 ## Detailed coverage
 
 Technical research & evidence work — framing questions, source hierarchy (primary > secondary), literature search (arXiv, citation snowballing), evidence grading, experiment design (controls, seeds, ablations), reproducibility records, triangulating claims, and writing findings. Use for any "is X true / which option wins / what does the literature say" task.
+
+## Recovering web discovery
+
+Use available `web_research` for distinct query angles and known `sourceUrls` in background. Known primary-source URLs can still be read when search engines fail. Select `fallbackProviders` for relevant coverage: Wikipedia locates encyclopedia references; Crossref locates scholarly metadata. Neither substitutes for general web coverage or full-text verification. Honor recency/domain filters and provider cooldowns; do not rotate endpoints to evade access blocks. Start with the default three source reads, or set `readPages:0` for discovery only. Read query attempts and `view:"sources"` receipts; retrieve exact cached passages with `get_search_content` using the source's `responseId`. Keep notes tied to the source and retrieval date, follow useful citations with another bounded source batch, and seek conflicting evidence. Empty results and unreadable pages leave coverage incomplete.

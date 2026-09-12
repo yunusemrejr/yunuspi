@@ -55,7 +55,7 @@ export function registerBrowserSession(pi: any) {
     name: "browser_session",
     label: "Isolated browser",
     description:
-      "Agent-owned isolated Chromium session for authorized HTTP(S) interaction: open/navigate, snapshot, exact-target click/fill/press, screenshot, logs, list, close. Cookies/storage stay in this browser; no personal profiles, credential import, files, downloads, popups or arbitrary code. Max two sessions per agent, 10-minute lifetime, 200 actions. Each action returns bounded untrusted state; inspect it before acting. Browser isolation is not a network sandbox. Use render_see for local HTML/SVG/image/PDF; web_search for discovery; sandbox_run for disposable shell experiments. Never replay a timed-out mutation without reconciling current state.",
+      "Agent-owned Chromium: open/navigate, scoped snapshot, inspect DOM/HTML/computed CSS/hit target, click/fill/press, condition wait, viewport, screenshot, incremental logs/network, list/close. Use observed selector or exact role/name; optional frame is an observed iframe selector. Logs/network return nextCursor; pass it as since to avoid repeats. includeText reveals minimized console/script errors on explicit diagnostic reads. No personal profiles, downloads, arbitrary JS or credentials. Two sessions, 10-minute lifetime, 200 actions; bounded untrusted evidence. Never replay uncertain mutations: inspect current state first. render_see handles local files; web_search/web_research handle discovery.",
     parameters: Type.Object({
       action: Type.Union(
         [
@@ -67,6 +67,10 @@ export function registerBrowserSession(pi: any) {
           "press",
           "screenshot",
           "logs",
+          "network",
+          "inspect",
+          "wait",
+          "viewport",
           "list",
           "close",
         ].map((value) => Type.Literal(value)),
@@ -78,6 +82,23 @@ export function registerBrowserSession(pi: any) {
       name: Type.Optional(Type.String({ maxLength: 256 })),
       text: Type.Optional(Type.String({ maxLength: 8000 })),
       key: Type.Optional(Type.String({ maxLength: 80 })),
+      frame: Type.Optional(Type.String({ maxLength: 256 })),
+      since: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 })),
+      includeText: Type.Optional(Type.Boolean()),
+      properties: Type.Optional(
+        Type.Array(Type.String({ maxLength: 50 }), { maxItems: 20 }),
+      ),
+      state: Type.Optional(
+        Type.Union(
+          ["attached", "detached", "visible", "hidden"].map((value) =>
+            Type.Literal(value),
+          ),
+        ),
+      ),
+      timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 15000 })),
+      width: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
+      height: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
     }),
     async execute(
       _id: string,
@@ -102,6 +123,7 @@ export function registerBrowserSession(pi: any) {
       const reply = (details: any, images: any[] = []) => ({
         content: [{ type: "text", text: JSON.stringify(details) }, ...images],
         details,
+        ...(details.ok === false ? { isError: true } : {}),
       });
       if (p.action === "list")
         return reply({
@@ -256,6 +278,12 @@ export function registerBrowserSession(pi: any) {
         });
         if (owner !== scope || session.closed)
           throw Error("Browser session changed during action");
+        if (p.action === "open" && result.ok === false) {
+          await close(id);
+          throw Error(
+            `Browser open failed (${result.failure.stage}/${result.failure.kind}): ${result.failure.nextStep}`,
+          );
+        }
         const images = [];
         if (result.png) {
           const output = path.join(session.dir, `capture-${randomUUID()}.png`);

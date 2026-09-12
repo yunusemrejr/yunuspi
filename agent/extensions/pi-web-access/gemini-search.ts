@@ -443,24 +443,30 @@ async function searchWithConfiguredRouting(
 	options: FullSearchOptions,
 	routing: SearchRoutingConfig,
 ): Promise<AttributedSearchResponse> {
-	const diagnostics: string[] = [];
+	const failures: ProviderSearchFailure[] = [];
+	let empty: AttributedSearchResponse | undefined;
 	for (const provider of routing.providers) {
+		options.signal?.throwIfAborted();
 		const useCurrentModel = provider === "openai" && routing.useCurrentModel === true;
 		if (!(await isResolvedProviderAvailable(provider, options, useCurrentModel))) {
-			diagnostics.push(`${provider}: unavailable`);
+			failures.push({ provider, kind: "unsupported", error: "Provider unavailable in this session" });
 			continue;
 		}
 		try {
-			return await searchWithResolvedProvider(provider, query, options, useCurrentModel);
+			const result = await searchWithResolvedProvider(provider, query, options, useCurrentModel);
+			if (result.results.length) return { ...result, ...(failures.length ? { providerErrors: failures } : {}) };
+			empty = result;
+			failures.push({ provider, kind: "invalid-response", error: "No candidate sources; continuing configured routes" });
 		} catch (err) {
 			const classified = classifyProviderError(provider, err);
-			diagnostics.push(`${provider} [${classified.kind}]: ${errorMessage(err)}`);
+			failures.push(toProviderFailure(classified));
 			if (!routing.fallbackOn.includes(classified.kind as SearchRoutingConfig["fallbackOn"][number])) {
 				throw classified;
 			}
 		}
 	}
-	throw new Error(`Configured search routing exhausted:\n  - ${diagnostics.join("\n  - ")}`);
+	if (empty) return { ...empty, providerErrors: failures };
+	throw new SearchProviderAggregateError("Configured search routing exhausted", failures);
 }
 
 async function searchInternal(query: string, options: FullSearchOptions = {}): Promise<AttributedSearchResponse> {
@@ -482,14 +488,16 @@ async function searchInternal(query: string, options: FullSearchOptions = {}): P
 	const fallbackErrors: ProviderSearchFailure[] = [];
 	const openAiResult = await tryOpenAIInAuto(query, options, fallbackErrors);
 	if (openAiResult?.results.length) return openAiResult;
+	if (openAiResult) fallbackErrors.push({ provider: "openai", kind: "invalid-response", error: "No candidate sources; continuing available routes" });
 
-  let empty: AttributedSearchResponse | undefined;
+  let empty: AttributedSearchResponse | undefined = openAiResult ?? undefined;
   for (const fallback of ["searxng", "duckduckgo"] as const) {
     if (!(await isResolvedProviderAvailable(fallback, options))) continue;
     try {
       const result = await searchWithResolvedProvider(fallback, query, options);
       if (result.results.length) return { ...result, ...(fallbackErrors.length ? { providerErrors: fallbackErrors } : {}) };
       empty = result;
+      fallbackErrors.push({ provider: fallback, kind: "invalid-response", error: "No candidate sources; continuing available routes" });
     } catch (err) {
       if (options.signal?.aborted || isAbortError(err) && !isTimeoutError(err)) throw err;
       fallbackErrors.push(toProviderFailure(classifyProviderError(fallback, err)));

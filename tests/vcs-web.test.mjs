@@ -312,6 +312,7 @@ test("background research continues distinct query angles, paginates, and reject
   const start = await call({
     action: "start",
     queries: ["first", "failure", "empty", "fourth"],
+    readPages: 0,
   });
   const id = start.details.id;
   const end = await call({ action: "wait", id });

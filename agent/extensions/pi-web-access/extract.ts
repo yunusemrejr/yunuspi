@@ -311,6 +311,8 @@ export interface ExtractedContent {
 type HttpExtractedContent = ExtractedContent & { declaredLinks?: DeclaredWebLink[] };
 
 export interface ExtractOptions {
+	/** Bounded background reading: direct HTTP extraction only, no clone, model or hosted fallback. */
+	httpOnly?: boolean;
 	timeoutMs?: number;
 	forceClone?: boolean;
 	prompt?: string;
@@ -514,7 +516,7 @@ export async function extractContent(
 		}
 	}
 
-	if (options?.authFetchProfile || options?.mode === "raw") {
+	if (options?.httpOnly || options?.authFetchProfile || options?.mode === "raw") {
 		try {
 			return await extractViaHttp(url, resolveFetchTimeoutMs(options), signal, options);
 		} catch (err) {
