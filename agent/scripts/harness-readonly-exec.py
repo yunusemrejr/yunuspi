@@ -76,20 +76,79 @@ def ssh_config_mounts():
 
 
 def check_hardlinks(protected):
+    return check_protected_hardlinks([protected])
+
+
+def check_protected_hardlinks(protected_roots):
+    """Only aliases outside the union of read-only roots are unsafe.
+
+    Count directory entries once, including explicit file roots. Reject any
+    linked inode whose filesystem link count exceeds the protected inventory.
+    """
+    roots = set(protected_roots)
+    roots = {root for root in roots if not any(
+        parent != root and os.path.commonpath([parent, root]) == parent
+        for parent in roots)}
+    linked = {}
     def scan_error(error):
-        # Runtime lock directories can disappear between scandir calls. Their
-        # absence is not an unreadable subtree; permission/I/O errors still fail.
         if not isinstance(error, FileNotFoundError):
             raise error
-    for directory, dirs, files in os.walk(protected, followlinks=False, onerror=scan_error):
-        for name in files:
-            candidate = os.path.join(directory, name)
-            try:
-                info = os.lstat(candidate)
-            except FileNotFoundError:
+    def inspect(candidate):
+        try:
+            info = os.lstat(candidate)
+        except FileNotFoundError:
+            return
+        if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+            key = (info.st_dev, info.st_ino)
+            entry = linked.setdefault(key, {'links': info.st_nlink, 'paths': set()})
+            entry['links'] = max(entry['links'], info.st_nlink)
+            entry['paths'].add(candidate)
+    for root in roots:
+        inspect(root)
+        try:
+            if not stat.S_ISDIR(os.lstat(root).st_mode):
                 continue
-            if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-                raise RuntimeError('harness has hard-linked files; a maintenance session must replace them with independent copies before guarded execution')
+        except FileNotFoundError:
+            continue
+        for directory, dirs, files in os.walk(root, followlinks=False, onerror=scan_error):
+            for name in files:
+                inspect(os.path.join(directory, name))
+    if any(len(entry['paths']) < entry['links'] for entry in linked.values()):
+        raise RuntimeError('harness has hard-linked files with aliases outside protected roots; a maintenance session must replace them with independent copies before guarded execution')
+
+
+def writable_mounts(protected_roots):
+    """Keep every protected branch and its ancestors read-only.
+
+    Unlike overlaying independent single-root policies, this union never rebinds
+    another protected tree writable. Missing roots retain their existing parent
+    boundary, so a command cannot create a new global skill destination there.
+    """
+    protected = set(protected_roots)
+    ancestors = set()
+    for root in protected:
+        current = os.path.dirname(root)
+        while True:
+            ancestors.add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+    mounts = []
+    for current in sorted(ancestors, key=lambda item: (item.count('/'), item)):
+        if any(os.path.commonpath([root, current]) == root for root in protected):
+            continue
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.path in ancestors or entry.path in protected:
+                        continue
+                    if entry.path in ('/proc', '/sys', '/dev') or entry.is_symlink():
+                        continue
+                    mounts.extend(['--bind-try', entry.path, entry.path])
+        except FileNotFoundError:
+            continue
+    return mounts
 
 
 def main():
@@ -97,15 +156,29 @@ def main():
         raise RuntimeError('Linux bubblewrap runtime required')
     if not os.access('/usr/bin/bwrap', os.X_OK):
         raise RuntimeError('required executable unavailable: /usr/bin/bwrap; install bubblewrap before running guarded commands')
-    if len(sys.argv) < 4 or sys.argv[2] != '--':
+    if len(sys.argv) < 4:
         raise RuntimeError('invalid guarded command')
     protected = os.path.realpath(sys.argv[1])
     if protected == '/' or not os.path.isdir(protected):
         raise RuntimeError('invalid harness root')
+    roots = {protected}
+    at = 2
+    while at < len(sys.argv) and sys.argv[at] == '--protect':
+        if at + 1 >= len(sys.argv) or not os.path.isabs(sys.argv[at + 1]):
+            raise RuntimeError('invalid protected skill path')
+        # Keep link entries AND referents. The trusted parent supplied this
+        # launch-scoped list; environment edits in descendants cannot remove it.
+        value = os.path.abspath(sys.argv[at + 1])
+        if value == '/':
+            raise RuntimeError('protected skill path is too broad')
+        roots.update([value, os.path.realpath(value)])
+        at += 2
+    if at >= len(sys.argv) - 1 or sys.argv[at] != '--':
+        raise RuntimeError('invalid guarded command')
     # An already-existing alias outside the protected tree would otherwise have
     # the outside path's permissions. Refuse instead of pretending path rules
     # protect inode aliases. This bounded-by-tree scan is intentional.
-    check_hardlinks(protected)
+    check_protected_hardlinks(roots)
     os.environ['PI_HARNESS_MUTATION_DENIED'] = '1'
     # A separate PID namespace and fresh procfs prevent /proc/<host-pid>/root
     # aliases to the parent's writable mounts. Capabilities are removed after
@@ -113,24 +186,13 @@ def main():
     # Keep protected ancestors read-only too: renaming an ancestor must not
     # move the host harness. Bind existing sibling subtrees writable so normal
     # project builds retain their filesystem access.
-    writable = []
-    current = '/'
-    for part in protected.strip('/').split('/'):
-        branch = os.path.join(current, part)
-        with os.scandir(current) as entries:
-            for entry in entries:
-                if entry.path != branch and entry.path not in ('/proc', '/sys', '/dev') and not entry.is_symlink():
-                    # Sibling temp/lock directories can disappear after the
-                    # inventory. Missing optional mounts must not fail normal
-                    # execution; the protected branch is never optional/writable.
-                    writable.extend(['--bind-try', entry.path, entry.path])
-        current = branch
+    writable = writable_mounts(roots)
     ssh_mounts, ssh_descriptors = ssh_config_mounts()
     arguments = ['/usr/bin/bwrap', '--unshare-user', '--unshare-pid',
                  '--ro-bind', '/', '/', *writable,
                  *ssh_mounts,
                  '--proc', '/proc', '--dev-bind', '/dev', '/dev',
-                 '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[3:]]
+                 '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
     try:
         os.execv(arguments[0], arguments)
     finally:

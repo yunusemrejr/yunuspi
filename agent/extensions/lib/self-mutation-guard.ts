@@ -71,6 +71,121 @@ export const SELF_MUTATION_ALLOWED =
   containsPath(HARNESS_ROOT, INITIAL_CWD);
 // Children inherit denial even if they change cwd or import another copy of this module.
 if (!SELF_MUTATION_ALLOWED) process.env.PI_HARNESS_MUTATION_DENIED = "1";
+
+/** Global skill sources are captured from trusted harness configuration, never
+ * from the tool cwd or project settings. Preserve both symlink entries and
+ * referents, including absent destinations where an installer could add skills.
+ */
+export function discoverMutationRoots(harness: string, home: string): string[] {
+  const agent = path.join(harness, "agent"),
+    roots = new Set<string>();
+  const skillTrees: string[] = [];
+  const addPath = (input: string, base = agent): string => {
+    const raw = input.replace(/^~(?=\/|$)/, home);
+    const physical = canonicalMutationPath(raw, base);
+    if (
+      ["/", "/tmp", "/var/tmp", home].some((root) => physical === root) ||
+      containsPath(physical, home)
+    )
+      throw new Error(
+        "Global skill scope is too broad; configure explicit skill directories in a maintenance session",
+      );
+    roots.add(physical);
+    // A parent symlink can redirect an entire skill tree. Its directory entry
+    // must be protected as well as the files currently reached through it.
+    for (
+      let at = path.resolve(base, raw);
+      at !== path.dirname(at);
+      at = path.dirname(at)
+    ) {
+      try {
+        if (fs.lstatSync(at).isSymbolicLink())
+          roots.add(canonicalMutationPath(at, base, false));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    return physical;
+  };
+  addPath(harness);
+  for (const candidate of [
+    path.join(agent, "skills"),
+    path.join(home, ".agents/skills"),
+    path.join(home, ".codex/skills"),
+  ])
+    skillTrees.push(addPath(candidate));
+  const settings = path.join(agent, "settings.json");
+  try {
+    const stat = fs.statSync(settings);
+    if (!stat.isFile() || stat.size > 1_048_576)
+      throw new Error("Global skill settings cannot be safely read");
+    addPath(settings);
+    const config = JSON.parse(fs.readFileSync(settings, "utf8"));
+    if (config.skills !== undefined && !Array.isArray(config.skills))
+      throw new Error("Global skills must be an array of paths");
+    if ((config.skills?.length ?? 0) > 256)
+      throw new Error("Too many global skill paths; narrow the configuration");
+    for (const entry of config.skills ?? []) {
+      if (typeof entry !== "string" || !entry.trim() || /^[!-]/.test(entry))
+        continue;
+      const source = entry.replace(/^\+/, "");
+      if (/[*?\[\]{}]/.test(source))
+        throw new Error(
+          "Use explicit global skill directories instead of glob patterns for write isolation",
+        );
+      skillTrees.push(addPath(source));
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const visited = new Set<string>();
+  let scanned = 0;
+  while (skillTrees.length) {
+    const current = skillTrees.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!stat.isDirectory()) continue;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      // Match the loader's hidden-directory and dependency exclusions.
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      if (++scanned > 100_000 || roots.size > 512)
+        throw new Error(
+          "Global skill discovery exceeded its bound; narrow the configured roots",
+        );
+      const candidate = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) skillTrees.push(addPath(candidate));
+      else if (entry.isDirectory()) skillTrees.push(candidate);
+    }
+  }
+  const all = [...roots];
+  return all
+    .filter(
+      (root) =>
+        !all.some((parent) => parent !== root && containsPath(parent, root)),
+    )
+    .sort();
+}
+
+let rootDiscoveryFailed = false;
+export const PROTECTED_MUTATION_ROOTS: readonly string[] = Object.freeze(
+  (() => {
+    try {
+      return discoverMutationRoots(HARNESS_ROOT, homedir());
+    } catch {
+      rootDiscoveryFailed = true;
+      return [HARNESS_ROOT];
+    }
+  })(),
+);
+const discoveryFailure =
+  "Unable to determine protected global skill paths. Use a harness maintenance session to check settings.json and skill-directory permissions; no unguarded mutation was allowed.";
 const maintenanceSkill = path.join(
   HARNESS_ROOT,
   "agent/skills/harness-self-maintenance/SKILL.md",
@@ -82,6 +197,7 @@ export function selfMutationDenial(
   followLeaf = true,
 ): string | undefined {
   if (SELF_MUTATION_ALLOWED) return;
+  if (rootDiscoveryFailed) return "Blocked: " + discoveryFailure;
   try {
     const resolved = canonicalMutationPath(
       target.replace(/^@/, "").replace(/^~(?=\/|$)/, homedir()),
@@ -89,8 +205,9 @@ export function selfMutationDenial(
       followLeaf,
     );
     if (
-      containsPath(HARNESS_ROOT, resolved) ||
-      containsPath(resolved, HARNESS_ROOT)
+      PROTECTED_MUTATION_ROOTS.some(
+        (root) => containsPath(root, resolved) || containsPath(resolved, root),
+      )
     )
       return "Blocked: this session was launched outside the harness maintenance directory. Harness writes require a new human-started session inside the harness root; launching from home or a parent directory, changing cwd, or using a subagent does not grant authority.";
     const stat =
@@ -102,9 +219,18 @@ export function selfMutationDenial(
   }
 }
 function hasHarnessInode(target: fs.Stats): boolean {
-  const dirs = [HARNESS_ROOT];
+  const dirs = [...PROTECTED_MUTATION_ROOTS];
   while (dirs.length) {
     const dir = dirs.pop()!;
+    try {
+      const stat = fs.lstatSync(dir);
+      if (stat.isFile() && stat.dev === target.dev && stat.ino === target.ino)
+        return true;
+      if (!stat.isDirectory()) continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -135,6 +261,7 @@ export function guardedCommand(
   args: readonly string[],
 ): { command: string; args: string[] } {
   if (SELF_MUTATION_ALLOWED) return { command, args: [...args] };
+  if (rootDiscoveryFailed) throw new Error(discoveryFailure);
   if (process.platform !== "linux")
     throw new Error(
       "Harness write isolation requires Linux bubblewrap. Use the documented WSL2/Linux VM runtime. No unisolated command was started.",
@@ -145,6 +272,9 @@ export function guardedCommand(
       "-I",
       path.join(HARNESS_ROOT, "agent/scripts/harness-readonly-exec.py"),
       HARNESS_ROOT,
+      ...PROTECTED_MUTATION_ROOTS.filter(
+        (root) => root !== HARNESS_ROOT,
+      ).flatMap((root) => ["--protect", root]),
       "--",
       command,
       ...args,
