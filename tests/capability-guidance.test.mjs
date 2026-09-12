@@ -69,7 +69,9 @@ test("available skill routes continue beyond the first three suggestions", () =>
 test("management discovery does not consume execution guidance and availability is rechecked", () => {
   const f=fixture(["subagent"]); f.start("Use independent subagents to review the change");
   f.step("subagent",{action:"list",capabilities:true});
-  assert.ok(f.guidance.candidates().some(h=>h.key==='workflow:delegation'));
+  const hints=f.guidance.candidates();
+  assert.equal(hints.filter(h=>h.tool==='subagent').length,1,"discovery and execution guidance share one contract receipt");
+  assert.ok(hints.some(h=>h.key==='delegation-contract'));
   f.active.length=0;
   assert.equal(f.guidance.candidates().length,0);
   f.active.push("subagent");
@@ -110,6 +112,19 @@ test("delivery receipts survive reload without treating them as skill reads", ()
   restored.start({prompt:"Inspect JSON keys",systemPrompt:""},f.ctx);
   assert.equal(restored.candidates().length,0);
   assert.deepEqual(f.entries.at(-1).data.read,[]);
+});
+
+test("a full delivery history remains bounded without disabling new capabilities", () => {
+  const f=fixture(['data_query']);
+  f.entries.push({type:'custom',customType:'relevant-guidance',data:{
+    version:1,cwd:f.ctx.cwd,shown:Array.from({length:96},(_,i)=>`past:${i}`),read:[],
+  }});
+  f.guidance.restore(f.ctx); f.start('Inspect JSON keys');
+  assert.ok(f.take().some(h=>h.tool==='data_query'));
+  const receipts=f.entries.at(-1).data.shown;
+  assert.equal(receipts.length,96);
+  assert.ok(!receipts.includes('past:0'));
+  assert.ok(receipts.includes('utility:data_query'));
 });
 
 test("new file phases route existing tools and file cues still expire", () => {
