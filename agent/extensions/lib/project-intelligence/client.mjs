@@ -12,13 +12,10 @@ export class IntelligenceClient {
     // only its runtime startup warnings and return actual failures via messages.
     this.worker = new Worker(new URL("./worker.mjs", import.meta.url), {
       workerData: { cwd, stateDir, sessionId },
-      execArgv: [
-        ...process.execArgv.filter(
-          (arg) =>
-            !arg.startsWith("--input-type") && !arg.startsWith("--inspect"),
-        ),
-        "--no-warnings",
-      ],
+      // This plain ESM worker needs no parent loaders or process-wide flags.
+      // Forwarding process.execArgv can make Worker reject valid parent V8,
+      // OpenSSL, test-runner or snapshot options before it starts.
+      execArgv: ["--no-warnings"],
     });
     this.worker.on("message", (message) => {
       const item = this.pending.get(message.id);

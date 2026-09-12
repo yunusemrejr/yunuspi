@@ -414,14 +414,18 @@ test("viewer server is private, reusable, and observes peer revisions", () =>
     }
   }));
 
-test("an idle intelligence worker does not keep a headless process alive", () =>
+test("a worker accepts process-only parent flags and exits when idle", () =>
   fixture(async ({ cwd, stateDir, temp }) => {
     const file = path.join(temp, "idle.mjs");
     await fs.writeFile(
       file,
       `import {IntelligenceClient} from ${JSON.stringify(pathToFileURL(modulePath("client.mjs")).href)};const c=new IntelligenceClient(${JSON.stringify({ cwd, stateDir, sessionId: "idle" })});await c.ready;`,
     );
-    await exec(process.execPath, [file], { timeout: 5000, maxBuffer: 10000 });
+    await exec(
+      process.execPath,
+      ["--stack-trace-limit=10", "--v8-pool-size=4", file],
+      { timeout: 5000, maxBuffer: 10000 },
+    );
   }));
 
 test("automatic HTTP evidence retains known origins without path or query credentials", () =>
