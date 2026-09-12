@@ -159,11 +159,13 @@ export function createRelevantGuidance(pi: any) {
   const utilityHints = (prompt: string) => {
     const parts=prompt.replace(/```[^]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').split(/\n|[.!?](?:\s|$)|;/);
     for (const part of parts) {
-      if (!/\b(check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
+      if (!/\b(test|reproduce|try|check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
       if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
         utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
       if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
         utilityHint('git_info','Git evidence: git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
+      if (/\b(sandbox(?:es)?|isolated? (?:experiment|test|reproduction)s?|disposable|scratch environment|without (?:affecting|changing|touching) (?:the )?(?:project|workspace))\b/i.test(part))
+        utilityHint('sandbox_run','Disposable experiments: sandbox_run runs a bounded script in a fresh environment with explicit copied files or fixtures, no project/home mounts or network, and automatic cleanup. Combine related steps in one call. If isolation cannot start, report it; never silently run the experiment on the host.');
       if (/\b(http|api endpoint|response headers?|status code)\b/i.test(part))
         utilityHint('http_request','HTTP inspection: http_request returns status, headers and a capped body for a bounded request. Reuse it for endpoint diagnostics; preserve authorization and do not repeat an uncertain mutation.');
       if (/\b(listening ports?|systemd|service status|processes|cpu usage|memory usage)\b/i.test(part))

@@ -17,6 +17,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 ## What is included
 
 - Main-agent and subagent workflows, bounded parallel/fusion execution and failure recovery.
+- [Disposable sandboxes](docs/SANDBOXES.md) for quick isolated experiments, with copied fixtures, no network, resource limits and automatic cleanup.
 - Capability-aware provider discovery, economical routing and provider-specific cache accounting.
 - Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.

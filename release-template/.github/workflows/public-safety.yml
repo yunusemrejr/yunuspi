@@ -20,6 +20,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bubblewrap python3 apparmor
           sudo apparmor_parser -r config/bwrap.apparmor
+      - name: Start disposable sandbox resource manager
+        run: |
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
       - run: node --test tests/*.test.mjs
         env:
           PI_REQUIRE_ISOLATION_TEST: '1'
+          PI_SANDBOX_REQUIRE: '1'

@@ -25,7 +25,8 @@
     "http-tools.ts",
     "bulk-edit.ts",
     "sys-probe.ts",
-    "session-hooks.ts"
+    "session-hooks.ts",
+    "sandbox.ts"
   ],
   "lib": [
     "stall-core.ts",
@@ -367,6 +368,7 @@
     "scripts/lib/paragraph_selector.py",
     "extensions/pi-subagents/src/shared/progress-evidence.ts",
     "extensions/pi-subagents/src/runs/shared/common-task.ts",
-    "extensions/pi-subagents/src/runs/shared/file-verification.ts"
+    "extensions/pi-subagents/src/runs/shared/file-verification.ts",
+    "scripts/sandbox-runner.py"
   ]
 }

@@ -1,8 +1,8 @@
 ---
 name: researcher
 description: Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief
-tools: read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, http_request, context_slice, symbol_expand, ast_diff, obs_read
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../http-tools.ts
+tools: read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, http_request, context_slice, symbol_expand, ast_diff, obs_read, sandbox_run
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../http-tools.ts, ../../sandbox.ts
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true
@@ -57,3 +57,5 @@ Use `math_check` for supplied numerical metrics or exact split-ID overlap, `arti
 For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
+
+Use `sandbox_run` for small experiments that must not affect the project or other agents. Supply only needed fixtures or explicit source copies; related commands share one call and are automatically disposed. Do not fall back to host execution if sandbox isolation fails. Results cover only the supplied snapshot.

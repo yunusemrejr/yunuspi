@@ -14,7 +14,7 @@ The complete harness targets Linux with Bash and GNU utilities. The portable ins
 
 In an administrator PowerShell window, run `wsl --install -d Ubuntu`, reboot if requested, then open Ubuntu and create your Linux user. Run every command in INSTALL.md inside Ubuntu. Clone into `~/src/yunuspi` inside the Linux filesystem; avoid `/mnt/c` for the working harness, dependency installation and session files. Install Node inside WSL rather than reusing a Windows executable. Windows credentials and Linux credentials are separate; configure keys inside Ubuntu.
 
-Interactive usage does not require systemd. Optional Linux user services require a WSL installation with systemd enabled. The public installer does not install services, enable boot tasks or change system settings. Closing or shutting down WSL stops its processes.
+Interactive usage does not require systemd. The optional `sandbox_run` capability requires a running systemd user manager and delegated cgroup v2 memory, PIDs and CPU controllers; WSL2 must have systemd enabled for it. Optional Linux user services require a WSL installation with systemd enabled. The public installer does not install services, enable boot tasks or change system settings. Closing or shutting down WSL stops its processes.
 
 ## macOS with a Linux VM
 
