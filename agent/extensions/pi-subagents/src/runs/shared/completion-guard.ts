@@ -16,6 +16,8 @@ const READ_ONLY_BUILTIN_TOOLS = new Set([
 	"intercom",
 	"contact_supervisor",
 	"structured_output",
+	// Project metadata never constitutes implementing a requested code change.
+	"project_intel",
 ]);
 
 // Cursor native edit/write often land as thinking traces (inactive_trace /

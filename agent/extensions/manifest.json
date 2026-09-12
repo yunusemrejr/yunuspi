@@ -26,7 +26,8 @@
     "bulk-edit.ts",
     "sys-probe.ts",
     "session-hooks.ts",
-    "sandbox.ts"
+    "sandbox.ts",
+    "project-intelligence.ts"
   ],
   "lib": [
     "stall-core.ts",
@@ -370,6 +371,19 @@
     "extensions/pi-subagents/src/shared/progress-evidence.ts",
     "extensions/pi-subagents/src/runs/shared/common-task.ts",
     "extensions/pi-subagents/src/runs/shared/file-verification.ts",
-    "scripts/sandbox-runner.py"
+    "scripts/sandbox-runner.py",
+    "extensions/lib/project-intelligence/client.mjs",
+    "extensions/lib/project-intelligence/continuity.mjs",
+    "extensions/lib/project-intelligence/discovery-parsers.mjs",
+    "extensions/lib/project-intelligence/discovery.mjs",
+    "extensions/lib/project-intelligence/identity.mjs",
+    "extensions/lib/project-intelligence/privacy.mjs",
+    "extensions/lib/project-intelligence/query.mjs",
+    "extensions/lib/project-intelligence/store.mjs",
+    "extensions/lib/project-intelligence/viewer-server.mjs",
+    "extensions/lib/project-intelligence/viewer.mjs",
+    "extensions/lib/project-intelligence/worker.mjs",
+    "extensions/lib/project-intelligence/viewer-assets/app.js",
+    "extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js"
   ]
 }
