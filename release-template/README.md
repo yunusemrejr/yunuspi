@@ -29,6 +29,8 @@ The optional mini preprocessing model is not bundled with a Python environment, 
 
 Read [session cost accounting](docs/COST-ACCOUNTING.md) for the footer estimate, `/cost` breakdown, provider pricing and coverage limits.
 
+Read [model routing and automatic assistance](docs/MODEL-ROUTING.md) for task quality gates, cached benchmark research, free-model preference and autonomous subagent, swarm and fusion budgets.
+
 ## Privacy and updates
 
 [Public release rules](docs/PUBLISHING.md) describe the export boundary, checks and update procedure. Run `node scripts/check-public.mjs` before every commit/push. CI scans tracked content and history as well. Hooks and CI reduce risk; they cannot prove that arbitrary prose contains no confidential information. Review each diff.
