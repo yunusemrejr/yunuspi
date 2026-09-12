@@ -27,7 +27,7 @@ export function reviewAspects(files: string[], task = '', history: any[] = []) {
   if (/\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names) || /\b(?:UI|interface|accessibility|responsive)\b/i.test(prose)) selected.add('interface');
   if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
   if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose)) selected.add('runtime');
-  if (/deploy|docker|pipeline|terraform|\.tf\b|release/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
+  if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
   if (!selected.size && files.length) selected.add('correctness');
   // History sets attention order, never correctness standards or an extra round.
   const recent = history.slice(-20);

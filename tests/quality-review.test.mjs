@@ -12,7 +12,7 @@ const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsS
 const schema='data:text/javascript,'+encodeURIComponent('export const Type=new Proxy({}, {get:(_t,name)=>(...args)=>({name,args})});');
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){return n==='typebox'?{url:${JSON.stringify(schema)},shortCircuit:true}:next(n,c);}`),import.meta.url);
 const {createQualityReviewLifecycle,reviewAspects,parseReviewReport,REVIEW_LIMITS}=await import(pathToFileURL(path.join(agent,'extensions/lib/quality-review.ts')));
-const {projectTestFacts}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
+const {projectTestFacts,isProjectReviewSource}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
 const storePath=path.join(agent,'extensions/lib/project-intelligence/store.mjs');
 const openStore=fs.existsSync(storePath)?(await import(pathToFileURL(storePath))).openStore:undefined;
 const pass=(aspect)=>({aspect,ok:true,text:JSON.stringify({outcome:'pass',evidence:['src/value.js:1 preserves zero and negative inputs; source and focused tests checked.'],findings:[],gap:''})});
@@ -70,6 +70,22 @@ test('deployment workflow edits are reviewed while credentials and hidden runtim
  const f=await fixture(t);await f.mutate('.github/workflows/deploy.yml','name: Deploy');await f.settle();assert.ok(f.calls[0][0].aspects.some(a=>a.id==='delivery'));
  const before=f.state().revision;await f.mutate('.env','TEST_PRIVATE_PLACEHOLDER');await f.mutate('auth.json','{}');assert.equal(f.state().revision,before);
  const facts=await projectTestFacts(f.dir);assert.ok(facts.reviewSources['.github/workflows/deploy.yml']);assert.equal(facts.reviewSources['.env'],undefined);
+});
+test('credential configuration is excluded across formats, native receipts, scans and restored scopes',async t=>{
+ const f=await fixture(t);
+ const files=['secrets.yaml','credentials.yml','config/secrets.json','auth.toml','config/settings.xml','models.yaml','production.credentials.json','api-key.txt','config/private_key.toml','config/tokens.yml','credentials/identity.json','.env','nested/secrets/test.json'];
+ for(const file of files){assert.equal(isProjectReviewSource(file),false,file);assert.equal(isProjectReviewSource(file.replaceAll('/','\\')),false,file);await f.mutate(file,'TEST_PRIVATE_PLACEHOLDER');}
+ await f.settle();assert.equal(f.calls.length,0);assert.equal(f.state().changed.length,0);
+ const facts=await projectTestFacts(f.dir);for(const file of files)assert.equal(facts.reviewSources[file],undefined,file);
+ f.branch.push({type:'custom',customType:'quality-review-v1',data:{root:f.dir,revision:0,changed:files}});f.api.restore(f.ctx);assert.equal(f.state().changed.length,0);
+ for(const file of ['src/auth.ts','src/settings.py','src/models.rs','config/public.yaml'])assert.equal(isProjectReviewSource(file),true,file);
+});
+test('extensionless delivery files participate in both source discovery and native review dispatch',async t=>{
+ const f=await fixture(t);
+ const files=['Dockerfile','containers/Dockerfile.production','Containerfile','release.Containerfile','Makefile','GNUmakefile','Jenkinsfile','Procfile','Justfile'];
+ for(const file of files){assert.equal(isProjectReviewSource(file),true,file);assert.ok(reviewAspects([file]).some(a=>a.id==='delivery'),file);await f.mutate(file,'FROM example.invalid/base');}
+ const facts=await projectTestFacts(f.dir);for(const file of files)assert.ok(facts.reviewSources[file],file);
+ await f.settle();assert.equal(f.calls.length,1);assert.deepEqual(new Set(f.calls[0][0].files),new Set(files));assert.ok(f.calls[0][0].aspects.some(a=>a.id==='delivery'));
 });
 test('real bounded discovery detects shell source edits and deletion without attributing unrelated idle changes',async t=>{
  const f=await fixture(t);fs.writeFileSync(path.join(f.dir,'external.md'),'peer work');f.api.observe(await projectTestFacts(f.dir),false);assert.equal(f.state().changed.length,0);
