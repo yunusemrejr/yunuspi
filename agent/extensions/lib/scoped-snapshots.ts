@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { selfMutationDenial } from "./self-mutation-guard.ts";
 const hash = (v: any) =>
   createHash("sha256")
     .update(typeof v === "string" || Buffer.isBuffer(v) ? v : JSON.stringify(v))
@@ -258,10 +259,16 @@ export class ScopedSnapshots {
         restored: string[] = [],
         failed: any[] = [];
       for (const change of p.changes) {
+        const denial = selfMutationDenial(await this.safe(p.root, change.path), p.root);
+        if (denial) throw Error(denial);
+      }
+      for (const change of p.changes) {
         try {
           const file = await this.safe(p.root, change.path);
           await queue(file, async () => {
             await this.safe(p.root, change.path);
+            const denial = selfMutationDenial(file, p.root);
+            if (denial) throw Error(denial);
             if (hash(await this.state(file)) !== hash(change.current))
               throw Error("Concurrent edit since preview");
             const before = m.entries[change.path];

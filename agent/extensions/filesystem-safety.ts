@@ -1,54 +1,3 @@
-/**
- * Filesystem Safety Extension
- *
- * Blocks destructive operations that target sensitive directories outside cwd.
- * Normal project work (git, cd, reads) is allowed even under protected ancestors
- * like ~/Desktop. Writes use cwd/temp, verified repository roots, and configured
- * skills during harness work; unknown ordinary scopes need one session approval.
- * Reads and authorized API credential use are not gated by these write scopes.
- *
- * Protected directories:
- * - / (root)
- * - /root
- * - /etc, /usr, /bin, /sbin, /boot, /lib(64), /var, /sys, /proc, /dev, /run, /opt, /srv
- * - ~ (home directory root)
- * - ~/Desktop
- * - ~/Documents
- * - ~/Downloads
- * - ~/Music
- * - ~/Pictures
- * - ~/Videos
- * - ~/.ssh
- * - ~/.gnupg
- * - ~/.aws
- * - ~/.config
- * - ~/.local
- *
- * Destructive commands blocked:
- * - rm -rf, rm -r (recursive deletes; NOTE: bare `rm -f <file>` has no `r` in
- *   its flag cluster and is NOT intercepted — single-file force deletes outside
- *   cwd are only guarded via the write/edit tool path checks)
- * - mkfs, fdisk, dd
- * - chmod, chown on system dirs
- * - mv, cp with force flag on protected paths
- *
- * Shell variable targets are RESOLVED, not blanket-blocked (the old rule
- * false-positived on the standard mktemp temp-copy workflow — e.g.
- * `E2E=$(mktemp -d); cp -r . "$E2E/"; rm -rf "$E2E"` was blocked because
- * "$E2E" contained a `$`). Assignments found in the same command text are
- * collected and classified: mktemp substitutions are ephemeral (allowed),
- * literals are expanded transitively and re-checked, and truly unknown
- * variables still fail closed with an actionable message.
- *
- * Pattern gating runs on a data-stripped view of the command (see
- * stripShellData): heredoc bodies, single-quoted spans, and data-only quoted
- * spans are blanked before DESTRUCTIVE/DANGEROUS/deploy-hazard regexes run,
- * so command PAYLOADS (scripts written via heredoc, commit messages,
- * documentation text describing destructive commands) can no longer trip the
- * guard, while executable constructs ($(), backticks, shell-consumer heredoc
- * bodies) and real quoted path operands stay fully guarded.
- */
-
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -58,7 +7,13 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 
-import { selfMutationDenial, SELF_MUTATION_ALLOWED, SELF_MUTATION_GUIDANCE } from "./lib/self-mutation-guard.ts";
+import {
+	canonicalMutationPath,
+	containsPath,
+	selfMutationDenial,
+	SELF_MUTATION_ALLOWED,
+	SELF_MUTATION_GUIDANCE,
+} from "./lib/self-mutation-guard.ts";
 
 const HOME = os.homedir();
 
@@ -66,6 +21,7 @@ const HOME = os.homedir();
 const PROTECTED_DIRS = [
 	"/",
 	"/root",
+	"/home",
 	"/etc",
 	"/usr",
 	"/bin",
@@ -95,490 +51,970 @@ const PROTECTED_DIRS = [
 	path.join(HOME, ".env"),
 ];
 
-// Destructive command patterns
-const DESTRUCTIVE_PATTERNS = [
-	// Any combined flag containing r (rm -r, rm -rf, rm -fr), --recursive, --force.
-	// WHY: the old class required BOTH r and f in one token, so plain `rm -r dir`
-	// slipped through every guard.
-	/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive|--force)\b/i, // rm -rf, rm -r, rm -f
-	/\brm[ \t]+[^;\n|&]*\*/i, // rm with wildcards
-	/(?:^|[;\n|&()]|\b(?:do|then|else|exec|xargs)\s)\s*(?:(?:sudo|command|env)\s+(?:-[\w-]+\s+)*)?(?:\/[\w./-]+\/)?mkfs(?:\.[\w-]+)?(?=\s|$)/i, // executed formatter, not an inventory word
-	/(?:^|[;\n|&()]|\b(?:do|then|else|exec|xargs)\s)\s*(?:(?:sudo|command|env)\s+(?:-[\w-]+\s+)*)?(?:\/[\w./-]+\/)?fdisk(?=\s|$)/i, // executed partitioner
-	/\bdd\s+.*of=\/dev\b/i, // dd to device
-	// WHY: `\b\/\b` can never match a slash preceded by whitespace (no word
-	// boundary between ' ' and '/'), so `chmod 777 /` was never caught. Require a
-	// whitespace-adjacent slash instead; the protected-path check does the rest.
-	/\bchmod\s+.*\s\//i, // chmod on root/system paths
-	/\bchown\s+.*\s\//i, // chown on root/system paths
-	/\bmv\s+.*\s+\/\s*$/i, // mv to root
-	/\bcp\s+.*\s+\/\s*$/i, // cp to root
-	// find with a destructive action: the {} placeholder of -exec rm (and
-	// find's built-in -delete) is unknowable, so the search ROOTS are what the
-	// protected-path check below validates.
-	/\bfind\s+[^;\n]*\s-exec(?:dir)?\s+rm\b/i, // find … -exec(dir) rm …
-	/\bfind\s+[^;\n]*\s-delete\b/i, // find … -delete
-];
-
-// Dangerous rm patterns (always blocked regardless of directory).
-// PATTERN INDEX CONTRACT: index 0 (absolute-path rm) is the only pattern the
-// ephemeral carve-out in isAlwaysDangerous may relax — see rmTargetsAllEphemeral.
-const DANGEROUS_RM_PATTERNS = [
-	/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\s+[/~]/i, // rm -rf /...
-	/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\s+\./i, // rm -rf .
-	/\brm\s+(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\s+\*/i, // rm -rf *
-];
-
-// Deploy-hazard patterns (compiled from the SSH-git deploy wisdom): operations
-// that destroy remote/working-tree state and cannot be rolled back. Always
-// blocked — the doctrine module says the same thing in prose; here it is code.
-const DEPLOY_HAZARD_PATTERNS = [
-	/\brsync\s+.*(--delete|--del)\b/i, // rsync --delete (prod syncs)
-	/\bgit\s+push\s+.*(-f|--force)\b/i, // force push
-	/\bgit\s+reset\s+--hard\b/i, // discard working tree + history
-	/\bgit\s+clean\s+-[a-zA-Z]*f[a-zA-Z]*d[a-zA-Z]*x/i, // clean -fdx
-	/\bssh\s+.*rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|--recursive)/i, // remote rm -rf
-	/\bgit\s+push\s+.*--delete\b/i, // delete remote branch
-];
-
-function isPathProtected(targetPath: string, cwd: string): boolean {
-	let resolved = path.resolve(cwd, targetPath);
-	// Follow symlinks: a cwd-internal symlink pointing at a protected dir must
-	// not defeat the guard. Nonexistent targets (new files) keep the lexical path.
-	try {
-		resolved = fs.realpathSync(resolved);
-	} catch {
-		// ENOENT or unreadable — lexical resolution is the best we can do.
-	}
-	const normalizedCwd = path.resolve(cwd);
-
-	// Project files under a protected ancestor (e.g. ~/Desktop/...) are allowed.
-	if (
-		resolved === normalizedCwd ||
-		resolved.startsWith(normalizedCwd + path.sep)
-	) {
-		return false;
-	}
-
-	// Ephemeral roots: the canonical system temp locations are never protected
-	// targets — their CONTENT is routine temp-workflow material (mktemp copy
-	// dirs, build scratch). The exact roots (/tmp, /var/tmp) stay guarded so a
-	// blanket wipe of the whole temp dir still blocks, and the bash handler's
-	// absolute-path `rm -rf /...` always-dangerous rule backstops both.
-	if (resolved.startsWith("/tmp/") || resolved.startsWith("/var/tmp/")) {
-		return false;
-	}
-
-	for (const protectedDir of PROTECTED_DIRS) {
-		if (
-			resolved === protectedDir ||
-			resolved.startsWith(protectedDir + path.sep)
-		) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-function isAlwaysDangerous(
-	command: string,
-	targetView: string = command,
-): boolean {
-	for (let i = 0; i < DANGEROUS_RM_PATTERNS.length; i++) {
-		if (!DANGEROUS_RM_PATTERNS[i].test(command)) continue;
-		// Ephemeral carve-out applies ONLY to the absolute-path pattern (index 0,
-		// per the pattern-index contract): cleanup of mktemp-style dirs created in
-		// a PREVIOUS shell invocation can only arrive as a literal /tmp path, so a
-		// rm whose EVERY target resolves strictly beneath /tmp/ or /var/tmp/ is
-		// ordinary temp hygiene, not an always-dangerous wipe. Exact roots and
-		// traversal escapes (/tmp, /tmp/.., /tmp/../etc) stay blocked.
-		if (i === 0 && rmTargetsAllEphemeral(targetView)) continue;
-		return true;
-	}
-	return false;
-}
-
-function matchesDestructivePattern(command: string): boolean {
-	for (const pattern of DESTRUCTIVE_PATTERNS) {
-		if (pattern.test(command)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-/**
- * Shell variable resolution for destructive-command targets.
- *
- * WHY: the old guard blanket-blocked every target containing `$` ("unresolved
- * shell variables can expand to anything — block rather than guess"). That
- * turned the standard mktemp temp-copy workflow into a guaranteed false
- * positive:
- *
- *   E2E=$(mktemp -d /tmp/e2e-XXXXXX)
- *   cp -r . "$E2E/"
- *   rm -rf "$E2E"          ← blocked: "$E2E" treated as possibly-protected
- *
- * Resolution strategy (heuristic, fail-closed):
- *   1. NAME=value assignments are collected from the whole command text
- *      (export/local/readonly/declare prefixes, quoted and $(…) RHSes).
- *   2. An RHS that is an mktemp command substitution classifies the variable
- *      as EPHEMERAL — mktemp creates under $TMPDIR (/tmp by default) unless
- *      its template/-p/--tmpdir argument resolves somewhere non-ephemeral
- *      (e.g. `mktemp -p $HOME/x`), in which case it is UNKNOWN instead.
- *   3. Any other command substitution (`$(…)`, backticks) → UNKNOWN.
- *   4. Otherwise the RHS is a literal that may reference other variables;
- *      references are resolved transitively (depth-capped; cycles → UNKNOWN).
- *   5. Unassigned names with hard conventions: TMPDIR/TMP/TEMP → EPHEMERAL;
- *      HOME → the real home dir; PWD → cwd (honouring the last `cd` seen in
- *      the command). Everything else unassigned → UNKNOWN.
- *   6. Expansion: EPHEMERAL vars become a proxy path under /tmp (never
- *      protected); UNKNOWN vars leave the target unresolvable.
- *   7. Unresolvable targets still block (fail closed — same "block rather
- *      than guess" policy as before), but the reason now says how to fix it.
- *      Resolved targets run the normal protected-path check, so $HOME,
- *      /etc, the project root, etc. stay protected.
+/** Contextual accident prevention; executable isolation remains the hard boundary.
+ * Only operands of recognized mutations are evaluated. This deliberately bounded
+ * shell model never executes substitutions or treats variable names as authority.
  */
+type ShellRisk = {
+	level: "block" | "review";
+	reason: string;
+	target?: string;
+	expanded?: string;
+	resolved: boolean;
+};
+type ShellState = {
+	vars: Map<string, string | undefined>;
+	cwd: string | undefined;
+	environment: NodeJS.ProcessEnv;
+	allocated: Set<string>;
+};
+type ShellToken = { raw: string; operator: boolean };
 
-type VarInfo =
-	| { kind: "ephemeral" }
-	| { kind: "literal"; value: string }
-	| { kind: "unknown" };
-
-interface ShellVarState {
-	/** name -> raw RHS (unquoted); may itself contain $refs or $(…) */
-	assignments: Map<string, string>;
-	/** raw argument of the last `cd` seen ($PWD afterwards reflects it) */
-	lastCd?: string;
-}
-
-// NAME=value / NAME="value" / NAME=$(cmd) / NAME=`cmd`, optionally prefixed
-// with export|readonly|local|declare. The leading character class avoids
-// matching --flag=value and redirections; RHS alternatives match balanced
-// quotes/parens or stop at the first shell separator for bare values.
-const ASSIGNMENT_RE =
-	/(?:^|[\s;(&|])(?:export\s+|readonly\s+|local\s+|declare\s+(?:-[a-zA-Z]+\s+)?)?([A-Za-z_][A-Za-z0-9_]*)=((?:\$\([^)]*\))|(?:`[^`\n]*`)|(?:"[^"\n]*")|(?:'[^'\n]*')|(?:[^\s;|&]*))/g;
-
-// A standalone mktemp invocation — not part of a larger word such as
-// mktemp-utils or /usr/bin/mktemp.d.
-const MKTEMP_RE = /(?<![\w./-])mktemp(?![\w-])/;
-
-/** Ephemeral-by-convention environment variables (always temp locations). */
-const EPHEMERAL_ENV_VARS = new Set(["TMPDIR", "TMP", "TEMP"]);
-
-function collectShellAssignments(command: string): ShellVarState {
-	const state: ShellVarState = { assignments: new Map() };
-	for (const match of command.matchAll(ASSIGNMENT_RE)) {
-		let rhs = match[2];
-		if (rhs.startsWith('"') || rhs.startsWith("'")) rhs = rhs.slice(1, -1);
-		if (rhs === "") continue; // empty value resolves to nothing useful
-		state.assignments.set(match[1], rhs);
-	}
-	// Track the last `cd <target>`: $PWD afterwards reflects it, so a target
-	// like "$PWD/x" must resolve against the cd destination, not the tool cwd.
-	for (const m of command.matchAll(
-		/(?:^|[\s;&|])cd\s+("([^"\n]*)"|'([^'\n]*)'|(\S+))/g,
-	)) {
-		state.lastCd = (m[2] ?? m[3] ?? m[4] ?? "").replace(/^["']|["']$/g, "");
-	}
-	if (
-		state.lastCd === undefined &&
-		/(?:^|[\s;&|])cd\s*(?=$|[;|&\n])/m.test(command)
-	) {
-		state.lastCd = "~"; // bare `cd` goes home
-	}
-	return state;
-}
-
-function classifyRhs(
-	rhs: string,
-	state: ShellVarState,
-	cwd: string,
-	depth: number,
-): VarInfo {
-	if (rhs.includes("$(") || rhs.includes("`")) {
-		// Command substitution — only mktemp (and bare pwd) results are classifiable.
-		const body = rhs
-			.replace(/^\$\(/, "")
-			.replace(/\)$/, "")
-			.replace(/`/g, "")
-			.trim();
-		if (body === "pwd") return { kind: "literal", value: cwd };
-		if (MKTEMP_RE.test(rhs) && mktempCreatesEphemeral(rhs, state, cwd, depth)) {
-			return { kind: "ephemeral" };
-		}
-		return { kind: "unknown" };
-	}
-	return { kind: "literal", value: rhs };
-}
-
-/**
- * Is the mktemp invocation inside `rhs` guaranteed to create an ephemeral
- * location? mktemp defaults to $TMPDIR (/tmp); an explicit template argument
- * or -p/--tmpdir DIR must itself resolve to /tmp, /var/tmp, or a relative
- * (cwd-scoped) path — anything else (e.g. `mktemp -p $HOME/x`) means we
- * cannot prove ephemerality.
- */
-function mktempCreatesEphemeral(
-	rhs: string,
-	state: ShellVarState,
-	cwd: string,
-	depth: number,
-): boolean {
-	const idx = rhs.search(MKTEMP_RE);
-	if (idx < 0) return false;
-	const argText = rhs
-		.slice(idx + "mktemp".length)
-		// Stop the argument scan at substitution/quote terminators and separators.
-		.replace(/[)'`]/g, " ")
-		.split(/[;&|]/)[0];
-	const toks = argText.trim().split(/\s+/).filter(Boolean);
-	const locationOk = (p: string | undefined): boolean => {
-		if (p === undefined || p === "") return true; // default $TMPDIR (=/tmp)
-		const expanded = expandVars(
-			p.replace(/^["']|["']$/g, ""), // a leading quote must not hide an absolute path
-			state,
-			cwd,
-			depth + 1,
-		);
-		if (expanded === undefined) return false; // cannot prove ephemeral
-		if (
-			expanded === "/tmp" ||
-			expanded === "/var/tmp" ||
-			expanded.startsWith("/tmp/") ||
-			expanded.startsWith("/var/tmp/")
-		) {
-			return true;
-		}
-		// Relative template → created under cwd (cwd-scoped writes are allowed anyway).
-		return !expanded.startsWith("/") && !expanded.startsWith("~");
+function shellTokens(source: string): ShellToken[] {
+	const tokens: ShellToken[] = [];
+	let word = "",
+		quote = "",
+		substitution = 0;
+	const flush = () => {
+		if (word) tokens.push({ raw: word, operator: false });
+		word = "";
 	};
-	for (let i = 0; i < toks.length; i++) {
-		const tok = toks[i];
-		if (tok === "-p" || tok === "--tmpdir") return locationOk(toks[i + 1]);
-		if (tok.startsWith("--tmpdir="))
-			return locationOk(tok.slice("--tmpdir=".length));
-		if (!tok.startsWith("-") && !locationOk(tok)) return false; // template argument
+	for (let i = 0; i < source.length; i++) {
+		const c = source[i];
+		if (c === "\\" && quote !== "'") {
+			word += c + (source[++i] ?? "");
+			continue;
+		}
+		if (quote) {
+			word += c;
+			if (c === quote) quote = "";
+			continue;
+		}
+		if (c === "'" || c === '"' || c === "`") {
+			quote = c;
+			word += c;
+			continue;
+		}
+		if (c === "$" && source[i + 1] === "(") {
+			substitution++;
+			word += "$(";
+			i++;
+			continue;
+		}
+		if (substitution) {
+			if (c === "(") substitution++;
+			if (c === ")") substitution--;
+			word += c;
+			continue;
+		}
+		if (c === "#" && !word) {
+			while (i < source.length && source[i] !== "\n") i++;
+			i--;
+			continue;
+		}
+		if (c === "\n" || /[;|&()<>]/.test(c)) {
+			flush();
+			let raw = c;
+			if (source[i + 1] === c && /[|&<>]/.test(c)) raw += source[++i];
+			tokens.push({ raw, operator: true });
+			continue;
+		}
+		if (/\s/.test(c)) {
+			flush();
+			continue;
+		}
+		word += c;
 	}
-	return true;
+	flush();
+	return tokens;
 }
 
-/** Resolve one variable name against command assignments + known conventions. */
-function lookupVar(
-	name: string,
-	state: ShellVarState,
-	cwd: string,
-	depth: number,
-): VarInfo | undefined {
-	if (state.assignments.has(name)) {
-		return classifyRhs(state.assignments.get(name) as string, state, cwd, depth);
+function shellSubstitutions(word: string): string[] {
+	const mask = word.split("");
+	let quote = "";
+	for (let i = 0; i < word.length; i++) {
+		if (word[i] === "\\" && quote !== "'") {
+			mask[i] = " ";
+			if (i + 1 < mask.length) mask[++i] = " ";
+			continue;
+		}
+		if (word[i] === "'" && quote !== '"') {
+			quote = quote ? "" : "'";
+			mask[i] = " ";
+			continue;
+		}
+		if (quote === "'") {
+			mask[i] = " ";
+			continue;
+		}
+		if (word[i] === '"') quote = quote ? "" : '"';
 	}
-	if (EPHEMERAL_ENV_VARS.has(name)) return { kind: "ephemeral" };
-	if (name === "HOME") return { kind: "literal", value: HOME };
-	if (name === "PWD") {
-		if (state.lastCd === undefined) return { kind: "literal", value: cwd };
-		const cd = expandVars(state.lastCd, state, cwd, depth + 1);
-		return cd === undefined
-			? { kind: "unknown" }
-			: { kind: "literal", value: cd };
-	}
-	return undefined; // unassigned, unknown → caller fails closed
+	return [...mask.join("").matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)].map((m) =>
+		word.slice(
+			m.index + (m[1] === undefined ? 1 : 2),
+			m.index + m[0].length - 1,
+		),
+	);
 }
 
-/**
- * Expand $NAME / ${NAME} references in `text`. Returns undefined when any
- * reference is unknown/unresolvable (caller must then fail closed) or when
- * the result still contains shell syntax we do not model ($?, $(, backticks,
- * ${VAR:-default} …).
- */
-function expandVars(
-	text: string,
-	state: ShellVarState,
-	cwd: string,
+function shellValue(
+	raw: string,
+	state: ShellState,
 	depth = 0,
 ): string | undefined {
-	if (depth > 8) return undefined; // assignment cycle / runaway nesting
-	let out = "";
-	let last = 0;
-	for (const m of text.matchAll(
-		/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
-	)) {
-		const name = m[1] ?? m[2];
-		const info = lookupVar(name, state, cwd, depth);
-		let replacement: string | undefined;
-		if (info?.kind === "ephemeral") {
-			replacement = `/tmp/.guard-resolved-${name}`;
-		} else if (info?.kind === "literal") {
-			replacement = expandVars(info.value, state, cwd, depth + 1);
+	if (depth > 8) return;
+	let out = "",
+		quote = "";
+	const variable = (name: string) =>
+		state.vars.has(name)
+			? state.vars.get(name)
+			: name === "PWD"
+				? state.cwd
+				: state.environment[name];
+	for (let i = 0; i < raw.length; i++) {
+		const c = raw[i];
+		if (c === "'" && quote !== '"') {
+			quote = quote ? "" : "'";
+			continue;
 		}
-		if (replacement === undefined) return undefined;
-		out += text.slice(last, m.index) + replacement;
-		last = m.index + m[0].length;
+		if (quote === "'") {
+			out += c;
+			continue;
+		}
+		if (c === '"') {
+			quote = quote ? "" : '"';
+			continue;
+		}
+		if (c === "\\") {
+			const next = raw[++i];
+			if (next === undefined) return;
+			if (next !== "\n")
+				out += quote === '"' && !/[\\"$`]/.test(next) ? "\\" + next : next;
+			continue;
+		}
+		if (c === "`") {
+			const end = raw.indexOf("`", i + 1);
+			if (end < 0) return;
+			const value = substitutionValue(raw.slice(i + 1, end), state, depth + 1);
+			if (value === undefined) return;
+			out += value;
+			i = end;
+			continue;
+		}
+		if (c === "$" && raw[i + 1] === "(") {
+			// Only a complete substitution is modeled, never a command that happens
+			// to mention mktemp (e.g. $(mktemp -d; echo /)).
+			const end = raw.indexOf(")", i + 2);
+			if (end < 0) return;
+			const value = substitutionValue(raw.slice(i + 2, end), state, depth + 1);
+			if (value === undefined) return;
+			out += value;
+			i = end;
+			continue;
+		}
+		if (c === "$") {
+			const tail = raw.slice(i);
+			const match =
+				/^\$([A-Za-z_]\w*)|^\$\{([A-Za-z_]\w*)(?:(:-|-|:\?|\?)([^{}]*))?\}/.exec(
+					tail,
+				);
+			if (!match) return;
+			let value = variable(match[1] ?? match[2]);
+			const missing =
+				value === undefined || (match[3]?.startsWith(":") && value === "");
+			if (missing && match[3]?.endsWith("-"))
+				value = shellValue(match[4], state, depth + 1);
+			if (missing && match[3]?.endsWith("?")) return; // shell aborts; no inferred target
+			if (value === undefined) return;
+			// Unquoted expansion can produce several operands or inject rm options.
+			if (!quote && /\s/.test(value)) return;
+			out += value;
+			i += match[0].length - 1;
+			continue;
+		}
+		out += c;
 	}
-	out += text.slice(last);
-	if (out.includes("$") || out.includes("`")) return undefined;
-	// Tilde expansion at the start only (shell semantics).
-	if (out === "~" || out.startsWith("~/")) out = HOME + out.slice(1);
+	if (quote) return;
+	if (raw.startsWith("~")) {
+		if (!(raw === "~" || raw.startsWith("~/"))) return;
+		out = HOME + out.slice(1);
+	}
 	return out;
 }
 
-function extractPathsFromCommand(command: string): string[] {
-	const paths: string[] = [];
-
-	// Drop redirections first: targets like /dev/null are redirect destinations,
-	// not operands, and treating them as such false-blocks `rm -rf build/ > /dev/null`.
-	const stripped = command
-		.replace(/\s\d*>{1,2}\s*\S+/g, "")
-		.replace(/\s\d*<\s*\S+/g, "");
-
-	const parts = stripped.split(/\s+/);
-	for (let i = 1; i < parts.length; i++) {
-		const part = parts[i].replace(/[;|&><]+$/g, "").replace(/^["']|["']$/g, "");
-		if (!part || part.startsWith("-")) continue;
-
-		// WHY: NAME=… tokens are definitions (env prefixes, TMP=$(mktemp -d)),
-		// not targets. Treating them as paths made the assignment line itself a
-		// phantom "unresolved variable" target — e.g. `E2E=$(mktemp -d)` plus an
-		// rm elsewhere in the same script blocked the whole script.
-		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(part)) continue;
-
-		paths.push(part);
-	}
-
-	return paths;
-}
-
-/**
- * Blank out assignment spans (LHS + RHS) so a target list built from the
- * command cannot contain phantom tokens from an assignment's own RHS — e.g.
- * the `/tmp/e2e-XXXXXX)` leftover of `T=$(mktemp -d /tmp/e2e-XXXXXX)`.
- */
-function stripAssignments(command: string): string {
-	return command.replace(ASSIGNMENT_RE, (m) => " ".repeat(m.length));
-}
-
-/**
- * True when EVERY rm target in `command` resolves strictly beneath /tmp/ or
- * /var/tmp/ (the ephemeral carve-out). Exact roots and normalized escapes are
- * not ephemeral: /tmp, /var/tmp, /tmp/.., /tmp/../etc all stay blocked.
- */
-function rmTargetsAllEphemeral(command: string): boolean {
-	let found = false;
-	for (const m of command.matchAll(
-		/\brm\s+(?:(?:-[a-zA-Z]+|--recursive|--force)\s+)*([^\n;|&]*)/g,
-	)) {
-		const args = m[1]
-			.split(/\s+/)
-			.map((a) => a.replace(/^["']|["']$/g, ""))
-			.filter(Boolean);
-		if (args.length === 0) return false; // `rm -rf` bare — conservative
-		for (const arg of args) {
-			if (arg.includes("$")) return false; // unresolved variable → keep blocked
-			const resolved = path.resolve(arg);
-			if (resolved === "/tmp" || resolved === "/var/tmp") return false;
-			if (!resolved.startsWith("/tmp/") && !resolved.startsWith("/var/tmp/")) {
-				return false;
-			}
-		}
-		found = true;
-	}
-	return found;
-}
-
-/**
- * Would a glob-bearing target's EXPANSION reach a protected tree? The literal
- * pattern (e.g. /home/*) is neither an existing path nor lexically under a
- * protected dir, but the shell expands it into real entries — evaluate the
- * static root (text before the first glob metachar, minus its partial
- * segment) and block when a protected directory sits AT or BENEATH that root.
- * This is a conservative containment check, not a shell parser.
- */
-function globRootProtected(target: string, cwd: string): boolean {
-	const cut = target.search(/[*?]/);
-	if (cut < 0) return false;
-	let t = target;
-	if (t === "~" || t.startsWith("~/")) t = HOME + t.slice(1); // tilde expansion
-	const prefix = t.slice(0, cut);
-	const segIdx = prefix.lastIndexOf("/");
-	let root = segIdx >= 0 ? prefix.slice(0, segIdx) : "";
-	if (t.startsWith("/") && root === "") root = "/"; // '/*' globs the fs root itself
-	if (root === "") return false; // pure-relative glob → children of cwd (permitted)
-	let resolved = path.resolve(cwd, root);
-	try {
-		resolved = fs.realpathSync(resolved);
-	} catch {
-		/* nonexistent root — lexical resolution is the best we can do */
-	}
-	if (resolved.startsWith("/tmp/") || resolved.startsWith("/var/tmp/")) {
-		return false; // ephemeral subtree mirrors isPathProtected
-	}
-	// Glob roots inside the project cwd are ordinary cwd-scoped work (same
-	// carve-out as isPathProtected: project files under a protected ancestor
-	// like ~/Desktop stay allowed).
-	const normalizedCwd = path.resolve(cwd);
+function substitutionValue(
+	body: string,
+	state: ShellState,
+	depth: number,
+): string | undefined {
+	const tokens = shellTokens(body);
+	if (!tokens.length || tokens.some((t) => t.operator)) return;
+	const words = tokens.map((t) => shellValue(t.raw, state, depth));
+	if (words.some((w) => w === undefined)) return;
+	const args = words as string[],
+		command = path.basename(args.shift()!);
 	if (
-		resolved === normalizedCwd ||
-		resolved.startsWith(normalizedCwd + path.sep)
-	) {
-		return false;
-	}
-	for (const p of PROTECTED_DIRS) {
-		if (
-			resolved === p ||
-			resolved.startsWith(p + path.sep) ||
-			p.startsWith(resolved + path.sep) // glob root is an ancestor of a protected dir
-		) {
-			return true;
+		command === "pwd" &&
+		(!args.length || (args.length === 1 && ["-P", "-L"].includes(args[0])))
+	)
+		return state.cwd;
+	if (command !== "mktemp") return;
+	let base: string | undefined,
+		template: string | undefined,
+		useTemp = false;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (["-d", "--directory", "-q", "--quiet"].includes(arg)) continue;
+		if (arg === "-p") {
+			base = args[++i];
+			if (!base) return;
+			useTemp = true;
+			continue;
 		}
+		if (arg === "--tmpdir") {
+			base = state.vars.has("TMPDIR")
+				? state.vars.get("TMPDIR")
+				: state.environment.TMPDIR || "/tmp";
+			useTemp = true;
+			continue;
+		}
+		if (arg.startsWith("--tmpdir=")) {
+			base = arg.slice(9);
+			useTemp = true;
+			continue;
+		}
+		if (arg === "-t") {
+			useTemp = true;
+			continue;
+		}
+		if (arg.startsWith("-")) return; // includes -u: no allocated temporary path
+		if (template !== undefined) return;
+		template = arg;
 	}
-	return false;
+	// mktemp's real location, including the actual TMPDIR, never a /tmp proxy
+	// merely because a variable is named TEMP. Preserve suffix/traversal checks.
+	if (!template || useTemp)
+		base ??= state.vars.has("TMPDIR")
+			? state.vars.get("TMPDIR")
+			: state.environment.TMPDIR || "/tmp";
+	if (base === undefined && (!template || useTemp)) return;
+	const pattern = template ?? "tmp.XXXXXXXXXX";
+	if (!/X{3,}/.test(pattern)) return;
+	if (useTemp && path.isAbsolute(pattern)) return;
+	const location = base === undefined ? pattern : base + "/" + pattern;
+	if (!state.cwd && !path.isAbsolute(location)) return;
+	try {
+		const result = canonicalMutationPath(
+			location.replace(/X{3,}/g, "pi-allocated-temp"),
+			state.cwd,
+		);
+		state.allocated.add(result);
+		return result;
+	} catch {
+		return;
+	}
 }
 
-/**
- * Find's search roots: every leading non-option path argument between the
- * `find` word and its first destructive action (-exec/dir rm or -delete).
- * Options never precede the root paths, so leading non-`-` tokens are the
- * start points; none means find's implicit `.`.
- */
-function findStartPaths(segment: string): string[] {
-	const tokens = segment.split(/\s+/).filter(Boolean);
-	const starts: string[] = [];
-	for (const tok of tokens) {
-		if (tok.startsWith("-")) break;
-		starts.push(tok.replace(/^["']|["']$/g, ""));
+function isPathProtected(
+	targetPath: string,
+	cwd: string,
+	followLeaf = true,
+): boolean {
+	let resolved: string, normalizedCwd: string;
+	try {
+		resolved = canonicalMutationPath(
+			targetPath.replace(/^~(?=\/|$)/, HOME),
+			cwd,
+			followLeaf,
+		);
+		normalizedCwd = canonicalMutationPath(cwd);
+	} catch {
+		return true;
 	}
-	return starts.length > 0 ? starts : ["."];
+	// A launch at / or home never grants those whole trees as destructive scope.
+	if ([...PROTECTED_DIRS, "/tmp", "/var/tmp"].includes(resolved)) return true;
+	if (!scopeTooBroad(normalizedCwd) && containsPath(normalizedCwd, resolved))
+		return false;
+	if (resolved.startsWith("/tmp/") || resolved.startsWith("/var/tmp/"))
+		return false;
+	return PROTECTED_DIRS.some(
+		(root) => root !== "/" && containsPath(root, resolved),
+	);
 }
 
-/**
- * Blank non-executable DATA regions of a shell command so destructive-pattern
- * matching only sees shell syntax, while preserving length 1:1 (blanked chars
- * become spaces) so the two views stay index-aligned.
- *
- *   mode="gate":    for DESTRUCTIVE / DANGEROUS / deploy-hazard PATTERN GATING.
- *                   Quoted spans are data → blanked, EXCEPT double-quoted
- *                   spans containing $ or ` (those constructs execute/expand
- *                   even quoted). Heredoc bodies per the examinability rules
- *                   below.
- *   mode="targets": for target extraction / variable collection. Quoted spans
- *                   are kept when they can be a real path operand — containing
- *                   $ or ` (expands at runtime) or starting with / or ~ (an
- *                   absolute/tilde path literal) — and blanked otherwise, so
- *                   data payloads (commit messages, heredoc prose) cannot
- *                   become phantom targets while quoted real targets still
- *                   resolve.
- *
- * Heredoc examinability (both modes): a heredoc fed to a SHELL interpreter
- * (sh/bash/zsh/ksh/dash/ash/su — its body is executed by that shell) stays
- * fully examinable regardless of delimiter quoting; quoted-delimiter bodies
- * (<<'EOF') are literal data → blanked; unquoted bodies keep only lines that
- * contain a command substitution ($( … ) or backticks — the parent shell
- * expands those before feeding stdin; a bare $VAR only interpolates data).
- *
- * Single-quoted spans are shell-literal, so blanking them can never hide an
- * executable construct; unmatched quotes blank to end-of-text, which mirrors
- * shell semantics (an unterminated string makes the whole rest data).
- */
+function assessShellMutation(
+	command: string,
+	cwd: string,
+	environment = process.env,
+	depth = 0,
+): ShellRisk | undefined {
+	if (depth > 5)
+		return {
+			level: "review",
+			reason:
+				"Nested shell mutation exceeds the bounded analyzer; split the command",
+			resolved: false,
+		};
+	const state: ShellState = {
+		vars: new Map(),
+		cwd,
+		environment,
+		allocated: new Set(),
+	};
+	const exported = new Set(Object.keys(environment));
+	const branches: Array<{
+		vars: Map<string, string | undefined>;
+		cwd: string | undefined;
+	}> = [];
+	let conditionalCd: string | undefined;
+	let mutationCwd: string | undefined = cwd;
+	let risk: ShellRisk | undefined;
+	const note = (next: ShellRisk | undefined) => {
+		if (next && (!risk || next.level === "block")) risk = next;
+	};
+	const uncertain = (
+		target: string,
+		reason = "unresolved shell variable or dynamic target",
+		resolved = false,
+	) => note({ level: "review", target, resolved, reason });
+	const check = (
+		raw: string,
+		recursive = false,
+		broad = false,
+		unlinkLeaf = false,
+	) => {
+		const expanded = shellValue(raw, state);
+		if (expanded === undefined) {
+			uncertain(raw);
+			return;
+		}
+		if (!expanded) return; // empty quoted operand is an rm error, not '/'
+		if (!mutationCwd && !path.isAbsolute(expanded)) {
+			uncertain(raw, "working directory is not known at this operation");
+			return;
+		}
+		// Detect unquoted glob syntax, including variable-produced patterns. Quoted
+		// literal '*' filenames are ordinary files. Braces are ambiguous, not paths.
+		const glob =
+			/[*?[]/.test(expanded) && !/^'(?:[^']*)'$|^"(?:[^"$]*)"$/.test(raw);
+		const cut = glob ? expanded.search(/[*?[]/) : -1;
+		const prefix = cut < 0 ? expanded : expanded.slice(0, cut);
+		const target =
+			cut < 0
+				? prefix
+				: prefix.includes("/")
+					? prefix.slice(0, prefix.lastIndexOf("/") + 1)
+					: ".";
+		const followLeaf = !unlinkLeaf || glob || expanded.endsWith("/");
+		if (/[{}]/.test(expanded)) {
+			uncertain(raw, "brace-expanded mutation needs explicit target paths");
+			return;
+		}
+		let physical: string;
+		try {
+			physical = canonicalMutationPath(target, mutationCwd, followLeaf);
+		} catch {
+			uncertain(raw, "mutation target cannot be resolved safely");
+			return;
+		}
+		const harnessDenial = selfMutationDenial(
+			physical,
+			state.cwd ?? cwd,
+			followLeaf,
+		);
+		if (harnessDenial || isPathProtected(physical, cwd, followLeaf)) {
+			note({
+				level: "block",
+				target: raw,
+				expanded: physical,
+				resolved: true,
+				reason: harnessDenial ?? "Cannot operate on protected path",
+			});
+			return;
+		}
+		let workspace: string;
+		try {
+			workspace = canonicalMutationPath(cwd);
+		} catch {
+			uncertain(raw);
+			return;
+		}
+		if (
+			(recursive || broad) &&
+			((cut < 0 && containsPath(physical, workspace)) ||
+				(glob &&
+					/(?:^|\/)\*$/.test(expanded) &&
+					containsPath(physical, workspace)))
+		)
+			note({
+				level: "review",
+				target: raw,
+				expanded: physical,
+				resolved: true,
+				reason:
+					"This operation replaces or removes a whole working directory; select a narrower file set or review the exact command",
+			});
+	};
+	const processSegment = (tokens: ShellToken[]) => {
+		conditionalCd = undefined;
+		mutationCwd = state.cwd;
+		if (!tokens.length) return;
+		const raw = tokens.map((t) => t.raw);
+		// Inspect executed substitutions even when their enclosing command is read-only.
+		for (const word of raw) {
+			for (const body of shellSubstitutions(word))
+				note(
+					assessShellMutation(
+						body,
+						state.cwd ?? cwd,
+						{ ...environment, ...Object.fromEntries(state.vars) },
+						depth + 1,
+					),
+				);
+		}
+		const args: string[] = [],
+			redirects: string[] = [];
+		for (let i = 0; i < tokens.length; i++) {
+			if (tokens[i].operator && /^[<>]/.test(tokens[i].raw)) {
+				const op = tokens[i].raw,
+					operand = tokens[++i]?.raw;
+				if (operand && [">", ">>"].includes(op)) {
+					if (args.length && /^\d+$/.test(args.at(-1)!)) args.pop();
+					if (operand !== "/dev/null" && !/^\d+$/.test(operand))
+						redirects.push(operand);
+				}
+			} else args.push(tokens[i].raw);
+		}
+		for (const dest of redirects) check(dest);
+		let i = 0;
+		if (["then", "do", "else", "!"].includes(args[i])) i++;
+		const prefixVariables = new Map(state.vars);
+		const assignments: Array<[string, string | undefined]> = [];
+		const exportsVariables =
+			args[i] === "export" ||
+			(args[i] === "declare" && args[i + 1]?.includes("x"));
+		if (["export", "local", "readonly", "declare"].includes(args[i])) i++;
+		while (i < args.length) {
+			if (/^-[a-zA-Z]+$/.test(args[i]) && assignments.length === 0 && i > 0) {
+				i++;
+				continue;
+			}
+			const m = /^([A-Za-z_]\w*)=([\s\S]*)$/.exec(args[i]);
+			if (!m) break;
+			const value = shellValue(m[2], state);
+			assignments.push([m[1], value]);
+			state.vars.set(m[1], value);
+			i++;
+		}
+		if (i === args.length) {
+			for (const [key, value] of assignments) {
+				state.vars.set(key, value);
+				if (exportsVariables) exported.add(key);
+			}
+			return;
+		}
+		state.vars = prefixVariables;
+		if (exportsVariables && !assignments.length) {
+			for (const key of args.slice(i))
+				if (/^[A-Za-z_]\w*$/.test(key)) exported.add(key);
+			return;
+		}
+		let childEnvironment: NodeJS.ProcessEnv = {
+			...environment,
+			...Object.fromEntries(
+				[...state.vars].filter(([key]) => exported.has(key)),
+			),
+			...Object.fromEntries(assignments),
+		};
+		let childCwd = state.cwd;
+		let name = path.basename(shellValue(args[i++], state) ?? "");
+		while (
+			[
+				"command",
+				"exec",
+				"sudo",
+				"env",
+				"nohup",
+				"timeout",
+				"nice",
+				"stdbuf",
+			].includes(name)
+		) {
+			while (
+				i < args.length &&
+				(args[i].startsWith("-") || /^[A-Za-z_]\w*=/.test(args[i]))
+			) {
+				const option = args[i++];
+				if (name === "env") {
+					const assignment = /^([A-Za-z_]\w*)=(.*)$/s.exec(option);
+					if (assignment)
+						childEnvironment[assignment[1]] = shellValue(assignment[2], state);
+					if (option === "-i" || option === "--ignore-environment")
+						childEnvironment = {};
+					if (option === "-u" || option === "--unset")
+						delete childEnvironment[args[i]];
+					if (option.startsWith("--unset="))
+						delete childEnvironment[option.slice(8)];
+					if (option === "-S" || option === "--split-string") {
+						const script = shellValue(args[i++] ?? "", state);
+						if (script === undefined)
+							uncertain("env -S", "Split command is unresolved");
+						else
+							note(
+								assessShellMutation(
+									[script, ...args.slice(i)].join(" "),
+									childCwd ?? cwd,
+									childEnvironment,
+									depth + 1,
+								),
+							);
+						return;
+					}
+					if (option.startsWith("--chdir=")) {
+						const dest = shellValue(option.slice(8), state);
+						try {
+							childCwd =
+								dest !== undefined
+									? canonicalMutationPath(dest, state.cwd)
+									: undefined;
+						} catch {
+							childCwd = undefined;
+						}
+					}
+					if (option === "-C" || option === "--chdir") {
+						const dest = shellValue(args[i] ?? "", state);
+						try {
+							childCwd =
+								dest !== undefined
+									? canonicalMutationPath(dest, state.cwd)
+									: undefined;
+						} catch {
+							childCwd = undefined;
+						}
+					}
+				}
+				if (
+					(name === "sudo" &&
+						["-u", "-g", "-h", "-p", "-C", "-D", "-R"].includes(option)) ||
+					(name === "env" &&
+						["-u", "--unset", "-C", "--chdir"].includes(option)) ||
+					(name === "nice" && option === "-n") ||
+					(name === "timeout" && ["-s", "-k"].includes(option))
+				)
+					i++;
+			}
+			if (name === "timeout") i++;
+			name = path.basename(shellValue(args[i++] ?? "", state) ?? "");
+		}
+		mutationCwd = childCwd;
+		const operands = args.slice(i),
+			values = operands.map((arg) => shellValue(arg, state));
+		if (name === "cd") {
+			const dest = shellValue(
+				operands.find((a) => a !== "--" && a !== "-P" && a !== "-L") ?? "~",
+				state,
+			);
+			try {
+				const physical =
+					dest !== undefined && state.cwd
+						? canonicalMutationPath(dest, state.cwd)
+						: undefined;
+				conditionalCd = physical;
+				state.cwd =
+					physical &&
+					(state.allocated.has(physical) || fs.statSync(physical).isDirectory())
+						? physical
+						: undefined;
+			} catch {
+				state.cwd = undefined;
+			}
+			return;
+		}
+		if (name === "unset") {
+			for (const key of operands) state.vars.set(key, undefined);
+			return;
+		}
+		if (
+			name === "xargs" &&
+			values.some((v) =>
+				[
+					"rm",
+					"rmdir",
+					"shred",
+					"mv",
+					"cp",
+					"sed",
+					"perl",
+					"sh",
+					"bash",
+				].includes(path.basename(v ?? "")),
+			)
+		) {
+			uncertain(
+				"xargs",
+				"Mutation operands arrive from stdin; use scoped find -exec or preview explicit paths",
+			);
+			return;
+		}
+		if (["fi", "done", "esac"].includes(name)) {
+			const before = branches.pop();
+			if (before) {
+				for (const key of new Set([
+					...state.vars.keys(),
+					...before.vars.keys(),
+				]))
+					if (state.vars.get(key) !== before.vars.get(key))
+						state.vars.set(key, undefined);
+				if (state.cwd !== before.cwd) state.cwd = undefined;
+			}
+			return;
+		}
+		if (
+			[
+				"for",
+				"while",
+				"until",
+				"if",
+				"case",
+				"eval",
+				"source",
+				".",
+				"read",
+			].includes(name)
+		) {
+			if (["for", "while", "until", "if", "case"].includes(name))
+				branches.push({ vars: new Map(state.vars), cwd: state.cwd });
+			if (["if", "while", "until"].includes(name))
+				note(
+					assessShellMutation(
+						operands.join(" "),
+						state.cwd ?? cwd,
+						{ ...environment, ...Object.fromEntries(state.vars) },
+						depth + 1,
+					),
+				);
+			// No inference of branch or sourced assignments; dependent targets need review.
+			for (const key of state.vars.keys()) state.vars.set(key, undefined);
+			if (name === "for" || name === "read")
+				for (const key of operands)
+					if (/^[A-Za-z_]\w*$/.test(key)) state.vars.set(key, undefined);
+			return;
+		}
+		if (/^(?:bash|sh|dash|zsh|ksh)$/.test(name)) {
+			const option = values.findIndex(
+				(v) => v !== undefined && /^-[a-z]*c[a-z]*$/.test(v),
+			);
+			if (option >= 0) {
+				const script = values[option + 1];
+				if (script !== undefined)
+					note(
+						assessShellMutation(
+							script,
+							childCwd ?? cwd,
+							childEnvironment,
+							depth + 1,
+						),
+					);
+			}
+			return;
+		}
+		// Remote/state-wide operations are reviewable, not rejected because a regex
+		// sees '--force' inside --force-with-lease or '--delete' beside --dry-run.
+		if (name === "git") {
+			let start = 0;
+			while (start < values.length && values[start]?.startsWith("-")) {
+				if (["-C", "-c", "--git-dir", "--work-tree"].includes(values[start]!))
+					start++;
+				start++;
+			}
+			const verb = values[start],
+				opts = values.slice(start + 1);
+			const has = (...flags: string[]) =>
+				opts.some((v) => v !== undefined && flags.includes(v));
+			if (
+				verb === "push" &&
+				!has("--dry-run", "-n") &&
+				(has("--force", "-f", "--delete", "-d", "--mirror") ||
+					opts.some((v) => v?.startsWith("+") || v?.startsWith(":")))
+			)
+				uncertain(
+					"git push",
+					"Remote history or refs would be overwritten or removed; review the exact command",
+					true,
+				);
+			if (
+				(verb === "reset" && has("--hard")) ||
+				(verb === "clean" &&
+					!has("--dry-run", "-n") &&
+					opts.some((v) => /^-[a-z]*f/.test(v ?? "")))
+			)
+				uncertain(
+					"git " + verb,
+					"Working-tree data would be discarded; preview or review the exact command",
+					true,
+				);
+			return;
+		}
+		if (name === "rsync") {
+			if (
+				!values.some(
+					(v) => v === "--dry-run" || /^-[a-zA-Z]*n[a-zA-Z]*$/.test(v ?? ""),
+				) &&
+				values.some((v) => /^--(?:delete(?:-.+)?|del)$/.test(v ?? ""))
+			)
+				uncertain(
+					"rsync",
+					"Destination files absent from the source would be deleted; use --dry-run to review",
+					true,
+				);
+			return;
+		}
+		if (name === "ssh") {
+			const tail = values.filter((v): v is string => v !== undefined).join(" ");
+			if (/\b(?:rm|mkfs|dd|shred)\b/.test(tail))
+				uncertain(
+					"ssh",
+					"Remote mutation has no verified local filesystem scope; review the remote command",
+				);
+			return;
+		}
+		if (
+			/^mkfs(?:\.|$)/.test(name) ||
+			["fdisk", "sfdisk", "parted"].includes(name)
+		) {
+			if (
+				!values.some((v) =>
+					["--help", "--version", "-l", "--list"].includes(v ?? ""),
+				)
+			)
+				note({
+					level: "block",
+					reason:
+						"Device formatting or partition mutation requires a separate operator workflow",
+					target: name,
+					resolved: true,
+				});
+			return;
+		}
+		if (name === "find") {
+			const destructive =
+				values.some((v) =>
+					["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(v ?? ""),
+				) &&
+				(values.includes("-delete") ||
+					values.some((v) =>
+						[
+							"rm",
+							"rmdir",
+							"shred",
+							"chmod",
+							"chown",
+							"mv",
+							"cp",
+							"sed",
+							"perl",
+							"sh",
+							"bash",
+						].includes(path.basename(v ?? "")),
+					));
+			if (!destructive) return;
+			const roots: string[] = [];
+			let at = 0;
+			while (["-H", "-L", "-P"].includes(values[at] ?? "")) at++;
+			for (
+				;
+				at < operands.length &&
+				!operands[at].startsWith("-") &&
+				operands[at] !== "(";
+				at++
+			)
+				roots.push(operands[at]);
+			for (const root of roots.length ? roots : ["."])
+				check(
+					root,
+					!values.some((v) =>
+						["-name", "-iname", "-path", "-regex"].includes(v ?? ""),
+					),
+					false,
+				);
+			// -L traverses links inside a safe root. Do not pretend root checks cover it.
+			if (values.includes("-L"))
+				uncertain(
+					"find -L",
+					"Destructive find follows descendant symlinks; use explicit paths or avoid -L",
+				);
+			return;
+		}
+		if (name === "dd") {
+			for (const arg of operands)
+				if (arg.startsWith("of=")) check(arg.slice(3));
+			return;
+		}
+		if (
+			![
+				"rm",
+				"rmdir",
+				"unlink",
+				"shred",
+				"mv",
+				"cp",
+				"install",
+				"chmod",
+				"chown",
+				"chgrp",
+				"truncate",
+				"tee",
+				"sed",
+				"perl",
+			].includes(name)
+		)
+			return;
+		const optionValues = values.slice(
+			0,
+			values.includes("--") ? values.indexOf("--") : values.length,
+		);
+		if (optionValues.includes("--help") || optionValues.includes("--version"))
+			return;
+		const targets: string[] = [];
+		let afterOptions = false,
+			destination: string | undefined;
+		const recursive = values.some(
+			(v) => v === "--recursive" || /^-[a-zA-Z]*[rR][a-zA-Z]*$/.test(v ?? ""),
+		);
+		for (let at = 0; at < operands.length; at++) {
+			const arg = operands[at],
+				value = values[at];
+			if (!afterOptions && value === "--") {
+				afterOptions = true;
+				continue;
+			}
+			if (!afterOptions && value?.startsWith("-")) {
+				if (["-t", "--target-directory"].includes(value))
+					destination = operands[++at];
+				else if (value.startsWith("--target-directory="))
+					destination = arg.slice(arg.indexOf("=") + 1);
+				else if (
+					[
+						"--reference",
+						"--mode",
+						"--owner",
+						"--group",
+						"--suffix",
+						"-m",
+						"-o",
+						"-g",
+						"-S",
+						"-s",
+						"--size",
+						"-e",
+						"-f",
+					].includes(value) &&
+					name !== "rm"
+				)
+					at++;
+				continue;
+			}
+			targets.push(arg);
+		}
+		if (
+			["chmod", "chown", "chgrp"].includes(name) &&
+			!values.some((v) => v?.startsWith("--reference")) &&
+			!(
+				name === "chmod" &&
+				values.some((v) => /^-[rwxXstugo]+(?:,|$)/.test(v ?? ""))
+			)
+		)
+			targets.shift();
+		if (name === "cp" || name === "install") {
+			// Copy sources are reads; -t names the destination explicitly.
+			const dest = destination ?? targets.at(-1);
+			if (dest) check(dest, false, false);
+			return;
+		}
+		if (name === "sed" || name === "perl") {
+			if (
+				!values.some(
+					(v) =>
+						v === "--in-place" ||
+						v?.startsWith("--in-place=") ||
+						/^-[a-zA-Z]*i/.test(v ?? ""),
+				)
+			)
+				return;
+			if (!values.some((v) => v === "-e" || v?.startsWith("-e") || v === "-f"))
+				targets.shift();
+		}
+		if (destination) check(destination);
+		for (let at = 0; at < targets.length; at++)
+			check(
+				targets[at],
+				recursive || name === "mv",
+				["rm", "sed", "perl", "chmod", "chown", "chgrp"].includes(name),
+				["rm", "unlink", "rmdir"].includes(name) ||
+					(name === "mv" &&
+						(destination !== undefined || at < targets.length - 1)),
+			);
+	};
+	let segment: ShellToken[] = [];
+	const snapshot = () => ({ vars: new Map(state.vars), cwd: state.cwd });
+	const restore = (saved: ReturnType<typeof snapshot>) => {
+		state.vars = new Map(saved.vars);
+		state.cwd = saved.cwd;
+	};
+	const subshells: ReturnType<typeof snapshot>[] = [];
+	let pipeline: ReturnType<typeof snapshot> | undefined;
+	for (const token of shellTokens(stripShellData(command, "paths"))) {
+		if (token.operator && /^[;\n|&()]|^&&$|^\|\|$/.test(token.raw)) {
+			const before = snapshot();
+			processSegment(segment);
+			segment = [];
+			if (token.raw === "&&" && conditionalCd) state.cwd = conditionalCd;
+			if (token.raw === "(") {
+				subshells.push(snapshot());
+			} else if (token.raw === ")") {
+				const saved = subshells.pop();
+				if (saved) restore(saved);
+			} else if (token.raw === "|") {
+				pipeline ??= before;
+				restore(pipeline);
+			} else if (pipeline) {
+				restore(pipeline);
+				pipeline = undefined;
+			} else if (token.raw === "&") restore(before);
+			else if (token.raw === "||") {
+				for (const [key, value] of state.vars)
+					if (!before.vars.has(key) || before.vars.get(key) !== value)
+						state.vars.set(key, undefined);
+				if (state.cwd !== before.cwd) state.cwd = undefined;
+			}
+		} else segment.push(token);
+	}
+	processSegment(segment);
+	return risk;
+}
+
+// Compatibility helpers for older callers; production uses the single assessor.
+function destructiveTargetsProtectedPath(command: string, cwd: string) {
+	return assessShellMutation(command, cwd);
+}
+function isAlwaysDangerous(command: string, targetView = command) {
+	return assessShellMutation(targetView, process.cwd())?.level === "block";
+}
+function matchesDestructivePattern(command: string) {
+	return /\b(?:rm|rmdir|unlink|shred|mv|cp|install|chmod|chown|chgrp|truncate|tee|sed|perl|find|dd|mkfs|fdisk)\b/.test(
+		command,
+	);
+}
+function extractPathsFromCommand(command: string) {
+	return shellTokens(command)
+		.slice(1)
+		.filter(
+			(t) =>
+				!t.operator && !t.raw.startsWith("-") && !/^[A-Za-z_]\w*=/.test(t.raw),
+		)
+		.map((t) => t.raw);
+}
+
 function stripShellData(
 	command: string,
 	mode: "gate" | "targets" | "paths",
@@ -699,123 +1135,14 @@ function stripShellData(
 	return out.join("");
 }
 
-function destructiveTargetsProtectedPath(
-	command: string,
-	cwd: string,
-): { target: string; expanded?: string; resolved: boolean } | undefined {
-	// Two views of the same command, index-aligned by stripShellData:
-	//   gateText — data spans blanked, for PATTERN matching only (a `rm -rf`
-	//   inside a heredoc body or quoted message is data, not shell syntax);
-	//   targetText — heredoc data blanked but quoted path operands kept, so
-	//   extraction/var resolution still sees real targets like '/etc' or "$HOME".
-	// A literal `chmod +x /tmp/script; <read-only audit>` must not make
-	// unrelated /proc operands look like chmod targets. Only mask this narrow,
-	// independently verified temp operation; other mutations retain all guards.
-	const permissionView = stripShellData(command, "targets");
-	for (const match of permissionView.matchAll(/(?:^|[;\n&|])\s*chmod[ \t]+\+x[ \t]+(\/(?:tmp|var\/tmp)\/[A-Za-z0-9_./-]+)(?=[ \t]*(?:[;\n&|]|$))/g)) {
-		if (isPathProtected(match[1], cwd)) continue;
-		const start = match.index + match[0].indexOf("chmod");
-		const end = match.index + match[0].length;
-		command = command.slice(0, start) + " ".repeat(end - start) + command.slice(end);
-	}
-	const gateText = stripShellData(command, "gate");
-	if (!matchesDestructivePattern(gateText)) {
-		return undefined;
-	}
-	const targetText = stripShellData(command, "targets");
-	const state = collectShellAssignments(targetText);
-
-	// WHY: dd's target arrives as an `of=<path>` token, which the
-	// assignment-shaped skip in extractPathsFromCommand drops (and for a bare
-	// `dd if=x of=y` that drops EVERY token) — check it before the empty-paths
-	// early return. This also closes an old hole where `dd … of=/dev/sda`
-	// matched the destructive pattern but its token resolved as a harmless
-	// cwd-relative path and never hit the protected check. Pattern-scanned on
-	// gateText so an of=/dev string inside heredoc data cannot trigger it.
-	const ddTarget = /\bdd\b[^;|&]*?\bof=(\S+)/i.exec(gateText)?.[1];
-	if (ddTarget && isPathProtected(ddTarget, cwd)) {
-		return { target: ddTarget, resolved: true };
-	}
-
-	// find -exec(dir) rm / find -delete: the {} placeholder is unknowable, so
-	// the search ROOTS are validated against the same protected-path policy —
-	// a destructive operation rooted in a protected tree cannot bypass it by
-	// delegating the deletion to find. Marker located on gateText (data can't
-	// trigger it), roots read from targetText (quoted roots still resolve).
-	const findMarker =
-		/\bfind\b[\s\S]*?(?:\s-exec(?:dir)?\s+rm\b|\s-delete\b)/i.exec(gateText);
-	if (findMarker) {
-		for (const raw of findStartPaths(
-			targetText.slice(findMarker.index, findMarker.index + findMarker[0].length),
-		)) {
-			let expanded: string | undefined;
-			if (raw.includes("$")) {
-				expanded = expandVars(raw, state, cwd);
-			} else if (raw === "~" || raw.startsWith("~/")) {
-				expanded = HOME + raw.slice(1); // tilde start path
-			} else {
-				expanded = raw;
-			}
-			if (
-				expanded === undefined ||
-				isPathProtected(expanded, cwd) ||
-				globRootProtected(expanded, cwd)
-			) {
-				return { target: raw, expanded, resolved: expanded !== undefined };
-			}
-		}
-	}
-
-	const paths = extractPathsFromCommand(stripAssignments(targetText));
-	// Bare relative targets (e.g. "node_modules") are resolved inside cwd.
-	if (paths.length === 0) {
-		return undefined;
-	}
-
-	// Resolve shell variables against assignments found in the command text
-	// instead of blanket-blocking every `$` (the old rule false-positived the
-	// whole mktemp temp-copy workflow). Unknown variables still fail closed.
-	for (const targetPath of paths) {
-		if (targetPath.includes("$")) {
-			// $() and backticks are EXECUTABLE constructs — whatever they expand
-			// to is unknowable and they can run arbitrary commands; block with the
-			// resolved (dangerous) disposition rather than the misleading
-			// "unresolved variable" one.
-			if (/\$\(|`/.test(targetPath)) {
-				return { target: targetPath, resolved: true };
-			}
-			const expanded = expandVars(targetPath, state, cwd);
-			if (expanded === undefined) {
-				return { target: targetPath, resolved: false };
-			}
-			if (isPathProtected(expanded, cwd)) {
-				return { target: targetPath, expanded, resolved: true };
-			}
-			if (globRootProtected(expanded, cwd)) {
-				return { target: targetPath, expanded, resolved: true };
-			}
-			continue; // resolved to a non-protected path (e.g. mktemp under /tmp)
-		}
-		if (isPathProtected(targetPath, cwd)) {
-			return { target: targetPath, resolved: true };
-		}
-		// Glob-bearing literal target: the shell expands it into real entries
-		// that lexical checks cannot see (e.g. rm /home/* reaches $HOME).
-		if (globRootProtected(targetPath, cwd)) {
-			return { target: targetPath, resolved: true };
-		}
-	}
-
-	return undefined;
-}
-
 // Compiled policy: ".agent_memory/ is local working notes; NEVER push it to any
 // remote". Enforced at the stage that would leak it (git add). If the file is
 // already gitignored, git add cannot stage it and the guard stays silent.
 function isAgentMemoryExposed(cwd: string): Promise<boolean> {
 	return new Promise((resolve) => {
 		try {
-			if (!fs.existsSync(path.join(cwd, ".agent_memory"))) return resolve(false);
+			if (!fs.existsSync(path.join(cwd, ".agent_memory")))
+				return resolve(false);
 		} catch {
 			return resolve(false);
 		}
@@ -846,7 +1173,9 @@ async function gitAddLeaksAgentMemory(
 	if (addIdx < 0) return false;
 	const args = tokens.slice(addIdx + 1);
 	if (args.some((a) => a.startsWith(".agent_memory"))) return true; // explicit add
-	if (args.some((a) => a === "." || a === "-A" || a === "--all" || a === "-f")) {
+	if (
+		args.some((a) => a === "." || a === "-A" || a === "--all" || a === "-f")
+	) {
 		return await isAgentMemoryExposed(cwd);
 	}
 	return false;
@@ -856,25 +1185,11 @@ async function gitAddLeaksAgentMemory(
 // permissions from its innocent-looking lexical path. Never guess on errors.
 function mutationPath(raw: string, cwd: string): string | undefined {
 	const value = raw.replace(/^@/, "").replace(/^~(?=\/|$)/, HOME);
-	let probe = path.resolve(cwd, value);
-	const suffix: string[] = [];
-	for (let depth = 0; depth < 128; depth++) {
-		try {
-			return path.join(fs.realpathSync(probe), ...suffix);
-		} catch (e: any) {
-			if (e.code !== "ENOENT") return undefined;
-			try {
-				if (fs.lstatSync(probe).isSymbolicLink()) return undefined;
-			} catch (statError: any) {
-				if (statError.code !== "ENOENT") return undefined;
-			}
-			const parent = path.dirname(probe);
-			if (parent === probe) return undefined;
-			suffix.unshift(path.basename(probe));
-			probe = parent;
-		}
+	try {
+		return canonicalMutationPath(value, cwd);
+	} catch {
+		return undefined;
 	}
-	return undefined;
 }
 const within = (file: string, root: string) =>
 	file === root || file.startsWith(root + path.sep);
@@ -965,25 +1280,28 @@ export function invalidMutationPath(raw: string): string | undefined {
 // Deliberately cross-line, not word n-grams: dense CSS, tables, and checklist
 // syntax within one line are not evidence of degeneration.
 export function writeDegeneration(content: string): string | undefined {
-	const spans = new Map<string, number[]>();
-	let previous = "",
-		consecutive = 0;
-	let lineNumber = 0;
-	for (const line of content.split(/\r?\n/)) {
-		lineNumber++;
-		consecutive = line === previous ? consecutive + 1 : 1;
-		previous = line;
-		if (line.trim().length < 24 || !/\p{L}/u.test(line)) continue;
-		if (consecutive >= 3)
-			return `3 consecutive identical substantive lines ending at line ${lineNumber}`;
-		if (line.length < 100) continue;
-		const span = line; // Shared prefixes in distinct CSS/HTML lines are legitimate.
-		const occurrences = spans.get(span) ?? [];
-		occurrences.push(lineNumber);
-		if (occurrences.length >= 3)
-			return `the same exact long line at lines ${occurrences.join(", ")}`;
-		spans.set(span, occurrences);
+	// Repeated rows, fixtures and short examples are normal. Only a large output
+	// dominated by one identical substantive line is strong enough to interrupt.
+	if (content.length < 8192) return;
+	const lines = content.split(/\r?\n/),
+		counts = new Map<string, number>();
+	for (const line of lines) {
+		if (line.trim().length < 80 || !/\p{L}/u.test(line)) continue;
+		const count = (counts.get(line) ?? 0) + 1;
+		counts.set(line, count);
+		if (count >= 12 && count * line.length > content.length * 0.85)
+			return `one identical substantive line accounts for over 85% of this large output (${count} copies)`;
 	}
+}
+
+export function writeReplacementRisk(
+	previous: string,
+	next: string,
+): string | undefined {
+	const before = Buffer.byteLength(previous),
+		after = Buffer.byteLength(next);
+	if (before >= 16_384 && after < before * 0.05)
+		return `whole-file write would remove over 95% of an existing ${before}-byte file`;
 }
 
 function literalShellWord(raw: string, variables: Map<string, string>): string {
@@ -1017,7 +1335,8 @@ function literalShellWord(raw: string, variables: Map<string, string>): string {
 							return String.fromCodePoint(
 								Math.min(0x10ffff, parseInt(code.slice(1), 16)),
 							);
-						if (/^[0-7]/.test(code)) return String.fromCharCode(parseInt(code, 8));
+						if (/^[0-7]/.test(code))
+							return String.fromCharCode(parseInt(code, 8));
 						return code;
 					},
 				);
@@ -1117,11 +1436,19 @@ export function invalidShellPath(command: string): string | undefined {
 
 export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	let maintenanceReminded = false;
-	pi.on("session_start", () => { maintenanceReminded = false; });
+	pi.on("session_start", () => {
+		maintenanceReminded = false;
+	});
 	pi.on("before_agent_start", () => {
 		if (!SELF_MUTATION_ALLOWED || maintenanceReminded) return;
 		maintenanceReminded = true;
-		return { message: { customType: "harness-maintenance-safety", content: SELF_MUTATION_GUIDANCE, display: false } };
+		return {
+			message: {
+				customType: "harness-maintenance-safety",
+				content: SELF_MUTATION_GUIDANCE,
+				display: false,
+			},
+		};
 	});
 	const approved = new Map<string, "file" | "directory">(),
 		denied = new Set<string>();
@@ -1140,7 +1467,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	});
 	pi.on("tool_call", async (event, ctx) => {
 		// Only intercept bash tool calls
-		if (event.toolName !== "bash") {
+		if (event.toolName !== "bash" && event.toolName !== "bg_run") {
 			return undefined;
 		}
 
@@ -1159,48 +1486,42 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			return { block: true, reason };
 		}
 
-		// Data-span views: pattern gates must not fire on heredoc bodies, quoted
-		// messages, or other data payloads (a `rm -rf /` string in a commit
-		// message or heredoc is not a command). See stripShellData.
-		const gateText = stripShellData(command, "gate");
-		const targetText = stripShellData(command, "targets");
-
-		if (isAlwaysDangerous(gateText, targetText)) {
-			const reason = "Blocked: Destructive command detected";
-			if (ctx.hasUI) {
-				ctx.ui.notify(reason, "error");
+		const risk = assessShellMutation(command, ctx.cwd);
+		if (risk) {
+			const reason = `${risk.level === "review" ? "Review required" : "Blocked"}: ${risk.reason}${risk.target ? `: ${JSON.stringify(risk.target)}` : ""}${risk.expanded ? ` (resolves to ${JSON.stringify(risk.expanded)})` : ""}.`;
+			// Approval is for this exact invocation only. It never enlarges write
+			// scope or overrides a hard harness/system boundary.
+			const epoch = generation;
+			if (
+				risk.level === "review" &&
+				risk.resolved &&
+				ctx.hasUI &&
+				!ctx.signal?.aborted
+			) {
+				const allowed = await ctx.ui
+					.confirm(
+						"Review destructive operation",
+						`${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
+						{ signal: ctx.signal },
+					)
+					.catch(() => false);
+				if (
+					allowed &&
+					epoch === generation &&
+					!ctx.signal?.aborted &&
+					JSON.stringify(assessShellMutation(command, ctx.cwd)) ===
+						JSON.stringify(risk)
+				)
+					return undefined;
 			}
-			return { block: true, reason };
-		}
-
-		// Deploy-hazard interception (compiled policy — see DOCTRINE-MODULES/deployment.md)
-		for (const pattern of DEPLOY_HAZARD_PATTERNS) {
-			if (pattern.test(gateText)) {
-				const reason = `Blocked: Deploy hazard (${pattern.source}) — prod/remote/worktree state would be destroyed irreversibly. Stage the intended change and ship via the normal push pipeline.`;
-				if (ctx.hasUI) {
-					ctx.ui.notify(reason, "error");
-				}
-				return { block: true, reason };
-			}
-		}
-
-		const guardedTarget = destructiveTargetsProtectedPath(command, ctx.cwd);
-		if (guardedTarget) {
-			let reason: string;
-			if (guardedTarget.resolved) {
-				reason = `Blocked: Cannot operate on protected path "${guardedTarget.target}"`;
-				if (guardedTarget.expanded) {
-					reason += ` (resolves to "${guardedTarget.expanded}")`;
-				}
-			} else {
-				reason =
-					`Blocked: "${guardedTarget.target}" is an unresolved shell variable used by a destructive command — it could expand to a protected path. ` +
-					`Derive temp paths inside the same command (e.g. T=$(mktemp -d); cp -r . "$T/"; rm -rf "$T") or pass a literal path instead.`;
-			}
-			if (ctx.hasUI) {
-				ctx.ui.notify(reason, "error");
-			}
-			return { block: true, reason };
+			return {
+				block: true,
+				reason:
+					reason +
+					(risk.level === "review"
+						? " Use explicit, narrow targets or a preview before retrying; unresolved targets are never guessed from variable names."
+						: ""),
+			};
 		}
 
 		return undefined;
@@ -1270,6 +1591,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				block: true,
 				reason: "Blocked: cannot safely resolve write target",
 			};
+
 		if (isPathProtected(target, cwd)) {
 			if (automaticWriteRoot(target, cwd)) return undefined;
 			const eligible =
@@ -1325,18 +1647,66 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 
 		return undefined;
 	});
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName !== "write") return;
+		const filePath = (event.input.file_path || event.input.path) as string;
+		if (typeof filePath !== "string") return;
+		const target = mutationPath(filePath, ctx.cwd);
+		if (!target) return;
+		if (event.toolName === "write" && typeof event.input.content === "string") {
+			let previous: string | undefined;
+			try {
+				const stat = fs.statSync(target);
+				if (stat.isFile() && stat.size >= 16_384 && stat.size <= 2_000_000)
+					previous = fs.readFileSync(target, "utf8");
+			} catch {
+				/* The native tool reports ordinary access errors. */
+			}
+			const reason =
+				previous === undefined
+					? undefined
+					: writeReplacementRisk(previous, event.input.content);
+			if (reason) {
+				const epoch = generation;
+				let accepted = false;
+				if (ctx.hasUI && !ctx.signal?.aborted)
+					accepted = await ctx.ui
+						.confirm(
+							"Review whole-file replacement",
+							`${reason}: ${target}. Allow this exact replacement?`,
+							{ signal: ctx.signal },
+						)
+						.catch(() => false);
+				let unchanged = false;
+				try {
+					unchanged =
+						mutationPath(filePath, ctx.cwd) === target &&
+						fs.readFileSync(target, "utf8") === previous;
+				} catch {}
+				if (
+					!accepted ||
+					!unchanged ||
+					epoch !== generation ||
+					ctx.signal?.aborted
+				)
+					return {
+						block: true,
+						reason: `Review required: ${reason}. No file was changed. Use an edit with exact old text for an intentional replacement, or review this write interactively.`,
+					};
+			}
+		}
+	});
 }
 
 // Exported read-only for harness bench tests (scripts/bench/path-safety-var-test.mjs);
 // the default export above remains the extension entry point.
 export {
+	assessShellMutation,
 	automaticWriteRoot,
 	mutationPath,
 	sensitiveExternalPath,
 	scopeTooBroad,
-	collectShellAssignments,
 	destructiveTargetsProtectedPath,
-	expandVars,
 	extractPathsFromCommand,
 	isAlwaysDangerous,
 	isPathProtected,

@@ -33,7 +33,8 @@ function authority(cwd, extra={}, change=false) {
 }
 test('maintenance authority is latched at original process launch',()=>{
  const f=fixture(); try {
-  for(const cwd of [harness,path.dirname(harness),path.parse(harness).root]) assert.deepEqual(authority(cwd),[true,false]);
+  for(const cwd of [harness,agent,path.join(agent,"extensions")]) assert.deepEqual(authority(cwd),[true,false]);
+  for(const cwd of [path.dirname(harness),path.parse(harness).root,os.homedir()]) if(cwd!==harness) assert.deepEqual(authority(cwd),[false,true]);
   assert.deepEqual(authority(f.project),[false,true]);
   assert.deepEqual(authority(f.project,{},true),[false,true]);
   assert.deepEqual(authority(harness,{PI_SUBAGENT_CHILD:'1'}),[false,true]);
@@ -137,6 +138,22 @@ test('real namespace prevents mutation while allowing project work',t=>{
    t.skip('Real namespace integration unavailable on this host; payload did not execute. Portable fail-closed checks ran separately.');return;
   }
   const target=JSON.stringify(path.join(f.protectedDir,'original'));
+  const sibling=path.join(f.root,'vanishing-sibling');fs.mkdirSync(sibling);
+  const raceScript=`import importlib.util, os, sys
+spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
+guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+wrapper,root,sibling=sys.argv[1:]
+original_exec=guard.os.execv
+def race(executable,args):
+ os.rmdir(sibling)
+ original_exec(executable,args)
+guard.os.execv=race
+sys.argv=[wrapper,root,'--',sys.executable,'-c',"open('after-race','w').write('ok')"]
+guard.main()
+`;
+  const race=spawnSync(python,['-I','-c',raceScript,wrapper,f.protectedDir,sibling],{cwd:f.project,encoding:'utf8'});
+  assert.equal(race.status,0,`Disappearing optional sibling must not fail execution: ${race.stderr}`);
+  assert.equal(fs.readFileSync(path.join(f.project,'after-race'),'utf8'),'ok');
   if(fs.existsSync('/usr/bin/ssh')) {
    const ssh=run("import subprocess; subprocess.run(['/usr/bin/ssh','-G','example.invalid'],stdout=subprocess.DEVNULL,check=True)");
    assert.equal(ssh.status,0,`SSH system config must remain valid in the user namespace: ${ssh.stderr}`);
@@ -147,4 +164,35 @@ test('real namespace prevents mutation while allowing project work',t=>{
   const linked=run("open('hardlink','w').write('bad')");assert.equal(linked.status,126);assert.match(linked.stderr,/hard-linked/);
   assert.equal(fs.readFileSync(path.join(f.protectedDir,'original'),'utf8'),'unchanged');
  } finally {f.close();}
+});
+
+test('native guards distinguish protected inode aliases from ordinary project hardlinks',()=>{
+ const f=fixture(); try {
+  const lib=path.join(f.protectedDir,'agent/extensions/lib');fs.mkdirSync(lib,{recursive:true});
+  fs.copyFileSync(path.join(agent,'extensions/lib/self-mutation-guard.ts'),path.join(lib,'self-mutation-guard.ts'));
+  const guard=pathToFileURL(path.join(lib,'self-mutation-guard.ts')).href;
+  fs.symlinkSync(path.join(f.protectedDir,'agent'),path.join(f.project,'alias'));
+  fs.symlinkSync(path.join(f.protectedDir,'missing'),path.join(f.project,'dangling'));
+  fs.linkSync(path.join(f.protectedDir,'original'),path.join(f.project,'harness-link'));
+  fs.writeFileSync(path.join(f.project,'ordinary'),'project');fs.linkSync(path.join(f.project,'ordinary'),path.join(f.project,'ordinary-link'));
+  const result=node(f.project,`const g=await import(${JSON.stringify(guard)});delete process.env.PI_HARNESS_MUTATION_DENIED;process.chdir(${JSON.stringify(f.protectedDir)});console.log(JSON.stringify(['alias/../original','dangling/new','harness-link','ordinary-link'].map(p=>!!g.selfMutationDenial(p,${JSON.stringify(f.project)}))));`);
+  assert.equal(result.status,0,result.stderr);assert.deepEqual(JSON.parse(result.stdout),[true,true,true,false]);
+  assert.equal(fs.readFileSync(path.join(f.protectedDir,'original'),'utf8'),'unchanged');
+ }finally{f.close();}
+});
+
+test('bulk apply cannot use an ancestor workspace to acquire maintenance authority',()=>{
+ const f=fixture();try {
+  const lib=path.join(f.protectedDir,'agent/extensions/lib');fs.mkdirSync(lib,{recursive:true});
+  fs.copyFileSync(path.join(agent,'extensions/lib/self-mutation-guard.ts'),path.join(lib,'self-mutation-guard.ts'));
+  const guard=pathToFileURL(path.join(lib,'self-mutation-guard.ts')).href;
+  const helper=pathToFileURL(path.join(agent,'extensions/lib/bulk-edit.ts')).href;
+  const bulk=path.join(agent,'extensions/bulk-edit.ts');
+  const result=node(f.root,`import fs from 'node:fs';import assert from 'node:assert/strict';import {stripTypeScriptTypes} from 'node:module';
+let source=fs.readFileSync(${JSON.stringify(bulk)},'utf8').replace('import { Type } from "typebox";','const Type=new Proxy({},{get:()=>()=>({})});').replace('import { Minimatch } from "minimatch";','class Minimatch {constructor(){throw Error("explicit files only");}}').replace('"./lib/self-mutation-guard.ts"',${JSON.stringify(JSON.stringify(guard))}).replace('"./lib/bulk-edit.ts"',${JSON.stringify(JSON.stringify(helper))});
+const m=await import('data:text/javascript;base64,'+Buffer.from(stripTypeScriptTypes(source)).toString('base64'));let tool;m.default({registerTool:t=>tool=t});const params={pattern:'unchanged',replacement:'bad',files:['harness/original']};
+const preview=await tool.execute('preview',{...params,action:'preview'},undefined,undefined,{cwd:process.cwd()});assert.equal(preview.isError,undefined);
+const apply=await tool.execute('apply',{...params,action:'apply',token:preview.details.token},undefined,undefined,{cwd:process.cwd()});assert.equal(apply.isError,true);assert.match(apply.content[0].text,/launched outside/);`);
+  assert.equal(result.status,0,result.stderr);assert.equal(fs.readFileSync(path.join(f.protectedDir,'original'),'utf8'),'unchanged');
+ }finally{f.close();}
 });

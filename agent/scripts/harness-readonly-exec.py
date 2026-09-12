@@ -120,7 +120,10 @@ def main():
         with os.scandir(current) as entries:
             for entry in entries:
                 if entry.path != branch and entry.path not in ('/proc', '/sys', '/dev') and not entry.is_symlink():
-                    writable.extend(['--bind', entry.path, entry.path])
+                    # Sibling temp/lock directories can disappear after the
+                    # inventory. Missing optional mounts must not fail normal
+                    # execution; the protected branch is never optional/writable.
+                    writable.extend(['--bind-try', entry.path, entry.path])
         current = branch
     ssh_mounts, ssh_descriptors = ssh_config_mounts()
     arguments = ['/usr/bin/bwrap', '--unshare-user', '--unshare-pid',

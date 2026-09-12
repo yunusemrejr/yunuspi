@@ -16,6 +16,11 @@ import { randomBytes } from "node:crypto";
 import { Minimatch } from "minimatch";
 import { Type } from "typebox";
 import {
+  canonicalMutationPath,
+  containsPath,
+  selfMutationDenial,
+} from "./lib/self-mutation-guard.ts";
+import {
   applyPattern,
   changedPreview,
   compilePattern,
@@ -50,6 +55,7 @@ type Entry = {
   hash: string;
   updated: string;
   mode: number;
+  identity: string;
 };
 
 function safePath(root: string, candidate: string): string {
@@ -59,7 +65,7 @@ function safePath(root: string, candidate: string): string {
     throw new Error(
       "path must not start with '-' or contain control characters",
     );
-  const resolved = path.resolve(root, candidate);
+  const resolved = canonicalMutationPath(candidate, root);
   const relative = path.relative(root, resolved);
   if (
     relative === ".." ||
@@ -105,6 +111,7 @@ async function collectFiles(
     }
     list.sort();
   }
+  list = [...new Set(list)];
 
   let binary = 0;
   let large = 0;
@@ -162,6 +169,7 @@ async function buildPlan(
       hash: contentHash(content),
       updated,
       mode: stat.mode & 0o777,
+      identity: `${stat.dev}:${stat.ino}`,
     });
   }
   const maxFiles = Math.min(
@@ -178,7 +186,9 @@ async function buildPlan(
   const token = planToken(
     entries.map((entry) => ({
       path: entry.path,
-      hash: entry.hash,
+      hash: contentHash(
+        JSON.stringify([entry.hash, entry.mode, entry.identity]),
+      ),
       matches: entry.matches,
     })),
     String(params.pattern),
@@ -189,6 +199,20 @@ async function buildPlan(
 }
 
 export default function bulkEdit(pi: any) {
+  // An apply token proves an actual preview in this session, for this root.
+  // A model-computed digest or another workspace's identical bytes is insufficient.
+  const previews = new Map<
+    string,
+    { root: string; digest: string; expires: number }
+  >();
+  let applying = false;
+  let generation = 0;
+  const reset = () => {
+    generation++;
+    previews.clear();
+  };
+  pi.on?.("session_start", reset);
+  pi.on?.("session_shutdown", reset);
   pi.registerTool({
     name: "bulk_edit",
     label: "Bulk Edit",
@@ -222,6 +246,7 @@ export default function bulkEdit(pi: any) {
       _onUpdate: any,
       ctx: any,
     ) {
+      const epoch = generation;
       try {
         const cwd =
           typeof ctx?.cwd === "string" && ctx.cwd ? ctx.cwd : process.cwd();
@@ -231,14 +256,26 @@ export default function bulkEdit(pi: any) {
           ignoreCase: !!params.ignoreCase,
         };
         const plan = await buildPlan(root, params, options);
+        if (epoch !== generation || signal?.aborted)
+          throw new Error(
+            "Session changed or operation cancelled; preview again",
+          );
         if (params.action === "preview") {
+          const token = randomBytes(24).toString("hex");
+          while (previews.size >= 8)
+            previews.delete(previews.keys().next().value!);
+          previews.set(token, {
+            root,
+            digest: plan.token,
+            expires: Date.now() + 15 * 60_000,
+          });
           return {
             content: [
               {
                 type: "text",
                 text: JSON.stringify({
                   action: "preview",
-                  token: plan.token,
+                  token,
                   totalMatches: plan.entries.reduce(
                     (sum, entry) => sum + entry.matches,
                     0,
@@ -254,53 +291,103 @@ export default function bulkEdit(pi: any) {
                 }),
               },
             ],
-            details: { token: plan.token, files: plan.entries.length },
+            details: { token, files: plan.entries.length },
           };
         }
         if (typeof params.token !== "string" || params.token.length < 8)
           throw new Error("apply requires the token returned by preview");
-        if (params.token !== plan.token)
+        const preview = previews.get(params.token);
+        if (
+          !preview ||
+          preview.root !== root ||
+          preview.digest !== plan.token ||
+          preview.expires < Date.now()
+        )
           throw new Error(
             "workspace changed since preview (token mismatch); run preview again",
           );
         if (signal?.aborted) throw new Error("Cancelled");
-        const written: string[] = [];
-        for (const entry of plan.entries) {
-          if (signal?.aborted)
-            throw new Error(
-              `Cancelled after ${written.length} file(s); re-run preview before apply`,
-            );
-          const temp = path.join(
-            path.dirname(entry.absolute),
-            `.${path.basename(entry.absolute)}.bulk-${randomBytes(4).toString("hex")}.tmp`,
+        if (applying)
+          throw new Error(
+            "Another bulk apply is running; preview again after it completes",
           );
-          try {
-            await fs.writeFile(temp, entry.updated, { mode: entry.mode });
-            await fs.rename(temp, entry.absolute);
-          } catch (error) {
-            await fs.rm(temp, { force: true }).catch(() => {});
-            throw new Error(
-              `write failed for ${entry.path} after ${written.length} file(s) were written: ${(error as Error).message.slice(0, 160)}`,
-            );
-          }
-          written.push(entry.path);
-        }
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                action: "apply",
-                files: written,
-                replacements: plan.entries.reduce(
-                  (sum, entry) => sum + entry.matches,
-                  0,
-                ),
-              }),
-            },
-          ],
-          details: { files: written.length },
+        // Validate the entire batch before any writes, including native harness
+        // authority. A home-rooted workspace must not confer maintenance access.
+        const validate = async (entry: Entry) => {
+          const actual = safePath(root, entry.path);
+          if (actual !== entry.absolute || !containsPath(root, actual))
+            throw new Error("Path changed since preview");
+          const denial = selfMutationDenial(actual, root);
+          if (denial) throw new Error(denial);
+          const stat = await fs.lstat(actual);
+          if (
+            !stat.isFile() ||
+            stat.isSymbolicLink() ||
+            `${stat.dev}:${stat.ino}` !== entry.identity ||
+            (stat.mode & 0o777) !== entry.mode ||
+            contentHash(await fs.readFile(actual)) !== entry.hash
+          )
+            throw new Error(`Concurrent edit since preview: ${entry.path}`);
         };
+        for (const entry of plan.entries) await validate(entry);
+        if (epoch !== generation || signal?.aborted)
+          throw new Error(
+            "Session changed or operation cancelled; preview again",
+          );
+        if (applying)
+          throw new Error(
+            "Another bulk apply is running; preview again after it completes",
+          );
+        applying = true;
+        previews.delete(params.token);
+        const written: string[] = [];
+        try {
+          for (const entry of plan.entries) {
+            if (signal?.aborted || epoch !== generation)
+              throw new Error(
+                `Cancelled after ${written.length} file(s); re-run preview before apply`,
+              );
+            const temp = path.join(
+              path.dirname(entry.absolute),
+              `.${path.basename(entry.absolute)}.bulk-${randomBytes(4).toString("hex")}.tmp`,
+            );
+            let created = false;
+            try {
+              await validate(entry);
+              await fs.writeFile(temp, entry.updated, {
+                mode: entry.mode,
+                flag: "wx",
+              });
+              created = true;
+              await validate(entry);
+              await fs.rename(temp, entry.absolute);
+            } catch (error) {
+              if (created) await fs.rm(temp, { force: true }).catch(() => {});
+              throw new Error(
+                `write failed for ${entry.path} after ${written.length} file(s) were written: ${(error as Error).message.slice(0, 160)}`,
+              );
+            }
+            written.push(entry.path);
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  action: "apply",
+                  files: written,
+                  replacements: plan.entries.reduce(
+                    (sum, entry) => sum + entry.matches,
+                    0,
+                  ),
+                }),
+              },
+            ],
+            details: { files: written.length },
+          };
+        } finally {
+          applying = false;
+        }
       } catch (error) {
         return {
           isError: true,
