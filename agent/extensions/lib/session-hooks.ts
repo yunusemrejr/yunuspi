@@ -60,6 +60,14 @@ const isExecution = (args: HookArgs) => !args.action;
  */
 export const HOOK_RULES: readonly HookRule[] = [
 	{
+		key: 'source-check-recovery', tools: ['source_check'], onError: true,
+		line: 'Fix reported syntax errors; use project checks for missing parsers and narrow incomplete batches. Rerun changed files. Syntax alone does not establish type or runtime correctness.',
+	},
+	{
+		key: 'source-check-scope', tools: ['source_check'],
+		line: 'These receipts cover syntax of the returned source digests. Keep required project types, tests and configuration schema checks. Later edits invalidate this evidence.',
+	},
+	{
 		key: "subagent-recover-evidence",
 		tools: ["subagent"],
 		onError: true,

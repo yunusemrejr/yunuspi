@@ -22,6 +22,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - Capability-aware provider discovery, economical routing and provider-specific cache accounting.
 - Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
+- [Skill routing and batch source checks](docs/SKILLS-AND-CHECKS.md): broader catalog matching, scoped pre-edit skill review and compact syntax diagnostics across languages and configuration formats.
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
 - Persistent project intelligence with automatic discovery, concurrent session contributions, bounded architecture retrieval and a live `/graph` window; see [project intelligence](docs/PROJECT-INTELLIGENCE.md).
 - Autonomous web search with bounded fallback, plus session activity counters and a `/metrics` panel for tools, agents, skills, hooks and cache usage; see [search and session metrics](docs/SESSION-METRICS.md).

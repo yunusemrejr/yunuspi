@@ -1,14 +1,17 @@
-/** Advisory hints owned/delivered by reminders.ts. No I/O, inference, timers,
- * tool execution, permission decisions, or scans of tool-output prose. */
+/** Bounded capability hints and pre-edit skill review owned by reminders.ts.
+ * No inference or autonomous tool execution. Only catalog heading metadata is
+ * read; tool-output prose does not become routing instructions. */
 import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
+import { Type } from "typebox";
+import { sourceCheckSupported } from "./source-check.ts";
 import { qualityReviewSignals } from "./quality-review-signals.ts";
 import { slopGuidanceSignals } from "./slop-guidance-signals.ts";
 import { codeGuidanceSignals } from "./code-guidance-signals.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
-import { routeSkills, skillTaskText } from "./skill-routing.ts";
+import { routeSkills, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
@@ -35,6 +38,11 @@ export function createRelevantGuidance(pi: any) {
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
   let matchingPrompt = false, requestDisabled = false;
+  let skillReviewDisabled = false;
+  const reviewTargets = new Map<string, { skill: Skill; reason: string }>();
+  const deferredSkills = new Map<string, string>();
+  const reviewEnabled = () => enabled() && !skillReviewDisabled && process.env.PI_SKILL_REVIEW !== 'off'
+    && tools().has('read') && tools().has('skill_review');
   // Small requests keep three ordinary hints; sustained work earns another
   // opportunity every four completed tool steps. Repeated candidates() calls
   // cannot refill this allowance. One urgent recovery cue has a separate slot.
@@ -63,7 +71,7 @@ export function createRelevantGuidance(pi: any) {
     if (!matchingPrompt && !hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
     if (!enabled() || wasShown(hint.key)) return;
     if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool) || unavailable.has(hint.tool))) return;
-    if (hint.skill && read.has(hint.skill)) return;
+    if (hint.skill && (skillReviewDisabled || read.has(hint.skill))) return;
     for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
     const previous = pending.get(hint.key);
     if (previous && (previous.priority ?? 0) >= (hint.priority ?? 0)) {
@@ -104,7 +112,10 @@ export function createRelevantGuidance(pi: any) {
   const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
   const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
   // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
-  const remember = (text: string) => { context = [...new Set([...context, ...skillTerms(text)])].slice(-48); };
+  const remember = (text: string) => {
+    const current = skillTerms(text);
+    context = [...context.filter(term => !current.includes(term)), ...current].slice(-48);
+  };
   // Section targeting: read only a skill's headings (bounded, cached by mtime)
   // so a recommendation points at the useful part instead of the whole file.
   const sectionPointer = (file: string, terms: string[]): string => {
@@ -126,11 +137,18 @@ export function createRelevantGuidance(pi: any) {
    * overlap yields nothing; explicit routes and signals keep their priority. */
   const contextSkill = (priority = 55) => {
     if (!skillIndex || !context.length) return;
+    let offered = 0;
+    const coveredTerms = new Set<string>();
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
       if (skillCovered(ranked.skill.file)) continue;
+      const terms = ranked.matched.map(term => term.split('~').at(-1)!);
+      if (terms.every(term => coveredTerms.has(term))) continue;
       add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file, priority,
         text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
-      return;
+      // Up to three distinct relevant workflows can enter the pending queue;
+      // the ordinary two-hint delivery and run budgets still apply.
+      for (const term of terms) coveredTerms.add(term);
+      if (++offered >= 3) break;
     }
   };
   const signalHint = (key: string, skillName: string, check: string, sourceFile?: string) => {
@@ -162,6 +180,8 @@ export function createRelevantGuidance(pi: any) {
       if (!/\b(test|reproduce|try|check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
       if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
         utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
+      if (/\b(syntax|parse errors?|syntax errors?|configuration files?|config files?)\b/i.test(part))
+        utilityHint('source_check','Syntax checks: source_check({paths:[...]}) batches installed language/configuration parsers with compact per-file results. Use explicit changed paths; unavailable or incomplete checks are not passes. Keep project type checks, tests and configuration schema validation.');
       if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
         utilityHint('git_info','Git evidence: git_info({action:"scope"}) identifies project/worktree ownership; session history branches and checkpoints are not commits. git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
       if (/\b(browser|website|web page)\b/i.test(part) && /\b(navigate|fill|submit|inspect|use)\b/i.test(part))
@@ -232,8 +252,53 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
   };
   const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48) });
+  // A targeted pre-edit checkpoint, not a correctness verdict or a security
+  // boundary. Only exact file routes qualify; lexical suggestions never gate.
+  // Reading remains the native tool's job so delivery cannot masquerade as use.
+  const reviewStatus = () => [...reviewTargets.values()].map(({skill, reason}) => ({
+    name: skill.name, path: skill.file, reason,
+    status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'needs_review',
+    ...(deferredSkills.has(skill.file) ? { justification: deferredSkills.get(skill.file) } : {}),
+  }));
+  pi.registerTool?.({
+    name: 'skill_review', label: 'Skill review',
+    description: 'Inspect applicable pre-edit skills. Read their SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Deferral lasts this request and is not a read receipt.',
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal('inspect'), Type.Literal('defer')]),
+      skill: Type.Optional(Type.String({maxLength:512})),
+      reason: Type.Optional(Type.String({minLength:12,maxLength:240})),
+    }),
+    async execute(_id: any, input: any) {
+      if (input.action === 'defer') {
+        const target = [...reviewTargets.values()].find(({skill}) => skill.name === input.skill || skill.file === input.skill);
+        if (!target || typeof input.reason !== 'string' || input.reason.trim().length < 12 || input.reason.length > 240)
+          return {isError:true, content:[{type:'text',text:'Choose a current skill from inspect and provide a task-specific reason (12–240 characters).'}]};
+        deferredSkills.set(target.skill.file, input.reason.trim());
+        try { pi.appendEntry?.('skill-review-decision', {requestNumber, skill:target.skill.name, disposition:'deferred', reason:input.reason.trim()}); } catch {}
+      }
+      const result = {enabled:reviewEnabled(), skills:reviewStatus(), scope:'Exact file routes only; at most four skills per request. Read-only work remains available.'};
+      return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
+    },
+  });
   return {
+    beforeToolCall(event: any) {
+      if (!reviewEnabled() || !['edit','write'].includes(event.toolName)) return;
+      const supplied = event.input?.path;
+      if (typeof supplied !== 'string' || !supplied || supplied.length > 4096) return;
+      const file = checkpointPath(supplied,cwd);
+      if (/SKILL\.md$/i.test(file) || /(?:^|\/)(?:node_modules|vendor|dist|build|generated|backups)(?:\/|$)/i.test(file)) return;
+      const applicable = routeSkills('',file).sort((a,b) => b.priority-a.priority)
+        .map(route => ({skill:skills.find(s => s.name === route.name), reason:route.check}))
+        .filter((entry): entry is {skill:Skill;reason:string} => !!entry.skill).slice(0,2);
+      for (const entry of applicable) {
+        if (!reviewTargets.has(entry.skill.file) && reviewTargets.size < 4) reviewTargets.set(entry.skill.file,entry);
+      }
+      const needed = applicable.filter(({skill}) => reviewTargets.has(skill.file) && !read.has(skill.file) && !deferredSkills.has(skill.file));
+      if (!needed.length) return;
+      return {block:true,reason:`Before editing ${JSON.stringify(supplied)}, review the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, then retry the edit. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Read-only inspection remains available.`};
+    },
     userInput() {
+      reviewTargets.clear(); deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
@@ -252,6 +317,7 @@ export function createRelevantGuidance(pi: any) {
       if (hadTopics) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
+      reviewTargets.clear(); deferredSkills.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
@@ -315,9 +381,11 @@ export function createRelevantGuidance(pi: any) {
       read = new Set([...read].filter(file => availableSkillFiles.has(file)));
       skillIndex = buildSkillIndex(skills);
       const rawPrompt = String(event.prompt ?? "");
-      const prompt = skillTaskText(rawPrompt);
-      utilityHints(prompt);
-      if (!/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(prompt) && /\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
+      const taskPrompt = skillTaskText(rawPrompt);
+      const prompt = skillIntentSegments(taskPrompt).join('\n');
+      skillReviewDisabled = /\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(taskPrompt);
+      utilityHints(taskPrompt);
+      if (!/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(taskPrompt) && /\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
         add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
       if (process.env.PI_REASONING_AIDS !== "off" && !/\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(prompt)) {
         const aides = [
@@ -333,7 +401,11 @@ export function createRelevantGuidance(pi: any) {
       }
       topicHints({prompt: prompt.length > 24000 ? prompt.slice(0,12000) + "\n" + prompt.slice(-12000) : prompt});
       routedSkills(prompt);
-      remember(prompt);
+      const currentIntent = skillIntentSegments(prompt).join(' ');
+      // Substantive new requests replace the old lexical topic profile. Short
+      // continuation requests retain it; old domains cannot crowd out a pivot.
+      if (!/\b(?:continue|resume|same task|next step)\b/i.test(currentIntent)) context = [];
+      remember(currentIntent);
       contextSkill();
       codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
       // Match narrow task intent against skills actually present in this run's catalog.
@@ -377,7 +449,7 @@ export function createRelevantGuidance(pi: any) {
         if (language) skillHint(`${language} work`, [], new RegExp(`^${language}(?:$|[-_ ])`, "i"), true);
       }
       const doing = /\b(build|make|create|implement|fix|refactor|review|write|analy[sz]e|train|evaluate|animate|calculate|audit|debug|compare|inspect)\b/i.test(prompt);
-      if (doing && !/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(prompt) && /\b(image|screenshot|diagram|visuals?)\b/i.test(prompt) && ctx.model?.input?.includes("image") !== true)
+      if (doing && !/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(taskPrompt) && /\b(image|screenshot|diagram|visuals?)\b/i.test(prompt) && ctx.model?.input?.includes("image") !== true)
         add({ key: "visual-handoff", tool: "subagent", text: 'Visual evidence needed on a text-only or unknown-capability route: use subagent model discovery (input:image tools:true) and an eligible vision child with fresh context, the artifact and a precise read-only question. Require source-correlated image reads; a child’s claimed inspection alone is not visual evidence. Respect route/spending restrictions; do not delegate recursively. If unavailable, use supported DOM/geometry or file-metadata calculations, state their limits, and do not claim to have seen pixels.' });
       if (doing && /\b(animation|animate|motion graphics?|keyframes?|transitions?)\b/i.test(prompt))
         practice("motion", "Motion work", ["motion"],
@@ -458,6 +530,9 @@ export function createRelevantGuidance(pi: any) {
         add({key:'utility:lsp_diagnostics',tool:'lsp_diagnostics',priority:68,sourceFile:file,
           text:`Changed source: lsp_diagnostics with paths:[${JSON.stringify(file)}] and serverScope:"primary" can check current syntax/type diagnostics. Keep project tests; missing servers or incomplete results do not establish a clean check.`});
       }
+      if (['edit','write'].includes(name) && sourceCheckSupported(file))
+        add({key:'utility:source_check',tool:'source_check',priority:72,sourceFile:file,
+          text:`Changed source/configuration: source_check({paths:[${JSON.stringify(file)}]}) runs bounded syntax checks. Batch related changed files in one call; a syntax pass does not replace project types, tests or configuration schema checks.`});
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
         routedSkills("", file);

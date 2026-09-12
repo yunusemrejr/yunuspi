@@ -1,6 +1,14 @@
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import { inspectPageState } from "./render-page-state.mjs";
+import {
+  browserFailure,
+  createBrowserEvents,
+  diagnosticText,
+  inspectBrowserElement,
+  safeBrowserUrl,
+} from "./browser-diagnostics.mjs";
+export { safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 
@@ -16,25 +24,17 @@ export function browserUrl(raw) {
     );
   return url.href;
 }
-export function safeBrowserUrl(raw) {
-  try {
-    const url = new URL(raw);
-    return `${url.origin}${url.pathname}`.slice(0, 512);
-  } catch {
-    return "(unavailable)";
-  }
-}
 export async function runBrowserSession(input, output) {
   let browser,
     context,
     page,
     closing = false,
-    count = 0;
-  const logs = [];
-  const record = (kind, extra = {}) => {
-    logs.push({ at: new Date().toISOString(), kind, ...extra });
-    if (logs.length > 100) logs.shift();
-  };
+    count = 0,
+    requestId = 0;
+  const logs = createBrowserEvents(),
+    network = createBrowserEvents();
+  const requests = new WeakMap();
+  const record = (kind, extra) => logs.record(kind, extra);
   const close = async () => {
     if (closing) return;
     closing = true;
@@ -44,34 +44,43 @@ export async function runBrowserSession(input, output) {
     close().finally(() => process.exit(0));
   }, 10 * 60_000);
   lifetime.unref();
-  process.on("SIGTERM", () => close().finally(() => process.exit(0)));
+  const terminate = () => close().finally(() => process.exit(0));
+  process.on("SIGTERM", terminate);
   const lines = createInterface({ input, crlfDelay: Infinity });
   try {
     for await (const line of lines) {
       if (line.length > 32_768) throw Error("Browser request exceeds limit");
-      let id;
+      let id,
+        action,
+        stage = "validation";
       try {
         const request = JSON.parse(line);
         id = request.id;
-        const { action, ...p } = request;
+        ({ action } = request);
+        const p = request;
         if (++count > 200)
           throw Error(
             "Browser session action limit reached; close and open a new session",
           );
+        const timeout = p.timeoutMs ?? 5000;
+        if (!Number.isInteger(timeout) || timeout < 100 || timeout > 15000)
+          throw Error("Invalid timeoutMs: use 100–15000");
         if (action === "close") {
           await close();
-          output.write(JSON.stringify({ id, result: { closed: true } }) + "\n");
+          output.write(
+            JSON.stringify({ id, result: { ok: true, closed: true } }) + "\n",
+          );
           break;
         }
         if (!browser) {
           if (action !== "open") throw Error("Open the browser session first");
           browserUrl(p.url);
+          stage = "launch";
           browser = await chromium.launch({
             channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
             headless: true,
             chromiumSandbox: true,
             timeout: 15_000,
-            args: ["--disable-gpu", "--disable-webgl"],
           });
           context = await browser.newContext({
             viewport: { width: 1280, height: 800 },
@@ -95,7 +104,7 @@ export async function runBrowserSession(input, output) {
             }
           });
           page = await context.newPage();
-          page.setDefaultTimeout(10_000);
+          page.setDefaultTimeout(5000);
           page.setDefaultNavigationTimeout(15_000);
           page.on("dialog", (dialog) => {
             record("dialog-dismissed", { type: dialog.type() });
@@ -106,108 +115,209 @@ export async function runBrowserSession(input, output) {
             download.cancel().catch(() => {});
           });
           page.on("console", (message) => {
-            if (["error", "warning"].includes(message.type()))
-              record(`console-${message.type()}`, {
-                message: "omitted: untrusted page values",
-              });
+            const location = message.location();
+            record(`console-${message.type()}`, {
+              message: diagnosticText(message.text()),
+              location: {
+                url: safeBrowserUrl(location.url),
+                line: location.lineNumber,
+                column: location.columnNumber,
+              },
+            });
           });
-          page.on("pageerror", () => record("page-script-error"));
-          page.on("requestfailed", (request) =>
-            record("request-failed", { url: safeBrowserUrl(request.url()) }),
+          page.on("pageerror", (error) =>
+            record("page-script-error", {
+              message: diagnosticText(error.stack ?? error.message, 1200),
+            }),
           );
+          page.on("request", (request) => {
+            const entry = {
+              requestId: ++requestId,
+              url: safeBrowserUrl(request.url()),
+              method: request.method(),
+              resourceType: request.resourceType(),
+            };
+            requests.set(request, entry);
+            network.record("request", entry);
+          });
           page.on("response", (response) => {
+            const entry = requests.get(response.request());
+            network.record("response", {
+              ...entry,
+              status: response.status(),
+              contentType: diagnosticText(
+                response.headers()["content-type"] ?? "",
+                100,
+              ),
+            });
             if (response.status() >= 400)
               record("http-error", {
                 status: response.status(),
                 url: safeBrowserUrl(response.url()),
               });
           });
+          page.on("requestfinished", (request) => {
+            const timing = request.timing();
+            network.record("finished", {
+              ...requests.get(request),
+              durationMs: Math.max(0, Math.round(timing.responseEnd)),
+              responseStartMs: Math.max(0, Math.round(timing.responseStart)),
+            });
+          });
+          page.on("requestfailed", (request) => {
+            const failure = {
+              ...requests.get(request),
+              failure: diagnosticText(request.failure()?.errorText, 120),
+            };
+            network.record("failed", failure);
+            record("request-failed", failure);
+          });
         }
+        const surface = p.frame ? page.frameLocator(p.frame) : page;
         const locate = () => {
           if (
             typeof p.selector === "string" &&
             p.selector.length > 0 &&
             p.selector.length <= 256
           )
-            return page.locator(p.selector);
+            return surface.locator(p.selector);
           if (
             typeof p.role === "string" &&
             typeof p.name === "string" &&
             p.name.length <= 256
           )
-            return page.getByRole(p.role, { name: p.name, exact: true });
+            return surface.getByRole(p.role, { name: p.name, exact: true });
           throw Error(
             "Use a selector or exact role/name observed in this browser session",
           );
         };
+        const snapshot = async () =>
+          (p.selector || p.role ? locate() : surface.locator(":root")).evaluate(
+            inspectPageState,
+            { selector: p.selector ?? null },
+            { timeout },
+          );
         let result;
+        stage = action;
         if (action === "open" || action === "navigate") {
+          stage = "navigation";
           const response = await page.goto(browserUrl(p.url), {
             waitUntil: "domcontentloaded",
+            timeout: 15000,
           });
           record("navigation", {
             url: safeBrowserUrl(page.url()),
             status: response?.status(),
           });
         } else if (action === "click") {
-          await locate().click();
+          await locate().click({ timeout });
           record("click");
         } else if (action === "fill") {
           if (typeof p.text !== "string" || p.text.length > 8000)
             throw Error("fill text limit is 8000 characters");
-          await locate().fill(p.text);
+          await locate().fill(p.text, { timeout });
           record("fill");
         } else if (action === "press") {
           if (typeof p.key !== "string" || p.key.length > 80)
             throw Error("Invalid key");
-          await locate().press(p.key);
+          await locate().press(p.key, { timeout });
           record("press");
+        } else if (action === "wait") {
+          if (
+            !["attached", "detached", "visible", "hidden"].includes(
+              p.state ?? "visible",
+            )
+          )
+            throw Error("Invalid wait state");
+          await locate().waitFor({ state: p.state ?? "visible", timeout });
+        } else if (action === "viewport") {
+          if (
+            ![p.width, p.height].every(
+              (n) => Number.isInteger(n) && n >= 240 && n <= 2560,
+            )
+          )
+            throw Error("Viewport dimensions must be 240–2560 pixels");
+          await page.setViewportSize({ width: p.width, height: p.height });
+        } else if (action === "inspect") {
+          result = {
+            inspection: await locate().evaluate(
+              inspectBrowserElement,
+              { properties: p.properties ?? [] },
+              { timeout },
+            ),
+          };
+        } else if (action === "logs" || action === "network") {
+          const data = (action === "logs" ? logs : network).read(p);
+          result = {
+            [action]: data.events,
+            ...Object.fromEntries(
+              Object.entries(data).filter(([key]) => key !== "events"),
+            ),
+            limitations:
+              "Bounded event history; bodies, cookies, authorization headers and URL parameters omitted. includeText enables best-effort minimized console/script messages; application prose can still contain private data.",
+          };
         } else if (action === "screenshot") {
-          const png = await page.screenshot({ type: "png", timeout: 10_000 });
+          const png = await (p.selector || p.role ? locate() : page).screenshot(
+            { type: "png", timeout: 10000 },
+          );
           if (png.length > 1_100_000)
             throw Error("Screenshot exceeds attachment limit");
           result = { png: png.toString("base64"), mimeType: "image/png" };
-        } else if (!["snapshot", "logs"].includes(action))
+        } else if (action !== "snapshot")
           throw Error("Unsupported browser action");
         if (!result) {
+          stage = "observation";
+          // Observe the whole document after mutations; a target may have disappeared.
+          const state =
+            action === "snapshot"
+              ? await snapshot()
+              : await surface
+                  .locator(":root")
+                  .evaluate(inspectPageState, {}, { timeout });
           result = {
-            url: safeBrowserUrl(page.url()),
-            logs: logs.slice(-20),
-            untrusted: true,
+            pageState: state,
+            frames: page
+              .frames()
+              .slice(0, 6)
+              .map((frame) => ({
+                url: safeBrowserUrl(frame.url()),
+                name: diagnosticText(frame.name(), 120),
+              })),
           };
-          if (action !== "logs") {
-            result.pageState = await page
-              .locator(":root")
-              .evaluate(inspectPageState, { selector: null });
-            while (
-              JSON.stringify(result).length > 14_000 &&
-              result.pageState.items.length
-            ) {
-              result.pageState.items.pop();
-              result.pageState.truncated = true;
-            }
-          }
         }
+        result = {
+          ok: true,
+          url: safeBrowserUrl(page.url()),
+          diagnostics: { logs: logs.summary(), network: network.summary() },
+          untrusted: true,
+          ...result,
+        };
         output.write(JSON.stringify({ id, result }) + "\n");
       } catch (error) {
-        record("action-error");
-        // Playwright errors can echo entered values or URLs. Retain the failure
-        // class; callers inspect current state before retrying uncertain actions.
+        const failure = browserFailure(error, stage, action);
+        if (
+          stage === "observation" &&
+          ["click", "fill", "press"].includes(action)
+        )
+          failure.outcome = "action completed; subsequent observation failed";
+        record("action-error", { failure });
         output.write(
           JSON.stringify({
             id,
-            error:
-              error.name === "TimeoutError"
-                ? "Browser action timed out; inspect current state before retrying"
-                : "Browser action failed; inspect state/logs and validate the target. No automatic action replay.",
+            result: {
+              ok: false,
+              failure,
+              url: page ? safeBrowserUrl(page.url()) : undefined,
+              untrusted: true,
+            },
           }) + "\n",
         );
       }
     }
   } finally {
     clearTimeout(lifetime);
+    process.removeListener("SIGTERM", terminate);
     await close();
-    lines.close();
   }
 }
 if (process.argv[1] === new URL(import.meta.url).pathname)

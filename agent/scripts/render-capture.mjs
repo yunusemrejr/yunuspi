@@ -497,7 +497,13 @@ export async function renderCapture(p, output, signal) {
   } catch (e) {
     await fs.unlink(output).catch(() => {});
     if (outputMode !== "image") {
-      const reason = signal?.aborted
+      const reason = /Unsupported GPU\/WebGL/.test(String(e.message))
+        ? "unsupported GPU/WebGL page; serve the app over HTTP and use browser_session for WebGL-capable inspection"
+        : /ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED/.test(String(e.message))
+          ? "navigation unreachable; check the server task and HTTP URL"
+          : /strict mode violation/.test(String(e.message))
+            ? "ambiguous selector; inspect current DOM and choose one target"
+            : signal?.aborted
         ? "cancelled"
         : e.code === "ENOENT"
           ? "ENOENT: source not found"

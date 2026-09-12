@@ -28,7 +28,8 @@ export function skillTerms(text: string, limit = MAX_TERMS): string[] {
 }
 export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
   const docs = skills.slice(0, 256).map(skill => {
-    const name = new Set(skillTerms(skill.name, 16));
+    // Hyphenated catalogue names should match ordinary task prose too.
+    const name = new Set(skillTerms(`${skill.name} ${skill.name.replace(/[-_:/.]+/g, ' ')}`, 24));
     return { skill, name, tokens: new Set([...name, ...skillTerms(skill.description)]) };
   });
   const df = new Map<string, number>();
