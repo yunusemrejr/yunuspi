@@ -1,3 +1,4 @@
+import { planFieldError, planGraphError } from "./plan.ts";
 import type { TaskDetails } from "../tool/types.js";
 import { EMPTY_STATE, type TaskState } from "./state.ts";
 
@@ -19,9 +20,10 @@ export function isTaskDetails(value: unknown): value is Pick<TaskDetails, "tasks
 		if (["description", "activeForm", "owner"].some(key => t[key] !== undefined && typeof t[key] !== "string")) return false;
 		if (t.blockedBy !== undefined && (!Array.isArray(t.blockedBy) || !t.blockedBy.every(id => Number.isSafeInteger(id) && id > 0))) return false;
 		if (t.metadata !== undefined && (!t.metadata || typeof t.metadata !== "object" || Array.isArray(t.metadata))) return false;
+		if (planFieldError(t)) return false;
 		ids.add(t.id as number);
 	}
-	return true;
+	return !planGraphError(v.tasks as TaskDetails["tasks"]);
 }
 
 /**

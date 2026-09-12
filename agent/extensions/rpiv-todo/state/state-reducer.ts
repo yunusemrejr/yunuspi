@@ -4,6 +4,7 @@ import type {
 	TaskMutationParams,
 	TaskStatus,
 } from "../tool/types.js";
+import { PLAN_FIELDS, planFieldError, planGraphError, blockers } from "./plan.ts";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
@@ -19,6 +20,7 @@ import { detectCycle } from "./task-graph.js";
  */
 export type Op =
 	| { kind: "create"; taskId: number }
+	| { kind: "batch"; ids: Record<string, number>; count: number }
 	| {
 			kind: "update";
 			id: number;
@@ -27,7 +29,7 @@ export type Op =
 			changed: boolean;
 	  }
 	| { kind: "delete"; id: number; subject: string }
-	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
+	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean; view?: "tree" | "frontier" }
 	| { kind: "get"; task: Task }
 	| { kind: "clear"; count: number }
 	| { kind: "error"; message: string };
@@ -76,6 +78,7 @@ function taskChanged(before: Task, after: Task): boolean {
 		before.description !== after.description ||
 		before.activeForm !== after.activeForm ||
 		before.owner !== after.owner ||
+		PLAN_FIELDS.some(key => JSON.stringify(before[key]) !== JSON.stringify(after[key])) ||
 		!sameNumberList(before.blockedBy, after.blockedBy) ||
 		!sameRecord(before.metadata, after.metadata)
 	);
@@ -92,12 +95,13 @@ function taskChanged(before: Task, after: Task): boolean {
  * dangling/deleted blockedBy, self-block, cycles). Decision: validation stays
  * in-reducer — see Plan §Decisions §Decision 2.
  */
-export function applyTaskMutation(
+function reduceTaskMutation(
 	state: TaskState,
 	action: TaskAction,
 	params: TaskMutationParams,
 ): ApplyResult {
 	switch (action) {
+		case "batch": return errorResult(state, "Nested batches are not supported");
 		case "create": {
 			if (!params.subject?.trim()) {
 				return errorResult(state, "subject required for create");
@@ -120,6 +124,7 @@ export function applyTaskMutation(
 			if (params.blockedBy?.length) newTask.blockedBy = [...params.blockedBy];
 			if (params.owner) newTask.owner = params.owner;
 			if (params.metadata) newTask.metadata = { ...params.metadata };
+			for (const key of PLAN_FIELDS) if (params[key] !== undefined) Object.assign(newTask, {[key]: structuredClone(params[key])});
 
 			const newTasks = [...state.tasks, newTask];
 			return {
@@ -136,6 +141,7 @@ export function applyTaskMutation(
 			const current = state.tasks[idx];
 
 			const hasMutation =
+				PLAN_FIELDS.some(key => params[key] !== undefined) ||
 				params.subject !== undefined ||
 				params.description !== undefined ||
 				params.activeForm !== undefined ||
@@ -195,6 +201,8 @@ export function applyTaskMutation(
 			}
 
 			const updated: Task = { ...current, status: newStatus };
+			if (current.status === "completed" && newStatus !== "completed" || params.acceptance !== undefined && params.acceptance !== current.acceptance) delete updated.evidence;
+			for (const key of PLAN_FIELDS) if (params[key] !== undefined) Object.assign(updated, {[key]: structuredClone(params[key])});
 			if (params.subject !== undefined) updated.subject = params.subject;
 			if (params.description !== undefined)
 				updated.description = params.description;
@@ -225,6 +233,7 @@ export function applyTaskMutation(
 				op: {
 					kind: "list",
 					includeDeleted: params.includeDeleted === true,
+					view: params.view,
 					...(params.status === undefined ? {} : { statusFilter: params.status }),
 				},
 			};
@@ -263,4 +272,40 @@ export function applyTaskMutation(
 			};
 		}
 	}
+}
+
+/** Atomic plan edits use the existing reducer and persisted snapshot. */
+export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
+ if (action === "batch") {
+  if (!Array.isArray(params.operations) || !params.operations.length || params.operations.length > 32) return errorResult(state, "batch requires 1..32 operations");
+  let next = state; const ids: Record<string, number> = {};
+  const resolve = (id: number) => id < 0 ? ids[String(id)] ?? id : id;
+  for (const [index, input] of params.operations.entries()) {
+   if (!input || !["create", "update", "delete"].includes(input.action)) return errorResult(state, `batch operation ${index+1}: unsupported action`);
+   const item = {...input};
+   if (item.action === "create" && item.id !== undefined) {
+    if (!Number.isSafeInteger(item.id) || item.id >= 0 || ids[String(item.id)] !== undefined) return errorResult(state, "Batch create aliases must be unique negative integers");
+    ids[String(item.id)] = next.nextId; delete item.id;
+   } else if (item.id !== undefined) item.id = resolve(item.id);
+   if (item.parentId != null) item.parentId = resolve(item.parentId);
+   for (const key of ["blockedBy", "addBlockedBy", "removeBlockedBy"] as const) if (item[key]) item[key] = item[key]!.map(resolve);
+   const result = applyTaskMutation(next, item.action, item);
+   if (result.op.kind === "error") return errorResult(state, `batch operation ${index+1}: ${result.op.message}`);
+   next = result.state;
+  }
+  return {state:next, op:{kind:"batch", ids, count:params.operations.length}};
+ }
+ const invalid = planFieldError(params); if (invalid) return errorResult(state, invalid);
+ const result = reduceTaskMutation(state, action, params);
+ if (result.op.kind === "error" || result.state === state) return result;
+ const graphError = planGraphError(result.state.tasks); if (graphError) return errorResult(state, graphError);
+ const task = result.state.tasks.find(t => t.id === params.id);
+ if (action === "update" && task && ["in_progress", "completed"].includes(task.status)) {
+  if (blockers(task, result.state.tasks).length) return errorResult(state, "Complete dependencies before starting or completing this task");
+  if (task.status === "completed") {
+   if (result.state.tasks.some(t => t.parentId === task.id && !["completed", "deleted"].includes(t.status))) return errorResult(state, "Complete or explicitly remove unfinished children first");
+   if (task.acceptance?.trim() && !task.evidence?.trim()) return errorResult(state, "Record verification evidence before completing this task");
+  }
+ }
+ return result;
 }

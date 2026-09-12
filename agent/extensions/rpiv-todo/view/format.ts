@@ -48,6 +48,7 @@ export const STATUS_COLOR: Record<
  */
 export const ACTION_GLYPH: Record<TaskAction, string> = {
 	create: "+",
+	batch: "≡",
 	update: "→",
 	delete: "×",
 	get: "›",
@@ -96,7 +97,9 @@ export function formatOverlayTaskLine(
 	}
 	let line = `${glyph}`;
 	if (showId) line += ` ${theme.fg("dim", `#${t.id}`)}`;
+	if (t.parentId) line += ` ${theme.fg("dim", `↳ #${t.parentId}`)}`;
 	line += ` ${subject}`;
+	if (t.execution && t.execution !== "self") line += ` ${theme.fg("muted", `[${t.execution}]`)}`;
 	if (t.status === "in_progress" && t.activeForm) {
 		line += ` ${theme.fg("muted", `(${sanitizeTerminalText(t.activeForm)})`)}`;
 	}

@@ -352,6 +352,7 @@
     "scripts/workspace-facts.mjs",
     "scripts/wait-condition.mjs",
     "extensions/pi-memory/priming.ts",
+    "extensions/rpiv-todo/state/plan.ts",
     "extensions/pi-memory/project-identity.ts",
     "extensions/pi-memory/mutation.ts",
     "extensions/pi-background-tasks/src/core/completion-wake.ts",
