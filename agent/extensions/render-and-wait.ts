@@ -1,3 +1,4 @@
+import {registerBrowserSession} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import fs from "node:fs/promises";
@@ -22,7 +23,7 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
     let stopped: string | undefined;
     const child = execFile(process.execPath, [path.join(scripts, "render-capture.mjs"), encode(params), output], {
       cwd, detached: process.platform !== "win32", encoding: "utf8", maxBuffer: 65536,
-      env: {...process.env, TMPDIR: tempRoot, HOME: tempRoot, XDG_CACHE_HOME: path.join(tempRoot,"cache"), XDG_CONFIG_HOME: path.join(tempRoot,"config")},
+      env: {...Object.fromEntries(["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])), TMPDIR: tempRoot, HOME: tempRoot, XDG_CACHE_HOME: path.join(tempRoot,"cache"), XDG_CONFIG_HOME: path.join(tempRoot,"config")},
     }, (error, stdout, stderr) => {
       clearTimeout(deadline); clearTimeout(hardKill);
       signal?.removeEventListener("abort", abort);
@@ -47,6 +48,7 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
   });
 }
 export default function (pi: any) {
+  registerBrowserSession(pi);
   const acquireRender = createRenderQueue();
   pi.registerTool({
     name: "wait_for",
@@ -79,7 +81,7 @@ export default function (pi: any) {
     name: "render_see",
     label: "Render and see",
     description:
-      "Built-in browser inspection: use directly without locating/installing Playwright. Inspect or capture local HTML/SVG/image/PDF or HTTP(S). output:text returns bounded live-DOM labels, controls, bounds/overflow, image alt/load status and validation state without pixels; both adds PNG. Default image for vision models, text otherwise. Supports dark/light, reduced motion and sampled CSS/WAAPI frames. Selector scopes DOM inspection and scrolls viewport images to the first match (may clip oversized elements). Oversized full-page captures return explicitly incomplete viewport evidence. Concurrent calls queue (up to four waiting, 120s queue deadline). Isolated, unauthenticated, 30s execution max; no actions/GPU. DOM facts are not visual interpretation.",
+      "Built-in browser inspection: use directly without locating/installing Playwright. Inspect or capture local HTML/SVG/image/PDF or HTTP(S). output:text returns bounded live-DOM labels, controls, bounds/overflow, image alt/load status and validation state without pixels; both adds PNG. Default image for vision models, text otherwise. Supports dark/light, reduced motion and sampled CSS/WAAPI frames. Selector scopes DOM inspection and scrolls viewport images to the first match (may clip oversized elements). Oversized full-page captures return explicitly incomplete viewport evidence. Concurrent calls queue per agent (up to four waiting, 120s queue deadline); other agents have independent captures. Isolated, unauthenticated, 30s execution max; no actions/GPU. DOM facts are not visual interpretation.",
     parameters: Type.Object({
       source: Type.String(),
       output: Type.Optional(StringEnum(["image", "text", "both"])),
@@ -105,7 +107,8 @@ export default function (pi: any) {
       let lock: string | undefined;
       let tempRoot: string | undefined;
       try {
-        const dir = path.join(getAgentDir(), "artifacts", "renders");
+        const owner = String(ctx.sessionManager?.getSessionId?.() ?? "current").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100);
+        const dir = path.join(getAgentDir(), "artifacts", "renders", `${owner}-${process.pid}`);
         await fs.mkdir(dir, { recursive: true, mode: 0o700 });
         const lockPath = path.join(dir, ".capture-lock");
         try {

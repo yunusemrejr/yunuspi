@@ -527,6 +527,7 @@ export function writeParallelHandoffGroup(input: {
 	const group: ParallelHandoffGroup = {
 		stepIndex: input.stepIndex,
 		baseCommit: input.setup.baseCommit,
+		...(input.setup.commonDir ? { commonDir: input.setup.commonDir } : {}),
 		repoRoot: input.setup.cwd,
 		children: input.results.map((result, taskIndex) => {
 			const binding = bindingForTask(taskIndex);
@@ -649,6 +650,7 @@ export function discardPreservedWorktrees(
 		const report = cleanupWorktrees({
 			cwd: group.repoRoot,
 			baseCommit: group.baseCommit,
+			...(group.commonDir ? { commonDir: group.commonDir } : {}),
 			worktrees: pending.map((task) => ({
 				path: task.path,
 				agentCwd: task.path,

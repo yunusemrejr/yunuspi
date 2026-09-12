@@ -1,3 +1,4 @@
+import { waitForSearchSlot, coolSearchProvider, retryAfterMs, readSearchBody } from "./search-transport.ts";
 import { readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { activityMonitor } from "./activity.ts";
@@ -533,7 +534,10 @@ async function runOpenAISearch(
 	};
 
 	try {
-		const response = await fetch(useCodexEndpoint ? CODEX_RESPONSES_URL : auth.responsesUrl, {
+		const endpoint = useCodexEndpoint ? CODEX_RESPONSES_URL : auth.responsesUrl;
+		const paceKey = `openai:${new URL(endpoint).origin}`;
+		await waitForSearchSlot(paceKey, options.signal, 1000);
+		const response = await fetch(endpoint, {
 			method: "POST",
 			headers,
 			body: JSON.stringify(body),
@@ -542,9 +546,13 @@ async function runOpenAISearch(
 				: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
 		});
 
+		if (response.status === 429 || response.status === 503) {
+			await response.body?.cancel();
+			await coolSearchProvider(paceKey, retryAfterMs(response.headers.get("retry-after")));
+		}
 		if (!response.ok) {
 			activityMonitor.logError(activityId, `HTTP ${response.status}`);
-			const errorText = redactCredential(await response.text(), auth.apiKey);
+			const errorText = redactCredential(await readSearchBody(response, 65536), auth.apiKey);
 			throw new Error(`OpenAI API error ${response.status}: ${errorText.slice(0, 300)}`);
 		}
 

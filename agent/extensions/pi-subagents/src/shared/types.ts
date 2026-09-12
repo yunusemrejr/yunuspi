@@ -462,6 +462,8 @@ export interface ParallelHandoffSupersessionEvidence {
 }
 
 export interface ParallelHandoffGroup {
+	/** Project common Git directory captured before managed worktree creation. */
+	commonDir?: string;
 	stepIndex: number;
 	baseCommit: string;
 	repoRoot: string;

@@ -1,3 +1,4 @@
+import { waitForSearchSlot, coolSearchProvider, retryAfterMs, readSearchBody } from "./search-transport.ts";
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { activityMonitor } from "./activity.ts";
@@ -186,6 +187,8 @@ export async function searchWithKimi(
 		? AbortSignal.any([timeoutSignal, options.signal])
 		: timeoutSignal;
 	try {
+		const paceKey = "kimi";
+		await waitForSearchSlot(paceKey, options.signal, 1000);
 		const response = await fetch(KIMI_SEARCH_URL, {
 			method: "POST",
 			headers: buildRequestHeaders(auth),
@@ -193,9 +196,13 @@ export async function searchWithKimi(
 			signal: requestSignal,
 		});
 
+		if (response.status === 429 || response.status === 503) {
+			await response.body?.cancel();
+			await coolSearchProvider(paceKey, retryAfterMs(response.headers.get("retry-after")));
+		}
 		if (!response.ok) {
 			activityMonitor.logError(activityId, `HTTP ${response.status}`);
-			const errorText = redactCredential(await response.text(), auth.apiKey);
+			const errorText = redactCredential(await readSearchBody(response, 65536), auth.apiKey);
 			throw new Error(`Kimi Code search API error ${response.status}: ${errorText.slice(0, 300)}`);
 		}
 

@@ -1,5 +1,5 @@
 import { guardedCommand } from "../../../../lib/self-mutation-guard.ts";
-import { runManagedGit } from "./git-command.ts";
+import { runManagedGit, managedRepositoryIdentity } from "./git-command.ts";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -9,6 +9,8 @@ import { PROJECT_SUBAGENTS_RELATIVE_DIR } from "../../shared/artifacts.ts";
 import { getAgentDir } from "../../shared/utils.ts";
 
 export interface WorktreeSetup {
+	/** Pinned project identity; session history is not a repository. */
+	commonDir?: string;
 	cwd: string;
 	worktrees: WorktreeInfo[];
 	baseCommit: string;
@@ -434,6 +436,18 @@ function createSingleWorktree(
 	}
 }
 
+function assertWorktreeOwnership(setup: WorktreeSetup, worktree: WorktreeInfo): void {
+  const parent = managedRepositoryIdentity(setup.cwd);
+  const child = managedRepositoryIdentity(worktree.path);
+  const common = setup.commonDir ?? parent.commonDir;
+  if (parent.commonDir !== common || child.commonDir !== common ||
+      child.workTree !== normalizeComparableCwd(worktree.path) || child.workTree === parent.workTree ||
+      child.gitDir === parent.gitDir || child.branch !== `refs/heads/${worktree.branch}` ||
+      !/^pi-parallel-[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/.test(worktree.branch)) {
+    throw new Error("Managed worktree ownership changed; preserve files and inspect repository/path/branch identity before recovery");
+  }
+}
+
 function removeSyntheticPath(worktree: WorktreeInfo, syntheticPath: string): void {
 	const resolved = path.resolve(worktree.path, syntheticPath);
 	const relative = path.relative(worktree.path, resolved);
@@ -441,6 +455,13 @@ function removeSyntheticPath(worktree: WorktreeInfo, syntheticPath: string): voi
 		return;
 	}
 
+	// A child can replace an intermediate directory with a symlink. Never
+  // traverse that alias during cleanup, even for a setup-hook synthetic path.
+  const physicalParent = normalizeComparableCwd(path.dirname(resolved));
+  const root = normalizeComparableCwd(worktree.path);
+  if (physicalParent !== path.dirname(resolved) || !(physicalParent === root || physicalParent.startsWith(root + path.sep)))
+    throw new Error("Synthetic path parent changed or escaped the managed worktree");
+  if (hasTrackedEntries(worktree.path, relative)) throw new Error("Synthetic path became tracked; preserve it");
 	let stat: fs.Stats;
 	try {
 		stat = fs.lstatSync(resolved);
@@ -511,6 +532,7 @@ function captureWorktreeDiff(
 	agent: string,
 	patchPath: string,
 ): WorktreeDiff {
+	assertWorktreeOwnership(setup, worktree);
 	removeSyntheticPathsBeforeDiff(worktree);
 	// Capture against the pinned base without changing the child's staging area.
 	const temporary = fs.mkdtempSync(path.join(os.tmpdir(),"pi-worktree-index-"));
@@ -578,6 +600,8 @@ function cleanupSingleWorktree(
 	const errors: string[] = [];
 	let worktreeRemoved = false;
 	let branchRemoved = false;
+  try { assertWorktreeOwnership(setup, worktree); }
+  catch (error) { return { index: worktree.index, path: worktree.path, branch: worktree.branch, worktreeRemoved, branchRemoved, preserved: true, reason: String(error) }; }
 	if (intent.kind === "preserve" && intent.cleanupBlocker) {
 		return {
 			index: worktree.index,
@@ -593,7 +617,7 @@ function cleanupSingleWorktree(
 		try {
 			removeSyntheticPathsBeforeDiff(worktree);
 		} catch (error) {
-			errors.push(`synthetic path cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+			return { index: worktree.index, path: worktree.path, branch: worktree.branch, worktreeRemoved, branchRemoved, preserved: true, reason: `Synthetic cleanup refused: ${String(error)}` };
 		}
 		const status = runGit(worktree.path, ["status", "--porcelain"]);
 		const baseDiff = runGit(worktree.path, ["diff", "--quiet", setup.baseCommit, "--"]);
@@ -664,7 +688,10 @@ function cleanupSingleWorktree(
 			}
 		}
 	}
+	let branchTip: string | undefined;
 	try {
+		assertWorktreeOwnership(setup, worktree);
+		branchTip = runGitChecked(worktree.path, ["rev-parse", "HEAD"]).trim();
 		runGitChecked(setup.cwd, ["worktree", "remove", "--force", worktree.path]);
 		worktreeRemoved = true;
 	} catch (error) {
@@ -672,7 +699,9 @@ function cleanupSingleWorktree(
 	}
 	if (worktreeRemoved) {
 		try {
-			runGitChecked(setup.cwd, ["branch", "-D", worktree.branch]);
+			const registered = runGitChecked(setup.cwd, ["worktree", "list", "--porcelain"]);
+      if (registered.split("\n").includes(`branch refs/heads/${worktree.branch}`)) throw new Error("Branch now belongs to another checkout");
+      runGitChecked(setup.cwd, ["update-ref", "--no-deref", "-d", `refs/heads/${worktree.branch}`, branchTip!]);
 			branchRemoved = true;
 		} catch (error) {
 			errors.push(`branch removal failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -696,10 +725,12 @@ export function createWorktrees(cwd: string, runId: string, count: number, optio
 	if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(runId)) throw new Error("Invalid worktree run ID");
 	if (!Number.isSafeInteger(count) || count < 1 || count > 64) throw new Error("Worktree count must be between 1 and 64");
 	const repo = resolveRepoState(cwd);
+	const commonDir = managedRepositoryIdentity(repo.toplevel).commonDir;
 	const setupHook = resolveWorktreeSetupHook(repo.toplevel, options?.setupHook);
 	const baseDir = resolveWorktreeBaseDir(options?.baseDir, repo.toplevel);
 	const plannedSetup: WorktreeSetup = {
 		cwd: repo.toplevel,
+		commonDir,
 		baseCommit: repo.baseCommit,
 		worktrees: Array.from({ length: count }, (_, index) => {
 			const worktreePath = buildWorktreePath(baseDir, runId, index);
@@ -732,6 +763,7 @@ export function createWorktrees(cwd: string, runId: string, count: number, optio
 	} catch (error) {
 		cleanupWorktrees({
 			cwd: repo.toplevel,
+		commonDir,
 			worktrees,
 			baseCommit: repo.baseCommit,
 		}, { kind: "setup-rollback" });
@@ -740,6 +772,7 @@ export function createWorktrees(cwd: string, runId: string, count: number, optio
 
 	return {
 		cwd: repo.toplevel,
+		commonDir,
 		worktrees,
 		baseCommit: repo.baseCommit,
 	};
@@ -781,13 +814,9 @@ export function cleanupWorktrees(
 	}
 	tasks.sort((left, right) => left.index - right.index);
 	const errors: string[] = [];
-	let pruned = false;
-	try {
-		runGitChecked(setup.cwd, ["worktree", "prune"]);
-		pruned = true;
-	} catch (error) {
-		errors.push(`worktree prune failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
+	// Legacy receipt field: true means no run-owned stale registration remains.
+  // Never prune another run's worktree registrations as incidental cleanup.
+  const pruned = tasks.every(task => task.worktreeRemoved);
 	const state = tasks.every((task) => task.worktreeRemoved && task.branchRemoved) && pruned ? "complete" : "partial";
 	return {
 		state,

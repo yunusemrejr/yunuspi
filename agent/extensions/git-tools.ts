@@ -13,6 +13,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Type } from "typebox";
+import { managedGitEnv, MANAGED_GIT_ARGS, managedRepositoryIdentity } from "./pi-subagents/src/runs/shared/git-command.ts";
 
 const execFileP = promisify(execFile);
 const MAX_OUTPUT = 32768;
@@ -59,7 +60,7 @@ function formatStatus(stdout: string): string {
   let branch = "(unknown)";
   let tracking = "";
   if (head) {
-    const match = /^## ([^.\s]+)(?:\.\.\.(\S+))?(?: \[(.+)\])?/.exec(head);
+    const match = /^## (.+?)(?:\.\.\.(\S+))?(?: \[(.+)\])?$/.exec(head);
     if (match) {
       branch = match[1];
       const upstream = match[2];
@@ -91,11 +92,16 @@ export async function runGitInfo(
   const action = params.action;
   const filePath = validatePath(params.path);
   const revision = validateRevision(params.revision);
-  const count = Math.min(Math.max(Number(params.count) || 10, 1), 50);
-  const base = ["--no-pager", "-c", "core.pager=cat", "-c", "color.ui=false"];
+  const count = Math.min(Math.max(Math.floor(Number(params.count)) || 10, 1), 50);
+  const base = [...MANAGED_GIT_ARGS, "--literal-pathspecs"];
   let args: string[];
 
   switch (action) {
+    case "scope": {
+      const identity = managedRepositoryIdentity(cwd);
+      return JSON.stringify({ ...identity, scope: "project", managedBranch: identity.branch?.startsWith("refs/heads/pi-parallel-") ?? false,
+        note: "Session history branches and checkpoints are not Git refs or file rollback. Managed worktrees share project objects/refs/config but own their worktree and index. Fusion output is a proposal until an explicit project integration. Harness releases use the sanitized public export; GitHub state requires a fresh remote query." }, null, 2);
+    }
     case "status":
       args = [
         "status",
@@ -103,16 +109,20 @@ export async function runGitInfo(
         "--branch",
         "--untracked-files=normal",
       ];
+      if (filePath) args.push("--", filePath);
       break;
     case "diff": {
       const patch = params.patch !== false;
       args = [
         "diff",
         "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
         "--stat",
         ...(patch ? ["--patch", "--unified=2"] : []),
         ...(params.staged ? ["--cached"] : []),
       ];
+      if (revision) args.push(revision);
       if (filePath) args.push("--", filePath);
       break;
     }
@@ -132,10 +142,15 @@ export async function runGitInfo(
       args = [
         "show",
         "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
         "--stat",
         "--oneline",
         ...(patch ? ["--patch", "--unified=2"] : []),
+        "--end-of-options",
         revision || "HEAD",
+        "--",
+        ...(filePath ? [filePath] : []),
       ];
       break;
     }
@@ -144,7 +159,7 @@ export async function runGitInfo(
       break;
     default:
       throw new Error(
-        `Unsupported git action: ${String(action)} (read-only: status, diff, log, show, branch)`,
+        `Unsupported git action: ${String(action)} (read-only: status, diff, log, show, branch, scope)`,
       );
   }
 
@@ -154,12 +169,7 @@ export async function runGitInfo(
       cwd,
       timeout: 10000,
       maxBuffer: 16 * 1024 * 1024,
-      env: {
-        ...process.env,
-        GIT_PAGER: "cat",
-        GIT_TERMINAL_PROMPT: "0",
-        GIT_OPTIONAL_LOCKS: "0",
-      },
+      env: managedGitEnv(),
     });
     stdout = String(result.stdout ?? "");
   } catch (error: any) {
@@ -180,7 +190,7 @@ export default function gitTools(pi: any) {
     name: "git_info",
     label: "Git Info",
     description:
-      "Read-only Git inspection with bounded output: status, diff, log, show or branch. Use this INSTEAD of bash `git status`, `git diff`, `git log`, `git show` or `git branch`. Mutating git commands (commit, push, checkout, rebase) remain in bash. Output is capped at 32 KB; diff/show include a patch unless patch is false.",
+      "Read-only Git inspection with bounded output: status, diff, log, show, branch or scope. scope identifies the project Git/worktree/index ownership and distinguishes session history, fusion and harness publishing. Use this INSTEAD of bash `git status`, `git diff`, `git log`, `git show` or `git branch`. Mutating git commands (commit, push, checkout, rebase) remain in bash. Output is capped at 32 KB; diff/show include a patch unless patch is false.",
     promptSnippet:
       "Inspect git status/diff/log/show/branch with bounded output",
     promptGuidelines: [
@@ -188,6 +198,7 @@ export default function gitTools(pi: any) {
     ],
     parameters: Type.Object({
       action: Type.Union([
+        Type.Literal("scope"),
         Type.Literal("status"),
         Type.Literal("diff"),
         Type.Literal("log"),

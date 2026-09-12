@@ -19,6 +19,7 @@ function buildProviderButtons(
 		{ value: "openai", label: "OpenAI", available: available.openai },
 		{ value: "duckduckgo", label: "DuckDuckGo", available: available.duckduckgo },
 		{ value: "kimi", label: "Kimi", available: available.kimi },
+		...(["searxng", "wikipedia", "crossref"] as const).map(value => ({ value, label: value, available: available[value] })),
 	];
 
 	return providers
@@ -1373,7 +1374,7 @@ const SCRIPT = `(function() {
   var token = DATA.sessionToken;
   var timeoutSec = DATA.timeout;
   var queries = Array.isArray(DATA.queries) ? DATA.queries : [];
-  var providers = ["all", "openai", "duckduckgo", "kimi"];
+  var providers = ["all", "openai", "searxng", "duckduckgo", "wikipedia", "crossref", "kimi"];
   var availProviders = DATA.availableProviders && typeof DATA.availableProviders === "object" ? DATA.availableProviders : {};
   var workflow = "summary-review";
   var initialDefaultProvider = typeof DATA.defaultProvider === "string" ? DATA.defaultProvider : "duckduckgo";

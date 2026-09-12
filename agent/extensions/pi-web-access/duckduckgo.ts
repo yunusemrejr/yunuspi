@@ -1,10 +1,10 @@
 import { parseHTML } from "linkedom";
 import { activityMonitor } from "./activity.ts";
+import { searchGet, coolSearchProvider, SearchCooldownError } from "./search-transport.ts";
 import type { SearchOptions, SearchResult, SearchResponse } from "./perplexity.ts";
 
 const SEARCH_URL = "https://lite.duckduckgo.com/lite/";
 const SEARCH_URLS = [SEARCH_URL, "https://html.duckduckgo.com/html/"];
-const SEARCH_TIMEOUT_MS = 10_000;
 
 interface NormalizedDomainFilters {
 	allowed: string[];
@@ -31,7 +31,7 @@ function normalizeDomain(value: string): string | null {
 	return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(input) ? input : null;
 }
 
-function normalizeDomainFilters(domainFilter: string[] | undefined): NormalizedDomainFilters {
+export function normalizeDomainFilters(domainFilter: string[] | undefined): NormalizedDomainFilters {
 	const filters: NormalizedDomainFilters = { allowed: [], blocked: [] };
 	for (const raw of domainFilter ?? []) {
 		const domain = normalizeDomain(raw);
@@ -46,7 +46,7 @@ function hostMatchesDomain(hostname: string, domain: string): boolean {
 	return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
-function matchesDomainFilters(url: string, filters: NormalizedDomainFilters): boolean {
+export function matchesDomainFilters(url: string, filters: NormalizedDomainFilters): boolean {
 	if (filters.allowed.length === 0 && filters.blocked.length === 0) return true;
 	const hostname = new URL(url).hostname.toLowerCase();
 	if (filters.allowed.length > 0 && !filters.allowed.some(domain => hostMatchesDomain(hostname, domain))) return false;
@@ -58,7 +58,7 @@ function decodeResultUrl(href: string): string | null {
 		const link = new URL(href, SEARCH_URL);
 		const destination = link.searchParams.get("uddg") ?? link.href;
 		const url = new URL(destination);
-		return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+		return !url.username && !url.password && ["http:", "https:"].includes(url.protocol) ? url.href : null;
 	} catch {
 		return null;
 	}
@@ -82,7 +82,7 @@ export function parseDuckDuckGoResults(html: string, options: SearchOptions = {}
 		if (container?.classList.contains("result--ad")) continue;
 		const title = anchor.textContent?.trim() ?? "";
 		const resultUrl = decodeResultUrl(anchor.getAttribute("href") ?? "");
-		if (!title || !resultUrl || new URL(resultUrl).hostname.endsWith("duckduckgo.com")) continue;
+		if (!title || !resultUrl || hostMatchesDomain(new URL(resultUrl).hostname, "duckduckgo.com")) continue;
 		parseableResults++;
 		if (seen.has(resultUrl) || !matchesDomainFilters(resultUrl, filters)) continue;
 		let snippet = container?.querySelector(".result__snippet")?.textContent?.trim() ?? "";
@@ -112,24 +112,14 @@ async function searchEndpoint(endpoint: string, query: string, options: SearchOp
 	const activityId = activityMonitor.logStart({ type: "api", query });
 
 	try {
-		const response = await fetch(url, {
-			method: "GET",
-			headers: {
-				Accept: "text/html",
-				"User-Agent": "Mozilla/5.0 (compatible; pi-web-access/1.0; +https://github.com/nicobailon/pi-web-access)",
-			},
-			signal: options.signal
-				? AbortSignal.any([AbortSignal.timeout(SEARCH_TIMEOUT_MS), options.signal])
-				: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-		});
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(`DuckDuckGo search error ${response.status}: ${body.slice(0, 300)}`);
-		}
-
-		const results = parseDuckDuckGoResults(await response.text(), options);
-
-		activityMonitor.logComplete(activityId, response.status);
+		const html = await searchGet("duckduckgo", url, options.signal);
+    let results: SearchResult[];
+    try { results = parseDuckDuckGoResults(html, options); }
+    catch (error) {
+      if (/bot challenge/i.test(String(error))) await coolSearchProvider("duckduckgo", 15 * 60_000);
+      throw error;
+    }
+		activityMonitor.logComplete(activityId, 200);
 		const answer = results.map(result => result.snippet
 			? `${result.snippet}\nSource: ${result.title} (${result.url})`
 			: `Source: ${result.title} (${result.url})`).join("\n\n");
@@ -149,7 +139,7 @@ export async function searchWithDuckDuckGo(query: string, options: SearchOptions
 		try {
 			return await searchEndpoint(endpoint, query, options);
 		} catch (err) {
-			if (options.signal?.aborted) throw err;
+			if (options.signal?.aborted || err instanceof SearchCooldownError) throw err;
 			const message = err instanceof Error ? err.message : String(err);
 			errors.push(`${new URL(endpoint).hostname}: ${message}`);
 		}
