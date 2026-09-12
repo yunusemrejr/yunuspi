@@ -3253,6 +3253,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			? params.model ?? (externalRunnerWithoutExplicitModel ? undefined : a.model)
 			: resolveEffectiveSubagentModel(params.model as string | undefined, a.model, parentModel, availableModels, a.modelProvider ?? currentProvider, {
 				...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
+				task: typeof params.task === "string" ? params.task : undefined,
 				source: modelOrigin === "explicit" ? "explicit" : "inherited",
 			});
 		const modelOverrideFromParent = modelOrigin === "inherited";
@@ -3677,7 +3678,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		agentConfig.modelProvider ?? currentProvider,
 		{
 			...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
-			source: modelOrigin === "explicit" ? "explicit" : "inherited",
+			task: typeof params.task === "string" ? params.task : undefined,
+				source: modelOrigin === "explicit" ? "explicit" : "inherited",
 		},
 	);
 	const modelOverrideFromParent = modelOrigin === "inherited";

@@ -1,10 +1,12 @@
 import * as fs from "node:fs";
-import { readHealth, recoveryPerformance } from "./provider-health.ts";
+import { readHealth, recoveryPerformance, evaluateRoute } from "./provider-health.ts";
 import * as path from "node:path";
 import { splitKnownThinkingSuffix, type ModelInfo } from "../../shared/model-info.ts";
 import { getAgentDir } from "../../shared/utils.ts";
 import { findModelExclusion } from "./model-exclusions.ts";
-import { describeFreeRoutes } from "./free-route-evidence.ts";
+import { describeFreeRoutes, catalogRouteCapabilities, readFreeEvidence } from "./free-route-evidence.ts";
+import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
+import { assessModelQuality, compareModelVersions, validBenchmark, taskQuality, type BenchmarkEvidence, type ModelDiscovery, type QualityTask } from "./model-quality.ts";
 import {
 	isAutonomousMeteredEligible,
 	economyComparisonCost,
@@ -16,27 +18,27 @@ import {
 } from "./model-economy.ts";
 
 /**
- * Deterministic autonomous model selection (2026-09-06 pass).
+ * Deterministic autonomous model selection. Capability and task quality gates
+ * precede free/cheap preference; operational reliability is a separate axis.
  *
- * Rules (offline by default; ranking cache is advisory only):
+ * Rules (selection is always offline):
  *   * Only models with KNOWN metered input+output rates at or below the
  *     configured caps are eligible (see model-economy.ts). Unknown, zero and
  *     placeholder prices never qualify.
  *   * Declared subscription providers (e.g. openai-codex) are used ONLY as a
  *     last resort when no metered route within the caps remains.
  *   * Unknown or too-small context windows are excluded from the autonomous pool.
- *   * Selection is deterministic: lowest metered price wins; popularity and
- *     benchmark data from a valid local ranking cache are surfaced in the
- *     explanation and used only as a tie-break — popularity NEVER overrides
- *     the price cap.
- *   * No timers, no network. `refreshModelRankingCache` is the single,
- *     explicit refresh entry point (the parent session calls it against a
- *     bounded source); failed refreshes report failure without throwing.
+ *   * Task-aware callers require source-backed, comparable benchmark evidence
+ *     or the selected reference identity. Unknown peers are advisory only.
+ *   * Free-first within quality gates, then inexpensive metered routes.
+ *     Legacy ranking data never overrides quality or the automatic price cap.
+ *   * No timers/network on selection. Background model research publishes
+ *     through refreshModelRankingCache; failures retain prior evidence.
  */
 
 const MIN_AUTONOMOUS_CONTEXT_TOKENS = 8192;
 const RANK_CACHE_FILE = "subagents-model-rank.json";
-const RANK_CACHE_VERSION = 1;
+const RANK_CACHE_VERSION = 2;
 
 export interface ModelRankCache {
 	version: number;
@@ -44,13 +46,21 @@ export interface ModelRankCache {
 	asOf: string;
 	coding?: Array<{ model: string; share: number }>;
 	benchmarks?: Array<{ model: string; score: number }>;
+ observations?: BenchmarkEvidence[];
+ discoveries?: ModelDiscovery[];
+ researchAt?: number;
+ researchCatalog?: string;
 }
 
 export interface AffordableSelectionOptions {
+ task?: string;
+ quality?: QualityTask;
+ /** Explicit workload requirements replace parent capacity only where supplied. */
+ freeOnly?: boolean;
  /** Caller-known workload only. Cache counts must be established, never guessed. */
  workload?: EconomyWorkload;
  /** Task requirements may narrow the pool; unspecified requirements retain parent capacity. */
- requirements?: { minContextWindow?: number; minOutputTokens?: number; reasoning?: boolean; inputModalities?: string[] };
+ requirements?: { minContextWindow?: number; minOutputTokens?: number; reasoning?: boolean; inputModalities?: string[]; toolCalling?: boolean };
 
 	/** Prefer the same model identity within eligible routes, without lifting caps. */
 	preferredModel?: string;
@@ -81,11 +91,17 @@ function rankCachePath(): string {
 	return path.join(getAgentDir(), "cache", RANK_CACHE_FILE);
 }
 
-function readRankCache(): { cache?: ModelRankCache; offline: boolean; note?: string } {
+let rankSnapshot: { key: string; cache: ModelRankCache } | undefined;
+export function readRankCache(): { cache?: ModelRankCache; offline: boolean; note?: string } {
 	const filePath = rankCachePath();
 	let parsed: unknown;
 	try {
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size > 4*1024*1024) return {offline:true};
+  const key = `${filePath}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  if (rankSnapshot?.key === key) return {cache:rankSnapshot.cache,offline:false};
 		parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (isRankCacheValid(parsed)) { rankSnapshot = {key,cache:parsed}; return {cache:parsed,offline:false}; }
 	} catch {
 		return { offline: true };
 	}
@@ -112,21 +128,31 @@ export function selectAffordableModel(
 ): AffordableSelection | undefined {
 	const preferredBase = options?.preferredModel ? splitKnownThinkingSuffix(options.preferredModel).baseModel : undefined;
 	const reference = models?.find(m=>m.fullId===preferredBase);
+ const evidence = readFreeEvidence();
 	const hasCapacity = (model:ModelInfo) => {
         const required = options?.requirements;
         if (required?.minContextWindow !== undefined && (!Number.isSafeInteger(required.minContextWindow) || required.minContextWindow <= 0 || !(typeof model.contextWindow === "number" && model.contextWindow >= required.minContextWindow))) return false;
         if (required?.minOutputTokens !== undefined && (!Number.isSafeInteger(required.minOutputTokens) || required.minOutputTokens <= 0 || !(typeof model.maxTokens === "number" && model.maxTokens >= required.minOutputTokens))) return false;
         if (required?.reasoning === true && model.reasoning !== true) return false;
         if (required?.inputModalities?.some(input => !model.input?.includes(input))) return false;
+        if (required?.toolCalling && catalogRouteCapabilities(model,evidence)?.toolCalling !== true) return false;
 
-		if(reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow))return false;
-		if(reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens))return false;
-		if(reference?.input?.includes("image") && !model.input?.includes("image"))return false;
-		if(reference?.reasoning === true && model.reasoning !== true)return false;
+		if(required?.minContextWindow === undefined && reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow))return false;
+		if(required?.minOutputTokens === undefined && reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens))return false;
+		if(required?.inputModalities === undefined && reference?.input?.includes("image") && !model.input?.includes("image"))return false;
+		if(required?.reasoning === undefined && reference?.reasoning === true && model.reasoning !== true)return false;
 		return true;
 	};
-	const pool = (models ?? []).filter((model) => {
+ const timestamp = Date.now();
+ const health = readHealth();
+ const { cache, offline } = readRankCache();
+ const qualityTask = options?.quality ?? (options?.task ? taskQuality(options.task) : undefined);
+ const histories = new Map((models ?? []).map(m=>[m.fullId,recoveryPerformance(health.providers[m.provider]?.models[m.id],m,timestamp)]));
+	let pool = (models ?? []).filter((model) => {
 		if (!hasCapacity(model)) return false;
+  if (!evaluateRoute({provider:model.provider,model:model.id,now:timestamp},health).allowed) return false;
+  const history = histories.get(model.fullId)!;
+  if (history.samples >= 4 && history.failureRate > .65) return false;
 		if (options?.exclude?.includes(model.fullId) || findModelExclusion(model.fullId)) return false;
 		if (options?.exhaustedProviders?.length) {
 			const provider = model.fullId.slice(0, model.fullId.indexOf("/"));
@@ -135,17 +161,30 @@ export function selectAffordableModel(
 		return true;
 	});
 	// One evidence snapshot for the whole selection, rather than disk I/O per model.
-	const freeReport = describeFreeRoutes(pool, {requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:true}});
+	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:true}});
+ const freeIds = new Set(freeReport.candidates.filter(c=>c.eligible).map(c=>c.route));
+ const qualityPool = pool.filter(m=>freeIds.has(m.fullId) || !options?.freeOnly && (isAutonomousMeteredEligible(m,cfg) || subscriptionEligible(m,cfg)));
+ const quality = qualityTask ? assessModelQuality(qualityPool,cache?.observations ?? [],qualityTask,reference,timestamp) : undefined;
+ if (quality) pool = pool.filter(m=>quality.get(m.fullId)?.eligible);
 	const preferred = reference;
 	const preferredId = preferred?.id ?? options?.preferredModel?.slice((options.preferredModel.indexOf("/") ?? -1)+1);
+ const qualityRank = (id:string) => quality?.get(id)?.confidence === "measured" ? 0 : quality?.get(id)?.confidence === "reference" ? 1 : 2;
+ const versionRank = new Map(pool.map(model => [model.fullId,pool.filter(other => {
+  const a=quality?.get(model.fullId), b=quality?.get(other.fullId);
+  return a?.confidence === "measured" && b?.confidence === "measured" && a.relative! >= b.relative! && compareModelVersions(model.id,other.id)>0;
+ }).length]));
+ const bestRelative = Math.max(0,...[...(quality?.values() ?? [])].map(q=>q.relative??0));
+ const qualityBand = (id:string) => Math.floor(Math.max(0,bestRelative-(quality?.get(id)?.relative??0))/.03);
+ const qualityCompare = (a:string,b:string) => qualityRank(a)-qualityRank(b) || qualityBand(a)-qualityBand(b) || (versionRank.get(b)??0)-(versionRank.get(a)??0);
 	const same = (id:string) => Number(!!preferredId && id === preferredId);
-	const free = freeReport.candidates.filter(c=>c.eligible).sort((a,b)=>same(b.id)-same(a.id)||(a.rank??Infinity)-(b.rank??Infinity));
+	const free = freeReport.candidates.filter(c=>c.eligible && (!quality || quality.get(c.route)?.eligible)).sort((a,b)=>same(b.id)-same(a.id)||(a.rank??Infinity)-(b.rank??Infinity));
     if (free.length) {
         const anchor=pool.find(model=>model.fullId===free[0]!.route);
         const speed=new Map(free.map(candidate=>{const model=pool.find(m=>m.fullId===candidate.route);return [candidate.route,anchor&&model?Math.min(0,compareObservedEconomySpeed(model,anchor)):0];}));
-        free.sort((a,b)=>same(b.id)-same(a.id)||(speed.get(a.route)??0)-(speed.get(b.route)??0)||(a.rank??Infinity)-(b.rank??Infinity)||a.route.localeCompare(b.route));
-        return {model:free[0]!.route,explanation:["free-first: verified free pricing, tool support and minimum context; same identity preferred, then comparable observed response speed and evidence/capacity rank"]};
+        free.sort((a,b)=>qualityCompare(a.route,b.route) || same(b.id)-same(a.id) || histories.get(a.route)!.failureRate-histories.get(b.route)!.failureRate || (speed.get(a.route)??0)-(speed.get(b.route)??0)||(a.rank??Infinity)-(b.rank??Infinity)||a.route.localeCompare(b.route));
+        return {model:free[0]!.route,explanation:["free-first after task quality, verified free pricing, tool support, capacity and route-health gates",...(quality ? [quality.get(free[0]!.route)!.reason] : ["task quality unspecified; catalog capacity is not a quality measurement"]),"provider reliability and observed response speed do not establish model intelligence"]};
     }
+	if (options?.freeOnly) return undefined;
 	const explanation: string[] = [];
 	const eligible = pool.filter((model) => {
 		if (contextTooSmall(model)) return false;
@@ -154,7 +193,6 @@ export function selectAffordableModel(
 		return false;
 	});
 	if (eligible.length === 0) return undefined;
-	const { cache, offline } = readRankCache();
 	if (cache) {
 		explanation.push(`local ranking cache consulted (as_of ${cache.asOf}); popularity/benchmarks never override the automatic price cap`);
 	} else {
@@ -167,7 +205,7 @@ export function selectAffordableModel(
     const compareCost=(a:ModelInfo,b:ModelInfo)=>{
         const left=economyComparisonCost(a,options?.workload),right=economyComparisonCost(b,options?.workload);
         const group=Number(left>cheapestCost*1.1)-Number(right>cheapestCost*1.1);
-        return group || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right;
+        return qualityRank(a.fullId)-qualityRank(b.fullId) || group || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right || qualityCompare(a.fullId,b.fullId);
     };
 
 	const metered = eligible
@@ -195,6 +233,7 @@ export function selectAffordableModel(
 		: metered;
 	const chosen = ranked[0];
 	if (chosen) {
+        if (quality) explanation.push(quality.get(chosen.fullId)!.reason,"free candidates failed a task, capability or operational gate; paid price does not imply quality");
         const qualification=operationalEconomyQualification(chosen,cfg);
         if(qualification)explanation.push(qualification.reason);
 		explanation.push(`offline cheapest-member rule with observed speed tie-break within 10% cost: pick an eligible metered route (${chosen.fullId})`);
@@ -214,10 +253,14 @@ export function selectAffordableModel(
 function isRankCacheValid(cache: unknown): cache is ModelRankCache {
 	if (!cache || typeof cache !== "object" || Array.isArray(cache)) return false;
 	const candidate = cache as ModelRankCache;
-	if (candidate.version !== RANK_CACHE_VERSION) return false;
+	if (candidate.version !== RANK_CACHE_VERSION && candidate.version !== 1) return false;
 	for (const value of [candidate.fetchedAt, candidate.asOf]) {
 		if (typeof value !== "string" || !value.trim() || !Number.isFinite(Date.parse(value)) || Date.parse(value) > Date.now()) return false;
 	}
+ if (candidate.researchAt !== undefined && (!Number.isFinite(candidate.researchAt) || candidate.researchAt <= 0 || candidate.researchAt > Date.now())) return false;
+ if (candidate.researchCatalog !== undefined && !/^[a-f0-9]{64}$/.test(candidate.researchCatalog)) return false;
+ if (candidate.observations !== undefined && (!Array.isArray(candidate.observations) || candidate.observations.length>10000 || !candidate.observations.every(b=>validBenchmark(b)))) return false;
+ if (candidate.discoveries !== undefined && (!Array.isArray(candidate.discoveries) || candidate.discoveries.length>1000 || !candidate.discoveries.every(d => d && typeof d.model === "string" && d.model.length<=512 && Number.isFinite(d.checkedAt) && d.checkedAt>0 && d.checkedAt<=Date.now() && Array.isArray(d.sources) && d.sources.length<=4 && d.sources.every(url=>{try {const u=new URL(url);return url.length<=2048 && u.protocol==="https:" && !u.username && !u.password;} catch {return false;}})))) return false;
 	for (const [rows, score] of [[candidate.coding, "share"], [candidate.benchmarks, "score"]] as const) {
 		if (rows === undefined) continue;
 		if (!Array.isArray(rows) || rows.length > 10_000) return false;
@@ -255,12 +298,20 @@ export async function refreshModelRankingCache(
 		};
 	}
 	const filePath = rankCachePath();
+	let lock: string | undefined;
 	try {
 		fs.mkdirSync(path.dirname(filePath), { recursive: true });
-		fs.writeFileSync(filePath, `${JSON.stringify(result.body, null, "\t")}\n`);
+  // Atomic replacement plus exclusive publication; a slow refresh cannot
+  // overwrite newer evidence produced by another live session.
+  const lockPath = `${filePath}.publish-lock`;
+  fs.mkdirSync(lockPath); lock = lockPath;
+  const prior = readRankCache().cache;
+  if (prior && Date.parse(prior.fetchedAt) > Date.parse(result.body.fetchedAt)) return {ok:false,reason:"newer model evidence already published"};
+  writePrivateAtomicJson(filePath,result.body);
+	  rankSnapshot = undefined;
 	} catch (error) {
 		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-	}
+	} finally { if(lock) {try {fs.rmdirSync(lock);} catch { /* Failed cleanup must not replace a published result. */ }} }
 	return { ok: true, filePath };
 }
 
