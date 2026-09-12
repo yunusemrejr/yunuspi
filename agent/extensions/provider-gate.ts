@@ -151,22 +151,28 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 
     let pendingAttempts=0;
     let timing: {provider:string; model:string; session:string|undefined; started:number}|undefined;
-    for (const event of ["session_start","session_switch","session_tree","session_shutdown","agent_end"] as const) pi.on(event,()=>{pendingAttempts=0;timing=undefined;});
+    let servingEndpoint: {provider:string;model:string;name:string}|undefined;
+    for (const event of ["session_start","session_switch","session_tree","session_shutdown","agent_end"] as const) pi.on(event,()=>{pendingAttempts=0;timing=undefined;servingEndpoint=undefined;});
 
 	// THE GATE — runs for every inference request in this process.
 	pi.on("before_provider_request", async (event: any, ctx: any) => {
 		if (gateDisabled()) return undefined;
 		const payload = event?.payload;
 		const route = resolveRoute(payload, ctx as AnyCtx);
-		if (!route) {timing=undefined;return undefined;} // fail-open: unattributable requests are never blocked
-		if (isLoopback(route)) return undefined; // mocks/loopback are not fleet traffic
+		if (!route) {timing=undefined;servingEndpoint=undefined;return undefined;} // fail-open: unattributable requests are never blocked
+		if (isLoopback(route)) {timing=undefined;servingEndpoint=undefined;return undefined;} // mocks/loopback are not fleet traffic
 		pendingAttempts++;
         timing=undefined; // Any overlapping/retried request invalidates attribution.
 		const estTokens = estimateTokens(payload);
+        const only = payload.provider?.only;
+        const endpoint = route.provider === "openrouter" && payload.provider?.allow_fallbacks === false && Array.isArray(only) && only.length === 1 && typeof only[0] === "string" ? only[0] : undefined;
+        const endpointName = endpoint && ctx?.model?.compat?.openRouterRouting?.only?.[0] === endpoint ? ctx.model.compat.recoveryEndpointName : undefined;
+        servingEndpoint = pendingAttempts === 1 && endpoint ? {provider:route.provider,model:route.model,name:endpointName??endpoint} : undefined;
 		try {
 			const outcome = await gateRequest({
 				provider: route.provider,
 				model: route.model,
+                endpoints: endpoint ? [endpoint,...(endpointName?[endpointName]:[])] : undefined,
 				estTokens,
 				session: sessionLabel(ctx as AnyCtx),
 				signal: (ctx as any)?.signal,
@@ -202,6 +208,8 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 		const provider =
 			typeof message.provider === "string" ? message.provider : undefined;
 		const model = typeof message.model === "string" ? message.model : undefined;
+        const endpoint = pendingAttempts===1 && servingEndpoint?.provider===provider && servingEndpoint.model===model ? servingEndpoint.name : undefined;
+        servingEndpoint=undefined;
         const observedElapsed = pendingAttempts===1 && timing && timing.provider===provider && timing.model===model && timing.session===sessionLabel(ctx) ? performance.now()-timing.started : undefined;
         pendingAttempts=Math.max(0,pendingAttempts-1);timing=undefined;
 		if (!provider) return;
@@ -211,6 +219,8 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 				model,
 				errorMessage: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
 				source: "message_end",
+                endpoint,
+                rates: ctx?.model?.provider===provider && ctx.model.id===model ? economyRateIdentity(ctx.model.cost??{},ctx.model.baseUrl,ctx.model.api) : undefined,
 			});
             if (!recorded) invalidateEconomyUsage(provider,model);
 			if (recorded) {
@@ -237,7 +247,7 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
                 && typeof usage.cost?.total === "number" && Number.isFinite(usage.cost.total) && usage.cost.total>=0
                 ? {...(typeof observedElapsed==="number" && observedElapsed>=0 && observedElapsed<=600_000 ? {elapsedMs:observedElapsed}:{}),messageAt:message.timestamp,input:usage.input,output:usage.output,cacheRead:usage.cacheRead,cacheWrite:usage.cacheWrite,costUsd:usage.cost.total,
                     rates:economyRateIdentity(cost,current.baseUrl,current.api)} : undefined;
-            recordSuccess({ provider, model, inputTokens: usage.input, economyUsage });
+            recordSuccess({ provider, model, endpoint, inputTokens: usage.input, economyUsage });
 		}
 	});
 

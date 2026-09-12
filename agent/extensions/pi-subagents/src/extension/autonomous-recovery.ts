@@ -11,18 +11,20 @@ import { catalogRouteCapabilities, describeFreeRoutes, distributeChildren, isPro
 import { fuseChildOutputs } from "../workflows/recovery-seam.ts";
 import { isAutonomousMeteredEligible, loadModelEconomyConfig, registerEconomyRequestHook } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
-import { selectAffordableModel } from "../runs/shared/model-selection.ts";
+import { selectAffordableModel, selectRecoveryModel, sameRecoveryModel } from "../runs/shared/model-selection.ts";
 import { evaluateQuotaHealth } from "../runs/shared/quota-health.ts";
 import { readJournalQuotaEvents } from "../runs/shared/quota-journal.ts";
 // Shared fleet-wide cooldown state (fix_provider_cooldown_enforcement): the
 // free group and reroute candidates must consult the same executable
 // provider-health store the request gate enforces — a route another session
 // (or child) has on cooldown is not a failover option.
-import { classifyFailure, evaluateRoute, recordFailure } from "../runs/shared/provider-health.ts";
+import { fetchEndpoints, rankRecoveryEndpoints, endpointRecoveryRouting, type Endpoint } from "../runs/shared/openrouter-endpoints.ts";
+import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, readHealth } from "../runs/shared/provider-health.ts";
 
 type Model = NonNullable<ExtensionContext["model"]>;
 type Launch = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: undefined, ctx: ExtensionContext) => Promise<any>;
 const route = (m: Model) => `${m.provider}/${m.id}`;
+const selectionKey = (m: Model) => JSON.stringify([route(m),(m as any).compat?.openRouterRouting ?? {}]);
 /** Read-only group children need text, read tools and adequate context; no images. */
 const FREE_MIN_CONTEXT = 16_384;
 export const COOLDOWN_MS = 25_000;
@@ -100,7 +102,7 @@ function recoveryConstraints(ctx: ExtensionContext, prompt: string, primary: Mod
 	return constraints;
 }
 /** Root lifecycle controller. Native executor owns processes, fleet slots and cancellation; one parent remains writer. */
-export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, deps: { now?: () => number; wait?: typeof wait; childRoutes?: readonly string[] } = {}): void {
+export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, deps: { now?: () => number; wait?: typeof wait; childRoutes?: readonly string[]; endpoints?: (modelId:string, signal:AbortSignal)=>Promise<Endpoint[]> } = {}): void {
 	const child = process.env.PI_SUBAGENT_CHILD === "1";
 	if (child && !deps.childRoutes?.length) return;
 	const now = deps.now ?? Date.now;
@@ -117,6 +119,10 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	let recoveryStart: number | undefined;
 	let restorePrimary = false;
 	let automaticRoute: string | undefined;
+ let endpointSelected = false;
+ let endpointAttempts = 0;
+ let endpointCatalog: Endpoint[] | undefined;
+ const visitedEndpoints = new Set<string>();
 	let requestedOutput: { route: string; tokens: number } | undefined;
 	let attempts = 0;
 	let busy = false;
@@ -140,14 +146,15 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// Persist emission time immediately: sendMessage queues until inference resumes.
 		pi.appendEntry("provider-recovery", { emittedAt: now(), check: attempts, elapsedMs: recoveryStart === undefined ? 0 : now() - recoveryStart, text });
 	};
-	const reset = () => { assistance?.abort(); assistance = undefined; active?.abort(); active = undefined; busy = false; if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined; generation++; usedAssist = false; groupUsed = false; attempts = 0; recoveryStart = undefined; restorePrimary = false; automaticRoute = undefined; requestedOutput = undefined; paused = false; visited.clear(); exhausted.clear(); };
+	const reset = () => { assistance?.abort(); assistance = undefined; active?.abort(); active = undefined; busy = false; if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined; generation++; usedAssist = false; groupUsed = false; attempts = 0; recoveryStart = undefined; restorePrimary = false; automaticRoute = undefined; endpointSelected = false; endpointAttempts = 0; endpointCatalog = undefined; visitedEndpoints.clear(); requestedOutput = undefined; paused = false; visited.clear(); exhausted.clear(); };
 	on("input", (event, ctx) => {
 		if (event.source === "extension") return;
-		const keepAutomatic = automaticRoute && ctx.model && route(ctx.model) === automaticRoute;
+		const keepAutomatic = ctx.model && (automaticRoute && route(ctx.model) === automaticRoute || endpointSelected && primary && route(ctx.model) === route(primary));
+        const previousEndpoint = endpointSelected;
 		const previousPrimary = primary, previousAutomatic = automaticRoute;
 		reset();
 		primary = keepAutomatic ? previousPrimary : ctx.model;
-		if (keepAutomatic) { automaticRoute = previousAutomatic; restorePrimary = true; }
+		if (keepAutomatic) { automaticRoute = previousAutomatic; endpointSelected = previousEndpoint; restorePrimary = true; }
 		prompt = event.text;
 	});
 	for (const name of ["session_shutdown", "session_before_switch", "session_before_fork", "session_before_tree"]) on(name, () => { reset(); primary = undefined; prompt = ""; });
@@ -162,21 +169,21 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		const selected = await ownSelection.run(true, () => pi.setModel(model));
 		// Core validates auth asynchronously before changing models. If a manual
 		// choice won meanwhile, undo only our stale write, never a newer choice.
-		if (epoch !== generation && primary && ctx.model && route(ctx.model) === route(model) && route(primary) !== route(model)) await setModel(primary, ctx);
+		if (epoch !== generation && primary && ctx.model && selectionKey(ctx.model) === selectionKey(model) && selectionKey(primary) !== selectionKey(model)) await setModel(primary, ctx);
 		return selected;
 	};
 	const available = (ctx: ExtensionContext) => {
 		const scope = ctx.scopedModels?.map(x => route(x.model));
 		const models = ctx.modelRegistry.getAvailable().filter(m => (!scope?.length || scope.includes(route(m))) && (!child || deps.childRoutes!.includes(route(m))));
 		const health = evaluateQuotaHealth(readJournalQuotaEvents(), [...new Set(models.map(m => m.provider))], now());
-		const t = now();
+		const t = now(), sharedHealth = readHealth();
 		// exhausted holds ROUTE keys ("provider/id") and, only for provider-scoped
 		// failure classifications, bare provider keys. evaluateRoute adds the
 		// SHARED cooldown state declared by any session/child (executable state,
 		// not prose): a cooling route is not a failover candidate.
 		return models.filter(m => !exhausted.has(m.provider) && !exhausted.has(route(m))
 			&& !health.some(h => h.provider === m.provider && h.state === "exhausted")
-			&& evaluateRoute({ provider: m.provider, model: m.id, now: t }).allowed);
+			&& evaluateRoute({ provider: m.provider, model: m.id, now: t }, sharedHealth).allowed);
 	};
 	const group = async (ctx: ExtensionContext, signal: AbortSignal, failure?: string): Promise<string | undefined> => {
 		if (groupUsed) return;
@@ -333,7 +340,46 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			const toolsRequired = (pi.getActiveTools?.() ?? ["unknown"]).length > 0;
 			const usage = ctx.getContextUsage?.()?.tokens;
 			const output = requestedOutput?.route === route(primary) ? requestedOutput.tokens : primary.maxTokens;
-			const compatible = constraints.fixedRoute || process.env.PI_AUTONOMOUS_MODEL_FALLBACK === "off" || Object.keys((primary as any).compat?.openRouterRouting ?? {}).length ? [] : candidates.filter(m => {
+            const routing = (primary as any).compat?.openRouterRouting ?? {};
+            const fallbackOff = process.env.PI_AUTONOMOUS_MODEL_FALLBACK === "off";
+            const currentIsPrimary = event.message.provider === primary.provider && event.message.model === primary.id;
+            // Two endpoint continuations reserve the remaining budget for other
+            // configured providers. Generic account quota errors never qualify.
+            const upstream = openRouterUpstream(errorText);
+            if (!constraints.fixedRoute && !fallbackOff && currentIsPrimary && primary.provider === "openrouter"
+                && primary.baseUrl?.replace(/\/+$/, "") === "https://openrouter.ai/api/v1" && endpointAttempts < 2
+                && failure && (failure.kind !== "quota-rate" || upstream) && evaluateRoute({provider:primary.provider,model:primary.id,now:now()}).allowed) {
+                const existingCaps = routing.max_price ?? {};
+                const cap = (key:string, price:number) => existingCaps[key] !== undefined && Number.isFinite(Number(existingCaps[key])) ? Math.min(price,Number(existingCaps[key])) : price;
+                // Keep endpoint price at or below the selected model's rates.
+                const caps = {prompt:cap("prompt",primary.cost.input),completion:cap("completion",primary.cost.output)};
+                if (Number.isFinite(caps.prompt) && caps.prompt>=0 && Number.isFinite(caps.completion) && caps.completion>=0) {
+                    if (!endpointCatalog) {
+                        try { endpointCatalog = process.env.PI_OFFLINE === "1" && !deps.endpoints ? [] : await (deps.endpoints ?? fetchEndpoints)(primary.id,signal); }
+                        catch { endpointCatalog = []; }
+                    }
+                    if (epoch !== generation || signal.aborted) return;
+                    for (const endpoint of endpointCatalog) if (upstream && endpoint.provider_name?.toLowerCase() === upstream.toLowerCase()) visitedEndpoints.add(endpoint.tag);
+                    const ranked = rankRecoveryEndpoints(endpointCatalog, {model:primary,routing,visited:visitedEndpoints,failedProvider:upstream,
+                        contextTokens:Number.isSafeInteger(usage) && usage!>=0 ? usage!*2 : primary.contextWindow-output,
+                        outputTokens:output,tools:toolsRequired,reasoning:primary.reasoning,caps,now:now()});
+                    const endpoint = ranked[0];
+                    if (endpoint) {
+                        visitedEndpoints.add(endpoint.tag); endpointAttempts++;
+                        const replacement = {...primary,compat:{...(primary as any).compat,openRouterRouting:endpointRecoveryRouting(endpoint,routing,caps),recoveryEndpointName:endpoint.provider_name??endpoint.tag}};
+                        if (await setModel(replacement,ctx)) {
+                            if (epoch !== generation || signal.aborted) return;
+                            endpointSelected=true; restorePrimary=true;
+                            notice(ctx, `Serving provider recovery: ${route(primary)} via ${endpoint.tag}; live capacity/parameter checks, selected-price ceiling and health ranking; retained pending continuation.`);
+                            event.decision="retry"; return;
+                        }
+                    }
+                }
+            }
+            // Privacy/allowlist policies cannot be translated to another API.
+            // A soft order or sort preference alone does not pin the provider.
+            const hardRouting = Object.keys(routing).some(key => !["order","sort","allow_fallbacks"].includes(key)) || routing.allow_fallbacks===false;
+			const compatible = constraints.fixedRoute || fallbackOff || hardRouting ? [] : candidates.filter(m => {
 				if (![m.contextWindow, m.maxTokens, output].every(value => Number.isSafeInteger(value) && value > 0)) return false;
 				// Use current work size when known, with half the destination window
 				// left for system/tools/tokenizer drift. Native Pi still owns exact
@@ -341,20 +387,19 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				const fits = Number.isSafeInteger(usage) && usage! >= 0 ? usage! + output <= m.contextWindow / 2 : m.contextWindow >= primary!.contextWindow;
 				if (visited.has(route(m)) || !fits || m.maxTokens < output || primary!.reasoning && !m.reasoning || !primary!.input.every(i => m.input.includes(i))) return false;
 				const free = isProvenFreeRoute(m, evidence, now());
-				if (constraints.freeOnly ? !free : !free && !isAutonomousMeteredEligible(toModelInfo(m), cfg)) return false;
-				if (m.id === primary!.id) return m.provider !== primary!.provider && m.api === primary!.api;
+				if (constraints.freeOnly ? !free : !free && !isAutonomousMeteredEligible(toModelInfo(m), cfg) && !cfg.subscriptionProviders.includes(m.provider)) return false;
+				if (sameRecoveryModel(toModelInfo(primary!),toModelInfo(m))) return m.provider !== primary!.provider && (m.api === primary!.api || !toolsRequired || catalogRouteCapabilities(m,evidence,now())?.toolCalling===true);
 				if (constraints.sameModel) return false;
 				// Cross-model recovery requires positive tool support, never guessed
 				// from family names. The catalog evidence already stores paid rows.
 				return !toolsRequired || catalogRouteCapabilities(m, evidence, now())?.toolCalling === true;
 			});
-			const sameModel = compatible.filter(m => m.id === primary!.id);
-			const pool = sameModel.length ? sameModel : compatible;
-			const choice = selectAffordableModel(pool.map(toModelInfo), cfg);
+			const pool = compatible;
+			const choice = selectRecoveryModel(pool.map(toModelInfo), toModelInfo(primary), now());
 			const alternate = pool.find(m => route(m) === choice?.model);
 			if (alternate) {
 				visited.add(route(alternate));
-				if (await setModel(alternate, ctx)) { if (epoch !== generation || signal.aborted) return; restorePrimary = true; automaticRoute = route(alternate); notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${choice!.explanation.join(" ")}; retained session and completed tool results.`); event.decision = "retry"; return; }
+				if (await setModel(alternate, ctx)) { if (epoch !== generation || signal.aborted) return; restorePrimary = true; endpointSelected = false; automaticRoute = route(alternate); notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${choice!.explanation.join(" ")}; retained session and completed tool results.`); event.decision = "retry"; return; }
 			}
 			if (epoch !== generation || signal.aborted) return;
 			// Helpful only after repeated real failure, never as a default startup
@@ -376,7 +421,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			// the recovery deadline via the signal.
 			await sleep(Math.min(retryDelayMs, RECOVERY_DEADLINE_MS - (now() - recoveryStart!)), signal);
 			if (epoch !== generation || signal.aborted || now() - recoveryStart! >= RECOVERY_DEADLINE_MS) return;
-			if (await setModel(primary, ctx)) { if (epoch !== generation || signal.aborted) return; automaticRoute = undefined; notice(ctx, `Primary recheck/resumption: ${route(primary)}; retained conversation and completed tool results.`); event.decision = "retry"; }
+			if (await setModel(primary, ctx)) { if (epoch !== generation || signal.aborted) return; automaticRoute = undefined; endpointSelected = false; notice(ctx, `Primary recheck/resumption: ${route(primary)}; retained conversation and completed tool results.`); event.decision = "retry"; }
 		} catch { if (epoch === generation) {
 			paused = true;
 			if (deadlineTimer) clearTimeout(deadlineTimer);
@@ -388,8 +433,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	on("agent_settled", async (_event, ctx) => {
 		if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined;
 		active?.abort();
-		if (restorePrimary && primary && ctx.model && route(ctx.model) !== route(primary)) await setModel(primary, ctx);
+		if (restorePrimary && primary && ctx.model && (route(ctx.model) !== route(primary) || endpointSelected)) await setModel(primary, ctx);
 		restorePrimary = false;
+		endpointSelected = false;
 		automaticRoute = undefined;
 	});
 	on("message_end", (event, ctx) => {
@@ -397,7 +443,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		if (message?.role !== "assistant" || !["stop", "toolUse"].includes(message.stopReason) || !message.content?.some((b: any) => b.type === "toolCall" || b.type === "text" && b.text?.trim())) return;
 		// Success ends continuous failure, even while the task continues using tools.
 		if (deadlineTimer) clearTimeout(deadlineTimer);
-		deadlineTimer = undefined; recoveryStart = undefined; attempts = 0; visited.clear();
+		deadlineTimer = undefined; recoveryStart = undefined; attempts = 0; visited.clear(); endpointAttempts = 0; visitedEndpoints.clear(); endpointCatalog = undefined;
 		ctx.ui.setStatus("autonomous-recovery", undefined);
 	});
 }

@@ -31,6 +31,7 @@
  * endpoint `tag` values (e.g. "z-ai/fp8", "cloudflare").
  */
 
+import { fetchEndpoints, endpointMetric, type Endpoint } from "./pi-subagents/src/runs/shared/openrouter-endpoints.ts";
 import type {
 	AutocompleteItem,
 	ExtensionAPI,
@@ -43,7 +44,7 @@ import { join } from "node:path";
 const AGENT_DIR: string =
 	process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 const MODELS_JSON = join(AGENT_DIR, "models.json");
-const FETCH_TIMEOUT_MS = 20_000;
+
 
 const SUBCOMMANDS = [
 	"list",
@@ -57,20 +58,6 @@ const SUBCOMMANDS = [
 ] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number] | undefined;
 
-interface Endpoint {
-	tag: string;
-	provider_name?: string;
-	quantization?: string;
-	context_length?: number;
-	max_completion_tokens?: number;
-	pricing?: Record<string, string>;
-	status?: number;
-	uptime_last_30m?: number;
-	uptime_month?: number;
-	latency_last_30m?: number;
-	throughput_last_30m?: number;
-	supports_tool_choice?: boolean;
-}
 
 interface ModelsJson {
 	providers?: Record<
@@ -247,27 +234,7 @@ async function fetchEndpointsOrWarn(
 	return eps;
 }
 
-async function fetchEndpoints(modelId: string): Promise<Endpoint[]> {
-	const res = await fetch(
-		// Model ids are URL-safe (letters/digits/-/./_/: plus the / separator);
-		// encodeURIComponent would escape the slash and 404.
-		`https://openrouter.ai/api/v1/models/${modelId}/endpoints`,
-		{
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-		},
-	);
-	if (!res.ok) throw new Error(`endpoints fetch failed (HTTP ${res.status})`);
-	const body = (await res.json()) as { data?: { endpoints?: Endpoint[] } };
-	if (!Array.isArray(body.data?.endpoints)) return [];
-	return body.data.endpoints.filter(
-		(e) =>
-			e &&
-			typeof e.tag === "string" &&
-			e.tag.trim().length > 0 &&
-			!/[\u0000-\u001f\u007f]/u.test(e.tag) &&
-			(e.status ?? 0) === 0,
-	);
-}
+
 
 function perMillion(v: unknown): number {
 	if (
@@ -284,8 +251,8 @@ function endpointCost(e: Endpoint): number {
 }
 
 function endpointLine(e: Endpoint): string {
-	const latency = e.latency_last_30m;
-	const tps = e.throughput_last_30m;
+	const latency = endpointMetric(e.latency_last_30m);
+	const tps = endpointMetric(e.throughput_last_30m);
 	const up = e.uptime_last_30m ?? e.uptime_month;
 	return [
 		e.tag,
@@ -318,14 +285,14 @@ function sortEndpoints(eps: Endpoint[], key: string): Endpoint[] {
 		sorted.sort((a, b) => endpointCost(a) - endpointCost(b));
 	} else if (key === "throughput" || key === "tps") {
 		sorted.sort(
-			(a, b) => (b.throughput_last_30m ?? 0) - (a.throughput_last_30m ?? 0),
+			(a, b) => (endpointMetric(b.throughput_last_30m) ?? 0) - (endpointMetric(a.throughput_last_30m) ?? 0),
 		);
 	} else if (key === "uptime") {
 		sorted.sort((a, b) => uptimeOf(b) - uptimeOf(a));
 	} else {
 		sorted.sort(
 			(a, b) =>
-				(a.latency_last_30m ?? Infinity) - (b.latency_last_30m ?? Infinity),
+				(endpointMetric(a.latency_last_30m) ?? Infinity) - (endpointMetric(b.latency_last_30m) ?? Infinity),
 		);
 	}
 	return sorted;
