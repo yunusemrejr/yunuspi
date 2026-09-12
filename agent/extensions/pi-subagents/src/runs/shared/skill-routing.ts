@@ -85,24 +85,33 @@ export function skillTaskText(prompt = '') {
     || /^\s*(?:#[^\n]*\n\s*)?<agent(?:\s[^>]*)?>/i.test(clean) && /<\/agent>[^]*<task(?:\s[^>]*)?>/i.test(clean);
   return envelope && tasks.length ? tasks.join('\n') : clean;
 }
+/** Clause-local intent keeps excluded languages and quoted examples out of
+ * suggestions. Contrast clauses retain the positive request after an exclusion. */
+export function skillIntentSegments(prompt = '') {
+  return skillTaskText(prompt).replace(/\brather than\b[^;\n.!?]*/gi,' ')
+    .split(/\n|[.!?](?:\s|$)|;|\b(?:but|instead)\b/i)
+    .filter(part => !/\b(?:do not|don't|never|without animation|static svg|explain|what is|how does)\b/i.test(part));
+}
+export function skillActionSegments(prompt = '') {
+  return skillIntentSegments(prompt).filter(part => task.test(part));
+}
 export function routeSkills(prompt = '', file = '') {
   const bounded = skillTaskText(prompt);
   const normalized = file.length <= 4096 ? file.replaceAll('\\','/') : '';
   const doing = task.test(bounded);
-  const actionSegments=bounded.replace(/```[^]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').split(/\n|[.!?](?:\s|$)|;/)
-    .filter(part=>task.test(part) && !/\b(?:do not|don't|never|without animation|static svg|explain|what is|how does)\b/i.test(part));
+  const actionSegments = skillActionSegments(bounded);
   const matches = skillRoutes.flatMap(route => {
     const fileMatch = !!normalized && !!route.file?.test(normalized);
     return fileMatch || doing && (route.scopedIntent
       // Slash-shaped tokens are stripped from scoped intent tests so pasted paths do not
       // dominate routing; a route whose intent genuinely declares path evidence opts in.
       ? actionSegments.some(part=>{const stripped=part.replace(/(?:\S*\/)+\S*/g,' ');return route.intent.test(stripped)||!!route.pathIntent&&route.intent.test(part);})
-      : route.intent.test(bounded))
+      : actionSegments.some(part => route.intent.test(part)))
       ? [{name:route.name, check:route.check, priority:Math.max(fileMatch ? 70 : 60, route.priority ?? 0)}] : [];
   });
   // Statistical fallback never displaces explicit language/file matches.
-  if (doing && matches.length === 0) {
-    const inferred = localIntent(bounded);
+  if (doing && actionSegments.length && matches.length === 0) {
+    const inferred = localIntent(actionSegments.join('\n'));
     const route = inferred && skillRoutes.find(r=>r.name===inferred.name);
     if (route) matches.push({name:route.name,check:route.check,priority:50});
   }

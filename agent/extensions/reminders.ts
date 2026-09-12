@@ -641,6 +641,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	pi.on("input", (event) => { recoveryRoute = undefined; if (event.source !== "extension") { loop = createLoopTracker(); guidance.userInput(); } });
 	pi.on("tool_call", (event, ctx) => {
 		if (ctx.signal?.aborted) return;
+		const review = guidance.beforeToolCall(event);
+		if (review) return review;
 		const reason = loop.block(event);
 		if (reason) return {block: true, reason};
 	});

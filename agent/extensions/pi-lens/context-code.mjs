@@ -72,7 +72,7 @@ export async function inspectSource(filename, source) {
     return base;
   } finally { tree.delete(); }
 }
-export async function loadSources(cwd, paths, signal) {
+export async function readSourceFiles(cwd, paths, signal, accept = file => /\.(?:[cm]?[jt]sx?|py|cpp|cc|c|h|hpp|rs|go|java|css|html|sql|sh)$/i.test(file)) {
   if(!Array.isArray(paths)||!paths.length||paths.length>20) throw new Error('Provide 1–20 explicit source file paths');
   const root=await fs.realpath(cwd); const files=[], errors=[]; let bytes=0;
   for(const supplied of [...new Set(paths)]) {
@@ -82,7 +82,7 @@ export async function loadSources(cwd, paths, signal) {
       const resolved=await fs.realpath(path.resolve(root,supplied));
       const relative=path.relative(root,resolved);
       if(relative.startsWith('..'+path.sep)||relative==='..'||path.isAbsolute(relative)) throw new Error('Path escapes workspace');
-      if(!/\.(?:[cm]?[jt]sx?|py|cpp|cc|c|h|hpp|rs|go|java|css|html|sql|sh)$/i.test(resolved)||/(?:^|[/\\])(?:node_modules|\.git|vendor)(?:[/\\]|$)/.test(relative)) throw new Error('Only project source files are accepted');
+      if(!accept(resolved)||/(?:^|[/\\])(?:node_modules|\.git|vendor)(?:[/\\]|$)/.test(relative)) throw new Error('Only supported project source/configuration files are accepted');
       const handle=await fs.open(resolved,constants.O_RDONLY|(constants.O_NONBLOCK??0)|(constants.O_NOFOLLOW??0)); let source;
       try {
         const stat=await handle.stat();
@@ -104,10 +104,20 @@ export async function loadSources(cwd, paths, signal) {
         source=new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,length)); bytes+=length;
         if(source.includes('\0')) throw new Error('Binary source refused');
       } finally {await handle.close();}
-      files.push(await inspectSource(relative,source));
+      files.push({path:relative,source,bytes:Buffer.byteLength(source),digest:hash(source)});
     } catch(error) { if(signal?.aborted)throw new Error('Cancelled');errors.push({path:typeof supplied==='string'?supplied.slice(0,4096):'<invalid>',error:error.message}); }
   }
   return {files,errors,bytes};
+}
+export async function loadSources(cwd, paths, signal) {
+  const data = await readSourceFiles(cwd, paths, signal);
+  const files = [];
+  for (const file of data.files) {
+    if (signal?.aborted) throw new Error('Cancelled');
+    try { files.push(await inspectSource(file.path,file.source)); }
+    catch(error) { data.errors.push({path:file.path,error:error.message}); }
+  }
+  return {...data,files};
 }
 // The budget applies to the entire serialized result, not only source bodies.
 export function boundResult(result,maxChars=12000) {
