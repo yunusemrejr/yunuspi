@@ -413,6 +413,12 @@ async function run(op, payload, signal) {
       };
     case "history":
       return store.history({ limit: Math.min(30, payload.limit ?? 20) });
+    case "review_history":
+      return store.reviewHistory(
+        identity.checkoutId,
+        workerData.sessionId,
+        payload.samples,
+      );
     case "record":
       return record(payload, signal);
     case "observation": {
