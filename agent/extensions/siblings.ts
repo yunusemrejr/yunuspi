@@ -481,12 +481,15 @@ export default function siblingsExtension(pi: ExtensionAPI) {
 		} catch { /* Optional coordination cannot invalidate a committed plan. */ }
 	});
 	pi.on("session_start", async (_event, ctx) => {
-		currentContext = ctx; readVersions.clear(); pendingReads.clear();
+		currentContext = undefined; readVersions.clear(); pendingReads.clear();
 		seen.clear(); pendingBoardLines = 0; lastBoardNoticeAt = 0; overlapNotices.clear();
 		coordination = { objective: "", note: "", files: [], recentWrites: [] };
 		try {
 			const sid = ctx.sessionManager.getSessionId();
 			if (!sid) return;
+			// Keep identity values, never a lifecycle-bound SDK context proxy.
+			const file = safeSessionFile(ctx);
+			currentContext = {cwd:ctx.cwd, sessionManager:{getSessionId:()=>sid, getSessionFile:()=>file}};
 			const branch = ctx.sessionManager.getBranch?.() ?? [];
 			for (const entry of branch.slice(-128).reverse()) {
 				if (entry.type === "custom" && entry.customType === "sibling-coordination" && entry.data?.root === coordinationRoot(ctx.cwd)) { coordination = cleanCoordination(entry.data.coordination); coordination.recentWrites = []; break; }

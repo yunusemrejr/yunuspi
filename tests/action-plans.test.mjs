@@ -60,6 +60,10 @@ test('active plans share scopes and stale direct writes require a fresh read',as
   bus.emit('todo-plan-changed',{sessionId:'alpha',cwd:root,tasks});
   assert.deepEqual((await b.status()).peers[0].coordination.plan.files,[path.join(root,'source.txt')]);
   assert.equal((await b.status()).coordination.plan.objective,'','peer plan does not replace own intent');
+  a.ctx.sessionManager.getSessionId=()=>{throw Error('stale SDK context')};
+  bus.emit('todo-plan-changed',{sessionId:'alpha',cwd:root,tasks:tasks.map(t=>({...t,subject:'Recovered purpose'}))});
+  assert.equal((await b.status()).peers[0].coordination.plan.objective,'Recovered purpose','publication uses captured identity rather than a stale SDK context');
+  a.ctx.sessionManager.getSessionId=()=> 'alpha';
   const file=path.join(root,'source.txt');fs.writeFileSync(file,'initial');
   const write={toolName:'write',input:{path:'source.txt'}},read={toolName:'read',toolCallId:'read-1',input:{path:'source.txt'}};
   assert.equal((await b.call('tool_call',write)).block,true);
