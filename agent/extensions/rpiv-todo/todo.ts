@@ -83,7 +83,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 				params as TaskMutationParams,
 			);
 			commitState(sid(ctx), result.state);
-			if (result.op.kind !== "error" && !["get", "list"].includes(params.action)) pi.events?.emit("todo-plan-changed", {sessionId:sid(ctx), cwd:ctx.cwd, tasks:result.state.tasks});
+			try { if (result.op.kind !== "error" && !["get", "list"].includes(params.action)) pi.events?.emit("todo-plan-changed", {sessionId:sid(ctx), cwd:ctx.cwd, tasks:result.state.tasks}); } catch { /* Optional peer publication cannot invalidate a committed plan. */ }
 			return buildToolResult(
 				params.action,
 				params as TaskMutationParams,

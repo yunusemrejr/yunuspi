@@ -210,13 +210,14 @@ export default function (
 	// bugs and must propagate. The render is sid-gated so a child never refreshes the
 	// foreground overlay.
 	const replayAndRefresh = async (
-		ctx: Parameters<typeof sid>[0] & Parameters<typeof replayFromBranch>[0],
+		ctx: Parameters<typeof sid>[0] & Parameters<typeof replayFromBranch>[0] & {cwd: string},
 	): Promise<void> => {
 		let isForeground = false;
 		try {
 			const id = sid(ctx);
 			planInputs.add(id);
 			replaceState(id, replayFromBranch(ctx));
+			try { pi.events?.emit("todo-plan-changed", {sessionId:id, cwd:ctx.cwd, tasks:getState(id).tasks}); } catch { /* Peer publication cannot invalidate branch replay. */ }
 			isForeground = id === getActiveRenderSession();
 		} catch (e) {
 			if (!isStaleCtxError(e)) throw e;
@@ -271,6 +272,7 @@ export default function (
 		}
 		// The shutting-down session's own data slot is always evicted.
 		evictSession(s);
+		planInputs.delete(s);
 		// Overlay teardown is sid-gated: a child shutdown (distinct sid) must not
 		// dispose the foreground's overlay. Only the foreground's own shutdown
 		// (or an unknown/stale sid) tears it down and clears the pointer.
