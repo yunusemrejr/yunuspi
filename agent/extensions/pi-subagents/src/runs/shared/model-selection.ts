@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { readHealth, recoveryPerformance } from "./provider-health.ts";
 import * as path from "node:path";
 import { splitKnownThinkingSuffix, type ModelInfo } from "../../shared/model-info.ts";
 import { getAgentDir } from "../../shared/utils.ts";
@@ -265,3 +266,36 @@ export async function refreshModelRankingCache(
 
 // Re-exported for callers that need the same default caps without loading twice.
 export { loadModelEconomyConfig };
+
+/** Conservative identity comparison: keep versions/variants, allow a registry's
+ * unqualified id to match a namespaced id. Never guess model families or tiers. */
+export function sameRecoveryModel(a: ModelInfo, b: ModelInfo): boolean {
+ const left=a.id.toLowerCase(), right=b.id.toLowerCase();
+ return left===right || !left.includes("/") && right.endsWith("/"+left) || !right.includes("/") && left.endsWith("/"+right);
+}
+
+/** Continuity selection differs from cheap helper selection. The caller owns
+ * capability/price admission; identity, measured reliability and proximity win
+ * inside that pool. Catalog capacity and benchmark similarity are proxies, not
+ * a claim that different models have equal intelligence. */
+export function selectRecoveryModel(models: ModelInfo[], primary: ModelInfo, now=Date.now()): AffordableSelection | undefined {
+ const {cache}=readRankCache();
+ const state=readHealth();
+ const benchmark=(m:ModelInfo)=>cache?.benchmarks?.find(row=>row.model===m.fullId || row.model===m.id)?.score;
+ const reference=benchmark(primary);
+ const distance=(a:number|undefined,b:number|undefined)=>a && b ? Math.min(3,Math.abs(Math.log2(a/b))) : 1;
+ const cost=(m:ModelInfo)=>m.cost ? m.cost.input+m.cost.output : undefined;
+ const rows=models.filter(m=>!findModelExclusion(m.fullId)).map(model=>{
+  const history=recoveryPerformance(state.providers[model.provider]?.models[model.id], model, now);
+  const score=benchmark(model);
+  const similarity=reference!==undefined && score!==undefined ? Math.min(3,Math.abs(score-reference)/Math.max(1,Math.abs(reference)))*4
+   : distance(model.contextWindow,primary.contextWindow)*.5 + distance(model.maxTokens,primary.maxTokens)*.25 + Number(model.reasoning!==primary.reasoning);
+  const priceDistance=distance(cost(model),cost(primary));
+  const speed=history.msPerToken ? Math.min(2, Math.log1p(history.msPerToken)/5) : 1;
+  return {model,history,same:sameRecoveryModel(primary,model),score:similarity+history.failureRate*4+priceDistance*.25+speed*.25};
+ });
+ rows.sort((a,b)=>Number(b.same)-Number(a.same)||a.score-b.score||a.model.fullId.localeCompare(b.model.fullId));
+ const pick=rows[0];
+ if(!pick)return;
+ return {model:pick.model.fullId,explanation:[`${pick.same ? "same model identity" : "closest catalog/benchmark profile within admitted capabilities"}; ${pick.history.samples} recent outcome samples; ${Math.round(pick.history.failureRate*100)}% smoothed failure estimate; price and observed speed included`]};
+}

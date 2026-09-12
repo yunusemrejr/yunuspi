@@ -114,6 +114,7 @@ const LOCK_POLL_MS = 25;
 export type FailureKind =
 	| "quota-rate"
 	| "provider-outage"
+	| "provider-auth"
 	| "route-failure"
 	| "model-failure"
 	| "deterministic";
@@ -152,7 +153,37 @@ export interface EconomyUsageSample {
  /** Exact rates used to price this route, serialized by the producer. */
  rates: string;
 }
+export interface RecoveryObservation {
+ at: number;
+ ok: boolean;
+ rates?: string;
+ elapsedMs?: number;
+ inputTokens?: number;
+ outputTokens?: number;
+}
+export const RECOVERY_HISTORY_MS = 7 * 24 * 60 * 60_000;
+/** Retained across failures and sessions; economic admission keeps its stricter five-minute evidence. */
+function observeRecovery(model: ModelHealth, sample: RecoveryObservation): void {
+ const previous = Array.isArray(model.recoveryHistory) ? model.recoveryHistory : [];
+ model.recoveryHistory = [...previous.filter(s => s && typeof s.ok === "boolean" && Number.isFinite(s.at) && s.at <= sample.at && sample.at-s.at <= RECOVERY_HISTORY_MS), sample].slice(-100);
+}
+/** Only structured upstream attribution can narrow an OpenRouter quota failure. */
+export function openRouterUpstream(error: string | undefined): string | undefined {
+ if (!error || error.length > 65_536) return;
+ const start = error.indexOf("{");
+ if (start < 0) return;
+ try {
+  const body = JSON.parse(error.slice(start));
+  const value = (body.error ?? body)?.metadata?.provider_name;
+  if (typeof value === "string" && value.trim() && value.length <= 128 && !/[\x00-\x1f\x7f]/.test(value)) return value.trim();
+ } catch { /* Unstructured text cannot establish a failure domain. */ }
+}
+export function endpointHealthKey(model: string, endpoint: string): string {
+ return JSON.stringify([model, "endpoint", endpoint.toLowerCase()]);
+}
+
 export interface ModelHealth {
+ recoveryHistory?: RecoveryObservation[];
  /** Last fifty SDK-reported successful usages and estimated costs; never semantic quality labels. */
  economyUsage?: EconomyUsageSample[];
 
@@ -229,7 +260,8 @@ export function parseRetryAfterMs(detail: string | undefined | null, now = Date.
 }
 
 const QUOTA_RATE_RE =
-	/\b429\b|rate.?limit|too many requests|quota|usage limit|insufficient_quota|out of budget|billing/i;
+	/\b429\b|rate.?limit|too many requests|quota|usage limit|insufficient_quota|out of budget|billing|\b402\b|insufficient credits|concurrency (?:limit|exceeded)|too many concurrent/i;
+const PROVIDER_AUTH_RE = /\b401\b|invalid[ _-]api[ _-]key|authentication[ _-](?:failed|error)|invalid[ _-]credentials/i;
 const PROVIDER_OUTAGE_RE =
 	/\b503\b|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|upstream.{0,24}unavailable|provider.{0,24}unavailable/i;
 const ROUTE_TRANSPORT_RE =
@@ -254,6 +286,7 @@ export function classifyFailure(errorMessage: string | undefined | null): Failur
 	if (text.includes("provider-gate")) return undefined;
 	const retryAfterMs = parseRetryAfterMs(text);
 	if (DETERMINISTIC_RE.test(text)) return { kind: "deterministic", scope: "route", retryAfterMs };
+	if (PROVIDER_AUTH_RE.test(text)) return { kind: "provider-auth", scope: "provider", retryAfterMs };
 	if (QUOTA_RATE_RE.test(text)) return { kind: "quota-rate", scope: "provider", retryAfterMs };
 	if (PROVIDER_OUTAGE_RE.test(text)) return { kind: "provider-outage", scope: "provider", retryAfterMs };
 	if (MODEL_FAILURE_RE.test(text)) return { kind: "model-failure", scope: "route", retryAfterMs };
@@ -271,6 +304,7 @@ export function cooldownFor(
  consecutive: number,
 ): number {
  if (classification.kind === "deterministic") return DETERMINISTIC_COOLDOWN_MS;
+ if (classification.kind === "provider-auth") return RETRY_AFTER_CEILING_MS;
  const hint = classification.retryAfterMs;
  if (typeof hint === "number" && Number.isFinite(hint) && hint >= 0)
   return Math.min(RETRY_AFTER_CEILING_MS, hint);
@@ -452,6 +486,9 @@ export interface RecordFailureInput {
 	errorMessage?: string;
 	/** Where the failure was observed (observability), e.g. "message_end". */
 	source?: string;
+	/** Exact serving endpoint, only when the outgoing request was pinned. */
+	endpoint?: string;
+	rates?: string;
 	/** Estimated request size; when omitted, the route's newest request sample is used. */
 	estTokens?: number;
 	now?: number;
@@ -472,18 +509,28 @@ export interface RecordedFailure {
  */
 export function recordFailure(input: RecordFailureInput): RecordedFailure | undefined {
 	const now = input.now ?? Date.now();
-	const classification = classifyFailure(input.errorMessage);
-	if (!classification) return undefined;
+	const original = classifyFailure(input.errorMessage);
+ if (!original) return undefined;
+ const upstream = input.provider === "openrouter" ? openRouterUpstream(input.errorMessage) : undefined;
+ const endpoint = input.provider === "openrouter" && original.kind !== "deterministic" && original.kind !== "provider-auth"
+  ? upstream ?? (original.kind !== "quota-rate" ? input.endpoint : undefined) : undefined;
+ const classification = endpoint ? { ...original, scope: "route" as const } : original;
 	return mutateHealth((state) => {
 		const entry = ensureEntry(state, input.provider, now);
 		entry.updatedAt = now;
-		const routeKey = input.model ?? "";
+		const routeKey = input.model ? endpoint ? endpointHealthKey(input.model, endpoint) : input.model : "";
 		const routeState =
 			routeKey && entry.models[routeKey]
 				? entry.models[routeKey]
 				: routeKey
 					? (entry.models[routeKey] = { updatedAt: now, cooldownUntil: 0 })
 					: undefined;
+        if (routeState && classification.kind !== "deterministic") observeRecovery(routeState, {at:now,ok:false,rates:input.rates});
+        if (endpoint && input.model) {
+         const modelState = entry.models[input.model] ??= {updatedAt:now,cooldownUntil:0};
+         modelState.economyUsage = undefined;
+         observeRecovery(modelState, {at:now,ok:false,rates:input.rates});
+        }
 		const priorConsecutive =
 			(classification.scope === "provider" ? entry.failure?.consecutive : routeState?.failure?.consecutive) ?? 0;
 		const consecutive = (now - (classification.scope === "provider" ? entry.failure?.at ?? 0 : routeState?.failure?.at ?? 0) <= WINDOW_MAX_AGE_MS
@@ -541,6 +588,7 @@ export function invalidateEconomyUsage(provider:string, model?:string): void {
 
 export interface RecordSuccessInput {
 	provider: string;
+	endpoint?: string;
 	model?: string;
 	inputTokens?: number;
  economyUsage?: Omit<EconomyUsageSample, "at">;
@@ -573,6 +621,15 @@ export function recordSuccess(input: RecordSuccessInput): void {
 			model.failure = undefined;
 			model.updatedAt = now;
             const usage = input.economyUsage;
+            const sample: RecoveryObservation = {at:now,ok:true,rates:usage?.rates,
+             ...(Number.isFinite(usage?.elapsedMs) && usage!.elapsedMs! > 0 && usage!.elapsedMs! <= 600_000 ? {elapsedMs:usage!.elapsedMs} : {}),
+             ...(usage && Number.isSafeInteger(usage.input) && Number.isSafeInteger(usage.cacheRead) && Number.isSafeInteger(usage.cacheWrite) ? {inputTokens:usage.input+usage.cacheRead+usage.cacheWrite,outputTokens:usage.output} : {})};
+            observeRecovery(model, sample);
+            if (input.endpoint && input.provider === "openrouter") {
+             const endpoint = entry.models[endpointHealthKey(input.model, input.endpoint)] ??= {updatedAt:now,cooldownUntil:0};
+             endpoint.cooldownUntil=0; endpoint.failure=undefined; endpoint.updatedAt=now;
+             observeRecovery(endpoint, sample);
+            }
             if (usage && [usage.input,usage.output,usage.cacheRead,usage.cacheWrite].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000_000)
                 && Number.isFinite(usage.costUsd) && usage.costUsd>=0 && typeof usage.rates === "string" && usage.rates.length<=2048) {
                 const previous = Array.isArray(model.economyUsage) ? model.economyUsage : [];
@@ -601,18 +658,20 @@ export interface RouteDecision {
 }
 
 /** Resolve the executable state for one route right now (read-only). */
-export function evaluateRoute(input: { provider: string; model?: string; now?: number }): RouteDecision {
+export function evaluateRoute(input: { provider: string; model?: string; endpoints?: string[]; now?: number }, state: ProviderHealthState = readHealth()): RouteDecision {
 	const now = input.now ?? Date.now();
-	const entry = readHealth().providers[input.provider];
+	const entry = state.providers[input.provider];
 	if (!entry) return { allowed: true, waitMs: 0, cooldownUntil: 0 };
 	// Persisted deadlines already include metadata/pacing; do not shorten them
 	// to the fallback when another process evaluates the route.
 	const providerUntil = entry.cooldownUntil;
-	const routeUntil = (input.model ? entry.models[input.model]?.cooldownUntil : 0) ?? 0;
+	const keys = input.model ? [input.model, ...(input.endpoints ?? []).map(endpoint => endpointHealthKey(input.model!, endpoint))] : [];
+ const bindingModel = keys.map(key => entry.models[key]).filter(Boolean).sort((a,b)=>b.cooldownUntil-a.cooldownUntil)[0];
+ const routeUntil = bindingModel?.cooldownUntil ?? 0;
 	const until = Math.max(providerUntil, routeUntil);
 	if (until <= now) return { allowed: true, waitMs: 0, cooldownUntil: until };
 	const byProvider = providerUntil >= routeUntil;
-	const record = byProvider ? entry.failure : input.model ? entry.models[input.model]?.failure : undefined;
+	const record = byProvider ? entry.failure : bindingModel?.failure;
 	return {
 		allowed: false,
 		waitMs: until - now,
@@ -635,6 +694,7 @@ export function estimateTokens(payload: unknown): number {
 }
 
 export interface GateRequestInput {
+	endpoints?: string[];
 	provider: string;
 	model?: string;
 	estTokens?: number;
@@ -706,7 +766,7 @@ export async function gateRequest(input: GateRequestInput): Promise<GateOutcome>
 	input.signal?.throwIfAborted();
 	const now = input.now ?? Date.now();
 	recordRequest({ provider: input.provider, model: input.model, estTokens: input.estTokens, now });
-	let decision = evaluateRoute({ provider: input.provider, model: input.model, now });
+	let decision = evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now });
 	if (decision.allowed) {
 		clearPending(`${input.provider}/${input.model ?? ""}`, input.session);
 		return { allowed: true, deferredMs: 0 };
@@ -730,7 +790,7 @@ export async function gateRequest(input: GateRequestInput): Promise<GateOutcome>
 			await sleepWithSignal(Math.min(GATE_POLL_MS, decision.waitMs), input.signal, sleep);
 			input.signal?.throwIfAborted();
 			const now2 = Date.now();
-			decision = evaluateRoute({ provider: input.provider, model: input.model, now: now2 });
+			decision = evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: now2 });
 			if (decision.allowed) {
 				clearPending(route, input.session);
 				return { allowed: true, deferredMs: now2 - startedAt };
@@ -854,4 +914,21 @@ export function snapshot(now = Date.now()): HealthSnapshot {
 		}),
 		pending: state.pending,
 	};
+}
+
+/** Time-decayed operational evidence; unknown observations stay neutral. Rate
+ * and URL fingerprints prevent historical speed from crossing endpoint changes. */
+export function recoveryPerformance(health: ModelHealth | undefined, model: {cost?:any;baseUrl?:string;api?:string}, now=Date.now()): {samples:number;failureRate:number;msPerToken?:number} {
+ const rates=economyRateIdentity(model.cost??{},model.baseUrl,model.api);
+ const samples=(Array.isArray(health?.recoveryHistory)?health.recoveryHistory:[]).filter(s=>s && typeof s.ok === "boolean" && Number.isFinite(s.at) && s.at<=now && now-s.at<=RECOVERY_HISTORY_MS && s.rates===rates);
+ let total=2, failed=1;
+ const speeds:number[]=[];
+ for(const s of samples) {
+  const weight=Math.pow(.5,(now-s.at)/(24*60*60_000)); total+=weight; if(!s.ok)failed+=weight;
+  // Whole-response speed is comparable only for useful sized output, and is
+  // deliberately a small tie-break, not TTFT or a model-quality estimate.
+  if(s.ok && Number.isFinite(s.elapsedMs) && s.elapsedMs!>0 && s.elapsedMs!<=600_000 && Number.isSafeInteger(s.outputTokens) && s.outputTokens!>=32 && s.outputTokens!<=100_000_000) speeds.push(s.elapsedMs!/s.outputTokens!);
+ }
+ speeds.sort((a,b)=>a-b);
+ return {samples:samples.length,failureRate:failed/total,...(speeds.length>=3?{msPerToken:speeds[Math.floor(speeds.length/2)]}:{})};
 }

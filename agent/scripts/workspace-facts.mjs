@@ -232,3 +232,84 @@ export async function workspaceScope(root, signal) {
   signal?.throwIfAborted();
   return result;
 }
+
+const TEST_SOURCE = /\.(?:[cm]?[jt]sx?|py|rs|go|java|kt|kts|cs|fs|php|rb|swift|c|cc|cpp|cxx|h|hpp|sh|bash|ex|exs|erl|scala|clj|cljs|vue|svelte)$/i;
+const TEST_PATH = /(?:^|\/)(?:tests?|__tests__|specs?)(?:\/|$)|(?:^|[._-])(?:test|spec)(?:[._-]|$)|_test\.[^/]+$/i;
+const TEST_MANIFEST = /^(?:package\.json|pyproject\.toml|pytest\.ini|tox\.ini|Cargo\.toml|go\.mod|composer\.json|Gemfile|pom\.xml|build\.gradle(?:\.kts)?|CMakeLists\.txt|Makefile|.*\.(?:csproj|fsproj))$/;
+const TEST_SKIP = /^(?:\..*|node_modules|vendor|target|dist|build|coverage|__pycache__|venv|env|logs?|artifacts?|backups?|sessions?|worktrees?|uploads?|storage|data|secrets?|credentials?)$/i;
+
+export function isProjectTestSource(file) {
+  return !file.split(/[\\/]/).some(part => TEST_SKIP.test(part)) && TEST_SOURCE.test(file) && !/\.min\.[cm]?js$/i.test(file);
+}
+
+export function isProjectReviewSource(file) {
+  return !file.split(/[\\/]/).some(part => TEST_SKIP.test(part)) &&
+    !/(?:^|\/)(?:auth|settings|models|credentials)\.json$|\.(?:min|generated)\./i.test(file) &&
+    (isProjectTestSource(file) || /\.(?:html?|css|scss|sass|less|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(file));
+}
+
+/** Local test setup and source metadata only. Never executes project code,
+ * imports a config, reads secrets or follows a symlink. A bounded scan cannot
+ * establish absence or ownership of every test/change in a large workspace. */
+export async function projectTestFacts(cwd, signal, options = {}) {
+  signal?.throwIfAborted();
+  const root = await fs.realpath(cwd);
+  const maxEntries = Math.min(4000, Math.max(1, options.maxEntries ?? 1200));
+  const deadline = Date.now() + Math.min(2000, Math.max(1, options.timeoutMs ?? 400));
+  const result = { root, source: 'bounded local filenames and stat metadata', manifests: [], tests: [], scripts: [], sources: {}, reviewSources: {}, truncated: false, entries: 0,
+    limitations: ['No scripts/configs executed. Test filenames and script names do not establish coverage or safety.', 'Source stat changes include shell/external writes; attribution and same-metadata changes are not established.', 'Ignored/generated directories, symlinks and paths beyond scan limits are not inspected.'] };
+  const queue = [{ dir: root, depth: 0 }];
+  const manifests = [];
+  while (queue.length && !result.truncated) {
+    const { dir, depth } = queue.shift();
+    try {
+      const directory = await fs.opendir(dir);
+      for await (const entry of directory) {
+        signal?.throwIfAborted();
+        if (++result.entries > maxEntries || Date.now() >= deadline) { result.truncated = true; break; }
+        if (entry.isSymbolicLink() || TEST_SKIP.test(entry.name)) continue;
+        const absolute = path.join(dir, entry.name), relative = path.relative(root, absolute).split(path.sep).join('/');
+        if (entry.isDirectory()) {
+          if (depth < 5) queue.push({ dir: absolute, depth: depth + 1 });
+          else result.truncated = true;
+        } else if (entry.isFile()) {
+          if (TEST_MANIFEST.test(entry.name) && result.manifests.length < 32) {
+            result.manifests.push(relative);
+            if (entry.name === 'package.json' && manifests.length < 8) manifests.push(absolute);
+          }
+          const testSource = isProjectTestSource(relative) || TEST_MANIFEST.test(entry.name) || /(?:vitest|jest|pytest|test).*config\./i.test(entry.name);
+          if (testSource || isProjectReviewSource(relative)) {
+            const stat = await fs.lstat(absolute);
+            if (!stat.isFile() || stat.isSymbolicLink()) continue;
+            const fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+            if (testSource) result.sources[relative] = fingerprint;
+            if (isProjectReviewSource(relative)) result.reviewSources[relative] = fingerprint;
+            if (TEST_PATH.test(relative) && result.tests.length < 40) result.tests.push(relative);
+          }
+        }
+      }
+    } catch (error) { signal?.throwIfAborted(); result.truncated = true; }
+  }
+  // Read only literal JSON keys through the same no-follow, bounded contract as
+  // workspaceFacts. Script bodies stay out of automatic model-facing notices.
+  for (const file of manifests) {
+    let handle;
+    try {
+      signal?.throwIfAborted();
+      handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > 65536) { result.truncated = true; continue; }
+      const buffer = Buffer.alloc(65537), { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > 65536) { result.truncated = true; continue; }
+      const data = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+      if (data?.scripts && typeof data.scripts === 'object' && !Array.isArray(data.scripts)) {
+        for (const name of Object.keys(data.scripts).filter(name => /^(?:test|check|verify)(?:$|[:-])/.test(name)).slice(0, 16)) {
+          if (typeof data.scripts[name] === 'string') result.scripts.push({ manifest: path.relative(root, file), name: name.slice(0, 80), executed: false, bodyOmitted: true });
+        }
+      }
+    } catch { result.truncated = true; }
+    finally { await handle?.close(); }
+  }
+  signal?.throwIfAborted();
+  return result;
+}

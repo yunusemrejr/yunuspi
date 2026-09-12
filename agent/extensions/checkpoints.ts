@@ -42,6 +42,7 @@ import {
 	fileCheckpoints,
 	fileCheckpointText,
 } from "./lib/checkpoint-files.ts";
+import { createProjectTestLifecycle } from "./lib/project-tests.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -507,6 +508,7 @@ function emit(
 export default function checkpointsExtension(pi: ExtensionAPI) {
 	// Keep all tools/hooks disabled under the documented PI_CHECKPOINTS=0 contract.
 	if (DISABLED) return;
+	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW });
 	let st: CheckpointState | null = null;
 	const pending = new Map<string, string>();
 	let mutationVersion = 0;
@@ -523,16 +525,19 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		if (s.editsSinceCommand < EDITS_WITHOUT_VERIFY)
 			pending.delete("unverified-edits");
 		if (s.verifyStrikes < VERIFY_STRIKES) pending.delete("verify-failed");
-		const content = [...pending.values()].join("\n");
+		const content = [...pending.values(), projectTests.notice()].filter(Boolean).join("\n");
 		pending.clear();
 		return content || undefined;
 	});
-	pi.on("before_agent_start", () => {
+	pi.on("input", event => projectTests.input(event));
+	pi.on("agent_settled", (event, ctx) => projectTests.settled(event, ctx));
+	pi.on("before_agent_start", async (_event, ctx) => {
 		pending.delete("unverified-edits");
 		pending.delete("verify-failed");
 		starts.clear();
+		await projectTests.start(ctx);
 	});
-	pi.on("message_end", (event) => {
+	pi.on("message_end", async (event, ctx) => {
 		if (
 			event.message.role === "assistant" &&
 			event.message.stopReason === "aborted"
@@ -540,8 +545,9 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			pending.clear();
 			starts.clear();
 		}
+		await projectTests.message(event, ctx);
 	});
-	pi.on("tool_call", (event, ctx) => {
+	pi.on("tool_call", async (event, ctx) => {
 		if (
 			["bash", "read", "read_symbol", "read_enclosing"].includes(event.toolName)
 		)
@@ -549,8 +555,9 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 				version: mutationVersion,
 				batch: batchOf(ctx),
 			});
+		await projectTests.call(event, ctx);
 	});
-	pi.on("session_tree", (_event, ctx) => {
+	pi.on("session_tree", async (_event, ctx) => {
 		// A heuristic window is branch-local; authoritative file history remains reconstructible.
 		st = defaultState(sidOf(ctx));
 		pending.clear();
@@ -558,9 +565,12 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		mutationVersion = 0;
 		lastMutationBatch = undefined;
 		writeState(st);
+		await projectTests.restore(ctx);
 	});
+	pi.on("session_switch", (_event, ctx) => projectTests.restore(ctx));
 	pi.on("session_start", async (_event, ctx) => {
 		try {
+			await projectTests.restore(ctx);
 			// Restart/reload begins a new heuristic window, not a claim about inherited edits.
 			st = defaultState(sidOf(ctx));
 			pending.clear();
@@ -597,6 +607,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	// A changed-file readback is useful evidence in pure-writing workflows.
 	pi.on("tool_result", async (event, ctx) => {
 		try {
+			await projectTests.result(event, ctx);
 			const sid = sidOf(ctx);
 			const s = load(sid);
 			const start = starts.get(event.toolCallId);
@@ -675,6 +686,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	// Effective context telemetry is owned by session-signals.ts.
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		projectTests.shutdown();
 		try {
 			writeState(load(sidOf(ctx)));
 		} catch {
