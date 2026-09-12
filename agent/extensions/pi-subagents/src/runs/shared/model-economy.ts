@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "./pi-spawn.ts";
 import { readHealth, economyRateIdentity, type ProviderHealthState } from "./provider-health.ts";
 import { splitKnownThinkingSuffix, toModelInfo, type ModelInfo } from "../../shared/model-info.ts";
-import { getAgentDir } from "../../shared/utils.ts";
+import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { isProvenFreeRoute, capFreeRequest, FREE_BASE_URL } from "./free-route-evidence.ts";
+import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../../shared/file-system-retry.ts";
+import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 
 /**
  * Cost-aware subagent economy policy (2026-09-06 pass).
@@ -131,6 +135,16 @@ export function parseModelEconomyConfig(raw: unknown, options?: { filePath?: str
 
 let configCache: ModelEconomyConfig | undefined;
 let configCacheKey: string | undefined;
+let configCacheStamp: string | undefined;
+
+function configSourceStamp(filePath: string): string {
+	try {
+		const stat = fs.statSync(filePath);
+		return `${filePath}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`;
+	} catch {
+		return `${filePath}:missing`;
+	}
+}
 
 function readJsonObjectFile(filePath: string): Record<string, unknown> {
 	try {
@@ -150,14 +164,17 @@ function canonicalSettingsEconomy(): { economy: unknown; filePath: string } {
 
 /** Load and cache the effective economy config (see precedence at the top). */
 export function loadModelEconomyConfig(): ModelEconomyConfig {
-	const envPath = process.env[ECONOMY_CONFIG_ENV];
+	const envPath = process.env[ECONOMY_CONFIG_ENV]?.trim() || undefined;
 	const key = envPath ?? "";
-	if (configCache && configCacheKey === key) return configCache;
+	const sourcePath = envPath ?? path.join(getAgentDir(), "settings.json");
+	const stamp = configSourceStamp(sourcePath);
+	if (configCache && configCacheKey === key && configCacheStamp === stamp) return configCache;
 	const { economy, filePath } = envPath
 		? { economy: readJsonObjectFile(envPath), filePath: envPath }
 		: canonicalSettingsEconomy();
 	configCache = parseModelEconomyConfig(economy, { filePath });
 	configCacheKey = key;
+	configCacheStamp = stamp;
 	return configCache;
 }
 
@@ -165,7 +182,8 @@ export function loadModelEconomyConfig(): ModelEconomyConfig {
 export function clearModelEconomyConfigCache(): void {
 	configCache = undefined;
 	configCacheKey = undefined;
- healthSnapshot = undefined;
+	configCacheStamp = undefined;
+	healthSnapshot = undefined;
 }
 
 /** Strip a known thinking suffix; used for exact-route comparisons. */
@@ -209,11 +227,12 @@ function inheritedOperationalRoutes(): string[] {
  } catch {return [];}
 }
 export function operationalAdmissionRoutes(routes?: readonly string[]): string {
- const admitted=new Set([...inheritedOperationalRoutes(),...operationalAdmissions]);
+ const admitted=new Set([...inheritedOperationalRoutes(),...operationalAdmissions].map(baseModelOf));
  return JSON.stringify((routes ?? [...admitted]).map(baseModelOf).filter(route=>admitted.has(route)).slice(0,routes?32:128));
 }
 function operationalRouteWasAdmitted(route:string): boolean {
- return operationalAdmissions.has(route)||inheritedOperationalRoutes().includes(route);
+ const base=baseModelOf(route);
+ return [...operationalAdmissions,...inheritedOperationalRoutes()].some(admitted=>baseModelOf(admitted)===base);
 }
 let healthSnapshot: {at:number; state:ProviderHealthState} | undefined;
 function economyHealth(): ProviderHealthState {
@@ -407,6 +426,7 @@ export function formatEconomyBlockedMessage(fullId: string, classification: Mode
 		`[pi-subagents] economy policy blocked '${baseModelOf(fullId)}' before inference. Budget: ${formatCaps(cfg)}.${rates}`,
 		"Retry only this child with model: inherit for budget-aware selection, or select a listed eligible route with the required capabilities. Keep successful siblings. Do not repeat the same blocked route or change the budget automatically.",
 		alternatives.length ? `Within-budget price candidates (verify capabilities/scope): ${alternatives.slice(0, 3).join(", ")}.` : "No known within-budget metered alternative was found.",
+		`To permit this exact route, use the human-authorized command: /subagents-economy allow ${baseModelOf(fullId)}.`,
 	].join(" ");
 }
 
@@ -414,7 +434,7 @@ export function formatEconomyBlockedMessage(fullId: string, classification: Mode
 export function formatEconomyNoRouteMessage(fullId: string, cfg: ModelEconomyConfig): string {
 	return [
 		`[pi-subagents] economy policy blocked inheriting '${baseModelOf(fullId)}' for a subagent: no route with a known price within the automatic budget (${formatCaps(cfg)}) is available.`,
-		`Authorize the exact route (subagents-economy allow ${baseModelOf(fullId)}) or make an affordable metered model available in the registry.`,
+		`Authorize the exact route (/subagents-economy allow ${baseModelOf(fullId)}) or make an affordable metered model available in the registry.`,
 	].join(" ");
 }
 
@@ -435,6 +455,26 @@ export function formatEconomyUnknownWarning(fullId: string, cfg: ModelEconomyCon
 
 function canonicalSettingsPath(): string {
 	return path.join(getAgentDir(), "settings.json");
+}
+
+/** Use Pi's own lock protocol so economy commands also serialize with core
+ * settings saves. Resolve its bundled library only when a write is requested. */
+function withSettingsUpdateLock<T>(filePath: string, operation: () => T): T {
+	const packageRoot = process.env[PI_CODING_AGENT_PACKAGE_ROOT_ENV] || resolvePiPackageRoot() || resolveInstalledPiPackageRoot();
+	const require = createRequire(packageRoot ? path.join(packageRoot, "package.json") : import.meta.url);
+	const lockfile = require("proper-lockfile") as { lockSync(path: string, options: { realpath: boolean }): () => void };
+	fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+	let release: (() => void) | undefined;
+	for (let attempt = 0; !release; attempt++) {
+		try { release = lockfile.lockSync(filePath, { realpath: false }); }
+		catch (error) {
+			const delay = DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS[attempt];
+			if ((error as NodeJS.ErrnoException).code !== "ELOCKED" || delay === undefined) throw error;
+			waitForFileSystemRetry(delay);
+		}
+	}
+	try { return operation(); }
+	finally { release(); }
 }
 
 function settingsObjectForUpdate(raw: unknown, label: string): Record<string, unknown> {
@@ -468,28 +508,32 @@ export function setAuthorizedExpensiveModel(route: string, action: "allow" | "re
 		throw new Error(`Economy allow/revoke requires an exact 'provider/id' entry (got '${route}').`);
 	}
 	const filePath = canonicalSettingsPath();
-	// Tolerant reads are appropriate for policy defaults, never for updates:
-	// a malformed file or nested object must not erase unrelated settings.
-	const settings = readSettingsForUpdate(filePath);
-	const subagents = settingsObjectForUpdate(settings.subagents, "subagents");
-	const economy = settingsObjectForUpdate(subagents.economy, "subagents.economy");
-	const allowExpensive = validateAllowExpensive(economy.allowExpensive);
-	let changed = false;
-	if (action === "allow" && !allowExpensive.some((entry) => baseModelOf(entry) === base)) {
-		allowExpensive.push(base);
-		changed = true;
-	} else if (action === "revoke") {
-		const next = allowExpensive.filter((entry) => baseModelOf(entry) !== base);
-		changed = next.length !== allowExpensive.length;
-		allowExpensive.length = 0;
-		allowExpensive.push(...next);
-	}
-	if (changed) {
-		subagents.economy = { ...economy, allowExpensive };
-		settings.subagents = subagents;
-		fs.writeFileSync(filePath, `${JSON.stringify(settings, null, "\t")}\n`);
-	}
-	return { allowExpensive: [...allowExpensive], filePath };
+	return withSettingsUpdateLock(filePath, () => {
+		// Tolerant reads are appropriate for policy defaults, never for updates:
+		// a malformed file or nested object must not erase unrelated settings.
+		const settings = readSettingsForUpdate(filePath);
+		const subagents = settingsObjectForUpdate(settings.subagents, "subagents");
+		const economy = settingsObjectForUpdate(subagents.economy, "subagents.economy");
+		const allowExpensive = validateAllowExpensive(economy.allowExpensive);
+		let changed = false;
+		if (action === "allow" && !allowExpensive.some((entry) => baseModelOf(entry) === base)) {
+			allowExpensive.push(base);
+			changed = true;
+		} else if (action === "revoke") {
+			const next = allowExpensive.filter((entry) => baseModelOf(entry) !== base);
+			changed = next.length !== allowExpensive.length;
+			allowExpensive.length = 0;
+			allowExpensive.push(...next);
+		}
+		if (changed) {
+			subagents.economy = { ...economy, allowExpensive };
+			settings.subagents = subagents;
+			writePrivateAtomicJson(filePath, settings);
+			// Invalidate only after the complete atomic replacement succeeds.
+			clearModelEconomyConfigCache();
+		}
+		return { allowExpensive: [...allowExpensive], filePath };
+	});
 }
 
 type HookHandler = (args: { payload?: unknown }, ctx: unknown) => Promise<unknown> | unknown;

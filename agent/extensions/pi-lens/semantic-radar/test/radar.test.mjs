@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { extractFunctions, parserFor } from "../extract.mjs";
 import { buildIndex, findDivergences } from "../radar.mjs";
-import { scorePair } from "../index.mjs";
+import { scorePair, SemanticIndex } from "../index.mjs";
 import { lshCandidates } from "../hash.mjs";
 
 async function fns(src, ext = ".ts") {
@@ -86,9 +86,59 @@ test("boilerplate/tiny functions skipped", async () => {
   assert.equal(fns2.length, 0);
 });
 
+test("outer return shape ignores nested callback returns", async () => {
+  const outer = get(await fns(`function choose(value) {
+    const makeObject = () => ({ value });
+    if (value) return value;
+    return false;
+  }`), "choose");
+  assert.equal(outer?.retShape, "value");
+});
+
 test("unsupported language degrades gracefully", async () => {
   const res = await (await import("../extract.mjs")).analyzeFile("/tmp/nonexistent-file.rb");
   assert.equal(res.supported, false);
+});
+
+test("malformed persisted index state is bounded and fails closed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "radar-corrupt-"));
+  const dataDir = path.join(dir, "state");
+  fs.mkdirSync(dataDir);
+  fs.writeFileSync(path.join(dir, "bad.ts"), `function repair(value) {
+  const copy = value.trim();
+  if (copy.length > 3) return copy.toLowerCase();
+  return value;
+}`);
+  const signature = Array.from({ length: 64 }, (_, i) => i + 1);
+  fs.writeFileSync(
+    path.join(dataDir, "semantic-radar-index.json"),
+    JSON.stringify({
+      version: 5,
+      updatedAt: new Date().toISOString(),
+      files: {
+        "../outside.ts": {
+          contentHash: "x",
+          mtimeMs: 1,
+          funcs: [{ id: "escape", name: "escape", sig: signature }],
+        },
+        "bad.ts": {
+          contentHash: "x",
+          mtimeMs: 1,
+          funcs: [{ id: "bad", name: "bad", sig: [1, 2, 3] }],
+        },
+      },
+    }),
+  );
+  const index = await SemanticIndex.load(dataDir);
+  assert.equal(index.stats().files, 0, "damaged files are discarded so the source can be rebuilt");
+  assert.equal(index.stats().funcs, 0, "invalid function records are discarded");
+  assert.doesNotThrow(() => index.query({ sig: signature }, { max: 1 }));
+  assert.deepEqual(index.query({ sig: signature }, { max: 0 }), []);
+  const rebuilt = await buildIndex({ cwd: dir, dataDir });
+  assert.equal(rebuilt.stats.updated, 1, "a damaged cache record must not suppress source re-analysis");
+  assert.equal(rebuilt.stats.files, 1);
+  assert.ok(rebuilt.stats.funcs >= 1);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("index: build, idempotent re-upsert, move not counted as new entropy", async () => {

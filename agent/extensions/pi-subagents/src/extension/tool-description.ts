@@ -24,7 +24,7 @@ Models: a child defaults to its agent config or the parent model. To honor a use
 export const SUBAGENT_TOOL_PROMPT_SNIPPET = "Delegate independent work through an async workflow; respect user model/provider constraints.";
 
 export const SUBAGENT_TOOL_PROMPT_GUIDELINES = [
-	"Use subagent for useful independent work, not mandatory ceremony on small tasks; honor requests not to delegate. List available agents if unsure. Use one async workflowScript for orchestration (await runs calls; runs.all returns an ordered array), and one writer per worktree. Resolve requested model/provider/thinking with action=models, then set model='provider/id:thinking'; never silently substitute. Native async runs notify on completion—do not poll to wait. Prefer proven free routes (any configured provider, e.g. OpenRouter or OrcaRouter) for read-only or advisory work; swarms and fusions stay advisory on cheap or free low-thinking models, and paid-but-cheap escalation follows the task's quality needs. When the main model is itself cheap or free, inheriting it is fine. See the subagent tool and skill for detailed contracts.",
+	"Use subagent for useful independent work; honor requests not to delegate. Use one async workflow or declarative task set, await its calls, and keep one writer per worktree. Select relevant skills per child. Resolve requested model/provider/thinking with action=models and an exact model='provider/id:thinking'; never silently substitute. Completion notifications wake the parent; do not poll. Prefer proven free routes for read-only or advisory work; keep swarms and fusions on cheap or free low-thinking models, escalating only when quality requires.",
 ];
 
 // Advertise only orchestration that this process can execute. The shared-VM

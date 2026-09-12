@@ -1,5 +1,5 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import net from "node:net";
 import { getActiveProxy, getWebSearchConfigPath, hasScopedProxyDecision, isProxyBypassedUrl } from "./utils.ts";
 
@@ -16,13 +16,12 @@ const WEB_SEARCH_CONFIG_PATH = getWebSearchConfigPath();
 let cachedConfigRoot: { signature: string; value: Record<string, unknown> | null } | null = null;
 
 function loadConfigRoot(): Record<string, unknown> | null {
-	if (!existsSync(WEB_SEARCH_CONFIG_PATH)) return null;
-
 	let signature: string;
 	try {
 		const stat = statSync(WEB_SEARCH_CONFIG_PATH);
-		signature = `${stat.mtimeMs}:${stat.size}`;
+		signature = `${stat.ino ?? ""}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
 	} catch {
+		cachedConfigRoot = null;
 		return null;
 	}
 
@@ -32,8 +31,10 @@ function loadConfigRoot(): Record<string, unknown> | null {
 	try {
 		raw = readFileSync(WEB_SEARCH_CONFIG_PATH, "utf-8");
 	} catch {
-		// Do not memoize read failures: a chmod fix changes neither mtime nor size,
-		// so a cached failure would permanently fail-open the domain policy.
+		// Do not retain a previous parsed policy across a read failure. A chmod
+		// fix may change neither mtime nor size, so stale policy would otherwise
+		// silently survive a transient permissions problem.
+		cachedConfigRoot = null;
 		return null;
 	}
 
@@ -136,6 +137,8 @@ export function loadSsrfConfig(): SsrfConfig {
 }
 
 interface ValidationOptions {
+	/** Abort DNS preflight as well as the eventual fetch. */
+	signal?: AbortSignal;
 	lookup?: Lookup;
 	/** Optional hostname policy for fetch_content target URLs. */
 	domainPolicy?: DomainPolicy;
@@ -180,10 +183,49 @@ async function defaultLookup(hostname: string): Promise<LookupAddress[]> {
 	return dnsLookup(hostname, { all: true, verbatim: true });
 }
 
+function abortError(signal?: AbortSignal): Error {
+	const reason = signal?.reason as { name?: unknown; message?: unknown } | undefined;
+	if (reason?.name === "TimeoutError" || (typeof reason?.message === "string" && /timeout/i.test(reason.message))) {
+		return new Error("Remote fetch timed out");
+	}
+	return new Error("Remote fetch aborted");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) throw abortError(signal);
+}
+
+/**
+ * DNS lookups do not consistently accept AbortSignal across supported Node
+ * versions. Race the lookup with the caller's signal so a bounded web probe
+ * cannot spend its whole budget waiting on resolver failure. The resolver may
+ * finish in the background, but its result is ignored after the race settles.
+ */
+async function lookupWithAbort(hostname: string, lookup: Lookup, signal?: AbortSignal): Promise<LookupAddress[]> {
+	throwIfAborted(signal);
+	const lookupPromise = Promise.resolve().then(() => lookup(hostname));
+	if (!signal) return lookupPromise;
+
+	let onAbort: (() => void) | undefined;
+	const abortPromise = new Promise<never>((_, reject) => {
+		onAbort = () => reject(abortError(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	try {
+		return await Promise.race([lookupPromise, abortPromise]);
+	} finally {
+		if (onAbort) signal.removeEventListener("abort", onAbort);
+	}
+}
+
 export async function validateRemoteUrl(rawUrl: string | URL, options: ValidationOptions = {}): Promise<URL> {
+	throwIfAborted(options.signal);
 	const url = rawUrl instanceof URL ? rawUrl : new URL(rawUrl);
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		throw new Error("Only HTTP and HTTPS URLs can be fetched remotely");
+	}
+	if (url.username || url.password) {
+		throw new Error("Credentials in remote URLs are not allowed");
 	}
 
 	const hostname = normalizeHostname(url.hostname);
@@ -211,12 +253,14 @@ export async function validateRemoteUrl(rawUrl: string | URL, options: Validatio
 
 	let addresses: LookupAddress[];
 	try {
-		addresses = await (options.lookup ?? defaultLookup)(hostname);
+		addresses = await lookupWithAbort(hostname, options.lookup ?? defaultLookup, options.signal);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		if (message === "Remote fetch aborted" || message === "Remote fetch timed out") throw new Error(message);
 		throw new Error(`Failed to resolve ${hostname}: ${message}`);
 	}
 
+	throwIfAborted(options.signal);
 	if (addresses.length === 0) throw new Error(`Failed to resolve ${hostname}: no addresses returned`);
 	for (const { address } of addresses) {
 		assertPublicAddress(address, hostname, allowRanges);
@@ -231,8 +275,15 @@ export async function fetchRemoteUrl(
 ): Promise<Response> {
 	const fetchImpl = options.fetch ?? fetch;
 	const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
-	let current = await validateRemoteUrl(url, options);
-	let requestInit = init;
+	const initSignal = init.signal ?? undefined;
+	const validationSignal = options.signal && initSignal
+		? AbortSignal.any([options.signal, initSignal])
+		: options.signal ?? initSignal;
+	const validationOptions = validationSignal ? { ...options, signal: validationSignal } : options;
+	let current = await validateRemoteUrl(url, validationOptions);
+	let requestInit: RequestInit = validationSignal && init.signal !== validationSignal
+		? { ...init, signal: validationSignal }
+		: init;
 
 	for (let redirects = 0; redirects <= maxRedirects; redirects++) {
 		const response = await fetchImpl(current, { ...requestInit, redirect: "manual" });
@@ -243,7 +294,7 @@ export async function fetchRemoteUrl(
 		if (redirects === maxRedirects) throw new Error(`Too many redirects fetching ${current.toString()}`);
 
 		const from = current;
-		current = await validateRemoteUrl(new URL(location, current), options);
+		current = await validateRemoteUrl(new URL(location, current), validationOptions);
 		if (response.status === 303 || ((response.status === 301 || response.status === 302) && requestInit.method?.toUpperCase() === "POST")) {
 			const { body: _body, ...nextInit } = requestInit;
 			requestInit = { ...nextInit, method: "GET" };

@@ -939,6 +939,7 @@ export class BackgroundTaskRegistry {
         this.writeNotice(
           task,
           `\n[background task process error: ${error.message}]\n`,
+          true,
         );
         if (!task.pid) {
           // A spawn failure has no process to supervise. With a PID, `error`
@@ -991,6 +992,7 @@ export class BackgroundTaskRegistry {
           this.writeNotice(
             task,
             `\n[background task timeout: ${task.error}]\n`,
+            true,
           );
           try {
             this.requestKill(task, "SIGTERM");
@@ -1010,6 +1012,7 @@ export class BackgroundTaskRegistry {
       this.writeNotice(
         task,
         `\n[background task spawn exception: ${message}]\n`,
+        true,
       );
       if (task.child?.pid) {
         // Metadata can fail after spawn. Never publish terminal or disarm the
@@ -1238,8 +1241,12 @@ export class BackgroundTaskRegistry {
     }
   }
 
-  /** Cap-enforcing sink for all persisted task output; terminates the task once the byte cap is exceeded. */
-  private writeToStream(task: BgTask, buffer: Buffer): void {
+  /** Cap-enforcing sink for child output; terminates the task once the byte cap is exceeded. */
+  private writeToStream(
+    task: BgTask,
+    buffer: Buffer,
+    diagnostic = false,
+  ): void {
     if (!task.stream || task.stream.destroyed) return;
     if (buffer.length === 0) return;
 
@@ -1256,12 +1263,15 @@ export class BackgroundTaskRegistry {
       task.bytesWritten += remaining;
     }
 
+    // Internal diagnostics must never turn a timeout/process failure into an
+    // output-cap failure, and must never make the persisted file exceed the
+    // configured hard byte bound. Their full text remains in task.error and
+    // terminal metadata when no bytes remain in the transcript.
+    if (diagnostic) return;
+
     if (!task.capExceeded) {
       task.capExceeded = true;
       task.error = `Output exceeded cap of ${formatSize(this.maxOutputBytes)}; terminating task`;
-      const notice = `\n\n[background task error: ${task.error}]\n`;
-      task.stream.write(notice);
-      task.bytesWritten += Buffer.byteLength(notice, "utf8");
       task.killKind = "output_cap";
       try {
         this.requestKill(task, "SIGTERM");
@@ -1271,10 +1281,10 @@ export class BackgroundTaskRegistry {
     }
   }
 
-  /** Persist an internally generated notice (spawn/timeout/cap diagnostics) verbatim. */
-  private writeNotice(task: BgTask, text: string): void {
+  /** Persist transcript notices, optionally bounded without changing task failure cause. */
+  private writeNotice(task: BgTask, text: string, diagnostic = false): void {
     if (!text) return;
-    this.writeToStream(task, Buffer.from(text, "utf8"));
+    this.writeToStream(task, Buffer.from(text, "utf8"), diagnostic);
   }
 
   private appendChildOutput(
@@ -1429,6 +1439,7 @@ export class BackgroundTaskRegistry {
     this.writeNotice(
       task,
       `\n[background task Windows termination: ${message}]\n`,
+      true,
     );
   }
 

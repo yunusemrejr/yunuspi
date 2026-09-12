@@ -12,6 +12,7 @@ export type SkillIndex = {
 export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400;
+const FUZZY_MIN_TERM = 6;
 // Common prose that would otherwise let a generic description match any task.
 const STOP = new Set(("with this that from work task tasks when into your using used user users code files file skill skills workflow checks check verify ensure keep kept only before after other more most less than then them they must does each example examples actual current project projects relevant preserve existing avoid without within between during possible apply applies report reports about which where while there their these those have has been being will would should could would state states visible local needed needs need make makes made take takes gives given each other same different only also just like such very well over under more most much many some any all not use used uses using do don't doesn't did doing done also into onto off out up down here when whenever whether either neither because since until unless though although even still yet already always never often sometimes usually rarely truly simply really quite rather about above below across along among around behind beyond despite except inside outside through toward towards upon versus via per plus minus okay fine good better best great hard easy simple simply own hands hand thing things part parts area areas case cases time times day days week weeks month months year years first second third last next new old start starts started begin begins began end ends ended stop stops stopped run runs ran running step steps phase phases stage stages level levels type types kind kinds form forms mode modes way ways point points item items unit units value values number numbers set sets list lists page pages line lines word words text texts name names path paths file files data info information note notes result results output outputs input inputs cause causes effect effects issue issues problem problems error errors change changes changed update updates updated add adds added remove removes removed fix fixes fixed build builds built make makes create creates created write writes wrote read reads review review inspected inspect look looks look at see sees seen show shows shown tell tells told ask asks asked need needs needed want wants wanted give gives given get gets got take takes took put puts plus also item number part thing side top bottom front back left right open closes close closed full empty high low long short big small fast slow early late hard soft sure certain likely probably maybe perhaps almost nearly roughly approx also etc eg ie vs ok").split(/\s+/).filter(Boolean));
 /** Lowercased discriminating terms from text. Bounded, deduplicated, no stemming. */
@@ -45,6 +46,48 @@ export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
   }
   return { docs, weight, strong };
 }
+
+/**
+ * Return whether two bounded tokens differ by one insertion, deletion,
+ * substitution or adjacent transposition. This is deliberately a single
+ * edit: skill routing should recover common typos without turning a weak
+ * lexical overlap into a recommendation.
+ */
+function oneEditAway(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return a === b;
+  if (a.length === b.length) {
+    const different: number[] = [];
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) different.push(i);
+    if (different.length === 1) return true;
+    return different.length === 2 && different[1] === different[0] + 1
+      && a[different[0]] === b[different[1]]
+      && a[different[1]] === b[different[0]];
+  }
+  const shorter = a.length < b.length ? a : b;
+  const longer = a.length < b.length ? b : a;
+  let i = 0, j = 0, skipped = false;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) { i++; j++; continue; }
+    if (skipped) return false;
+    skipped = true; j++;
+  }
+  return true;
+}
+
+/** Select one deterministic close token from a document, if any. */
+function fuzzyToken(index: SkillIndex, doc: SkillIndex["docs"][number], term: string): string | undefined {
+  if (term.length < FUZZY_MIN_TERM) return undefined;
+  let best: string | undefined;
+  let bestScore = -1;
+  for (const token of doc.tokens) {
+    if (token.length < FUZZY_MIN_TERM || Math.abs(token.length - term.length) > 1 || !oneEditAway(term, token)) continue;
+    const score = (index.strong.has(token) ? 2 : 1) * (index.weight.get(token) ?? 0);
+    if (score > bestScore || score === bestScore && token < (best ?? "\uffff")) {
+      best = token; bestScore = score;
+    }
+  }
+  return best;
+}
 /** Bounded heading outline of a skill body: H2/H3 headings with 1-based lines.
  * Pure, so section targeting is testable without touching the filesystem. */
 export function headingOutline(markdown: string, limit = 200): Array<{ text: string; line: number }> {
@@ -70,7 +113,10 @@ export function bestSkillSection(headings: readonly { text: string; line: number
 }
 /** Rank catalogue skills against bounded context. Requires at least two
  * matched discriminating terms and one strongly rare term; weak or generic
- * overlap yields nothing rather than a speculative recommendation. */
+ * overlap yields nothing rather than a speculative recommendation. A single
+ * edit fuzzy match is allowed only for sufficiently long tokens and receives
+ * a discount, so a typo can recover a skill without broadening ordinary
+ * generic matches. */
 export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranked[] {
   const terms = skillTerms(context, 64);
   if (!terms.length) return [];
@@ -78,12 +124,24 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
   for (const doc of index.docs) {
     let score = 0, rare = 0;
     const matched: string[] = [];
+    const matchedCanonical = new Set<string>();
     for (const term of terms) {
       const w = index.weight.get(term);
-      if (!w || !doc.tokens.has(term)) continue;
-      score += w * (doc.name.has(term) ? 2 : 1);
-      if (index.strong.has(term)) rare++;
-      if (matched.length < 6) matched.push(term);
+      if (w && doc.tokens.has(term)) {
+        if (matchedCanonical.has(term)) continue;
+        matchedCanonical.add(term);
+        score += w * (doc.name.has(term) ? 2 : 1);
+        if (index.strong.has(term)) rare++;
+        if (matched.length < 6) matched.push(term);
+        continue;
+      }
+      const close = fuzzyToken(index, doc, term);
+      const closeWeight = close ? index.weight.get(close) : undefined;
+      if (!close || !closeWeight || matchedCanonical.has(close)) continue;
+      matchedCanonical.add(close);
+      score += closeWeight * 0.55 * (doc.name.has(close) ? 2 : 1);
+      if (index.strong.has(close)) rare++;
+      if (matched.length < 6) matched.push(`${term}~${close}`);
     }
     if (matched.length >= 2 && rare >= 1 && score >= 6) out.push({ skill: doc.skill, score: Math.round(score * 100) / 100, matched });
   }

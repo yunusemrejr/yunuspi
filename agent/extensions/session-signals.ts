@@ -1,6 +1,9 @@
+import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
+import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
+import path from "node:path";
 import { Type } from "typebox";
 import {
   SettingsManager,
@@ -221,39 +224,9 @@ export default function (pi: any) {
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.
-  const recentFailures = (ctx: any) => {
-    const entries =
-      ctx.sessionManager?.getBranch?.() ??
-      ctx.sessionManager?.getEntries?.() ??
-      [];
-    const failures: Array<{ tool: string; callId?: string; error: string }> =
-      [];
-    for (let i = entries.length - 1; i >= 0 && failures.length < 8; i--) {
-      const message = entries[i]?.message;
-      if (
-        entries[i]?.type !== "message" ||
-        message?.role !== "toolResult" ||
-        message?.isError !== true
-      )
-        continue;
-      const text = (Array.isArray(message.content) ? message.content : [])
-        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .slice(0, 180);
-      failures.push({
-        tool: message.toolName ?? "unknown",
-        callId: message.toolCallId,
-        error: text,
-      });
-    }
-    return {
-      count: failures.length,
-      failures,
-      scope:
-        "Most recent tool failures on this branch, newest first. Failures include ordinary non-zero exits and safety-guard refusals; they are evidence to inspect, not proof of a defect.",
-    };
-  };
+  const recentFailures = (ctx: any) => collectSessionDiagnostics(
+    ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [],
+  );
   pi.registerCommand("self", {
     description: "Current-session token and failure diagnostics",
     handler: async (_a: any, ctx: any) =>
@@ -266,7 +239,7 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics, effective context pressure, view:failures for the most recent tool failures on this branch, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit.",
+      "Current session diagnostics, effective context pressure, view:failures for bounded tool/model/child/workflow failure evidence and recovery clues on this branch, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit. Use session_audit for bounded aggregate counts from persisted past sessions; session_self remains the current-session and branch-local diagnostic view.",
     parameters: Type.Object({
       view: Type.Optional(
         StringEnum(["session", "context", "runtime", "failures"]),
@@ -281,6 +254,28 @@ export default function (pi: any) {
             : p.view === "context"
               ? facts(ctx)
               : self(ctx);
+      return {
+        content: [{ type: "text", text: JSON.stringify(details) }],
+        details,
+      };
+    },
+  });
+  pi.registerTool({
+    name: "session_audit",
+    label: "Session audit",
+    description:
+      "Bounded offline aggregate of persisted past-session activity. The default workspace scope includes only session headers whose cwd canonicalizes exactly to the active workspace; choose scope all explicitly for a harness-wide audit. Returns tool, skill, child, workflow and failure counts only, with no prompts, paths or raw errors; no model or network calls.",
+    parameters: Type.Object({
+      scope: Type.Optional(StringEnum(["workspace", "all"])),
+    }),
+    async execute(_id: any, p: any, signal: any, _u: any, ctx: any) {
+      const details = await scanSessionAudit({
+        sessionsDir: path.join(getAgentDir(), "sessions"),
+        workspace: ctx.cwd,
+        scope: p?.scope === "all" ? "all" : "workspace",
+        maxFiles: 100,
+        signal,
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,

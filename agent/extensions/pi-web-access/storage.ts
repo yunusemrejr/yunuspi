@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ExtractedContent } from "./extract.ts";
 import type { SearchResult } from "./perplexity.ts";
+import type { ProviderSearchFailure } from "./gemini-search.ts";
 import { getWebSearchConfigDir } from "./utils.ts";
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -36,6 +37,7 @@ export interface QueryResultData {
 	results: SearchResult[];
 	error: string | null;
 	provider?: string;
+	providerErrors?: ProviderSearchFailure[];
 }
 
 interface FetchCacheRef {

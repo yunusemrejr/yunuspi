@@ -313,12 +313,20 @@ export default function siblingsExtension(pi: ExtensionAPI) {
 			try { for (let entry = directory.readSync(); entry; entry = directory.readSync()) { if(names.length>=1024){scanTruncated=true;break;} names.push(entry.name); } } finally { directory.closeSync(); }
 			const entries = names.sort((a,b)=>Number(b.startsWith(prefix))-Number(a.startsWith(prefix)) || a.localeCompare(b));
 			if (entries.length > 512) scanTruncated = true;
-			for (const f of entries.slice(0,512)) {
+			for (const [entryIndex, f] of entries.entries()) {
 				try {
 					const p = path.join(ACTIVE_DIR, f);
 					const stat = fs.lstatSync(p);
 					if (!stat.isFile() || stat.isSymbolicLink()) continue;
 					const age = now - stat.mtimeMs;
+					// Keep active peer discovery bounded, but still sweep expired
+					// leftovers beyond that window. A busy workdir can accumulate
+					// hundreds of crashed heartbeats; leaving the tail forever made
+					// the advertised all-cwd expiry sweep incomplete.
+					if (entryIndex >= 512) {
+						if (age > PRUNE_MS) fs.rmSync(p, { force: true });
+						continue;
+					}
 					if (!f.endsWith(".json")) {
 						// Non-entry leftovers (e.g. crashed heartbeat .tmp) still
 						// obey the expiry sweep.

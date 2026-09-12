@@ -34,6 +34,49 @@ export type HttpRequestBody = {
   maxBytes?: number;
 };
 
+type HttpFailureKind = "cancelled" | "timeout" | "validation" | "network" | "unknown";
+
+function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return { value, truncated: false };
+  let low = 0;
+  let high = Math.min(value.length, maxBytes) + 1;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (Buffer.byteLength(value.slice(0, middle), "utf8") <= maxBytes) low = middle;
+    else high = middle;
+  }
+  return { value: value.slice(0, low), truncated: true };
+}
+
+function describeHttpFailure(error: unknown, signal?: AbortSignal): {
+  error: string;
+  kind: HttpFailureKind;
+  retryable: boolean;
+  nextStep: string;
+} {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 240) || "HTTP request failed";
+  const lower = message.toLowerCase();
+  const kind: HttpFailureKind = signal?.aborted || lower === "cancelled" || lower.includes("abort")
+    ? "cancelled"
+    : lower.includes("timed out") || lower.includes("timeout")
+      ? "timeout"
+      : /url |url is|unsupported method|only http|credentials|header|body|json|invalid request|allowed:|managed by/i.test(lower)
+        ? "validation"
+        : /fetch failed|econn|enotfound|enetwork|socket|dns|network|connect/i.test(lower)
+          ? "network"
+          : "unknown";
+  const nextStep = kind === "cancelled"
+    ? "The request was cancelled; retry only if the result is still needed."
+    : kind === "timeout"
+      ? "Retry once with a reachable endpoint or increase timeoutMs within the bounded limit."
+      : kind === "validation"
+        ? "Fix the URL, method, headers or bounded body inputs, then retry."
+        : kind === "network"
+          ? "Check endpoint and proxy/network access, then retry once or use fetch_content for readable pages."
+          : "Check the endpoint and request inputs; retry only after correcting the cause.";
+  return { error: message, kind, retryable: kind === "timeout" || kind === "network", nextStep };
+}
+
 function validateHeaders(
   input: Record<string, unknown>,
 ): Record<string, string> {
@@ -106,12 +149,19 @@ export async function performHttp(
   if (input.body !== undefined && input.json !== undefined)
     throw new Error("Supply either body or json, not both");
   let body: string | undefined;
+  if (input.headers !== undefined && (!input.headers || typeof input.headers !== "object" || Array.isArray(input.headers)))
+    throw new Error("headers must be an object of string values");
   const headers = validateHeaders(
     (input.headers ?? {}) as Record<string, unknown>,
   );
   if (input.json !== undefined) {
-    body = JSON.stringify(input.json);
-    if (body.length > BODY_LIMIT)
+    try {
+      body = JSON.stringify(input.json);
+    } catch {
+      throw new Error("json must be JSON-serializable");
+    }
+    if (typeof body !== "string") throw new Error("json must be JSON-serializable");
+    if (Buffer.byteLength(body, "utf8") > BODY_LIMIT)
       throw new Error(`json body exceeds ${BODY_LIMIT} bytes`);
     if (!Object.keys(headers).some((h) => h.toLowerCase() === "content-type"))
       headers["content-type"] = "application/json";
@@ -217,12 +267,14 @@ export async function performHttp(
     encoding = "base64";
   }
 
+  const bounded = truncateUtf8(text, maxBytes);
+
   return {
     status: response.statusCode,
     headers: returned,
     encoding,
-    body: text.length > maxBytes ? text.slice(0, maxBytes) : text,
-    truncated: truncated || text.length > maxBytes,
+    body: bounded.value,
+    truncated: truncated || bounded.truncated,
     bytes: raw.length,
   };
 }
@@ -260,14 +312,11 @@ export default function httpTools(pi: any) {
           details: result,
         };
       } catch (error) {
+        const failure = describeHttpFailure(error, signal);
         return {
           isError: true,
-          content: [
-            {
-              type: "text",
-              text: error instanceof Error ? error.message : "Request failed",
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(failure) }],
+          details: failure,
         };
       }
     },

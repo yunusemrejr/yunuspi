@@ -378,11 +378,10 @@ function shouldUseOpenAICodexDefault(ctx?: Pick<ExtensionContext, "model">): boo
 	return ctx?.model?.provider === "openai-codex";
 }
 
-function shouldPreferOpenAI(options: Pick<PendingCurate, "numResults" | "recencyFilter"> | undefined, preferOpenAICodexDefault: boolean): boolean {
-	if (options?.recencyFilter) return false;
-	if (typeof options?.numResults === "number" && Number.isFinite(options.numResults) && Math.floor(options.numResults) !== 5) {
-		return false;
-	}
+function shouldPreferOpenAI(_options: Pick<PendingCurate, "numResults" | "recencyFilter"> | undefined, preferOpenAICodexDefault: boolean): boolean {
+	// Hosted search accepts the same query constraints as the fallback. The
+	// old numResults/recency gate made the curator silently switch defaults for
+	// perfectly valid requests, so preference follows session routing only.
 	return preferOpenAICodexDefault;
 }
 
@@ -694,15 +693,25 @@ async function openInBrowser(pi: ExtensionAPI, url: string): Promise<void> {
 	if (plat !== "darwin" && plat !== "win32") {
 		await new Promise<void>((resolve, reject) => {
 			const child = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
-			const timer = setTimeout(resolve, 100);
+			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finish = (error?: Error) => {
+				if (settled) return;
+				settled = true;
+				if (timer !== undefined) clearTimeout(timer);
+				if (error) reject(error);
+				else resolve();
+			};
+			// xdg-open may hand off to a desktop launcher and never produce a
+			// useful exit status. Give fast failures time to surface while keeping
+			// curator startup bounded when the launcher hangs.
+			timer = setTimeout(() => finish(), 1500);
 			child.once("error", (err) => {
-				clearTimeout(timer);
-				reject(err);
+				finish(err);
 			});
 			child.once("exit", (code) => {
-				clearTimeout(timer);
-				if (code === 0) resolve();
-				else reject(new Error(`Failed to open browser (exit code ${code ?? "unknown"})`));
+				if (code === 0) finish();
+				else finish(new Error(`Failed to open browser (exit code ${code ?? "unknown"})`));
 			});
 			child.unref();
 		});
@@ -1223,11 +1232,20 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function buildSearchReturn(opts: SearchReturnOptions): AgentToolResult<Record<string, unknown>> {
+		const compactFailure = (value: string): string => value.replace(/\s+/g, " ").trim().slice(0, 240);
 		const sc = opts.results.filter(r => !r.error).length;
 		const tr = opts.results.reduce((sum, r) => sum + r.results.length, 0);
 		if (opts.results.length > 0 && sc === 0) {
-			const error = `All ${opts.results.length} search queries failed:\n${opts.results.map(r => `- ${r.query}: ${r.error}`).join("\n")}\nTry a different provider or fetch a known source URL directly.`;
-			return { content: [{ type: "text", text: error }], details: { error, successfulQueries: 0, queryCount: opts.queryList.length } };
+			const error = `All ${opts.results.length} search queries failed:\n${opts.results.map(r => `- ${compactFailure(r.query)}: ${compactFailure(r.error ?? "unknown search failure")}`).join("\n")}\nTry a different provider or fetch a known source URL directly.`;
+			return {
+				content: [{ type: "text", text: error }],
+				details: {
+					error,
+					successfulQueries: 0,
+					queryCount: opts.queryList.length,
+					failedQueries: opts.results.slice(0, 8).map(r => ({ query: compactFailure(r.query), provider: r.provider ?? null, error: compactFailure(r.error ?? "unknown search failure") })),
+				},
+			};
 		}
 
 		const hasApprovedSummary = typeof opts.approvedSummary === "string" && opts.approvedSummary.trim().length > 0;
@@ -1273,6 +1291,7 @@ export default function (pi: ExtensionAPI) {
 
 		const searchId = storeAndPublishSearch(opts.results);
 		const isBackgroundFetch = fetchId !== null && !hasInlineReady;
+		const providerErrors = opts.results.flatMap(result => result.providerErrors ?? []).slice(0, 8);
 
 		return {
 			content: [{ type: "text", text: output.trim() }],
@@ -1283,9 +1302,10 @@ export default function (pi: ExtensionAPI) {
 				totalResults: tr,
 				includeContent: opts.includeContent,
 				fetchId,
-				fetchUrls: isBackgroundFetch ? opts.urls : undefined,
-				searchId,
-				...(opts.curated ? {
+					fetchUrls: isBackgroundFetch ? opts.urls : undefined,
+					searchId,
+					...(providerErrors.length > 0 ? { providerErrors } : {}),
+					...(opts.curated ? {
 					curated: true,
 					curatedFrom: opts.curatedFrom,
 					curatedQueries: opts.results.map(r => ({
@@ -1294,6 +1314,7 @@ export default function (pi: ExtensionAPI) {
 						answer: r.answer || null,
 						sources: r.results.map(s => ({ title: s.title, url: s.url })),
 						error: r.error,
+						providerErrors: r.providerErrors,
 					})),
 				} : {}),
 				...((opts.workflow && hasApprovedSummary)
@@ -1882,7 +1903,7 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				try {
-					const { answer, results, inlineContent, provider } = await search(query, {
+					const { answer, results, inlineContent, provider, providerErrors } = await search(query, {
 						provider: resolvedProvider,
 						numResults: params.numResults,
 						recencyFilter,
@@ -1892,7 +1913,7 @@ export default function (pi: ExtensionAPI) {
 						extensionContext: ctx,
 					});
 
-					searchResults.push({ query, answer, results, error: null, provider });
+					searchResults.push({ query, answer, results, error: null, provider, ...(providerErrors ? { providerErrors } : {}) });
 					for (const r of results) {
 						if (!allUrls.includes(r.url)) {
 							allUrls.push(r.url);

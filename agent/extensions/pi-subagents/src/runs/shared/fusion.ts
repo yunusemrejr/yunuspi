@@ -168,12 +168,15 @@ export function planFusion(fragments: FusionFragment[], config?: FusionConfig): 
  const strategy=classifyFusionStrategy(fragments);
  const ordered=fragments.slice().sort((a,b)=>Number(b.kind==="conflict")-Number(a.kind==="conflict")||byOwnerThenTime(a,b));
  const sections=new Map<string,string>();
+ const provenanceOwners=new Map<string,Set<string>>();
  const parts:string[]=[];
  const provenance:FusionProvenance[]=[];
  for(const fragment of ordered) {
   let section=sections.get(fragment.body);
   if(!section){section=`s${sections.size+1}`;sections.set(fragment.body,section);parts.push(fragment.body);}
-  if(!provenance.some(item=>item.section===section&&item.owner===fragment.owner))provenance.push({section,owner:fragment.owner});
+  let owners=provenanceOwners.get(section);
+  if(!owners){owners=new Set<string>();provenanceOwners.set(section,owners);}
+  if(!owners.has(fragment.owner)){owners.add(fragment.owner);provenance.push({section,owner:fragment.owner});}
  }
  const body=parts.join("\n\n");
  const truncated=body.length>maxBodyChars;

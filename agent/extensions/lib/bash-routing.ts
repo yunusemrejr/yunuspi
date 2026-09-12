@@ -138,9 +138,40 @@ export function classifyBashCommand(command: string): BashRoute | null {
     };
   }
 
-  const tokens = tokenizeSimple(raw);
-  if (!tokens || tokens.length < 2) return null;
-  const [head, ...args] = tokens;
+	const tokens = tokenizeSimple(raw);
+	if (!tokens) return null;
+	const [head, ...args] = tokens;
+
+	// Read-only system inspection has a structured replacement. Keep these
+	// advisory because flags such as `ps aux` and `ss -ltnp` do not have a
+	// byte-for-byte equivalent in sys_probe; the native rows are still easier
+	// for an agent to consume than reparsing shell columns.
+	if (head === "ps" && (args.length === 0 || (args.length === 1 && /^(?:aux|-?ef|-?eF|-e|-f)$/.test(args[0])))) {
+		return {
+			ruleId: "sys-ps",
+			tool: "sys_probe",
+			severity: "annotate",
+			hint: "Use the sys_probe tool with action `processes` for bounded structured process rows instead of parsing `ps` output.",
+		};
+	}
+	if (head === "ss" && args.length >= 1 && args.length <= 2 && args.some((arg) => /^-[A-Za-z]+$/.test(arg) && arg.includes("l")) && args.every((arg) => /^-[A-Za-z]+$/.test(arg))) {
+		return {
+			ruleId: "sys-ss",
+			tool: "sys_probe",
+			severity: "annotate",
+			hint: "Use the sys_probe tool with action `listeners` for bounded structured sockets instead of parsing `ss` output.",
+		};
+	}
+	if (head === "systemctl" && args.length >= 1 && args[0] === "list-units" && args.slice(1).every((arg) => /^--(?:type|state)=\S+$/.test(arg) || arg === "--no-pager" || arg === "--no-legend")) {
+		return {
+			ruleId: "sys-systemctl",
+			tool: "sys_probe",
+			severity: "annotate",
+			hint: "Use the sys_probe tool with action `services` for bounded structured service rows instead of parsing `systemctl` output.",
+		};
+	}
+
+	if (tokens.length < 2) return null;
 
   if (head === "cat" && args.length === 1 && !args[0].startsWith("-")) {
     return {

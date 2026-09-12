@@ -180,7 +180,6 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	};
 	const group = async (ctx: ExtensionContext, signal: AbortSignal, failure?: string): Promise<string | undefined> => {
 		if (groupUsed) return;
-		groupUsed = true;
 		const groupEpoch = generation, groupSessionFile = ctx.sessionManager.getSessionFile();
 		const models = available(ctx);
 		const report = describeFreeRoutes(models, { requirements: { minContextWindow: FREE_MIN_CONTEXT, toolCalling: true }, now: now() });
@@ -198,6 +197,12 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			if (pick) { routes=[{route:pick.model,proof:"known low metered price and catalog tool support"}]; metered=true; }
 		}
 		if (!routes.length) return; // No useful eligible capacity: parent proceeds quietly.
+		// Consume the one-group budget only after a route is actually admitted.
+		// A transient shared cooldown, stale free catalog, or quota snapshot must
+		// not prevent a later failure from using newly available cheap capacity.
+		// This assignment remains before the first await, so concurrent callers
+		// still coalesce into one bounded group.
+		groupUsed = true;
 		const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
 		if (routes.length > 1) try { metrics?.('swarms'); } catch {}
 

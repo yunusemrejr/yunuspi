@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { activityMonitor } from "./activity.ts";
 import type { SearchOptions, SearchResponse, SearchResult } from "./perplexity.ts";
@@ -95,19 +95,30 @@ interface NormalizedDomainFilters {
 	blockedDomains?: string[];
 }
 
-let cachedConfig: WebSearchConfig | null = null;
+let cachedConfig: { signature: string; value: WebSearchConfig } | null = null;
+
+function configSignature(): string | null {
+	try {
+		const stat = statSync(CONFIG_PATH);
+		return `${stat.ino ?? ""}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+	} catch {
+		return null;
+	}
+}
 
 function loadConfig(): WebSearchConfig {
-	if (cachedConfig) return cachedConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedConfig = {};
-		return cachedConfig;
+	const signature = configSignature();
+	if (!signature) {
+		cachedConfig = null;
+		return {};
 	}
+	if (cachedConfig?.signature === signature) return cachedConfig.value;
 
 	const raw = readFileSync(CONFIG_PATH, "utf-8");
 	try {
-		cachedConfig = JSON.parse(raw) as WebSearchConfig;
-		return cachedConfig;
+		const value = JSON.parse(raw) as WebSearchConfig;
+		cachedConfig = { signature, value };
+		return value;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Failed to parse ${CONFIG_PATH}: ${message}`);

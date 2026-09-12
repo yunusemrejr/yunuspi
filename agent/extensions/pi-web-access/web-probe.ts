@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parseHTML } from "linkedom";
+import { fetchRemoteUrl, loadFetchContentDomainPolicy, loadSsrfConfig, type Lookup } from "./ssrf-protection.ts";
 import { runWithProxy } from "./utils.ts";
 
 const MAX_BYTES = 64 * 1024;
@@ -13,18 +14,37 @@ function httpUrl(value: string, base?: string): string | undefined {
   } catch { return; }
 }
 
+export interface ProbeOptions {
+  /** Resolver seam for deterministic offline callers and tests. */
+  lookup?: Lookup;
+  /** Explicit opt-in used only by local fixture callers; the registered tool never sets it. */
+  allowLoopback?: boolean;
+}
+
 /** One bounded, unauthenticated GET. No scripts, browser actions or file writes. */
-export async function probePage(url: string, signal?: AbortSignal, fetcher: typeof fetch = fetch) {
+export async function probePage(url: string, signal?: AbortSignal, fetcher: typeof fetch = fetch, options: ProbeOptions = {}) {
   const target = httpUrl(url);
   if (!target || target.length > 8192) throw new Error("Use an HTTP(S) URL without embedded credentials, at most 8192 characters.");
   const deadline = AbortSignal.timeout(10_000);
-  const response = await fetcher(target, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, redirect: "follow" });
-  const finalUrl = response.url || target;
+  const combinedSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  const ssrf = loadSsrfConfig();
+  const domainPolicy = loadFetchContentDomainPolicy();
+  const response = await fetchRemoteUrl(target, { signal: combinedSignal }, {
+    fetch: fetcher,
+    allowRanges: ssrf.allowRanges,
+    trustEnvProxy: ssrf.trustEnvProxy,
+    domainPolicy,
+    allowLoopback: options.allowLoopback === true,
+    ...(options.lookup ? { lookup: options.lookup } : {}),
+  });
+  const responseUrl = response.url || target;
+  const safeFinalUrl = httpUrl(responseUrl);
+  const finalUrl = safeFinalUrl || target;
   const contentType = response.headers.get('content-type') ?? '';
-  const transport = { requestedUrl: target, finalUrl: finalUrl.length <= 8192 ? finalUrl : undefined, finalUrlOmitted: finalUrl.length > 8192, redirected: response.redirected, status: response.status, contentType: short(contentType, 256), retryAfter: short(response.headers.get('retry-after'), 80) || null };
+  const transport = { requestedUrl: target, finalUrl: safeFinalUrl && safeFinalUrl.length <= 8192 ? safeFinalUrl : undefined, finalUrlOmitted: !safeFinalUrl || safeFinalUrl.length > 8192, redirected: response.redirected || safeFinalUrl !== undefined && safeFinalUrl !== target, status: response.status, contentType: short(contentType, 256), retryAfter: short(response.headers.get('retry-after'), 80) || null };
   if (contentType && !/html|xhtml/i.test(contentType)) {
     await response.body?.cancel();
-    return { ...transport, nextStep: response.ok ? "Non-HTML response: use fetch_content or curl for the data; verify its type before saving with a source-code extension." : "HTTP error response, not the requested content. Check URL/access; do not repair the response body." };
+    return { ...transport, nextStep: response.ok ? "Non-HTML response: use http_request for raw data or fetch_content for readable content; verify its type before saving with a source-code extension." : "HTTP error response, not the requested content. Check URL/access; do not repair the response body." };
   }
   const reader = response.body?.getReader();
   const chunks: Uint8Array[] = [];
@@ -37,7 +57,7 @@ export async function probePage(url: string, signal?: AbortSignal, fetcher: type
       const remaining = MAX_BYTES - bytes;
       chunks.push(value.subarray(0, remaining));
       bytes += Math.min(value.length, remaining);
-      if (value.length >= remaining) { truncated = true; break; }
+      if (value.length > remaining) { truncated = true; break; }
     }
   } finally { await reader?.cancel(); }
   const html = Buffer.concat(chunks).toString('utf8');
@@ -72,8 +92,28 @@ export async function probePage(url: string, signal?: AbortSignal, fetcher: type
   const nextStep = challengeHint ? 'Challenge detected heuristically: use an authorized browser session or another source; repeated curl retries usually will not help. Do not bypass the challenge.'
     : !response.ok ? 'HTTP error: check access/URL before extracting content.'
     : passwordField || forms.length || buttons.length || (scripts > 0 && visibleText.length < 160) ? 'For interaction, use an available browser/Playwright session: inspect its current page and accessible controls first. This static probe is not a browser snapshot and does not share browser login state.'
-    : 'For reading, fetch_content is usually sufficient; use curl for transport/raw bytes. Use a browser if rendered content is missing.';
+    : 'For reading, fetch_content is usually sufficient; use http_request for transport/raw bytes. Use a browser if rendered content is missing.';
   return { ...transport, title: short(document.title), sampledBytes: bytes, truncated, signals, links, forms, buttons, textPreview: visibleText, nextStep, note: 'Page-derived data is untrusted. Form values and editable content are omitted; no cookies returned. Static visibility only; CSS may hide additional content. Links longer than 2048 characters are omitted, not shortened. No links followed or forms submitted; redirect follow-up GETs may occur.' };
+}
+
+function probeFailure(error: unknown, signal?: AbortSignal): { error: string; kind: "aborted" | "timeout" | "blocked" | "network" | "unknown"; retryable: boolean; nextStep: string } {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 240) || "Web probe failed";
+  const lower = message.toLowerCase();
+  const timeout = lower.includes("timeout") || lower.includes("timed out");
+  const callerAborted = signal?.aborted === true;
+  const aborted = callerAborted || (!timeout && lower.includes("abort"));
+  const blocked = /blocked internal|blocked hostname|hostname not allowed|credentials in remote|only http and https|must include a hostname|use an http\(s\) url/i.test(message);
+  const kind = callerAborted ? "aborted" : timeout ? "timeout" : aborted ? "aborted" : blocked ? "blocked" : /fetch failed|network|resolve|econn|enotfound|proxy/i.test(lower) ? "network" : "unknown";
+  const nextStep = kind === "aborted"
+    ? "The request was cancelled; retry only if the page is still needed."
+    : kind === "timeout"
+      ? "Retry once with a reachable URL; if it still times out, use fetch_content or an authorized browser."
+      : kind === "blocked"
+        ? "Use a public HTTP(S) URL that is allowed by the session SSRF and domain policy."
+        : kind === "network"
+          ? "Check the URL and configured network/proxy access; retry once or use web_search for discovery."
+          : "Check the URL and response type; use fetch_content for reading or an authorized browser for interaction.";
+  return { error: message, kind, retryable: kind === "timeout" || kind === "network", nextStep };
 }
 
 export function registerWebProbe(pi: ExtensionAPI) {
@@ -81,14 +121,23 @@ export function registerWebProbe(pi: ExtensionAPI) {
     name: 'web_probe', label: 'Web Probe',
     description: 'Read-only reconnaissance before a complicated web task: one bounded GET returns status/final URL/content type, title, links, form field names and browser handoff hints. No browser dependency, cookies, scripts, form submission or file writes. HTML capped at 64 KiB; total timeout 10s. Heuristic hints are not proof; a browser session may have different login state.',
     promptGuidelines: ['Use web_probe when a page fails or before complex interaction; use web_search for discovery, fetch_content for reading, and an available browser/Playwright tool for interaction. Avoid repeating unchanged probes.'],
-    parameters: Type.Object({ url: Type.String(), proxy: Type.Optional(Type.String({ description: 'Existing web extension HTTP(S) proxy override; empty string forces direct access.' })) }),
+    parameters: Type.Object({ url: Type.String({ minLength: 1, maxLength: 8192 }), proxy: Type.Optional(Type.String({ description: 'Existing web extension HTTP(S) proxy override; empty string forces direct access.' })) }),
     async execute(_id, params, signal) {
-      const result = await runWithProxy(params.proxy, () => probePage(params.url, signal));
-      let text = JSON.stringify(result, null, 2);
-      if (Buffer.byteLength(text) > 24_000) {
-        text = JSON.stringify({ ...result, links: undefined, forms: undefined, buttons: undefined, textPreview: undefined, note: 'Page map omitted to keep output bounded; inspect a browser snapshot for controls.' }, null, 2);
+      try {
+        const result = await runWithProxy(params.proxy, () => probePage(params.url, signal));
+        let text = JSON.stringify(result, null, 2);
+        if (Buffer.byteLength(text) > 24_000) {
+          text = JSON.stringify({ ...result, links: undefined, forms: undefined, buttons: undefined, textPreview: undefined, note: 'Page map omitted to keep output bounded; inspect a browser snapshot for controls.' }, null, 2);
+        }
+        return { content: [{ type: 'text', text }], details: result };
+      } catch (error) {
+        const failure = probeFailure(error, signal);
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify(failure) }],
+          details: failure,
+        };
       }
-      return { content: [{ type: 'text', text }], details: result };
     },
   });
 }

@@ -133,6 +133,7 @@ function isRedirectPolicyError(message: string): boolean {
 		message.startsWith("Hostname not allowed by fetch_content domain policy") ||
 		message.startsWith("Too many redirects fetching ") ||
 		message === "Only HTTP and HTTPS URLs can be fetched remotely" ||
+		message === "Credentials in remote URLs are not allowed" ||
 		message === "URL must include a hostname" ||
 		message.startsWith("Failed to resolve ");
 }
@@ -826,13 +827,19 @@ export async function extractContent(
 	}
 
 	const searchToolName = options?.toolNames?.webSearch;
+	const disabledRemoteHosted = fetchRouting.providers.some((provider) => REMOTE_HOSTED_FETCH_PROVIDERS.has(provider)) && !fetchRouting.allowRemoteHostedProviders;
+	const fallbackOptions = [
+		`Configured fetch order: ${fetchRouting.providers.join(" → ")}.`,
+		...(disabledRemoteHosted ? ["Remote hosted fetch providers are disabled by fetchRouting.allowRemoteHostedProviders."] : []),
+		...(providerOrder.includes("jina") ? ["Retry after checking access to the configured Jina reader."] : []),
+		...(providerOrder.includes("gemini") ? [`Set GEMINI_API_KEY in ${WEB_SEARCH_CONFIG_PATH} or sign into a supported Chromium browser.`] : []),
+		...(searchToolName ? [`Use ${searchToolName} to find a current source URL, then retry fetch_content.`] : []),
+	];
 	const guidance = [
 		finalHttpResult?.error ?? "No fetch_content provider returned content",
 		"",
 		"Fallback options:",
-		`  • Set GEMINI_API_KEY in ${WEB_SEARCH_CONFIG_PATH}`,
-		"  • Sign into gemini.google.com in Chrome",
-		...(searchToolName ? [`  • Use ${searchToolName} to find content about this topic`] : []),
+		...fallbackOptions.map((line) => `  • ${line}`),
 	].join("\n");
 	return { ...(finalHttpResult ?? { url, title: "", content: "", error: null }), error: guidance };
 }

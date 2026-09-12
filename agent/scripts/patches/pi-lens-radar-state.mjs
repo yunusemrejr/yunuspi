@@ -274,6 +274,217 @@ for (const [name, edits] of Object.entries(qualityChanges)) {
   (changes[name] ??= []).push(...edits);
 }
 
+// Cache-hardening keeps the local semantic index a bounded, disposable cache:
+// malformed sibling state is discarded and the source is reparsed on the next
+// scan instead of poisoning the LSH table or suppressing refresh forever.
+const indexCacheHardening = [
+  [
+    String.raw`const INDEX_FILE = "semantic-radar-index.json";`,
+    String.raw`const INDEX_FILE = "semantic-radar-index.json";
+const MAX_INDEX_BYTES = 32 * 1024 * 1024;
+const MAX_INDEX_FILES = 20_000;
+const MAX_FUNCS_PER_FILE = 2_048;
+const MAX_TOTAL_FUNCS = 200_000;`,
+  ],
+  [
+    String.raw`
+function setOverlap(a, b) {`,
+    String.raw`
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const boundedString = (value, max, nonEmpty = true) => typeof value === "string"
+  && value.length <= max && (!nonEmpty || value.length > 0) && !value.includes("\0");
+const validHash = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+const validSignature = value => Array.isArray(value) && value.length === 64
+  && value.every(v => Number.isInteger(v) && v >= 0 && v <= 0xffffffff)
+  && value.some(v => v !== 0xffffffff);
+const boundedStrings = (value, maxItems, maxLength) => Array.isArray(value)
+  && value.length <= maxItems && value.every(v => boundedString(v, maxLength));
+
+// The state file is a cache, so invalid records can be discarded safely. Do
+// this before rebuilding LSH buckets: malformed JSON fields must never turn a
+// sibling session's cache into an exception or an unbounded memory walk.
+function sanitizeRankProfile(value) {
+  if (!isObject(value) || value.version !== 1) return undefined;
+  const ints = (v, length, max) => Array.isArray(v) && v.length === length
+    && v.every(x => Number.isInteger(x) && x >= 0 && x <= max);
+  if (!ints(value.tokenSig, 32, 0xffffffff) || !value.tokenSig.some(x => x !== 0xffffffff)
+      || !Array.isArray(value.literalHashes) || value.literalHashes.length > 64
+      || !value.literalHashes.every(x => Number.isInteger(x) && x >= 0 && x <= 0xffffffff)
+      || !Array.isArray(value.operatorHashes) || value.operatorHashes.length > 64
+      || !value.operatorHashes.every(x => Number.isInteger(x) && x >= 0 && x <= 0xffffffff)
+      || ![value.canonicalHash, value.literalSequenceHash, value.operatorSequenceHash].every(validHash)
+      || !Number.isSafeInteger(value.tokenCount) || value.tokenCount < 8 || value.tokenCount > 2_048
+      || !Number.isSafeInteger(value.identifierCount) || value.identifierCount < 0 || value.identifierCount > value.tokenCount
+      || !Number.isSafeInteger(value.nested) || value.nested < 0 || value.nested > 8) return undefined;
+  return {
+    version: 1,
+    tokenSig: [...value.tokenSig], canonicalHash: value.canonicalHash,
+    literalHashes: [...value.literalHashes], operatorHashes: [...value.operatorHashes],
+    literalSequenceHash: value.literalSequenceHash, operatorSequenceHash: value.operatorSequenceHash,
+    tokenCount: value.tokenCount, identifierCount: value.identifierCount, nested: value.nested,
+  };
+}
+
+function sanitizeFingerprint(value) {
+  if (!isObject(value) || !boundedString(value.id, 256) || !boundedString(value.name, 256)
+      || !validSignature(value.sig) || !boundedStrings(value.calls, 256, 512)
+      || !boundedStrings(value.props, 256, 512) || !boundedString(value.retShape, 32)
+      || !Number.isSafeInteger(value.skelLen) || value.skelLen < 0 || value.skelLen > 10_000_000
+      || !Number.isSafeInteger(value.arity) || value.arity < 0 || value.arity > 10_000
+      || (value.startLine !== undefined && (!Number.isSafeInteger(value.startLine) || value.startLine < 1))
+      || (value.endLine !== undefined && (!Number.isSafeInteger(value.endLine) || value.endLine < 1))
+      || (value.startLine !== undefined && value.endLine !== undefined && value.endLine < value.startLine)
+      || (value.lexicalHash !== undefined && !validHash(value.lexicalHash))) return null;
+  const profile = sanitizeRankProfile(value.rankProfile);
+  if (value.rankProfile !== undefined && value.rankProfile !== null && !profile) return null;
+  const out = {
+    id: value.id, name: value.name, startLine: value.startLine, endLine: value.endLine,
+    skelLen: value.skelLen, calls: [...value.calls], props: [...value.props],
+    retShape: value.retShape, arity: value.arity, sig: [...value.sig],
+  };
+  if (value.lexicalHash !== undefined) out.lexicalHash = value.lexicalHash;
+  if (profile) out.rankProfile = profile;
+  return out;
+}
+
+function safeRelativePath(rel) {
+  if (!boundedString(rel, 512) || path.isAbsolute(rel) || /^[a-z]:[\\/]/i.test(rel)) return false;
+  const normalized = rel.replaceAll("\\", "/");
+  if (normalized !== rel || normalized.split("/").some(part => !part || part === "." || part === "..")) return false;
+  return !["__proto__", "constructor", "prototype"].includes(normalized);
+}
+
+function sanitizeFiles(value) {
+  if (!isObject(value)) return null;
+  const names = Object.keys(value);
+  if (names.length > MAX_INDEX_FILES) return null;
+  const out = {};
+  let totalFuncs = 0;
+  for (const rel of names) {
+    if (!safeRelativePath(rel)) continue;
+    const record = value[rel];
+    if (!isObject(record) || !boundedString(record.contentHash, 128)
+        || typeof record.mtimeMs !== "number" || !Number.isFinite(record.mtimeMs) || record.mtimeMs < 0
+        || (record.statKey !== undefined && !boundedString(record.statKey, 256))) continue;
+    if (!Array.isArray(record.funcs) || record.funcs.length > MAX_FUNCS_PER_FILE) continue;
+    const funcs = record.funcs.map(sanitizeFingerprint);
+    // Rebuild the whole file when any function is damaged. Keeping a partial
+    // record with the same statKey would make the incremental scanner believe
+    // the source was already analysed and preserve the corruption forever.
+    if (funcs.some(fp => !fp)) continue;
+    if (totalFuncs + funcs.length > MAX_TOTAL_FUNCS) break;
+    totalFuncs += funcs.length;
+    out[rel] = {
+      contentHash: record.contentHash, mtimeMs: record.mtimeMs,
+      funcs, ...(record.statKey === undefined ? {} : {statKey: record.statKey}),
+    };
+  }
+  return out;
+}
+
+function setOverlap(a, b) {`,
+  ],
+  [
+    String.raw`        const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+        if (raw.version === VERSION) {
+          idx.files = raw.files ?? {};
+          idx.loadedAt = Date.parse(raw.updatedAt ?? "") || 0;
+          idx.#dirty = true; // rebuilt lazily on first query
+        }`,
+    String.raw`        const stat = fs.statSync(p);
+        if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) return idx;
+        const serialized = fs.readFileSync(p, "utf8");
+        if (Buffer.byteLength(serialized, "utf8") > MAX_INDEX_BYTES) return idx;
+        const raw = JSON.parse(serialized);
+        const files = raw?.version === VERSION ? sanitizeFiles(raw.files) : null;
+        if (files) {
+          idx.files = files;
+          idx.loadedAt = Date.parse(raw.updatedAt ?? "") || 0;
+          idx.#dirty = true; // rebuilt lazily on first query
+        }`,
+  ],
+  [
+    String.raw`  query(fp, { max = 20, excludeFile = null, minTier = "weak" } = {}) {
+    this.#ensureFresh();
+    const order = { lexical: 3, high: 2, probable: 1, weak: 0 };`,
+    String.raw`  query(fp, { max = 20, excludeFile = null, minTier = "weak" } = {}) {
+    const order = { lexical: 3, high: 2, probable: 1, weak: 0 };
+    if (!validSignature(fp?.sig) || !Number.isSafeInteger(max) || max <= 0 || !Object.hasOwn(order, minTier)) return [];
+    max = Math.min(max, 256);
+    this.#ensureFresh();`,
+  ],
+  [
+    String.raw`        const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+        if (raw.version === VERSION && raw.files) {
+          for (const [rel, disk] of Object.entries(raw.files)) {`,
+    String.raw`        const diskStat = fs.statSync(p);
+        if (diskStat.isFile() && diskStat.size <= MAX_INDEX_BYTES) {
+          const serialized = fs.readFileSync(p, "utf8");
+          if (Buffer.byteLength(serialized, "utf8") <= MAX_INDEX_BYTES) {
+            const raw = JSON.parse(serialized);
+            const diskFiles = raw.version === VERSION ? sanitizeFiles(raw.files) : null;
+            if (diskFiles) {
+              for (const [rel, disk] of Object.entries(diskFiles)) {`,
+  ],
+  [
+    String.raw`              }
+            }
+          }
+        }
+      }
+    } catch { /* keep ours on unreadable disk state */ }`,
+    String.raw`              }
+            }
+          }
+        }
+      }
+    } catch { /* keep ours on unreadable disk state */ }`,
+  ],
+];
+const indexPrefixHardening = indexCacheHardening.splice(0, 2);
+indexCacheHardening.splice(1, 1);
+changes["index.mjs"].push(...indexCacheHardening);
+
+const returnShapeRepair = [
+  [
+    String.raw`function findReturnShape(fnNode) {
+  let shape = "void";
+  walk(fnNode, (n) => {
+    if (n.type !== "return_statement" || shape !== "void") return;
+    const v = n.namedChildren.find((c) => c.type !== "comment");
+    if (!v) return;
+    if (v.type === "object" || v.type === "array" || v.type === "new_expression") shape = v.type;
+    else if (v.type === "await_expression") shape = "await";
+    else shape = "value";
+  });
+  return shape;
+}`,
+    String.raw`function findReturnShape(fnNode) {
+  let shape = "void";
+  // Nested callbacks have their own return contract. Walking into one here
+  // used to let an inner object/array return classify the enclosing function,
+  // which polluted the shape signal used by duplicate detection.
+  const stack = [fnNode];
+  while (stack.length && shape === "void") {
+    const n = stack.pop();
+    if (n !== fnNode && FN_KINDS.has(n.type)) continue;
+    if (n.type === "return_statement") {
+      const v = n.namedChildren.find((c) => c.type !== "comment");
+      if (v) {
+        if (v.type === "object" || v.type === "array" || v.type === "new_expression") shape = v.type;
+        else if (v.type === "await_expression") shape = "await";
+        else shape = "value";
+      }
+      continue;
+    }
+    for (let i = n.namedChildren.length - 1; i >= 0; i--) stack.push(n.namedChildren[i]);
+  }
+  return shape;
+}`,
+  ],
+];
+changes["extract.mjs"].push(...returnShapeRepair);
+
 // Extend the existing owner: the previous applied block remains a migration
 // anchor, while pristine upstream still reaches the same final postcondition.
 // Export these deltas so the regression can reconstruct an installed v4 fork.
@@ -298,16 +509,34 @@ upgradeAppliedEdit("extract.mjs", 'import { fnv1a, fnv1a16, minhashSignature }',
 upgradeAppliedEdit("extract.mjs", 'lexicalHash: createHash("sha256")', source => source
   .replace('      lexicalHash: createHash("sha256").update(n.text).digest("hex"),',
     '      lexicalHash: createHash("sha256").update(n.text).digest("hex"),\n      rankProfile: extractRankProfile(n),'));
-upgradeAppliedEdit("index.mjs", "const VERSION = 4;", source => source
-  .replace('import { lshBuckets, lshCandidates, jaccard } from "./hash.mjs";',
-    'import { lshBuckets, lshCandidates, jaccard } from "./hash.mjs";\nimport { rankCandidates } from "./neural-ranker.mjs";')
-  .replace("const VERSION = 4; // Exact function-source hashes; feature-set equality is only similarity.",
-    "const VERSION = 5; // Versioned rank profiles; old fingerprints rebuild before learned ranking."));
+upgradeAppliedEdit("index.mjs", "const VERSION = 4;", source => {
+  const next = source
+    .replace('import { lshBuckets, lshCandidates, jaccard } from "./hash.mjs";',
+      'import { lshBuckets, lshCandidates, jaccard } from "./hash.mjs";\nimport { rankCandidates } from "./neural-ranker.mjs";')
+    .replace("const VERSION = 4; // Exact function-source hashes; feature-set equality is only similarity.",
+      "const VERSION = 5; // Versioned rank profiles; old fingerprints rebuild before learned ranking.");
+  // The bounded state helpers are inserted between INDEX_FILE and the first
+  // scoring helper. Include them in the version migration edit so that the
+  // historical source remains a complete, idempotent patch target.
+  const prefix = indexPrefixHardening[0][1].slice(indexPrefixHardening[0][1].indexOf("const INDEX_FILE"));
+  const helper = indexPrefixHardening[1][1].slice(1);
+  return next.replace('const INDEX_FILE = "semantic-radar-index.json";\n\nfunction setOverlap(a, b) {',
+    prefix + "\n\n" + helper);
+});
 upgradeAppliedEdit("runtime.mjs", 'import { findDivergences, buildIndex, sourcePath }', source => source +
   '\nimport { compareCandidates } from "./neural-ranker.mjs";');
 addNeuralEdit("index.mjs",
   "    out.sort((a, b) => (order[b.tier] - order[a.tier]) || (b.jaccard - a.jaccard));\n    return out.slice(0, max);",
   "    return rankCandidates(fp, out).slice(0, max);");
+const queryNeuralEdit = changes["index.mjs"].find(([before]) =>
+  String(before).includes("const hits = lshCandidates(this.table, lshBuckets(fp.sig), max * 4);"));
+if (queryNeuralEdit) queryNeuralEdit[1] = String.raw`  query(fp, { max = 20, excludeFile = null, minTier = "weak" } = {}) {
+    const order = { lexical: 3, high: 2, probable: 1, weak: 0 };
+    if (!validSignature(fp?.sig) || !Number.isSafeInteger(max) || max <= 0 || !Object.hasOwn(order, minTier)) return [];
+    max = Math.min(max, 256);
+    this.#ensureFresh();
+    const hits = lshCandidates(this.table, lshBuckets(fp.sig), max * 4, undefined,
+      id => this.entries.get(id)?.file !== excludeFile);`;
 addNeuralEdit("runtime.mjs",
   'function rank(t) {\n  return t === "lexical" ? 3 : t === "high" ? 2 : t === "probable" ? 1 : 0;\n}',
   "// Share query ordering so turn-end selection preserves the ranked candidates.");

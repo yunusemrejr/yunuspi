@@ -150,14 +150,24 @@ function featureVector(fnNode) {
 
 function findReturnShape(fnNode) {
   let shape = "void";
-  walk(fnNode, (n) => {
-    if (n.type !== "return_statement" || shape !== "void") return;
-    const v = n.namedChildren.find((c) => c.type !== "comment");
-    if (!v) return;
-    if (v.type === "object" || v.type === "array" || v.type === "new_expression") shape = v.type;
-    else if (v.type === "await_expression") shape = "await";
-    else shape = "value";
-  });
+  // Nested callbacks have their own return contract. Walking into one here
+  // used to let an inner object/array return classify the enclosing function,
+  // which polluted the shape signal used by duplicate detection.
+  const stack = [fnNode];
+  while (stack.length && shape === "void") {
+    const n = stack.pop();
+    if (n !== fnNode && FN_KINDS.has(n.type)) continue;
+    if (n.type === "return_statement") {
+      const v = n.namedChildren.find((c) => c.type !== "comment");
+      if (v) {
+        if (v.type === "object" || v.type === "array" || v.type === "new_expression") shape = v.type;
+        else if (v.type === "await_expression") shape = "await";
+        else shape = "value";
+      }
+      continue;
+    }
+    for (let i = n.namedChildren.length - 1; i >= 0; i--) stack.push(n.namedChildren[i]);
+  }
   return shape;
 }
 

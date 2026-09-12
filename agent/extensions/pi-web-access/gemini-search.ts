@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CredentialResolutionError } from "./credential-source.ts";
 import {
@@ -54,7 +54,7 @@ export class SearchProviderError extends Error {
 		status: number | undefined,
 		cause: unknown,
 	) {
-		super(`${provider} search failed (${kind}): ${message}`);
+		super(`${provider} search failed (${kind}): ${compactError(message)}`);
 		this.name = "SearchProviderError";
 		this.provider = provider;
 		this.kind = kind;
@@ -70,6 +70,10 @@ export interface ProviderSearchResponse extends SearchResponse {
 export interface ProviderSearchFailure {
 	provider: ResolvedSearchProvider;
 	error: string;
+	kind?: SearchProviderErrorKind;
+	status?: number;
+	retryable?: boolean;
+	nextStep?: string;
 }
 
 export interface AttributedSearchResponse extends SearchResponse {
@@ -90,14 +94,28 @@ type SearchConfig = {
 	searchRouting?: SearchRoutingConfig;
 };
 
-let cachedSearchConfig: SearchConfig | null = null;
+let cachedSearchConfig: { signature: string; value: SearchConfig } | null = null;
+
+function compactError(value: string): string {
+	return value.replace(/\s+/g, " ").trim().slice(0, 240) || "search failed";
+}
+
+function searchConfigSignature(): string | null {
+	try {
+		const stat = statSync(CONFIG_PATH);
+		return `${stat.ino ?? ""}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+	} catch {
+		return null;
+	}
+}
 
 function getSearchConfig(): SearchConfig {
-	if (cachedSearchConfig) return cachedSearchConfig;
-	if (!existsSync(CONFIG_PATH)) {
-		cachedSearchConfig = { searchProvider: "auto", searchProviderConfigured: false };
-		return cachedSearchConfig;
+	const signature = searchConfigSignature();
+	if (!signature) {
+		cachedSearchConfig = null;
+		return { searchProvider: "auto", searchProviderConfigured: false };
 	}
+	if (cachedSearchConfig?.signature === signature) return cachedSearchConfig.value;
 
 	const rawText = readFileSync(CONFIG_PATH, "utf-8");
 	let raw: Record<string, unknown>;
@@ -113,12 +131,13 @@ function getSearchConfig(): SearchConfig {
 	}
 
 	const searchProviderConfigured = Object.hasOwn(raw, "searchProvider") || Object.hasOwn(raw, "provider");
-	cachedSearchConfig = {
+	const value: SearchConfig = {
 		searchProvider: normalizeSearchProviderSelection(raw.searchProvider ?? raw.provider, `provider in ${CONFIG_PATH}`),
 		searchProviderConfigured,
 		...(Object.hasOwn(raw, "searchRouting") ? { searchRouting: normalizeSearchRouting(raw.searchRouting) } : {}),
 	};
-	return cachedSearchConfig;
+	cachedSearchConfig = { signature, value };
+	return value;
 }
 
 function normalizeSearchRouting(value: unknown): SearchRoutingConfig {
@@ -193,19 +212,23 @@ function isAbortError(err: unknown): boolean {
 	return errorMessage(err).toLowerCase().includes("abort");
 }
 
+function isTimeoutError(err: unknown): boolean {
+	return /timeout|timed out|aborted due to timeout/i.test(errorMessage(err));
+}
+
 function isOpenAICodexSelected(ctx?: ExtensionContext): boolean {
 	return ctx?.model?.provider === "openai-codex";
 }
 
-async function tryOpenAIInAuto(query: string, options: FullSearchOptions, fallbackErrors: string[]): Promise<AttributedSearchResponse | null> {
+async function tryOpenAIInAuto(query: string, options: FullSearchOptions, fallbackErrors: ProviderSearchFailure[]): Promise<AttributedSearchResponse | null> {
 	try {
 		if (await isOpenAISearchAvailable(options.extensionContext)) {
 			const result = await searchWithOpenAI(query, options, options.extensionContext);
 			return { ...result, provider: "openai" };
 		}
 	} catch (err) {
-		if (isAbortError(err)) throw err;
-		fallbackErrors.push(`OpenAI: ${errorMessage(err)}`);
+		if (isAbortError(err) && !isTimeoutError(err)) throw err;
+		fallbackErrors.push(toProviderFailure(classifyProviderError("openai", err)));
 	}
 	return null;
 }
@@ -225,6 +248,8 @@ function classifyProviderError(provider: ResolvedSearchProvider, err: unknown): 
 	const mentionsUnsupportedWebSearch = /(?:web[_ -]?search|web[_ -]?search_preview|(?:the )?tool)\b.*\b(?:unsupported|not supported|does not support|doesn't support|unknown|unrecognized|unavailable|not found)|\b(?:unsupported|not supported|does not support|doesn't support|unknown|unrecognized|unavailable|not found)\b.*\b(?:web[_ -]?search|web[_ -]?search_preview|(?:the )?tool)/i.test(lower);
 	if (err instanceof CredentialResolutionError || /(?:api )?key (?:not found|missing)|credential resolution/.test(lower)) {
 		kind = "credential";
+	} else if (isTimeoutError(err)) {
+		kind = "transient";
 	} else if (isAbortError(err)) {
 		kind = "aborted";
 	} else if (status === 401 || status === 403) {
@@ -253,6 +278,39 @@ function classifyProviderError(provider: ResolvedSearchProvider, err: unknown): 
 		kind = "config";
 	}
 	return new SearchProviderError(provider, kind, message, status, err);
+}
+
+function providerErrorNextStep(kind: SearchProviderErrorKind): string {
+	if (kind === "credential" || kind === "auth") return "Configure the provider credential or choose a provider available in this session.";
+	if (kind === "quota") return "Wait for the provider quota window or choose DuckDuckGo for a zero-key retry.";
+	if (kind === "network" || kind === "transient") return "Check network/proxy access and retry once, then use another provider.";
+	if (kind === "unsupported" || kind === "invalid-response") return "Choose another provider or narrow the request; the provider response was not usable.";
+	if (kind === "aborted") return "The search was cancelled; retry only if the result is still needed.";
+	return "Check the provider configuration and request, then retry if the cause is corrected.";
+}
+
+function toProviderFailure(error: SearchProviderError): ProviderSearchFailure {
+	const retryable = error.kind === "quota" || error.kind === "network" || error.kind === "transient" || error.kind === "invalid-response" || error.kind === "unsupported";
+	const causeMessage = error.causeError instanceof Error ? error.causeError.message : error.message;
+	return {
+		provider: error.provider,
+		error: compactError(causeMessage),
+		kind: error.kind,
+		...(error.status !== undefined ? { status: error.status } : {}),
+		retryable,
+		nextStep: providerErrorNextStep(error.kind),
+	};
+}
+
+export class SearchProviderAggregateError extends Error {
+	readonly failures: ProviderSearchFailure[];
+
+	constructor(label: string, failures: ProviderSearchFailure[]) {
+		const bounded = failures.slice(0, 8);
+		super(`${label} search failed:\n${bounded.map(({ provider, error }) => `  - ${providerLabel(provider)}: ${compactError(error)}`).join("\n")}`);
+		this.name = "SearchProviderAggregateError";
+		this.failures = bounded;
+	}
 }
 
 async function searchWithResolvedProvider(
@@ -319,18 +377,18 @@ async function searchWithProviders(
 	if (options.signal?.aborted) throw new Error("Aborted");
 
 	const successes: AttributedSearchResponse[] = [];
-	const failures: Array<{ provider: ResolvedSearchProvider; error: string }> = [];
+	const failures: ProviderSearchFailure[] = [];
 	for (let index = 0; index < settled.length; index++) {
 		const outcome = settled[index];
 		if (outcome.status === "fulfilled") {
 			successes.push(outcome.value);
 		} else {
-			failures.push({ provider: providers[index], error: errorMessage(outcome.reason) });
+			failures.push(toProviderFailure(classifyProviderError(providers[index], outcome.reason)));
 		}
 	}
 	if (successes.length === 0) {
 		const label = selectedProviders ? "Selected-provider" : "All-provider";
-		throw new Error(`${label} search failed:\n  - ${failures.map(({ provider, error }) => `${providerLabel(provider)}: ${error}`).join("\n  - ")}`);
+		throw new SearchProviderAggregateError(label, failures);
 	}
 
 	const results: SearchResult[] = [];
@@ -410,7 +468,7 @@ export async function search(query: string, options: FullSearchOptions = {}): Pr
 
 // WHY: auto = session's default LLM (openai hosted search: codex subscription or API key)
 // then zero-config duckduckgo. Kimi stays explicit-only (fork decision: no gemini search).
-	const fallbackErrors: string[] = [];
+	const fallbackErrors: ProviderSearchFailure[] = [];
 	const openAiResult = await tryOpenAIInAuto(query, options, fallbackErrors);
 	if (openAiResult) return openAiResult;
 
@@ -419,13 +477,13 @@ export async function search(query: string, options: FullSearchOptions = {}): Pr
 			const ddgResult = await searchWithDuckDuckGo(query, options);
 			return { ...ddgResult, provider: "duckduckgo" };
 		} catch (err) {
-			if (isAbortError(err)) throw err;
-			fallbackErrors.push(`DuckDuckGo: ${errorMessage(err)}`);
+			if (isAbortError(err) && !isTimeoutError(err)) throw err;
+			fallbackErrors.push(toProviderFailure(classifyProviderError("duckduckgo", err)));
 		}
 	}
 
 	if (fallbackErrors.length > 0) {
-		throw new Error(`Auto provider search failed:\n  - ${fallbackErrors.join("\n  - ")}`);
+		throw new SearchProviderAggregateError("Auto provider", fallbackErrors);
 	}
 
 	throw new Error(

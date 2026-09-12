@@ -6,7 +6,7 @@
 //
 // The live installation stays non-Git; only the checkout receives commits.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdtempSync, readdirSync, rmSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,7 @@ const AGENT_DIR = path.resolve(
 );
 
 const USAGE =
-  "Use [--checkout DIR] [--message TEXT] [--export-dir DIR] [--dry-run] [--allow-dirty].";
+  "Use [--checkout DIR] [--message TEXT] [--export-dir DIR] [--dry-run | --verify-only] [--allow-dirty].";
 
 export function parseArgs(argv) {
   const opt = {
@@ -25,6 +25,7 @@ export function parseArgs(argv) {
     message: "",
     exportDir: "",
     dryRun: false,
+    verifyOnly: false,
     allowDirty: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -33,6 +34,7 @@ export function parseArgs(argv) {
       opt.dryRun = true;
       continue;
     }
+    if (key === "--verify-only") { opt.verifyOnly = true; continue; }
     if (key === "--allow-dirty") {
       opt.allowDirty = true;
       continue;
@@ -53,22 +55,37 @@ export function parseArgs(argv) {
     throw new Error(`Unknown option ${JSON.stringify(key)}. ${USAGE}`);
   }
   opt.checkout = path.resolve(opt.checkout);
+  if (opt.dryRun && opt.verifyOnly) throw new Error("Choose --dry-run or --verify-only, not both.");
+  if (opt.exportDir) opt.exportDir = path.resolve(opt.exportDir);
   return opt;
+}
+
+function canonicalPath(input) {
+  let at = path.resolve(input); const missing = [];
+  while (!existsSync(at)) {
+    const parent = path.dirname(at); if (parent === at) break;
+    missing.unshift(path.basename(at)); at = parent;
+  }
+  return path.join(realpathSync(at), ...missing);
 }
 
 /** The live tree is never a publish target, and the export must not nest
  * inside the checkout (a self-copy would recurse or leak temp state). */
 export function assertSafeCheckout(checkout, exportDir, agentDir = AGENT_DIR) {
+  checkout = canonicalPath(checkout);
+  agentDir = canonicalPath(agentDir);
+  exportDir = exportDir ? canonicalPath(exportDir) : "";
   if (
     checkout === path.resolve(agentDir) ||
-    checkout.startsWith(path.resolve(agentDir) + path.sep)
+    checkout.startsWith(path.resolve(agentDir) + path.sep) ||
+    agentDir.startsWith(checkout + path.sep)
   )
     throw new Error(
       `Refusing to publish into the live installation: ${checkout}`,
     );
   if (
     exportDir &&
-    (exportDir === checkout || exportDir.startsWith(checkout + path.sep))
+    (exportDir === checkout || exportDir.startsWith(checkout + path.sep) || checkout.startsWith(exportDir + path.sep))
   )
     throw new Error(
       `Export directory must live outside the checkout: ${exportDir}`,
@@ -100,6 +117,40 @@ function copyTree(src, dest) {
     });
 }
 
+/** Overlay publication must never silently retain a file the exporter removed.
+ * Leave deletion review to the caller instead of deleting arbitrary checkout
+ * files. This also applies with --allow-dirty. */
+export function assertNoStaleCheckoutPaths(exportDir, checkout) {
+  const stale = [];
+  const visit = (relative = "") => {
+    for (const entry of readdirSync(path.join(checkout, relative), { withFileTypes: true })) {
+      if (!relative && entry.name === ".git") continue;
+      const child = path.join(relative, entry.name);
+      const source = path.join(exportDir, child);
+      let sourceStat;
+      try { sourceStat = lstatSync(source); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (!sourceStat) stale.push(child);
+      else if (entry.isDirectory() && sourceStat.isDirectory()) visit(child);
+      if (stale.length >= 20) return;
+    }
+  };
+  visit();
+  if (stale.length) throw new Error(
+    `Checkout contains paths absent from the sanitized export. Review and remove obsolete paths before publishing; no files were copied:\n${stale.join("\n")}`,
+  );
+}
+
+function verifyDistribution(exportDir) {
+  // Dependencies must never enter the public checkout or the release export.
+  const fixture = mkdtempSync(path.join(os.tmpdir(), "yunuspi-distribution-"));
+  try {
+    copyTree(exportDir, fixture);
+    run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], fixture);
+    run("npm", ["test"], fixture);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+}
+
 function main() {
   const opt = parseArgs(process.argv.slice(2));
   const exportDir =
@@ -108,7 +159,7 @@ function main() {
     ? null
     : () => rmSync(exportDir, { recursive: true, force: true });
   try {
-    assertSafeCheckout(opt.checkout, exportDir);
+    opt.checkout = assertSafeCheckout(opt.checkout, exportDir);
     console.log(`[publish] export  ${AGENT_DIR} -> ${exportDir}`);
     run(
       process.execPath,
@@ -133,13 +184,26 @@ function main() {
       );
       return;
     }
+    if (opt.verifyOnly) {
+      verifyDistribution(exportDir);
+      console.log("[publish] verified distribution; checkout, index and remote untouched");
+      return;
+    }
     const dirty = run("git", ["status", "--porcelain"], opt.checkout, {
       capture: true,
     }).stdout.trim();
+    const beforeHead = run("git", ["rev-parse", "HEAD"], opt.checkout, { capture: true }).stdout.trim();
     if (dirty && !opt.allowDirty)
       throw new Error(
         `Checkout has uncommitted changes; review or pass --allow-dirty:\n${dirty.slice(0, 800)}`,
       );
+    assertNoStaleCheckoutPaths(exportDir, opt.checkout);
+    console.log("[publish] verify  distribution in an isolated temporary copy");
+    verifyDistribution(exportDir);
+    if (run("git", ["status", "--porcelain"], opt.checkout, { capture: true }).stdout.trim() !== dirty ||
+        run("git", ["rev-parse", "HEAD"], opt.checkout, { capture: true }).stdout.trim() !== beforeHead)
+      throw new Error("Checkout changed during distribution verification; review concurrent work before publishing.");
+    assertNoStaleCheckoutPaths(exportDir, opt.checkout);
     copyTree(exportDir, opt.checkout);
     console.log("[publish] scan    public safety checks");
     run(process.execPath, ["scripts/check-public.mjs", "."], opt.checkout);

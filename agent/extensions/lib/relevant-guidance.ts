@@ -13,6 +13,7 @@ import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSecti
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 24; // distinct hints per session/workspace, including reloads
+const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history scan
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
 const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
 const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
@@ -215,7 +216,11 @@ export function createRelevantGuidance(pi: any) {
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = "";
       // Entries are local session metadata, not instructions or a new state file.
-      const entries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+      const rawEntries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
+      // A long-lived session can contain many thousands of tool events. Only
+      // recent metadata can affect current receipts; bounding this pass keeps
+      // restore latency and memory proportional to the state it can use.
+      const entries = Array.isArray(rawEntries) ? rawEntries.slice(-MAX_RESTORE_ENTRIES) : [];
       // Capability failures survive compaction; successful execution is the
       // recovery receipt. Never infer availability from an assistant's claims.
       unavailable = new Set();
@@ -235,7 +240,12 @@ export function createRelevantGuidance(pi: any) {
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string' && /^topic:[a-z0-9-]{1,100}$/.test(pair[0]) &&
           Number.isSafeInteger(pair[1]) && pair[1] >= 0 && pair[1] <= requestNumber && requestNumber - pair[1] < 3));
         read = new Set((Array.isArray(d.read) ? d.read : []).filter((x: any) => typeof x === "string").slice(-48));
-        context = new Set((Array.isArray(d.context) ? d.context : []).filter((x: any) => typeof x === "string" && /^[a-z0-9][a-z0-9+#._-]{3,31}$/.test(x)).slice(-48));
+        // Keep restored state in the same representation as live state. A Set
+        // here made the next snapshot throw at context.slice(); the advisory
+        // catch then hid the failure and silently lost guidance state.
+        context = [...new Set((Array.isArray(d.context) ? d.context : [])
+          .filter((x: any) => typeof x === "string" && /^[a-z0-9][a-z0-9+#._-]{3,31}$/.test(x))
+          .slice(-48))];
         extensions = new Set((Array.isArray(d.extensions) ? d.extensions : []).filter((x: any) => typeof x === "string" && /^[a-z0-9]{1,8}$/.test(x)).slice(0,12));
         skillOffers = new Map((Array.isArray(d.offers) ? d.offers : []).slice(-48).filter((pair: any) =>
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^(?:skill|skillctx):\S{1,200}$/.test(pair[0]) &&
@@ -252,6 +262,11 @@ export function createRelevantGuidance(pi: any) {
       skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
         .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
         .filter(s => path.isAbsolute(s.file) && s.file.length < 512 && s.name.length < 100);
+      // Read receipts are advisory metadata from an earlier catalogue
+      // snapshot. Drop entries that are no longer available so a renamed or
+      // removed skill cannot suppress a current recommendation after restore.
+      const availableSkillFiles = new Set(skills.map(skill => skill.file));
+      read = new Set([...read].filter(file => availableSkillFiles.has(file)));
       skillIndex = buildSkillIndex(skills);
       const rawPrompt = String(event.prompt ?? "");
       const prompt = skillTaskText(rawPrompt);

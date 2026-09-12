@@ -66,7 +66,9 @@
     "data-query.ts",
     "bulk-edit.ts",
     "sys-probe.ts",
-    "session-hooks.ts"
+    "session-hooks.ts",
+    "session-diagnostics.ts",
+    "session-audit.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

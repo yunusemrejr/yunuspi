@@ -31,6 +31,8 @@ export interface HookRule {
 	 * Used for literal-search rules where the useful moment is the miss.
 	 */
 	needsEmptyResult?: boolean;
+	/** Failure recovery has separate receipts from successful first use. */
+	onError?: boolean;
 }
 
 const TEST_RUNNER =
@@ -56,6 +58,23 @@ const contains = (pattern: RegExp) => (args: HookArgs) =>
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
+	{
+		key: "subagent-recover-evidence",
+		tools: ["subagent"],
+		onError: true,
+		line: "Inspect each child's structured outcome; preserve successful siblings and retry only the failed scope after correcting its cause. Status and retained artifacts can resolve uncertainty without relaunching.",
+	},
+	{
+		key: "browser-recover-state",
+		tools: ["render_see"],
+		onError: true,
+		line: "Use the reported failure stage to check the server, URL or selector before another capture; an unavailable renderer supplies no visual evidence. Reuse the existing server task when it is healthy.",
+	},
+	{
+		key: "background-completion",
+		tools: ["bg_run"],
+		line: "Keep the returned task ID and continue independent work. Completion normally notifies; inspect that task's status or output if needed instead of repeated shell polling or duplicate launches.",
+	},
 	{
 		key: "web-verify",
 		tools: ["web_search"],
@@ -110,7 +129,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "search-fuzzy",
 		tools: ["grep", "find"],
-		line: "No literal match here — identifier-ranked symbol_search and fuzzy findText cover renames, typos and concept matches that exact patterns miss.",
+		line: "No literal match here. If code intelligence is available, try identifier-ranked symbol_search or context_code findText with a shorter identifier; first confirm the search path and pattern.",
 		needsEmptyResult: true,
 	},
 ];
@@ -119,8 +138,10 @@ export const HOOK_RULES: readonly HookRule[] = [
 export function matchHook(
 	toolName: string,
 	args: HookArgs = {},
+	onError = false,
 ): HookRule | null {
 	for (const rule of HOOK_RULES) {
+		if (!!rule.onError !== onError) continue;
 		if (!rule.tools.includes(toolName)) continue;
 		if (rule.when && !rule.when(args)) continue;
 		return rule;
