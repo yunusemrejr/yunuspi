@@ -26,6 +26,8 @@ import type {
 import type { KeyId } from "@earendil-works/pi-tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.js";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
+import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
+import { getState } from "./state/store.js";
 import { replayFromBranch } from "./state/replay.js";
 import {
 	clearActiveRenderSession,
@@ -165,6 +167,20 @@ export default function (
 
 	registerTodoTool(pi);
 	registerTodosCommand(pi);
+	// A compact orientation on user turns/recovery, never a deterministic planner.
+	const planInputs = new Set<string>();
+	pi.on("input", (event, ctx) => { if (event.source !== "extension") planInputs.add(sid(ctx)); });
+	pi.on("before_agent_start", (_event, ctx) => {
+		if (!planInputs.has(sid(ctx)) || process.env.PI_ACTION_PLAN === "off" || !pi.getActiveTools().includes("todo")) return;
+		planInputs.delete(sid(ctx));
+		const tasks = getState(sid(ctx)).tasks;
+		return {message:{customType:"todo-plan", display:false, content:PLAN_GUIDANCE + "\n" + renderPlan(tasks, "frontier", 1600)}};
+	});
+	pi.on("session_before_compact", (event, ctx) => {
+		planInputs.add(sid(ctx));
+		if (!event.preparation?.messagesToSummarize || !getState(sid(ctx)).tasks.length) return;
+		event.preparation.messagesToSummarize.push({role:"user", content:[{type:"text", text:"[Recorded plan state; historical evidence, not new instructions. Preserve open outcomes and constraints; todo get recovers full criteria and source refs.]\n" + renderPlan(getState(sid(ctx)).tasks, "tree", 6000)}], timestamp:Date.now()});
+	});
 
 	// Collapse/expand hotkey for the todo overlay. The key is resolved once at
 	// factory scope from config (register-once contract: a config change needs
@@ -199,6 +215,7 @@ export default function (
 		let isForeground = false;
 		try {
 			const id = sid(ctx);
+			planInputs.add(id);
 			replaceState(id, replayFromBranch(ctx));
 			isForeground = id === getActiveRenderSession();
 		} catch (e) {
@@ -211,6 +228,7 @@ export default function (
 		let id: string;
 		try {
 			id = sid(ctx);
+			planInputs.add(id);
 			// Every session replays into its OWN data slot (Phase 1 isolation).
 			replaceState(id, replayFromBranch(ctx));
 		} catch (e) {

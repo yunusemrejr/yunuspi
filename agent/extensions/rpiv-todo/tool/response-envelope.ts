@@ -1,5 +1,6 @@
 import type { TaskState } from "../state/state.js";
 import type { Op } from "../state/state-reducer.js";
+import { renderPlan } from "../state/plan.ts";
 import { deriveBlocks } from "../state/task-graph.js";
 import { sanitizeTerminalText } from "./sanitize.js";
 import type {
@@ -45,6 +46,7 @@ function formatGetLines(task: Task, state: TaskState): string {
 	if (blocks.length) {
 		lines.push(`  blocks: ${blocks.map((id) => `#${id}`).join(", ")}`);
 	}
+	for (const key of ["parentId", "execution", "files", "acceptance", "evidence", "refs", "runId"] as const) if (task[key] != null) lines.push(`  ${key}: ${sanitizeTerminalText(JSON.stringify(task[key]))}`);
 	if (task.owner) lines.push(`  owner: ${sanitizeTerminalText(task.owner)}`);
 	return lines.join("\n");
 }
@@ -57,6 +59,7 @@ function formatGetLines(task: Task, state: TaskState): string {
  */
 export function formatContent(op: Op, state: TaskState): string {
 	switch (op.kind) {
+		case "batch": return `Applied ${op.count} operations; ids=${JSON.stringify(op.ids)}\n${renderPlan(state.tasks, "frontier")}`;
 		case "create": {
 			const t = state.tasks.find((x) => x.id === op.taskId);
 			// Defensive — `op.taskId` always resolves on success path.
@@ -79,7 +82,7 @@ export function formatContent(op: Op, state: TaskState): string {
 			let view = state.tasks;
 			if (!op.includeDeleted) view = view.filter((t) => t.status !== "deleted");
 			if (op.statusFilter) view = view.filter((t) => t.status === op.statusFilter);
-			return view.length === 0 ? "No tasks" : view.map(formatListLine).join("\n");
+			return view.length === 0 ? "No tasks" : op.includeDeleted ? view.map(formatListLine).join("\n") : renderPlan(view, op.view);
 		}
 		case "get":
 			return formatGetLines(op.task, state);
@@ -100,7 +103,7 @@ export function buildToolResult(
 	params: TaskMutationParams,
 	state: TaskState,
 	op: Op,
-): { content: Array<{ type: "text"; text: string }>; details: TaskDetails } {
+): { content: Array<{ type: "text"; text: string }>; details: TaskDetails; isError?: boolean } {
 	const text = formatContent(op, state);
 	const details: TaskDetails = {
 		action,
@@ -109,5 +112,5 @@ export function buildToolResult(
 		nextId: state.nextId,
 		...(op.kind === "error" ? { error: op.message } : {}),
 	};
-	return { content: [{ type: "text", text }], details };
+	return { content: [{ type: "text", text }], details, ...(op.kind === "error" ? {isError:true} : {}) };
 }

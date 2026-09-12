@@ -1,8 +1,8 @@
 import type { TaskStatus } from "../tool/types.js";
 
 /**
- * Allowed forward transitions per source status. `completed` is one-way to
- * `deleted` (never back to `in_progress`); `deleted` is terminal.
+ * Allowed forward transitions per source status. `completed` may reopen after changed scope or failed verification;
+ * `deleted` remains terminal. Prior evidence stays in session history.
  *
  * Idempotent same→same is checked separately in `isTransitionValid` so this
  * table only enumerates actual transitions.
@@ -10,7 +10,7 @@ import type { TaskStatus } from "../tool/types.js";
 export const VALID_TRANSITIONS: Record<TaskStatus, ReadonlySet<TaskStatus>> = {
   pending: new Set(["in_progress", "completed", "deleted"]),
   in_progress: new Set(["pending", "completed", "deleted"]),
-  completed: new Set(["deleted"]),
+  completed: new Set(["pending", "in_progress", "deleted"]),
   deleted: new Set(),
 };
 

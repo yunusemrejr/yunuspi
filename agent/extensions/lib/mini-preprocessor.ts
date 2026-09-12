@@ -34,6 +34,19 @@ export function miniProjection(raw:string,value:unknown):string|undefined {
  // Exact complete source paragraphs; IDs and ranges are independently reconstructed.
  return `[incomplete extract; sha256:${source.hash}; spans:${selected.keep.map(i=>source.spans[i].join(':')).join(',')}]\n`+selected.keep.map(i=>source.paragraphs[i]).join('\n\n');
 }
+/** Check the best possible valid extract before spending CPU on inference. */
+export function miniPotentialSavings(raw:string):number {
+ const source=miniSource(raw);if(!source)return 0;
+ const keep=[...source.required].sort((a,b)=>a-b);
+ // A nonempty selection is required; choose the shortest possible paragraph.
+ if(!keep.length)keep.push(source.paragraphs.reduce((best,p,i)=>p.length<source.paragraphs[best].length?i:best,0));
+ const best=miniProjection(raw,{version:1,status:'SELECT',sourceHash:source.hash,keep});
+ const saved=best?raw.length-best.length-256:0;
+ return saved>=150 && saved/raw.length>=.15?saved:0;
+}
+// Context capacity still matters on cheap/free main routes. At this threshold
+// the existing ten-second single-flight worker limit bounds local CPU use.
+const usefulContextSaving = (saved:number, total:number) => saved >= 1024 && saved / total >= .35;
 async function loadRuntime():Promise<Runtime|undefined>{
  if(process.env.PI_MINI_PREPROCESSOR==='off')return;
  let handle;try{
@@ -50,15 +63,16 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  return {
   reset(){generation++;current?.abort();},
   async select(raw:string,inputUsdPerMillion:unknown):Promise<MiniSelection|undefined>{
-   if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||busy||now()-last<10_000||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<=0||!miniSource(raw))return;
+   if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||busy||now()-last<10_000||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0||!miniSource(raw))return;
    // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
    // Newly produced tool bytes have not appeared in the provider prefix yet.
-   if((raw.length-300)/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
+   const potential=miniPotentialSavings(raw);
+   if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
    const timer=setTimeout(()=>abort.abort(),450);timer.unref?.();
    try{
-    const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw})})]);
+    const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw})})]);
     if(!res.ok||!res.body)return;
     const reader=res.body.getReader();const chunks:Uint8Array[]=[];let length=0;
     try{while(true){const part=await Promise.race([deadline,reader.read()]);if(part.done)break;length+=part.value.byteLength;if(length>2048){void reader.cancel().catch(()=>{});return;}chunks.push(part.value);}}finally{reader.releaseLock();}
@@ -68,7 +82,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     if(!/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"SELECT"\s*,\s*"sourceHash"\s*:\s*"[a-f0-9]{64}"\s*,\s*"keep"\s*:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*\}\s*$/.test(wire))return;
     const selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;
     const projection=miniProjection(raw,selection)!;const saved=raw.length-projection.length-256;
-    if(saved<150||saved/raw.length<.15||saved/6*inputUsdPerMillion/1e6<(performance.now()-started)/1000*.00002*10)return;
+    if(saved<150||saved/raw.length<.15||!usefulContextSaving(saved,raw.length)&&saved/6*inputUsdPerMillion/1e6<(performance.now()-started)/1000*.00002*10)return;
     return selection;
    }catch{return;}finally{clearTimeout(timer);if(current===abort){busy=false;current=undefined;}}
   }

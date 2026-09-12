@@ -13,13 +13,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
 import { loadConfig, validateGuidanceFields } from "./config.js";
-import { formatStatusLabel, t } from "./state/i18n-bridge.js";
-import {
-	selectTasksByStatus,
-	selectTodoCounts,
-	selectVisibleTasks,
-} from "./state/selectors.js";
+import { t } from "./state/i18n-bridge.js";
+import { selectVisibleTasks } from "./state/selectors.js";
 import { applyTaskMutation } from "./state/state-reducer.js";
 import { commitState, getRenderState, getState, sid } from "./state/store.js";
 import { buildToolResult } from "./tool/response-envelope.js";
@@ -33,16 +30,9 @@ import {
 	TodoParamsSchema,
 } from "./tool/types.js";
 import {
-	formatCommandTaskLine,
 	renderTodoCall,
 	renderTodoResult,
 } from "./view/format.js";
-
-// English fallbacks for localized /todos section headers — the box-drawing
-// decoration is part of the localized string so translators can adjust spacing.
-const SECTION_PENDING = "── Pending ──";
-const SECTION_IN_PROGRESS = "── In Progress ──";
-const SECTION_COMPLETED = "── Completed ──";
 
 // ---------------------------------------------------------------------------
 // Public re-exports — pre-refactor consumers (overlay, tests, index.ts) keep
@@ -72,10 +62,8 @@ export { TOOL_NAME } from "./tool/types.js";
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_PROMPT_SNIPPET =
-	"Manage a task list to track multi-step progress";
-export const DEFAULT_PROMPT_GUIDELINES: string[] = [
-	"Use todo for multi-step work or a user task list; skip it for quick single tasks. Keep one task in_progress, set activeForm when starting, and update status to completed only after verification. Leave failures/blockers open; use blockedBy for dependencies. Detailed action fields are in the todo schema.",
-];
+	"Maintain an actionable hierarchical plan";
+export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_GUIDANCE];
 
 export function registerTodoTool(pi: ExtensionAPI): void {
 	const guidance = validateGuidanceFields(loadConfig().guidance);
@@ -83,7 +71,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
 		description:
-			"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Use this to plan and track multi-step work like research, design, and implementation.",
+			"Maintain hierarchical action plans. Batch edits are atomic; negative IDs alias earlier creates. list view=frontier shows active/ready work, tree shows hierarchy; get retrieves criteria and evidence. Reopen completed nodes when scope changes. Execution modes describe native orchestration intent.",
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
@@ -95,6 +83,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 				params as TaskMutationParams,
 			);
 			commitState(sid(ctx), result.state);
+			if (result.op.kind !== "error" && !["get", "list"].includes(params.action)) pi.events?.emit("todo-plan-changed", {sessionId:sid(ctx), cwd:ctx.cwd, tasks:result.state.tasks});
 			return buildToolResult(
 				params.action,
 				params as TaskMutationParams,
@@ -127,7 +116,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 
 export function registerTodosCommand(pi: ExtensionAPI): void {
 	pi.registerCommand(COMMAND_NAME, {
-		description: "Show all todos on the current branch, grouped by status",
+		description: "Show the current hierarchical action plan",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify(
@@ -142,37 +131,8 @@ export function registerTodosCommand(pi: ExtensionAPI): void {
 				ctx.ui.notify(t("command.no_todos", MSG_NO_TODOS), "info");
 				return;
 			}
-			const groups = selectTasksByStatus(state);
-			const counts = selectTodoCounts(state);
-
-			const header: string[] = [];
-			if (counts.completed > 0)
-				header.push(
-					`${counts.completed}/${counts.total} ${formatStatusLabel("completed")}`,
-				);
-			if (counts.inProgress > 0)
-				header.push(`${counts.inProgress} ${formatStatusLabel("in_progress")}`);
-			if (counts.pending > 0)
-				header.push(`${counts.pending} ${formatStatusLabel("pending")}`);
-
-			const lines: string[] = [header.join(" · ")];
-			if (groups.pending.length > 0) {
-				lines.push(t("command.section.pending", SECTION_PENDING));
-				for (const task of groups.pending)
-					lines.push(formatCommandTaskLine(task, "○"));
-			}
-			if (groups.inProgress.length > 0) {
-				lines.push(t("command.section.in_progress", SECTION_IN_PROGRESS));
-				for (const task of groups.inProgress)
-					lines.push(formatCommandTaskLine(task, "◐"));
-			}
-			if (groups.completed.length > 0) {
-				lines.push(t("command.section.completed", SECTION_COMPLETED));
-				for (const task of groups.completed)
-					lines.push(formatCommandTaskLine(task, "✓"));
-			}
-
-			ctx.ui.notify(lines.join("\n"), "info");
+			ctx.ui.notify(renderPlan(state.tasks, "tree", 16000), "info");
+			return;
 		},
 	});
 }

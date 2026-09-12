@@ -334,7 +334,7 @@ export function reminderText(
 		const items = open.slice(0,3).map(t => `#${t.id} [${t.status}] ${JSON.stringify(oneLine(t.subject!,160))}${t.blockedBy?.length ? ` (blocked by ${t.blockedBy.slice(0,5).map(id=>"#"+id).join(", ")})` : ""}`).join("; ");
 		lines.push(`Open todos: ${parts.join(", ")} — last todo checkpoint ${fmtAgo(now, st.lastTodoActionAt)} ago.` +
 			(items ? ` Recorded items: ${items}${open.length>3 ? `; ${open.length-3} more (todo list)` : ""}.` : ' Use todo list to inspect the current items.') +
-			` Reconcile these recorded items with the user's latest scope; mark verified work completed and keep at most one in_progress.`);
+			` Reconcile the hierarchical plan with the user's latest scope; add missing executable children, use todo list view=frontier for ready work, and record evidence before completion. Concurrent steps need separate owners/scopes; keep your own session purpose.`);
 
 	}
 	if (fire.caution) {

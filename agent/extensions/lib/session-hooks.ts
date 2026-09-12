@@ -84,7 +84,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "task-dependencies",
 		tools: ["todo"],
-		line: "Keep this task list as the owner of dependencies and completion state. Reuse its IDs; mark completion from observed results and preserve blocked work instead of creating a parallel queue.",
+		line: "Plan outcomes and child steps here; batch related edits, reuse IDs after follow-ups, and record evidence before completion. Native tools dispatch runs; active plan files feed session coordination.",
 	},
 	{
 		key: "web-verify",

@@ -25,6 +25,9 @@ const MIN_DEDUP_CHARS = 400;
 const MAX_ENTRIES = 64;
 const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
+// Whole-paragraph prose from local documentation also benefits from Kompress.
+// Structured code, status, errors and source qualifications remain protected.
+const miniEligibleTool = (tool: string, input: any) => tool === "bash" || tool === "read" && typeof input?.path === "string" && /\.(?:txt|md|rst)$/i.test(input.path);
 interface Reference {
 	version: 1;
 	id: number;
@@ -142,7 +145,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 						text:
 							"[visual capability] Your current model cannot see this image. Reading source or capturing another screenshot does not provide visual evidence. " +
 							(canDelegate
-								? 'For a visual task, read the pi-subagents skill, then use subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
+        ? 'For a visual task, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
 								: "No subagent tool is active here. Report the visual limitation; do not claim to have inspected the pixels."),
 					},
 				],
@@ -185,9 +188,9 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		const finish = (selection?: unknown) => ({details: {...event.details, piObservation: ref, ...(selection ? {piMiniSelection: selection} : {})}});
 		// Existing deterministic compression wins. Only bounded successful prose
 		// can spend local inference; the original tool body stays in the transcript.
-		if (event.toolName === "bash" && !event.isError && !event.details?.truncation && !event.details?.truncated
+		if (miniEligibleTool(event.toolName,event.input) && !event.isError && !event.details?.truncation && !event.details?.truncated
 			&& !event.details?.cancelled && !event.details?.aborted && (event.details?.exitCode === undefined || event.details.exitCode === 0)
-			&& ctx?.model?.cost?.input > 0 && process.env.PI_OUTPUT_DISTILLER !== "off"
+			&& ctx?.model?.cost?.input >= 0 && process.env.PI_OUTPUT_DISTILLER !== "off"
 			&& pi.getActiveTools().includes("obs_read") && miniSource(text) && !distillOutput(event.toolName, text, ref.searchOutput)) {
 			let statusSize = Infinity;
 			try {statusSize = JSON.stringify({isError:false,details:event.details ?? {}}).length;} catch {}

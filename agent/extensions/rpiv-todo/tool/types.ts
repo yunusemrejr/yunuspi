@@ -31,7 +31,8 @@ export type TaskAction =
 	| "list"
 	| "get"
 	| "delete"
-	| "clear";
+	| "clear"
+	| "batch";
 
 export interface Task {
 	id: number;
@@ -42,6 +43,14 @@ export interface Task {
 	blockedBy?: number[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
+	parentId?: number | null;
+	execution?: "self" | "subagent" | "swarm" | "fusion";
+	files?: string[];
+	acceptance?: string;
+	evidence?: string;
+	refs?: string[];
+	runId?: string;
+
 }
 
 /**
@@ -74,8 +83,18 @@ export interface TaskMutationParams {
 	removeBlockedBy?: number[];
 	owner?: string;
 	metadata?: Record<string, unknown>;
+	parentId?: number | null;
+	execution?: "self" | "subagent" | "swarm" | "fusion";
+	files?: string[];
+	acceptance?: string;
+	evidence?: string;
+	refs?: string[];
+	runId?: string;
+
 	id?: number;
 	includeDeleted?: boolean;
+	view?: "tree" | "frontier";
+	operations?: Array<TaskMutationParams & {action: "create" | "update" | "delete"}>;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +103,7 @@ export interface TaskMutationParams {
 // pre-refactor schema at `packages/rpiv-todo/todo.ts:512-573`.
 // ---------------------------------------------------------------------------
 
-export const TodoParamsSchema = Type.Object({
+const MutationSchema = Type.Object({
 	action: StringEnum([
 		"create",
 		"update",
@@ -93,6 +112,13 @@ export const TodoParamsSchema = Type.Object({
 		"delete",
 		"clear",
 	] as const),
+	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent outcome id; null detaches. Negative ids refer to earlier batch creates."})),
+	execution: Type.Optional(StringEnum(["self", "subagent", "swarm", "fusion"] as const)),
+	files: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32})),
+	acceptance: Type.Optional(Type.String({maxLength:2000,description:"Concrete completion check"})),
+	evidence: Type.Optional(Type.String({maxLength:2000,description:"Observed verification and limitations; required to complete a task with acceptance"})),
+	refs: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32,description:"Project fact ids, observation ids or source references; no copied project map"})),
+	runId: Type.Optional(Type.String({maxLength:2000,description:"Native subagent/swarm/fusion run id; results still require review"})),
 	subject: Type.Optional(
 		Type.String({ description: "Task subject line (required for create)" }),
 	),
@@ -147,6 +173,13 @@ export const TodoParamsSchema = Type.Object({
 				"If true, list action returns deleted (tombstoned) tasks as well. Default: false.",
 		}),
 	),
+});
+
+export const TodoParamsSchema = Type.Object({
+ ...MutationSchema.properties,
+ action: StringEnum(["create", "update", "list", "get", "delete", "clear", "batch"] as const),
+ view: Type.Optional(StringEnum(["tree", "frontier"] as const, {description:"list projection; omitted means tree"})),
+ operations: Type.Optional(Type.Array(Type.Object({...MutationSchema.properties, action:StringEnum(["create", "update", "delete"] as const)}), {maxItems:32,minItems:1,description:"Atomic mutations. Create may supply a unique negative id as a local alias; later operations reference it. Errors roll back the entire batch."})),
 });
 
 export type TodoParams = Static<typeof TodoParamsSchema>;
