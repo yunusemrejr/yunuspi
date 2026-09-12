@@ -39,9 +39,18 @@ for (const part of activityMetrics.footer) {
 if (activityLine) lines.push(theme.fg('dim', truncateToWidth(activityLine, width)));
 /* PI_SESSION_ACTIVITY_V${version} */ ` + (bundled ? 'let extensionStatuses=this.footerData.getExtensionStatuses()' : old);
 }
-function transformActivity(source, bundled) {
+export function transformActivity(source, bundled) {
   const old = bundled ? ',extensionStatuses=this.footerData.getExtensionStatuses()' : 'const extensionStatuses = this.footerData.getExtensionStatuses()';
   const code = activityCode(activitySource, bundled, 2);
+  if (source.includes('PI_SESSION_ACTIVITY_V2') && !source.includes(code)) {
+    const start = source.indexOf(activityPrefix), end = source.indexOf(activitySuffix,start+activityPrefix.length);
+    const helper = source.slice(start+activityPrefix.length,end);
+    // Audited installed V2 predating distinct-tools/skillctx source updates.
+    if (createHash('sha256').update(helper).digest('hex') === '69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47') {
+      const old = activityCode(helper,bundled,2);
+      if (source.split(old).length === 2) source = source.replace(old,()=>code);
+    }
+  }
   if(source.includes('PI_SESSION_ACTIVITY_V2')) { if(source.split(code).length!==2||source.includes('PI_SESSION_ACTIVITY_V1'))throw Error('session activity postcondition drift'); return source; }
   if(source.includes('PI_SESSION_ACTIVITY_V1')) {
     const start=source.indexOf(activityPrefix), end=source.indexOf(activitySuffix,start+activityPrefix.length);

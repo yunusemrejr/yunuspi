@@ -687,6 +687,7 @@ export function buildSkillInjection(skills: ResolvedSkill[]): string {
 		"The following configured skills are available to this subagent.",
 		"For this task and each new subtask, match the descriptions and read only the relevant skill files before acting. Use read (or bash if read is unavailable); do not claim a skill was applied without reading it.",
 		"After reading, identify the task inputs, next action and observable success check. Apply only relevant steps. Reading is not execution; verify the resulting artifact or postcondition and label missing evidence. Do not expand scope to satisfy unrelated skill sections.",
+		"Check active tool descriptions before implementing a skill step yourself. Reuse supported tools and retain their evidence or task handles. A skill can describe tools absent from this child; report required gaps to the parent without installing substitutes or expanding permissions. Select additional relevant skills as the task changes, without a skill-count quota.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",

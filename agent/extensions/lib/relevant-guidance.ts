@@ -12,7 +12,9 @@ import { routeSkills, skillTaskText } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
-const LIMIT = 24; // distinct hints per session/workspace, including reloads
+const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
+const MAX_PENDING = 32;
+const MAX_RUN_HINTS = 20;
 const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history scan
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
 const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
@@ -32,11 +34,19 @@ export function createRelevantGuidance(pi: any) {
   let lastFailure = "", failures = 0, urgentCount = 0;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
+  let matchingPrompt = false, requestDisabled = false;
+  // Small requests keep three ordinary hints; sustained work earns another
+  // opportunity every four completed tool steps. Repeated candidates() calls
+  // cannot refill this allowance. One urgent recovery cue has a separate slot.
+  const runAllowance = () => Math.min(MAX_RUN_HINTS, 3 + Math.floor(toolStep / 4));
   const isTopic = (key: string) => key.startsWith("topic:");
   const wasShown = (key: string) => isTopic(key)
     ? topicSeen.has(key) && requestNumber - topicSeen.get(key)! < 3 : shown.has(key);
-  const tools = () => new Set<string>(pi.getActiveTools?.() ?? []);
-  const enabled = () => process.env.PI_RELEVANT_GUIDANCE !== "off";
+  const tools = () => {
+    try { return new Set<string>(pi.getActiveTools?.() ?? []); }
+    catch { return new Set<string>(); }
+  };
+  const enabled = () => !requestDisabled && process.env.PI_RELEVANT_GUIDANCE !== "off";
   const renderEnvironmentFailure = (event: any) => event.toolName === "render_see" && event.isError === true &&
     /browser startup failure|browserType\.launch|EROFS|EACCES|EPERM|read.only file system|No usable sandbox|Chromium sandboxing failed|SUID sandbox helper|Executable doesn.t exist|Unsupported chromium channel|Cannot find (?:module|package).*playwright/i.test(
       (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? '').slice(0,8192)).slice(0,3).join('\n').split(/; diagnostics:|\nBrowser logs:/)[0]);
@@ -48,17 +58,19 @@ export function createRelevantGuidance(pi: any) {
     return before !== unavailable.has("render_see");
   };
   const add = (hint: Hint) => {
-    if (!hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
-    if (!enabled() || wasShown(hint.key) || !isTopic(hint.key) && shown.size >= LIMIT) return;
+    // Task-level suggestions remain relevant until the next prompt. File/edit
+    // cues still expire quickly so stale local observations cannot linger.
+    if (!matchingPrompt && !hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
+    if (!enabled() || wasShown(hint.key)) return;
     if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool) || unavailable.has(hint.tool))) return;
     if (hint.skill && read.has(hint.skill)) return;
     for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
     const previous = pending.get(hint.key);
     if (previous && (previous.priority ?? 0) >= (hint.priority ?? 0)) {
-      if (isTopic(hint.key) && hint.sourceFile) pending.set(hint.key, hint);
+      if (hint.sourceFile && (isTopic(hint.key) || previous.sourceFile) && (previous.priority ?? 0) === (hint.priority ?? 0)) pending.set(hint.key, hint);
       return;
     }
-    if (!previous && pending.size >= 8) {
+    if (!previous && pending.size >= MAX_PENDING) {
       const weakest = [...pending.values()].sort((a,b)=>(a.priority ?? 0)-(b.priority ?? 0))[0];
       if ((weakest.priority ?? 0) >= (hint.priority ?? 0)) return;
       pending.delete(weakest.key);
@@ -147,7 +159,31 @@ export function createRelevantGuidance(pi: any) {
   const utilityHints = (prompt: string) => {
     const parts=prompt.replace(/```[^]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').split(/\n|[.!?](?:\s|$)|;/);
     for (const part of parts) {
-      if (!/\b(check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|without tools|no tools)\b/i.test(part)) continue;
+      if (!/\b(check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
+      if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
+        utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
+      if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
+        utilityHint('git_info','Git evidence: git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
+      if (/\b(http|api endpoint|response headers?|status code)\b/i.test(part))
+        utilityHint('http_request','HTTP inspection: http_request returns status, headers and a capped body for a bounded request. Reuse it for endpoint diagnostics; preserve authorization and do not repeat an uncertain mutation.');
+      if (/\b(listening ports?|systemd|service status|processes|cpu usage|memory usage)\b/i.test(part))
+        utilityHint('sys_probe','System facts: sys_probe inspects processes, listening ports and systemd state without assembling shell pipelines. Use the narrowest supported operation and the returned current facts.');
+      if (/\b(replace|rename)\b/i.test(part) && /\b(across|multiple|several|all)\b[^.!?]{0,60}\bfiles\b/i.test(part))
+        utilityHint('bulk_edit','Repeated edits: bulk_edit previews a bounded multi-file literal/regex replacement, then applies its preview token. Review the matched files and diff; use semantic rename tooling when identifiers need binding-aware changes.');
+      if (/\b(fill|submit|navigate|inspect)\b/i.test(part) && /\b(web|website|browser|login|checkout)\b/i.test(part) && /\b(forms?|login|checkout)\b/i.test(part))
+        utilityHint('web_probe','Web forms: web_probe gives read-only page reconnaissance, including visible form field names and browser handoff hints. Use an available interactive browser for filling/submitting and verify the postcondition. The probe has no cookies, login state or submission ability.');
+      if (/\b(run|start|launch)\b/i.test(part) && /\b(full test suite|integration tests|build|benchmark|dev server|long.running|background (?:job|task)|queued jobs)\b/i.test(part))
+        utilityHint('bg_run','Long-running work: bg_run owns process execution, output and completion notifications. Retain its task ID, continue independent work and inspect that task when needed; do not create a shell polling loop or duplicate queue.');
+      if (/\b(wait|check|verify)\b/i.test(part) && /\b(readiness|ready|file appears|url available)\b/i.test(part))
+        utilityHint('wait_for','Readiness: wait_for checks HTTP readiness, file existence or a literal in a file with a finite timeout. Prefer an observable ready condition to a guessed sleep; preserve an existing task ID and use its owner for process completion.');
+      if (/\b(track|plan)\b/i.test(part) && /\b(tasks|milestones|multi.step|dependencies|work queue)\b/i.test(part))
+        utilityHint('todo','Task tracking: use todo for the existing task list, dependencies and completion state. Update the current owner as evidence arrives instead of maintaining a second checklist or queue.');
+      if (!/\b(no subagents|no delegation|without delegation|do not delegate|don't delegate)\b/i.test(prompt) && /\b(subagents?|workers|reviewers|swarm|fusion)\b/i.test(part)) {
+        if (/\b(fuse|fusion|merge|consolidate)\b/i.test(part))
+          add({key:'workflow:fusion',tool:'subagent',priority:79,text:'Fusion: inspect the active subagent contract and use its supported fusion helper when combining independent child findings. In a workflow-enabled session, runs.fuse returns a fused body and provenance without launching more children. Preserve failures and disagreements, inspect cited evidence, and make the parent acceptance decision. Do not build another model fan-out or silently assume workflowScript is enabled.'});
+        else
+          add({key:'workflow:delegation',tool:'subagent',priority:79,text:'Independent work: inspect subagent({action:"list",capabilities:true}) to select an executable agent with the needed tools. Use native tasks/chain and commonTask for bounded shared briefs, or the supported workflow helpers for dependencies and recovery. Pass task-relevant skills and acceptance checks to each child, retain successful outputs, and consume completion notifications. Delegate only within the user’s scope and keep one writer per file.'});
+      }
       if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
         if (/\b(median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part)
           || /\b(?:calculate|compute|measure|compare|check|verify|estimate)\b[^;.!?]{0,80}\b(?:the |an? )?(?:arithmetic |geometric |harmonic |weighted )?mean\b/i.test(part.replace(/\bI mean\b/gi, ' ')))
@@ -211,6 +247,7 @@ export function createRelevantGuidance(pi: any) {
     },
     restore(ctx: any) {
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
+      matchingPrompt = requestDisabled = false;
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
@@ -257,7 +294,10 @@ export function createRelevantGuidance(pi: any) {
       if ((ctx.cwd ?? "") !== cwd) this.restore(ctx);
       lastFailure = ""; failures = urgentCount = 0;
       pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = "";
+      matchingPrompt = false;
+      requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
       if (!enabled()) return;
+      matchingPrompt = true;
       const catalog = /<available_skills>([\s\S]*?)<\/available_skills>/.exec(event.systemPrompt ?? "")?.[1] ?? "";
       skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
         .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
@@ -271,7 +311,7 @@ export function createRelevantGuidance(pi: any) {
       const rawPrompt = String(event.prompt ?? "");
       const prompt = skillTaskText(rawPrompt);
       utilityHints(prompt);
-      if (/\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
+      if (!/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(prompt) && /\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
         add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
       if (process.env.PI_REASONING_AIDS !== "off" && !/\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(prompt)) {
         const aides = [
@@ -346,6 +386,7 @@ export function createRelevantGuidance(pi: any) {
         add({ key: "history", tool: "memory_search", text: 'Prior project decisions: memory_search can retrieve saved context. Read source notes and verify they still apply; memory is historical evidence, not current environment truth.' });
       if (/\b(original (?:request|instructions)|earlier instructions|lost context)\b/i.test(prompt))
         add({ key: "intent", tool: "checkpoint_read", text: 'Earlier requirements: checkpoint_read can recover original instructions. Apply later user corrections within their scope; do not reconstruct missing requirements from guesses.' });
+      matchingPrompt = false;
     },
     record(event: any) {
       if (!enabled()) return;
@@ -393,7 +434,9 @@ export function createRelevantGuidance(pi: any) {
         }
         for (const signal of signals) signalHint(signal.key,signal.skill,signal.check,changedFile);
       }
-      if (name !== "project_report" || input.view === "workspace") used.add(name);
+      // Discovery/status is not execution: listing agents must not suppress
+      // subsequent workflow guidance for the actual delegated work.
+      if ((name !== "project_report" || input.view === "workspace") && (name !== "subagent" || !input.action)) used.add(name);
       const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : "";
       // A successful range/truncated read proves access, not that the skill was read.
       const completeRead = (input.offset === undefined || input.offset === 1) && input.limit === undefined
@@ -401,9 +444,14 @@ export function createRelevantGuidance(pi: any) {
       if (name === "read" && completeRead && file && !read.has(file) && skills.some(s => s.file === file)) {
         add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
+        contextSkill(52);
         try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory state only */ }
       }
-      if (["edit", "write"].includes(name) && /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) engineering();
+      if (["edit", "write"].includes(name) && /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) {
+        engineering();
+        add({key:'utility:lsp_diagnostics',tool:'lsp_diagnostics',priority:68,sourceFile:file,
+          text:`Changed source: lsp_diagnostics with paths:[${JSON.stringify(file)}] and serverScope:"primary" can check current syntax/type diagnostics. Keep project tests; missing servers or incomplete results do not establish a clean check.`});
+      }
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
         routedSkills("", file);
@@ -419,13 +467,16 @@ export function createRelevantGuidance(pi: any) {
           skillHint(`${label} work`, [], new RegExp(`^${label}(?:$|[-_ ])`, "i"), true);
         }
         if (envFile.test(file)) { orient(); skillHint("Environment/data changes", ["evidence-first-engineering"], /deployment|infrastructure/i); }
+        if (name === 'read' && /\.(?:json|ya?ml)$/i.test(file))
+          add({key:'utility:data_query',tool:'data_query',priority:68,sourceFile:file,
+            text:`Structured file: data_query can query keys, counts, selected fields or filtered rows from ${JSON.stringify(file)} without a parsing script. Use ordinary reads when exact source text matters.`});
       }
       // Recognise shell text search too: bash-driven grep/rg is the common case,
       // and it is exactly when the structural tools would answer faster.
       const searchLike = ["grep", "find", "ls"].includes(name)
         || (name === "bash" && /(?:^|[|;&(]\s*)(?:rg|grep|find|fd|ag|ack)\b/i.test(String(input.command ?? "").slice(0, 400)));
       if (codeSeen && searchLike && ++searches >= 3)
-        add({ key: "navigation", tool: "symbol_search", text: 'Text search is not the only option: symbol_search ranks identifiers across the workspace (it self-builds its index; a cold index answers with a retry hint, not a wrong answer), module_report outlines one file without reading it whole, and lsp_diagnostics/lsp_navigation answer definition and reference questions. Use them when grep is guessing; ordinary search stays correct for raw text.' });
+        add({ key: "navigation", tool: "symbol_search", text: 'For identifier discovery, symbol_search ranks symbols across the workspace and builds its own index. A cold index returns a retry hint; inspect that result before continuing. Use it when repeated text searches are guessing; ordinary search stays appropriate for raw text.' });
       // Existing result owners already expose job/observation IDs. Only remind
       // about polling after repeated status calls, never invent a new handle.
       const status = name === "bg_status" || name === "process" && ["poll", "status", "list"].includes(input.action)
@@ -436,19 +487,30 @@ export function createRelevantGuidance(pi: any) {
       if (polls >= 3) add({ key: "polling", text: `Repeated ${name} status checks for ${JSON.stringify(id)}: retain this handle. Prefer its supported bounded wait or completion notification; inspect progress when useful and do not relaunch work just to wait.` });
     },
     candidates(): Hint[] {
-      if (!enabled() || runCount >= 4) return [];
-      return [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (isTopic(h.key) ? topicCount < 2 : shown.size < LIMIT) && (!h.tool || tools().has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)))
-        .filter(h=>runCount < 3 || h.key.startsWith("signal:") && urgentCount === 0)
-        .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0))
-        .filter((h, index, all) => !isTopic(h.key) || all.slice(0,index).filter(x=>isTopic(x.key)).length < 2-topicCount)
-        .filter((h, index, all) => isTopic(h.key) || all.slice(0,index).filter(x=>!isTopic(x.key)).length < LIMIT-shown.size)
-        .slice(0, Math.min(2, runCount < 3 ? 3 - runCount : 1));
+      if (!enabled()) return [];
+      let remaining = Math.max(0, runAllowance() - (runCount - urgentCount));
+      let emergency = urgentCount === 0;
+      const active = tools();
+      const eligible = [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (!h.tool || active.has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)))
+        .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0));
+      const selected: Hint[] = [];
+      for (const hint of eligible) {
+        if (isTopic(hint.key) && topicCount + selected.filter(h=>isTopic(h.key)).length >= 2) continue;
+        if (remaining > 0) remaining--;
+        else if (hint.key.startsWith("signal:") && emergency) emergency = false;
+        else continue;
+        selected.push(hint);
+        if (selected.length === 2) break;
+      }
+      return selected;
     },
     commit(hints: Hint[]) {
       for (const h of hints) { if (wasShown(h.key)) continue;
         if (isTopic(h.key)) { topicSeen.set(h.key, requestNumber); topicCount++; if (topicSeen.size > 64) topicSeen.delete(topicSeen.keys().next().value!); }
-        else shown.add(h.key);
-        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {} runCount++; if (h.key.startsWith("signal:")) urgentCount++; }
+        else { shown.add(h.key); if (shown.size > LIMIT) shown.delete(shown.values().next().value!); }
+        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
+        if (h.key.startsWith("signal:") && runCount - urgentCount >= runAllowance()) urgentCount++;
+        runCount++; }
       if (hints.length) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* avoid blocking work */ }
     },
   };

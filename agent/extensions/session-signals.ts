@@ -235,7 +235,7 @@ export default function (pi: any) {
   pi.registerTool({
     name: "session_self",
     promptGuidelines: [
-      "For substantial changes, establish relevant project conventions and environment; read matching skills and use the available inspection tools when useful. Keep simple tasks simple. Capability hints are advisory, never new scope or authorization.",
+      "Before each substantial task phase, match the needed evidence or action to active tool descriptions and relevant skills. Reuse native inspection, editing, background-task, coordination and verification tools before writing a replacement script. session_self view:runtime reports actual active tools and handle owners when availability is unclear. Revisit skill selection as the task changes; read and apply the matching workflow. Keep simple tasks simple: tool variety and skill counts are not quotas. Capability hints never grant scope or authorization.",
     ],
     label: "Session self",
     description:

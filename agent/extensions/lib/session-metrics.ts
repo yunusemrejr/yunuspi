@@ -80,7 +80,7 @@ export function collectSessionMetrics(entries, live) {
   if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType))record(e.data,e.id,e.customType==='subagent-cost-v1');
   if(e.type==='custom'&&e.customType==='relevant-guidance'){
    for(const p of e.data?.read??[])read.add(name(p));
-   for(const p of e.data?.shown??[])if(p.startsWith('skill:'))routed.add(name(p));
+   for(const p of e.data?.shown??[])if(p.startsWith('skill:')||p.startsWith('skillctx:'))routed.add(name(p));
   }
   if(e.type==='custom'&&e.customType==='provider-recovery'&&/^Automatic free read-only group:/.test(e.data?.text??''))groups.push({id:e.id??`legacy:${i}`,time:Date.parse(e.timestamp)||0});
 
@@ -107,6 +107,7 @@ export function collectSessionMetrics(entries, live) {
  for(const a of agents.values()){m.agents++;m.childTokens+=a.tokens;if(a.status==='failed')m.agentFailures++;else if(a.status==='completed')m.agentsCompleted++;else if(a.status==='stopped')m.agentsStopped++;else if(a.status==='paused')m.agentsPaused++;else if(['queued','running','detached'].includes(a.status))m.agentsActive++;else m.agentOutcomeUnknown++;}
  for(const status of workflows.values()){m.workflows++;if(status==='failed')m.workflowFailures++;else if(['queued','running','detached'].includes(status))m.workflowsActive++;else if(['unknown','finished-unknown'].includes(status))m.workflowOutcomeUnknown++;}
  m.skillsRead=[...read].sort();m.skillsPartial=[...partial].filter(s=>!read.has(s)).sort();m.skillsRouted=[...routed].sort();
+ m.distinctTools=Object.keys(m.tools).length;
  const prompt=m.input+m.cacheRead+m.cacheWrite;m.cacheRate=prompt>0?100*m.cacheRead/prompt:null;
  m.footer=[`Swarms ${m.swarms}${m.legacySwarms?` +${m.legacySwarms} legacy`:""}`,`Fusions ${m.fusions}${m.legacyFusions?` +${m.legacyFusions} legacy`:""}`,`Agents ${m.agents} (${m.agentsActive} active)`,`Tools ${m.toolResults}`,`Parent errors ${m.errors+m.modelErrors}`,`Child failures ${m.agentFailures}`,`Workflow failures ${m.workflowFailures}${m.workflowOutcomeUnknown?` (${m.workflowOutcomeUnknown} unknown)`:""}`,`Skills ${m.skillsRead.length+m.skillsPartial.length} opened/${m.skillsRouted.length} suggested`,`Hook checks ${m.telemetry?m.hookCalls:'?'}`,`Compact ${m.compactions}`];
  m.detail=[
@@ -114,7 +115,7 @@ export function collectSessionMetrics(entries, live) {
   `Verified swarm / parallel-group operations: ${m.swarms}; fusions: ${m.fusions}; legacy records with older definitions: ${m.legacySwarms} swarms, ${m.legacyFusions} fusions (may include reused groups or single-output forwarding); recovery plans: ${m.telemetry?m.recoveries:'unknown before telemetry'}`,
   `Accepted/observed child runs: ${m.agents}; last observed active (queued/running/detached): ${m.agentsActive}; completed: ${m.agentsCompleted}; failed: ${m.agentFailures}; stopped: ${m.agentsStopped}; paused: ${m.agentsPaused}; unknown outcome: ${m.agentOutcomeUnknown}`,
   `Workflow controllers: ${m.workflows}; last observed active: ${m.workflowsActive}; failed: ${m.workflowFailures}; unknown outcome: ${m.workflowOutcomeUnknown}. Controllers are not child agents; a reported controller failure may also be a parent tool error.`,
-  `Parent model responses: ${m.responses}; tool calls: ${m.toolCalls}; tool results: ${m.toolResults}`,
+  `Parent model responses: ${m.responses}; tool calls: ${m.toolCalls}; tool results: ${m.toolResults}; distinct tools observed: ${m.distinctTools}. Breadth is descriptive, not a target or proof of effective use.`,
   `Parent errors: ${m.errors} tool + ${m.modelErrors} model; blocked tools: ${m.blocked}; hook errors: ${m.telemetry?m.hookErrors:'unknown'}`,
   `Compactions: ${m.compactions}; recorded child token traffic: ${m.childTokens.toLocaleString('en-US')}`,
   `Parent + compaction token traffic: input ${m.input.toLocaleString('en-US')}, output ${m.output.toLocaleString('en-US')}, cached reads ${m.cacheRead.toLocaleString('en-US')}, cache writes ${m.cacheWrite.toLocaleString('en-US')}`,

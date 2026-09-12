@@ -1,5 +1,7 @@
 # Search and session metrics
 
+The detailed activity report includes distinct tools observed separately from total tool results. Replayed result IDs count once. Skill suggestions include both explicit workflow routes and catalog relevance matches; neither is a successful read or proof of application. Tool breadth describes activity and is not a quality score or usage quota. These counters do not prove that model behavior improved; guidance regression tests verify routing and delivery, not live task outcomes.
+
 Web search returns results directly by default, without opening a browser or waiting for summary approval. Browser curation remains available through `workflow: "summary-review"`; `auto-summary` generates a separate summary without browser review. Existing explicit workflow preferences remain effective. Use `/curator off` to switch an existing installation to direct results.
 
 Automatic provider selection tries the supported session model and then DuckDuckGo. DuckDuckGo tries its Lite endpoint followed by HTML, with a ten-second limit per endpoint, cancellation support, and bot-challenge detection. Custom result counts and recency filters no longer skip the OpenAI route. These fallbacks improve recovery; they do not guarantee provider availability. When every search fails, the tool reports an error and skips the summary and approval wait.

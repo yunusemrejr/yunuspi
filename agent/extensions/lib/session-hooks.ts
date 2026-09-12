@@ -45,13 +45,14 @@ const CI = /\bgh (?:run|workflow)\b/;
 const INSTALL =
 	/\b(?:npm (?:i|install|add)\b|pnpm (?:add|install)\b|yarn add\b|pip3? install\b|cargo add\b|go get\b|apt-get install\b)/;
 /** Swarm/fusion surfaces inside a subagent workflow script. */
-const FUSION = /\b(?:fuse|fusion|swarm|runs\.lanes)\b/;
+const FUSION = /\b(?:fuse|fusion|swarm|runs\.(?:all|lanes|fuseFragments))\b/;
 
 const bashCommand = (args: HookArgs): string =>
 	typeof args.command === "string" ? args.command : "";
 
 const contains = (pattern: RegExp) => (args: HookArgs) =>
 	pattern.test(bashCommand(args));
+const isExecution = (args: HookArgs) => !args.action;
 
 /**
  * Ordered most-specific-first: the fusion rule must win over the generic
@@ -74,6 +75,16 @@ export const HOOK_RULES: readonly HookRule[] = [
 		key: "background-completion",
 		tools: ["bg_run"],
 		line: "Keep the returned task ID and continue independent work. Completion normally notifies; inspect that task's status or output if needed instead of repeated shell polling or duplicate launches.",
+	},
+	{
+		key: "form-reconnaissance",
+		tools: ["web_probe"],
+		line: "Form fields are read-only reconnaissance, not a logged-in browser. Use an available interactive browser for authorized submissions, then verify the resulting page before retrying.",
+	},
+	{
+		key: "task-dependencies",
+		tools: ["todo"],
+		line: "Keep this task list as the owner of dependencies and completion state. Reuse its IDs; mark completion from observed results and preserve blocked work instead of creating a parallel queue.",
 	},
 	{
 		key: "web-verify",
@@ -119,12 +130,14 @@ export const HOOK_RULES: readonly HookRule[] = [
 		key: "subagent-fusion-budget",
 		tools: ["subagent"],
 		line: "Swarms and fusions stay advisory and cheap: free or low-cost low-thinking models, bounded scopes, and the parent reads disagreements before acting.",
-		when: (args) => FUSION.test(JSON.stringify(args)),
+		when: (args) => isExecution(args) && (Array.isArray(args.tasks) && args.tasks.length > 1
+			|| typeof args.workflowScript === "string" && FUSION.test(args.workflowScript)),
 	},
 	{
 		key: "subagent-contract",
 		tools: ["subagent"],
-		line: "Declare each child's file scope and acceptance up front; one writer per file, and read-only scopes prefer free or low-thinking models.",
+		line: "Declare each child's file scope, required tools, relevant skills and acceptance up front. Keep one writer per file; retain native result handles and use completion notifications for queued work.",
+		when: isExecution,
 	},
 	{
 		key: "search-fuzzy",

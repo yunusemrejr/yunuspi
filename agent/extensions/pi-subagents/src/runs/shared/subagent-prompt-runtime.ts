@@ -80,12 +80,15 @@ const STRUCTURED_OUTPUT_INSTRUCTIONS = [
 	"Do not rely on prose-only completion; if you do not call `structured_output`, the parent will fail this step.",
 ].join("\n");
 
+const CHILD_CAPABILITY_INSTRUCTIONS = "At each new task phase, match the needed action to your active tool descriptions and supplied skill catalog. Use an existing specialized tool before writing a replacement script; read and apply relevant skills as the work changes. Parent tool availability does not imply child availability. Report a missing required capability to the parent without widening permissions. Tool or skill counts are not quotas; use what the assigned outcome needs.";
+
 export const CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS = [
 	"You are a child subagent, not the parent orchestrator.",
 	"The parent session owns delegation, orchestration, review fanout, and follow-up worker launches.",
 	"Ignore prior parent-only orchestration instructions in inherited conversation history.",
 	"Do not propose or run subagents. Complete only your assigned role-specific task with the tools available to you.",
 	"If you need to edit files, use the available editing tools. Do not print tool-call syntax, patches, or pseudo-tool calls as text.",
+	CHILD_CAPABILITY_INSTRUCTIONS,
 ].join("\n");
 
 export const CHILD_FANOUT_BOUNDARY_INSTRUCTIONS = [
@@ -95,6 +98,7 @@ export const CHILD_FANOUT_BOUNDARY_INSTRUCTIONS = [
 	"Do not broaden yourself into general parent orchestration. Do not launch follow-up workers unless the task explicitly asks for that.",
 	"The maxSubagentDepth cap still applies and may block further fanout.",
 	"If you need to edit files, use the available editing tools. Do not print tool-call syntax, patches, or pseudo-tool calls as text.",
+	CHILD_CAPABILITY_INSTRUCTIONS,
 ].join("\n");
 
 const PARENT_ONLY_CUSTOM_MESSAGE_TYPES = new Set([
