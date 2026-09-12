@@ -61,6 +61,8 @@
     "mini-preprocessor.ts",
     "self-mutation-guard.ts",
     "session-metrics.ts",
+    "session-cost.ts",
+    "cost-evidence.ts",
     "session-telemetry.ts",
     "bash-routing.ts",
     "data-query.ts",

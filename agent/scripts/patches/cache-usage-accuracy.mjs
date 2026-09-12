@@ -20,7 +20,7 @@ const metadata = `${previousMetadata}
     // Completion tokens already include it: expose the breakdown, never add it.
     const reasoningCount = rawUsage.completion_tokens_details?.reasoning_tokens ?? rawUsage.reasoning_tokens;
     usage.reasoning = Number.isSafeInteger(reasoningCount) && reasoningCount >= 0 ? Math.min(reasoningCount, usage.output) : 0;`;
-const charge = `${previousCharge}
+const previousPriceCharge = `${previousCharge}
     /* PI_PROVIDER_PRICE_ACCURACY_V3 */
     let billingHost = '';
     try { const u = new URL(model.baseUrl); if (u.protocol === 'https:') billingHost = u.hostname; } catch {}
@@ -40,6 +40,41 @@ const charge = `${previousCharge}
       if (!atPeak) for (const key of ['input','output','cacheRead','cacheWrite','total']) usage.cost[key] *= 0.5;
       usage.cost.priceBasis = atPeak ? 'deepseek-peak-2026-09-10' : 'deepseek-off-peak-2026-09-10';
     }`;
+const previousChargeV4 = previousPriceCharge.replace('PI_PROVIDER_PRICE_ACCURACY_V3', 'PI_PROVIDER_PRICE_ACCURACY_V4')
+  .replace("usage.cost.source = 'provider-reported';", "usage.cost.source = 'provider-reported'; usage.cost.complete = true;")
+  .replace("usage.cost.source = 'provider-estimate';", "usage.cost.source = 'provider-estimate'; usage.cost.complete = true;")
+  + `
+    if (!['provider-reported','provider-estimate'].includes(usage.cost.source) &&
+        [rawUsage.prompt_tokens_details?.audio_tokens, rawUsage.completion_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) usage.cost.complete = false;
+    if (usage.cost.source === 'provider-reported' && Number.isFinite(rawUsage.cost_details?.upstream_inference_cost))
+      usage.cost.upstreamInferenceCost = rawUsage.cost_details.upstream_inference_cost;
+    if (usage.cost.source === 'provider-reported' && rawUsage.is_byok === true) usage.cost.byok = true;
+`;
+const servicePriceSource = fs.readFileSync(new URL('./openai-service-pricing.js',import.meta.url),'utf8').trim();
+const charge = previousChargeV4 + `
+    /* PI_CHAT_SERVICE_PRICING_V1 */
+    if (model.provider === 'openai') {
+      ${servicePriceSource}
+      applyServiceTierPricing(usage, serviceTier, model);
+    }
+`;
+const responseCharge = `{
+  /* PI_RESPONSE_PRICE_EVIDENCE_V1 */
+  let host = '';
+  try { const url = new URL(model.baseUrl); if (url.protocol === 'https:') host = url.hostname; } catch {}
+  const raw = response?.usage, cost = output.usage.cost;
+  if (model.provider === 'openrouter' && host === 'openrouter.ai' && Number.isFinite(raw?.cost) && raw.cost >= 0) {
+    cost.estimatedTotal = cost.total; cost.total = raw.cost; cost.source = 'provider-reported'; cost.complete = true;
+    if (Number.isFinite(raw.cost_details?.upstream_inference_cost)) cost.upstreamInferenceCost = raw.cost_details.upstream_inference_cost;
+    if (raw.is_byok === true) cost.byok = true;
+  }
+  if (model.provider === 'deepinfra' && host === 'api.deepinfra.com' && Number.isFinite(raw?.estimated_cost) && raw.estimated_cost >= 0) {
+    cost.estimatedTotal = cost.total; cost.total = raw.estimated_cost; cost.source = 'provider-estimate'; cost.complete = true;
+  }
+  if (!['provider-reported','provider-estimate'].includes(cost.source) &&
+      [raw?.input_tokens_details?.audio_tokens, raw?.output_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) cost.complete = false;
+}
+`;
 const legacyAffinity = `if (cacheRetention !== 'none' && model.provider === 'openrouter' && options?.sessionId) {
       let official = false;
       try { official = new URL(model.baseUrl).hostname === 'openrouter.ai'; } catch {}
@@ -53,13 +88,28 @@ const affinity = `if (cacheRetention !== 'none' && model.provider === 'cerebras'
 const responseMetadata = `cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.cached_tokens >= 0, /* ${marker} */`;
 const count = (s, x) => s.split(x).length - 1;
 export function transform(source, kind, bundled = false) {
+  if (kind === 'chat') {
+    if (source.includes(previousChargeV4) && !source.includes('PI_CHAT_SERVICE_PRICING_V1')) source=source.replace(previousChargeV4,()=>charge);
+    const pairs = [
+      [bundled ? 'function parseChunkUsage(rawUsage,model){' : 'function parseChunkUsage(rawUsage, model) {', 'function parseChunkUsage(rawUsage, model, serviceTier) {'],
+      ...['chunk','choice'].map(owner=>[
+        bundled ? `parseChunkUsage(${owner}.usage,model)` : `parseChunkUsage(${owner}.usage, model)`,
+        `parseChunkUsage(${owner}.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier)`]),
+    ];
+    for (const [old,next] of pairs) {
+      if (count(source,next)===1) continue;
+      if (count(source,old)!==1) throw Error('chat service pricing anchor drift');
+      source=source.replace(old,()=>next);
+    }
+  }
+  if (kind === 'chat' && source.includes(previousPriceCharge)) source = source.replace(previousPriceCharge, () => charge);
   if (kind === 'chat' && source.includes('PI_PROVIDER_PRICE_ACCURACY_V2')) {
     const begin = source.indexOf(previousCharge), end = source.indexOf("\nreturn usage;", begin);
     if (begin < 0 || end < 0) throw Error('cache usage price upgrade: anchor drift');
     source = source.slice(0, begin) + charge + source.slice(end);
   }
 
-  if (kind === 'chat' && source.includes(previousCharge) && !source.includes('PI_PROVIDER_PRICE_ACCURACY_V3')) {
+  if (kind === 'chat' && source.includes(previousCharge) && !source.includes('PI_PROVIDER_PRICE_ACCURACY_V4')) {
     source = source.replace(previousMetadata, () => metadata).replace(previousCharge, () => charge);
   }
   if (source.includes(legacyAffinity)) source = source.replace(legacyAffinity, () => affinity);
@@ -72,7 +122,13 @@ export function transform(source, kind, bundled = false) {
     edits = [[beforeCost, afterCost], [beforeAffinity, afterAffinity]];
   } else {
     const old = bundled ? 'cacheRead:cachedTokens,cacheWrite:cacheWriteTokens' : '                cacheRead: cachedTokens,\n                cacheWrite: cacheWriteTokens';
-    edits = [[old, `${responseMetadata}\n${old}`]];
+    const boundary = bundled ? 'let status=response?.status,incompleteDetails=' : '        // Map status to stop reason. For incomplete responses, retain the provider\'s';
+    const insertion = responseCharge + boundary;
+    if (source.includes(marker) && !source.includes('PI_RESPONSE_PRICE_EVIDENCE_V1')) {
+      if (count(source,boundary)!==1) throw Error('response billing anchor drift');
+      source=source.replace(boundary,()=>insertion);
+    }
+    edits = [[old, `${responseMetadata}\n${old}`], [boundary,insertion]];
   }
   if (source.includes(marker)) {
     for (const [, next] of edits) if (count(source, next) !== 1) throw Error('cache usage accuracy: postcondition drift');

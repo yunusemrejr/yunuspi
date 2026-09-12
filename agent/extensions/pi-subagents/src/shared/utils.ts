@@ -1,3 +1,5 @@
+import { addUsageCost } from "./cost-accounting.ts";
+import { collectSessionCost } from "../../../lib/session-cost.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -329,11 +331,11 @@ function extractToolCallSummaries(messages: Message[] | undefined): ToolCallSumm
 export function sumResultsUsage(results: SingleResult[]): Usage {
 	const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 	for (const result of results) {
+		addUsageCost(usage, result.usage);
 		usage.input += result.usage.input;
 		usage.output += result.usage.output;
 		usage.cacheRead += result.usage.cacheRead;
 		usage.cacheWrite += result.usage.cacheWrite;
-		usage.cost += result.usage.cost;
 		usage.turns += result.usage.turns;
 	}
 	return usage;
@@ -347,6 +349,7 @@ export function toAgentToolUsage(usage: Usage): PiUsage {
 		cacheWrite: usage.cacheWrite,
 		totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: usage.cost },
+		...(usage.costDetails ? {costDetails:{...usage.costDetails}} : {}),
 	};
 }
 
@@ -372,7 +375,10 @@ export function sumResultsCost(results: SingleResult[]): NonNullable<Details["to
 		total.costUsd += result.usage.cost;
 		addNestedCost(total, result.children);
 	}
-	return total;
+	// The footer and budget/completion accounting share the same tree reducer.
+	const evidence = collectSessionCost([{type:'custom',customType:'subagent-cost-v1',data:{runId:'cost-aggregation',results}}]);
+	total.costUsd = evidence.total;
+	return {...total, costDetails:{reported:evidence.reported,estimated:evidence.estimated,unknown:evidence.unknown,subscription:evidence.subscription,seen:evidence.seen,estimatedUsage:evidence.estimatedUsage}};
 }
 
 export function compactForegroundResult(result: SingleResult): SingleResult {

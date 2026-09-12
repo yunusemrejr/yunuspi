@@ -1,3 +1,4 @@
+import { collectSessionCost } from "./lib/session-cost.ts";
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
@@ -54,6 +55,23 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
 }
 
 export default function (pi: any) {
+  pi.registerCommand("cost", {
+    description: "Session cost by model, child runs and auxiliary usage, with pricing coverage",
+    handler: async (_args: string, ctx: any) => {
+      const cost = collectSessionCost(ctx.sessionManager.getEntries());
+      const money = (n: number) => n > 0 && n < 0.000001 ? `$${n.toExponential(3)}` : `$${n.toFixed(6)}`;
+      const lines = [
+        `${cost.formatted} total (USD)`,
+        `Provider-reported: ${money(cost.reported)}; estimated: ${money(cost.estimated)}.`,
+        ...cost.rows.map((r: any) => `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? ' estimated' : ''}${r.unknown ? ' + unpriced usage' : ''}${r.subscription ? ' · subscription' : ''}`),
+        ...(cost.pending ? [`${cost.pending} child operation(s) awaiting final cost evidence.`] : []),
+        ...(cost.unknown ? ['Partial total: some recorded activity has missing prices or usage.'] : []),
+        'Main responses, child runs, retries, compactions and usage-bearing tools are included when recorded. Repeated child snapshots count once.',
+        'Estimates use the rates attached to each response. Provider-reported amounts take precedence. Unreported external tools, storage, taxes, credit purchases and subscription fees are outside this total.',
+      ];
+      ctx.ui.notify(lines.join('\n'), 'info');
+    },
+  });
   const toolJson = createToolJsonCompactor();
   let riskAnnounced = false;
   let requested: number | undefined;

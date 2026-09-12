@@ -1,3 +1,4 @@
+import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 /**
@@ -144,11 +145,11 @@ function redactResultPrompt<T extends SingleResult>(result: T): T {
 }
 
 function sumUsage(target: Usage, source: Usage): void {
+	addUsageCost(target, source);
 	target.input += source.input;
 	target.output += source.output;
 	target.cacheRead += source.cacheRead;
 	target.cacheWrite += source.cacheWrite;
-	target.cost += source.cost;
 	target.turns += source.turns;
 }
 
@@ -1107,6 +1108,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			}
 			shared.transcriptWriter?.writeChildEvent(evt);
 			shared.orcaProgressTab?.event(evt);
+			addAuxiliaryUsage(result.usage, evt);
 			if (evt.type === "compaction_start") compactionStartedReceived = true;
 			if (evt.type === "compaction_end" && evt.willRetry === true) {
 				compactionStartedReceived = false;
@@ -1191,6 +1193,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			if (evt.type === "message_end" && evt.message) {
 				result.messages!.push(evt.message);
 				if (evt.message.role === "assistant") {
+					addUsageCost(result.usage, evt.message.usage, evt.message.provider, evt.message.model);
 					result.usage.turns++;
 					progress.turnCount = result.usage.turns;
 					const toolCalls = Array.isArray(evt.message.content)
@@ -1205,7 +1208,6 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 						result.usage.output += u.output || 0;
 						result.usage.cacheRead += u.cacheRead || 0;
 						result.usage.cacheWrite += u.cacheWrite || 0;
-						result.usage.cost += u.cost?.total || 0;
 						progress.tokens = result.usage.input + result.usage.output;
 						progress.inputTokens = result.usage.input;
 						progress.outputTokens = result.usage.output;

@@ -1,3 +1,4 @@
+import { addUsageCost } from "../../shared/cost-accounting.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { resultFilePath, resultPayloadPathForSessionRun } from "./result-files.ts";
@@ -85,11 +86,11 @@ function usageFromAttempts(attempts: ModelAttempt[] | undefined): Usage | undefi
 	const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 	for (const attempt of attempts) {
 		if (!attempt.usage) continue;
+		addUsageCost(usage, attempt.usage);
 		usage.input += attempt.usage.input;
 		usage.output += attempt.usage.output;
 		usage.cacheRead += attempt.usage.cacheRead;
 		usage.cacheWrite += attempt.usage.cacheWrite;
-		usage.cost += attempt.usage.cost;
 		usage.turns += attempt.usage.turns;
 	}
 	return usage.input !== 0 || usage.output !== 0 || usage.cacheRead !== 0 || usage.cacheWrite !== 0 || usage.cost !== 0 || usage.turns !== 0
