@@ -19,7 +19,13 @@
     "provider-gate.ts",
     "reasoning-aids.ts",
     "health-log.ts",
-    "continuation-notice.ts"
+    "continuation-notice.ts",
+    "bash-router.ts",
+    "git-tools.ts",
+    "http-tools.ts",
+    "bulk-edit.ts",
+    "sys-probe.ts",
+    "session-hooks.ts"
   ],
   "lib": [
     "stall-core.ts",
@@ -55,7 +61,12 @@
     "mini-preprocessor.ts",
     "self-mutation-guard.ts",
     "session-metrics.ts",
-    "session-telemetry.ts"
+    "session-telemetry.ts",
+    "bash-routing.ts",
+    "data-query.ts",
+    "bulk-edit.ts",
+    "sys-probe.ts",
+    "session-hooks.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

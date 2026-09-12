@@ -2,12 +2,12 @@
 name: worker
 description: Implementation agent for normal tasks and approved oracle handoffs
 aliases: developer, coder, implementer, develop
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, context_slice, symbol_expand, ast_diff, obs_read
+tools: read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true

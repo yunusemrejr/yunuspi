@@ -1,8 +1,8 @@
 ---
 name: researcher
 description: Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief
-tools: read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, context_slice, symbol_expand, ast_diff, obs_read
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+tools: read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, http_request, context_slice, symbol_expand, ast_diff, obs_read
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../http-tools.ts
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true

@@ -1,10 +1,10 @@
 ---
 name: delegate
 description: Lightweight subagent that inherits the parent model with no default reads
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts
 systemPromptMode: append
 inheritProjectContext: true
-tools: read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, context_slice, symbol_expand, ast_diff, obs_read
+tools: read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read
 inheritSkills: false
 ---
 

@@ -2,8 +2,8 @@
 name: oracle
 aliases: advisor
 description: High-context decision-consistency oracle that protects inherited state and prevents drift
-tools: read, grep, find, ls, bash, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, context_slice, symbol_expand, ast_diff, obs_read
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+tools: read, grep, find, ls, bash, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, sys_probe, context_slice, symbol_expand, ast_diff, obs_read
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../sys-probe.ts
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true

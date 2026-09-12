@@ -5,6 +5,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {numericCheck} from './numeric-checks.ts';
 import {inspectText, inspectImage, convertValue} from './artifact-checks.ts';
+import {parseData, executeDataQuery} from './data-query.ts';
 
 const disabled = () => process.env.PI_SMALL_TOOLS === 'off' || process.env.PI_REASONING_AIDS === 'off';
 const TEXT_LIMIT = 65536, IMAGE_LIMIT = 1048576;
@@ -47,8 +48,9 @@ async function readArtifact(file: unknown, cwd: unknown, limit: number, prefix: 
 
 export default function registerSmallTools(pi: any) {
   if (disabled() && process.env.PI_SUBAGENT_CHILD !== '1') return;
-  function register(name: string, description: string, parameters: any, run: (p: any, ctx: any, signal: any) => unknown) {
+  function register(name: string, description: string, parameters: any, run: (p: any, ctx: any, signal: any) => unknown, guidelines?: string[]) {
     pi.registerTool({name,label:name.replaceAll('_',' '),description,parameters,
+      ...(guidelines && guidelines.length ? {promptGuidelines: guidelines} : {}),
       async execute(_id: any, p: any, signal: any, _onUpdate: any, ctx: any) {
         try {
           if (disabled()) throw Error('Small tools are disabled');
@@ -71,7 +73,8 @@ export default function registerSmallTools(pi: any) {
       values:Type.Optional(numbers()),actual:Type.Optional(Type.Union([numbers(),list(str())])),predicted:Type.Optional(Type.Union([numbers(),list(str())])),
       labels:Type.Optional(Type.Array(str(),{maxItems:32})),a:Type.Optional(numbers()),b:Type.Optional(numbers()),
       train:Type.Optional(list(str())),validation:Type.Optional(list(str())),test:Type.Optional(list(str())),
-    }),p=>numericCheck(p));
+    }),p=>numericCheck(p),
+    ['Use math_check for numeric summaries, metrics, vector comparisons and train/validation/test overlap instead of computing by hand.']);
   register('artifact_check',
     'Inspect Unicode controls, normalization and line endings (text), or PNG/JPEG/GIF/WebP header dimensions (image). File paths stay within cwd. Header metadata does not verify full image decoding; Unicode analysis does not prove font/glyph rendering.',
     object({operation:Type.Union(['text','image'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
@@ -86,8 +89,39 @@ export default function registerSmallTools(pi: any) {
       try { text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes); }
       catch { throw Error('Text file is not valid UTF-8'); }
       return inspectText(text);
-    });
+    },
+    ['Use artifact_check to verify text encoding/Unicode state or image header dimensions before claiming an artifact is valid.']);
   register('value_convert',
     'Convert supplied text: strict UTF-8 Base64, URI component encoding, or JSON format/compact. Returns bounded converted text; never evaluates code or writes a file. Use when exact encoding or formatting is needed.',
-    object({operation:Type.Union(['json_format','json_compact','base64_encode','base64_decode','url_encode','url_decode'].map(operation)),text:str(TEXT_LIMIT)}),p=>convertValue(p));
+    object({operation:Type.Union(['json_format','json_compact','base64_encode','base64_decode','url_encode','url_decode'].map(operation)),text:str(TEXT_LIMIT)}),p=>convertValue(p),
+    ['Use value_convert for exact base64, URL-component or JSON encoding and formatting instead of shell one-liners.']);
+  register('data_query',
+    'Read and query JSON or YAML from a workspace file or supplied text. Use this INSTEAD of bash `jq`, `yq` or `python -c` for reads: get a path, list keys, count, filter an array by field, or convert JSON/YAML/CSV. Bounded output; never evaluates code or writes a file.',
+    object({
+      op:Type.Union(['get','keys','count','filter','convert'].map(operation)),
+      file:Type.Optional(Type.String({minLength:1,maxLength:1024})),
+      text:Type.Optional(str(TEXT_LIMIT)),
+      path:Type.Optional(str(1024)),
+      field:Type.Optional(str(256)),
+      equals:Type.Optional(Type.Union([Type.String({maxLength:512}),Type.Number({}),Type.Boolean({})])),
+      format:Type.Optional(Type.Union(['json','yaml','csv'].map(operation))),
+      limit:Type.Optional(Type.Integer({minimum:1,maximum:200})),
+    }),async (p,ctx,signal) => {
+      if (!p || typeof p !== 'object' || Array.isArray(p)) throw Error('Invalid input');
+      if (('file' in p) === ('text' in p)) throw Error('Supply exactly one of file or text');
+      if (!['get','keys','count','filter','convert'].includes(p.op)) throw Error(`Unsupported data operation: ${String(p.op)}`);
+      let data: unknown;
+      if (typeof p.file === 'string') {
+        const artifact = await readArtifact(p.file, ctx?.cwd, 2*1024*1024, false, signal);
+        let text: string;
+        try { text = new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(artifact.bytes); }
+        catch { throw Error('File is not valid UTF-8 text'); }
+        data = parseData(text, p.file);
+      } else {
+        if (typeof p.text !== 'string') throw Error('Text must be a string');
+        data = parseData(p.text);
+      }
+      return executeDataQuery({op:p.op,data,path:p.path,field:p.field,equals:p.equals,format:p.format,limit:p.limit});
+    },
+    ['Use data_query to read or reshape JSON/YAML values instead of jq, yq or python -c.']);
 }

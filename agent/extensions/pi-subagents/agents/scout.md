@@ -1,8 +1,8 @@
 ---
 name: scout
 description: Fast codebase recon that returns compressed context for handoff
-tools: read, grep, find, ls, bash, write, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, context_slice, symbol_expand, ast_diff, obs_read
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts
+tools: read, grep, find, ls, bash, write, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, sys_probe, context_slice, symbol_expand, ast_diff, obs_read
+subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../sys-probe.ts
 thinking: low
 systemPromptMode: replace
 inheritProjectContext: true
