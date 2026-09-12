@@ -67,7 +67,7 @@ export function userSkipsProjectTests(input: string): boolean {
   return [...matches].some(match => !/^\s+(?:for|in|on|under|inside|against|of|that|which)\b/i.test(prose.slice(match.index! + match[0].length)));
 }
 
-export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts } = {}) {
+export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts; onFacts?: (facts: any, observeChanges: boolean) => void } = {}) {
   let state = fresh(), facts: any, baseline: Record<string, string> | undefined, epoch = 0, active = true;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1;
@@ -85,14 +85,21 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     save();
   };
   const scan = async (ctx: any, observeChanges = state.changed.length > 0) => {
-    if (!enabled() || !active || !ctx?.cwd) return;
+    if ((!enabled() && !options.onFacts) || !active || !ctx?.cwd) return;
     const ticket = epoch;
     const perform = async () => {
       if (ticket !== epoch) return;
       let next: any;
       try { next = await discover(ctx.cwd, ctx.signal); }
-      catch { if (ticket === epoch) facts = { unavailable: true, tests: [], manifests: [], scripts: [], truncated: true }; return; }
+      catch {
+        if (ticket === epoch) {
+          facts = { unavailable: true, tests: [], manifests: [], scripts: [], truncated: true };
+          options.onFacts?.({ ...facts, root: state.root || ctx.cwd, reviewSources: {} }, observeChanges);
+        }
+        return;
+      }
       if (ticket !== epoch || !active) return;
+      options.onFacts?.(next, observeChanges);
       if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; starts.clear(); }
       state.root = next.root;
       if (baseline && observeChanges) {
@@ -105,7 +112,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };
-  const summary = () => ({ ...state, need: projectTestNeed(state), facts: facts ? { ...facts, sources: undefined } : { unavailable: true },
+  const summary = () => ({ ...state, disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
     evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit.' });
   const advice = () => {
     const need = projectTestNeed(state);
@@ -176,7 +183,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
     },
     async result(event: any, ctx: any) {
-      if (!enabled() || !active) return;
+      if ((!enabled() && !options.onFacts) || !active) return;
       const ticket = epoch;
       const start = starts.get(event.toolCallId); starts.delete(event.toolCallId);
       if (['write', 'edit', 'bulk_edit', 'bash', 'bg_run'].includes(event.toolName)) {

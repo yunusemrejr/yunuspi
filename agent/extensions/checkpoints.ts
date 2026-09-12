@@ -43,6 +43,7 @@ import {
 	fileCheckpointText,
 } from "./lib/checkpoint-files.ts";
 import { createProjectTestLifecycle } from "./lib/project-tests.ts";
+import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -508,7 +509,8 @@ function emit(
 export default function checkpointsExtension(pi: ExtensionAPI) {
 	// Keep all tools/hooks disabled under the documented PI_CHECKPOINTS=0 contract.
 	if (DISABLED) return;
-	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW });
+	const quality = createQualityReviewLifecycle(pi, { shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot() });
+	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe) => quality.observe(facts, observe) });
 	let st: CheckpointState | null = null;
 	const pending = new Map<string, string>();
 	let mutationVersion = 0;
@@ -525,12 +527,12 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		if (s.editsSinceCommand < EDITS_WITHOUT_VERIFY)
 			pending.delete("unverified-edits");
 		if (s.verifyStrikes < VERIFY_STRIKES) pending.delete("verify-failed");
-		const content = [...pending.values(), projectTests.notice()].filter(Boolean).join("\n");
+		const content = [...pending.values(), projectTests.notice(), quality.notice()].filter(Boolean).join("\n");
 		pending.clear();
 		return content || undefined;
 	});
-	pi.on("input", event => projectTests.input(event));
-	pi.on("agent_settled", (event, ctx) => projectTests.settled(event, ctx));
+	pi.on("input", event => { projectTests.input(event); quality.input(event); });
+	pi.on("agent_settled", async (event, ctx) => { await projectTests.settled(event, ctx); await quality.settled(event, ctx); });
 	pi.on("before_agent_start", async (_event, ctx) => {
 		pending.delete("unverified-edits");
 		pending.delete("verify-failed");
@@ -546,6 +548,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			starts.clear();
 		}
 		await projectTests.message(event, ctx);
+		quality.message(event);
 	});
 	pi.on("tool_call", async (event, ctx) => {
 		if (
@@ -565,12 +568,12 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		mutationVersion = 0;
 		lastMutationBatch = undefined;
 		writeState(st);
-		await projectTests.restore(ctx);
+		quality.restore(ctx); await projectTests.restore(ctx);
 	});
-	pi.on("session_switch", (_event, ctx) => projectTests.restore(ctx));
+	pi.on("session_switch", async (_event, ctx) => { quality.restore(ctx); await projectTests.restore(ctx); });
 	pi.on("session_start", async (_event, ctx) => {
 		try {
-			await projectTests.restore(ctx);
+			quality.restore(ctx); await projectTests.restore(ctx);
 			// Restart/reload begins a new heuristic window, not a claim about inherited edits.
 			st = defaultState(sidOf(ctx));
 			pending.clear();
@@ -608,6 +611,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	pi.on("tool_result", async (event, ctx) => {
 		try {
 			await projectTests.result(event, ctx);
+			quality.result(event, ctx);
 			const sid = sidOf(ctx);
 			const s = load(sid);
 			const start = starts.get(event.toolCallId);
@@ -687,6 +691,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		projectTests.shutdown();
+		quality.shutdown();
 		try {
 			writeState(load(sidOf(ctx)));
 		} catch {

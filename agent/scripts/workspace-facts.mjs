@@ -242,10 +242,11 @@ export function isProjectTestSource(file) {
   return !file.split(/[\\/]/).some(part => TEST_SKIP.test(part)) && TEST_SOURCE.test(file) && !/\.min\.[cm]?js$/i.test(file);
 }
 
+const reviewSkip = part => TEST_SKIP.test(part) && !/^(?:\.github|\.circleci|\.gitlab-ci\.yml)$/.test(part);
 export function isProjectReviewSource(file) {
-  return !file.split(/[\\/]/).some(part => TEST_SKIP.test(part)) &&
+  return !file.split(/[\\/]/).some(reviewSkip) &&
     !/(?:^|\/)(?:auth|settings|models|credentials)\.json$|\.(?:min|generated)\./i.test(file) &&
-    (isProjectTestSource(file) || /\.(?:html?|css|scss|sass|less|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(file));
+    (TEST_SOURCE.test(file) || /\.(?:html?|css|scss|sass|less|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(file));
 }
 
 /** Local test setup and source metadata only. Never executes project code,
@@ -267,7 +268,7 @@ export async function projectTestFacts(cwd, signal, options = {}) {
       for await (const entry of directory) {
         signal?.throwIfAborted();
         if (++result.entries > maxEntries || Date.now() >= deadline) { result.truncated = true; break; }
-        if (entry.isSymbolicLink() || TEST_SKIP.test(entry.name)) continue;
+        if (entry.isSymbolicLink() || reviewSkip(entry.name)) continue;
         const absolute = path.join(dir, entry.name), relative = path.relative(root, absolute).split(path.sep).join('/');
         if (entry.isDirectory()) {
           if (depth < 5) queue.push({ dir: absolute, depth: depth + 1 });
