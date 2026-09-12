@@ -1,3 +1,4 @@
+import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
@@ -438,11 +439,11 @@ function usageFromAttempts(attempts: ModelAttempt[] | undefined): Usage | undefi
 	const usage = emptyUsage();
 	for (const attempt of attempts) {
 		if (!attempt.usage) continue;
+		addUsageCost(usage, attempt.usage);
 		usage.input += attempt.usage.input;
 		usage.output += attempt.usage.output;
 		usage.cacheRead += attempt.usage.cacheRead;
 		usage.cacheWrite += attempt.usage.cacheWrite;
-		usage.cost += attempt.usage.cost;
 		usage.turns += attempt.usage.turns;
 	}
 	return usage.input !== 0 || usage.output !== 0 || usage.cacheRead !== 0 || usage.cacheWrite !== 0 || usage.cost !== 0 || usage.turns !== 0
@@ -830,6 +831,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				compactionStartedReceived = false;
 				afterCompactionSettlement = false;
 			}
+			addAuxiliaryUsage(usage, event);
 			const lifecycleAction = projectChildLifecycle(event, false, childLifecycleState);
 			if (event.type === "agent_settled" && lifecycleAction === "start-drain") {
 				agentSettledReceived = true;
@@ -914,13 +916,13 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				}
 				if (event.message.errorMessage) assistantError = event.message.errorMessage;
 				const eventUsage = event.message.usage;
+				addUsageCost(usage, eventUsage, event.message.provider, event.message.model);
+				usage.turns++;
 				if (eventUsage) {
-					usage.turns++;
 					usage.input += eventUsage.input ?? eventUsage.inputTokens ?? 0;
 					usage.output += eventUsage.output ?? eventUsage.outputTokens ?? 0;
 					usage.cacheRead += eventUsage.cacheRead ?? 0;
 					usage.cacheWrite += eventUsage.cacheWrite ?? 0;
-					usage.cost += eventUsage.cost?.total ?? 0;
 				}
 				if (isTerminalAssistantStop(event.message)) {
 					if (!event.message.errorMessage && extractTextFromContent(event.message.content).trim()) assistantError = undefined;

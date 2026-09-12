@@ -245,6 +245,9 @@ export interface Usage {
 	cacheWrite: number;
 	cost: number;
 	turns: number;
+	/** Preserved across retries, workflow aggregation, detachment and replay. */
+	costDetails?: { reported: number; estimated: number; unknown: boolean; subscription: boolean; seen: boolean; estimatedUsage?: boolean };
+	costByModel?: Array<{route: string; evidence: NonNullable<Usage['costDetails']>}>;
 }
 
 export interface ToolBudgetConfig {
@@ -830,6 +833,7 @@ export type CostSummary = {
 	inputTokens: number;
 	outputTokens: number;
 	costUsd: number;
+	costDetails?: Usage['costDetails'];
 };
 
 export type PublicNestedRunSummary = Pick<
@@ -1311,11 +1315,23 @@ export interface SpawnBudgetSnapshot {
 }
 
 /** Slim per-child projection of a terminal result payload, safe to surface in tool_result details. */
+export interface CostAccountingNode {
+    id?: string;
+    runId?: string;
+    sessionFile?: string;
+    totalCost?: Pick<CostSummary, 'costUsd' | 'costDetails'>;
+    children?: CostAccountingNode[];
+    steps?: Array<{children?: CostAccountingNode[]}>;
+    accountingIncomplete?: boolean;
+}
+
 export interface WaitCompletionChild {
 	agent?: string;
 	/** Child run identity where the producer records one (workflow children); artifact files are keyed by it. */
 	runId?: string;
-	/** Bounded accounting projection used by /subagent-cost after async completion. */
+	totalCost?: Pick<CostSummary, 'costUsd' | 'costDetails'>;
+	children?: CostAccountingNode[];
+	/** Bounded accounting projection used by /cost after async completion. */
 	usage?: Usage;
 	/** Persisted Pi child session when available. */
 	sessionFile?: string;

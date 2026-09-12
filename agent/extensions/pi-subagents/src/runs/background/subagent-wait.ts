@@ -1,3 +1,4 @@
+import { addUsageCost } from "../../shared/cost-accounting.ts";
 /**
  * `bg_wait` tool: block the current turn until outstanding async runs
  * or a named remembered detached foreground run finishes.
@@ -324,11 +325,11 @@ function completionUsage(completions: WaitCompletion[] | undefined): Usage | und
 		for (const child of completion.results ?? []) {
 			if (!child.usage || (child.usage.input === 0 && child.usage.output === 0 && child.usage.cacheRead === 0 && child.usage.cacheWrite === 0 && child.usage.cost === 0 && child.usage.turns === 0)) continue;
 			projected = true;
+			addUsageCost(usage, child.usage);
 			usage.input += child.usage.input;
 			usage.output += child.usage.output;
 			usage.cacheRead += child.usage.cacheRead;
 			usage.cacheWrite += child.usage.cacheWrite;
-			usage.cost += child.usage.cost;
 			usage.turns += child.usage.turns;
 		}
 	}

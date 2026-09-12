@@ -1,4 +1,7 @@
 import { sumResultsCost } from "../shared/utils.ts";
+import { readCostEvidence } from "../../../lib/cost-evidence.ts";
+import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
+
 /** Persist compact accounting evidence, never prompts or tool output. Footer
  * owns summation/deduplication; this bridges detached completion into history. */
 export function persistSubagentCost(pi: any, state: any, payload: any): void {
@@ -17,8 +20,10 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     ...(r?.timedOut ? {timedOut:true} : {}),
     ...(typeof r?.runId === 'string' ? {runId:r.runId} : {}),
     ...(typeof r?.sessionFile === 'string' ? {sessionFile:r.sessionFile} : {}),
-    usage: r?.usage ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns} : undefined,
-    totalCost: r?.usage ? {costUsd:Math.max(sumResultsCost([r]).costUsd, r.totalCost?.costUsd ?? 0)} : r?.totalCost ? {costUsd:r.totalCost.costUsd} : undefined,
+    ...(typeof r?.model === 'string' ? {model:r.model} : {}),
+    ...(r?.children ? {children:projectCostChildren(r.children)} : {}),
+    usage: r?.usage ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
+    totalCost: r?.usage ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
   }));
   pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['swarms','fusions','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
   try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}

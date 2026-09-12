@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import { readCostEvidence } from "../../../../lib/cost-evidence.ts";
+import { projectCostByModel, projectCostChildren } from "../../shared/cost-accounting.ts";
 import type { ArtifactPaths, SubagentState, Usage, WaitCompletion, WaitCompletionChild } from "../../shared/types.ts";
 import type { AsyncRunSummary } from "./async-status.ts";
 import { readCompletionReplay, writeCompletionReplay } from "./completion-replay.ts";
@@ -24,7 +26,7 @@ function projectedUsage(value: unknown): Usage | undefined {
 	const cost = nonNegativeNumber(record.cost);
 	const turns = nonNegativeNumber(record.turns);
 	if (input === undefined || output === undefined || cacheRead === undefined || cacheWrite === undefined || cost === undefined || turns === undefined || !Number.isSafeInteger(turns)) return undefined;
-	return { input, output, cacheRead, cacheWrite, cost, turns };
+	return { input, output, cacheRead, cacheWrite, cost, turns, ...(record.costDetails ? {costDetails:readCostEvidence(record)} : {}), ...(record.costByModel ? {costByModel:projectCostByModel(record.costByModel)} : {}) };
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -62,6 +64,10 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 			const agent = asNonEmptyString(child.agent);
 			const childRunId = asNonEmptyString(child.runId);
 			const usage = projectedUsage(child.usage);
+            const total = child.totalCost as {costUsd?:unknown;costDetails?:unknown} | undefined;
+            const totalCost = total && nonNegativeNumber(total.costUsd) !== undefined
+              ? {costUsd:total.costUsd as number,...(total.costDetails?{costDetails:readCostEvidence({costDetails:total.costDetails})}:{})} : undefined;
+            const children = projectCostChildren(child.children);
 			const sessionFile = asNonEmptyString(child.sessionFile);
 			const error = asNonEmptyString(child.error);
 			const model = asNonEmptyString(child.model);
@@ -71,6 +77,8 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 				...(agent ? { agent } : {}),
 				...(childRunId ? { runId: childRunId } : {}),
 				...(usage ? { usage } : {}),
+                ...(totalCost ? {totalCost} : {}),
+                ...(children ? {children} : {}),
 				...(sessionFile ? { sessionFile } : {}),
 				...(typeof child.success === "boolean" ? { success: child.success } : {}),
 				...(outputState ? { outputState } : {}),

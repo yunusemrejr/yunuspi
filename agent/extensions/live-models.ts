@@ -97,7 +97,7 @@ function wireFor(providerId: string): { api: string; baseUrl: string } {
 	}
 }
 
-type PiModel = ProviderModelConfig & { outputLimitEstimated?: boolean };
+type PiModel = Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
 type RefreshModelContext = Parameters<
 	NonNullable<ProviderConfig["refreshModels"]>
 >[0];
@@ -480,6 +480,8 @@ function mapOpenRouterModel(m: OrLiveModel): PiModel {
 		cost: {
 			input: toPerMillion(m.pricing?.prompt),
 			output: toPerMillion(m.pricing?.completion),
+			missing: ['input','output'].filter((_,i) => {const value=m.pricing?.[i===0?'prompt':'completion'];return value === undefined || value === null || value === '' || !Number.isFinite(Number(value)) || Number(value)<0;}),
+			knownFree: ['prompt','completion'].every(key=>m.pricing?.[key] !== undefined && m.pricing[key] !== null && m.pricing[key] !== '' && Number(m.pricing[key]) === 0),
 			cacheRead: toPerMillion(m.pricing?.input_cache_read ?? m.pricing?.prompt),
 			cacheWrite: toPerMillion(m.pricing?.input_cache_write ?? m.pricing?.prompt),
 		},
@@ -743,6 +745,7 @@ function mapOrcaModel(
 		cost = {
 			input: perM(live.pricing.prompt_per_million, live.pricing.prompt),
 			output: perM(live.pricing.completion_per_million, live.pricing.completion),
+			missing: live.pricing.completion_per_million === undefined && live.pricing.completion === undefined ? ['output'] : [],
 			cacheRead: live.pricing.input_cache_read !== undefined ? toPerMillion(live.pricing.input_cache_read) : perM(live.pricing.prompt_per_million, live.pricing.prompt) * (catalog?.cache_ratio ?? 1),
 			cacheWrite: live.pricing.input_cache_write !== undefined ? toPerMillion(live.pricing.input_cache_write) : perM(live.pricing.prompt_per_million, live.pricing.prompt),
 		};
@@ -750,6 +753,7 @@ function mapOrcaModel(
 		const inputCost = (catalog?.model_ratio ?? 0) * 2 * groupRatio;
 		cost = {
 			input: inputCost,
+			missing: catalog?.model_ratio === undefined ? ['input','output','cacheRead'] : [],
 			output: inputCost * (catalog?.completion_ratio ?? 1),
 			cacheRead: inputCost * (catalog?.cache_ratio ?? 1),
 			cacheWrite: 0,
@@ -943,6 +947,7 @@ async function refreshTogether(
 			cost: {
 				input: m.pricing?.input ?? fromStore?.cost?.input ?? 0,
 				output: m.pricing?.output ?? fromStore?.cost?.output ?? 0,
+				missing: ['input','output'].filter(key => !Number.isFinite(m.pricing?.[key] ?? fromStore?.cost?.[key])),
 				cacheRead: m.pricing?.cached_input ?? (m.pricing?.input !== undefined ? m.pricing.input : fromStore?.cost?.cacheRead ?? fromStore?.cost?.input ?? 0),
 				cacheWrite: 0,
 			},
@@ -1034,6 +1039,7 @@ function mapFriendliModel(m: FriendliLiveModel): PiModel | undefined {
 		cost: {
 			input: toPerMillion(m.pricing?.input),
 			output: toPerMillion(m.pricing?.output),
+			missing: ['input','output'].filter(key => {const value=m.pricing?.[key];return value === undefined || value === null || value === '' || !Number.isFinite(Number(value)) || Number(value)<0;}),
 			cacheRead: toPerMillion(m.pricing?.input_cache_read ?? m.pricing?.input),
 			cacheWrite: 0,
 		},
@@ -1123,6 +1129,7 @@ function mapRunInfraModel(m: RunInfraLiveModel): PiModel | undefined {
 		cost: {
 			input: m.pricing?.input ?? 0,
 			output: m.pricing?.output ?? 0,
+			missing: ['input','output'].filter(key => !Number.isFinite(m.pricing?.[key]) || m.pricing[key]<0),
 			cacheRead: m.cached_input_price_usd_per_mtok ?? m.cached_input_price ?? m.pricing?.input ?? 0,
 			cacheWrite: 0,
 		},
