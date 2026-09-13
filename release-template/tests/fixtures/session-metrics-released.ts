@@ -11,19 +11,6 @@ export function collectSessionMetrics(entries, live) {
  const terminal=new Set(['completed','failed','stopped']);
  const hookNames=new Set(['input','before_agent_start','context','before_provider_request','tool_call','tool_result','session_before_switch','session_before_fork','session_before_compact','session_before_tree']);
  const normalizedState=v=>v==='complete'?'completed':v==='rejected'?'failed':['queued','running','completed','failed','stopped','paused','detached'].includes(v)?v:'unknown';
- // Older automatic-helper ledgers used a wrapper ID and omitted the native
- // ID. Repair only exact run-0 session paths naming an observed single run;
- // never infer identity from model, timing, status, or a neighboring entry.
- const nativeSingles=new Set(entries.filter(e=>e.type==='custom'&&e.customType==='subagent-lifecycle-v1'&&e.data?.mode==='single').map(e=>e.data.runId));
- const helperRuns=new Map();
- for(const e of entries){
-  const d=e.type==='custom'&&e.customType==='subagent-cost-v1'?e.data:undefined;
-  if(!d||!/^(?:auto-assist|quality-review)-/.test(d.runId)||d.results?.length!==1)continue;
-  const r=d.results[0];
-  if(!r||r.runId||(r.index??0)!==0||typeof r.sessionFile!=='string'||r.sessionFile.length>4096||r.sessionFile.split('/').some(p=>p==='.'||p==='..'))continue;
-  const id=r.sessionFile.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];
-  if(id&&nativeSingles.has(id))helperRuns.set(d.runId,helperRuns.has(d.runId)&&helperRuns.get(d.runId)!==id?null:id);
- }
  const record=(d,fallback,accounted=false)=>{
   if(!d||typeof d!=='object')return;
   const root=d.runId||d.asyncId||d.id||fallback;
@@ -45,8 +32,7 @@ export function collectSessionMetrics(entries, live) {
   for(const [i,r] of rows.entries()) {
    if(!r||typeof r!=='object'||r.status==='pending'||r.state==='pending')continue;
    const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}`];
-   const nativeId=r.runId??(rows.length===1&&(r.index??i)===0?helperRuns.get(root):undefined);
-   if(nativeId)ids.push(`${nativeId}:0`);
+   if(r.runId)ids.push(`${r.runId}:0`);
    const keys=[...new Set(ids.map(id=>aliases.get(id)??id))];
    const key=keys.find(k=>agents.has(k))??keys[0];
    let old=agents.get(key)||{};
@@ -119,9 +105,6 @@ export function collectSessionMetrics(entries, live) {
  m.legacyFusions+=new Set(legacyFusions.filter(g=>g.time<measuredSince).map(g=>g.id)).size;
  for(const h of Object.values(m.hooks)){m.hookCalls+=h.calls;m.hookChanged+=h.changed;m.hookErrors+=h.errors;m.trimmedChars+=h.removedChars;m.addedChars+=h.addedChars;}
  for(const a of agents.values()){m.agents++;m.childTokens+=a.tokens;if(a.status==='failed')m.agentFailures++;else if(a.status==='completed')m.agentsCompleted++;else if(a.status==='stopped')m.agentsStopped++;else if(a.status==='paused')m.agentsPaused++;else if(['queued','running','detached'].includes(a.status))m.agentsActive++;else m.agentOutcomeUnknown++;}
- // Diagnostics consume the same identity resolution and final outcomes.
- m.agentAliases=Object.fromEntries(aliases);
- m.agentStates=Object.fromEntries([...agents].map(([key,a])=>[key,a.status]));
  for(const status of workflows.values()){m.workflows++;if(status==='failed')m.workflowFailures++;else if(['queued','running','detached'].includes(status))m.workflowsActive++;else if(['unknown','finished-unknown'].includes(status))m.workflowOutcomeUnknown++;}
  m.skillsRead=[...read].sort();m.skillsPartial=[...partial].filter(s=>!read.has(s)).sort();m.skillsRouted=[...routed].sort();
  m.distinctTools=Object.keys(m.tools).length;

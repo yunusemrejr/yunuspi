@@ -86,6 +86,8 @@ export async function renderCapture(p, output, signal) {
     browserStarting = false,
     timer,
     renderer = "Poppler pdftoppm";
+  let stage = "source";
+  let navigationFailure;
   const start = Date.now();
   const abort = () => {
     browser?.close().catch(() => {});
@@ -115,6 +117,7 @@ export async function renderCapture(p, output, signal) {
       const count = Number(info.stdout.match(/^Pages:\s+(\d+)/m)?.[1]);
       if (!count || page > count)
         throw Error(`PDF page ${page} exceeds ${count} pages`);
+      stage = "capture";
       await exec(
         "pdftoppm",
         [
@@ -149,6 +152,7 @@ export async function renderCapture(p, output, signal) {
           throw Error("Credentials in URLs are not allowed");
       }
       browserStarting = true;
+      stage = "launch";
       browser = await chromium.launch({
         channel: process.env.PI_RENDER_BROWSER_CHANNEL ?? "chrome",
         headless: true,
@@ -157,6 +161,7 @@ export async function renderCapture(p, output, signal) {
         chromiumSandbox: true,
       });
       browserStarting = false;
+      stage = "setup";
       if (signal?.aborted) {
         await browser.close();
         throw Error("Render cancelled");
@@ -265,6 +270,18 @@ export async function renderCapture(p, output, signal) {
             });
           } catch (e) {
             addError(e.message);
+            // The bounded fetch proxy aborts the browser route on failure;
+            // Chromium then reports only ERR_FAILED. Keep a static diagnosis
+            // for the main document, without retaining URLs or response text.
+            if (route.request().isNavigationRequest() && route.request().frame() === primary?.mainFrame()) {
+              navigationFailure = /Response exceeds|Remote loading byte cap exceeded/.test(e.message)
+                ? "navigation response exceeds the byte limit; use a smaller page or resource"
+                : e.name === "TimeoutError" || e.name === "AbortError"
+                  ? "navigation timeout; check the server task and readiness before retrying"
+                  : e.message === "fetch failed"
+                    ? "navigation unreachable; check the server task and HTTP URL"
+                    : "navigation request failed; check the server task and HTTP response";
+            }
             return route.abort();
           }
         }
@@ -359,6 +376,7 @@ export async function renderCapture(p, output, signal) {
         if (r.status() >= 400 && errors.length < 30)
           addError(`HTTP ${r.status()}: ${r.url().slice(0, 160)}`);
       });
+      stage = "navigation";
       await page.goto(
         local
           ? `https://pi-local.invalid/${encodeURIComponent(path.basename(target))}`
@@ -368,6 +386,7 @@ export async function renderCapture(p, output, signal) {
           timeout: Math.max(1, ms - (Date.now() - start)),
         },
       );
+      stage = "selector";
       if (p.selector)
         await page
           .locator(p.selector)
@@ -376,6 +395,7 @@ export async function renderCapture(p, output, signal) {
             state: "visible",
             timeout: Math.max(1, ms - (Date.now() - start)),
           });
+      stage = "animation";
       if (conditions.animationTimeMs !== null)
         conditions.animationSample = await page.evaluate((timeMs) => {
           const animations = document.getAnimations();
@@ -393,6 +413,7 @@ export async function renderCapture(p, output, signal) {
             note: "Each currently discoverable main-frame document-timeline CSS/WAAPI animation paused at its own local time. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
           };
         }, conditions.animationTimeMs);
+      stage = "inspection";
       const gpu = (
         await Promise.all(
           page
@@ -441,6 +462,7 @@ export async function renderCapture(p, output, signal) {
         };
       }
       if (outputMode !== "text") {
+        stage = "selector";
         if (p.selector && !conditions.fullPage)
           await page.locator(p.selector).first().scrollIntoViewIfNeeded({
             timeout: Math.max(1, ms - (Date.now() - start)),
@@ -450,6 +472,7 @@ export async function renderCapture(p, output, signal) {
         if (p.selector && !conditions.fullPage)
           conditions.selectorCaptureNote = "Viewport scrolled to the first matching selector; surrounding content may be visible and oversized elements may be clipped. DOM inspection remains selector-scoped.";
       }
+      stage = "inspection";
       if (outputMode !== "image")
         pageState = await page
           .locator(p.selector ?? ":root")
@@ -457,6 +480,7 @@ export async function renderCapture(p, output, signal) {
           .evaluate(inspectPageState, {
             selector: p.selector ?? null,
           });
+      stage = "capture";
       if (outputMode !== "text")
         await page.screenshot({
           path: output,
@@ -497,23 +521,25 @@ export async function renderCapture(p, output, signal) {
   } catch (e) {
     await fs.unlink(output).catch(() => {});
     if (outputMode !== "image") {
-      const reason = /Unsupported GPU\/WebGL/.test(String(e.message))
+      const reason = signal?.aborted ? "cancelled"
+        : stage === "navigation" && navigationFailure ? navigationFailure
+        : /Unsupported GPU\/WebGL/.test(String(e.message))
         ? "unsupported GPU/WebGL page; serve the app over HTTP and use browser_session for WebGL-capable inspection"
-        : /ERR_CONNECTION_REFUSED|ERR_NAME_NOT_RESOLVED/.test(String(e.message))
+        : /ERR_CONNECTION_(?:REFUSED|RESET|CLOSED|TIMED_OUT)|ERR_NAME_NOT_RESOLVED|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED/.test(String(e.message))
           ? "navigation unreachable; check the server task and HTTP URL"
           : /strict mode violation/.test(String(e.message))
             ? "ambiguous selector; inspect current DOM and choose one target"
-            : signal?.aborted
-        ? "cancelled"
         : e.code === "ENOENT"
           ? "ENOENT: source not found"
           : browserStarting
             ? "browser startup failure"
-            : Date.now() - start >= ms
-              ? "timeout"
+            : e.name === "TimeoutError" || Date.now() - start >= ms
+              ? stage === "selector" ? "selector timeout; inspect current DOM for a visible matching target" : "timeout; inspect readiness and the server task before retrying"
+              : stage === "selector" && /selector|Unexpected token|Unknown engine|Invalid/.test(String(e.message))
+                ? "invalid selector; inspect current DOM and correct the selector syntax"
               : "render or selector failure";
       throw new Error(
-        `Inspection ${reason}; diagnostic details omitted to avoid exposing page values/URLs`,
+        `Inspection ${reason} (stage: ${stage}); diagnostic details omitted to avoid exposing page values/URLs`,
       );
     }
     throw Error(`${e.message}; diagnostics: ${errors.slice(0, 30).join("; ")}`);

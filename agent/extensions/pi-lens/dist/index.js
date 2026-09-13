@@ -114055,6 +114055,9 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
     updateRuntimeIdentityFromCtx(ctx);
     setAmbientAbortSignal(ctx?.signal);
     const rtToolName = event?.toolName;
+    // PI_LENS_TOOL_RESULT_PROFILE_V1: numeric timing only; never command, path or output content.
+    const resultProfileStart = performance.now();
+    let resultProfileOutcome = "handler-error";
     if (rtToolName === "edit" || rtToolName === "write") {
       logLatency({
         type: "phase",
@@ -114066,7 +114069,7 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
     }
     try {
       const { biomeClient, ruffClient, metricsClient, agentBehaviorClient } = await loadBootstrapClients();
-      return await handleToolResult({
+      const profiledResult = await handleToolResult({
         event,
         getFlag: (name, filePath) => getLensFlag(name, filePath),
         getFlagSource: (name, filePath) => getLensFlagSource(name, filePath),
@@ -114086,8 +114089,16 @@ ${degradations.map((group) => `  ${group.kind}: ${group.count} (${group.latestRe
         // concurrent in-process secondary session's.
         sessionId: getStableSessionId(ctx)
       });
+      resultProfileOutcome = event.isError === true ? "tool-error" : profiledResult ? "returned" : "unchanged";
+      return profiledResult;
     } finally {
       setAmbientAbortSignal(void 0);
+      try {
+        const durationMs = Math.max(0, performance.now() - resultProfileStart);
+        const tool = typeof rtToolName === "string" && /^[a-z0-9_.:-]{1,80}$/i.test(rtToolName) ? rtToolName : "unknown";
+        logLatency({ type: "phase", phase: "tool_result_handler", toolName: tool, filePath: "", durationMs, result: resultProfileOutcome });
+        globalThis[Symbol.for("yunus-pi.health.v1")]?.("lens.tool_result", { tool, durationMs, outcome: resultProfileOutcome });
+      } catch { /* A timing sink cannot change result delivery. */ }
     }
   };
   pi.on("tool_result", wrapSessionEventHandler("tool_result", onToolResult, { dbg }));

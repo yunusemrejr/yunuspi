@@ -5,7 +5,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { resolveProjectIdentity } from "./identity.mjs";
 import { openStore, nodeId } from "./store.mjs";
-import { queryGraph, simplifyGraph } from "./query.mjs";
+import { queryGraph, simplifyGraph, agentBrief } from "./query.mjs";
 import { discoverProject } from "./discovery.mjs";
 import { discoverContinuity } from "./continuity.mjs";
 import { safeText, secretFile } from "./privacy.mjs";
@@ -397,6 +397,7 @@ async function run(op, payload, signal) {
       if (!payload.focus) throw Error("Inspect requires focus (entity ID or exact key) or sourceId.");
       payload = { ...payload, hops: payload.hops ?? 1 };
       // fall through to the shared bounded query
+    case "brief":
     case "query": {
       const stats = store.getMeta(`discovery-stats:${identity.checkoutId}`);
       const caveat = !stats?.at
@@ -408,7 +409,12 @@ async function run(op, payload, signal) {
             : Date.now() - stats.at > 86400000
               ? "Evidence has not refreshed in over a day. "
               : "";
-      const result = queryGraph(snapshot(payload.allScopes === true, payload.includeInactive === true), {
+      const graph = snapshot(payload.allScopes === true, payload.includeInactive === true);
+      if (op === "brief") return agentBrief(graph, {
+        ...payload, query: safeText(payload.query ?? "", 1000), caveat,
+        maxChars: Math.min(6000, Math.max(400, payload.maxChars ?? 1800)),
+      });
+      const result = queryGraph(graph, {
         ...payload,
         query: safeText(payload.query ?? "", 1000),
         // Coverage warnings share the hard response budget with the subgraph.

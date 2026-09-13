@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentDir } from "../../shared/utils.ts";
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
+import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
 
 export type RunOutcome = "completed" | "failed" | "timed_out" | "stopped" | "interrupted";
 
@@ -15,6 +16,63 @@ export interface RunEntry {
 	outcome?: RunOutcome;
 	duration: number;
 	exit?: number;
+	evidence?: ReturnType<typeof projectRunEvidence>;
+}
+
+/** Compact diagnostic evidence shared by history and the session ledger.
+ * Categories describe observed failures; they never authorize a retry. No raw
+ * task, error, output, path, or tool arguments cross this projection. */
+export function projectRunEvidence(result: any = {}) {
+	const count = (v: unknown): number | undefined => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined;
+	const route = (v: unknown): string | undefined => typeof v === "string" && /^[a-z0-9_.:/@+-]{1,200}$/i.test(v) ? v : undefined;
+	const category = (r: any): string | undefined => {
+		if (r.stopped || r.status === "stopped") return "stopped";
+		if (r.interrupted || r.status === "paused") return "interrupted";
+		if (r.detached || r.status === "detached") return undefined;
+		if (r.timedOut) return "timeout";
+		if (r.toolBudgetBlocked || r.turnBudgetExceeded) return "budget";
+		if (r.contextOverflow) return "context";
+		if (r.structuredOutputFailed) return "invalid-output";
+		if (r.acceptance?.status === "rejected") return "acceptance";
+		if (!(r.error || r.exitCode !== undefined && r.exitCode !== 0 || r.success === false || r.status === "failed")) return undefined;
+		if (r.processSignal) return "process-signal";
+		const error = typeof r.error === "string" ? r.error.slice(0, 16000) : "";
+		if (/budget|economy|price cap|cost limit/i.test(error)) return "budget";
+		if (/\b429\b|rate.?limit|quota|cooldown/i.test(error)) return "capacity";
+		if (/context.{0,30}(?:limit|exceed|large)|too many tokens|\b413\b/i.test(error)) return "context";
+		if (/timed?\s*out|timeout|deadline/i.test(error)) return "timeout";
+		if (/blocked:|permission denied|not authorized|unauthorized|\b(?:401|403|EPERM)\b/i.test(error)) return "permission";
+		if (/Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND|ENOENT|command not found/i.test(error)) return "dependency";
+		if (/structured.?output|invalid.?json|schema|no (?:final|useful) output/i.test(error)) return "invalid-output";
+		if (/acceptance|completed without making edits|required output/i.test(error)) return "acceptance";
+		if (/\b(?:502|503|504|524|529)\b|service.?unavailable|fetch failed|socket hang up|stream.{0,30}(?:error|ended|closed)|connection.{0,20}(?:reset|closed|error)/i.test(error)) return "transport";
+		return "unknown";
+	};
+	const usage = (u: any) => Object.fromEntries(["input", "output", "cacheRead", "cacheWrite", "reasoning", "turns"].flatMap(k => count(u?.[k]) === undefined ? [] : [[k, u[k]]]));
+	const modelAttempts = Array.isArray(result.modelAttempts) ? result.modelAttempts.filter((a: any) => a && typeof a === "object") : undefined;
+	const progress = parseProgressEvidence(result.progressSummary?.progressEvidence ?? result.progress?.progressEvidence);
+	const failure = category(result);
+	return {
+		version: 1,
+		...(typeof result.task === "string" ? { taskHash: hashTask(result.task) } : {}),
+		...(route(result.model) ? { model: route(result.model) } : {}),
+		...(failure ? { outcomeReason: failure } : {}),
+		...(count(result.progressSummary?.durationMs) === undefined ? {} : { durationMs: result.progressSummary.durationMs }),
+		output: ["present", "absent"].includes(result.outputState) ? result.outputState : "unknown",
+		...(progress ? { progress } : {}),
+		usage: usage(result.usage),
+		...(modelAttempts ? {
+			attemptCount: modelAttempts.length,
+			retryCount: Math.max(0, modelAttempts.length - 1),
+			attempts: modelAttempts.slice(-8).map((a: any) => ({
+				...(route(a.model) ? { model: route(a.model) } : {}),
+				success: a.success === true,
+				...(category(a) ? { outcomeReason: category(a) } : {}),
+				usage: usage(a.usage),
+			})),
+			...(modelAttempts.length > 8 ? { attemptsTruncated: true } : {}),
+		} : {}),
+	};
 }
 
 const ROTATE_READ_THRESHOLD = 1200;
@@ -159,6 +217,7 @@ export function recordRun(
 			outcome,
 			duration: durationMs,
 			...(exitCode !== 0 ? { exit: exitCode } : {}),
+			evidence: projectRunEvidence({ ...terminal, task, exitCode }),
 		};
 		const historyPath = getHistoryPath();
 		hardenHistoryStorage(historyPath);

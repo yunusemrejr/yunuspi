@@ -1,4 +1,5 @@
 import { READ_ONLY_REASONING_TOOLS } from "./tool-budget.ts";
+import { AUTOMATIC_HELPER_LIMITS } from "./automatic-budgets.ts";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -60,7 +61,7 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
  for(const field of fields) {
   const prior=payload[field];
   if(prior!==undefined && (!Number.isSafeInteger(prior)||prior<=0))throw new Error("Invalid helper output budget");
-  payload={...payload,[field]:Math.min(prior??1024,1024)};
+  payload={...payload,[field]:Math.min(prior??AUTOMATIC_HELPER_LIMITS.outputTokens,AUTOMATIC_HELPER_LIMITS.outputTokens,model.maxTokens || AUTOMATIC_HELPER_LIMITS.outputTokens)};
  }
  return payload;
 }
@@ -471,10 +472,12 @@ export function registerPermissionGate(
 	});
 }
 
-function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undefined): void {
+export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undefined): void {
 	if (!budget) return;
 	let toolCount = 0;
 	let softNudged = false;
+	let finalizedTools = false;
+	const automatic = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-free-assistant";
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
 	onRuntimeEvent("tool_call", (event) => {
@@ -490,6 +493,15 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 		}
 		if (!shouldBlockToolForBudget(budget, toolName, toolCount)) return undefined;
 		return { block: true, reason: toolBudgetBlockedMessage(budget, toolName, toolCount) };
+	});
+	// Blocking a call alone still advertises the tool on the next request. Some
+	// helpers repeatedly retry blocked reads until the deadline. Once an automatic
+	// read-only run has consumed its all-tools budget, leave only text finalization.
+	onRuntimeEvent("tool_result", () => {
+		if (automatic && budget.block === "*" && toolCount >= budget.hard && !finalizedTools) {
+			pi.setActiveTools([]);
+			finalizedTools = true;
+		}
 	});
 }
 

@@ -26,9 +26,30 @@ const { IntelligenceClient } = await import(
 const { openStore, nodeId } = await import(
   pathToFileURL(modulePath("store.mjs"))
 );
-const { queryGraph, simplifyGraph } = await import(
+const { queryGraph, simplifyGraph, agentBrief } = await import(
   pathToFileURL(modulePath("query.mjs"))
 );
+
+test('agent briefs preserve directed dependencies, exact keys and provenance within the context budget', () => {
+  const nodes = ['target', 'consumer', 'dependency', 'transitive'].map(id => ({id, key:`src/${id}.ts`, label:id, type:'file'}));
+  const edge = (id, source, target) => ({id, source, target, type:'imports', status:'inferred', provenance:[{sourceId:'source', locator:`file:src/${source}.ts`, scope:'checkout'}]});
+  const graph = {revision:7, nodes, edges:[edge('a','consumer','target'),edge('b','target','dependency'),edge('c','transitive','consumer')], facts:[]};
+  assert.equal(typeof agentBrief,'function');
+  const brief = agentBrief(graph,{focus:'src/target.ts',hops:2,maxChars:1800});
+  assert.ok(JSON.stringify(brief).length <= 1800);
+  assert.match(brief.summary,/src\/consumer.ts -imports-> src\/target.ts/);
+  assert.match(brief.summary,/src\/target.ts -imports-> src\/dependency.ts/);
+  assert.match(brief.summary,/src\/transitive.ts -imports-> src\/consumer.ts/);
+  assert.match(brief.summary,/inferred.*@file:src/);
+  assert.match(brief.summary,/incoming.*consumers.*outgoing.*dependencies/i);
+  assert.equal(brief.revision,7);
+  assert.match(agentBrief(graph,{focus:'missing.ts'}).summary,/No matching entities/);
+  const crowded={...graph,edges:Array.from({length:40},(_,i)=>({...edge(String(i),'consumer','target'),type:`relation-${i}`}))};
+  const small=agentBrief(crowded,{focus:'src/target.ts',maxChars:700});
+  assert.ok(JSON.stringify(small).length<=700);
+  assert.equal(small.truncated,true);
+  assert.match(small.summary,/omitted/);
+});
 
 async function fixture(run) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "pi-public-intel-"));

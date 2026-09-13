@@ -39,6 +39,9 @@ export default function bashRouter(pi: any) {
 	let counts = new Map<string, number>();
 	let hintCounts = new Map<string, number>();
 	let pending = new Map<string, { tool: string; hint: string; ruleId: string; seen: number }>();
+    let activity = new Map<string, { decision: string; tool: string; rule: string; count: number }>();
+    let observed = new Set<string>();
+    let candidateResults = new Map<string, { tool: string; ruleId: string }>();
      let nativePending = new Map<string, string>();
      let nativeUsed = new Set<string>();
 	const nativeRouteTargets = new Map([
@@ -55,6 +58,27 @@ export default function bashRouter(pi: any) {
 		["sys_probe", "sys_probe"],
 	]);
      const maxHintsPerRule = 3;
+
+    const recordActivity = (decision: string, tool: string, rule: string) => {
+        const key = `${decision}:${rule}`;
+        const row = activity.get(key) ?? { decision, tool, rule, count: 0 };
+        row.count++;
+        activity.set(key, row);
+        try {
+            (globalThis as any)[HEALTH_SINK]?.("router.activity", { decision, tool, hook: rule, count: 1 });
+        } catch { /* Observations never affect routing. */ }
+    };
+    pi.registerCommand?.("bash-routes", {
+        description: "Measured Bash routing opportunities and native-tool use since session load",
+        handler: async (_args: string, ctx: any) => {
+            const lines = [...activity.values()].map(r => `${r.decision} · ${r.tool} · ${r.rule}: ${r.count}`);
+            ctx.ui.notify([
+                "Bash routing observations since this session loaded",
+                ...(lines.length ? lines : ["No observations recorded (routing may be disabled)."]),
+                "Available candidates are simple classified commands with an active specialized tool; they are opportunities, not proof of misuse or exact semantic equivalence. Complex commands are outside classifier coverage. Successful bypasses require a successful Bash result. Native successes are separate, not matched workload savings. Numeric events also persist in the health log when enabled.",
+            ].join("\n"), "info");
+        },
+    });
 
      const emit = (
           decision: string,
@@ -77,6 +101,9 @@ export default function bashRouter(pi: any) {
           pending = new Map();
           nativePending = new Map();
           nativeUsed = new Set();
+          activity = new Map();
+          observed = new Set();
+          candidateResults = new Map();
      };
 
 	pi.on("session_start", reset);
@@ -87,12 +114,19 @@ export default function bashRouter(pi: any) {
 		// the session counters, but drop reservations tied to that turn.
 		pending.clear();
 		nativePending.clear();
+        candidateResults.clear();
 	});
 
      pi.on("tool_call", (event: any) => {
           const mode = routerMode();
           if (mode === "off") return;
           const calledTool = typeof event.toolName === "string" ? event.toolName : typeof event.name === "string" ? event.name : "";
+          const id = event.toolCallId;
+          if (typeof id === "string" && id) {
+              if (observed.has(id)) return;
+              observed.add(id);
+              if (observed.size > 2048) observed.delete(observed.values().next().value!);
+          }
 		const nativeRouteTarget = nativeRouteTargets.get(calledTool);
 		if (nativeRouteTarget && typeof event.toolCallId === "string" && event.toolCallId.length > 0) {
 			nativePending.set(event.toolCallId, nativeRouteTarget);
@@ -103,6 +137,7 @@ export default function bashRouter(pi: any) {
                return;
           }
           if (!isToolCallEventType("bash", event)) return;
+          recordActivity("observed", "bash", "bash");
           const command = event.input?.command;
           if (typeof command !== "string") return;
           const route = classifyBashCommand(command);
@@ -119,12 +154,19 @@ export default function bashRouter(pi: any) {
 			} catch {
 				// A transient catalog failure must not prescribe or block a tool whose
 				// availability cannot be established.
-				return;
+                recordActivity("availability-unknown", route.tool, route.ruleId);
+                return;
 			}
           const targetAvailable = active === undefined
                || (Array.isArray(active) && active.includes(route.tool))
                || (active instanceof Set && active.has(route.tool));
+          const availability = active === undefined ? "availability-unknown" : targetAvailable ? "available-candidate" : "unavailable-candidate";
+          recordActivity(availability, route.tool, route.ruleId);
           if (!targetAvailable) return;
+          if (active !== undefined && typeof id === "string" && id) {
+              candidateResults.set(id, { tool: route.tool, ruleId: route.ruleId });
+              if (candidateResults.size > MAX_PENDING) candidateResults.delete(candidateResults.keys().next().value!);
+          }
           if (nativeUsed.has(route.tool)) return;
 
           const seen = (counts.get(route.ruleId) ?? 0) + 1;
@@ -137,6 +179,8 @@ export default function bashRouter(pi: any) {
                seen >= threshold
           ) {
                emit("block", route.tool, route.ruleId, seen);
+               candidateResults.delete(id);
+               recordActivity("blocked", route.tool, route.ruleId);
                const replacement = route.replacement
                     ? `: ${route.replacement}`
                     : ".";
@@ -162,10 +206,16 @@ export default function bashRouter(pi: any) {
 
      pi.on("tool_result", (event: any) => {
           if (typeof event.toolCallId !== "string" || event.toolCallId.length === 0) return;
+          const candidate = candidateResults.get(event.toolCallId);
+          candidateResults.delete(event.toolCallId);
+          if (candidate && routerMode() !== "off") recordActivity(event.isError ? "failed-bypass" : "successful-bypass", candidate.tool, candidate.ruleId);
           const nativeTool = nativePending.get(event.toolCallId);
 			if (nativeTool) {
 				nativePending.delete(event.toolCallId);
-				if (!event.isError) nativeUsed.add(nativeTool);
+                if (!event.isError && routerMode() !== "off") {
+                    nativeUsed.add(nativeTool);
+                    recordActivity("native-success", nativeTool, nativeTool);
+                }
 				return;
 			}
 			const pendingRoute = pending.get(event.toolCallId);

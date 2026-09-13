@@ -1,10 +1,10 @@
 ---
 name: delegate
 description: Lightweight subagent that inherits the parent model with no default reads
-subagentOnlyExtensions: ../../media-tools.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
+subagentOnlyExtensions: ../../reminders.ts, ../../media-tools.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: append
 inheritProjectContext: true
-tools: media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
+tools: skill_review, media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
 inheritSkills: false
 ---
 

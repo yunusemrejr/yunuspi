@@ -1,6 +1,7 @@
 import { sumResultsCost } from "../shared/utils.ts";
 import { readCostEvidence } from "../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
+import { projectRunEvidence } from "../runs/shared/run-history.ts";
 
 /** Persist compact accounting evidence, never prompts or tool output. Footer
  * owns summation/deduplication; this bridges detached completion into history. */
@@ -22,6 +23,7 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     ...(typeof r?.sessionFile === 'string' ? {sessionFile:r.sessionFile} : {}),
     ...(typeof r?.model === 'string' ? {model:r.model} : {}),
     ...(r?.children ? {children:projectCostChildren(r.children)} : {}),
+    evidence: projectRunEvidence(r ?? {}),
     usage: r?.usage ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
     totalCost: r?.usage ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
   }));

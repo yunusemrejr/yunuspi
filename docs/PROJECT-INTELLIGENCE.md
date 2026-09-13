@@ -90,11 +90,23 @@ is available for genuinely project-wide agent knowledge.
 
 ## Automatic integration
 
+The primary consumer is the agent. Use graph relationships to choose source
+reads, assess affected consumers, select verification and pass exact keys and
+evidence into child handoffs. The viewer is an optional inspection surface.
+
 - Startup and session switches resolve identity and begin incremental discovery.
 - Before a model turn, the task retrieves relevant evidence. The automatic
   capsule is at most 1,800 characters; the complete graph stays outside context.
+  Its budget is allocated directly to evidence text, retaining exact file keys,
+  directed relationships, source references and uncertainty instead of spending
+  the allowance on serialized graph metadata. Incoming and outgoing links are
+  interleaved; transitive connections remain eligible within the bound.
 - Read, edit, Git, browser, code-analysis and delegation hooks refresh the task
   neighborhood. They do not change user permissions or block an operation.
+  Explicit source paths select exact graph entities, and bulk previews provide
+  their actual file set. Refresh preserves this focus until the task or tool
+  changes it. An unavailable retrieval is labeled instead of reusing old context
+  as evidence for a different target. Missing links never prove independence.
 - Native write/edit observations contribute historical change-to-file links.
   These record observed writes, not a claim that tests or deployment succeeded.
 - Git, shell, memory and child completion events schedule a debounced refresh.

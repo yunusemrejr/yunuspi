@@ -3,6 +3,8 @@ import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
+import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
+export { REVIEW_LIMITS };
 
 // Services retain their existing process/graph owners. This checkpoint never
 // launches a process, picks a provider, executes project code or owns a database.
@@ -10,7 +12,6 @@ export const QUALITY_REVIEW_RUNNER = Symbol.for('yunus-pi.quality-review-runner.
 export const QUALITY_PROJECT_CONTEXT = Symbol.for('yunus-pi.quality-project-context.v1');
 const ENTRY = 'quality-review-v1';
 const brief = (text: string) => text.length <= 6000 ? text : `${text.slice(0,3000)}\n[Middle omitted from bounded review brief; parent retains full instructions.]\n${text.slice(-2800)}`;
-export const REVIEW_LIMITS = { rounds: 2, reviewers: 3, deadlineMs: 30000, costUsd: .01, tools: 4, tokens: 12000 } as const;
 const RUBRICS: Record<string, string> = {
   correctness: 'Trace the changed behavior, actual source owner, affected callers and failure/cancellation paths. Check compatibility and meaningful tests. Identify a concrete counterexample; do not request speculative refactors.',
   security: 'Trace input to authorization, escaping, secret handling and data/storage boundaries. Check denied cases and migration compatibility when applicable. A filename or pattern alone is not a vulnerability.',
@@ -93,7 +94,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     aspects: reviewAspects(changed,task,history), historicalSamples: history.length,
     patterns: patternReport(),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Tests, visual evidence and deployed behavior require their own observations.' });
-  const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Never claim good quality when reviewers, runtime/visual/deployment evidence or current tests are missing. Maximum two review rounds; report unresolved gaps when exhausted.`;
+  const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess them without rerunning this revision.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Maximum two review rounds; report unresolved gaps when exhausted.`;
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
   const refresh = async (ctx: any) => { if (scanning) return; scanning = true; try { await options.refresh(ctx); } finally { scanning = false; } };
   const run = async (ctx: any, signal?: AbortSignal) => {
@@ -114,18 +115,35 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       } catch {}
       const aspects = reviewAspects(changed,task,history);
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
-      let result: any;
+      // Admit each completed aspect before the shared deadline. A slow peer
+      // must not erase valid evidence, and late callbacks must not revive it.
+      const completed = new Map<string, ReviewReport>();
+      const failures = new Map<string, string>();
+      const onResult = (item: any) => {
+        if (ticket !== generation || rev !== revision || !active || paused || combined.aborted ||
+          !aspects.some(a => a.id === item?.aspect) || completed.has(item.aspect)) return;
+        if (!item.ok || typeof item.text !== 'string') {
+          if (typeof item.gap === 'string') failures.set(item.aspect,item.gap.slice(0,900));
+          return;
+        }
+        completed.set(item.aspect, parseReviewReport(item.text, item.aspect));
+      };
+      let failure = typeof runner !== 'function' ? 'The native quality review runner is unavailable.' : '';
       try {
-        result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS }, ctx, combined)),combined);
-      } catch {}
-      if (ticket !== generation || !active || paused || own.signal.aborted) return summary();
+        combined.throwIfAborted();
+        const result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS, onResult }, ctx, combined)),combined);
+        if (Array.isArray(result)) result.forEach(onResult);
+      } catch { failure = combined.aborted ? 'The review deadline expired before this aspect completed.' : 'The native quality review runner failed before returning this aspect.'; }
+      if (ticket !== generation || !active || paused || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       await refresh(ctx);
-      if (ticket !== generation || rev !== revision || own.signal.aborted) return summary();
-      const received: ReviewReport[] = aspects.map(a => {
-        const item = Array.isArray(result) ? result.find((r:any) => r.aspect === a.id) : undefined;
-        return item?.ok && !combined.aborted ? parseReviewReport(item.text, a.id) : { aspect:a.id, outcome:'unknown', evidence:[], findings:[], gap:'No eligible reviewer completed this aspect within the cost/time/tool limits, or delegation was restricted.' };
-      });
-      reports = received; reviewed = rev; save();
+      if (ticket !== generation || rev !== revision || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
+      const received: ReviewReport[] = aspects.map(a => completed.get(a.id) ?? { aspect:a.id, outcome:'unknown', evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.' });
+      reports = received; reviewed = rev;
+      if (received.every(r => r.outcome === 'unknown' && !r.evidence.length && !r.findings.length)) {
+        disposition = 'blocked';
+        reason = 'Independent review unavailable: ' + [...new Set(received.map(r => r.gap))].join(' ').slice(0,1000);
+      }
+      save();
       // Only bounded numeric/category outcomes cross sessions, not review prose.
       try { await withinDeadline(Promise.resolve(context?.({ action:'record', samples:received.map(r => ({aspect:r.aspect,outcome:r.outcome})) },ctx,combined)),combined); } catch {}
       return summary();
@@ -193,8 +211,15 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     async settled(_event: any, ctx: any) {
       if (!enabled() || !capable() || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
       const ticket = generation;
+      const previousReview = reviewed;
       await run(ctx);
       if (ticket !== generation || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || followups >= 3) return;
+      if (reviewed !== previousReview && disposition === 'blocked') {
+        // Show an automatic failure receipt without asking a model to repeat it
+        // or re-open completed project work merely to acknowledge capacity loss.
+        try { pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${reason}`,display:true},{deliverAs:'followUp',triggerTurn:false}); } catch {}
+        return;
+      }
       const content = advice(), key = `${revision}:${reviewed}:${status()}`;
       if (!content || delivered === key) return;
       try { pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true}); followups++; delivered = key; save(); } catch {}

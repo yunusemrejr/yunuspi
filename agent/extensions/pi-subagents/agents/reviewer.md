@@ -1,8 +1,8 @@
 ---
 name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
-tools: read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
-subagentOnlyExtensions: ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
+tools: skill_review, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
+subagentOnlyExtensions: ../../reminders.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true

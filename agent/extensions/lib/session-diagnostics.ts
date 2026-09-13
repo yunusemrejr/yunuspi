@@ -68,7 +68,10 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     if (!Array.isArray(rows)) continue;
     for (const [j, r] of rows.slice(0, 64).entries()) {
       if (!r || typeof r !== "object") continue;
-      const key = `child:${r.runId ?? root}:${r.runId ? 0 : r.workflowKey ?? r.childId ?? r.index ?? j}`;
+      const id = `${r.runId ?? root}:${r.runId ? 0 : r.workflowKey ?? r.childId ?? r.index ?? j}`;
+      const canonical = metrics.agentAliases[id] ?? id;
+      const key = `child:${canonical}`;
+      if (["completed", "stopped", "paused"].includes(metrics.agentStates[canonical])) { seen.add(key); continue; }
       if (seen.has(key)) continue;
       const status = r.state ?? r.status;
       if (r.stopped || r.interrupted || ["stopped", "paused"].includes(status)) { seen.add(key); continue; }

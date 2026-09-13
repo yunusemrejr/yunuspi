@@ -1,4 +1,4 @@
-/** Bounded capability hints and pre-edit skill review owned by reminders.ts.
+/** Bounded capability hints and task/file skill review owned by reminders.ts.
  * No inference or autonomous tool execution. Only catalog heading metadata is
  * read; tool-output prose does not become routing instructions. */
 import path from "node:path";
@@ -9,7 +9,7 @@ import { sourceCheckSupported } from "./source-check.ts";
 import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
-import { routeSkills, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
+import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
@@ -17,6 +17,7 @@ const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quot
 const MAX_PENDING = 32;
 const MAX_RUN_HINTS = 20;
 const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history scan
+const REVIEW_CONTEXT = 'skill-review-context';
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
 const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
 const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
@@ -37,10 +38,19 @@ export function createRelevantGuidance(pi: any) {
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
   let matchingPrompt = false, requestDisabled = false;
   let skillReviewDisabled = false;
-  const reviewTargets = new Map<string, { skill: Skill; reason: string }>();
+  const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
+  const bulkFiles = new Map<string, string[]>();
   const reviewEnabled = () => enabled() && !skillReviewDisabled && process.env.PI_SKILL_REVIEW !== 'off'
     && tools().has('read') && tools().has('skill_review');
+  const trackReview = (skill: Skill, reason: string, origin: 'task' | 'file') => {
+    if (skillReviewDisabled) return;
+    if (!reviewTargets.has(skill.file) && reviewTargets.size >= 32) {
+      const resolved = [...reviewTargets.keys()].find(file => read.has(file) || deferredSkills.has(file));
+      reviewTargets.delete(resolved ?? reviewTargets.keys().next().value!);
+    }
+    reviewTargets.set(skill.file, {skill, reason, origin:reviewTargets.get(skill.file)?.origin === 'task' ? 'task' : origin});
+  };
   // Small requests keep three ordinary hints; sustained work earns another
   // opportunity every four completed tool steps. Repeated candidates() calls
   // cannot refill this allowance. One urgent recovery cue has a separate slot.
@@ -90,7 +100,7 @@ export function createRelevantGuidance(pi: any) {
       ?? skills.find(s => terms.test(s.name))
       ?? (!nameOnly ? skills.find(s => terms.test(s.description)) : undefined);
     if (skill) add({ key: `skill:${skill.file}`, skill: skill.file, priority,
-      text: `${topic}: if useful and not already covered, read skill ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User instructions and project conventions take precedence.` });
+      text: `${topic}: read the relevant workflow in ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} before applying it.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User instructions and project conventions take precedence.` });
   };
   const practice = (key: string, topic: string, preferred: string[], text: string) => {
     const skill = preferred.map(n => skills.find(s => s.name === n)).find(Boolean);
@@ -101,11 +111,15 @@ export function createRelevantGuidance(pi: any) {
     } else add({ key: `practice:${key}`, text: `${topic}: ${text}` });
   };
   const routedSkills = (prompt = "", file = "") => {
+    const previous = JSON.stringify([...reviewTargets.values()]);
     for (const route of routeSkills(prompt, file)) {
       const skill = skills.find(s => s.name === route.name);
+      if (skill && file && route.priority >= 60) trackReview(skill, route.check, 'file');
       if (skill) add({key:`skill:${skill.file}`, skill:skill.file, priority:route.priority,
         text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples.${sectionPointer(skill.file, skillTerms(`${prompt} ${file}`, 24))} User intent and project conventions take precedence.`});
     }
+    if (!matchingPrompt && previous !== JSON.stringify([...reviewTargets.values()]))
+      try { pi.appendEntry?.(ENTRY,snapshot()); } catch { /* retain file workflows across compaction */ }
   };
   const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
   const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
@@ -250,18 +264,33 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
-  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48) });
-  // A targeted pre-edit checkpoint, not a correctness verdict or a security
-  // boundary. Only exact file routes qualify; lexical suggestions never gate.
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills] });
+  // A workflow checkpoint, not a correctness verdict or a security boundary.
+  // Deterministic task/file routes qualify; weak lexical suggestions never gate.
   // Reading remains the native tool's job so delivery cannot masquerade as use.
   const reviewStatus = () => [...reviewTargets.values()].map(({skill, reason}) => ({
     name: skill.name, path: skill.file, reason,
     status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'needs_review',
     ...(deferredSkills.has(skill.file) ? { justification: deferredSkills.get(skill.file) } : {}),
   }));
+  // Keep unresolved reads and applicable checks on the wire. A delivered hint
+  // must not disappear forever, and this must not enqueue extra model turns.
+  pi.on?.('context', (event: any, ctx: any) => {
+    const messages = event.messages.filter((m: any) => m.customType !== REVIEW_CONTEXT);
+    if (!enabled() || skillReviewDisabled || process.env.PI_SKILL_REVIEW === 'off' || !tools().has('read') || ctx && ctx.cwd !== cwd)
+      return messages.length !== event.messages.length ? {messages} : undefined;
+    const status = reviewStatus().filter(s => s.status !== 'deferred');
+    const selected = [...status.filter(s => s.status === 'needs_review').slice(0,3), ...status.filter(s => s.status === 'read').slice(-2)];
+    if (!selected.length) return messages.length !== event.messages.length ? {messages} : undefined;
+    const text = ['[Applicable skills]', 'Read relevant SKILL.md files before using their workflow; apply the listed checks and retain result evidence. A suggestion is not a read, and a read is not proof of application.',
+      ...selected.map(s => `${s.status === 'read' ? 'Apply (read)' : 'Read required'}: ${JSON.stringify(s.path)} — ${s.reason}`),
+      tools().has('skill_review') ? 'Use skill_review inspect for all targets; defer only with a task-specific reason. User instructions take precedence.' : 'If a skill does not apply or cannot be read, state the task-specific reason. User instructions take precedence.',
+    ].join('\n');
+    return {messages:[...messages,{role:'custom',customType:REVIEW_CONTEXT,content:text.slice(0,2800),display:false,timestamp:0}]};
+  });
   pi.registerTool?.({
     name: 'skill_review', label: 'Skill review',
-    description: 'Inspect applicable pre-edit skills. Read their SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Deferral lasts this request and is not a read receipt.',
+    description: 'Inspect applicable task and file skills and their read status. Read their SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Apply relevant checks and retain evidence; deferral is not a read receipt.',
     parameters: Type.Object({
       action: Type.Union([Type.Literal('inspect'), Type.Literal('defer')]),
       skill: Type.Optional(Type.String({maxLength:512})),
@@ -274,49 +303,60 @@ export function createRelevantGuidance(pi: any) {
           return {isError:true, content:[{type:'text',text:'Choose a current skill from inspect and provide a task-specific reason (12–240 characters).'}]};
         deferredSkills.set(target.skill.file, input.reason.trim());
         try { pi.appendEntry?.('skill-review-decision', {requestNumber, skill:target.skill.name, disposition:'deferred', reason:input.reason.trim()}); } catch {}
+        try { pi.appendEntry?.(ENTRY,snapshot()); } catch {}
       }
-      const result = {enabled:reviewEnabled(), skills:reviewStatus(), scope:'Exact file routes only; at most four skills per request. Read-only work remains available.'};
+      const result = {enabled:reviewEnabled(), skills:reviewStatus(), scope:'Deterministic task and file routes; at most two reads requested per operation. Discovery and skill reads remain available. Reads do not prove application.'};
       return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
     },
   });
   return {
     beforeToolCall(event: any) {
-      if (!reviewEnabled() || !['edit','write'].includes(event.toolName)) return;
-      const supplied = event.input?.path;
-      if (typeof supplied !== 'string' || !supplied || supplied.length > 4096) return;
-      const file = checkpointPath(supplied,cwd);
-      if (/SKILL\.md$/i.test(file) || /(?:^|\/)(?:node_modules|vendor|dist|build|generated|backups)(?:\/|$)/i.test(file)) return;
-      const applicable = routeSkills('',file).sort((a,b) => b.priority-a.priority)
+      if (!reviewEnabled()) return;
+      const supplied = event.input?.path ?? event.input?.file_path;
+      const mutation = ['edit','write'].includes(event.toolName) || event.toolName === 'bulk_edit' && event.input?.action === 'apply';
+      const file = typeof supplied === 'string' && supplied.length <= 4096 ? checkpointPath(supplied,cwd) : '';
+      const excluded = (value: string) => /SKILL\.md$/i.test(value) || /(?:^|\/)(?:node_modules|vendor|dist|build|generated|backups)(?:\/|$)/i.test(value);
+      if (file && excluded(file)) return;
+      const suppliedFiles = event.toolName === 'bulk_edit' ? bulkFiles.get(event.input?.token) ?? event.input?.files : event.input?.paths;
+      const files = [file, ...(Array.isArray(suppliedFiles) ? suppliedFiles.slice(0,200).filter((p: any) => typeof p === 'string').map((p: string) => checkpointPath(p,cwd)) : [])].filter(p => p && !excluded(p));
+      const applicable = mutation ? files.flatMap(file => routeSkills('',file).sort((a,b) => b.priority-a.priority).slice(0,2))
         .map(route => ({skill:skills.find(s => s.name === route.name), reason:route.check}))
-        .filter((entry): entry is {skill:Skill;reason:string} => !!entry.skill).slice(0,2);
-      for (const entry of applicable) {
-        if (!reviewTargets.has(entry.skill.file) && reviewTargets.size < 4) reviewTargets.set(entry.skill.file,entry);
-      }
-      const needed = applicable.filter(({skill}) => reviewTargets.has(skill.file) && !read.has(skill.file) && !deferredSkills.has(skill.file));
+        .filter((entry): entry is {skill:Skill;reason:string} => !!entry.skill) : [];
+      for (const entry of applicable) trackReview(entry.skill,entry.reason,'file');
+      // Source reads and discovery stay open. The task checkpoint also covers
+      // research, browser/media work and shell/delegated execution, not just edits.
+      const execution = mutation || ['bash','sandbox_run','web_search','web_research','browser_session','render_see','media_edit','music_compose','data_query'].includes(event.toolName)
+        || event.toolName === 'subagent' && !event.input?.action;
+      if (!execution) return;
+      const currentFiles = new Set(applicable.map(entry => entry.skill.file));
+      const needed = [...reviewTargets.values()].filter(({skill,origin}) =>
+        (origin === 'task' && (!mutation || !currentFiles.size || !skillRoutes.find(route => route.name === skill.name)?.file) || currentFiles.has(skill.file)) && !read.has(skill.file) && !deferredSkills.has(skill.file)).slice(0,2);
       if (!needed.length) return;
-      return {block:true,reason:`Before editing ${JSON.stringify(supplied)}, review the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, then retry the edit. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Read-only inspection remains available.`};
+      return {block:true,reason:`Before ${event.toolName}${file ? ` on ${JSON.stringify(supplied)}` : ''}, read the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, apply the relevant checks, then retry. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Source reads and discovery remain available.`};
     },
     userInput() {
-      reviewTargets.clear(); deferredSkills.clear();
+      const hadDeferrals = deferredSkills.size > 0;
+      deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
-      // A skipped suggestion is not a read receipt, but repeated nagging is noise:
-      // re-offer an unread skill at most three times, spaced by two requests.
+      // Space renewed offers across requests; never treat ignored suggestions
+      // as read receipts or permanently retire an unread workflow.
       for (const key of shown) {
         const file = skillKey(key);
         if (!file && key !== "delegation-contract") continue;
         if (file) {
           const offer = skillOffers.get(key) ?? { n: 0, at: -2 };
-          if (offer.n >= 3 || requestNumber - offer.at < 2) continue;
-          skillOffers.set(key, { n: offer.n + 1, at: requestNumber });
+          if (requestNumber - offer.at < 2) continue;
+          skillOffers.set(key, { n: Math.min(3,offer.n + 1), at: requestNumber });
         }
         shown.delete(key);
       }
-      if (hadTopics) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
+      if (hadTopics || hadDeferrals) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
       reviewTargets.clear(); deferredSkills.clear();
+      bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
@@ -329,6 +369,19 @@ export function createRelevantGuidance(pi: any) {
       // recent metadata can affect current receipts; bounding this pass keeps
       // restore latency and memory proportional to the state it can use.
       const entries = Array.isArray(rawEntries) ? rawEntries.slice(-MAX_RESTORE_ENTRIES) : [];
+      // A compaction invalidates reads, not the still-active task's workflows.
+      const prior = [...entries].reverse().find(e => e?.type === 'custom' && e.customType === ENTRY && e.data?.cwd === cwd);
+      for (const entry of (Array.isArray(prior?.data?.reviews) ? prior.data.reviews : []).slice(-32)) {
+        if (!entry?.skill || typeof entry.skill.file !== 'string' || !path.isAbsolute(entry.skill.file) || entry.skill.file.length >= 512
+          || typeof entry.skill.name !== 'string' || entry.skill.name.length >= 100 || typeof entry.reason !== 'string' || entry.reason.length > 1000
+          || !['task','file'].includes(entry.origin)) continue;
+        reviewTargets.set(entry.skill.file,entry);
+      }
+      skills = [...reviewTargets.values()].map(entry => entry.skill);
+      for (const entry of (Array.isArray(prior?.data?.deferrals) ? prior.data.deferrals : []).slice(-32)) {
+        if (Array.isArray(entry) && entry.length === 2 && reviewTargets.has(entry[0]) && typeof entry[1] === 'string' && entry[1].length >= 12 && entry[1].length <= 240)
+          deferredSkills.set(entry[0],entry[1]);
+      }
       // Capability failures survive compaction; successful execution is the
       // recovery receipt. Never infer availability from an assistant's claims.
       unavailable = new Set();
@@ -363,13 +416,14 @@ export function createRelevantGuidance(pi: any) {
     },
     start(event: any, ctx: any) {
       if ((ctx.cwd ?? "") !== cwd) this.restore(ctx);
+      const previousReviews = JSON.stringify([...reviewTargets.values()]);
       lastFailure = ""; failures = urgentCount = 0;
       pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = "";
       matchingPrompt = false;
       requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
       if (!enabled()) return;
       matchingPrompt = true;
-      const catalog = /<available_skills>([\s\S]*?)<\/available_skills>/.exec(event.systemPrompt ?? "")?.[1] ?? "";
+      const catalog = [...String(event.systemPrompt ?? '').matchAll(/<available_skills>([\s\S]*?)<\/available_skills>/g)].slice(0,8).map(match => match[1]).join('\n');
       skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
         .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
         .filter(s => path.isAbsolute(s.file) && s.file.length < 512 && s.name.length < 100);
@@ -403,7 +457,13 @@ export function createRelevantGuidance(pi: any) {
       const currentIntent = skillIntentSegments(prompt).join(' ');
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
-      if (!/\b(?:continue|resume|same task|next step)\b/i.test(currentIntent)) context = [];
+      const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !routeSkills(prompt).some(route => route.priority >= 60);
+      if (!continuation) { context = []; reviewTargets.clear(); }
+      for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
+      for (const route of routeSkills(prompt).filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).sort((a,b) => b.priority-a.priority || a.name.localeCompare(b.name)).slice(0,3)) {
+        const skill = skills.find(s => s.name === route.name);
+        if (skill) trackReview(skill,route.check,'task');
+      }
       remember(currentIntent);
       contextSkill();
       codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
@@ -464,6 +524,8 @@ export function createRelevantGuidance(pi: any) {
       if (/\b(original (?:request|instructions)|earlier instructions|lost context)\b/i.test(prompt))
         add({ key: "intent", tool: "checkpoint_read", text: 'Earlier requirements: checkpoint_read can recover original instructions. Apply later user corrections within their scope; do not reconstruct missing requirements from guesses.' });
       matchingPrompt = false;
+      if (previousReviews !== JSON.stringify([...reviewTargets.values()]))
+        try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* receipts are advisory metadata */ }
     },
     record(event: any) {
       if (!enabled()) return;
@@ -486,6 +548,20 @@ export function createRelevantGuidance(pi: any) {
         return;
       }
       lastFailure = ""; failures = 0;
+      if (name === 'bulk_edit' && input.action === 'preview') {
+        // The native preview owns the concrete file set behind its apply token.
+        // Route those paths, never infer files from a glob or arbitrary prose.
+        try {
+          const text = event.content?.find((part: any) => part.type === 'text')?.text;
+          const result = typeof text === 'string' && text.length < 128000 ? JSON.parse(text) : undefined;
+          if (typeof result?.token === 'string' && Array.isArray(result.files)) {
+            const files = result.files.slice(0,200).map((entry: any) => entry.path).filter((file: any) => typeof file === 'string' && file.length <= 4096);
+            if (bulkFiles.size >= 8) bulkFiles.delete(bulkFiles.keys().next().value!);
+            bulkFiles.set(result.token,files);
+            for (const file of files) routedSkills('',checkpointPath(file,cwd));
+          }
+        } catch { /* non-preview or truncated output is not a file receipt */ }
+      }
       if (['edit','write'].includes(name)) {
         const changedFile = typeof input.path === 'string' ? checkpointPath(input.path,cwd) : '';
         for (const hint of pending.values()) if (isTopic(hint.key) && hint.sourceFile &&

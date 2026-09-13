@@ -163,18 +163,21 @@ test("activity reports distinguish repeated calls, tool breadth and catalog-base
 test("released activity collectors upgrade without overwriting unknown local changes", () => {
   // Reconstruct the released helper and verify its frozen fingerprint before
   // exercising migration. This fixture contains source, never session data.
-  const previous=activitySource
+  const releasedSource=fs.readFileSync(new URL('./fixtures/session-metrics-released.ts',import.meta.url),'utf8')
+    .replace('export function collectSessionMetrics','function collectSessionMetrics').replace(/^.*\n/,'').trim();
+  assert.equal(createHash('sha256').update(releasedSource).digest('hex'),'61c16b6a591f8438e1fca219d159cf80e4f95a8ebd78aa80dc8220d731f6e4a7');
+  const previous=releasedSource
     .replace("if(p.startsWith('skill:')||p.startsWith('skillctx:'))", "if(p.startsWith('skill:'))")
     .replace(" m.distinctTools=Object.keys(m.tools).length;\n", "")
     .replace("; distinct tools observed: ${m.distinctTools}. Breadth is descriptive, not a target or proof of effective use.", "");
   assert.equal(createHash('sha256').update(previous).digest('hex'),'69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47');
-  for(const bundled of [false,true]) {
+  for(const bundled of [false,true]) for(const historical of [previous,releasedSource]) {
     const anchor=bundled?',extensionStatuses=this.footerData.getExtensionStatuses()':'const extensionStatuses = this.footerData.getExtensionStatuses()';
     const current=transformActivity(anchor,bundled);
-    const released=current.replace(activitySource,()=>previous);
+    const released=current.replace(activitySource,()=>historical);
     assert.equal(transformActivity(released,bundled),current);
     assert.equal(transformActivity(current,bundled),current);
-    assert.throws(()=>transformActivity(released.replace(previous,()=>previous+'\n'),bundled),/drift/);
+    assert.throws(()=>transformActivity(released.replace(historical,()=>historical+'\n'),bundled),/drift/);
     assert.throws(()=>transformActivity(released.replace("let activityLine = ''","let activityLine = 'local edit'"),bundled),/drift/);
   }
 });

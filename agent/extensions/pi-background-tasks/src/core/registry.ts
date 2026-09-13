@@ -1934,8 +1934,10 @@ export class BackgroundTaskRegistry {
       ? `\n  <error>${escapeXml(task.error)}</error>`
       : "";
     const taskName = taskDisplayName(task);
-    const guidance =
-      "Terminal state and output metadata are durable. Do not call bg_status to reconfirm; use bg_logs only if output is needed.";
+    const requestedCleanup = task.status === "killed" && (task.killKind === "user" || task.killKind === "shutdown");
+    const guidance = requestedCleanup
+      ? "Requested cancellation is complete. This is a terminal receipt; no acknowledgement or follow-up turn is needed."
+      : "Terminal state and output metadata are durable. Do not call bg_status to reconfirm; use bg_logs only if output is needed.";
     const content = [
       "<background-task-notification>",
       `  <task-id>${task.id}</task-id>`,
@@ -1959,7 +1961,7 @@ export class BackgroundTaskRegistry {
           display: true,
           details: snapshot(task),
         },
-        { deliverAs: "followUp", triggerTurn: task.triggerOnCompletion },
+        { deliverAs: "followUp", triggerTurn: task.triggerOnCompletion && !requestedCleanup },
       );
     } catch (error) {
       task.notified = false;

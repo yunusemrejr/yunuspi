@@ -12,14 +12,23 @@ Delivery remains capped at two hints at a time, with a small initial allowance
 that grows during sustained work. Duplicate, already-read and unavailable skills
 do not consume the queue. Suggestions are not evidence that a skill was read.
 
-## Before editing source
+## Read and apply relevant workflows
 
-The reminders owner checks native `edit` and `write` calls against available
-skills with exact file routes. An unread matching skill pauses the edit with its
-path and reason. Read its `SKILL.md` using `read`, apply the relevant workflow,
-then retry the edit. A successful complete read covers other files using that
-skill while its context remains available. Failed or truncated reads do not
-count, and compaction invalidates old read receipts.
+The reminders owner selects up to three available workflows from deterministic
+task routes, then discovers additional workflows from the files being read or
+changed. Unread workflows remain in bounded model context until read or deferred;
+delivering a suggestion does not retire them. After a read, the context carries
+the applicable checks and asks the agent to retain result evidence. Reading does
+not establish that those checks were executed successfully.
+
+The checkpoint covers native edits and writes, concrete bulk-edit apply targets,
+and task-routed shell, research, browser, media, data and delegated execution.
+An unread matching skill pauses the operation with its path and reason. Read its
+`SKILL.md` using `read`, apply the relevant workflow, then retry. Source reads,
+search/discovery tools and bulk previews remain available. A successful complete
+read covers other files using that skill while its context remains available.
+Failed or truncated reads do not count. Compaction preserves workflow obligations
+but invalidates old read receipts, so the agent reads the source again.
 
 When a skill is irrelevant to the particular change, already covered by other
 instructions, or inaccessible, record the reason:
@@ -30,10 +39,19 @@ instructions, or inaccessible, record the reason:
 
 Pass this object to `skill_review`; `{"action":"inspect"}` lists the current
 review state. Deferrals expire on the next user request and never count as reads.
-The checkpoint covers at most two skills per edit and four per request. It leaves
-read-only work available, excludes generated/dependency paths, and requires both
-`read` and `skill_review` to be active. It is a workflow checkpoint, not a sandbox:
-shell commands and other mutation tools are not intercepted by this mechanism.
+Each checkpoint asks for at most two reads at a time. Further applicable file
+workflows remain eligible throughout a long task; the former four-skill bypass
+is removed. Generated/dependency paths are excluded. The checkpoint requires
+both `read` and `skill_review` to be active and is not a security boundary or a
+general shell parser. A task-specific deferral is available without asking the
+user for permission.
+
+Built-in child profiles explicitly load the same skill owner and expose
+`skill_review`. Child mode registers only skill lifecycle hooks, without parent
+manual reminders or extra model turns. Strict custom capability ceilings still
+apply; a child without `skill_review` receives context but is not blocked by an
+unavailable tool. Short continuations retain workflow context; new tasks replace
+old task routes. Catalog-only weak matches remain advisory.
 
 User requests to work without skills take precedence. `PI_SKILL_REVIEW=off`
 disables the checkpoint; `PI_RELEVANT_GUIDANCE=off` disables its owning guidance

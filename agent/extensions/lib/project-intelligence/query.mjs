@@ -472,6 +472,61 @@ export function queryGraph(snapshot, options = {}) {
   return fitted;
 }
 
+/** Agent context has its own text budget: serializing the full graph first can
+ * consume the entire allowance before any relationships reach the model. Keep
+ * exact keys, directions and evidence together, and only omit complete lines. */
+export function agentBrief(snapshot, options = {}) {
+  const maxChars = clampInteger(options.maxChars, 1800, 400, 6000);
+  const graph = queryGraph(snapshot, { ...options, maxChars: 200000, limit: Math.min(40, options.limit ?? 16) });
+  const byId = new Map(graph.nodes.map(node => [node.id, node]));
+  const label = id => safeString(byId.get(id)?.key || byId.get(id)?.label || id, 160);
+  const evidence = item => {
+    const source = asArray(item.provenance)[0];
+    return `[${safeString(item.status || 'unknown', 18)}${item.conflict ? ', conflict' : ''}]${source ? ` @${safeString(source.locator || source.sourceId, 140)}` : ' [source unavailable]'}`;
+  };
+  const focus = asArray(options.focus).filter(value => typeof value === 'string').slice(0, 2).map(value => safeString(value,120));
+  const roots = graph.nodes.filter(node => node.distance === 0);
+  const header = `revision ${graph.revision}; ${focus.length ? `focus=${JSON.stringify(focus)}` : `query=${JSON.stringify(safeString(options.query, 180))}`}`;
+  const result = {revision:graph.revision, summary:'', truncated:Boolean(graph.truncated)};
+  const lines = [header, 'Incoming links identify consumers; outgoing links identify dependencies. Verify inferred links in source.'];
+  if (options.caveat) lines.push(safeString(options.caveat, 180));
+  if (!roots.length) lines.push('No matching entities. Missing evidence is not proof of no dependency.');
+  const edgeLine = edge => `${label(edge.source)} -${safeString(edge.type, 40)}-> ${label(edge.target)} ${evidence(edge)}`;
+  // Interleave both directions so a high-degree consumer cannot crowd out all
+  // dependencies (or vice versa). Traversal retains transitive relationships.
+  const rootIds = new Set(roots.map(node => node.id));
+  const relationPriority = edge => ['contains','declares','modified'].includes(edge.type) ? 1 : 0;
+  const edges = graph.edges.slice().sort((a,b) => relationPriority(a)-relationPriority(b));
+  const incoming = edges.filter(edge => rootIds.has(edge.target));
+  const outgoing = edges.filter(edge => rootIds.has(edge.source));
+  const near = [], seen = new Set();
+  for (let i = 0; i < Math.max(incoming.length,outgoing.length); i++) {
+    for (const edge of [incoming[i],outgoing[i]]) if (edge && !seen.has(edge.id)) { seen.add(edge.id); near.push(edge); }
+  }
+  const facts = graph.facts.map(fact => `${label(fact.subject)}.${safeString(fact.predicate,40)}=${safeString(fact.object,180)} ${evidence(fact)}`);
+  const candidates = [
+    ...roots.map(node => `entity: ${label(node.id)} [${node.type}]`),
+    ...near.slice(0,2).map(edgeLine),
+    ...facts.filter((_,i) => graph.facts[i].conflict),
+    ...edges.filter(edge => !seen.has(edge.id)).map(edgeLine),
+    ...near.slice(2).map(edgeLine),
+    ...facts.filter((_,i) => !graph.facts[i].conflict),
+  ];
+  const omitted = 'Additional evidence omitted; use project_intel with focus and direction to inspect more.';
+  for (const line of candidates) {
+    if (JSON.stringify({...result,summary:[...lines,line,omitted].join('\n')}).length > maxChars) { result.truncated=true; continue; }
+    lines.push(line);
+  }
+  if (result.truncated) lines.push(omitted);
+  result.summary=lines.join('\n');
+  // Keep warnings intact even if supplied keys fill the header allowance.
+  if (JSON.stringify(result).length > maxChars) {
+    result.truncated=true;
+    result.summary=[`revision ${graph.revision}; target label omitted`, options.caveat ? safeString(options.caveat,120) : '', omitted].filter(Boolean).join('\n');
+  }
+  return result;
+}
+
 function positionFor(id, index) {
   const digest = hashText(id, 16);
   const first = Number.parseInt(digest.slice(0, 8), 16) / 0xffffffff;

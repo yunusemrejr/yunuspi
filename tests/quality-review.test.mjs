@@ -98,6 +98,16 @@ test('missing reviewers, invalid responses and omitted aspects are explicit gaps
  await f.settle();await f.tool({action:'review'});assert.equal(f.calls.length,1);
  await f.tool({action:'assess',disposition:'blocked',reason:'No permitted reviewer is available; disclose the independent review gap.'});assert.equal(f.state().status,'blocked');
 });
+test('unavailable reviewers settle once with an actionable gap and no automatic acknowledgement turn',async t=>{
+ const gap='No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.';
+ const f=await fixture(t,{runner:async req=>req.aspects.map(a=>({aspect:a.id,ok:false,text:'',gap}))});
+ await f.mutate();await f.settle();
+ assert.equal(f.state().status,'blocked');assert.equal(f.state().reports[0].gap,gap);
+ assert.equal(f.sent.length,1);assert.equal(f.sent[0].m.customType,'quality-review-status');assert.equal(f.sent[0].o.triggerTurn,false);assert.equal(f.api.notice(),'');
+ for(let i=0;i<4;i++){await f.settle();await f.tool({action:'review'});}
+ assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'Review capacity failure must never become a quality pass.'}),/missing evidence/);
+});
 test('blocking findings require an explicit evidence-based dismissal or a repair and new review',async t=>{
  const f=await fixture(t,{runner:async req=>req.aspects.map(a=>({aspect:a.id,ok:true,text:JSON.stringify({outcome:'changes',evidence:['src/value.js:1 returns a wrong result for negative inputs.'],findings:[{severity:'blocking',file:'src/value.js',detail:'A negative input becomes positive, violating the documented result contract.'}],gap:''})}))});
  await f.mutate();await f.settle();
@@ -108,6 +118,21 @@ test('late reviewer completion after edits cannot approve newer content',async t
  let finish;const f=await fixture(t,{runner:req=>new Promise(resolve=>finish=()=>resolve(req.aspects.map(a=>pass(a.id))))});await f.mutate();
  const pending=f.settle();while(!finish)await new Promise(r=>setImmediate(r));await f.mutate('src/value.js','export const value=9;');finish();await pending;
  assert.notEqual(f.state().status,'accepted');assert.equal(f.state().reports.length,0);
+});
+test('a peer deadline preserves completed aspect evidence but rejects late results',async t=>{
+ const original=REVIEW_LIMITS.deadlineMs;REVIEW_LIMITS.deadlineMs=40;
+ t.after(()=>{REVIEW_LIMITS.deadlineMs=original;});
+ let late;
+ const f=await fixture(t,{runner:async req=>{
+  req.onResult?.(pass('correctness'));
+  late=new Promise(resolve=>setTimeout(()=>{req.onResult?.(pass('content'));resolve();},100));
+  await late;return req.aspects.map(a=>pass(a.id));
+ }});
+ await f.mutate();await f.mutate('README.md','Explain the current behavior.');await f.settle();
+ assert.equal(f.state().reports.find(r=>r.aspect==='correctness').outcome,'pass');
+ assert.equal(f.state().reports.find(r=>r.aspect==='content').outcome,'unknown');
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'A partial review cannot establish all required aspect evidence.'}),/missing evidence/);
+ const snapshot=JSON.stringify(f.state());await late;assert.equal(JSON.stringify(f.state()),snapshot);
 });
 test('Stop cancels a noncooperative runner; late output and extension messages cannot resume it',async t=>{
  let started,finish;const f=await fixture(t,{runner:req=>{started=true;return new Promise(resolve=>finish=()=>resolve(req.aspects.map(a=>pass(a.id))));}});await f.mutate();

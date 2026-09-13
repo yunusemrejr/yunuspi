@@ -408,6 +408,18 @@ function logReminderErr(where: string, err: unknown): void {
 // ---------------------------------------------------------------- extension
 
 export default function remindersExtension(pi: ExtensionAPI) {
+	// Children share skill routing/read receipts without inheriting the parent's
+	// manual reminder timers, todo nudges or continuation messages.
+	if (process.env.PI_SUBAGENT_CHILD === "1") {
+		const guidance = createRelevantGuidance(pi);
+		for (const hook of ["session_start", "session_switch", "session_compact"] as const)
+			pi.on(hook, (_event, ctx) => { guidance.restore(ctx); });
+		pi.on("input", (event) => { if (event.source !== "extension") guidance.userInput(); });
+		pi.on("before_agent_start", (event, ctx) => { guidance.start(event, ctx); });
+		pi.on("tool_call", (event, ctx) => { if (!ctx.signal?.aborted) return guidance.beforeToolCall(event); });
+		pi.on("tool_result", (event) => { guidance.record(event); });
+		return;
+	}
 	// Per-session live state; sid "" (unknown) is tolerated.
 	const live = new Map<string, ReminderState>();
 	const todoSnapshots = new WeakMap<ReminderState, Array<{id?: number; subject?: string; status?: string; blockedBy?: number[]}>>();
