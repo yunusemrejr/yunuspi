@@ -1,6 +1,6 @@
 # Skill routing and source checks
 
-Skill routing is deterministic and uses no model calls. Explicit task and file
+Default guidance offers brief, optional invitations to browse grouped skills or search for a workflow. It does not select a workflow for the agent or launch a discovery model. The detailed routing below supplies local relevance signals and remains available through inspect and explicit strict mode. Skill routing is deterministic and uses no model calls. Explicit task and file
 routes take priority; catalog descriptions provide additional suggestions when
 at least two distinct discriminating terms match. Hyphenated skill names also
 match ordinary prose. Negated clauses, quoted text and code fences do not become

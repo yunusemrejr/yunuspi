@@ -93,7 +93,8 @@
     "skill-discovery.ts",
     "skill-discovery-controller.ts",
     "harness-activity.ts",
-    "tool-discovery.ts"
+    "tool-discovery.ts",
+    "capability-groups.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

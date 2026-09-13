@@ -2,7 +2,34 @@
  * capabilities. Discovery changes schema exposure only; it never runs a tool
  * or grants access outside the host's original active/allowed tool set. */
 import { Type } from 'typebox';
+import { CAPABILITY_GROUPS, capabilityGroup, groupOverview } from './capability-groups.ts';
 const RECEIPT = 'harness-tool-activation-v1';
+const RESUME_TOOLS = 6;
+// Historical discovery is not a permanent schema subscription. Retain a small
+// recent working set and every unresolved call, without rewriting session history.
+export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
+  const recent = new Set<string>(), pending = new Map<string,string>();
+  const branch = entries.slice(-2000);
+  for (const entry of branch) {
+    const message = entry.type === 'message' ? entry.message : undefined;
+    if (entry.type === 'compaction' || message?.role === 'compactionSummary' || message?.role === 'user' || message?.role === 'assistant') pending.clear();
+    if (message?.role === 'assistant' && Array.isArray(message.content))
+      for (const call of message.content) if (call.type === 'toolCall' && typeof call.id === 'string' && allowed.has(call.name)) pending.set(call.id,call.name);
+    if (message?.role === 'toolResult') pending.delete(message.toolCallId);
+  }
+  let messages = 0;
+  const remember = (name: unknown) => {
+    if (typeof name === 'string' && allowed.has(name) && !CORE_TOOLS.has(name) && recent.size < RESUME_TOOLS) recent.add(name);
+  };
+  for (const entry of branch.toReversed()) {
+    if (entry.type === 'message' && ++messages > 12) break;
+    if (entry.type === 'message' && entry.message?.role === 'toolResult') remember(entry.message.toolName);
+    if (entry.type === 'custom' && entry.customType === RECEIPT && Array.isArray(entry.data?.names))
+      for (const name of entry.data.names.slice(-128).toReversed()) remember(name);
+  }
+  for (const name of pending.values()) recent.add(name);
+  return recent;
+}
 export const CORE_TOOLS = new Set([
   'read','bash','edit','write','grep','find','ls','tool_search',
   'session_self','subagent','bg_wait','quality_review','skill_review',
@@ -27,11 +54,7 @@ export function registerToolDiscovery(pi: any) {
     allowed = owner && same(expected,new Set(current))
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
-    const remembered = new Set<string>();
-    for (const entry of (ctx.sessionManager?.getBranch?.() ?? []).slice(-2000)) {
-      if (entry.type === 'custom' && entry.customType === RECEIPT && Array.isArray(entry.data?.names))
-        for (const name of entry.data.names.slice(0,128)) if (typeof name === 'string' && allowed.has(name)) remembered.add(name);
-    }
+    const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
     pi.setActiveTools([...expected]);
   };
@@ -39,11 +62,13 @@ export function registerToolDiscovery(pi: any) {
   pi.on('session_switch', initialize);
   pi.registerTool({
     name:'tool_search',label:'Find tools',
-    description:'Find and enable specialized harness tools by query or exact names. Their full schemas become available on the next response. This only exposes tools; it does not execute them. Use when a needed capability is not currently listed. Ordinary tools remain appropriate for simple work.',
+    description:'Browse capability groups or search short tool previews. Enable chosen schemas with names or enable:true; no underlying tool runs. Search never enables tools by default.',
     promptGuidelines:[
-      'The harness has optional source/AST/LSP inspection, browser/web, media, memory, background jobs, data/API/Git and coordination tools. tool_search discovers and enables them on demand. Choose tools and relevant skills when they help; no discovery call, tool variety or workflow sequence is required.',
+      'Optional capabilities: source/AST/LSP, browser/web, media, memory, jobs, data/API/Git and coordination. tool_search({}) shows groups; a query previews matches; names enables chosen tools. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
     ],
     parameters:Type.Object({
+      group:Type.Optional(Type.String({maxLength:64,description:'Group id from the overview; optional filter.'})),
+      enable:Type.Optional(Type.Boolean({description:'Enable query matches explicitly. Exact names enable by default.'})),
       query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot or symbol references.'})),
       names:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:128}),{maxItems:8,description:'Exact tool names to enable.'})),
       limit:Type.Optional(Type.Integer({minimum:1,maximum:8})),
@@ -54,7 +79,11 @@ export function registerToolDiscovery(pi: any) {
       if (_signal?.aborted) return answer({error:'Tool discovery cancelled.'},true);
       if (!owner || identity(ctx)!==owner || !same(expected,new Set(pi.getActiveTools())))
         return answer({error:'Tool selection changed outside discovery; preserve the current tool set. Start a new session to reset discovery.'},true);
-      const catalog = pi.getAllTools().filter((tool: any) => allowed.has(tool.name) && tool.name!=='tool_search');
+      let catalog = pi.getAllTools().filter((tool: any) => allowed.has(tool.name) && tool.name!=='tool_search');
+      if (input.group) {
+        if (!CAPABILITY_GROUPS.some(group=>group.id === input.group)) return answer({error:'Unknown capability group.'},true);
+        catalog = catalog.filter((tool: any)=>capabilityGroup(tool.name,tool.description) === input.group);
+      }
       const explicit = Array.isArray(input.names) ? [...new Set(input.names)] : [];
       let matches: any[];
       if (explicit.length) {
@@ -63,26 +92,27 @@ export function registerToolDiscovery(pi: any) {
         matches = explicit.map(name => catalog.find((tool: any) => tool.name===name));
       } else {
         const query = typeof input.query==='string' ? input.query.trim() : '';
-        if (!query) return answer({error:'Supply a capability query or exact tool names.'},true);
+        if (!query && !input.group) return answer({groups:groupOverview(catalog.map((tool: any)=>({name:tool.name,description:tool.description}))),next:'Use group or query for short previews; names enables chosen tools.'});
         const terms = [...new Set(words(query))].filter(term => term.length>1);
         matches = catalog.map((tool: any) => {
           const name = tool.name.toLowerCase(), text = String(tool.description??'').toLowerCase();
-          const score = name===query.toLowerCase() ? 10000 : terms.reduce((sum,term)=>sum+(name.includes(term)?8:0)+(text.includes(term)?1:0),0);
+          const score = !query ? 1 : name===query.toLowerCase() ? 10000 : terms.reduce((sum,term)=>sum+(name.includes(term)?8:0)+(text.includes(term)?1:0),0);
           return {tool,score};
         }).filter((row: any)=>row.score>0).sort((a: any,b: any)=>b.score-a.score||a.tool.name.localeCompare(b.tool.name)).map((row: any)=>row.tool);
       }
       const offset = explicit.length ? 0 : Math.min(1000,Math.max(0,input.offset??0));
-      const selected = matches.slice(offset,offset+Math.min(8,Math.max(1,input.limit??5)));
-      const added = selected.map(tool=>tool.name).filter(name=>!expected.has(name));
+      const selected = matches.slice(offset,offset+Math.min(8,Math.max(1,input.limit??(explicit.length || 3))));
+      const activate = input.enable === true || (explicit.length > 0 && input.enable !== false);
+      const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
       if (added.length) {
         const next = new Set([...expected,...added]);
         pi.setActiveTools([...next]);
         expected = next;
         try { pi.appendEntry?.(RECEIPT,{names:added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
       }
-      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,240),active:true,...(Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
+      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:expected.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         remaining:Math.max(0,matches.length-offset-selected.length),
-        note:'Selected tool schemas are available next. No underlying tool was executed.'});
+        note:activate?'Chosen schemas are available next. No tool executed.':'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });
 }
@@ -101,5 +131,5 @@ export function compactSkillCatalog(event: any, activeTools: string[]): string |
     '  <skill>',`    <name>${escape(skill.name)}</name>`,`    <description>${escape(skill.description)}</description>`,`    <location>${escape(skill.filePath)}</location>`,'  </skill>',
   ]),'</available_skills>'].join('\n');
   if (source.split(catalog).length!==2) return;
-  return source.replace(catalog,`Installed skills are available on demand (${skills.length} workflows). Use skill_review with action:"search" and a task-specific query to find names, descriptions and file paths; read the relevant workflow when useful. Local routing can also offer optional suggestions. No skill-reading quota or fixed workflow is required.`);
+  return source.replace(catalog,`Installed skills are available on demand (${skills.length} workflows). Use skill_review action:"browse" for groups or action:"search" with a query for short matches. Read a chosen workflow when useful. Discovery and workflows are optional.`);
 }

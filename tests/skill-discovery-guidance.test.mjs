@@ -9,9 +9,9 @@ if(!fs.existsSync(agent))agent=path.resolve(import.meta.dirname,'../..');
 const {createRelevantGuidance}=await import(pathToFileURL(path.join(agent,'extensions/lib/relevant-guidance.ts')));
 const RUNNER=Symbol.for('yunus-pi.skill-discovery-runner.v1');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function fixture(){
+function fixture(optIn=true){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'skill-guidance-'));const file=path.join(dir,'skills/spatial/SKILL.md');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'# Spatial balance\nCompare composition proportions.\n');
- const envKeys=['PI_OFFLINE','PI_SUBAGENT_CHILD','PI_SKILL_DISCOVERY','PI_RELEVANT_GUIDANCE','PI_SKILL_REVIEW'];const env=new Map(envKeys.map(key=>[key,process.env[key]]));for(const key of envKeys)delete process.env[key];
+ const envKeys=['PI_OFFLINE','PI_SUBAGENT_CHILD','PI_SKILL_DISCOVERY','PI_RELEVANT_GUIDANCE','PI_SKILL_REVIEW'];const env=new Map(envKeys.map(key=>[key,process.env[key]]));for(const key of envKeys)delete process.env[key];if(optIn)process.env.PI_SKILL_DISCOVERY='on';
  const previous=globalThis[RUNNER],calls=[],entries=[],hooks={},registered={};let wake=0;
  globalThis[RUNNER]=(request,ctx,signal)=>new Promise(resolve=>calls.push({request,signal,resolve}));
  const api={getActiveTools:()=>['read','edit','subagent','skill_review'],on(name,fn){hooks[name]=fn;},registerTool(tool){registered[tool.name]=tool;},appendEntry(customType,data){entries.push({type:'custom',customType,data});},sendMessage(){wake++;},sendUserMessage(){wake++;}};
@@ -28,10 +28,10 @@ test('actual guidance delivers async advice through bounded candidates, without 
   f.observe();assert.equal(f.calls.length,0,'observation does not synchronously dispatch or wait for inference');await tick();assert.equal(f.calls.length,1);
   assert.match(f.calls[0].request.brief,/stylesheet responsive browser interface/);assert.doesNotMatch(f.calls[0].request.brief,/SECRET SOURCE BODY/);
   assert.equal(f.g.candidates().some(h=>h.skill===f.file),false,'stalled inference leaves ordinary work available');
-  f.finish();await tick();const candidates=f.g.candidates();assert.ok(candidates.some(h=>h.skill===f.file && /Async skill discovery/.test(h.text)));assert.ok(candidates.length<=2);assert.equal(f.wakes(),0);
+  f.finish();await tick();const candidates=f.g.candidates();assert.ok(candidates.some(h=>h.discovery==='workflow' && /Optional workflow discovery/.test(h.text)));assert.ok(candidates.length<=2);assert.equal(f.wakes(),0);
   assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined);
   const status=await f.registered.skill_review.execute('inspect',{action:'inspect'});assert.equal(status.details.skills.length,0,'advisory suggestion is not a mandatory review target');
-  f.g.commit(candidates);assert.equal(f.g.candidates().some(h=>h.skill===f.file),false,'delivered suggestion does not repeat');
+  f.g.commit(candidates);assert.equal(f.g.candidates().some(h=>h.discovery==='workflow'),false,'delivered suggestion does not repeat');
  }finally{f.cleanup();}
 });
 test('no skills, no tools and explicit discovery off prevent dispatch',async()=>{
@@ -45,6 +45,8 @@ test('pending advice is discarded after optout, native skill read, catalog repla
   if(change==='covered')f.read(f.file);
   if(change==='catalog')f.start('Make this fit better','<available_skills></available_skills>');
   if(change==='input')f.g.userInput();
-  f.finish();await tick();assert.equal(f.g.candidates().some(h=>/Async skill discovery/.test(h.text)),false,change);assert.equal(f.wakes(),0);
+  f.finish();await tick();assert.equal(f.g.candidates().some(h=>h.discovery==='workflow'),false,change);assert.equal(f.wakes(),0);
  }finally{f.cleanup();}}
 });
+
+test('default advisory observations do not call a model or wake the agent',async()=>{const f=fixture(false);try{f.observe();await tick();assert.equal(f.calls.length,0);assert.equal(f.wakes(),0);}finally{f.cleanup();}});

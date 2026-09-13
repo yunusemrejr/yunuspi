@@ -13,6 +13,7 @@ import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
+import { CAPABILITY_GROUPS, capabilityGroup, groupOverview } from "./capability-groups.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -45,7 +46,7 @@ const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
 const codeFile = /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i;
 const envFile = /(?:^|\/)(?:migrations?|\.github\/workflows|terraform)(?:\/|$)|(?:^|\/)(?:Dockerfile|compose\.ya?ml)|\.(?:sql|tf)$/i;
 type Skill = { name: string; file: string; description: string };
-type Hint = { key: string; text: string; tool?: string; skill?: string; priority?: number; sourceFile?: string; expiresAt?: number };
+type Hint = { key: string; text: string; tool?: string; skill?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
 
 export function createRelevantGuidance(pi: any) {
   let anchorContext = createContextAnchor();
@@ -61,6 +62,10 @@ export function createRelevantGuidance(pi: any) {
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
   let matchingPrompt = false, requestDisabled = false;
   let skillReviewDisabled = false;
+  // A generic advisory sentence is useful once per discovery kind in a user
+  // request. This local cooldown keeps different route keys from repeating
+  // the same reminder after every tool result; userInput starts a new window.
+  const advisoryDiscoveryDelivered = new Set<'capability' | 'workflow'>();
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
   const bulkFiles = new Map<string, string[]>();
@@ -97,6 +102,35 @@ export function createRelevantGuidance(pi: any) {
     catch { return new Set<string>(); }
   };
   const enabled = () => !requestDisabled && process.env.PI_RELEVANT_GUIDANCE !== "off";
+  // The default route only offers a small invitation to inspect capabilities.
+  // Keep direct workflow/tool wording for the explicit strict review mode so
+  // PI_SKILL_REVIEW=required retains its read checkpoint and safety contract.
+  // Advisory discovery is intentionally opt-in: merely noticing two files
+  // must not launch an inference turn in a long or resumed session.
+  const advisoryInvitation = (hint: Hint): Hint | undefined => {
+    const operationalGuidance = new Set(['visual-handoff', 'render', 'workspace', 'delegation-contract']);
+    if (reviewMode() !== 'advisory' || skillReviewDisabled || hint.key.startsWith('signal:') || operationalGuidance.has(hint.key)) return hint;
+    const kind = hint.skill ? 'workflow' : hint.tool ? 'capability' : undefined;
+    if (!kind) return hint;
+    if (advisoryDiscoveryDelivered.has(kind)) return undefined;
+    const tool = kind === 'workflow' ? 'skill_review' : 'tool_search';
+    // A limited child/session may not expose the discovery surface. Preserve
+    // its existing direct hint rather than dropping useful safety guidance.
+    if (!tools().has(tool)) return hint;
+    return {
+      ...hint,
+      // A fresh shared topic key avoids stale receipts for the old concrete
+      // tool/skill key on resume. topicSeen supplies the existing three
+      // request cooldown and persists only this bounded invitation metadata.
+      key: `topic:discovery-${kind}`,
+      tool,
+      skill: undefined,
+      discovery: kind,
+      text: kind === 'workflow'
+        ? 'Optional workflow discovery: if a relevant workflow would help, use skill_review with action:"browse" or "search". Reading is optional; keep user intent, safety and quality in view.'
+        : 'Optional capability discovery: if a specialized capability would help, browse tool_search for a short match. Choose only what fits; no action is required.',
+    };
+  };
   const renderEnvironmentFailure = (event: any) => event.toolName === "render_see" && event.isError === true &&
     /browser startup failure|browserType\.launch|EROFS|EACCES|EPERM|read.only file system|No usable sandbox|Chromium sandboxing failed|SUID sandbox helper|Executable doesn.t exist|Unsupported chromium channel|Cannot find (?:module|package).*playwright/i.test(
       (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? '').slice(0,8192)).slice(0,3).join('\n').split(/; diagnostics:|\nBrowser logs:/)[0]);
@@ -108,6 +142,9 @@ export function createRelevantGuidance(pi: any) {
     return before !== unavailable.has("render_see");
   };
   const add = (hint: Hint) => {
+    const invited = advisoryInvitation(hint);
+    if (!invited) return;
+    hint = invited;
     // Task-level suggestions remain relevant until the next prompt. File/edit
     // cues still expire quickly so stale local observations cannot linger.
     if (!matchingPrompt && !hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
@@ -120,6 +157,16 @@ export function createRelevantGuidance(pi: any) {
       if (hint.sourceFile && (isTopic(hint.key) || previous.sourceFile) && (previous.priority ?? 0) === (hint.priority ?? 0)) pending.set(hint.key, hint);
       return;
     }
+    // Generic advisory invitations are deliberately coalesced. Keeping one
+    // capability and one workflow offer pending makes a long session useful
+    // without spending the normal hint quota on identical text.
+    if (hint.discovery) {
+      const existing = [...pending.values()].find(value => value.discovery === hint.discovery);
+      if (existing) {
+        if ((existing.priority ?? 0) >= (hint.priority ?? 0)) return;
+        pending.delete(existing.key);
+      }
+    }
     if (!previous && pending.size >= MAX_PENDING) {
       const weakest = [...pending.values()].sort((a,b)=>(a.priority ?? 0)-(b.priority ?? 0))[0];
       if ((weakest.priority ?? 0) >= (hint.priority ?? 0)) return;
@@ -130,7 +177,8 @@ export function createRelevantGuidance(pi: any) {
   const discovery = createSkillDiscoveryController({
     catalog: () => skills,
     covered: file => skillCovered(file) || reviewTargets.has(file) || deferredSkills.has(file),
-    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent'),
+    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent')
+      && (reviewMode() !== 'advisory' || /^(?:1|on|true)$/i.test(process.env.PI_SKILL_DISCOVERY ?? '')),
     offer: (skill, reason) => add({key:`skillctx:${skill.file}`,skill:skill.file,priority:64,
       text:`Async skill discovery (advisory): ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} — ${JSON.stringify(reason)} Read if useful; this suggestion is not a read receipt or a new requirement.`}),
   });
@@ -380,24 +428,59 @@ export function createRelevantGuidance(pi: any) {
     status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'needs_review',
     ...(deferredSkills.has(skill.file) ? { justification: deferredSkills.get(skill.file) } : {}),
   }));
-  const searchSkills = (query: unknown, requestedLimit: unknown) => {
+  const searchSkills = (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown) => {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
-    const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 5;
-    if (!text || !skills.length) return [];
+    const group = typeof requestedGroup === 'string' ? requestedGroup.trim().slice(0, 64) : '';
+    const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 3;
+    const offset = Number.isInteger(requestedOffset) ? Math.min(1000, Math.max(0, Number(requestedOffset))) : 0;
+    if (!skills.length) return {results:[], offset, limit, remaining:0};
     const canonicalName = (value: string) => value.toLowerCase().trim().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
-    const exact = skills.filter(skill => canonicalName(skill.name) === canonicalName(text));
-    const ranked = skillIndex ? rankSkills(skillIndex, text, 8).map(item => item.skill) : [];
-    const ordered = [...exact, ...ranked];
+    const terms = [...new Set(text.toLowerCase().match(/[a-z0-9+#.-]{2,64}/g) ?? [])];
+    const candidates = skills.filter(skill => !group || capabilityGroup(skill.name, skill.description) === group);
+    const sortSkills = (left: Skill, right: Skill) => left.name.localeCompare(right.name) || left.file.localeCompare(right.file);
+    let ordered: Skill[];
+    if (!text) {
+      ordered = [...candidates].sort(sortSkills);
+    } else {
+      const exact = candidates.filter(skill => canonicalName(skill.name) === canonicalName(text)).sort(sortSkills);
+      const ranked = skillIndex
+        ? rankSkills(skillIndex, text, Math.min(256, Math.max(8, skills.length))).map(item => item.skill)
+          .filter(skill => !group || capabilityGroup(skill.name, skill.description) === group)
+        : [];
+      // Keep a direct metadata fallback so an explicit query remains useful
+      // for a single description term or a catalog larger than the ranker cap.
+      const lexical = candidates.map(skill => {
+        const name = skill.name.toLowerCase();
+        const description = skill.description.toLowerCase();
+        const score = terms.reduce((total, term) => total + (name.includes(term) ? 16 : 0) + (description.includes(term) ? 2 : 0), 0);
+        return {skill, score};
+      }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || sortSkills(a.skill, b.skill)).map(row => row.skill);
+      ordered = [...exact, ...ranked, ...lexical];
+    }
     const seen = new Set<string>();
-    return ordered.filter(skill => {
+    const unique = ordered.filter(skill => {
       if (seen.has(skill.file)) return false;
       seen.add(skill.file);
       return true;
-    }).slice(0, limit).map(skill => ({
-      name: skill.name.slice(0, 100),
-      path: skill.file.slice(0, 512),
-      description: skill.description.slice(0, 240),
-    }));
+    });
+    const selected = unique.slice(offset, offset + limit);
+    return {
+      results: selected.map((skill) => ({
+        name: skill.name.slice(0, 100),
+        path: skill.file.slice(0, 512),
+        description: skill.description.slice(0, 240),
+      })),
+      offset,
+      limit,
+      remaining: Math.max(0, unique.length - offset - selected.length),
+    };
+  };
+  const reviewPage = (requestedLimit: unknown, requestedOffset: unknown) => {
+    const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 3;
+    const offset = Number.isInteger(requestedOffset) ? Math.min(1000, Math.max(0, Number(requestedOffset))) : 0;
+    const all = reviewStatus();
+    const skills = all.slice(offset, offset + limit);
+    return {skills, offset, limit, remaining: Math.max(0, all.length - offset - skills.length)};
   };
   // Keep unresolved reads and applicable checks on the wire. A delivered hint
   // must not disappear forever, and this must not enqueue extra model turns.
@@ -419,18 +502,29 @@ export function createRelevantGuidance(pi: any) {
   });
   pi.registerTool?.({
     name: 'skill_review', label: 'Skill review',
-    description: 'Inspect applicable task and file skills and their read status, or search the bounded installed skill catalogue. Read a selected SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Apply relevant checks and retain evidence; search is advisory and never creates a review obligation.',
+    description: 'Browse compact groups or search the bounded installed skill catalogue, and inspect applicable task/file skill status. Read a selected SKILL.md with read, or defer one with a task-specific reason when irrelevant, already covered or inaccessible. Browse/search are advisory and never create a review obligation.',
     parameters: Type.Object({
-      action: Type.Union([Type.Literal('inspect'), Type.Literal('defer'), Type.Literal('search')]),
+      action: Type.Union([Type.Literal('browse'), Type.Literal('inspect'), Type.Literal('defer'), Type.Literal('search')]),
       skill: Type.Optional(Type.String({maxLength:512})),
       reason: Type.Optional(Type.String({minLength:12,maxLength:240,description:"Concise task-specific rationale, 12–240 characters; do not paste a review report."})),
+      group: Type.Optional(Type.String({maxLength:64,description:'Group id from browse; optional search filter.'})),
       query: Type.Optional(Type.String({maxLength:256,description:'Case-insensitive catalogue name/description query; bounded and advisory.'})),
-      limit: Type.Optional(Type.Integer({minimum:1,maximum:8,default:5,description:'Maximum matching skills to return (default 5).'})),
+      limit: Type.Optional(Type.Integer({minimum:1,maximum:8,default:3,description:'Maximum matching skills to return (default 3).'})),
+      offset: Type.Optional(Type.Integer({minimum:0,maximum:1000,description:'Page through bounded metadata matches.'})),
     }),
     async execute(_id: any, input: any) {
-      if (input.action === 'search') {
+      if (input.action === 'browse' || input.action === 'search') {
+        const group = typeof input.group === 'string' ? input.group.trim().slice(0,64) : '';
+        if (group && !CAPABILITY_GROUPS.some(candidate => candidate.id === group))
+          return {isError:true, content:[{type:'text',text:'Unknown skill group. Use skill_review({action:"browse"}) for the available group ids.'}]};
+        if (input.action === 'browse' && !group && typeof input.query !== 'string') {
+          const groups = groupOverview(skills.map(skill => ({name:skill.name,description:skill.description})));
+          const result = {groups, note:'Browse is metadata-only. Supply group or query for a short paginated preview; search and browse never create a review obligation.'};
+          return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
+        }
         const query = typeof input.query === 'string' ? input.query.trim().slice(0,256) : '';
-        const result = {query, results:searchSkills(input.query,input.limit), scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
+        const page = searchSkills(query,input.limit,input.offset,group);
+        const result = {query, ...(group ? {group} : {}), ...page, scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
         return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
       }
       if (input.action === 'defer') {
@@ -441,7 +535,7 @@ export function createRelevantGuidance(pi: any) {
         try { pi.appendEntry?.('skill-review-decision', {requestNumber, skill:target.skill.name, disposition:'deferred', reason:input.reason.trim()}); } catch {}
         try { pi.appendEntry?.(ENTRY,snapshot()); } catch {}
       }
-      const result = {enabled:reviewEnabled(), available:reviewAvailable(), mode:reviewMode(), skills:reviewStatus(), scope:'Deterministic task and file routes; at most two reads requested per operation. Discovery and skill reads remain available. Reads do not prove application.'};
+      const result = {enabled:reviewEnabled(), available:reviewAvailable(), mode:reviewMode(), ...reviewPage(input.limit,input.offset), scope:'Deterministic task and file routes; at most two reads requested per operation. Discovery and skill reads remain available. Reads do not prove application.'};
       return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
     },
   });
@@ -476,6 +570,7 @@ export function createRelevantGuidance(pi: any) {
       deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
+      advisoryDiscoveryDelivered.clear();
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
       // Space renewed offers across requests; never treat ignored suggestions
       // as read receipts or permanently retire an unread workflow.
@@ -498,6 +593,7 @@ export function createRelevantGuidance(pi: any) {
       bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
+      advisoryDiscoveryDelivered.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
@@ -559,6 +655,7 @@ export function createRelevantGuidance(pi: any) {
       lastFailure = ""; failures = urgentCount = 0;
       pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
       matchingPrompt = false;
+      advisoryDiscoveryDelivered.clear();
       requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
       if (!enabled()) return;
       matchingPrompt = true;
@@ -822,6 +919,7 @@ export function createRelevantGuidance(pi: any) {
         if (isTopic(h.key)) { topicSeen.set(h.key, requestNumber); topicCount++; if (topicSeen.size > 64) topicSeen.delete(topicSeen.keys().next().value!); }
         else { shown.add(h.key); if (shown.size > LIMIT) shown.delete(shown.values().next().value!); }
         pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
+        if (h.discovery) advisoryDiscoveryDelivered.add(h.discovery);
         if (h.key.startsWith("signal:") && runCount - urgentCount >= runAllowance()) urgentCount++;
         runCount++; }
       if (hints.length) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* avoid blocking work */ }

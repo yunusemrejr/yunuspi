@@ -143,7 +143,8 @@ test('default skill guidance is advisory: ordinary execution stays open and no r
   delete process.env.PI_SKILL_REVIEW;
   try {
     const f=fixture();f.start('Implement Python');
-    assert.ok(f.g.candidates().some(h=>h.skill),'the relevant workflow remains an optional hint');
+    assert.ok(f.g.candidates().some(h=>h.discovery==='workflow' && /action:"browse"/.test(h.text)),'a short invitation replaces a prescribed skill');
+    assert.ok(f.g.candidates().filter(h=>h.discovery).every(h=>!h.text.includes('SKILL.md')),'automatic invitation contains no skill paths');
     assert.equal(f.edit('main.py'),undefined);
     assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
     assert.equal(f.context().length,0,'advisory mode does not add a persistent required checklist');
@@ -151,6 +152,15 @@ test('default skill guidance is advisory: ordinary execution stays open and no r
     assert.equal(status.details.enabled,false,'strict enforcement is opt-in');
     assert.equal(status.details.available,true,'skill_review inspect remains available');
     assert.ok(status.details.skills.some(s=>s.status==='needs_review'));
+    f.g.commit(f.g.candidates());
+    for(let i=0;i<30;i++)f.g.record({toolName:'read',input:{path:`src/file${i}.py`},isError:false,content:[{type:'text',text:'pass'}]});
+    assert.ok(!f.g.candidates().some(h=>h.discovery),'same request does not repeatedly invite discovery');
+    f.g.restore(f.ctx);f.start('Implement Python');
+    assert.ok(!f.g.candidates().some(h=>h.discovery),'resume preserves the invitation cooldown');
+    f.start('Implement Python');f.start('Implement Python');
+    assert.ok(f.g.candidates().some(h=>h.discovery),'relevant invitations become eligible after three requests');
+    f.g.record({toolName:'skill_review',input:{action:'browse'},isError:false});
+    assert.ok(!f.g.candidates().some(h=>h.discovery==='workflow'),'successful discovery suppresses more invitations');
   } finally {
     if(inherited===undefined) delete process.env.PI_SKILL_REVIEW;
     else process.env.PI_SKILL_REVIEW=inherited;

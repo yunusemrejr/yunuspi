@@ -18,7 +18,7 @@ test('startup retains essential operations and loads specialized schemas only on
  const f=fixture();
  assert.ok(f.active().includes('subagent')&&f.active().includes('quality_review'));
  assert.ok(!f.active().includes('browser_session'));
- const result=await f.call({query:'browser screenshot',limit:1});
+ const result=await f.call({query:'browser screenshot',limit:1,enable:true});
  assert.deepEqual(result.details.tools.map(t=>t.name),['browser_session']);
  assert.ok(f.active().includes('browser_session'));
  assert.equal(f.executed(),0);
@@ -60,4 +60,38 @@ test('skill projection removes only the configured SDK catalog and keeps user in
  assert.equal(compactSkillCatalog(event,['read']),undefined,'no projection when discovery is unavailable');
  assert.equal(compactSkillCatalog({...event,systemPromptOptions:{skills:[{...skill,description:'Different registered evidence'}]}},['skill_review']),undefined,'custom catalogs are not rewritten');
  assert.equal(compactSkillCatalog({...event,systemPrompt:event.systemPrompt+'\n'+block},['skill_review']),undefined,'ambiguous duplicates are preserved');
+});
+
+test('group browsing and query previews do not expose schemas until a specific activation',async()=>{
+ const f=fixture(), before=f.active().slice();
+ const overview=await f.call({});
+ assert.ok(overview.details.groups.length>0);
+ assert.ok(!JSON.stringify(overview.details).includes('parameters'));
+ const group=overview.details.groups[0].id;
+ const page=await f.call({group,limit:1});
+ assert.ok(page.details.tools.length<=1);
+ const preview=await f.call({query:'browser screenshot'});
+ assert.equal(preview.details.tools[0].name,'browser_session');
+ assert.equal(preview.details.tools[0].active,false);
+ assert.deepEqual(f.active(),before);
+ assert.equal(f.entries.length,0);
+ await f.call({names:['browser_session']});
+ assert.ok(f.active().includes('browser_session'));
+ assert.equal(f.executed(),0);
+ assert.equal((await f.call({group:'not-real'})).isError,true);
+});
+test('resume bounds old discoveries, drops stale receipts and retains unresolved calls',async()=>{
+ const {restoredToolNames}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
+ const names=Array.from({length:40},(_,i)=>'special_'+i), allowed=new Set(names);
+ const receipt={type:'custom',customType:'harness-tool-activation-v1',data:{names}};
+ assert.equal(restoredToolNames([receipt],allowed).size,6);
+ const conversation=Array.from({length:13},()=>({type:'message',message:{role:'user',content:'Next task'}}));
+ assert.equal(restoredToolNames([receipt,...conversation],allowed).size,0);
+ const calls={type:'message',message:{role:'assistant',content:names.slice(0,8).map((name,i)=>({type:'toolCall',name,id:String(i)}))}};
+ const result={type:'message',message:{role:'toolResult',toolCallId:'0',toolName:names[0]}};
+ assert.equal(restoredToolNames([calls,...conversation],allowed).size,0,'abandoned calls before newer user turns do not pin schemas');
+ const restored=restoredToolNames([...conversation,calls,result],allowed);
+ assert.equal(restored.size,8,'recent completed tool plus all seven outstanding calls survive the soft schema cap');
+ assert.ok(restored.has(names[0]));
+ assert.ok(restored.has(names[7]));
 });

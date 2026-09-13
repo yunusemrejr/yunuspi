@@ -254,7 +254,7 @@ export default function (pi: any) {
   pi.registerTool({
     name: "session_self",
     promptGuidelines: [
-      "Before a substantial task phase, map the next decision to available inspection, editing, background-task, coordination and verification tools and any task-specific skill; when available, use tool_search to discover specialized tools and load their schemas. Read a SKILL.md on demand when its workflow changes that decision, apply only relevant guidance, and revisit selection when scope changes. Keep simple tasks simple: choices are advisory; they do not impose quotas, grant authorization, or prove success.",
+      "When useful, explore tool_search or find a task-specific skill with skill_review. Read a SKILL.md on demand when it helps the next decision. Discovery is optional; tool access and suggestions do not grant authorization or prove success.",
     ],
     label: "Session self",
     description:
