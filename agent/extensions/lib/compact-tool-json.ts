@@ -7,9 +7,12 @@ const STRUCTURED_TOOLS = new Set([
   'context_score', 'handoff_capsule', 'evidence_cache', 'data_query',
   'math_check', 'artifact_check', 'value_convert', 'quality_review',
   'skill_review', 'session_audit', 'dependency_plan',
+  'sqlite_probe', 'package_probe', 'openapi_probe', 'coverage_probe',
+  'contract_diff', 'env_audit', 'net_probe', 'archive_probe',
+  'http_request', 'sys_probe',
 ]);
-export function compactJsonWhitespace(text: string): string {
-  if (text.length < 512 || text.length > 1_000_000 || !/^\s*[\[{]/.test(text)) return text;
+export function compactJsonWhitespace(text: string, minimumSavings = 128): string {
+  if (text.length < (minimumSavings === 0 ? 0 : 512) || text.length > 1_000_000 || !/^\s*[\[{]/.test(text)) return text;
   try { JSON.parse(text); } catch { return text; }
   let quoted = false, escaped = false, start = 0;
   const pieces: string[] = [];
@@ -27,7 +30,7 @@ export function compactJsonWhitespace(text: string): string {
   }
   pieces.push(text.slice(start));
   const compact=pieces.join('');
-  return text.length-compact.length>=128 ? compact : text;
+  return text.length-compact.length>=minimumSavings ? compact : text;
 }
 export function createToolJsonCompactor() {
   // Text-keyed memoization avoids repeated parsing of growing history. Bounded,

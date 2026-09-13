@@ -18,6 +18,17 @@ try {
   await loader.reload();
   const result = loader.getExtensions(); assert.deepEqual(result.errors, []);
   [extension] = result.extensions; assert.equal(extension.tools.size, 8);
+  const {buildSystemPrompt} = await import(pathToFileURL(path.join(core, 'dist/core/system-prompt.js')));
+  const definitions = [...extension.tools.values()].map(t => t.definition);
+  const guidelines = definitions.flatMap(t => t.promptGuidelines);
+  assert.equal(new Set(guidelines).size, 1, 'utility advice is shared, not repeated per tool');
+  const options = {cwd:workspace, selectedTools:definitions.map(t=>t.name), toolSnippets:Object.fromEntries(definitions.map(t=>[t.name,t.promptSnippet]))};
+  const prompt = buildSystemPrompt({...options,promptGuidelines:guidelines});
+  assert.equal(prompt.split(guidelines[0]).length - 1, 1, 'actual SDK prompt includes shared advice once');
+  const previous = definitions.map(t => `Use ${t.name} for its supported inspections instead of shell/Python snippets. Supply explicit paths and inspect truncation indicators; narrow or paginate over-limit results.`);
+  const oldPrompt = buildSystemPrompt({...options,promptGuidelines:previous});
+  assert.ok(oldPrompt.length - prompt.length > 1000, 'save over 1000 prompt characters without hiding tools');
+  console.log(`Utility prompt reduction: ${oldPrompt.length - prompt.length} characters`);
   const ctx = { cwd: workspace, ui: { notify: message => { throw Error(message); } } };
   for (const hook of extension.handlers.get('session_start') ?? []) await hook({}, ctx);
   const samples = {

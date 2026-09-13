@@ -1524,6 +1524,9 @@ export default async function registerLiveModels(
 	// work: every session start triggers a non-blocking network refresh scoped
 	// to OUR providers (never the pi.dev builtins). Per-provider TTLs guard
 	// the fetches, so frequent boots cost one cached list read, not I/O.
+	// Discovery belongs to the interactive parent; each child already receives
+	// the model catalog. Do not fan out background requests per worker/session.
+	const automaticRefreshAllowed = () => process.env.PI_OFFLINE !== '1' && !process.env.PI_SUBAGENT_CHILD;
 	let sessionGeneration = 0;
  let researchController = new AbortController();
 	let lastRouterRefresh = 0;
@@ -1532,6 +1535,7 @@ export default async function registerLiveModels(
   researchController.abort(); researchController = new AbortController();
 		const generation = ++sessionGeneration;
 		lastRouterRefresh = Date.now();
+		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: [...REFRESHER_IDS, ...localProviderIds] })
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
@@ -1541,6 +1545,7 @@ export default async function registerLiveModels(
 	// Refresh discovery during long sessions without timers, inference probes,
 	// or waiting on the next provider request. One bounded attempt per interval.
 	pi.on("before_agent_start", (_event, ctx) => {
+		if (!automaticRefreshAllowed()) return;
 		const timestamp = Date.now();
 		if (routerRefreshPending || timestamp - lastRouterRefresh < ROUTER_CATALOG_TTL_MS) return;
 		lastRouterRefresh = timestamp;

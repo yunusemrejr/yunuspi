@@ -147,3 +147,21 @@ test('observation hook proposes near predecessors but exposes exact changes and 
   await assert.rejects(tools.obs_read.execute('id',{id:3},undefined,undefined,ctx),/unavailable/);
   assert.equal(handlers.context({messages:[again]},ctx),undefined,'a hidden branch failure cannot become a match');
 });
+
+test('skill instructions remain full reads rather than dedup pointers after compaction', () => {
+  const handlers={},branch=[];
+  observations({on:(name,fn)=>handlers[name]=fn,registerTool(){},registerCommand(){},getActiveTools:()=>['read','obs_read']},{reset(){},select:async()=>undefined});
+  const ctx={sessionManager:{getEntries:()=>branch,getBranch:()=>branch}};
+  handlers.session_start({},ctx);
+  const body='Workflow instructions and exact constraints. '.repeat(100);
+  const event={toolName:'read',input:{path:'/fixture/php/SKILL.md'},content:[{type:'text',text:body}],isError:false};
+  for(let i=0;i<2;i++) {
+    assert.equal(handlers.tool_result(event,ctx),undefined,'full instructions reach the skill receipt and model');
+    branch.push({type:'message',message:{...event,role:'toolResult'}});
+    handlers.session_compact({},ctx);
+  }
+  const legacy={role:'toolResult',toolName:'read',toolCallId:'skill-read',content:event.content,details:{piObservation:{version:1,id:1,signature:'legacy',operation:'legacy'}}};
+  const call={role:'assistant',content:[{type:'toolCall',id:'skill-read',name:'read',arguments:event.input}]};
+  const messages=[call,legacy];
+  assert.equal(handlers.context({messages},ctx),undefined,'legacy full skill bodies are not distilled');
+});

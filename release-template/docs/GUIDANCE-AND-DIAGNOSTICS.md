@@ -70,3 +70,9 @@ provenance uses indexed lookups, background diagnostics preserve the original
 failure cause within their output cap, and sibling cleanup reaches stale
 heartbeats beyond the discovery display limit. Existing capability checks,
 price ceilings and bounded fan-out still govern automatic work.
+
+## Session reliability fixes
+
+A limited skill read satisfies the read requirement when its returned text matches the entire small skill file. Partial reads remain insufficient. Skill reads bypass observation deduplication so a fresh read after compaction delivers the instructions again. Review failures distinguish malformed, empty, oversized, incomplete and execution-failed reports; invalid output does not become accepted evidence. Tool argument validation is classified before words echoed inside the invalid arguments.
+
+Startup animation stops when its content no longer fits the terminal viewport, preventing repeated full-screen startup redraws after a pane shrinks. MCP lifecycle handling isolates replacement workers from stale callbacks, discards failed handshakes, and avoids launching processes for already-cancelled calls. Restart an existing Pi process to load updated extensions and startup code.

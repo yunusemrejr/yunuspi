@@ -59,6 +59,13 @@ export function startRatMotion(owner) {
     // The startup mascot is above the conversation. Stop repainting it once
     // chat begins; it remains a static part of scrollback, not a busy loop.
     if (owner.chatContainer?.children?.length) { owner._yunusRatDispose?.(); return; }
+    // Once the header leaves the viewport, changing it forces a full redraw.
+    // Splitting a terminal for another session can trigger this while idle.
+    const terminal = owner.ui.terminal;
+    if (terminal && owner.ui.render(terminal.columns).length > terminal.rows) {
+      owner._yunusRatDispose?.();
+      return;
+    }
     owner._yunusRatFrame = Math.floor((Date.now() - started) / 100) % 16;
     owner.builtInHeader.setExpanded(owner.getStartupExpansionState());
     owner.ui.requestRender();
@@ -66,8 +73,9 @@ export function startRatMotion(owner) {
   timer.unref?.();
   owner._yunusRatDispose = () => { clearInterval(timer); owner._yunusRatDispose = undefined; };
 }
+const previousMotionInstallV2 = "(/* PI_RAT_MOTION_V2 */ (function startRatMotion(owner) {\n  owner._yunusRatDispose?.();\n  owner._yunusRatFrame = 0;\n  if (process.env.PI_RAT_ANIMATION === 'off' || process.env.TERM === 'dumb') return;\n  const started = Date.now();\n  const timer = setInterval(() => {\n    if (!owner.isInitialized || owner.customHeader || !owner.builtInHeader?.setExpanded) return;\n    // The startup mascot is above the conversation. Stop repainting it once\n    // chat begins; it remains a static part of scrollback, not a busy loop.\n    if (owner.chatContainer?.children?.length) { owner._yunusRatDispose?.(); return; }\n    owner._yunusRatFrame = Math.floor((Date.now() - started) / 100) % 16;\n    owner.builtInHeader.setExpanded(owner.getStartupExpansionState());\n    owner.ui.requestRender();\n  }, 100);\n  timer.unref?.();\n  owner._yunusRatDispose = () => { clearInterval(timer); owner._yunusRatDispose = undefined; };\n})(this))";
 const previousMotionInstall = "(/* PI_RAT_MOTION_V1 */ (function startRatMotion(owner) {\n  owner._yunusRatDispose?.();\n  owner._yunusRatFrame = 0;\n  if (process.env.PI_RAT_ANIMATION === 'off' || process.env.TERM === 'dumb') return;\n  const started = Date.now();\n  const timer = setInterval(() => {\n    if (!owner.isInitialized || owner.customHeader || !owner.builtInHeader?.setExpanded) return;\n    // The startup mascot is above the conversation. Stop repainting it once\n    // chat begins; it remains a static part of scrollback, not a busy loop.\n    if (owner.chatContainer?.children?.length) { owner._yunusRatDispose?.(); return; }\n    owner._yunusRatFrame = Math.floor((Date.now() - started) / 240) % 6;\n    owner.builtInHeader.setExpanded(owner.getStartupExpansionState());\n    owner.ui.requestRender();\n  }, 240);\n  timer.unref?.();\n  owner._yunusRatDispose = () => { clearInterval(timer); owner._yunusRatDispose = undefined; };\n})(this))";
-const motionInstall = `(/* PI_RAT_MOTION_V2 */ (${startRatMotion.toString()})(this))`;
+const motionInstall = `(/* PI_RAT_MOTION_V3 */ (${startRatMotion.toString()})(this))`;
 const cleanup = 'this._yunusRatDispose?.(),';
 const count = (s, needle) => s.split(needle).length - 1;
 export function transformBranding(source, bundled = false) {
@@ -98,7 +106,11 @@ export function transformBranding(source, bundled = false) {
     if (count(source,previousMotionInstall)!==1) throw Error('tui-branding: prior motion drift');
     source=source.replace(previousMotionInstall,()=>motionInstall);
   }
-  if (!source.includes('PI_RAT_MOTION_V2')) {
+  if (source.includes('PI_RAT_MOTION_V2')) {
+    if (count(source,previousMotionInstallV2)!==1) throw Error('tui-branding: prior motion drift');
+    source=source.replace(previousMotionInstallV2,()=>motionInstall);
+  }
+  if (!source.includes('PI_RAT_MOTION_V3')) {
     if (count(source,header)!==1 || count(source,logoDeclaration)!==1 || count(source,'${logo}')!==2 || count(source,stop)!==1) throw Error('tui-branding: animation anchor drift');
     source=source.replace(logoDeclaration,animatedDeclaration).replaceAll('${logo}','${logo()}')
       .replace(header,()=>motionInstall+','+header).replace(stop,stop+cleanup);

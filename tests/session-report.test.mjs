@@ -87,3 +87,25 @@ test('compaction retries append retention priorities once without changing origi
   assert.equal(event.preparation.messagesToSummarize[0], original);
   assert.equal(event.preparation.previousSummary, 'Existing summary');
 });
+
+test('utility and HTTP JSON histories compact without changing evidence or replay bytes', () => {
+  const text = JSON.stringify({rows:Array.from({length:80},(_,id)=>({id,detail:'keep  spacing'}))},null,2);
+  const compactor = createToolJsonCompactor();
+  for (const toolName of ['sqlite_probe','package_probe','openapi_probe','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','http_request','sys_probe']) {
+    const original = {role:'toolResult',toolName,toolCallId:'fixture',content:[{type:'text',text}]};
+    const messages = [original];
+    const result = compactor.transform(messages);
+    assert.deepEqual(JSON.parse(result[0].content[0].text),JSON.parse(text));
+    assert.ok(result[0].content[0].text.length < text.length * .8);
+    assert.equal(original.content[0].text,text);
+    assert.equal(result[0].toolCallId,'fixture');
+    compactor.reset();
+    assert.equal(JSON.stringify(compactor.transform(messages)),JSON.stringify(result));
+  }
+});
+
+test('diagnostics classify validation echoes and actual workflow guards correctly', () => {
+  assert.equal(failureCategory('Validation failed for tool "todo": action required; fields: acceptance, budget, evidence').category,'input');
+  assert.equal(failureCategory('Before edit on "index.php", read the matching workflow(s): PHP').category,'guard');
+  assert.equal(failureCategory('Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.').category,'verification');
+});

@@ -53,7 +53,13 @@ export class UtilityClient {
       this.notify('notifications/initialized', {});
       const catalog = await this.request('tools/list', {}, 2000);
       if (catalog?.tools?.length !== 8) throw Error('Incomplete utility catalog');
-    } catch (error) { child.kill('SIGKILL'); throw error; }
+    } catch (error) {
+      // Retire a failed handshake before yielding: kill() delivers exit later,
+      // and a concurrent call must never reuse this uninitialized process.
+      this.disconnected(child);
+      child.kill('SIGKILL');
+      throw error;
+    }
   }
   private disconnected(child: ChildProcessWithoutNullStreams) {
     if (this.child !== child) return;
@@ -92,6 +98,7 @@ export class UtilityClient {
     });
   }
   async call(name: string, args: unknown, signal?: AbortSignal) {
+    if (signal?.aborted) throw Error('Utility request cancelled');
     await this.start();
     return this.request('tools/call', { name, arguments: args }, 7500, signal);
   }

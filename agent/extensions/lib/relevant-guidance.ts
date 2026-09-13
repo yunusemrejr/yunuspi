@@ -1,6 +1,7 @@
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * No inference or autonomous tool execution. Only catalog heading metadata is
  * read; tool-output prose does not become routing instructions. */
+import { createContextAnchor } from "./context-anchor.ts";
 import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
@@ -17,6 +18,16 @@ const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quot
 const MAX_PENDING = 32;
 const MAX_RUN_HINTS = 20;
 const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history scan
+// A finite line limit can still return the entire file (for example 40 lines
+// requested from a 21-line skill). Verify returned bytes, not the limit flag.
+function returnedWholeSkill(file: string, content: any): boolean {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > 128 * 1024) return false;
+    const expected = fs.readFileSync(file, 'utf8');
+    return Array.isArray(content) && content.some(part => part?.type === 'text' && part.text === expected);
+  } catch { return false; }
+}
 const REVIEW_CONTEXT = 'skill-review-context';
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
 const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
@@ -35,6 +46,7 @@ type Skill = { name: string; file: string; description: string };
 type Hint = { key: string; text: string; tool?: string; skill?: string; priority?: number; sourceFile?: string; expiresAt?: number };
 
 export function createRelevantGuidance(pi: any) {
+  let anchorContext = createContextAnchor();
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
@@ -333,7 +345,10 @@ export function createRelevantGuidance(pi: any) {
       ...selected.map(s => `${s.status === 'read' ? 'Apply (read)' : 'Read required'}: ${JSON.stringify(s.path)} — ${s.reason}`),
       tools().has('skill_review') ? 'Use skill_review inspect for all targets; defer only with a task-specific reason. User instructions take precedence.' : 'If a skill does not apply or cannot be read, state the task-specific reason. User instructions take precedence.',
     ].join('\n');
-    return {messages:[...messages,{role:'custom',customType:REVIEW_CONTEXT,content:text.slice(0,2800),display:false,timestamp:0}]};
+    // Keep unchanged guidance at its first boundary; changed read status goes
+    // after the new evidence, without invalidating the earlier request prefix.
+    const guidance = {role:'custom',customType:REVIEW_CONTEXT,content:text.slice(0,2800),display:false,timestamp:0};
+    return {messages:anchorContext(messages,guidance,requestNumber)};
   });
   pi.registerTool?.({
     name: 'skill_review', label: 'Skill review',
@@ -341,7 +356,7 @@ export function createRelevantGuidance(pi: any) {
     parameters: Type.Object({
       action: Type.Union([Type.Literal('inspect'), Type.Literal('defer')]),
       skill: Type.Optional(Type.String({maxLength:512})),
-      reason: Type.Optional(Type.String({minLength:12,maxLength:240})),
+      reason: Type.Optional(Type.String({minLength:12,maxLength:240,description:"Concise task-specific rationale, 12–240 characters; do not paste a review report."})),
     }),
     async execute(_id: any, input: any) {
       if (input.action === 'defer') {
@@ -402,6 +417,7 @@ export function createRelevantGuidance(pi: any) {
       if (hadTopics || hadDeferrals) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
+      anchorContext = createContextAnchor();
       reviewTargets.clear(); deferredSkills.clear();
       bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
@@ -634,10 +650,11 @@ export function createRelevantGuidance(pi: any) {
       // subsequent workflow guidance for the actual delegated work.
       if ((name !== "project_report" || input.view === "workspace") && (name !== "subagent" || !input.action)) used.add(name);
       const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : "";
-      // A successful range/truncated read proves access, not that the skill was read.
-      const completeRead = (input.offset === undefined || input.offset === 1) && input.limit === undefined
-        && event.details?.truncation?.truncated !== true;
-      if (name === "read" && completeRead && file && !read.has(file) && skills.some(s => s.file === file)) {
+      const knownSkillRead = name === "read" && file && skills.some(s => s.file === file);
+      const completeRead = (input.offset === undefined || input.offset === 1)
+        && event.details?.truncation?.truncated !== true && event.details?.deduplicated !== true
+        && (input.limit === undefined || knownSkillRead && returnedWholeSkill(file, event.content));
+      if (knownSkillRead && completeRead && !read.has(file)) {
         add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
         contextSkill(52);

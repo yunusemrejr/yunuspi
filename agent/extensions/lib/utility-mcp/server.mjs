@@ -19,14 +19,18 @@ const result = (id, value) => send({ jsonrpc: '2.0', id, result: value });
 const error = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } });
 const failure = message => ({ content: [{ type: 'text', text: JSON.stringify({ error: message }) }], isError: true });
 
-function stopJob(id, message) {
-  const job = jobs.get(id); if (!job) return;
+function stopJob(id, message, worker) {
+  const job = jobs.get(id); if (!job || worker && job.worker !== worker) return;
   clearTimeout(job.timer); jobs.delete(id); void job.worker.terminate();
   result(id, failure(message));
 }
 function dispatch(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) || request.jsonrpc !== '2.0' || typeof request.method !== 'string' || request.id !== undefined && typeof request.id !== 'number' && typeof request.id !== 'string') return error(null, -32600, 'Invalid request');
   const { id, method, params = {} } = request;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    if (id !== undefined) error(id, -32602, 'Params must be an object');
+    return;
+  }
   if (id === undefined) {
     if (method === 'notifications/initialized' && initialized) ready = true;
     if (method === 'notifications/cancelled') stopJob(params.requestId, 'Request cancelled');
@@ -51,14 +55,14 @@ function dispatch(request) {
   const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { root, name: params.name, args }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 16, stackSizeMb: 4 }, stdout: true, stderr: true });
   // Worker dependencies and inspection backends must never contaminate MCP stdout.
   worker.stdout.resume(); worker.stderr.resume();
-  const timer = setTimeout(() => stopJob(id, 'Utility exceeded the 6 second runtime limit'), 6000);
+  const timer = setTimeout(() => stopJob(id, 'Utility exceeded the 6 second runtime limit', worker), 6000);
   jobs.set(id, { worker, timer });
   worker.once('message', value => {
-    if (!jobs.has(id)) return;
+    if (jobs.get(id)?.worker !== worker) return;
     clearTimeout(timer); jobs.delete(id); void worker.terminate(); result(id, value);
   });
-  worker.once('error', () => stopJob(id, 'Utility worker failed or exceeded memory limits'));
-  worker.once('exit', () => { if (jobs.has(id)) stopJob(id, 'Utility worker exited without a result'); });
+  worker.once('error', () => stopJob(id, 'Utility worker failed or exceeded memory limits', worker));
+  worker.once('exit', () => stopJob(id, 'Utility worker exited without a result', worker));
 }
 function shutdown() {
   if (shuttingDown) return;

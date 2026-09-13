@@ -253,11 +253,22 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				if (!Number.isSafeInteger(childResult.reviewEvidence?.sourceReads) || childResult.reviewEvidence.sourceReads < 1) return pending.map(r=>({...r,gap:'The reviewer returned no successful native source-read receipt.'}));
 				// Structured multi-aspect reports need their own bounded envelope;
 				// the ordinary prose preview cap can cut otherwise valid JSON in half.
-				const body = automaticHelperBody(childResult, {maxChars:30000});
-				const parsed = JSON.parse(body.replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1'));
-				const reports = assigned.map((a:any) => {const matches=parsed.reviews?.filter((r:any)=>r.aspect===a.id);return matches?.length===1 ? {aspect:a.id,ok:true,text:JSON.stringify(matches[0])} : {aspect:a.id,ok:false,text:''};});
-				return reports;
-			} catch { return pending.map(r=>({...r,gap:'Reviewer execution failed or its report was not valid JSON.'})); }
+				// Probe one extra character so truncation is classified, not parsed
+				// as malformed provider JSON. Never repair or infer review evidence.
+				const body = automaticHelperBody(childResult, {maxChars:30001});
+				const invalid = (gap: string) => pending.map(r=>({...r,gap}));
+				if (!body) return invalid('The reviewer returned an empty report.');
+				if (body.length > 30000) return invalid('The reviewer report exceeded the 30000-character envelope.');
+				let parsed: any;
+				try { parsed = JSON.parse(body.replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1')); }
+				catch { return invalid('The reviewer returned a report that was not valid JSON.'); }
+				if (!parsed || !Array.isArray(parsed.reviews)) return invalid('The reviewer JSON did not contain a reviews array.');
+				return assigned.map((a:any) => {
+					const matches = parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id);
+					return matches.length === 1 ? {aspect:a.id,ok:true,text:JSON.stringify(matches[0])}
+						: {aspect:a.id,ok:false,text:'',gap:'The reviewer JSON did not contain exactly one report for the assigned aspect.'};
+				});
+			} catch { return pending.map(r=>({...r,gap:'Reviewer execution failed before a report could be assessed.'})); }
 			finally { if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{index:0,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
 		}).map((operation,index)=>operation.then(reports=>{
 			if (!owns() || signal.aborted) return;

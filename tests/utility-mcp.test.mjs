@@ -1,3 +1,5 @@
+import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -287,4 +289,44 @@ test('extension prewarms automatically and closes its MCP process at shutdown', 
     assert.equal(value.isError, false);
     for (const tool of registered.values()) assert.ok(tool.promptGuidelines.length);
   } finally { events.get('session_shutdown')(); }
+});
+
+// Deterministic interleaving: a finished worker can exit after an ID is reused.
+function protocolFixture() {
+  const workers = [], replies = [];
+  class FakeWorker extends EventEmitter {
+    constructor() { super(); this.stdout = this.stderr = {resume(){}}; workers.push(this); }
+    terminate() { this.terminated = true; return Promise.resolve(0); }
+  }
+  const stdin = new EventEmitter(); stdin.destroy = () => {};
+  const stdout = new EventEmitter(); stdout.write = text => replies.push(JSON.parse(text)); stdout.writableLength = 0;
+  const source = fs.readFileSync(path.join(agent, 'extensions/lib/utility-mcp/server.mjs'), 'utf8')
+    .replace(/^import .*;$/gm, '').replaceAll('import.meta.url', JSON.stringify(pathToFileURL(path.join(agent, 'extensions/lib/utility-mcp/server.mjs')).href));
+  const api = vm.runInNewContext(source + '\n;({dispatch,shutdown,jobs})', {fs, Worker: FakeWorker, TOOLS, validate: (_name, args) => args, process: {argv:['node','server','--workspace',root],stdin,stdout,on(){}}, Buffer, URL, TextDecoder, setTimeout, clearTimeout});
+  const send = (id, method, params = {}) => api.dispatch({jsonrpc:'2.0', ...(id === undefined ? {} : {id}), method, params});
+  return {...api, workers, replies, send};
+}
+test('late worker callbacks cannot cancel a replacement request reusing its ID', () => {
+  const fixture = protocolFixture();
+  try {
+    fixture.send(1, 'initialize'); fixture.send(undefined, 'notifications/initialized');
+    fixture.send(2, 'tools/call', {name:'package_probe',arguments:{package:'demo'}});
+    const old = fixture.workers[0]; old.emit('message', {content:[]});
+    fixture.send(2, 'tools/call', {name:'package_probe',arguments:{package:'demo'}});
+    const replacement = fixture.workers[1];
+    old.emit('exit', 0);
+    assert.equal(replacement.terminated, undefined, 'old exit must not kill the new worker');
+    assert.equal(fixture.jobs.size, 1);
+    replacement.emit('message', {content:[],isError:false});
+    assert.equal(fixture.replies.at(-1).result.isError, false);
+  } finally { fixture.shutdown(); }
+});
+test('invalid initialize params do not poison the next valid handshake', () => {
+  const fixture = protocolFixture();
+  try {
+    assert.doesNotThrow(() => fixture.send(1, 'initialize', null));
+    assert.equal(fixture.replies.at(-1).error.code, -32602);
+    fixture.send(2, 'initialize');
+    assert.equal(fixture.replies.at(-1).result.serverInfo.name, 'yunuspi-utility-mcp');
+  } finally { fixture.shutdown(); }
 });

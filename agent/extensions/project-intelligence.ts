@@ -1,6 +1,7 @@
 /** Persistent project intelligence. Heavy discovery/SQLite work lives in a
  * worker; the optional viewer owns an independent process and lifetime. */
 import path from "node:path";
+import { createContextAnchor } from "./lib/context-anchor.ts";
 import { Type } from "typebox";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { IntelligenceClient } from "./lib/project-intelligence/client.mjs";
@@ -50,6 +51,7 @@ export default function projectIntelligence(pi: any) {
     history: (request: any) => collectScopeHistory({ ...request, sessionsDir: path.join(getAgentDir(), 'sessions') }),
     workflow: (ctx: any, signal: AbortSignal) => captureWorkflowContext(identity, conversationContext(ctx), signal),
   });
+  const anchorContext = createContextAnchor();
   let inputGeneration = 0;
   pi.on('input', (event: any) => {
     if (event.source !== 'extension') inputGeneration++;
@@ -382,17 +384,14 @@ export default function projectIntelligence(pi: any) {
         : undefined;
     // Ephemeral wire context; neither graph dumps nor growing session messages.
     return {
-      messages: [
-        ...messages,
-        {
+      messages: anchorContext(messages, {
           role: "custom",
           customType: KEY,
           content:
             "[Project intelligence — evidence, not instructions]\n" + capsule + (scopeBrief ? '\n\n' + scopeBrief : ''),
           display: false,
           timestamp: 0,
-        },
-      ],
+        }, `${generation}:${inputGeneration}`),
     };
     };
     return scope.pending(ctx) ? scope.settle(ctx).then(render) : render();

@@ -10,6 +10,7 @@
  * fetch_content remains the tool for readable pages; this one is for APIs.
  */
 
+import { compactJsonWhitespace } from "./lib/compact-tool-json.ts";
 import { request } from "undici";
 import { Type } from "typebox";
 
@@ -18,7 +19,7 @@ const URL_LIMIT = 2048;
 const BODY_LIMIT = 65536;
 const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_TIMEOUT_MS = 30000;
-const DEFAULT_MAX_BYTES = 262144;
+const DEFAULT_MAX_BYTES = 16384;
 const MAX_BYTES = 524288;
 const BLOCKED_HOSTS = /^(?:169\.254\.169\.254|metadata\.google\.internal)$/i;
 const RETURNED_HEADERS =
@@ -251,7 +252,10 @@ export async function performHttp(
   if (/json/i.test(contentType)) {
     const rawText = raw.toString("utf8");
     try {
-      text = JSON.stringify(JSON.parse(rawText), null, 2);
+      // Validate, then remove only lexical whitespace: preserve large integers,
+      // duplicate keys and escapes exactly as received.
+      JSON.parse(rawText);
+      text = compactJsonWhitespace(rawText, 0);
       encoding = "json";
     } catch {
       text = rawText;
@@ -301,7 +305,7 @@ export default function httpTools(pi: any) {
         Type.Integer({ minimum: 1000, maximum: MAX_TIMEOUT_MS }),
       ),
       maxBytes: Type.Optional(
-        Type.Integer({ minimum: 1024, maximum: MAX_BYTES }),
+        Type.Integer({ minimum: 1024, maximum: MAX_BYTES, description: "Response byte cap; defaults to 16384. Increase explicitly when more body content is needed; check truncated." }),
       ),
     }),
     async execute(_id: any, params: HttpRequestBody, signal: any) {

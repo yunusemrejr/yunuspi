@@ -117,3 +117,19 @@ test('history remains bounded and checkout-scoped, preserves discovered defects,
     assert.doesNotMatch(JSON.stringify(store.getMeta('quality-review:checkout-a')), /TEST_DO_NOT_STORE|prose/);
   } finally { store.close(); }
 }));
+
+test('project context keeps unchanged evidence anchored across synthetic tool requests without persisting it', () => fixture(async ({ open }) => {
+  const session = open('cache-prefix');
+  await session.call(read);
+  const user = { role: 'user', content: 'Inspect the README' };
+  const context = messages => session.hooks.get('context')({ messages }, session.ctx);
+  const first = await context([user]);
+  assert.equal(first.messages.at(-1).customType, 'project-intelligence-context');
+  const call = { role: 'assistant', content: [{ type: 'toolCall', id: 'call', name: 'read', arguments: { path: 'README.md' } }] };
+  const result = { role: 'toolResult', toolCallId: 'call', content: [{ type: 'text', text: 'Fixture project architecture' }] };
+  const next = await context([user, call, result]);
+  assert.deepEqual(next.messages.slice(0, first.messages.length), first.messages);
+  assert.deepEqual(next.messages.slice(first.messages.length), [call, result]);
+  const repeated = await context(next.messages);
+  assert.deepEqual(repeated.messages, next.messages, 'reprocessing wire context cannot duplicate the capsule');
+}));

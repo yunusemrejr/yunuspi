@@ -33,3 +33,9 @@ Restart Pi and resume the session to load updated core adapters/footer code. Exi
 The total is an estimate of recorded metered work, not an invoice. External tools without usage records, hosted storage/containers, account-specific discounts or credits, taxes, subscription fees and separately billed BYOK provider charges may require provider billing records. Audio usage without a matching price breakdown is marked partial. Configured or cached catalogs can be stale; new pricing schedules require refreshed metadata or a matching adapter update.
 
 Offline regression coverage includes model switches, long-context thresholds, hourly cache writes, malformed/missing rates, effective service tiers, nested/deduplicated children, retries, compactions, subscriptions, replay and billing corrections. Synthetic provider streams exercise installed API adapters without contacting model providers.
+
+## Context and traffic controls
+
+Unchanged project and skill guidance keeps its original position during tool continuations, preserving the reusable request prefix. Utility tools share one guidance entry while retaining their individual schemas. Structured tool JSON loses only insignificant whitespace; numeric spellings and string contents remain intact. HTTP responses default to a 16 KiB body limit, report truncation, and accept an explicit larger `maxBytes` when needed.
+
+Offline sessions and subagents do not automatically refresh the model catalog. Regression tests intercept provider requests to check request counts and payload preservation without paid inference. Character and byte reductions in fixtures are not measurements of billed token savings.

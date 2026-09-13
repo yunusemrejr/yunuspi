@@ -1,3 +1,4 @@
+import os from 'node:os';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,15 +11,15 @@ const {createRelevantGuidance}=await load('extensions/lib/relevant-guidance.ts')
 const {routeSkills}=await load('extensions/lib/skill-routing.ts');
 const {buildSkillIndex,rankSkills}=await load('extensions/lib/skill-relevance.ts');
 
-function fixture(names=['python-software-engineering','typescript-contract-engineering']) {
+function fixture(names=['python-software-engineering','typescript-contract-engineering'], skillRoot='/fixture/skills') {
   const active=['read','edit','write','skill_review','syntax_check'];
   const tools=new Map(),entries=[],hooks=new Map();
   const g=createRelevantGuidance({on:(name,fn)=>hooks.set(name,fn),getActiveTools:()=>active,registerTool:t=>tools.set(t.name,t),appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
   const ctx={cwd:'/fixture/project',sessionManager:{getBranch:()=>entries}};
-  const catalog=`<available_skills>${names.map(name=>`<skill><name>${name}</name><description>${name.replaceAll('-',' ')}</description><location>/fixture/skills/${name}/SKILL.md</location></skill>`).join('')}</available_skills>`;
+  const catalog=`<available_skills>${names.map(name=>`<skill><name>${name}</name><description>${name.replaceAll('-',' ')}</description><location>${skillRoot}/${name}/SKILL.md</location></skill>`).join('')}</available_skills>`;
   const start=(prompt='Fix the reported issue')=>{g.userInput();g.start({prompt,systemPrompt:catalog},ctx);};
   const edit=file=>g.beforeToolCall({toolName:'edit',input:{path:file}});
-  const read=(name,extra={})=>g.record({toolName:'read',input:{path:`/fixture/skills/${name}/SKILL.md`,...extra.input},...extra});
+  const read=(name,extra={})=>g.record({toolName:'read',input:{path:`${skillRoot}/${name}/SKILL.md`,...extra.input},...extra});
   const decide=input=>tools.get('skill_review').execute('decision',input);
   const context=(messages=[])=>hooks.get('context')({messages},ctx)?.messages ?? messages;
   g.restore(ctx);start();return {g,active,ctx,start,edit,read,decide,entries,context,catalog};
@@ -191,4 +192,29 @@ test('changed config files suggest a single batched source checker using fresh p
   assert.ok(hint);assert.match(hint.text,/second.yaml/);assert.doesNotMatch(hint.text,/first.toml/);
   f.g.record({toolName:'syntax_check',input:{paths:['second.yaml']}});
   assert.ok(!f.g.candidates().some(h=>h.tool==='syntax_check'));
+});
+
+test('a bounded read that returns the entire skill satisfies review after compaction', () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'skill-full-read-'));
+  const name='php-application-engineering', file=path.join(dir,name,'SKILL.md');
+  const body='---\nname: php-application-engineering\n---\n\n# PHP\nVerify syntax and runtime.\n';
+  fs.mkdirSync(path.dirname(file));fs.writeFileSync(file,body);
+  try {
+    const f=fixture([name],dir);f.start('Implement PHP');
+    f.read(name);f.entries.push({type:'compaction'});f.g.restore(f.ctx);
+    assert.equal(f.edit('index.php')?.block,true);
+    f.read(name,{input:{path:file,limit:40},content:[{type:'text',text:body.slice(0,20)}]});
+    assert.equal(f.edit('index.php')?.block,true,'partial content cannot satisfy the workflow');
+    f.read(name,{input:{path:file,offset:1,limit:40},content:[{type:'text',text:body}]});
+    assert.equal(f.edit('index.php'),undefined,'reading beyond EOF returned all instructions');
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('unchanged skill guidance keeps its position across tool continuations', () => {
+  const f=fixture();f.start('Implement Python');
+  const user={role:'user',content:'Implement Python'};
+  const first=f.context([user]);
+  const continuation={role:'assistant',content:[{type:'text',text:'Inspecting'}]};
+  const next=f.context([user,continuation]);
+  assert.deepEqual(next.slice(0,first.length),first,'stable request prefix preserves cache reuse');
+  assert.equal(next.at(-1),continuation);
 });

@@ -2,6 +2,9 @@ import { TOOLS } from './lib/utility-mcp/catalog.mjs';
 import { UtilityClient } from './lib/utility-client.ts';
 import fs from 'node:fs';
 
+// Identical guidelines let Pi deduplicate this shared advice across all eight tools.
+const UTILITY_GUIDANCE = 'Prefer utility probes and env_audit over shell/Python inspection snippets. Use explicit paths for files; inspect truncation flags and narrow or paginate incomplete results.';
+
 /** Native tool exposure, MCP lifecycle and prompt guidance share one catalog. */
 export default function utilityTools(pi: any) {
   let client: UtilityClient | undefined;
@@ -23,7 +26,7 @@ export default function utilityTools(pi: any) {
     description: spec.description,
     parameters: spec.inputSchema,
     promptSnippet: spec.description.split('. ')[0],
-    promptGuidelines: [`Use ${spec.name} for its supported inspections instead of shell/Python snippets. Supply explicit paths and inspect truncation indicators; narrow or paginate over-limit results.`],
+    promptGuidelines: [UTILITY_GUIDANCE],
     async execute(_id: string, args: unknown, signal: AbortSignal, _update: unknown, ctx: any) {
       try { return await ensure(ctx.cwd).call(spec.name, args, signal); }
       catch (error) { return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: error instanceof Error ? error.message : 'Utility unavailable; automatic retry is enabled' }) }] }; }

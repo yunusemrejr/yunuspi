@@ -28,6 +28,7 @@ const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Whole-paragraph prose from local documentation also benefits from Kompress.
 // Structured code, status, errors and source qualifications remain protected.
+const isSkillRead = (tool: string, input: any) => tool === "read" && typeof input?.path === "string" && /(?:^|[\\/])SKILL\.md$/i.test(input.path);
 const miniEligibleTool = (tool: string, input: any) => tool === "bash" || tool === "read" && typeof input?.path === "string" && /\.(?:txt|md|rst)$/i.test(input.path);
 interface Reference {
 	version: 1;
@@ -155,6 +156,9 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 				],
 			};
 		}
+		// Workflow instructions must actually reach the model after compaction;
+		// a pointer to an old observation is not a fresh skill read.
+		if (isSkillRead(event.toolName, event.input)) return;
 		if (!TOOLS.has(event.toolName)) return;
 		if (event.content.some((part) => part.type !== "text")) return;
 		const text = textOf(event.content);
@@ -209,12 +213,14 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 	// stable: later calls cannot alter how an earlier result was represented.
 	pi.on("context", (event) => {
 		if (process.env.PI_OUTPUT_DISTILLER === "off" || !pi.getActiveTools().includes("obs_read")) return;
+		const skillCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && isSkillRead(part.name, part.arguments) ? [part.id] : []) : []));
 		const baselines = new Map<string, { id: number; text: string; tool: string; fingerprint: Set<string> | undefined }>();
 		const failures: Array<{id:number;text:string;tool:string}> = [];
 		const searchCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && part.name === 'bash' && isSearchCommand(part.arguments?.command) ? [part.id] : []) : []));
 		let changed = false;
 		const messages = event.messages.map((message) => {
 			if (message.role !== "toolResult" || message.content.some(part => part.type !== "text")) return message;
+			if (skillCalls.has(message.toolCallId)) return message;
 			const ref = message.details?.piObservation as Reference | undefined;
 			if (ref?.version !== 1 || !ref.operation || !TOOLS.has(message.toolName)) return message;
 			const raw = textOf(message.content);

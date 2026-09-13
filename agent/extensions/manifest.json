@@ -86,7 +86,8 @@
     "session-audit.ts",
     "project-tests.ts",
     "browser-session.ts",
-    "utility-client.ts"
+    "utility-client.ts",
+    "context-anchor.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
