@@ -5,7 +5,7 @@ description: "Detect and repair generic, inaccessible or incoherent UI design us
 
 # UI Anti-pattern Review
 
-Use for UI audits, redesign and preventing formulaic “AI-looking” layouts. Judge a design by its purpose and execution, not a universal ban on particular colors or shapes.
+Use for UI audits and preventing formulaic layouts. Judge purpose and execution; colors and shapes alone do not establish defects.
 
 ## Working method
 
@@ -22,3 +22,6 @@ Use a small representative case and the relevant failure case to check the resul
 
 ## When an edit hook flags a pattern
 Read `references/patterns.md`, then inspect the complete component and the existing design rules. A partial CSS edit cannot prove a missing accessibility safeguard. Prioritize broken tasks and readability before decorative refinements. Verify the narrowest repair at a small and a large viewport, including relevant focus, loading, error and motion states. Do not loop through redesigns or replace the project's visual identity to satisfy a heuristic.
+
+## Authored component defaults
+Remove decorative LIVE pills with blinking or pulsing dots by default. Prefer quiet, truthful status; verify required live data across stale/offline/error states. Use available `artifact_check {operation:"ui",path:...}` for source cues, then rendered and interaction evidence. User requirements and intentional functional status systems take precedence. See `references/patterns.md` for typography, color, placement and review decisions.

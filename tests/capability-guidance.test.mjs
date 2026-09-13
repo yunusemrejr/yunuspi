@@ -82,11 +82,13 @@ test("management discovery does not consume execution guidance and availability 
 test("request constraints, quoted instructions and new prompts do not leak suggestions", () => {
   const f=fixture(toolNames);
   for(const prompt of ["Explain JSON keys","> Inspect JSON keys","```\nInspect JSON keys\n```","Do not inspect HTTP headers","Inspect JSON without tools"]) {
-    f.start(prompt); f.step("read",{path:"widget.tsx"});
-    // File evidence can generate guidance unless the user disabled tools; use
-    // neutral tool availability here so explanatory prose itself stays quiet.
+    f.start(prompt); f.step("read",{path:"evidence.txt"});
+    // Keep file evidence neutral while testing whether the prompt itself
+    // causes suggestions. UI files independently justify UI source guidance.
     assert.ok(f.guidance.candidates().every(h=>!h.tool));
   }
+  f.start("Inspect JSON without tools"); f.step("read",{path:"widget.tsx"});
+  assert.equal(f.guidance.candidates().length,0,"the no-tools constraint also suppresses file-based suggestions");
   f.start(task); assert.equal(f.take().length,2);
   f.start("Hello"); assert.equal(f.take().length,0,"pending task hints reset on new input");
   const noDelegate=fixture(["subagent"]);

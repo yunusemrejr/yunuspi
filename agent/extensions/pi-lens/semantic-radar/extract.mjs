@@ -98,7 +98,15 @@ function featureVector(fnNode) {
   const calls = new Set();
   const props = new Set();
   const feats = new Set();
+  const uiContract = [];
   walk(fnNode, (n) => {
+    // JSX names are DOM/component contracts, not alpha-renamable local variables.
+    // Keep an exact digest outside the trained numeric feature schema; learned
+    // reuse affinity must abstain across a changed tag, attribute or text label.
+    if (n.type === 'jsx_opening_element' || n.type === 'jsx_self_closing_element')
+      uiContract.push(['tag', n.childForFieldName('name')?.text ?? n.text]);
+    if (n.type === 'jsx_attribute') uiContract.push(['attribute', n.text]);
+    if (n.type === 'jsx_text' && n.text.trim()) uiContract.push(['text', n.text]);
     skel.push(n.type);
     const operator = n.childForFieldName("operator");
     if (operator) expand(feats, "operator", operator.text, 2);
@@ -145,7 +153,8 @@ function featureVector(fnNode) {
   expand(feats, "shape", "params:" + Math.min(arity, 6), W.shape);
   // structural bigrams: the shape of the code, name-independent (WEIGHT 1 — weak)
   for (let i = 0; i + 1 < skel.length; i++) expand(feats, "sk", skel[i] + "+" + skel[i + 1], W.skel);
-  return { feats, calls, props, retShape: ret, arity, skelLen: skel.length };
+  return { feats, calls, props, retShape: ret, arity, skelLen: skel.length,
+    ...(uiContract.length ? {uiContractHash:createHash('sha256').update(JSON.stringify(uiContract)).digest('hex')} : {}) };
 }
 
 function findReturnShape(fnNode) {
@@ -193,7 +202,7 @@ export function extractFunctions(rootNode, src) {
     const key = name + "@" + n.startPosition.row;
     if (seen.has(key)) return;
     seen.add(key);
-    const { feats, calls, props, retShape, arity, skelLen } = featureVector(n);
+    const { feats, calls, props, retShape, arity, skelLen, uiContractHash } = featureVector(n);
     if (skelLen < 12) return; // boilerplate/trivial guard (task: don't flag normal boilerplate)
     const id = n.startIndex + ":" + fnv1a16(name + ":" + n.startPosition.row + ":" + (src?.length ?? 0));
     const sortedFeatures = [...feats].sort();
@@ -205,6 +214,7 @@ export function extractFunctions(rootNode, src) {
       // function text can establish the stronger lexical tier.
       lexicalHash: createHash("sha256").update(n.text).digest("hex"),
       rankProfile: extractRankProfile(n),
+      ...(uiContractHash ? {uiContractHash} : {}),
       sig: minhashSignature(feats),
     });
   });

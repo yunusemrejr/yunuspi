@@ -74,3 +74,6 @@ Premium is **restraint with one flourish**, not ornament density. The page budge
 - The *decorative* element with no job (the blob, the gradient, the oversized type that says nothing — every flourish needs a *job* or it's the casino).
 
 The one-line version: **the page is a finite set, applied with rhythm, with one emphasis per view and one job per element; if a stranger could list the set and a squint could see the order, it's designed — if the removes make it better, it isn't finished.**
+
+## Avoid default component filler
+Start with the project's existing components, tokens and real content. Do not add decorative LIVE pills with blinking dots, fabricated metrics, redundant badge rows or motion that only advertises activity. Define font roles, color emphasis and content alignment as one system; verify long content and loading/error/empty states. Use available `artifact_check` with `operation:"ui"` for source cues, then verify the rendered result and actual controls. Keep functional status and intentional brand treatments when justified by the task.

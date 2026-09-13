@@ -5,7 +5,7 @@ import path from "node:path";
 import { lshBuckets, lshCandidates, jaccard } from "./hash.mjs";
 import { rankCandidates } from "./neural-ranker.mjs";
 
-const VERSION = 5; // Versioned rank profiles; old fingerprints rebuild before learned ranking.
+const VERSION = 6; // Rebuild older fingerprints before relying on JSX contract evidence.
 const INDEX_FILE = "semantic-radar-index.json";
 const MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const MAX_INDEX_FILES = 20_000;
@@ -56,7 +56,8 @@ function sanitizeFingerprint(value) {
       || (value.startLine !== undefined && (!Number.isSafeInteger(value.startLine) || value.startLine < 1))
       || (value.endLine !== undefined && (!Number.isSafeInteger(value.endLine) || value.endLine < 1))
       || (value.startLine !== undefined && value.endLine !== undefined && value.endLine < value.startLine)
-      || (value.lexicalHash !== undefined && !validHash(value.lexicalHash))) return null;
+      || (value.lexicalHash !== undefined && !validHash(value.lexicalHash))
+      || (value.uiContractHash !== undefined && !validHash(value.uiContractHash))) return null;
   const profile = sanitizeRankProfile(value.rankProfile);
   if (value.rankProfile !== undefined && value.rankProfile !== null && !profile) return null;
   const out = {
@@ -65,6 +66,7 @@ function sanitizeFingerprint(value) {
     retShape: value.retShape, arity: value.arity, sig: [...value.sig],
   };
   if (value.lexicalHash !== undefined) out.lexicalHash = value.lexicalHash;
+  if (value.uiContractHash !== undefined) out.uiContractHash = value.uiContractHash;
   if (profile) out.rankProfile = profile;
   return out;
 }
@@ -143,6 +145,8 @@ export function scorePair(a, b) {
   if (callOv >= 0.5 && co.n >= 2) evidence.push(`calls overlap ${(callOv * 100) | 0}%`);
   if (propOv >= 0.5 && po.n >= 2) evidence.push(`entities overlap ${(propOv * 100) | 0}%`);
   if (shapeMatch) evidence.push(`same return/arity (${a.retShape}/${a.arity})`);
+  if ((a.uiContractHash || b.uiContractHash) && a.uiContractHash !== b.uiContractHash)
+    evidence.push('JSX tag, attribute or text contract differs; inspect behavior and rendering before reuse');
   let tier = null;
   const domainAgree = (propOv >= 0.5 && po.n >= 1 && shapeMatch) || (callOv >= 0.5 && co.n >= 2) || (co.n >= 1 && shapeMatch);
   const exactSource = typeof a.lexicalHash === "string" && /^[a-f0-9]{64}$/.test(a.lexicalHash)

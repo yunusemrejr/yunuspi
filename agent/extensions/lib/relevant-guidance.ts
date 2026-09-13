@@ -6,9 +6,7 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
 import { sourceCheckSupported } from "./source-check.ts";
-import { qualityReviewSignals } from "./quality-review-signals.ts";
-import { slopGuidanceSignals } from "./slop-guidance-signals.ts";
-import { codeGuidanceSignals } from "./code-guidance-signals.ts";
+import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
@@ -250,6 +248,7 @@ export function createRelevantGuidance(pi: any) {
   const uiHints = () => {
     skillHint("UI work", ["product-ui-verification", "frontend-design"], /\b(?:ui|frontend|interface)\b/i, false, 85);
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
+    utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
   const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48) });
   // A targeted pre-edit checkpoint, not a correctness verdict or a security
@@ -495,15 +494,11 @@ export function createRelevantGuidance(pi: any) {
         // Native edits carry independent replacements. Never concatenate them:
         // separate regions need not form a valid expression together. Bound the
         // entire authored batch, not just each snippet, before doing review work.
-        const snippets: unknown[] = name === 'edit' && Array.isArray(input.edits)
-          ? input.edits.length <= 64 ? input.edits.map((edit: any) => edit?.newText) : []
-          : [content];
-        const validSnippets = snippets.filter((text): text is string => typeof text === 'string');
-        const bounded = validSnippets.reduce((size, text) => size + text.length, 0) <= 24000 ? validSnippets : [];
+        const bounded = authoredReviewSnippets(name,input);
         for (const text of bounded) topicHints({file:changedFile, text});
         if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off' && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|generated|backups)(?:\/|$)/i.test(changedFile) && bounded.some(text=>/[\uFFFD\u200B\u202A-\u202E\u2066-\u2069]/.test(text)))
           utilityHint('artifact_check','Unusual Unicode appeared in the authored edit. artifact_check({operation:"text",path:...}) can locate replacement characters, invisible controls and normalization differences. These may be intentional; inspect their role before changing them.');
-        const signals = bounded.flatMap(text => [...codeGuidanceSignals(changedFile,text), ...slopGuidanceSignals(changedFile,text), ...qualityReviewSignals(changedFile,text)]);
+        const signals = authoredReviewSignals(changedFile,bounded);
         // Only a bounded whole-file write can clear cues from earlier snippets.
         // An edit of a different region is not evidence that the old issue disappeared.
         if (name === 'write' && typeof content === 'string' && content.length <= 24000) {

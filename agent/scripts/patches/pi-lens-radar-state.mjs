@@ -547,6 +547,19 @@ addNeuralEdit("runtime.mjs",
   "  const top = [...byFn.values()].sort((a, b) => rank(b.tier) - rank(a.tier) || b.jaccard - a.jaccard).slice(0, maxAdvisories);",
   "  const top = [...byFn.values()].sort(compareCandidates).slice(0, maxAdvisories);");
 
+// JSX contracts extend the existing migrations; no parallel repair owner.
+upgradeAppliedEdit("index.mjs", "const VERSION = 5;", source => source
+  .replace("const VERSION = 5; // Versioned rank profiles; old fingerprints rebuild before learned ranking.", "const VERSION = 6; // Rebuild older fingerprints before relying on JSX contract evidence.")
+  .replace("      || (value.lexicalHash !== undefined && !validHash(value.lexicalHash))) return null;", "      || (value.lexicalHash !== undefined && !validHash(value.lexicalHash))\n      || (value.uiContractHash !== undefined && !validHash(value.uiContractHash))) return null;")
+  .replace("  if (value.lexicalHash !== undefined) out.lexicalHash = value.lexicalHash;", "  if (value.lexicalHash !== undefined) out.lexicalHash = value.lexicalHash;\n  if (value.uiContractHash !== undefined) out.uiContractHash = value.uiContractHash;"));
+upgradeAppliedEdit("extract.mjs", 'lexicalHash: createHash("sha256")', source => source
+  .replace("const { feats, calls, props, retShape, arity, skelLen }", "const { feats, calls, props, retShape, arity, skelLen, uiContractHash }")
+  .replace("      rankProfile: extractRankProfile(n),", "      rankProfile: extractRankProfile(n),\n      ...(uiContractHash ? {uiContractHash} : {}),"));
+addNeuralEdit("extract.mjs", "  const feats = new Set();\n  walk(fnNode, (n) => {", "  const feats = new Set();\n  const uiContract = [];\n  walk(fnNode, (n) => {\n    // JSX names are DOM/component contracts, not alpha-renamable local variables.\n    // Keep an exact digest outside the trained numeric feature schema; learned\n    // reuse affinity must abstain across a changed tag, attribute or text label.\n    if (n.type === 'jsx_opening_element' || n.type === 'jsx_self_closing_element')\n      uiContract.push(['tag', n.childForFieldName('name')?.text ?? n.text]);\n    if (n.type === 'jsx_attribute') uiContract.push(['attribute', n.text]);\n    if (n.type === 'jsx_text' && n.text.trim()) uiContract.push(['text', n.text]);");
+addNeuralEdit("extract.mjs", "  return { feats, calls, props, retShape: ret, arity, skelLen: skel.length };", "  return { feats, calls, props, retShape: ret, arity, skelLen: skel.length,\n    ...(uiContract.length ? {uiContractHash:createHash('sha256').update(JSON.stringify(uiContract)).digest('hex')} : {}) };");
+addNeuralEdit("index.mjs", "  if (shapeMatch) evidence.push(`same return/arity (${a.retShape}/${a.arity})`);", "  if (shapeMatch) evidence.push(`same return/arity (${a.retShape}/${a.arity})`);\n  if ((a.uiContractHash || b.uiContractHash) && a.uiContractHash !== b.uiContractHash)\n    evidence.push('JSX tag, attribute or text contract differs; inspect behavior and rendering before reuse');");
+addNeuralEdit("neural-ranker.mjs", "    const group = out.filter(c => c.tier === tier);\n    if (!group.length) continue;", "    const group = out.filter(c => c.tier === tier);\n    if (!group.length) continue;\n    // PI_LENS_RADAR_STATE_V1: JSX drift cannot gain learned reuse confidence.\n    // The model was trained for code reuse affinity, not visual taste or JSX\n    // equivalence. Preserve divergence candidates and their baseline order.\n    if (group.some(c => (fp.uiContractHash || c.uiContractHash) && fp.uiContractHash !== c.uiContractHash)) {\n      fallback += group.length; continue;\n    }");
+
 export function isAppliedSource(source, edits) {
   return (
     source.includes(marker) &&

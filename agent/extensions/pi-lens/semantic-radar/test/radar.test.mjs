@@ -113,7 +113,7 @@ test("malformed persisted index state is bounded and fails closed", async () => 
   fs.writeFileSync(
     path.join(dataDir, "semantic-radar-index.json"),
     JSON.stringify({
-      version: 5,
+      version: 6,
       updatedAt: new Date().toISOString(),
       files: {
         "../outside.ts": {
