@@ -1583,6 +1583,7 @@ async function runSingleStepInner(
 			: external.error;
 		const finalizedOutput = finalizeSingleOutput(omitUndefinedProperties({
 			fullOutput: resolvedOutput.fullOutput,
+			task: taskForCompletionGuard,
 			outputPath: step.outputPath,
 			outputMode: step.outputMode,
 			exitCode: exitCode ?? 1,
@@ -1653,6 +1654,7 @@ async function runSingleStepInner(
 			: external.error;
 		const finalizedOutput = finalizeSingleOutput(omitUndefinedProperties({
 			fullOutput: resolvedOutput.fullOutput,
+			task: taskForCompletionGuard,
 			outputPath: step.outputPath,
 			outputMode: step.outputMode,
 			exitCode: exitCode ?? 1,
@@ -2204,6 +2206,7 @@ async function runSingleStepInner(
 		: timeoutRecovery.message;
 	const finalizedOutput = finalizeSingleOutput(omitUndefinedProperties({
 		fullOutput: outputForSummary,
+		task: taskForCompletionGuard,
 		outputPath: step.outputPath,
 		outputMode: step.outputMode,
 		exitCode: finalResult?.exitCode ?? 1,

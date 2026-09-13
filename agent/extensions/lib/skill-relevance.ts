@@ -3,6 +3,7 @@
  * available-skills catalogue's own name/description tokens against bounded
  * session context terms; skill bodies are never read or injected. The reminder
  * owner still applies catalogue availability, delivery and lifecycle limits. */
+import {candidateRelevance} from './local-intelligence.mjs';
 export type SkillInfo = { name: string; file: string; description: string };
 export type SkillIndex = {
   docs: { skill: SkillInfo; tokens: Set<string>; name: Set<string> }[];
@@ -146,6 +147,9 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
     }
     if (matched.length >= 2 && rare >= 1 && score >= 6) out.push({ skill: doc.skill, score: Math.round(score * 100) / 100, matched });
   }
-  out.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name));
+  const relevance=process.env.PI_LOCAL_INTELLIGENCE==='off'?[]:candidateRelevance(out.map(item=>`${item.skill.name} ${item.skill.description}`),context);
+  const ranked=new Map(out.map((item,i)=>[item.skill.name,relevance[i]??0]));
+  // Statistical tie-break only after all rarity, fuzzy-match and availability gates.
+  out.sort((a, b) => b.score - a.score || ranked.get(b.skill.name)!-ranked.get(a.skill.name)! || a.skill.name.localeCompare(b.skill.name));
   return out.slice(0, Math.max(1, limit));
 }

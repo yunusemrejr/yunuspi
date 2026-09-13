@@ -3923,6 +3923,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	const preserveRejectedSavedOutput = r.acceptance?.explicit && r.acceptance.status === "rejected" && r.savedOutputPath !== undefined;
 	const finalizedOutput = finalizeSingleOutput(omitUndefinedProperties({
 		fullOutput,
+		task: cleanTask,
 		truncatedOutput: r.truncation?.text,
 		outputPath,
 		outputMode: r.outputMode,

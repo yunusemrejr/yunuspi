@@ -1,3 +1,4 @@
+import {estimateReliability} from "../../../../lib/local-intelligence.mjs";
 /**
  * provider-health.ts — shared, executable provider cooldown/rate state.
  *
@@ -918,17 +919,16 @@ export function snapshot(now = Date.now()): HealthSnapshot {
 
 /** Time-decayed operational evidence; unknown observations stay neutral. Rate
  * and URL fingerprints prevent historical speed from crossing endpoint changes. */
-export function recoveryPerformance(health: ModelHealth | undefined, model: {cost?:any;baseUrl?:string;api?:string}, now=Date.now()): {samples:number;failureRate:number;msPerToken?:number} {
+export function recoveryPerformance(health: ModelHealth | undefined, model: {cost?:any;baseUrl?:string;api?:string}, now=Date.now()): {samples:number;failureRate:number;effectiveSamples:number;failureUpper:number;msPerToken?:number} {
  const rates=economyRateIdentity(model.cost??{},model.baseUrl,model.api);
  const samples=(Array.isArray(health?.recoveryHistory)?health.recoveryHistory:[]).filter(s=>s && typeof s.ok === "boolean" && Number.isFinite(s.at) && s.at<=now && now-s.at<=RECOVERY_HISTORY_MS && s.rates===rates);
- let total=2, failed=1;
+ const estimate=estimateReliability(samples,now,24*60*60_000);
  const speeds:number[]=[];
  for(const s of samples) {
-  const weight=Math.pow(.5,(now-s.at)/(24*60*60_000)); total+=weight; if(!s.ok)failed+=weight;
   // Whole-response speed is comparable only for useful sized output, and is
   // deliberately a small tie-break, not TTFT or a model-quality estimate.
   if(s.ok && Number.isFinite(s.elapsedMs) && s.elapsedMs!>0 && s.elapsedMs!<=600_000 && Number.isSafeInteger(s.outputTokens) && s.outputTokens!>=32 && s.outputTokens!<=100_000_000) speeds.push(s.elapsedMs!/s.outputTokens!);
  }
  speeds.sort((a,b)=>a-b);
- return {samples:samples.length,failureRate:failed/total,...(speeds.length>=3?{msPerToken:speeds[Math.floor(speeds.length/2)]}:{})};
+ return {samples:samples.length,failureRate:estimate.failureRate,effectiveSamples:estimate.support,failureUpper:estimate.failureUpper,...(speeds.length>=3?{msPerToken:speeds[Math.floor(speeds.length/2)]}:{})};
 }
