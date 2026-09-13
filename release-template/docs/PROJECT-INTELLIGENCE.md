@@ -192,3 +192,23 @@ session shutdown, child contributions, viewer reconnection/live updates and
 The public distribution includes portable SQLite/discovery/worker/viewer-server
 tests in `tests/project-intelligence.test.mjs`. Browser visual acceptance is
 performed against the installed harness's Playwright runtime.
+
+## Quality review context
+
+When automatic quality checkpoints are installed, they can query the existing
+project worker for bounded architecture evidence and outcomes from earlier
+sessions in the same checkout. The adapter starts no extra worker or model call.
+Unavailable or incomplete graph evidence stays explicit.
+
+The history stores only the review aspect, outcome, whether a defect was found,
+observation time and a hashed session identifier. It excludes the current
+session from returned statistics, retains at most 60 records from the last
+90 days, and supplies at most 20 earlier records. A later pass preserves the
+fact that the session initially found a defect. Source contents, review prose
+and raw session identifiers are not stored in these statistics.
+
+Prior outcomes guide reviewer attention. They do not lower acceptance standards,
+turn an unknown result into a pass, or grant additional review rounds. A session
+switch or cancellation invalidates outstanding adapter results; writes remain
+bound to the worker and checkout that accepted them. The quality checkpoint
+owns reviewer selection, repair limits and final parent assessment separately.

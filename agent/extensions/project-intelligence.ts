@@ -236,6 +236,49 @@ export default function projectIntelligence(pi: any) {
       .join(" ")
       .slice(0, 1000);
   }
+  if (process.env.PI_SUBAGENT_CHILD !== "1")
+    (globalThis as any)[Symbol.for("yunus-pi.quality-project-context.v1")] =
+      async (request: any, ctx: any, signal: any) => {
+        if (!enabled() || closed) return;
+        signal?.throwIfAborted();
+        // ensure selects its worker synchronously before its first await. Pin
+        // that identity now so even a switch between promise continuations
+        // cannot redirect an old review to the replacement session.
+        const ready = ensure(ctx), current = client, epoch = generation;
+        await ready;
+        signal?.throwIfAborted();
+        assertCurrent(current, epoch, ctx);
+        if (request.action === "record") {
+          const result = await current.request(
+            "review_history",
+            { samples: request.samples },
+            { signal, timeout: 1500 },
+          );
+          signal?.throwIfAborted();
+          assertCurrent(current, epoch, ctx);
+          return result;
+        }
+        const [evidence, history] = await Promise.all([
+          current.request(
+            "query",
+            {
+              query: safeText(
+                `${request.files.slice(0, 20).join(" ")} ${request.task}`,
+                1000,
+              ),
+              direction: "both",
+              hops: 2,
+              limit: 16,
+              maxChars: 5000,
+            },
+            { signal, timeout: 1500 },
+          ),
+          current.request("review_history", {}, { signal, timeout: 1500 }),
+        ]);
+        signal?.throwIfAborted();
+        assertCurrent(current, epoch, ctx);
+        return { graph: evidence.summary, history };
+      };
   pi.on("session_start", (_event: any, ctx: any) => {
     if (enabled()) void ensure(ctx).catch((e) => reportError(e, ctx));
   });

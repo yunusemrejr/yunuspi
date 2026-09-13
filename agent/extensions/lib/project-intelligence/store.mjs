@@ -1275,6 +1275,33 @@ class ProjectIntelligenceStore {
     return withReadSnapshot(db, () => storeSnapshot(db, options));
   }
 
+  /** One numeric/category observation per session and aspect, updated atomically
+   * across workers. Source contents and review prose stay in the session. */
+  reviewHistory(scopeValue, sessionValue, samples) {
+    const db = this.#dbOrThrow();
+    const scope = boundedString(scopeValue, 'review scope', MAX_SCOPE);
+    const session = createHash('sha256').update(boundedString(sessionValue, 'review session', MAX_ID)).digest('hex').slice(0,32);
+    const key = `quality-review:${scope}`;
+    const aspects = ['correctness','security','interface','content','runtime','delivery'];
+    if (samples !== undefined && (!Array.isArray(samples) || samples.length > 6 || samples.some(s => !s || !aspects.includes(s.aspect) || !['pass','changes','unknown'].includes(s.outcome)))) throw errorWithCode('INVALID_INPUT','Invalid review observations');
+    return withImmediate(db, () => {
+      const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get(key);
+      let history = []; try { history = JSON.parse(row?.value ?? '[]'); } catch {}
+      if (!Array.isArray(history)) history = [];
+      history = history.filter(s => s && aspects.includes(s.aspect) && ['pass','changes','unknown'].includes(s.outcome) && Number.isFinite(s.at) && Date.now()-s.at < 90*86400000).slice(-60);
+      if (samples !== undefined) {
+        for (const sample of samples) {
+          const prior = history.find(s=>s.session===session && s.aspect===sample.aspect);
+          history = history.filter(s=>s.session!==session || s.aspect!==sample.aspect);
+          history.push({session,aspect:sample.aspect,outcome:sample.outcome,hadChanges:prior?.hadChanges===true || sample.outcome==='changes',at:Date.now()});
+        }
+        history = history.slice(-60);
+        db.prepare(`INSERT INTO metadata (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).run(key,JSON.stringify(history),Date.now());
+      }
+      return history.filter(s=>s.session!==session).slice(-20).map(({aspect,outcome,hadChanges,at})=>({aspect,outcome,hadChanges,at}));
+    });
+  }
+
   getMeta(keyValue) {
     const db = this.#dbOrThrow();
     const key = boundedString(keyValue, 'metadata key', MAX_ID);
