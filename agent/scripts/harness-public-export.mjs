@@ -115,6 +115,11 @@ const allowedExt = new Set([
  ".path",
  ".apparmor",
 ]);
+/** Executable source must resolve machine-specific paths at run time. A
+ * literal author home path rewritten to the /home/example placeholder still
+ * ships, but as dead code for every other installation, so the export stops
+ * instead. Documentation and example configuration keep the substitution. */
+const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh"]);
 const omitted = new Set([
  "node_modules",
  ".git",
@@ -162,7 +167,15 @@ function copyTree(dir, prefix) {
   let bytes = fs.readFileSync(p);
   if (!/\.(?:wasm|gif|png)$/.test(p)) {
    let text = bytes.toString("utf8");
-   text = text.replaceAll(os.homedir(), "/home/example");
+   const home = os.homedir();
+   if (text.includes(home)) {
+    if (portableCodeExt.has(path.extname(entry.name)))
+     throw Error(
+      "Hardcoded home path in exported source; resolve it at run time instead: " +
+       rel,
+     );
+    text = text.replaceAll(home, "/home/example");
+   }
    if (rel === "agent/extensions/live-models.ts")
     text = text.replace(
      /const ORCA_FALLBACK_KEY = ("[^"\r\n]*"|'[^'\r\n]*');/,

@@ -124,3 +124,20 @@ test('an internal wake cannot turn a previously unrelated user request into a co
   await lifecycle.start({prompt},ctx,'graph');
   assert.equal(calls,1,'a new actual user request gets a fresh routing decision');
 });
+
+test('reduced council independence stays visible in the brief and silent when absent',async()=>{
+  const selfAuthored={...result,independence:'self-critique',gap:'The critique reviewed a perspective it authored.'};
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>selfAuthored});
+  const ctx=context();
+  await lifecycle.start({prompt},ctx,'graph');
+  const brief=lifecycle.context(ctx);
+  assert.match(brief,/reduced \(same member reviewed its own perspective\)/);
+  assert.match(brief,/weigh it accordingly/);
+  assert.match(brief,/The critique reviewed a perspective it authored/);
+
+  const independent=createScopeDeliberation({},{history:async()=>history,runner:async()=>result});
+  const other=context('independent');
+  await independent.start({prompt},other,'graph');
+  assert.doesNotMatch(independent.context(other),/reduced \(same member/,'a full cohort must not claim reduced independence');
+  assert.match(independent.context(other),/Council status: complete/);
+});

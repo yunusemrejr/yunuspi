@@ -6,6 +6,14 @@ unchanged. Short referential requests add recent user vocabulary to the existing
 bounded graph query; helpers receive intact user excerpts with branch references
 in space reclaimed from their instructions.
 
+The same bounded cue covers compound instructions that name their subject only
+by reference ("do this and that", "handle the rest", "same for the others"),
+including a bare demonstrative that stands alone rather than modifying a noun
+("do this SQL query" is a complete instruction, not an inherited subject). An
+explicit task pivot, a refusal to continue or an over-long message keeps the cue
+off. Inheritance stays retrieval and evidence only; it never becomes a new
+instruction or permission.
+
 Newer corrections take precedence only within their scope. Historical evidence
 is not fresh authorization. Selection stops at explicit task pivots and does not
 backfill an older preference across an omitted newer correction. Assistant and

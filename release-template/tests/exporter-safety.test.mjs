@@ -55,3 +55,31 @@ test('clean fixture exports without copying private configuration', () => {
     assert.ok(!fs.existsSync(path.join(f.output, 'agent/auth.json')));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
+test('exporter refuses a hardcoded home path in executable source but sanitizes docs', () => {
+  const f = fixture();
+  try {
+    const literal = path.join(os.homedir(), '.pi/agent/extensions/pi-lens/dist/index.js');
+    fs.mkdirSync(path.join(f.source, 'scripts/patches'), { recursive: true });
+    fs.mkdirSync(path.join(f.source, 'skills/example'), { recursive: true });
+    fs.writeFileSync(
+      path.join(f.source, 'scripts/patches/example-patch.mjs'),
+      `const DIST = ${JSON.stringify(literal)};\n`,
+    );
+    fs.writeFileSync(
+      path.join(f.source, 'skills/example/SKILL.md'),
+      `Install under ${os.homedir()}/.pi/agent and read the notes.\n`,
+    );
+    const rejected = f.run();
+    assert.notEqual(rejected.status, 0);
+    assert.match(`${rejected.stdout}${rejected.stderr}`, /Hardcoded home path/);
+    assert.ok(!fs.existsSync(f.output));
+
+    // Documentation keeps the privacy substitution instead of failing.
+    fs.rmSync(path.join(f.source, 'scripts/patches/example-patch.mjs'));
+    const accepted = f.run();
+    assert.equal(accepted.status, 0, accepted.stderr);
+    const shipped = fs.readFileSync(path.join(f.output, 'agent/skills/example/SKILL.md'), 'utf8');
+    assert.ok(shipped.includes('/home/example/.pi/agent'));
+    assert.ok(!shipped.includes(os.homedir()));
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});

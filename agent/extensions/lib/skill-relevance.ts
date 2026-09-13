@@ -122,9 +122,26 @@ export function bestSkillSection(headings: readonly { text: string; line: number
 export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranked[] {
   const terms = skillTerms(context, 64);
   if (!terms.length) return [];
+  // A catalogue term is naming when at least half of the documents that carry
+  // it also carry it in their skill name. Counted per queried term only, so the
+  // cost stays bounded by the context rather than the whole catalogue. This is
+  // what keeps a single-term match honest: "spreadsheet" names the spreadsheet
+  // skill, while "settings" is one description word among many.
+  const naming = new Map<string, boolean>();
+  for (const term of terms) {
+    if (!index.weight.has(term) || naming.has(term)) continue;
+    let carried = 0, inName = 0;
+    for (const doc of index.docs) {
+      if (!doc.tokens.has(term)) continue;
+      carried++;
+      if (doc.name.has(term)) inName++;
+      if (inName * 2 >= carried && inName > 0 && carried > 1) break;
+    }
+    naming.set(term, inName > 0 && inName * 2 >= carried);
+  }
   const out: Ranked[] = [];
   for (const doc of index.docs) {
-    let score = 0, rare = 0;
+    let score = 0, rare = 0, nameMatches = 0, namingMatches = 0;
     const matched: string[] = [];
     const matchedCanonical = new Set<string>();
     for (const term of terms) {
@@ -132,7 +149,10 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
       if (w && doc.tokens.has(term)) {
         if (matchedCanonical.has(term)) continue;
         matchedCanonical.add(term);
-        score += w * (doc.name.has(term) ? 2 : 1);
+        const inName = doc.name.has(term);
+        score += w * (inName ? 2 : 1);
+        if (inName) nameMatches++;
+        if (inName && naming.get(term)) namingMatches++;
         if (index.strong.has(term)) rare++;
         if (matched.length < 6) matched.push(term);
         continue;
@@ -145,7 +165,16 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
       if (index.strong.has(close)) rare++;
       if (matched.length < 6) matched.push(`${term}~${close}`);
     }
-    if (matched.length >= 2 && rare >= 1 && score >= 6) out.push({ skill: doc.skill, score: Math.round(score * 100) / 100, matched });
+    // Two matched terms remain the ordinary signal. A single term that an
+    // naming token of that skill is also decisive, because the skill name is
+    // the most recent explicit statement of intent: "fix the crash when I
+    // upload a large spreadsheet" scored 20 on the name-level term alone and
+    // the two-term rule still discarded it. A fuzzy match never counts here,
+    // and a description-level or shared term keeps the two-term requirement.
+    const singleNameMatch = matched.length === 1 && rare >= 1 && nameMatches === 1 && namingMatches === 1;
+    if ((matched.length >= 2 || singleNameMatch) && rare >= 1 && score >= 6) {
+      out.push({ skill: doc.skill, score: Math.round(score * 100) / 100, matched });
+    }
   }
   const relevance=process.env.PI_LOCAL_INTELLIGENCE==='off'?[]:candidateRelevance(out.map(item=>`${item.skill.name} ${item.skill.description}`),context);
   const ranked=new Map(out.map((item,i)=>[item.skill.name,relevance[i]??0]));

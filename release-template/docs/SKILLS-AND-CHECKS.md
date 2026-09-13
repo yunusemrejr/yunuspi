@@ -57,6 +57,22 @@ User requests to work without skills take precedence. `PI_SKILL_REVIEW=off`
 disables the checkpoint; `PI_RELEVANT_GUIDANCE=off` disables its owning guidance
 system as well. Ordinary lower-confidence suggestions never block work.
 
+## GitHub workflow skills
+
+Four skills cover repository-facing work that is not part of ordinary Git
+operations (that stays with `git-github`):
+
+| Skill | Selected for | File route |
+| --- | --- | --- |
+| `github-readme-authoring` | writing, rewriting or polishing a README, front-page structure, badges, screenshots | `README.md` |
+| `github-repo-presentation` | description/topics, license choice, CONTRIBUTING, SECURITY, code of conduct, issue/PR templates, CODEOWNERS, social preview | the health-file paths themselves |
+| `github-release-notes` | changelog entries, release notes, version and prerelease decisions, migration notes | `CHANGELOG.md`, `.github/release.yml` |
+| `github-actions-workflows` | authoring, reviewing or hardening workflow YAML: permissions, pinned actions, caching, matrix, secrets/OIDC, required checks | `.github/workflows/*.yml` |
+
+Task routes require a matching action verb, so "explain the changelog format" or
+"improve the readme parser" do not select a skill. Each skill keeps its detailed
+checklists in a `references/` file that is read only when the task needs it.
+
 ## Batch syntax checks
 
 Call `syntax_check` with explicit workspace-relative paths:

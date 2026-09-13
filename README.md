@@ -23,6 +23,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
 - [Skill routing and batch source checks](docs/SKILLS-AND-CHECKS.md): broader catalog matching, scoped pre-edit skill review, component anti-boilerplate checks and compact syntax diagnostics across languages and configuration formats.
+- GitHub workflow skills for README authoring, repository presentation and community health files, release notes and changelogs, and GitHub Actions pipeline work; see [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
 - [Local evidence selection and ranking](docs/LOCAL-INTELLIGENCE.md): task-conditioned Kompress, recoverable compaction and child excerpts, exact near-duplicate deltas, failure-family references and telemetry-aware route optimization.
 - Persistent project intelligence with automatic discovery, concurrent session contributions, bounded architecture retrieval and a live `/graph` window; relevant revisions also get an automatic history-informed change-scope council. See [project intelligence](docs/PROJECT-INTELLIGENCE.md) and [scope decisions](docs/CHANGE-SCOPE.md).

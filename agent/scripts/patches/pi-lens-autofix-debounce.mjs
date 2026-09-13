@@ -23,11 +23,16 @@
 // report only).
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 
 const MARKER = "PI_LENS_RECENT_WRITE_SKIP";
-const DIST = path.join(
-  "/home/example/.pi/agent/extensions/pi-lens/dist/index.js",
-);
+// Resolved at run time from the invoking user's home, exactly like the other
+// pi-lens patch modules. A hardcoded absolute path here would ship an
+// unusable target to every other installation, and PI_HARNESS_PATCH_TEST_LENS
+// keeps fixture overrides consistent across the patch registry.
+const DIST =
+  process.env.PI_HARNESS_PATCH_TEST_LENS ??
+  path.join(os.homedir(), ".pi/agent/extensions/pi-lens/dist/index.js");
 /** Default debounce budget. 5s: comfortably longer than the observed
  * back-to-back write gap (<1s) and far shorter than normal inter-tool-result
  * latency, so real fix cycles are delayed only in the racy case. */

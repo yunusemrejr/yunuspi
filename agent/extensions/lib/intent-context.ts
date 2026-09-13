@@ -5,6 +5,14 @@ import { safeText } from './project-intelligence/privacy.mjs';
 const WINDOW = 256;
 const MAX_SCAN_CHARS = 32768;
 const pivot = /\b(?:new (?:task|topic|request)|unrelated (?:task|topic|question|request)|start over|switch to|forget (?:that|this|the previous))\b/i;
+const refusal = /\b(?:do not|don't|never|stop)\s+(?:continue|resume|do|handle|apply|implement|finish|start|work on|carry out|execute)\b/i;
+/** A compound instruction can name its subject only by reference ("do this and
+ * that", "handle the rest"). The demonstrative must stand alone: "this SQL
+ * query" modifies a noun and is not by itself evidence of an earlier subject,
+ * so an immediately following content noun keeps this cue off. */
+const demonstrative = /\b(?:do|handle|apply|implement|finish|carry out|execute|take care of|work on|go ahead with|start on)\s+(?:all of\s+)?(?:this|that|these|those|both|it|them|the rest|the others|the remaining (?:ones|items|tasks|pieces))(?=\s*(?:$|[,.!?;:]|\b(?:and|then|too|also|as well|first|next|instead|please|now|for me|in|on|to|with|using|via|without|but|while|when|where|before|after|if|unless)\b))/i;
+const pluralDemonstrative = /\b(?:both|either|all)\s+of\s+(?:these|those|them)\b/i;
+const sameAsBefore = /\b(?:do|apply|repeat|use)\s+the\s+same(?:\s+(?:for|with|to|as)\b|\s*[.!?]|$)|\bsame\s+(?:for|with)\s+(?:the\s+)?(?:other(?:s)?|rest|them|these|those)\b/i;
 const terms = (text: string) => [...new Set((text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_-]{2,}/gu) ?? [])
   .filter(t => !/^(the|and|for|this|that|with|please|make|more|less|improve|keep|from|have|want|need)$/.test(t)))].slice(0,48);
 const intentText = (text: string) => text.replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/^\s*>.*$/gm, ' ');
@@ -12,8 +20,11 @@ const intentText = (text: string) => text.replace(/```[\s\S]*?(?:```|$)/g, ' ').
 /** Only a retrieval cue, never a claim that a task or authorization continues. */
 export function isReferentialFollowup(prompt: string): boolean {
   const text = intentText(prompt.slice(0,1024)).trim();
-  return text.length <= 240 && !pivot.test(text) && !/\b(?:do not|don't|never|stop)\s+(?:continue|resume)\b/i.test(text) &&
-    /\b(?:continue|resume|same task|keep going|next step)\b|\bmake\s+(?:it|this|that|them)\b|\b(?:improve|refine|polish|fix|animate|rework)\s+(?:it|this|that|them)(?:\s+(?:more|less|too|again)\b|[.!?]|$)/i.test(text);
+  if (text.length > 240 || pivot.test(text) || refusal.test(text)) return false;
+  if (/\b(?:continue|resume|same task|keep going|next step)\b|\bmake\s+(?:it|this|that|them)\b|\b(?:improve|refine|polish|fix|animate|rework)\s+(?:it|this|that|them)(?:\s+(?:more|less|too|again)\b|[.!?]|$)/i.test(text)) return true;
+  // Compound instructions inherit their subject the same way a bare "make it
+  // better" does; the caller still treats the inherited text as evidence only.
+  return demonstrative.test(text) || pluralDemonstrative.test(text) || sameAsBefore.test(text);
 }
 
 type UserEvidence = { source: string; text: string };

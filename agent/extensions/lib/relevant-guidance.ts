@@ -123,6 +123,14 @@ export function createRelevantGuidance(pi: any) {
   };
   const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
   const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
+  // Offer counts were already persisted per skill but never consumed, so a
+  // repeatedly ignored workflow kept its full priority forever. Established
+  // fatigue drops the advisory hint to the floor: a fresh candidate then wins
+  // the scarce delivery slot decisively (a tie in priority would only preserve
+  // insertion order and change nothing). Reading the skill clears it, and a
+  // single earlier mention never demotes anything.
+  const offeredBefore = (file: string) => Math.max(skillOffers.get(`skill:${file}`)?.n ?? 0, skillOffers.get(`skillctx:${file}`)?.n ?? 0);
+  const fatigue = (file: string) => offeredBefore(file) >= 2 ? 40 : 0;
   // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
   const remember = (text: string) => {
     const current = skillTerms(text);
@@ -154,8 +162,16 @@ export function createRelevantGuidance(pi: any) {
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
       if (skillCovered(ranked.skill.file)) continue;
       const terms = ranked.matched.map(term => term.split('~').at(-1)!);
-      if (terms.every(term => coveredTerms.has(term))) continue;
-      add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file, priority,
+      // Require one genuinely fresh term instead of rejecting a workflow whose
+      // whole match is shared vocabulary. Rejecting on any overlap let a single
+      // high-scoring skill hide a distinct second workflow that shared a term,
+      // so the same suggestion re-filled the slot every request.
+      if (!terms.some(term => !coveredTerms.has(term))) continue;
+      // Advisory context hints yield one bounded step to a fresh candidate once
+      // the same workflow has already been offered and ignored; explicit task
+      // and file routes keep their full priority and their review obligation.
+      add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file,
+        priority: Math.max(1, priority - fatigue(ranked.skill.file)),
         text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
       // Up to three distinct relevant workflows can enter the pending queue;
       // the ordinary two-hint delivery and run budgets still apply.

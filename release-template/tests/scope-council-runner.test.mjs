@@ -133,6 +133,48 @@ test('scope council stays bounded to the shared public limits',()=>{
   assert.equal(SCOPE_COUNCIL_LIMITS.discussionChars,2500);
 });
 
+test('a two-route council still critiques both perspectives and labels the reduced independence',async()=>{
+  const calls=[],pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+  const pair=ids.slice(0,2).map(model);
+  registerScopeCouncilRunner(pi,{launch:async(id,params)=>{
+    calls.push({id,params});
+    const body=String(params.task);
+    if(body.includes('Peer critique synthesizer')) return result('Critique: the preservation side is supported by explicit user text; the meaningful-change side still needs a decisive source check before replacing unrelated behavior.');
+    if(body.includes('Preservation peer')) return result('Preserve the explicit title "Keep title" and the src/widget.ts reference because the user named them.');
+    return result('Reconsider the assistant-selected easing, but keep the change bounded to the reported behavior.');
+  },available:()=>pair,constraints:()=>({})});
+  const runner=globalThis[SCOPE_COUNCIL_RUNNER];
+  const output=await runner({task,graph:'src/widget.ts owns the widget behavior.',history:{evidence:[]}},context(),new AbortController().signal);
+  assert.equal(calls.length,3);
+  assert.equal(output.status,'complete');
+  assert.equal(output.independence,'self-critique','a two-member council has no third route for an independent critique');
+  assert.equal(output.proposals.length,2);
+  assert.match(output.discussion,/decisive source check/);
+});
+
+test('one surviving perspective is still challenged instead of returning an empty partial',async()=>{
+  const calls=[],pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+  const pair=ids.slice(0,2).map(model);
+  registerScopeCouncilRunner(pi,{launch:async(id,params)=>{
+    calls.push({id,params});
+    const body=String(params.task);
+    if(body.includes('Peer critique synthesizer')) return result('Challenge: the single meaningful-change perspective assumes the reported behavior is the whole complaint; the missing preservation view would likely raise the explicit title, which remains unverified.');
+    if(body.includes('Preservation peer')) return {details:{results:[{exitCode:1,error:true}]}};
+    return result('Recover the explicit title reference before widening the change; a bounded adjustment to the reported behavior is the smallest substantive scope.');
+  },available:()=>pair,constraints:()=>({})});
+  const runner=globalThis[SCOPE_COUNCIL_RUNNER];
+  const output=await runner({task,graph:'src/widget.ts owns the widget behavior.',history:{evidence:[]}},context(),new AbortController().signal);
+  assert.equal(calls.length,3,'the surviving perspective still receives a bounded critique');
+  assert.equal(output.status,'partial');
+  assert.equal(output.proposals.length,1);
+  assert.equal(output.proposals[0].role,'meaningful-change');
+  assert.equal(output.independence,'cross-peer','the surviving peer is critiqued by the member that did not author it');
+  assert.match(output.discussion,/missing preservation view/);
+  assert.match(output.gap,/peer/i,'the unavailable perspective stays an explicit gap');
+  const synth=calls.find(call=>String(call.params.task).includes('Peer critique synthesizer'));
+  assert.match(String(synth.params.task),/other perspective is unavailable/);
+});
+
 test('the generic proactive helper yields to the automatic scope council trigger',async()=>{
   const hooks=new Map(),launches=[];
   const pi={

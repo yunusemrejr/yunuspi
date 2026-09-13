@@ -8,6 +8,7 @@ const release=path.resolve(import.meta.dirname,'..');
 const agent=fs.existsSync(path.join(release,'agent'))?path.join(release,'agent'):path.resolve(release,'..');
 const load=name=>import(pathToFileURL(path.join(agent,'extensions',name)));
 const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence}=await load('lib/intent-context.ts');
+const {scopeRequest}=await load('lib/scope-deliberation.ts');
 const {agentBrief}=await load('lib/project-intelligence/query.mjs');
 const {discoverContinuity}=await load('lib/project-intelligence/continuity.mjs');
 const {projectMemoryKey}=await load('pi-memory/project-identity.ts');
@@ -30,6 +31,31 @@ test('referential follow-ups retain user evidence without resurrecting supersede
   const corrected=[user('old','Keep the old hero layout.'),user('new','Replace the old hero layout. '+'Detailed qualification. '.repeat(30))];
   assert.doesNotMatch(helperIntentEvidence(prompt,corrected),/Keep the old/);
   assert.doesNotMatch(helperIntentEvidence('New task: improve the hero',branch),/branch-entry/);
+});
+
+test('compound referential instructions inherit the earlier subject without widening it',()=>{
+  const branch=[user('goal','Improve the hero animation; preserve the palette.'),user('change','Actually replace only the hero motion.')];
+  for (const text of ['Do this and that, please.','Handle the rest.','Apply both of these.','Finish the others.','Same for the others.','Do the same for the header.','Do it in the sidebar.']) {
+    assert.match(intentRetrievalQuery(text,branch),/hero/,text);
+    assert.ok(Buffer.byteLength(JSON.stringify(helperIntentEvidence(text,[...branch,user('latest',text)])))-2<=280,text);
+  }
+  // A demonstrative that only modifies a noun, an explicit refusal and a task
+  // pivot are not an inherited subject, and the inherited excerpt stays
+  // evidence: it never becomes a new instruction for the helper.
+  for (const text of ['Do this SQL query with the supplied schema.','Do not do this and that.','New task: do this and that.']) {
+    assert.equal(intentRetrievalQuery(text,branch),text,text);
+    assert.doesNotMatch(helperIntentEvidence(text,[...branch,user('latest',text)]),/branch-entry:goal/,text);
+  }
+  assert.equal(intentRetrievalQuery('Stop the animation before it loops.',branch),'Stop the animation before it loops.');
+  const excerpt=helperIntentEvidence('Do this and that.',[...branch,user('latest','Do this and that.')]);
+  assert.match(excerpt,/branch-entry:goal/);
+  assert.ok(!excerpt.includes('Do this and that.'),'the current instruction is not duplicated');
+  // The same cue lets the automatic scope council describe the earlier subject
+  // as bounded historical evidence; a non-council subject stays out.
+  const council=[user('prior','Please redesign the settings layout because it is clunky.')];
+  assert.match(scopeRequest('Do this and that, please.',council),/Earlier subject \(historical, not new authority\)/);
+  assert.match(scopeRequest('Do this and that, please.',council),/redesign the settings layout/);
+  assert.equal(scopeRequest('Do this and that, please.',[user('prior','Fix the spelling of navigation.')]),undefined);
 });
 
 test('intent evidence bounds work and excludes non-user content, redacted data and incomplete corrections',()=>{

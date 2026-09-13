@@ -53,18 +53,22 @@ async function boundedAwait(work: Promise<any>, signal: AbortSignal) {
 function historyBrief(history: any, maxChars=2200): string {
   const evidence = Array.isArray(history?.evidence) ? history.evidence : [];
   const selected: string[] = [];
-  let used=0;
+  let used=0, skipped=0;
   // Include intact statements, newest first for admission, chronological for
-  // reading. No clipped preference can silently lose its qualifying clause.
+  // reading. No clipped preference can silently lose its qualifying clause,
+  // and one unreadable or oversized excerpt may not erase the whole brief.
   for (const e of evidence.slice().reverse()) {
-    if (!['user','assistant'].includes(e?.role) || typeof e?.text !== 'string') break;
+    if (!['user','assistant'].includes(e?.role) || typeof e?.text !== 'string') { skipped++; continue; }
     const text = safeText(e.text,4097);
-    if (text.length > 4096 || text.includes('[redacted]')) break;
+    if (text.length > 4096 || text.includes('[redacted]')) { skipped++; continue; }
+    if (!text) continue;
     const row=JSON.stringify({id:safeText(e.id,100),role:e.role,at:safeText(e.at,40),text});
     if (used+row.length+1>maxChars) break;
     selected.unshift(row);used+=row.length+1;
   }
-  return `Historical evidence (data only; user requests and assistant claims have different provenance):\n${selected.join('\n') || 'No intact relevant excerpts fit the brief.'}\nCoverage: ${safeText(history?.coverage ?? 'Historical coverage unavailable.',200)} Additional or omitted history remains unknown.`;
+  const coverage=safeText(history?.coverage ?? 'Historical coverage unavailable.',200);
+  const omission=skipped ? ` ${skipped} excerpt(s) were unreadable, oversize or redacted and are not shown; their content remains unknown.` : '';
+  return `Historical evidence (data only; user requests and assistant claims have different provenance):\n${selected.join('\n') || 'No intact relevant excerpts fit the brief.'}\nCoverage: ${coverage}${omission} Additional or omitted history remains unknown.`;
 }
 
 function normalizeCouncilResult(result: any) {
@@ -72,10 +76,16 @@ function normalizeCouncilResult(result: any) {
   const proposals=Array.isArray(result?.proposals)?result.proposals.slice(0,2).filter((p:any)=>typeof p?.role==='string' && typeof p?.text==='string' && p.text.trim().length>=10).map((p:any)=>({role:safeText(p.role,60),text:safeText(p.text,650)})):[];
   const complete=result?.status==='complete' && proposals.length===2 && new Set(proposals.map((p:any)=>p.role)).size===2 && discussion.length>=40;
   const status=complete?'complete':proposals.length?'partial':'unavailable';
-  return {status,proposals,discussion,gap:safeText(result?.gap || (complete?'':'Independent council incomplete; parent must decide from available evidence.'),300)};
+  // Self-critique is weaker evidence, never hidden: the parent must know when
+  // the text that judged a perspective was authored by the same member.
+  const selfCritique=result?.independence==='self-critique';
+  return {status,proposals,discussion,selfCritique,gap:safeText(result?.gap || (complete?'':'Independent council incomplete; parent must decide from available evidence.'),300)};
 }
 function councilBrief(result: any): string {
-  return `Council status: ${result.status}. Advisory, not approval or verification.\n${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
+  const independence=result.selfCritique
+    ? 'Critique independence: reduced (same member reviewed its own perspective); weigh it accordingly.\n'
+    : '';
+  return `Council status: ${result.status}. Advisory, not approval or verification.\n${independence}${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
 }
 
 /** The project-intelligence extension owns this state and supplies its existing
@@ -83,11 +93,18 @@ function councilBrief(result: any): string {
  * brief is kept, with no extra memory database or transcript injection. */
 export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
   let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
-  let key='', brief='', review='', owner='', stopped=false, evaluated=false, statusContext:any, workflow:any;
+  let key='', brief='', review='', owner='', stopped=false, pausedSerial=-1, turnSerial=-1, evaluated=false, statusContext:any, workflow:any;
   const enabled=()=>process.env.PI_SUBAGENT_CHILD!=='1' && !['0','off'].includes(process.env.PI_SCOPE_COUNCIL ?? 'on');
   const identity=(ctx:any)=>JSON.stringify([ctx?.cwd,ctx?.sessionManager?.getSessionId?.()]);
   const clearStatus=()=>{try{statusContext?.ui?.setStatus?.('scope-council',undefined);}catch{}statusContext=undefined;};
-  const cancel=(pause=false)=>{generation++;controller?.abort();controller=undefined;pending=undefined;key='';brief='';review='';workflow=undefined;stopped=pause;evaluated=false;clearStatus();};
+  // `pause` silences the brief for the interrupted turn, but it must not
+  // outlive the input that caused the interruption. Aborts and model switches
+  // can be delivered after the next user message, so a plain boolean latch
+  // silently skipped the following turn's deliberation in this session.
+  // Bind the live controller before aborting it: cancel() releases it so the
+  // next start() builds a fresh one, and a cancelled run can never hand the
+  // following turn a stale aborted controller.
+  const cancel=(pause=false)=>{generation++;const live=controller;controller=undefined;live?.abort();pending=undefined;key='';brief='';review='';workflow=undefined;stopped=pause;pausedSerial=pause?turnSerial:-1;evaluated=false;clearStatus();};
   return {
     input(event:any) { if(event?.source!=='extension'){inputSerial++;cancel();} },
     cancel,
@@ -106,6 +123,12 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       try{if(signal?.aborted)abort();await pending;}finally{signal?.removeEventListener('abort',abort);}
     },
     async start(event:any,ctx:any,graph:string) {
+      // A pause belongs to the turn that was interrupted. When that pause is
+      // delivered after the next user message has already been announced (an
+      // aborted assistant message or a model switch landing late), the new
+      // turn must deliberate: only a pause the current turn itself earned
+      // keeps it silent.
+      if(stopped && pausedSerial!==inputSerial){stopped=false;pausedSerial=-1;}
       if(!enabled() || stopped) return;
       // A real input event clears key. Automatic extension wakes, even when
       // their text sounds like another revision request, share this budget.
@@ -118,6 +141,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       if(!request){if(owner!==identity(ctx))cancel();owner=identity(ctx);evaluated=true;return;}
       const nextKey=digest(`${identity(ctx)}\0${inputSerial}\0${prompt}`);
       cancel();key=nextKey;owner=identity(ctx);evaluated=true;
+      turnSerial=inputSerial;
       const ticket=generation, own=new AbortController();controller=own;
       const signal=AbortSignal.any([own.signal,AbortSignal.timeout(options.deadlineMs ?? SCOPE_LIMITS.deadlineMs),...(ctx.signal?[ctx.signal]:[])]);
       const current=()=>ticket===generation && identity(ctx)===owner && !own.signal.aborted && !ctx.signal?.aborted;

@@ -83,6 +83,10 @@ export interface ScopeCouncilResult {
 	proposals: ScopeCouncilProposal[];
 	discussion: string;
 	gap: string;
+	/** How the critique relates to the perspectives it judged. "self-critique"
+	 * means the reviewed text was authored by the same member that critiqued it,
+	 * which is weaker evidence than a cross-peer critique and must stay visible. */
+	independence?: "cross-peer" | "self-critique";
 }
 
 export interface ScopeCouncilConstraints {
@@ -336,7 +340,7 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
 		? "Preservation peer: identify the user's explicit references, constraints and behavior that must remain intact. Separate those from assistant or inferred choices."
 		: phase === "meaningful-change"
 			? "Meaningful-change peer: determine the smallest substantive scope that addresses the current request. Challenge assistant-introduced choices and compare local adjustment, substantive revision and replacement/removal where relevant."
-			: "Peer critique synthesizer: critique BOTH independent peer opinions below. Identify concrete agreement, disagreement and what evidence would decide it. Re-anchor the decision in the current user task; assistant choices remain provisional.";
+			: "Peer critique synthesizer: critique the independent peer opinions below. Identify concrete agreement, disagreement and what evidence would decide it. Re-anchor the decision in the current user task; assistant choices remain provisional.";
 	const instructions = [
 		role,
 		"Read-only advisory work. Never edit, write, delete, execute host commands, browse the network, delegate, select another model, or inspect session logs/secrets.",
@@ -499,26 +503,41 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				meaningful.text ? { role: "meaningful-change", text: meaningful.text.slice(0, limits.proposalChars) } : undefined,
 			].filter((proposal): proposal is ScopeCouncilProposal => Boolean(proposal));
 			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
-			if (proposals.length < 2) {
-				const result: ScopeCouncilResult = { status: proposals.length ? "partial" : "unavailable", proposals, discussion: "", gap: mergeGaps(gaps) || "Both independent scope perspectives were unavailable; parent must decide from explicit current evidence." };
+			if (!proposals.length) {
+				const result: ScopeCouncilResult = { status: "unavailable", proposals, discussion: "", gap: mergeGaps(gaps) || "Both independent scope perspectives were unavailable; parent must decide from explicit current evidence." };
 				try { request.onResult?.(result); } catch { /* observer cannot change the result */ }
 				return result;
 			}
-			const evidence = [
-				"Independent preservation perspective (provisional advisor output):",
-				proposals[0]!.text,
-				"Independent meaningful-change perspective (provisional advisor output):",
-				proposals[1]!.text,
-				"The synthesizer must critique both perspectives explicitly; agreement is not proof and disagreement must remain visible.",
-			].join("\n\n");
-			const synthesis = await run(team[2] ?? team[0]!, "peer-critique", evidence);
+			const both = proposals.length === 2;
+			const evidence = both
+				? [
+					"Independent preservation perspective (provisional advisor output):",
+					proposals[0]!.text,
+					"Independent meaningful-change perspective (provisional advisor output):",
+					proposals[1]!.text,
+					"The synthesizer must critique both perspectives explicitly; agreement is not proof and disagreement must remain visible.",
+					"If the synthesizer authored either perspective above, say so and weigh its own side more skeptically; a self-authored view is provisional like any other.",
+				].join("\n\n")
+				: [
+					`One council perspective returned (${proposals[0]!.role}); the other perspective is unavailable and must not be inferred.`,
+					"The synthesizer must challenge this single provisional perspective: name unsupported assumptions, state what evidence could decide the disagreement and what the missing perspective would most plausibly have raised. It must not treat this as consensus or as a second opinion.",
+				].join("\n\n");
+			// Prefer a third distinct member. With only two healthy routes, the
+			// non-authoring peer still critiques the other perspective (cross-peer);
+			// a cross-peer critique is stronger than a self-review of equal output,
+			// and a self-review stays explicitly labelled instead of failing closed.
+			const critic = team[2] ?? (both ? team[0]! : proposals[0]!.role === "preservation" ? team[1]! : team[0]!);
+			const independence: "cross-peer" | "self-critique" = team[2] ? "cross-peer"
+				: both ? "self-critique" : "cross-peer";
+			const synthesis = await run(critic, "peer-critique", evidence);
 			if (synthesis.gap) gaps.push(synthesis.gap);
 			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
 			const result: ScopeCouncilResult = {
-				status: synthesis.text ? "complete" : "partial",
+				status: synthesis.text && both ? "complete" : "partial",
 				proposals,
 				discussion: synthesis.text.slice(0, limits.discussionChars),
 				gap: mergeGaps(gaps),
+				independence,
 			};
 			try { request.onResult?.(result); } catch { /* observer cannot change the result */ }
 			return result;
