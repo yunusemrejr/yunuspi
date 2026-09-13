@@ -5,6 +5,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {numericCheck} from './numeric-checks.ts';
 import {inspectText, inspectImage, convertValue} from './artifact-checks.ts';
+import {inspectUiSource} from './slop-guidance-signals.ts';
 import {parseData, executeDataQuery} from './data-query.ts';
 
 const disabled = () => process.env.PI_SMALL_TOOLS === 'off' || process.env.PI_REASONING_AIDS === 'off';
@@ -76,21 +77,22 @@ export default function registerSmallTools(pi: any) {
     }),p=>numericCheck(p),
     ['Use math_check for numeric summaries, metrics, vector comparisons and train/validation/test overlap instead of computing by hand.']);
   register('artifact_check',
-    'Inspect Unicode controls, normalization and line endings (text), or PNG/JPEG/GIF/WebP header dimensions (image). File paths stay within cwd. Header metadata does not verify full image decoding; Unicode analysis does not prove font/glyph rendering.',
-    object({operation:Type.Union(['text','image'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
-      if (!p || typeof p !== 'object' || Array.isArray(p) || !['text','image'].includes(p.operation)) throw Error('Unsupported artifact operation');
+    'Inspect Unicode metadata (text), image header dimensions (image), or UI source cues such as blinking status pills, competing fonts, contrast pairs and fragile controls (ui). ui requires a workspace path, at most 24000 characters, and returns advisory cues with a source hash; it does not render or certify design.',
+    object({operation:Type.Union(['text','image','ui'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
+      if (!p || typeof p !== 'object' || Array.isArray(p) || !['text','image','ui'].includes(p.operation)) throw Error('Unsupported artifact operation');
       const keys=Object.keys(p);
       if (keys.some(k=>!['operation','text','path'].includes(k)) || ('text' in p) === ('path' in p) || 'text' in p && typeof p.text !== 'string' || 'path' in p && typeof p.path !== 'string') throw Error('Supply exactly one of text or path');
       if (p.operation==='text' && typeof p.text==='string') return inspectText(p.text);
       if (p.operation==='image' && 'text' in p) throw Error('Image inspection requires a path');
+      if (p.operation==='ui' && 'text' in p) throw Error('UI inspection requires a path');
       const data=await readArtifact(p.path,ctx?.cwd,p.operation==='image'?IMAGE_LIMIT:TEXT_LIMIT,p.operation==='image',signal);
       if(p.operation==='image') return {...inspectImage(data.bytes),fileBytes:data.fileBytes,headerPrefixOnly:data.headerOnly};
       let text: string;
       try { text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes); }
       catch { throw Error('Text file is not valid UTF-8'); }
-      return inspectText(text);
+      return p.operation==='ui' ? inspectUiSource(p.path,text) : inspectText(text);
     },
-    ['Use artifact_check to verify text encoding/Unicode state or image header dimensions before claiming an artifact is valid.']);
+    ['Use artifact_check for text/image metadata or operation:"ui" on a changed component. Source cues locate review work; verify UI with rendered and interaction evidence.']);
   register('value_convert',
     'Convert supplied text: strict UTF-8 Base64, URI component encoding, or JSON format/compact. Returns bounded converted text; never evaluates code or writes a file. Use when exact encoding or formatting is needed.',
     object({operation:Type.Union(['json_format','json_compact','base64_encode','base64_decode','url_encode','url_decode'].map(operation)),text:str(TEXT_LIMIT)}),p=>convertValue(p),

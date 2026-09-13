@@ -59,16 +59,29 @@ async function loadRuntime():Promise<Runtime|undefined>{
 }
 export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof fetch;now?:()=>number}={}){
  let runtime=options.runtime,busy=false,last=-Infinity,generation=0;const now=options.now??Date.now,request=options.fetch??fetch;let current:AbortController|undefined;
+ const cache=new Map<string,MiniSelection>();
+ let failures=0;
+ const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,projectedSavedChars:0};
  if(!runtime)void loadRuntime().then(v=>{runtime=v;});
  return {
-  reset(){generation++;current?.abort();},
+  reset(){generation++;current?.abort();cache.clear();},
+  inspect(){return {...stats,cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
   async select(raw:string,inputUsdPerMillion:unknown):Promise<MiniSelection|undefined>{
-   if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||busy||now()-last<10_000||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0||!miniSource(raw))return;
+   if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0)return;
+   const source=miniSource(raw);if(!source)return;
+   const cached=validateMiniSelection(raw,cache.get(source.hash));
+   if(cached){
+    cache.delete(source.hash);cache.set(source.hash,cached);stats.cacheHits++;
+    // Cache owns its own IDs: callers cannot mutate a future source projection.
+    return {...cached,keep:[...cached.keep]};
+   }
+   if(busy||now()-last<Math.min(60000,10000*2**failures))return;
    // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
    // Newly produced tool bytes have not appeared in the provider prefix yet.
    const potential=miniPotentialSavings(raw);
    if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
+   stats.requests++;let accepted=false;
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
    const timer=setTimeout(()=>abort.abort(),450);timer.unref?.();
    try{
@@ -83,8 +96,15 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     const selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;
     const projection=miniProjection(raw,selection)!;const saved=raw.length-projection.length-256;
     if(saved<150||saved/raw.length<.15||!usefulContextSaving(saved,raw.length)&&saved/6*inputUsdPerMillion/1e6<(performance.now()-started)/1000*.00002*10)return;
+    if(cache.size>=16)cache.delete(cache.keys().next().value!);
+    cache.set(source.hash,{...selection,keep:[...selection.keep]});accepted=true;failures=0;stats.accepted++;stats.projectedSavedChars+=saved;
     return selection;
-   }catch{return;}finally{clearTimeout(timer);if(current===abort){busy=false;current=undefined;}}
+   }catch{return;}finally{
+    clearTimeout(timer);
+    if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;}
+    try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
+    if(current===abort){busy=false;current=undefined;}
+   }
   }
  };
 }

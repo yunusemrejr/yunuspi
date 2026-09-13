@@ -48,6 +48,7 @@
     "checkpoint-files.ts",
     "continuation-notice.ts",
     "code-guidance-signals.ts",
+    "authored-review.ts",
     "quality-review-signals.ts",
     "quality-review.ts",
     "slop-guidance-signals.ts",

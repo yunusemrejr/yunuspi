@@ -82,3 +82,13 @@ configuration/schema validation. A YAML syntax pass does not validate a Compose
 or Kubernetes configuration, and TypeScript syntax does not prove type safety.
 These changes reduce repeated command assembly and output volume; they do not
 claim a measured cost reduction or guarantee every model's task quality.
+
+## Component quality and shared review evidence
+
+`artifact_check({operation:"ui",path:"src/Status.tsx"})` checks a complete workspace source file up to 24,000 characters. It reports a source hash and bounded advisory cues: decorative blinking live/status pills, competing primary font families, tiny tracked text, explicit opaque text/background pairs below 3:1, repeated absolute positioning, effect/motion clusters, placeholder links, clickable containers and removed focus outlines. Unsupported paths and oversized files do not receive a clean verdict.
+
+The same source policy runs on successful native writes and independent batch replacements. Edit hooks route relevant skills; `quality_review` receives code, UI and content cues. Partial edits retain earlier cues until a complete replacement or fresh source discovery invalidates them. A source cue cannot resolve the CSS cascade, prove a status is fake, or certify usability. Review against project rules and user requirements, then verify rendered appearance and interaction states. Font/color names alone are not a ban list. Decorative blinking LIVE pills are discouraged by default.
+
+Parent and child skill guidance names the available source and render tools, encourages batched syntax checks, and asks workers to retain file/revision/check evidence. Swarm/fusion consumers can reuse current receipts while preserving disagreements and unavailable evidence; merged edits require fresh verification of affected behavior. Tool and skill availability still constrain each worker. Guidance remains bounded and deduplicated.
+
+Semantic radar also records a digest of JSX tags, attributes and text. A changed contract adds a divergence cue and prevents learned reordering within the affected similarity tier. Candidates remain available in baseline order. The neural model estimates code reuse affinity; it is not a visual design classifier and has not been retrained on these UI checks. Older fingerprint caches rebuild automatically.

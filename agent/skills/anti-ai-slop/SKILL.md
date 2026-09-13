@@ -21,3 +21,5 @@ Read `../ui-antipattern-review/SKILL.md` when UI is central. Inspect real conten
 
 ## Final check
 Does the artifact solve the requested problem? Are claims supported? Are boundaries and failure behavior coherent? Did verification exercise the actual change? Avoid broad rewrites solely to satisfy a style heuristic.
+
+Use available `artifact_check` with `operation:"ui"` for component source cues, then verify rendered and interaction states. See `references/patterns.md` for shared review evidence and code/prose checks.

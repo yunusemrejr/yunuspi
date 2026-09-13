@@ -2,7 +2,7 @@ import path from 'node:path';
 import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
-import { qualityReviewSignals } from './quality-review-signals.ts';
+import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
 
 // Services retain their existing process/graph owners. This checkpoint never
 // launches a process, picks a provider, executes project code or owns a database.
@@ -14,7 +14,7 @@ export const REVIEW_LIMITS = { rounds: 2, reviewers: 3, deadlineMs: 30000, costU
 const RUBRICS: Record<string, string> = {
   correctness: 'Trace the changed behavior, actual source owner, affected callers and failure/cancellation paths. Check compatibility and meaningful tests. Identify a concrete counterexample; do not request speculative refactors.',
   security: 'Trace input to authorization, escaping, secret handling and data/storage boundaries. Check denied cases and migration compatibility when applicable. A filename or pattern alone is not a vulnerability.',
-  interface: 'Check HTML semantics, keyboard/focus, responsive CSS, contrast, content hierarchy and changed interaction states. Require rendered/browser evidence for visual claims; source inspection alone cannot certify appearance or usability.',
+  interface: 'Check real task completion, native controls, keyboard/focus, responsive layout, contrast and loading/empty/error/disabled states. Review blinking live-status pills, competing font roles, tiny tracked labels, effect clusters, redundant cards and fixed-coordinate content against the project design system and user preferences. Default to quiet truthful status text. Source cues and learned similarity only select inspection targets: require rendered/browser evidence for appearance and actual interaction evidence for behavior. Block demonstrated broken behavior or unmet explicit requirements; label taste suggestions as improvements. Do not certify appearance from source or repeat redesign rounds for optional polish.',
   content: 'Check audience, clarity, specific supported claims, tone, links and calls to action. For public web content also check titles, headings, canonical/indexing, structured data and crawlability where relevant. Do not invent marketing facts or demand SEO for internal documentation.',
   runtime: 'Check language/runtime contracts (JavaScript, PHP, Python or other touched stack), browser compatibility, resource lifetimes and WebAssembly memory/ABI/fallback behavior where relevant. Require measurements for performance claims.',
   delivery: 'Check the actual target and release configuration, backwards compatibility, environment boundaries and rollback. Distinguish local, staged and observed production behavior; never deploy or access production just to review.',
@@ -77,7 +77,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
   let truncated = false, delivered = '', scanning = false, pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
   let scopeOverflow = false;
-  const patterns = new Map<string, ReturnType<typeof qualityReviewSignals>>();
+  const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
   const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow }); } catch {} };
@@ -88,9 +88,10 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     revision++; changed = all.slice(-128); disposition = ''; reason = ''; delivered = ''; save();
   };
   const status = () => !changed.length ? 'not_needed' : disposition || (reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
+  const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file}))).slice(0,12);
   const summary = () => ({ root, revision, changed, status: status(), rounds, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0, reason, truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history), historicalSamples: history.length,
-    patterns: [...patterns.values()].flat().slice(0,12),
+    patterns: patternReport(),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Never claim good quality when reviewers, runtime/visual/deployment evidence or current tests are missing. Maximum two review rounds; report unresolved gaps when exhausted.`;
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
@@ -115,7 +116,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
       let result: any;
       try {
-        result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:[...patterns.values()].flat().slice(0,12), tests:options.tests(), limits:REVIEW_LIMITS }, ctx, combined)),combined);
+        result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS }, ctx, combined)),combined);
       } catch {}
       if (ticket !== generation || !active || paused || own.signal.aborted) return summary();
       await refresh(ctx);
@@ -171,9 +172,15 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       // Native mutation receipts cover paths outside the bounded scan. Each
       // successful edit invalidates a review, even a same-size/same-stat write.
       if (!file.startsWith('../') && !path.isAbsolute(file) && isProjectReviewSource(file)) {
+        const earlier = patterns.get(file) ?? [];
         invalidate([file]);
         if (patterns.size >= 128) patterns.delete(patterns.keys().next().value!);
-        patterns.set(file,qualityReviewSignals(file,event.input?.content ?? event.input?.newText));
+        const snippets = authoredReviewSnippets(event.toolName,event.input);
+        const fresh = authoredReviewSignals(file,snippets);
+        // An unrelated partial edit cannot clear an earlier cue. A complete
+        // bounded write can; scan-driven changes discard stale snippet evidence.
+        const whole = event.toolName === 'write' && typeof event.input?.content === 'string' && event.input.content.length <= 24000;
+        patterns.set(file,[...new Map([...(whole?[]:earlier),...fresh].map(s=>[s.key,s])).values()].slice(0,12));
       }
     },
     message(event: any) {

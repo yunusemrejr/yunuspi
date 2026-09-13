@@ -37,7 +37,10 @@ test('local selection protects evidence and supports meaningful free-route conte
  assert.equal(miniPotentialSavings(Array(18).fill(material).join('\n\n')),0);
  let calls=0;const runtime={version:1,enabled:true,endpoint:'http://127.0.0.1:18736/select',apiKey:randomBytes(24).toString('base64url')};
  const client=createMiniPreprocessor({runtime,fetch:async(_url,options)=>{calls++;assert.equal(options.redirect,'error');return new Response(JSON.stringify(selection));}});
- assert.deepEqual(await client.select(raw,0),selection);assert.equal(await client.select(raw,0),undefined);assert.equal(calls,1,'busy/cooldown work is never queued');
+ assert.deepEqual(await client.select(raw,0),selection);
+ assert.deepEqual(await client.select(raw,0),selection,'identical verified content reuses the bounded cache');
+ assert.equal(await client.select(raw+'\n\nAdditional background.',0),undefined,'uncached work respects cooldown');
+ assert.equal(calls,1,'cache hits and cooldown never make another request');
  assert.match(miniProjection(raw,selection),/must not/);
  const rows=[{id:'specific',text:'quaternion rendering architecture'},{id:'generic',text:'application rendering architecture'},...Array.from({length:20},(_,i)=>({id:'d'+i,text:'application common background'}))];
  assert.equal(scoreContext(rows,'quaternion application rendering')[0].id,'specific');

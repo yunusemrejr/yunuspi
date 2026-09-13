@@ -59,6 +59,11 @@ const isExecution = (args: HookArgs) => !args.action;
  * delegation rule, and literal-search guidance is keyed on a result property.
  */
 export const HOOK_RULES: readonly HookRule[] = [
+  {
+    key: 'ui-source-evidence', tools: ['artifact_check'],
+    when: args => args.operation === 'ui',
+    line: 'Inspect flagged components against project rules and real status data. Verify rendered typography, contrast and interaction states. Source cues cannot certify design; fix demonstrated defects first.',
+  },
 	{
 		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",

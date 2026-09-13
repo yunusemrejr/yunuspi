@@ -20,3 +20,8 @@ Check the documentation for the deployed version when an API, support matrix or 
 - https://huggingface.co/docs/transformers/
 - https://huggingface.co/docs/trl/
 - https://huggingface.co/docs/peft/
+
+## Harness preprocessing and review assistance
+Use the installed deterministic compactor first. The optional mini selector may choose exact complete source paragraphs; it cannot rewrite evidence or make quality decisions. Keep hashes, original retrieval, status, negation, qualifiers and dependencies. Reuse validated source-hash selections from a bounded session cache, clear them on branch/reset, and back off after unsupported or failed inference. Measure requests, cache hits, fallback rate, projected character savings and latency; character counts are not billed tokens. Do not enable an experimental model merely because its client exists.
+
+For ML-assisted component checks, retain deterministic findings and source references. A learned reuse score cannot assess visual design or authorize repairs. Abstain across unsupported language/feature contracts, preserve divergence candidates, and test realistic changed tags, attributes, text, handlers and legitimate refactors. Evaluate any new weights on separated source families against the existing rule baseline before activation.

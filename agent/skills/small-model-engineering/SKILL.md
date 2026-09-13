@@ -19,3 +19,6 @@ Read [patterns and examples](references/patterns.md) for the relevant implementa
 ## Evidence and completion
 
 Use a small representative case and the relevant failure case to check the result. Report what was executed, what remains unverified, and any material compatibility assumption. Do not invent measured outcomes or treat reading this guide as verification.
+
+## Harness integration
+Use deterministic compaction first, then validated extractive selection with original retrieval. Cache exact-source selections, bound CPU and retries, and retain protected evidence. See `references/patterns.md` for cache, telemetry and ML component-review contracts; client presence is not model eligibility.

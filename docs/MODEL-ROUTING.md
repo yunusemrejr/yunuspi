@@ -37,3 +37,9 @@ Teams contain at most three different model identities and prefer free routes ac
 Children perform advisory investigations; the parent owns changes, resolves disagreements and validates claims. Fusion preserves source ownership and failed-member counts. It does not turn agreement into proof or silently choose a factual winner. A single usable child remains a single helper. Existing executor cancellation, fleet capacity, request caps and recovery remain authoritative.
 
 `model-routing-decision` session entries record the selected mode, reason, routes, evidence explanations and budgets. Model listings distinguish capability metadata, price status and cached benchmark coverage. Set `PI_AUTONOMOUS_FREE_ASSIST=0` to disable proactive helpers while keeping manual delegation available.
+
+## Local preprocessing reuse
+
+The optional mini paragraph selector retains up to 16 validated source-hash selections per client. Repeated source text can reuse exact paragraph IDs without inference, even during cooldown. Changed text needs its own selection; branch/reset clears the cache and aborts in-flight work. Returned IDs cannot mutate cached selections. Original tool text and source retrieval remain intact, and protected status, numbers, negation and qualifiers remain mandatory.
+
+Failed or unsupported inference backs off from 20 to at most 60 seconds; success returns to the existing ten-second limit. There is no retry queue. The client exposes request, accepted-selection, fallback and cache-hit counts plus projected character savings; these are not billed token measurements. Bounded health events carry only outcome categories and duration. Deterministic compaction still runs first, disabled/unavailable models preserve raw data, and no experimental SLM is enabled by these changes.

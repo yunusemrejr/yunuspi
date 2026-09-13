@@ -53,3 +53,4 @@ Every fragment is a fenced block:
 5. Self-check before finishing: every block parses as JSON with exactly the
    four keys `owner`, `kind`, `body`, `updatedAt`; `kind` is one of the three
    values above; `updatedAt` is a number.
+6. For a review fragment, retain the file/element, source revision, observed check and unresolved gap inside `body`. Peer agreement and learned similarity are not verification. Reuse current receipts; after merged edits the parent verifies affected behavior and rendered UI states. Do not erase dissent or unavailable evidence while shortening the report.

@@ -98,6 +98,12 @@ export function rankCandidates(fp, candidates, { mode = neuralRankerMode() } = {
   for (const tier of ["high", "probable"]) {
     const group = out.filter(c => c.tier === tier);
     if (!group.length) continue;
+    // PI_LENS_RADAR_STATE_V1: JSX drift cannot gain learned reuse confidence.
+    // The model was trained for code reuse affinity, not visual taste or JSX
+    // equivalence. Preserve divergence candidates and their baseline order.
+    if (group.some(c => (fp.uiContractHash || c.uiContractHash) && fp.uiContractHash !== c.uiContractHash)) {
+      fallback += group.length; continue;
+    }
     const rows = group.map(c => pairRankFeatures(fp, c, c));
     // OOD/missing evidence abstains for the whole tier group, so partial old
     // indexes cannot privilege the subset that happened to have new features.

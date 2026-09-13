@@ -27,3 +27,18 @@ Check the documentation for the deployed version when an API, support matrix or 
 The following review cues are adapted from [Impeccable’s slop catalog](https://impeccable.style/slop/): inspect repeated gradients, blur, glow and decorative backgrounds; unnecessary nested cards and redundant borders/shadows; template hero/feature/metric compositions; redundant badges and labels; weak type hierarchy, tiny text and excessive uppercase; and motion that competes with the task. These are contextual cues, not prohibited styles. Respect the project's documented typography, colors and radii. Distinguish source checks, browser measurements and visual judgment; test contrast on the rendered surface. A restrained beige design can be as generic as a loud gradient design. Choose treatments because they support the content and interaction.
 
 For each cue, record the element and consequence before changing it. For example, a border and shadow may usefully separate a floating panel, while the same treatment on every nested paragraph may fragment reading. Keep the successful parts. Compare matching viewport, content and interaction states after the repair.
+
+## Component decisions and evidence
+
+| Source cue | Default repair and verification |
+|---|---|
+| LIVE pill with blinking dot | Remove decorative status furniture. For required live data, show truthful status with a timestamp or stale/offline state; avoid recurring motion merely to imply activity. |
+| Several primary font families or similar sans/display faces competing | Give body, heading and data text distinct roles. Reuse the project's type scale; check loaded/fallback fonts, long labels and zoom. Do not count language fallback stacks as competing faces. |
+| Tiny uppercase text with wide tracking | Increase readability and reduce decorative metadata. Check the actual size and contrast; uppercase or monospace alone is not a defect. |
+| Gradients, blur, glow and perpetual movement on the same screen | Keep effects that explain interaction or establish needed hierarchy. Test reduced motion and interruption; loading feedback can be functional. |
+| Fixed-coordinate content or repeated nested cards | Use normal document flow and shared alignment where content must expand. Test narrow widths, localization, zoom and error messages; intentional overlays may stay positioned. |
+| Clickable div/span, placeholder link or suppressed outline | Use native action/navigation semantics and a visible focus treatment. Exercise keyboard, pointer and failure states. External handlers and shared CSS need inspection before judging. |
+
+No font-name or color-name blacklist can assess a composition. Explicit opaque CSS color pairs can be measured before rendering, but cascade, transparency, disabled/logo exceptions and font size still matter. The source checker reports only pairs below 3:1; normal text also needs evaluation against 4.5:1. Compare unrounded values to the applicable threshold. See [W3C contrast guidance](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html), [motion guidance](https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html) and [button behavior](https://www.w3.org/WAI/ARIA/apg/patterns/button/).
+
+Learned semantic-radar ranking estimates code reuse affinity, not visual taste. JSX contract drift stays visible and disables learned reordering within the affected candidate tier. A similar component may contain a changed label, tag, callback or ARIA attribute; inspect the difference rather than copying it or treating the score as a quality verdict.
