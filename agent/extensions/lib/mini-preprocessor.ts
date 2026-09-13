@@ -1,11 +1,11 @@
 /** Local non-generative paragraph selection. The transcript always owns raw text. */
 import {createHash} from 'node:crypto';
+import {protectedEvidence, relevanceScores, taskTerms} from './local-intelligence.mjs';
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 export type MiniSelection = {version:1;status:'SELECT';sourceHash:string;keep:number[]};
 type Runtime = {version:1;enabled:true;endpoint:'http://127.0.0.1:18736/select';apiKey:string};
-const protectedText = /\b(?:not|no|never|none|neither|nor|without|except|unless|only|if|until|before|after|must|shall|require\w*|need\w*|should|cannot|can't|don't|fail\w*|error\w*|warning|blocked|pending|unresolved|unverified|unknown|uncertain\w*|may|might|could|reported|observed|said|says|claimed|according|alleged|denied|confirmed|verified|unconfirmed|current|latest|remaining|deprecated|superseded)\b|\d|https?:\/\/|[/\\]|\b\w+\.\w+\b/i;
 const dependent = /^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b/i;
 export function miniSource(raw:string) {
  if(typeof raw!=='string'||raw.length<800||raw.length>4096||/[^\x09\x0a\x0d\x20-\x7e]/.test(raw)||/```|<\||\|>|^\s*(?:[{}\[\]]|diff --git|@@|#!|at\s+\w+\s*\()/m.test(raw))return;
@@ -17,7 +17,7 @@ export function miniSource(raw:string) {
  if(paragraphs.some(p=>p.includes('\n')||!/[.!?]["')]?\s*$/.test(p)))return;
  const required=new Set<number>();
  for(let i=0;i<paragraphs.length;i++){
-  if(protectedText.test(paragraphs[i])||paragraphs[i].trim().split(/\s+/).length<=6)required.add(i);
+  if(protectedEvidence.test(paragraphs[i])||paragraphs[i].trim().split(/\s+/).length<=6)required.add(i);
   if(dependent.test(paragraphs[i].trimStart())){required.add(i);if(i)required.add(i-1);}
  }
  return {hash:createHash('sha256').update(raw).digest('hex'),paragraphs,spans,required};
@@ -66,12 +66,14 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  return {
   reset(){generation++;current?.abort();cache.clear();},
   inspect(){return {...stats,cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
-  async select(raw:string,inputUsdPerMillion:unknown):Promise<MiniSelection|undefined>{
+  async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
    if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0)return;
    const source=miniSource(raw);if(!source)return;
-   const cached=validateMiniSelection(raw,cache.get(source.hash));
+   const signal=process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).join(' ');
+   const key=source.hash+':'+createHash('sha256').update(signal).digest('hex');
+   const cached=validateMiniSelection(raw,cache.get(key));
    if(cached){
-    cache.delete(source.hash);cache.set(source.hash,cached);stats.cacheHits++;
+    cache.delete(key);cache.set(key,cached);stats.cacheHits++;
     // Cache owns its own IDs: callers cannot mutate a future source projection.
     return {...cached,keep:[...cached.keep]};
    }
@@ -93,11 +95,16 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     const wire=Buffer.concat(chunks).toString('utf8');
     // Refuse duplicate/escaped/extra keys before JSON parsing.
     if(!/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"SELECT"\s*,\s*"sourceHash"\s*:\s*"[a-f0-9]{64}"\s*,\s*"keep"\s*:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*\}\s*$/.test(wire))return;
-    const selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;
+    let selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;
+    // Kompress is a token classifier, not an instruction model. Condition its
+    // source-ID proposal locally; never prepend a prompt outside its training
+    // distribution or allow task relevance to erase protected evidence.
+    const scores=relevanceScores(source.paragraphs,signal);
+    selection={...selection,keep:[...new Set([...selection.keep,...scores.flatMap((score:number,i:number)=>score>0?[i]:[])])].sort((a,b)=>a-b)};
     const projection=miniProjection(raw,selection)!;const saved=raw.length-projection.length-256;
     if(saved<150||saved/raw.length<.15||!usefulContextSaving(saved,raw.length)&&saved/6*inputUsdPerMillion/1e6<(performance.now()-started)/1000*.00002*10)return;
     if(cache.size>=16)cache.delete(cache.keys().next().value!);
-    cache.set(source.hash,{...selection,keep:[...selection.keep]});accepted=true;failures=0;stats.accepted++;stats.projectedSavedChars+=saved;
+    cache.set(key,{...selection,keep:[...selection.keep]});accepted=true;failures=0;stats.accepted++;stats.projectedSavedChars+=saved;
     return selection;
    }catch{return;}finally{
     clearTimeout(timer);

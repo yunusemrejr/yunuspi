@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import {selectEvidence} from "../../../../lib/local-intelligence.mjs";
 import * as path from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import type { OutputMode, SavedOutputReference } from "../../shared/types.ts";
@@ -277,6 +278,7 @@ export function resolveSingleOutput(
 
 export function finalizeSingleOutput(params: {
 	fullOutput: string;
+	task?: string;
 	truncatedOutput?: string;
 	outputPath?: string;
 	outputMode?: OutputMode;
@@ -292,6 +294,13 @@ export function finalizeSingleOutput(params: {
 		const outputReference = params.outputReference ?? formatSavedOutputReference(params.savedPath, params.fullOutput);
 		if (params.outputMode === "file-only") {
 			return { displayOutput: outputReference.message, savedPath: params.savedPath, outputReference };
+		}
+		// Persisted source and successful completion are mandatory. Failed runs,
+		// file-only delivery and structured output retain their existing behavior.
+		if(params.exitCode===0 && params.task && process.env.PI_HANDOFF_SELECTION!=='off') {
+			const budget=Math.min(6000,params.truncatedOutput ? Math.max(800,params.truncatedOutput.length-256) : 6000);
+			const selected=selectEvidence(params.fullOutput,params.task,budget);
+			if(selected && selected.text.length+160<displayOutput.length) displayOutput=`[Child report incomplete; full report: ${params.savedPath}]\n${selected.text}`;
 		}
 		if (!displayOutput.includes(outputReference.message)) displayOutput += `\n\n${outputReference.message}`;
 		return { displayOutput, savedPath: params.savedPath, outputReference };

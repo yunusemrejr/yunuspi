@@ -24,6 +24,7 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
 - [Skill routing and batch source checks](docs/SKILLS-AND-CHECKS.md): broader catalog matching, scoped pre-edit skill review, component anti-boilerplate checks and compact syntax diagnostics across languages and configuration formats.
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
+- [Local evidence selection and ranking](docs/LOCAL-INTELLIGENCE.md): task-conditioned Kompress, recoverable compaction and child excerpts, exact near-duplicate deltas, failure-family references and telemetry-aware route optimization.
 - Persistent project intelligence with automatic discovery, concurrent session contributions, bounded architecture retrieval and a live `/graph` window; see [project intelligence](docs/PROJECT-INTELLIGENCE.md).
 - Autonomous web search with bounded fallback, plus session activity counters and a `/metrics` panel for tools, agents, skills, hooks and cache usage; see [search and session metrics](docs/SESSION-METRICS.md).
 - [Long browser and community workflows](docs/ISOLATION-AND-WEB.md): niche-site discovery, renewable isolated browser sessions, form controls, draft checks and saved submission/reconciliation guidance for authorized questions, answers and marketing.

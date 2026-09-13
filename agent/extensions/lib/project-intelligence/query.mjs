@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { candidateRelevance } from '../local-intelligence.mjs';
 
 const DEFAULT_HOPS = 1;
 const DEFAULT_LIMIT = 16;
@@ -95,8 +96,14 @@ function rankMatches(graph, query, queryTokens, allTerms = false) {
     }
   }
   const degree = stableDegree(graph.edges);
-  return graph.nodes.filter(node => scores.get(node.id) > 0 && (!allTerms || queryTokens.every(token => lexicalScore(textById.get(node.id), token, [token]) > 0))).sort((a, b) =>
-    scores.get(b.id) - scores.get(a.id) || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id));
+  const eligible=graph.nodes.filter(node => scores.get(node.id) > 0 && (!allTerms || queryTokens.every(token => lexicalScore(textById.get(node.id), token, [token]) > 0))).sort((a,b)=>scores.get(b.id)-scores.get(a.id)||(degree.get(b.id)??0)-(degree.get(a.id)??0)||a.id.localeCompare(b.id));
+  // Rerank at most 30 discovered candidates; exact identity and lexical score
+  // tiers remain ahead of statistical relevance. Graph membership is intact.
+  const candidates=eligible.slice(0,30);
+  const relevance=process.env.PI_LOCAL_INTELLIGENCE==='off'?[]:candidateRelevance(candidates.map(node=>textById.get(node.id)),query);
+  const ranked=new Map(candidates.map((node,i)=>[node.id,relevance[i]??0]));
+  candidates.sort((a,b)=>scores.get(b.id)-scores.get(a.id) || ranked.get(b.id)-ranked.get(a.id) || (degree.get(b.id)??0)-(degree.get(a.id)??0) || a.id.localeCompare(b.id));
+  return [...candidates,...eligible.slice(30)];
 }
 
 function exactFocus(graph, focus) {
@@ -242,6 +249,14 @@ function traverse(graph, roots, options, query, queryTokens) {
     const scoreB = lexicalScore(nodeText(b), query, queryTokens);
     return distanceA - distanceB || scoreB - scoreA || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id);
   });
+  if(query && process.env.PI_LOCAL_INTELLIGENCE!=='off') {
+    const candidates=nodes.slice(0,30), scores=candidateRelevance(candidates.map(nodeText),query);
+    const relevance=new Map(candidates.map((node,i)=>[node.id,scores[i]]));
+    candidates.sort((a,b)=>(distances.get(a.id)-distances.get(b.id)) ||
+      lexicalScore(nodeText(b),query,queryTokens)-lexicalScore(nodeText(a),query,queryTokens) ||
+      relevance.get(b.id)-relevance.get(a.id) || (degree.get(b.id)??0)-(degree.get(a.id)??0) || a.id.localeCompare(b.id));
+    nodes.splice(0,candidates.length,...candidates);
+  }
   return { nodes, distances, via };
 }
 

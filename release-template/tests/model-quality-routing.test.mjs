@@ -35,6 +35,20 @@ try {
  await publish(rows);
  check('newer measured free model beats paid predecessor',()=>assert.equal(selectAffordableModel(models,cfg,{preferredModel:old.fullId,task:'Implement a repository function and tests'}).model,fresh.fullId));
  check('regressing free model loses to capable paid model',()=>assert.equal(selectAffordableModel([old,weak],cfg,{preferredModel:old.fullId,task:'Implement a repository function'}).model,old.fullId));
+ // Same model identity and admitted prices: measured retry cost breaks a
+ // near-price tie, but disabling the optimizer restores the cold price order.
+ const health=await import(shared+'provider-health.ts');
+ const reliable={...old,provider:'reliablehost',fullId:'reliablehost/'+old.id,cost:{input:.105,output:.105,cacheRead:.105,cacheWrite:.105}};
+ const flaky={...old,provider:'flakyhost',fullId:'flakyhost/'+old.id};
+ for(const candidate of [reliable,flaky]) for(let i=0;i<8;i++) {
+  const rates=health.economyRateIdentity(candidate.cost,candidate.baseUrl,candidate.api),now=at-10000+i;
+  if(candidate===flaky&&i<3)health.recordFailure({provider:candidate.provider,model:candidate.id,now,errorMessage:'500 server error',rates});
+  else health.recordSuccess({provider:candidate.provider,model:candidate.id,now,economyUsage:{input:1000,output:100,cacheRead:0,cacheWrite:0,costUsd:.001,rates,elapsedMs:2000}});
+ }
+ check('observed retry cost ranks only quality-admitted routes with sufficient effective samples',()=>assert.equal(selectAffordableModel([flaky,reliable],cfg,{preferredModel:flaky.fullId,task:'Implement a repository function'}).model,reliable.fullId));
+ process.env.PI_LOCAL_INTELLIGENCE='off';
+ check('disabled optimizer restores existing price ordering',()=>assert.equal(selectAffordableModel([flaky,reliable],cfg,{preferredModel:flaky.fullId,task:'Implement a repository function'}).model,flaky.fullId));
+ delete process.env.PI_LOCAL_INTELLIGENCE;
  check('healthy provider cannot confer intelligence on its weak model',()=>assert.equal(assessModelQuality([old,weak],rows,{domain:'coding',level:'standard'},old).get(weak.fullId).eligible,false));
  check('price and version alone do not establish quality',()=>assert.equal(selectAffordableModel([fresh],cfg,{task:'Implement a production authentication service'}),undefined));
  check('critical work needs at least two independent measures',()=>assert.equal(assessModelQuality([fresh],rows,{domain:'coding',level:'critical'},old).get(fresh.fullId).eligible,false));

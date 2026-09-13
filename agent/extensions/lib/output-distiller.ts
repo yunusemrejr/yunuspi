@@ -150,3 +150,30 @@ export function outputDelta(before: string, after: string): {offset: number; del
   if (insert.length + 400 >= after.length * .5) return;
   return {offset: prefix, deleteChars: before.length - prefix - suffix, insert, unchangedChars: prefix + suffix};
 }
+
+/** Sparse exact edits for repeated status output. Fingerprints only find the
+ * predecessor; every differing byte is represented, including numbers/order.
+ * Edits use original UTF-16 offsets and must be applied from last to first. */
+export function outputLineDelta(before: string, after: string) {
+  if (Math.min(before.length,after.length)<MIN_CHARS || Math.max(before.length,after.length)>MAX_OUTPUT_CHARS) return;
+  const a=before.split('\n'), b=after.split('\n');
+  if(a.length!==b.length || a.length>2048)return;
+  const edits:Array<{offset:number;deleteChars:number;insert:string}>=[];
+  let offset=0;
+  for(let i=0;i<a.length;i++) {
+    if(a[i]!==b[i]) {
+      let prefix=0,suffix=0;
+      while(prefix<Math.min(a[i].length,b[i].length)&&a[i][prefix]===b[i][prefix])prefix++;
+      while(suffix<Math.min(a[i].length,b[i].length)-prefix&&a[i][a[i].length-1-suffix]===b[i][b[i].length-1-suffix])suffix++;
+      edits.push({offset:offset+prefix,deleteChars:a[i].length-prefix-suffix,insert:b[i].slice(prefix,b[i].length-suffix)});
+      if(edits.length>64)return;
+    }
+    offset+=a[i].length+1;
+  }
+  if(!edits.length || JSON.stringify(edits).length+500>=after.length*.5)return;
+  // Verify the complete reconstruction independently before exposing a delta.
+  let restored=before;
+  for(const edit of edits.slice().reverse())restored=restored.slice(0,edit.offset)+edit.insert+restored.slice(edit.offset+edit.deleteChars);
+  if(restored!==after)return;
+  return {edits,applyOrder:'descending original offsets',unchangedChars:before.length-edits.reduce((sum,edit)=>sum+edit.deleteChars,0)};
+}

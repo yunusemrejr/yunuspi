@@ -1851,7 +1851,7 @@ export default function (pi: ExtensionAPI) {
 
 	// --- Pre-compaction: auto-capture session handoff ---
 	pi.on("session_before_compact", async (_event, ctx) => {
-		addCompactionSalience(_event);
+		addCompactionSalience(_event, pi.getActiveTools?.().includes('obs_read') ?? false);
 		// Capture the destination before waiting through a possible session change.
 		const filePath = dailyPath(todayStr());
 		const sid = shortSessionId(ctx.sessionManager.getSessionId());

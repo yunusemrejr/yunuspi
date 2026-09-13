@@ -6,6 +6,7 @@
  * Numeric references survive compaction/reload/fork and are branch-scoped.
  */
 import { createHash } from "node:crypto";
+import {taskTerms, structuralFingerprint, fingerprintSimilarity, failureSimilarity} from "./lib/local-intelligence.mjs";
 import {createMiniPreprocessor, miniSource, miniProjection} from "./lib/mini-preprocessor.ts";
 import type {
 	ExtensionAPI,
@@ -13,7 +14,7 @@ import type {
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { distillOutput, outputDelta, MAX_OUTPUT_CHARS, isSearchCommand } from "./lib/output-distiller.ts";
+import { distillOutput, outputDelta, outputLineDelta, MAX_OUTPUT_CHARS, isSearchCommand } from "./lib/output-distiller.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
@@ -73,6 +74,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 	let observations = new Map<string, number>();
 	let counter = 0;
 	let visionHintSent = false;
+	let taskSignal = "";
 
 	function remember(key: string, id: number): void {
 		observations.delete(key);
@@ -83,6 +85,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 
 	function restore(ctx: ExtensionContext): void {
 		mini.reset();
+		taskSignal = "";
 		observations = new Map();
 		counter = 0;
 		// Include inactive branches when reserving ids, but NEVER when retrieving
@@ -110,8 +113,9 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		const ref = event.message.details?.piObservation as Reference | undefined;
 		if (ref?.version === 1) remember(ref.signature, ref.id);
 	});
-	pi.on("before_agent_start", () => {
+	pi.on("before_agent_start", (event) => {
 		visionHintSent = false;
+		taskSignal = taskTerms(event?.prompt).join(" ");
 	});
 
 	// Existing image policy stays route-owned and is resolved on every request.
@@ -194,7 +198,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 			&& pi.getActiveTools().includes("obs_read") && miniSource(text) && !distillOutput(event.toolName, text, ref.searchOutput)) {
 			let statusSize = Infinity;
 			try {statusSize = JSON.stringify({isError:false,details:event.details ?? {}}).length;} catch {}
-			if (statusSize <= 80) return mini.select(text, ctx.model.cost.input).then(finish, () => finish());
+			if (statusSize <= 80) return mini.select(text, ctx.model.cost.input, taskSignal).then(finish, () => finish());
 		}
 		return finish();
 	});
@@ -205,7 +209,8 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 	// stable: later calls cannot alter how an earlier result was represented.
 	pi.on("context", (event) => {
 		if (process.env.PI_OUTPUT_DISTILLER === "off" || !pi.getActiveTools().includes("obs_read")) return;
-		const baselines = new Map<string, { id: number; text: string }>();
+		const baselines = new Map<string, { id: number; text: string; tool: string; fingerprint: Set<string> | undefined }>();
+		const failures: Array<{id:number;text:string;tool:string}> = [];
 		const searchCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && part.name === 'bash' && isSearchCommand(part.arguments?.command) ? [part.id] : []) : []));
 		let changed = false;
 		const messages = event.messages.map((message) => {
@@ -220,16 +225,32 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 			let status: string;
 			try { status = JSON.stringify({isError: message.isError === true, details}); } catch { return message; }
 			if (status.length > 2000) return message;
-			const baseline = baselines.get(ref.operation);
-			const delta = !message.isError && !details.truncation && !details.truncated && baseline
-				? outputDelta(baseline.text, raw) : undefined;
+			// Failure matching only adds a retrieval cue. Existing deterministic
+			// distillation still applies and originals remain recoverable.
+			let failureHint: string | undefined;
+			if (message.isError) {
+				const related = process.env.PI_LOCAL_INTELLIGENCE==='off' ? undefined : failures.slice(-16).filter(item=>item.tool===message.toolName)
+					.map(item=>({...item,similarity:failureSimilarity(raw,item.text)})).filter(item=>item.similarity>=.85).sort((a,b)=>b.similarity-a.similarity)[0];
+				failures.push({id:ref.id,text:raw,tool:message.toolName}); if(failures.length>16)failures.shift();
+				if(related) failureHint=`[Related historical failure: obs_read({id:${related.id}}); structural similarity ${related.similarity.toFixed(2)}, not a probability or verified resolution. The match does not establish current cause or resolution.]`;
+			}
+			let baseline = baselines.get(ref.operation);
+			const exactChange = (previous:string) => outputDelta(previous,raw) ?? (process.env.PI_LOCAL_INTELLIGENCE==='off'?undefined:outputLineDelta(previous,raw));
+			let delta = !message.isError && !details.truncation && !details.truncated && baseline ? exactChange(baseline.text) : undefined;
+			if(!message.isError && !delta && !details.truncation && !details.truncated && process.env.PI_LOCAL_INTELLIGENCE!=='off') {
+				const fingerprint=structuralFingerprint(raw);
+				const candidates=[...baselines.values()].filter(item=>item.tool===message.toolName)
+					.map(item=>({item,score:fingerprintSimilarity(fingerprint,item.fingerprint)})).filter(item=>item.score>=.8).sort((a,b)=>b.score-a.score).slice(0,8);
+				for(const {item} of candidates) { const proposed=exactChange(item.text); if(proposed){baseline=item;delta=proposed;break;} }
+			}
 			const summary = delta ? undefined : distillOutput(message.toolName, raw, ref.searchOutput || searchCalls.has(message.toolCallId));
 			const selected = !delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off" ? miniProjection(raw, selection) : undefined;
 			if (!delta && !summary && !selected) {
 				if (!message.isError && !details.truncation && !details.truncated && raw.length >= 3000) {
-					baselines.set(ref.operation, {id: ref.id, text: raw});
+					baselines.set(ref.operation, {id: ref.id, text: raw, tool:message.toolName, fingerprint:structuralFingerprint(raw)});
 					if (baselines.size > MAX_ENTRIES) baselines.delete(baselines.keys().next().value!);
 				}
+				if(failureHint) { changed=true; return {...message,content:[...message.content,{type:'text' as const,text:failureHint}]}; }
 				return message;
 			}
 			changed = true;
@@ -237,7 +258,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 				? JSON.stringify({kind: "exact-delta", baselineObservation: baseline!.id, offsetUnit: "UTF-16 code units", ...delta, currentChars: raw.length})
 				: selected ?? summary!.text;
 			return {...message, content: [{type: "text" as const, text:
-				`[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}`}]};
+				`[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`}]};
 		});
 		return changed ? {messages} : undefined;
 	});

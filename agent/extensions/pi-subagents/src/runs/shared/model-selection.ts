@@ -152,7 +152,7 @@ export function selectAffordableModel(
 		if (!hasCapacity(model)) return false;
   if (!evaluateRoute({provider:model.provider,model:model.id,now:timestamp},health).allowed) return false;
   const history = histories.get(model.fullId)!;
-  if (history.samples >= 4 && history.failureRate > .65) return false;
+  if (history.effectiveSamples >= 4 && history.failureRate > .65) return false;
 		if (options?.exclude?.includes(model.fullId) || findModelExclusion(model.fullId)) return false;
 		if (options?.exhaustedProviders?.length) {
 			const provider = model.fullId.slice(0, model.fullId.indexOf("/"));
@@ -202,10 +202,17 @@ export function selectAffordableModel(
     const cheapestCost=priceReference?economyComparisonCost(priceReference,options?.workload):Infinity;
     // Fixed cheapest-route anchor avoids non-transitive pairwise cost/latency tradeoffs.
     const speedScores=new Map(eligible.map(model=>[model.fullId,priceReference && economyComparisonCost(model,options?.workload)<=cheapestCost*1.1 ? Math.min(0,compareObservedEconomySpeed(model,priceReference)):0]));
+    const forecastReady=eligible.filter(model=>isAutonomousMeteredEligible(model,cfg)).every(model=>histories.get(model.fullId)!.effectiveSamples>=6);
+    const retryCost=(model:ModelInfo)=>{
+        const history=histories.get(model.fullId)!;
+        // Observed failures can increase a forecast, never widen price or quality
+        // admission. Weak/stale history stays neutral; no exploratory live calls.
+        return process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? economyComparisonCost(model,options?.workload)/Math.max(.2,1-history.failureRate) : economyComparisonCost(model,options?.workload);
+    };
     const compareCost=(a:ModelInfo,b:ModelInfo)=>{
         const left=economyComparisonCost(a,options?.workload),right=economyComparisonCost(b,options?.workload);
         const group=Number(left>cheapestCost*1.1)-Number(right>cheapestCost*1.1);
-        return qualityRank(a.fullId)-qualityRank(b.fullId) || group || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right || qualityCompare(a.fullId,b.fullId);
+        return qualityCompare(a.fullId,b.fullId) || group || (process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? retryCost(a)-retryCost(b) : 0) || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right || qualityCompare(a.fullId,b.fullId);
     };
 
 	const metered = eligible
