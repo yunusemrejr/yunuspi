@@ -38,6 +38,20 @@ const task = [
 ].join(". ");
 const toolNames = ["data_query","git_info","http_request","sys_probe","bulk_edit","web_probe","bg_run","wait_for","todo","math_check","artifact_check","value_convert","handoff_capsule","evidence_cache","context_score","context_slice","symbol_expand","ast_diff","lsp_diagnostics","lens_diagnostics"];
 
+test("utility tools receive automatic contextual guidance only when active", () => {
+  for (const [tool, prompt] of [
+    ['sqlite_probe', 'Inspect SQLite tables'], ['package_probe', 'Check the installed package version'],
+    ['openapi_probe', 'Inspect OpenAPI endpoints'], ['coverage_probe', 'Inspect uncovered lines'],
+    ['contract_diff', 'Inspect schema changes'], ['env_audit', 'Audit environment variables'],
+    ['net_probe', 'Inspect DNS records'], ['archive_probe', 'Inspect archive contents'],
+  ]) {
+    const enabled = fixture([tool]); enabled.start(prompt);
+    assert.ok(enabled.take().some(h => h.tool === tool), tool);
+    const disabled = fixture([]); disabled.start(prompt);
+    assert.equal(disabled.take().filter(h => h.tool === tool).length, 0);
+  }
+});
+
 test("sustained multi-phase work can discover twenty applicable tools without a catalog dump", () => {
   const f=fixture(toolNames); f.start(task);
   const delivered=[...f.take(),...f.take()];

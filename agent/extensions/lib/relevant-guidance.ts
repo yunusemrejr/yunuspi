@@ -206,6 +206,22 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('http_request','HTTP inspection: http_request returns status, headers and a capped body for a bounded request. Reuse it for endpoint diagnostics; preserve authorization and do not repeat an uncertain mutation.');
       if (/\b(listening ports?|systemd|service status|processes|cpu usage|memory usage)\b/i.test(part))
         utilityHint('sys_probe','System facts: sys_probe inspects processes, listening ports and systemd state without assembling shell pipelines. Use the narrowest supported operation and the returned current facts.');
+      if (/\b(sqlite|sqlite3|database tables?)\b/i.test(part))
+        utilityHint('sqlite_probe','SQLite evidence: sqlite_probe inspects an explicit workspace database using tables/schema/describe/query/explain. Use its bounded read-only results instead of Python or sqlite3 shell snippets.');
+      if (/\b(installed (?:package|version|dependency)|package exports|peer dependencies|lockfile|node_modules)\b/i.test(part))
+        utilityHint('package_probe','Dependency evidence: package_probe returns the physically installed Node package and lock resolution. Check this version and exports before reasoning from remembered APIs.');
+      if (/\b(openapi|swagger|request shape|response shape)\b/i.test(part))
+        utilityHint('openapi_probe','API specification: openapi_probe selects endpoints, operations, schemas, request/response shapes and auth from an explicit spec without loading the whole document.');
+      if (/\b(coverage|lcov|cobertura|uncovered lines?)\b/i.test(part))
+        utilityHint('coverage_probe','Coverage evidence: coverage_probe reads existing artifacts for explicit files and can intersect changed Git lines. It never runs tests and does not assume artifacts are fresh.');
+      if (/\b(contract diff|schema changes?|payload changes?)\b/i.test(part))
+        utilityHint('contract_diff','Structural changes: contract_diff compares two explicit JSON/YAML files or payloads. Use mode schema for required/optional schema contracts; sample payloads only establish observed shapes.');
+      if (/\b(environment variables?|env audit|\.env\.example|missing configuration)\b/i.test(part))
+        utilityHint('env_audit','Environment contract: env_audit compares explicit source/config paths and reports variable names only. It never reads live environment values or follows external env files.');
+      if (/\b(dns|tcp connectivity|tls certificate|certificate expir|connection refused)\b/i.test(part))
+        utilityHint('net_probe','Connection diagnostics: net_probe checks DNS, one TCP host:port or TLS certificate validation. Use one explicit endpoint; no network scanning.');
+      if (/\b(archive contents?|zip contents?|tar contents?|inspect (?:an? )?archive)\b/i.test(part))
+        utilityHint('archive_probe','Archive inspection: archive_probe lists, finds and stats members or reads one bounded text member without extraction.');
       if (/\b(replace|rename)\b/i.test(part) && /\b(across|multiple|several|all)\b[^.!?]{0,60}\bfiles\b/i.test(part))
         utilityHint('bulk_edit','Repeated edits: bulk_edit previews a bounded multi-file literal/regex replacement, then applies its preview token. Review the matched files and diff; use semantic rename tooling when identifiers need binding-aware changes.');
       if (/\b(fill|submit|navigate|inspect)\b/i.test(part) && /\b(web|website|browser|login|checkout)\b/i.test(part) && /\b(forms?|login|checkout)\b/i.test(part))

@@ -1,7 +1,7 @@
 import type { ResolvedToolBudget, ToolBudgetConfig, ToolBudgetState } from "../../shared/types.ts";
 
 // These capabilities do not write host project files; sandbox_run only writes disposable private copies.
-export const READ_ONLY_REASONING_TOOLS = ["skill_review", "dependency_plan", "decision_frontier", "coverage_select", "math_check", "artifact_check", "value_convert", "context_slice", "symbol_expand", "ast_diff", "syntax_check", "obs_read", "project_intel", "sandbox_run", "git_info"] as const;
+export const READ_ONLY_REASONING_TOOLS = ["sqlite_probe", "package_probe", "openapi_probe", "coverage_probe", "contract_diff", "env_audit", "net_probe", "archive_probe", "skill_review", "dependency_plan", "decision_frontier", "coverage_select", "math_check", "artifact_check", "value_convert", "context_slice", "symbol_expand", "ast_diff", "syntax_check", "obs_read", "project_intel", "sandbox_run", "git_info"] as const;
 
 export const DEFAULT_TOOL_BUDGET_BLOCK = ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS] as const;
 export const TOOL_BUDGET_ENV = "PI_SUBAGENT_TOOL_BUDGET";

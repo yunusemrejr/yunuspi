@@ -2,12 +2,12 @@
 name: worker
 description: Implementation agent for normal tasks and approved oracle handoffs
 aliases: developer, coder, implementer, develop
-subagentOnlyExtensions: ../../reminders.ts, ../../media-tools.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
+subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../media-tools.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: skill_review, media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
+tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true

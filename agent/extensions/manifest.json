@@ -28,7 +28,8 @@
     "sys-probe.ts",
     "session-hooks.ts",
     "project-intelligence.ts",
-    "sandbox.ts"
+    "sandbox.ts",
+    "utility-tools.ts"
   ],
   "lib": [
     "media-process.ts",
@@ -82,7 +83,8 @@
     "session-diagnostics.ts",
     "session-audit.ts",
     "project-tests.ts",
-    "browser-session.ts"
+    "browser-session.ts",
+    "utility-client.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -412,6 +414,19 @@
     "scripts/compatibility/reasoning-aids-loader-test.mjs",
     "scripts/compatibility/session-recovery-guidance-test.mjs",
     "scripts/compatibility/autonomous-recovery-test.mjs",
-    "scripts/compatibility/atomic-edit-preflight-test.mjs"
+    "scripts/compatibility/atomic-edit-preflight-test.mjs",
+    "extensions/lib/utility-mcp/catalog.mjs",
+    "extensions/lib/utility-mcp/contract.mjs",
+    "extensions/lib/utility-mcp/coverage.mjs",
+    "extensions/lib/utility-mcp/env.mjs",
+    "extensions/lib/utility-mcp/files.mjs",
+    "extensions/lib/utility-mcp/net.mjs",
+    "extensions/lib/utility-mcp/openapi.mjs",
+    "extensions/lib/utility-mcp/package.mjs",
+    "extensions/lib/utility-mcp/probe.py",
+    "extensions/lib/utility-mcp/server.mjs",
+    "extensions/lib/utility-mcp/shapes.mjs",
+    "extensions/lib/utility-mcp/worker.mjs",
+    "scripts/compatibility/utility-mcp-loader-test.mjs"
   ]
 }

@@ -1,8 +1,8 @@
 ---
 name: automatic-free-assistant
 description: Bounded read-only autonomous assistance; never a writer
-tools: skill_review, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_slice, symbol_expand, ast_diff, syntax_check, obs_read, project_intel, sandbox_run, git_info
-subagentOnlyExtensions: ../../reminders.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../git-tools.ts
+tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_slice, symbol_expand, ast_diff, syntax_check, obs_read, project_intel, sandbox_run, git_info
+subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../reasoning-aids.ts, ../../pi-observations.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../git-tools.ts
 thinking: off
 systemPromptMode: replace
 inheritProjectContext: true

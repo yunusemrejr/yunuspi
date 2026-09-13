@@ -27,6 +27,7 @@ for(const name of ['delegate.md','worker.md'])expectedExtensions[name].splice(1,
 for(const paths of Object.values(expectedExtensions))paths.push(path.join(agentRoot,'extensions/project-intelligence.ts'),path.join(agentRoot,'extensions/sandbox.ts'));
 expectedExtensions['automatic-free-assistant.md'].push(path.join(agentRoot,'extensions/git-tools.ts'));
 for(const [name,paths] of Object.entries(expectedExtensions))if(name!=='automatic-free-assistant.md')paths.push(path.join(agentRoot,'extensions/render-and-wait.ts'));
+for(const paths of Object.values(expectedExtensions))paths.unshift(path.join(agentRoot,'extensions/utility-tools.ts'),path.join(agentRoot,'extensions/bash-router.ts'));
 try {
  const paths=[];
  for(const name of fs.readdirSync(builtinDir)) {
@@ -43,7 +44,7 @@ try {
  for(const ambient of [false,true]) {
   const loader=new sdk.DefaultResourceLoader({cwd:home,agentDir:home,settingsManager:sdk.SettingsManager.inMemory({extensions:ambient?[canonical,observations]:[]}),additionalExtensionPaths:paths,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});
   await loader.reload();const result=loader.getExtensions();assert.deepEqual(result.errors,[]);
-  for(const tool of ['skill_review','dependency_plan','decision_frontier','coverage_select','math_check','artifact_check','value_convert','data_query','context_slice','symbol_expand','ast_diff','obs_read','git_info','http_request','bulk_edit','sys_probe','project_intel','sandbox_run','render_see','wait_for','browser_session'])assert.equal(result.extensions.filter(e=>e.tools.has(tool)).length,1,`${tool}, ambient=${ambient}`);
+  for(const tool of ['sqlite_probe','package_probe','openapi_probe','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','skill_review','dependency_plan','decision_frontier','coverage_select','math_check','artifact_check','value_convert','data_query','context_slice','symbol_expand','ast_diff','obs_read','git_info','http_request','bulk_edit','sys_probe','project_intel','sandbox_run','render_see','wait_for','browser_session'])assert.equal(result.extensions.filter(e=>e.tools.has(tool)).length,1,`${tool}, ambient=${ambient}`);
  }
  console.log('PASS all built-in helper paths: isolated and ambient child startup register each tool exactly once');
 } finally {fs.rmSync(home,{recursive:true,force:true});}

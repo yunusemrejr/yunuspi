@@ -56,6 +56,7 @@ export default function bashRouter(pi: any) {
 		["write", "write"],
 		["edit", "write"],
 		["sys_probe", "sys_probe"],
+		...["sqlite_probe", "package_probe", "openapi_probe", "coverage_probe", "contract_diff", "env_audit", "net_probe", "archive_probe"].map(name => [name, name] as [string, string]),
 	]);
      const maxHintsPerRule = 3;
 

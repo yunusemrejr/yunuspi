@@ -53,6 +53,14 @@ Select a model actually available to your account before starting work. Catalog 
 
 Start ordinary tasks in their project directory. Those sessions cannot use guarded write/edit or executable tools to modify the active harness. Maintenance requires a new human-started Pi session in `~/.pi` or an ancestor. Child agents and later directory changes do not grant maintenance authority. Keep ordinary projects outside `~/.pi`; launching from your home directory intentionally grants broad maintenance authority.
 
+The eight utility inspection tools start automatically in one local
+`yunuspi-utility-mcp` process per session, including built-in helper sessions.
+They require no MCP configuration, API keys or manual startup. The harness owns
+startup, reuse, bounded restart and shutdown; normal tool guidance and Bash
+routing keep the tools discoverable. SQLite/archive inspection uses Python 3.11+
+standard-library modules already provided by Ubuntu 24.04+; no Python package
+installation is needed. See the [utility tool contracts and limits](../agent/extensions/lib/utility-mcp/README.md).
+
 Linux executable isolation requires working Bubblewrap user namespaces and Python 3. Unsupported environments refuse guarded commands rather than run them without protection. Scripted workflows that execute arbitrary JavaScript inside the Pi process are unavailable outside maintenance sessions; use declarative subagent chains, parallel tasks, swarm or fusion instead. See [security boundaries](SECURITY.md) before enabling third-party extensions.
 
 Ubuntu 24.04+ may restrict unprivileged user namespaces through AppArmor. A `bwrap: setting up uid map: Permission denied` error can indicate that policy. An administrator can review `config/bwrap.apparmor`, check for an existing Bubblewrap profile, and load an appropriate per-executable policy with `sudo apparmor_parser -r config/bwrap.apparmor`. For persistence, install the reviewed profile under `/etc/apparmor.d/`. The supplied profile permits namespace creation for `/usr/bin/bwrap`; it does not globally disable AppArmor or its namespace restrictions. Do not replace a stricter existing organizational policy without review. See [Ubuntu's namespace restrictions](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces). The harness installer never makes this administrator-level policy change itself.

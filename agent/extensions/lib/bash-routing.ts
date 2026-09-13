@@ -142,6 +142,50 @@ export function classifyBashCommand(command: string): BashRoute | null {
 	if (!tokens) return null;
 	const [head, ...args] = tokens;
 
+  // Utility substitutions stay advisory when the shell flags/output have
+  // different semantics. Only an explicit single target becomes a candidate.
+  const utility = (ruleId: string, tool: string, hint: string, params?: Record<string, unknown>): BashRoute => ({
+    ruleId, tool, severity: "annotate", hint: `Use the ${tool} tool ${hint}.`,
+    ...(params ? { replacement: call(tool, params) } : {}),
+  });
+  if (head === "sqlite3" && args.length === 2 && !args[0].startsWith("-")) {
+    const [file, sql] = args;
+    if (sql === ".tables") return utility("utility-sqlite", "sqlite_probe", "with action tables for bounded database inspection", { path: file, action: "tables" });
+    const schema = /^\.schema(?:\s+([A-Za-z_][A-Za-z0-9_]*))?$/.exec(sql);
+    if (schema) return utility("utility-sqlite", "sqlite_probe", "with action schema", { path: file, action: "schema", ...(schema[1] ? { table: schema[1] } : {}) });
+    if (/^(?:SELECT|WITH|EXPLAIN|PRAGMA)\b/i.test(sql.trim())) return utility("utility-sqlite", "sqlite_probe", "with action query or explain for read-only SQL and bounded rows");
+  }
+  const packageName = /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+  if (["npm", "pnpm", "yarn"].includes(head) && ["ls", "list", "explain", "why"].includes(args[0]) && args.length >= 2 && packageName.test(args[1]) && args.slice(2).every(a => /^(?:--json|--depth=\d+)$/.test(a)))
+    return utility("utility-package", "package_probe", "for the installed version, exact location and lock resolution", { package: args[1] });
+  if (head === "cat" && args.length === 1) {
+    const pkg = /^(.*?)(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\/package\.json$/.exec(args[0]);
+    if (pkg && packageName.test(pkg[2])) return utility("utility-package", "package_probe", "for installed dependency metadata", { package: pkg[2], project: pkg[1].replace(/\/$/, "") || "." });
+    if (/(?:^|\/)(?:openapi|swagger)(?:\.[^/]+)?\.(?:json|ya?ml)$/i.test(args[0]))
+      return utility("utility-openapi", "openapi_probe", "to select endpoints and request/response shapes", { path: args[0], action: "list_endpoints" });
+  }
+  if (head === "node" && args.length === 2 && ["-p", "--print"].includes(args[0])) {
+    const pkg = /^require\(['"]((?:@[^/'"]+\/)?[^/'"]+)\/package\.json['"]\)(?:\.(?:version|exports|types|bin|peerDependencies))?$/.exec(args[1]);
+    if (pkg && packageName.test(pkg[1])) return utility("utility-package", "package_probe", "for installed dependency metadata", { package: pkg[1] });
+  }
+  if (head === "dig") {
+    const parts = args.filter(a => a !== "+short");
+    if (parts.length >= 1 && parts.length <= 2 && /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(parts[0]) && (parts.length === 1 || /^(?:A|AAAA|CNAME|MX|TXT|NS|SOA|SRV|CAA)$/.test(parts[1])))
+      return utility("utility-dns", "net_probe", "with action dns", { action: "dns", host: parts[0], ...(parts[1] ? { record_type: parts[1] } : {}) });
+  }
+  if (["nc", "netcat"].includes(head) && ["-z", "-zv", "-vz"].includes(args[0]) && args.length === 3 && /^\d+$/.test(args[2]) && +args[2] >= 1 && +args[2] <= 65535 && !args[1].startsWith("-"))
+    return utility("utility-tcp", "net_probe", "with action tcp for a single bounded connection", { action: "tcp", host: args[1], port: +args[2] });
+  if (head === "openssl" && args[0] === "s_client" && args[1] === "-connect" && (args.length === 3 || args.length === 5 && args[3] === "-servername")) {
+    const target = /^(?:\[([0-9a-f:]+)\]|([A-Za-z0-9.-]+)):(\d+)$/i.exec(args[2]);
+    if (target && +target[3] >= 1 && +target[3] <= 65535) return utility("utility-tls", "net_probe", "with action tls for certificate and validation details", { action: "tls", host: target[1] ?? target[2], port: +target[3], ...(args[4] ? { servername: args[4] } : {}) });
+  }
+  if (head === "unzip" && args.length === 2 && args[0] === "-l" || head === "tar" && args.length === 2 && /^-?(?:t[zgJj]?f|[zgJj]tf)$/.test(args[0]))
+    return utility("utility-archive", "archive_probe", "to list archive members without extraction", { action: "list", path: args[1] });
+  if (head === "diff" && args.length === 2 && args.every(a => !a.startsWith("-") && /\.(?:json|ya?ml)$/i.test(a)))
+    return utility("utility-contract", "contract_diff", "when comparing data-contract structure instead of scalar or formatting differences", { before: args[0], after: args[1] });
+  if (head === "lcov" && args.length === 2 && args[0] === "--summary")
+    return utility("utility-coverage", "coverage_probe", "with explicit artifact and source-file paths for coverage and changed-line intersections");
+
 	// Read-only system inspection has a structured replacement. Keep these
 	// advisory because flags such as `ps aux` and `ss -ltnp` do not have a
 	// byte-for-byte equivalent in sys_probe; the native rows are still easier
