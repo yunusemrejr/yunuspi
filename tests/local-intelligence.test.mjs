@@ -45,9 +45,11 @@ test('Kompress uses task-conditioned IDs and cannot reuse another task selection
   let calls=0,now=0;
   const client=mini.createMiniPreprocessor({runtime,now:()=>now,fetch:async()=>{calls++;return new Response(JSON.stringify({version:1,status:'SELECT',sourceHash:mini.miniSource(raw).hash,keep:[0]}));}});
   const login=await client.select(raw,5,'authentication timeout');assert(login.keep.includes(1));assert(!login.keep.includes(2));
+  assert.deepEqual(await client.select(raw,5,'timeout authentication'),login);assert.equal(calls,1,'keyword order does not invalidate a task cache');
   now=10000;const startup=await client.select(raw,5,'cache initialization');assert(startup.keep.includes(2));assert(!startup.keep.includes(1));
   assert.equal(calls,2);assert.deepEqual(await client.select(raw,5,'authentication timeout'),login);assert.equal(calls,2);
   client.reset();assert.equal(client.inspect().cached,0);
+  now=20000;assert.equal(await client.select(raw,5,'general authentication cache'),undefined);assert.equal(calls,2,'task retention overflow prevents unnecessary inference');
 });
 
 test('pre-compaction reduces actual input while preserving source, tool pairing and prior summary',()=>{

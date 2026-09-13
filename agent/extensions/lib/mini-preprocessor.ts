@@ -35,9 +35,10 @@ export function miniProjection(raw:string,value:unknown):string|undefined {
  return `[incomplete extract; sha256:${source.hash}; spans:${selected.keep.map(i=>source.spans[i].join(':')).join(',')}]\n`+selected.keep.map(i=>source.paragraphs[i]).join('\n\n');
 }
 /** Check the best possible valid extract before spending CPU on inference. */
-export function miniPotentialSavings(raw:string):number {
+export function miniPotentialSavings(raw:string,task=""):number {
  const source=miniSource(raw);if(!source)return 0;
- const keep=[...source.required].sort((a,b)=>a-b);
+ const scores=relevanceScores(source.paragraphs,task);
+ const keep=[...new Set([...source.required,...scores.flatMap((score:number,i:number)=>score>0?[i]:[])])].sort((a,b)=>a-b);
  // A nonempty selection is required; choose the shortest possible paragraph.
  if(!keep.length)keep.push(source.paragraphs.reduce((best,p,i)=>p.length<source.paragraphs[best].length?i:best,0));
  const best=miniProjection(raw,{version:1,status:'SELECT',sourceHash:source.hash,keep});
@@ -69,7 +70,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
   async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
    if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0)return;
    const source=miniSource(raw);if(!source)return;
-   const signal=process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).join(' ');
+   const signal=process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).sort().join(' ');
    const key=source.hash+':'+createHash('sha256').update(signal).digest('hex');
    const cached=validateMiniSelection(raw,cache.get(key));
    if(cached){
@@ -80,7 +81,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    if(busy||now()-last<Math.min(60000,10000*2**failures))return;
    // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
    // Newly produced tool bytes have not appeared in the provider prefix yet.
-   const potential=miniPotentialSavings(raw);
+   const potential=miniPotentialSavings(raw,signal);
    if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
    stats.requests++;let accepted=false;
