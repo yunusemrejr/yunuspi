@@ -133,6 +133,15 @@ test('scope council stays bounded to the shared public limits',()=>{
   assert.equal(SCOPE_COUNCIL_LIMITS.discussionChars,2500);
 });
 
+test('the registered runner publishes its limits for the deliberation owner',()=>{
+  const pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+  registerScopeCouncilRunner(pi,{launch:async()=>result('unused'),available:()=>models,constraints:()=>({})});
+  const runner=globalThis[SCOPE_COUNCIL_RUNNER];
+  assert.equal(typeof runner,'function');
+  assert.equal(runner.limits,SCOPE_COUNCIL_LIMITS,'the lifecycle reads the shared deadline from here instead of a second copy');
+  assert.equal(runner.limits.deadlineMs,45000);
+});
+
 test('a two-route council still critiques both perspectives and labels the reduced independence',async()=>{
   const calls=[],pi={getActiveTools:()=>['subagent'],appendEntry(){}};
   const pair=ids.slice(0,2).map(model);

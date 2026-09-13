@@ -7,7 +7,7 @@ match ordinary prose. Negated clauses, quoted text and code fences do not become
 positive task intent. A substantive new request replaces the old lexical topic;
 short continuation requests retain it.
 
-Up to three distinct catalog workflows can enter the existing suggestion queue.
+Up to three distinct catalog workflows can enter the existing suggestion queue, and a workflow whose whole match is vocabulary already covered no longer crowds out a genuinely distinct one. A workflow that has already been offered and ignored several times yields its advisory priority to a fresh candidate; reading it clears that fatigue and explicit task/file routes keep their full priority and review obligation.
 Delivery remains capped at two hints at a time, with a small initial allowance
 that grows during sustained work. Duplicate, already-read and unavailable skills
 do not consume the queue. Suggestions are not evidence that a skill was read.

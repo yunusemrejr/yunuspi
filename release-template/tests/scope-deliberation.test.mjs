@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const release=path.resolve(import.meta.dirname,'..');
 const agent=fs.existsSync(path.join(release,'agent'))?path.join(release,'agent'):path.resolve(release,'..');
-const {shouldRunScopeCouncil,scopeRequest,createScopeDeliberation,SCOPE_GUIDANCE,SCOPE_LIMITS}=await import(pathToFileURL(path.join(agent,'extensions/lib/scope-deliberation.ts')));
+const {shouldRunScopeCouncil,scopeRequest,createScopeDeliberation,scopeCouncilEnabled,SCOPE_GUIDANCE,SCOPE_LIMITS,SCOPE_COUNCIL_RUNNER}=await import(pathToFileURL(path.join(agent,'extensions/lib/scope-deliberation.ts')));
 const prompt='Please redesign the jumping character logic because it is distracting and low quality, then update production.';
 const context=(id='current')=>({cwd:'/tmp/synthetic-project',sessionManager:{getSessionId:()=>id,getBranch:()=>[]},ui:{setStatus(){}}});
 const history={evidence:[{id:'past:1',role:'user',at:'2026-01-01',text:'Preserve the serif typography and the blue palette.'},{id:'past:2',role:'assistant',at:'2026-02-01',text:'I added a jumping mascot to draw attention to the navigation.'}],incomplete:false,coverage:'Two relevant synthetic messages.'};
@@ -140,4 +140,69 @@ test('reduced council independence stays visible in the brief and silent when ab
   await independent.start({prompt},other,'graph');
   assert.doesNotMatch(independent.context(other),/reduced \(same member/,'a full cohort must not claim reduced independence');
   assert.match(independent.context(other),/Council status: complete/);
+});
+
+test('the native automatic-assistance switch disables the council before any history work',async()=>{
+  const prior=process.env.PI_AUTONOMOUS_FREE_ASSIST;
+  process.env.PI_AUTONOMOUS_FREE_ASSIST='off';
+  try{
+    let calls=0;
+    const lifecycle=createScopeDeliberation({},{history:async()=>{calls++;return history;},runner:async()=>result});
+    const ctx=context();
+    await lifecycle.start({prompt},ctx,'graph');
+    assert.equal(calls,0,'a council the runner would refuse must not pay for a history scan');
+    assert.equal(lifecycle.context(ctx),'','a disabled lifecycle publishes no brief');
+    assert.equal(scopeCouncilEnabled({PI_AUTONOMOUS_FREE_ASSIST:'off'}),false);
+    assert.equal(scopeCouncilEnabled({PI_SCOPE_COUNCIL:'OFF'}),false);
+    assert.equal(scopeCouncilEnabled({PI_SUBAGENT_CHILD:'1'}),false);
+    assert.equal(scopeCouncilEnabled({}),true);
+    assert.equal(scopeCouncilEnabled({PI_AUTONOMOUS_FREE_ASSIST:'1',PI_SCOPE_COUNCIL:'on'}),true);
+  } finally {
+    if(prior===undefined)delete process.env.PI_AUTONOMOUS_FREE_ASSIST; else process.env.PI_AUTONOMOUS_FREE_ASSIST=prior;
+  }
+});
+
+test('the registered runner publishes the shared deadline instead of a second copy',async()=>{
+  const previous=globalThis[SCOPE_COUNCIL_RUNNER];
+  const ctx=context('published-deadline');
+  try{
+    const hanging=async()=>new Promise(()=>{});
+    hanging.limits={deadlineMs:20};
+    globalThis[SCOPE_COUNCIL_RUNNER]=hanging;
+    const lifecycle=createScopeDeliberation({},{history:async()=>history});
+    const keeper=setTimeout(()=>{},400);
+    const started=Date.now();
+    try{await lifecycle.start({prompt},ctx,'graph');}
+    finally{clearTimeout(keeper);}
+    assert.ok(Date.now()-started<2000,'the published 20 ms deadline must bound the shared wait, not a local 45 s copy');
+    assert.match(lifecycle.context(ctx),/Council status: unavailable/);
+    assert.match(lifecycle.context(ctx),/deadline/i);
+    // An explicit per-call option still wins over the published limit.
+    const published=hanging.limits;
+    hanging.limits={deadlineMs:10000};
+    const explicit=createScopeDeliberation({},{history:async()=>history,deadlineMs:20});
+    const other=context('explicit-deadline');
+    const keeper2=setTimeout(()=>{},400);
+    const explicitStarted=Date.now();
+    try{await explicit.start({prompt},other,'graph');}
+    finally{clearTimeout(keeper2);}
+    assert.ok(Date.now()-explicitStarted<2000,'an explicit deadline keeps precedence over the published one');
+    hanging.limits=published;
+  } finally {
+    if(previous===undefined)delete globalThis[SCOPE_COUNCIL_RUNNER]; else globalThis[SCOPE_COUNCIL_RUNNER]=previous;
+  }
+});
+
+test('a global no-change constraint keeps a read-only review out of scope work',()=>{
+  // The verb in the question ("review the authentication module refactor") must
+  // not turn an explicitly read-only request into a change-scope decision; the
+  // proactive helper team owns that turn instead.
+  const review='Please review the authentication module refactor for security regressions and missing edge-case tests, then compare it against the previous implementation. Do not modify anything.';
+  assert.equal(shouldRunScopeCouncil(review),false);
+  assert.equal(shouldRunScopeCouncil('Review the refactor and report findings; do not change any files.'),false);
+  assert.equal(shouldRunScopeCouncil('Audit the schedule, keeping read-only access; no edits to the codebase.'),false);
+  // Scoped preservation clauses keep the existing affirmative-revision behavior.
+  assert.equal(shouldRunScopeCouncil("Redesign the distracting mascot, but don't change the font or colors."),true);
+  assert.equal(shouldRunScopeCouncil('Redesign the dashboard, but do not change anything in the API layer.'),true);
+  assert.equal(shouldRunScopeCouncil('Please do not redesign the animation.'),false);
 });

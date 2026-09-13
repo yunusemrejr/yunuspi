@@ -6,6 +6,7 @@ import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
 import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
+import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
 
 /** The automatic scope council is a service used by the parent lifecycle.
  * It deliberately has no registered user-facing tool: an agent cannot opt into
@@ -387,8 +388,7 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
 export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 	const now = deps.now ?? Date.now;
-	const enabled = () => !["0", "off"].includes((process.env.PI_SCOPE_COUNCIL ?? "on").toLowerCase())
-		&& !["0", "off"].includes((process.env.PI_AUTONOMOUS_FREE_ASSIST ?? "on").toLowerCase());
+	const enabled = () => scopeCouncilEnabled();
 	const runner = async (request: ScopeCouncilRequest, ctx: ExtensionContext, parentSignal?: AbortSignal): Promise<ScopeCouncilResult> => {
 		const limits = normalizeLimits(request?.limits);
 		if (!enabled()) return unavailable("Automatic scope council is disabled by the current session policy.");
@@ -546,5 +546,8 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			controller.abort();
 		}
 	};
+	// The runner owns the council's limits; the lifecycle reads the shared
+	// deadline from here instead of declaring a second copy that can drift.
+	(runner as any).limits = SCOPE_COUNCIL_LIMITS;
 	(globalThis as any)[SCOPE_COUNCIL_RUNNER] = runner;
 }

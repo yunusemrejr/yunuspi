@@ -149,6 +149,41 @@ test('available child catalogs participate even after another catalog and missin
   assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}})?.block,true);
 });
 
+test('repeatedly ignored catalog offers yield the scarce slot instead of re-filling it forever',()=>{
+  const names=['orbital-mechanics','asteroseismology','generic-noise-one','generic-noise-two','generic-noise-three'];
+  const descriptions={
+    'orbital-mechanics':'Orbital ephemeris nbody integrator residuals propagation',
+    'asteroseismology':'Stellar oscillation asteroseismic overtones and orbital ephemeris overlays',
+  };
+  const catalog='<available_skills>'+names.map(name=>`<skill><name>${name}</name><description>${descriptions[name]??'Applicable workflow'}</description><location>/fixture/skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
+  const active=['read','edit','write','skill_review'];
+  const entries=[];
+  const g=createRelevantGuidance({on(){},getActiveTools:()=>active,registerTool(){},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
+  const ctx={cwd:'/fixture/fatigue',sessionManager:{getBranch:()=>entries}};
+  g.restore(ctx);
+  let request=0;
+  const advance=()=>{
+    if(request++)g.userInput();
+    g.start({prompt:'Continue orbital ephemeris nbody integrator asteroseismic overtones',systemPrompt:catalog},ctx);
+    const hints=g.candidates();
+    const delivered=hints.find(h=>h.skill);
+    g.commit(delivered?[delivered]:[]);
+    return hints;
+  };
+  const first=advance();
+  const firstDelivered=first.find(h=>h.skill);
+  assert.equal(firstDelivered?.skill,'/fixture/skills/orbital-mechanics/SKILL.md');
+  assert.equal(firstDelivered?.priority,55,'a fresh offer keeps its full advisory priority');
+  let last=first;
+  for(let i=0;i<5;i++)last=advance();
+  const demoted=last.find(h=>h.skill==='/fixture/skills/orbital-mechanics/SKILL.md');
+  assert.ok(demoted,'fatigue never retires the workflow from the catalogue');
+  assert.equal(demoted.priority,15,'an ignored advisory workflow yields one bounded priority step');
+  const state=entries.filter(e=>e.data?.version===1).at(-1)?.data;
+  const tracked=(state?.offers??[]).find(([key])=>key==='skillctx:/fixture/skills/orbital-mechanics/SKILL.md');
+  assert.ok(tracked?.[1]?.n>=2,'the persisted offer count is what drives the demotion');
+});
+
 test('changed config files suggest a single batched source checker using fresh paths',()=>{
   const f=fixture([]);
   for(const file of ['first.toml','second.yaml']) f.g.record({toolName:'write',input:{path:file,content:'key = 1'}});

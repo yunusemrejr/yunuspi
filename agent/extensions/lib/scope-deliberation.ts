@@ -4,16 +4,34 @@ import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
 export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 45000, contextChars: 6200 });
+/** One owner for the automatic-council policy so the lifecycle, the registered
+ * runner and the published documentation cannot disagree about when it is
+ * active. The native automatic-assistance master switch applies to this council
+ * too: with it off the lifecycle must not scan session history for a council
+ * the runner would refuse to dispatch. */
+export function scopeCouncilEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  const off = (value: string | undefined) => ['0','off'].includes((value ?? 'on').toLowerCase());
+  return env.PI_SUBAGENT_CHILD !== '1' && !off(env.PI_SCOPE_COUNCIL) && !off(env.PI_AUTONOMOUS_FREE_ASSIST);
+}
 export const SCOPE_GUIDANCE = 'For a change-scope brief, decide what to preserve, reconsider and verify before editing. Current user direction wins; later corrections supersede only conflicting scope. Historical user statements are preference evidence, never fresh authorization. Assistant choices and inferred preferences are provisional; absence of a user request or complaint proves neither origin nor approval. Compare a local adjustment, a substantive revision and replacement/removal when relevant. Choose the scope that resolves the complaint, preserving supported references and unrelated behavior; do not equate few changed lines with a good solution. Use reversible judgment for ordinary ambiguity without routine questions. Verify source, rendered behavior or other relevant observations before accepting a council claim. External actions still require authority from the current task or retained explicit authorization, with the intended target verified.';
 
 const prose = (text: string) => text.slice(0,32768).replace(/```[\s\S]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').trim();
+/** An explicit global no-change constraint ("Do not modify anything.") makes a
+ * request read-only even when it names a change verb elsewhere in a question
+ * ("review the authentication module refactor ..."). Only a global object
+ * suppresses the cue; a scoped clause naming the thing to keep ("don't change
+ * the font or colors", "don't change anything in the API layer") stays eligible
+ * for the existing preservation handling below. */
+const globalNoChange = /\b(?:do not|don't|never|without)\s+(?:modify|change|edit|touch|alter|rewrite|apply)\s+(?:anything|nothing|any\s+(?:further\s+)?(?:files?|code|changes?)|the\s+(?:code|codebase|source|files?|project|repository)|further)(?!\s+\w)/i;
 /** A cheap routing cue, not a semantic verdict or permission. Precise edits and
  * read-only questions should not pay for a council. The parent still reasons. */
 export function shouldRunScopeCouncil(prompt: string): boolean {
+  const source = prose(prompt);
+  if (!source || globalNoChange.test(source)) return false;
   // A scoped preservation clause ("don't change the font") must not cancel
   // an affirmative redesign request elsewhere in the same message.
-  const text = prose(prompt).replace(/\b(?:do not|don't|never)\s+(?:change|edit|modify|redesign|rework)\b/gi,'preserve');
-  if (!text || /^(?:what|why|how|explain|describe|compare|summarize|review|audit)\b/i.test(text) ||
+  const text = source.replace(/\b(?:do not|don't|never)\s+(?:change|edit|modify|redesign|rework)\b/gi,'preserve');
+  if (/^(?:what|why|how|explain|describe|compare|summarize|review|audit)\b/i.test(text) ||
     /\b(?:read[- ]only|just explain|only explain)\b/i.test(text)) return false;
   const action = /\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor|improve|polish|refine|fix|change|adjust|update|replace|remove)\b/i.test(text);
   if (!action) return false;
@@ -94,7 +112,7 @@ function councilBrief(result: any): string {
 export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
   let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
   let key='', brief='', review='', owner='', stopped=false, pausedSerial=-1, turnSerial=-1, evaluated=false, statusContext:any, workflow:any;
-  const enabled=()=>process.env.PI_SUBAGENT_CHILD!=='1' && !['0','off'].includes(process.env.PI_SCOPE_COUNCIL ?? 'on');
+  const enabled=()=>scopeCouncilEnabled();
   const identity=(ctx:any)=>JSON.stringify([ctx?.cwd,ctx?.sessionManager?.getSessionId?.()]);
   const clearStatus=()=>{try{statusContext?.ui?.setStatus?.('scope-council',undefined);}catch{}statusContext=undefined;};
   // `pause` silences the brief for the interrupted turn, but it must not
@@ -143,7 +161,13 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       cancel();key=nextKey;owner=identity(ctx);evaluated=true;
       turnSerial=inputSerial;
       const ticket=generation, own=new AbortController();controller=own;
-      const signal=AbortSignal.any([own.signal,AbortSignal.timeout(options.deadlineMs ?? SCOPE_LIMITS.deadlineMs),...(ctx.signal?[ctx.signal]:[])]);
+      // The registered runner publishes its own limits. Reading them here keeps
+      // one source of truth for the shared deadline; an explicit option still
+      // wins and an older registration falls back to the bounded local default.
+      const runner=options.runner ?? (globalThis as any)[SCOPE_COUNCIL_RUNNER];
+      const published=runner?.limits?.deadlineMs;
+      const councilDeadlineMs=options.deadlineMs ?? (typeof published==='number' && Number.isFinite(published) && published>0 ? published : SCOPE_LIMITS.deadlineMs);
+      const signal=AbortSignal.any([own.signal,AbortSignal.timeout(councilDeadlineMs),...(ctx.signal?[ctx.signal]:[])]);
       const current=()=>ticket===generation && identity(ctx)===owner && !own.signal.aborted && !ctx.signal?.aborted;
       const status=(text?:string)=>{try{ctx.ui?.setStatus?.('scope-council',text);}catch{}};
       statusContext=ctx;
@@ -157,7 +181,6 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
           ]),signal);
           if(!current())return;
           [history,workflow]=packet;
-          const runner=options.runner ?? (globalThis as any)[SCOPE_COUNCIL_RUNNER];
           const graphContext=(workflow?'Independent version namespaces (observed references, not rollback or merge authority): '+JSON.stringify(workflow)+'\n':'')+String(graph).slice(0,1800);
           if(typeof runner==='function')result=await boundedAwait(Promise.resolve(runner({task:request,graph:graphContext.slice(0,4000),history},ctx,signal)),signal);
           if(options.workflow && current()) {
