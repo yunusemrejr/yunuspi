@@ -60,11 +60,45 @@ const isExecution = (args: HookArgs) => !args.action;
  */
 export const HOOK_RULES: readonly HookRule[] = [
 	{
-		key: 'source-check-recovery', tools: ['source_check'], onError: true,
+		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit"], onError: true,
+		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
+	},
+	{
+		key: "video-sample-evidence", tools: ["video_frames"],
+		line: "Inspect the returned frames and timing manifest. Sample more densely around suspected events; sparse frames cannot prove continuous motion, exact event boundaries or unseen content.",
+	},
+	{
+		key: "audio-measurement-scope", tools: ["audio_analyze"],
+		line: "Keep the measured window and units with findings. LUFS, sample peak and true peak differ; silence thresholds do not identify speech, and numbers alone do not verify audible quality.",
+	},
+	{
+		key: "media-export-review", tools: ["media_edit"],
+		line: "Review the output streams, duration and normalization report, then inspect representative playback for sync and quality. A clean decode does not establish correct edits or intelligibility.",
+	},
+	{
+		key: "music-score-review", tools: ["music_compose"],
+		line: "Review the MIDI and audition the WAV for rhythm, harmony and endings. The preview uses simple oscillators; MIDI program changes need a soundfont or DAW for instrument-quality rendering.",
+	},
+	{
+		key: "ffmpeg-source-review", tools: ["bash"],
+		when: (args) => /^(?:(?:\/[\w.-]+)+\/)?ffmpeg\s/.test(bashCommand(args).trim()),
+		line: "Probe source streams and preserve originals. Set mappings and timing explicitly; use media_edit for bounded presets and inspect decoded output plus representative playback before delivery.",
+	},
+	{
+		key: "browser-session-recovery", tools: ["browser_session"], onError: true,
+		line: "Reconcile current page, account history or submission receipt before retrying an uncertain action. A timeout may follow a successful post. Save the outcome in the existing plan and continue independent work.",
+	},
+	{
+		key: "browser-session-workflow", tools: ["browser_session"],
+		line: "Retain task authorization and destination rules; verify exact draft and account before submitting. Record outcomes in todo. Renew before lease expiry; after restart reacquire state and reconcile pending submissions.",
+		when: (args) => !["list", "close"].includes(String(args.action)),
+	},
+	{
+		key: 'source-check-recovery', tools: ['syntax_check'], onError: true,
 		line: 'Fix reported syntax errors; use project checks for missing parsers and narrow incomplete batches. Rerun changed files. Syntax alone does not establish type or runtime correctness.',
 	},
 	{
-		key: 'source-check-scope', tools: ['source_check'],
+		key: 'source-check-scope', tools: ['syntax_check'],
 		line: 'These receipts cover syntax of the returned source digests. Keep required project types, tests and configuration schema checks. Later edits invalidate this evidence.',
 	},
 	{

@@ -966,6 +966,7 @@ function storeSnapshot(db, options = {}) {
       id: row.node_id,
       type: row.type,
       label: row.label,
+      key: row.node_key,
       status: row.status,
       confidence: Number(row.confidence),
       _sourceTimestamp: sourceTimestamp,
@@ -987,6 +988,7 @@ function storeSnapshot(db, options = {}) {
         id: rootNode.id,
         type: rootNode.type,
         label: rootNode.label,
+        key: rootNode.node_key,
         status: rootNode.status,
         confidence: Number(rootNode.confidence),
         _sourceTimestamp: Number.MAX_SAFE_INTEGER,
@@ -1071,7 +1073,7 @@ function storeSnapshot(db, options = {}) {
   };
   const activities = db.prepare('SELECT * FROM activity ORDER BY id').all();
   const activity = activities
-    .filter(row => includeInactive || row.expires_at > Date.now())
+    .filter(row => (!scope || row.checkout_id === scope) && (includeInactive || row.expires_at > Date.now()))
     .map(row => {
       let files = [];
       let state = {};
@@ -1195,6 +1197,34 @@ class ProjectIntelligenceStore {
       : 'SELECT * FROM sources ORDER BY id').all(...(normalized ? [normalized] : [])).map(sourceSummary));
   }
 
+  nodeSources(nodeIdValue, scopeValue) {
+    const db = this.#dbOrThrow();
+    const id = boundedString(nodeIdValue, 'nodeId', MAX_KEY);
+    const scope = validateScope(scopeValue, { optional: true });
+    return withReadSnapshot(db, () => db.prepare(`SELECT s.* FROM sources s JOIN source_nodes sn ON sn.source_id = s.id
+      WHERE sn.node_id = ? ${scope ? "AND (s.scope = ? OR s.scope = 'shared')" : ''} ORDER BY s.id LIMIT 80`)
+      .all(id, ...(scope ? [scope] : [])).map(sourceSummary));
+  }
+
+  /** Read a source and the exact claims it owns for optimistic corrections. */
+  source(idValue, options = {}) {
+    const db = this.#dbOrThrow();
+    const id = boundedString(idValue, 'sourceId', MAX_KEY * 4);
+    const scope = validateScope(options.scope, { optional: true });
+    const limit = Math.min(80, Math.max(1, Number.isInteger(options.limit) ? options.limit : 30));
+    return withReadSnapshot(db, () => {
+      const row = db.prepare('SELECT * FROM sources WHERE id = ?').get(id);
+      if (!row || scope && row.scope !== scope && row.scope !== 'shared') return null;
+      const nodes = db.prepare('SELECT node_id AS id, type, label, node_key AS key FROM source_nodes WHERE source_id = ? ORDER BY node_id LIMIT ?').all(id, limit);
+      const claims = db.prepare('SELECT subject, predicate, object, relation, status, confidence, exclusive FROM source_claims WHERE source_id = ? ORDER BY claim_key LIMIT ?').all(id, limit);
+      const counts = {
+        nodes: Number(db.prepare('SELECT COUNT(*) AS n FROM source_nodes WHERE source_id = ?').get(id).n),
+        claims: Number(db.prepare('SELECT COUNT(*) AS n FROM source_claims WHERE source_id = ?').get(id).n),
+      };
+      return { ...sourceSummary(row), nodes, claims: claims.map(claim => ({ ...claim, relation: Boolean(claim.relation), exclusive: Boolean(claim.exclusive) })), counts, truncated: counts.nodes > nodes.length || counts.claims > claims.length };
+    });
+  }
+
   replaceSource(rawSource, options = {}) {
     const db = this.#dbOrThrow();
     const source = normalizeSource(rawSource);
@@ -1273,6 +1303,33 @@ class ProjectIntelligenceStore {
     const db = this.#dbOrThrow();
     assertObject(options ?? {}, 'snapshot options');
     return withReadSnapshot(db, () => storeSnapshot(db, options));
+  }
+
+  /** One numeric/category observation per session and aspect, updated atomically
+   * across workers. Source contents and review prose stay in the session. */
+  reviewHistory(scopeValue, sessionValue, samples) {
+    const db = this.#dbOrThrow();
+    const scope = boundedString(scopeValue, 'review scope', MAX_SCOPE);
+    const session = createHash('sha256').update(boundedString(sessionValue, 'review session', MAX_ID)).digest('hex').slice(0,32);
+    const key = `quality-review:${scope}`;
+    const aspects = ['correctness','security','interface','content','runtime','delivery'];
+    if (samples !== undefined && (!Array.isArray(samples) || samples.length > 6 || samples.some(s => !s || !aspects.includes(s.aspect) || !['pass','changes','unknown'].includes(s.outcome)))) throw errorWithCode('INVALID_INPUT','Invalid review observations');
+    return withImmediate(db, () => {
+      const row = db.prepare('SELECT value FROM metadata WHERE key = ?').get(key);
+      let history = []; try { history = JSON.parse(row?.value ?? '[]'); } catch {}
+      if (!Array.isArray(history)) history = [];
+      history = history.filter(s => s && aspects.includes(s.aspect) && ['pass','changes','unknown'].includes(s.outcome) && Number.isFinite(s.at) && Date.now()-s.at < 90*86400000).slice(-60);
+      if (samples !== undefined) {
+        for (const sample of samples) {
+          const prior = history.find(s=>s.session===session && s.aspect===sample.aspect);
+          history = history.filter(s=>s.session!==session || s.aspect!==sample.aspect);
+          history.push({session,aspect:sample.aspect,outcome:sample.outcome,hadChanges:prior?.hadChanges===true || sample.outcome==='changes',at:Date.now()});
+        }
+        history = history.slice(-60);
+        db.prepare(`INSERT INTO metadata (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).run(key,JSON.stringify(history),Date.now());
+      }
+      return history.filter(s=>s.session!==session).slice(-20).map(({aspect,outcome,hadChanges,at})=>({aspect,outcome,hadChanges,at}));
+    });
   }
 
   getMeta(keyValue) {
@@ -1409,7 +1466,13 @@ class ProjectIntelligenceStore {
     assertObject(options ?? {}, 'history options');
     const limit = options.limit === undefined ? 20 : options.limit;
     if (!Number.isInteger(limit) || limit < 0 || limit > MAX_HISTORY_ROWS) throw errorWithCode('INVALID_INPUT', `history limit must be in [0, ${MAX_HISTORY_ROWS}]`);
-    return withReadSnapshot(db, () => db.prepare(`SELECT * FROM history ORDER BY seq DESC LIMIT ?`).all(limit).map(row => {
+    const scope = validateScope(options.scope, { optional: true });
+    const sourceIds = Array.isArray(options.sourceIds) ? options.sourceIds.slice(0, 400) : options.sourceId ? [options.sourceId] : null;
+    if (sourceIds && !sourceIds.length) return [];
+    const where = [], params = [];
+    if (scope) { where.push("(scope = ? OR scope = 'shared')"); params.push(scope); }
+    if (sourceIds) { where.push(`source_id IN (${sourceIds.map(() => '?').join(',')})`); params.push(...sourceIds); }
+    return withReadSnapshot(db, () => db.prepare(`SELECT * FROM history ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY seq DESC LIMIT ?`).all(...params, limit).map(row => {
       let details = {};
       try { details = JSON.parse(row.details); } catch { details = { raw: row.details }; }
       return {

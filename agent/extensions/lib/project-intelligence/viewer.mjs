@@ -23,8 +23,9 @@ function randomId(bytes = 12) {
 	return crypto.randomBytes(bytes).toString("hex");
 }
 
-function statePathFor(dbPath) {
-	return `${dbPath}.viewer.json`;
+function statePathFor(dbPath, checkoutId = "") {
+	const scope = crypto.createHash("sha256").update(checkoutId).digest("hex").slice(0, 16);
+	return `${dbPath}.viewer-v2-${scope}.json`;
 }
 
 function lockPathFor(statePath) {
@@ -250,7 +251,7 @@ async function launchViewer(statePath, dbPath, identity) {
 		status: "starting",
 		projectId: identity.id,
 		identity,
-		leaseName: `project-intelligence-viewer:${identity.id || crypto.createHash("sha256").update(dbPath).digest("hex").slice(0, 32)}`,
+		leaseName: `project-intelligence-viewer:v2:${identity.id}:${identity.checkoutId}`,
 		owner: `viewer-${process.pid}-${randomId(8)}`,
 		token: randomToken(),
 		pid: null,
@@ -296,7 +297,7 @@ export async function openProjectViewer({ dbPath, identity, launch = true, launc
 	const safe = safeIdentity(identity);
 	if (!safe.id) throw new TypeError("openProjectViewer requires identity.id");
 	if (typeof launchExternal !== "function") throw new TypeError("openProjectViewer launchExternal must be a function");
-	const statePath = statePathFor(dbPath);
+	const statePath = statePathFor(dbPath, safe.checkoutId);
 	const existingPromise = inFlight.get(statePath);
 	if (existingPromise) return existingPromise;
 	const operation = (async () => {

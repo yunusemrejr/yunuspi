@@ -1265,6 +1265,8 @@ export interface SingleResult {
 	progress?: AgentProgress;
 	progressSummary?: ProgressSummary;
 	toolCalls?: ToolCallSummary[];
+	/** Native source-read receipts retained when the transcript is compacted. */
+	reviewEvidence?: { sourceReads: number };
 	artifactPaths?: ArtifactPaths;
 	truncation?: TruncationResult;
 	finalOutput?: string;

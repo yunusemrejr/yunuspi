@@ -181,7 +181,7 @@ export function createRelevantGuidance(pi: any) {
       if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
         utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
       if (/\b(syntax|parse errors?|syntax errors?|configuration files?|config files?)\b/i.test(part))
-        utilityHint('source_check','Syntax checks: source_check({paths:[...]}) batches installed language/configuration parsers with compact per-file results. Use explicit changed paths; unavailable or incomplete checks are not passes. Keep project type checks, tests and configuration schema validation.');
+        utilityHint('syntax_check','Syntax checks: syntax_check({paths:[...]}) batches installed language/configuration parsers with compact per-file results. Use explicit changed paths; unavailable or incomplete checks are not passes. Keep project type checks, tests and configuration schema validation.');
       if (/\b(git|uncommitted|staged|commit history|branch status)\b/i.test(part) && /\b(check|inspect|compare|review|read)\b/i.test(part))
         utilityHint('git_info','Git evidence: git_info({action:"scope"}) identifies project/worktree ownership; session history branches and checkpoints are not commits. git_info reads status, diffs, history and branches with bounded structured arguments. Inspect the relevant scope before staging task-owned changes; use the normal Git workflow for mutations.');
       if (/\b(browser|website|web page)\b/i.test(part) && /\b(navigate|fill|submit|inspect|use)\b/i.test(part))
@@ -531,8 +531,8 @@ export function createRelevantGuidance(pi: any) {
           text:`Changed source: lsp_diagnostics with paths:[${JSON.stringify(file)}] and serverScope:"primary" can check current syntax/type diagnostics. Keep project tests; missing servers or incomplete results do not establish a clean check.`});
       }
       if (['edit','write'].includes(name) && sourceCheckSupported(file))
-        add({key:'utility:source_check',tool:'source_check',priority:72,sourceFile:file,
-          text:`Changed source/configuration: source_check({paths:[${JSON.stringify(file)}]}) runs bounded syntax checks. Batch related changed files in one call; a syntax pass does not replace project types, tests or configuration schema checks.`});
+        add({key:'utility:syntax_check',tool:'syntax_check',priority:72,sourceFile:file,
+          text:`Changed source/configuration: syntax_check({paths:[${JSON.stringify(file)}]}) runs bounded syntax checks. Batch related changed files in one call; a syntax pass does not replace project types, tests or configuration schema checks.`});
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
         routedSkills("", file);

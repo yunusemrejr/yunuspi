@@ -26,6 +26,7 @@ export class IntelligenceClient {
         ? item.reject(
             Object.assign(Error(message.error.message), {
               code: message.error.code,
+              currentVersion: message.error.currentVersion,
             }),
           )
         : item.resolve(message.result);

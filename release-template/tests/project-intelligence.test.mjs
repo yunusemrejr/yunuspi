@@ -460,3 +460,79 @@ test("automatic HTTP evidence retains known origins without path or query creden
       /PRIVATE-PATH-VALUE|PRIVATE-QUERY-VALUE/,
     );
   }));
+
+test("agents inspect and correct shared evidence across sessions without stale overwrites", () =>
+  fixture(async ({ client }) => {
+    const author = client(), peer = client();
+    await Promise.all([author.ready, peer.ready]);
+    const fact = (description, scope) => ({
+      entity: { type: "constraint", key: "durable-contract", label: "Storage contract" },
+      description,
+      ...(scope ? { scope } : {}),
+    });
+    const first = await author.request("record", { fact: fact("Original evidence", "shared") });
+    const inspection = await peer.request("inspect", { sourceId: first.sourceId });
+    assert.equal(inspection.source.version, first.version);
+    assert.ok(inspection.source.nodes.some(node => node.key === "durable-contract"));
+    const corrected = await peer.request("update", {
+      sourceId: first.sourceId,
+      expectedVersion: inspection.source.version,
+      fact: fact("Corrected evidence"),
+    });
+    assert.equal(corrected.sourceId, first.sourceId);
+    assert.equal((await author.request("inspect", { sourceId: first.sourceId })).source.scope, "shared");
+    await assert.rejects(author.request("update", {
+      sourceId: first.sourceId, expectedVersion: first.version, fact: fact("Stale evidence"),
+    }), error => error.code === "STALE_SOURCE" && error.currentVersion === corrected.version);
+    await assert.rejects(peer.request("update", {
+      sourceId: first.sourceId, fact: fact("Missing version"),
+    }), /expectedVersion/);
+    const focused = await author.request("inspect", { focus: "durable-contract", hops: 0 });
+    assert.equal(focused.nodes.length, 1);
+    assert.equal(focused.nodes[0].id, first.entityId);
+    assert.match(JSON.stringify(focused), /Corrected evidence/);
+    assert.doesNotMatch(JSON.stringify(focused), /Original evidence|Stale evidence/);
+    const history = await author.request("history", { sourceId: first.sourceId });
+    assert.ok(history.length >= 2 && history.every(row => row.sourceId === first.sourceId));
+    await peer.request("retract", { sourceId: first.sourceId, expectedVersion: corrected.version });
+    assert.deepEqual((await author.request("query", { query: "durable-contract" })).nodes, []);
+    assert.equal((await author.request("inspect", { sourceId: first.sourceId })).source.active, false);
+    assert.ok((await author.request("history", { sourceId: first.sourceId })).some(row => row.event === "source-removed"));
+  }));
+
+test("retrieval distinguishes missing evidence, directed reachability and paged matches", () => {
+  const snapshot = {
+    revision: 1,
+    project: { id: "fixture", rootNodeId: "root", name: "Fixture" },
+    nodes: Array.from({ length: 80 }, (_, i) => ({
+      id: `n${i}`, key: `src/module-${i}.ts`, type: "file", label: `Module ${i}`,
+      status: "inferred", confidence: 0.7,
+    })),
+    edges: Array.from({ length: 79 }, (_, i) => ({
+      id: `e${i}`, source: `n${i + 1}`, target: `n${i}`, type: "imports", status: "inferred", confidence: 0.7,
+    })),
+    facts: [{ id: "fact", subject: "n20", predicate: "route", object: "/billing", provenance: [{ sourceId: "routes", locator: "routes.ts", version: 1 }] }],
+    sources: [], health: { ok: true, conflicts: [], staleSources: 0 }, activity: [],
+  };
+  const before = JSON.stringify(snapshot);
+  for (const options of [{ query: "does-not-exist" }, { focus: "missing" }]) {
+    const result = queryGraph(snapshot, options);
+    assert.deepEqual(result.nodes, []);
+    assert.equal(result.truncated, false);
+    assert.deepEqual(simplifyGraph(snapshot, options).nodes, []);
+  }
+  assert.equal(queryGraph(snapshot, { focus: "src/module-20.ts", hops: 0 }).nodes[0].id, "n20");
+  assert.equal(queryGraph(snapshot, { query: "/billing", hops: 0 }).nodes[0].id, "n20");
+  const options = { focus: "n20", direction: "incoming", hops: 2, maxChars: 6000 };
+  assert.deepEqual(queryGraph(snapshot, options).nodes.map(n => [n.id, n.distance]), [["n20", 0], ["n21", 1], ["n22", 2]]);
+  assert.deepEqual(simplifyGraph(snapshot, options).nodes.map(n => n.id), ["n20", "n21", "n22"]);
+  assert.deepEqual(simplifyGraph(snapshot, { ...options, direction: "outgoing" }).nodes.map(n => n.id), ["n20", "n19", "n18"]);
+  const first = simplifyGraph(snapshot, { types: ["file"], limit: 20 });
+  const second = simplifyGraph(snapshot, { types: ["file"], limit: 20, offset: first.page.size });
+  assert.equal(first.page.total, 80);
+  assert.equal(first.page.hasMore, true);
+  const ids = new Set(first.nodes.filter(n => !n.aggregate).map(n => n.id));
+  assert.ok(second.nodes.filter(n => !n.aggregate).every(n => !ids.has(n.id)));
+  assert.ok(JSON.stringify(queryGraph(snapshot, { query: "/billing", maxChars: 400 })).length <= 400);
+  assert.equal(JSON.stringify(snapshot), before, "response budgets cannot mutate cached evidence");
+});

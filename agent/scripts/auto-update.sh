@@ -12,9 +12,9 @@
 set -u
 
 case "${1:-}" in
-"" | --repair-only) ;;
+"" | --repair-only | --force) ;;
 *)
-  echo "Usage: auto-update.sh [--repair-only]" >&2
+  echo "Usage: auto-update.sh [--repair-only|--force]" >&2
   exit 2
   ;;
 esac
@@ -60,6 +60,22 @@ flock -w 120 -E 75 9 || {
 }
 export PI_HARNESS_LOCK_HELD=1
 
+# Launchers hold a shared lease for their lifetime. Take the exclusive lease
+# before repairs, staging or recovery; a /proc scan alone races with startup.
+exec 8>"$HOME/.pi/agent/logs/harness-session.lock" || exit 1
+if flock -n -E 75 8; then
+  export PI_HARNESS_SESSION_LOCK_HELD=1
+else
+  STATUS=$?
+  if [ "$STATUS" = 75 ]; then
+    echo "-- Pi update and repair deferred while sessions are active; current core retained"
+    echo "== done (exit 0) =="
+    exit 0
+  fi
+  echo "session lock unavailable (exit $STATUS)"
+  exit "$STATUS"
+fi
+
 # Desktop notifications go through the broker's policy: one notification per
 # distinct normalized root cause (fingerprint), silent occurrence counting on
 # repeats, bounded aggregate reminders while still failing, one recovery note
@@ -83,7 +99,8 @@ FAILURE=0
 # No installs, retention, inference or network in that mode.
 if [ "${1:-}" != --repair-only ]; then
   # --- pi core ---
-  if node "$SCRIPT_DIR/core-update.mjs"; then
+  CORE_ARGS=(); if [ "${1:-}" = --force ]; then CORE_ARGS+=(--force); fi
+  if node "$SCRIPT_DIR/core-update.mjs" "${CORE_ARGS[@]}"; then
     OK_OPS+=(npm-update)
   else
     UPDATE_STATUS=$?
@@ -154,6 +171,12 @@ if node "$HOME/.pi/agent/scripts/verify-harness.mjs" --fix >"$VERIFY_LOG" 2>&1; 
   OK_OPS+=(verify)
 else
   VERIFY_STATUS=$?
+  if [ "$VERIFY_STATUS" = 75 ]; then
+    echo "-- Pi repair deferred while sessions are active; current core retained"
+    rm -f "$VERIFY_LOG"
+    echo "== done (exit 0) =="
+    exit 0
+  fi
   FAILURE=1
   # Fingerprint the FAILING CHECKS, not the run: volatile absolute paths and
   # content hashes are stripped so the same root cause dedups across runs

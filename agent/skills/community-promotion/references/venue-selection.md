@@ -1,8 +1,21 @@
 # Finding appropriate venues
 
-Use a bounded search for the specific audience and problem: `topic community contribution guidelines`, `topic guest author editorial policy`, or `topic showcase rules`. Inspect a few recent substantive discussions and the actual rules. Search snippets, directory lists and the presence of a submit button are insufficient evidence.
+Start with the topic, audience, language/region, intended contribution and exclusions. For niche discovery, prioritize independent forums, specialist discussion boards, trade/hobby communities, maintained blogs with comments, community resource directories and editorial publications. Do not silently fill the shortlist with Reddit, Quora, Twitter/X or other mainstream social sites when niche venues were requested. Exclusions apply to actual destination domains and subdomains, not just search query text; keep rejected domains in the plan so later passes do not reintroduce them.
 
-Keep a compact shortlist: `{venue, audience_problem, useful_contribution, rules_url, checked_at, allowed_format, automation_policy, access, link_policy, effort, decision}`. Unknown rules remain unknown. Recheck before posting; retain URLs and short findings rather than whole pages.
+Use a few distinct query families, substituting the real audience/problem:
+
+- `topic forum`, `topic discussion board`, `topic community questions`, including local-language synonyms.
+- `"specific problem" "reply"`, `topic inurl:forum`, `topic inurl:threads`, `topic "powered by Discourse"`, or `topic phpBB` as discovery clues, never assumed software or permission.
+- `topic "leave a comment"`, `topic independent blog`, `topic guest author editorial policy`, or `topic resource directory submit`.
+- `topic community contribution guidelines`, `topic showcase rules`, and links from a verified specialist association, blogroll or community directory.
+
+Use structured domain exclusions in web_search where available as well as negative site terms. Use web_research for bounded independent query/read batches and retain its job handle; use web_probe only for read-only page/form reconnaissance. Open candidate pages with fetch_content or the available browser. Follow a small number of relevant outbound community links, deduplicate host and canonical thread identities, and change vocabulary or language when results repeat. Track checked/rejected candidates and search coverage, then expand until the requested useful shortlist or time/work budget is met. Search exhaustion is a reported coverage limit, not proof that no venues exist.
+
+For example, the installed search tools accept `domainFilter:["-reddit.com","-quora.com","-twitter.com","-x.com"]`. Carry these exclusions into each search/research batch when requested; check the final destination after redirects as well. Exclusion filters do not automatically carry from one tool call to the next.
+
+Inspect recent substantive discussions, dates, the actual rules and the target thread. Establish whether replies/comments remain open, whether a designated category fits, whether the question is already answered, and whether the venue has an active relevant audience. Search snippets, directory lists and the presence of a submit button are insufficient evidence.
+
+Keep compact evidence on each venue's existing plan step: `{venue_url, thread_url, audience_problem, useful_contribution, rules_url, checked_at, activity_evidence, allowed_format, automation_policy, ai_content_policy, access, link_policy, effort, decision}`. Unknown rules remain unknown; missing AI-specific rules are not themselves a prohibition, and missing rules are not affirmative permission. Resolve material ambiguity for the intended action or choose an eligible venue. Recheck before posting; retain URLs and short findings rather than whole pages.
 
 Prefer topical fit, editorial quality and a complete useful answer over domain-authority scores. Compare expected qualified conversations against drafting, access and moderation effort; numeric estimates are hypotheses. Exclude purchased ranking links, mass guest-post farms and unrelated discussion threads.
 
@@ -13,8 +26,4 @@ Possible formats, subject to current local rules:
 - An editorial guest article: follow its audience, originality and disclosure requirements; do not promise ranking-credit links.
 - An owned publication or an authorized account on a publishing platform: publish an original tutorial and distribute only to venues permitting it.
 
-Operational examples are eligibility checks, not an approved target list. [Forem documents an article API](https://developers.forem.com/api/v1); local terms and credentials still govern use. [X's developer guidelines](https://docs.x.com/developer-guidelines) direct automated applications to its official API and prohibit browser automation; do not spend a campaign trying browser account creation there. Instagram or another platform requires the same fresh API/account-policy check, not an assumed exception.
-
-[Stack Overflow's promotion guidance](https://stackoverflow.com/help/promotion) requires relevant, self-contained answers and affiliation disclosure. [Its AI-content policy](https://stackoverflow.com/help/gen-ai-policy) currently prohibits LLM-drafted content, so it is not an eligible autonomous-answer target. [Reddit's developer terms](https://redditinc.com/policies/developer-terms) prohibit spam and bypassing technical protections; community rules add further restrictions.
-
-Sources inspected 2026-09-10. Revalidate changing policies at execution time.
+There is no static approved target list. Forum software, blog engines and directory platforms are discovery clues; every independently hosted destination has its own current rules and access. Inspect official API documentation for that actual venue when using an API. Do not infer posting rights or working authentication from the platform brand.

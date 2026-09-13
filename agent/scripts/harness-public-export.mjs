@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
+import {CORE_COMPATIBILITY_TESTS} from "./lib/core-compatibility.mjs";
 const ownAgent = path.resolve(
  path.dirname(fileURLToPath(import.meta.url)),
  "..",
@@ -204,6 +205,16 @@ try {
  for (const dir of ["patches", "lib"])
   if (fs.existsSync(path.join(source, "scripts", dir)))
    copyTree(path.join(source, "scripts", dir), "agent/scripts/" + dir);
+ // The updater's synthetic compatibility gate is release code. Historical
+ // benchmarks and private session fixtures stay outside this explicit list.
+ if (fs.existsSync(path.join(source, "scripts/core-update.mjs"))) {
+  const temp = path.join(stage, ".compatibility");
+  fs.mkdirSync(temp);
+  for (const name of CORE_COMPATIBILITY_TESTS)
+   fs.copyFileSync(path.join(source, "scripts/compatibility", name), path.join(temp, name));
+  copyTree(temp, "agent/scripts/compatibility");
+  fs.rmSync(temp, { recursive: true });
+ }
  for (const name of ["package.json", "package-lock.json"])
   put("agent/npm/" + name, fs.readFileSync(path.join(source, "npm", name)));
  // Mini service and machine-specific systemd installation are opt-in, not a source runtime dependency.

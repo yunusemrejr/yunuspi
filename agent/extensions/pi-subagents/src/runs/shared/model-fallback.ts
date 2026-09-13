@@ -22,6 +22,14 @@ export type { AvailableModelInfo };
 
 const economyWarnedRoutes = new Set<string>();
 
+function taskRouteConstraints(task = ""): { fixed: boolean; freeOnly: boolean } {
+ const text=task.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
+ return {
+  fixed:/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(text),
+  freeOnly:/\bfree[- ]only\b|\b(?:only use|use only)\s+(?:the\s+)?free\b|\b(?:no|never use|do not use|don't use)\s+paid\b/i.test(text),
+ };
+}
+
 /** Forget previously deduplicated economy warnings (fresh subagent run). */
 /**
  * Live quota-health source (optional): when set, providers the quota-health
@@ -307,6 +315,8 @@ function resolveRequiredSubagentModelCandidate(
 }
 
 export interface ResolveSubagentModelOverrideOptions {
+ /** Task-aware quality admission; omitted only by display/preflight callers. */
+ task?: string;
 	/** When set with `enforce: true`, out-of-scope models are rejected. */
 	scope?: ModelScopeCheckRule | ModelScopeCheckRule[];
 	/** Origin of the requested model: explicit caller-supplied (hard error) vs inherited (warn). Defaults to `"inherited"`. */
@@ -408,7 +418,12 @@ export function resolveSubagentModelOverride(
 			const { info } = economyRouteInfo(resolved, availableModels);
 			if (info) {
 				const classification = classifyModelEconomy(splitThinkingSuffix(resolved).baseModel, info, cfg);
-				if (explicit === undefined && (classification.verdict === "expensive" || classification.verdict === "zero-placeholder")) {
+				if (explicit === undefined && options?.task) {
+     const constraints=taskRouteConstraints(options.task);
+     const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels)});
+     if (pick) { enforceModelScopes(pick.model,options?.scope,"inherited",options?.onWarn); return pick.model; }
+     if (["expensive","zero-placeholder"].includes(classification.verdict) || constraints.freeOnly && !isProvenFreeRoute(info)) throw new Error(`${formatEconomyNoRouteMessage(resolved,cfg)} No affordable route passed the task quality/route constraints; keep this work in the parent or supply verified benchmark evidence.`);
+				} else if (explicit === undefined && (classification.verdict === "expensive" || classification.verdict === "zero-placeholder")) {
 					const pick = selectAffordableModel(availableModels, cfg, { preferredModel: resolved, exclude: [resolved], exhaustedProviders: exhaustedProvidersOf(availableModels) });
 					if (!pick) throw new Error(formatEconomyNoRouteMessage(resolved, cfg));
 					enforceModelScopes(pick.model, options?.scope, "inherited", options?.onWarn);
@@ -545,7 +560,7 @@ export function buildModelCandidates(
 	if (skippedPrimary) {
 		console.warn(`[pi-subagents] Skipping primary model '${skippedPrimary}' because it is unavailable in this environment.`);
 	}
-	const economical = applyCandidateEconomy(resolved, availableModels, origin);
+	const economical = applyCandidateEconomy(resolved, availableModels, origin, options?.task);
 	for (const route of economical) if (!resolved.includes(route)) enforceModelScopes(route, scopes, "inherited", options?.onWarn);
 	// Inherited automatic workers may continue on a small, pre-admitted set.
 	// Explicit/configured model choices and caller fallback lists remain exact.
@@ -562,7 +577,7 @@ export function buildModelCandidates(
 				&&(isProvenFreeRoute(model,evidence)||!freeOnly&&isAutonomousMeteredEligible(model,cfg)));
 			const excluded=[...economical];
 			for(let attempts=0;attempts<8&&economical.length<3;attempts++) {
-				const choice=selectAffordableModel(pool,cfg,{preferredModel:first.fullId,exclude:excluded,exhaustedProviders:exhaustedProvidersOf(availableModels)});
+				const choice=selectAffordableModel(pool,cfg,{task:options?.task,preferredModel:first.fullId,exclude:excluded,exhaustedProviders:exhaustedProvidersOf(availableModels)});
 				if(!choice)break;excluded.push(choice.model);
 				try {enforceModelScopes(choice.model,scopes,"explicit",options?.onWarn);}catch {continue;}
 				economical.push(choice.model);
@@ -709,15 +724,26 @@ function applyCandidateEconomy(
 	candidates: string[],
 	availableModels: AvailableModelInfo[] | undefined,
 	origin: ModelOrigin,
+ task?: string,
 ): string[] {
 	const cfg = loadModelEconomyConfig();
 	if (!cfg.enabled || !registryHasPricing(availableModels) || candidates.length === 0) return candidates;
+ const constraints=taskRouteConstraints(task);
+ if (origin === "inherited" && task) {
+  const pick=constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0],exhaustedProviders:exhaustedProvidersOf(availableModels)});
+  if (pick) candidates=[pick.model,...candidates.slice(1).filter(route=>route!==pick.model)];
+  else if (constraints.freeOnly && !isProvenFreeRoute(economyRouteInfo(candidates[0],availableModels).info)) throw new Error("No eligible free route satisfies this task; keep the work in the parent. Paid assistance was not admitted.");
+ }
 	const kept: string[] = [];
 	let primaryDropped = false;
 	for (let index = 0; index < candidates.length; index++) {
 		const route = candidates[index]!;
 		const { info, base } = economyRouteInfo(route, availableModels);
 		const isPrimary = index === 0;
+  if (constraints.freeOnly && !isProvenFreeRoute(info)) {
+   if (isPrimary) throw new Error("Free-only task refused a route without current free pricing evidence.");
+   continue;
+  }
 		if (!info) {
 			kept.push(route);
 			continue;
@@ -745,9 +771,9 @@ function applyCandidateEconomy(
 	}
 	let result = kept;
 	if (primaryDropped) {
-		const pick = selectAffordableModel(availableModels, cfg, { preferredModel: candidates[0]!, exclude: [candidates[0]!, ...kept], exhaustedProviders: exhaustedProvidersOf(availableModels) });
-		if (!pick) throw new Error(formatEconomyNoRouteMessage(candidates[0]!, cfg));
+		const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels, cfg, { task, freeOnly:constraints.freeOnly, preferredModel: candidates[0]!, exclude: [candidates[0]!, ...kept], exhaustedProviders: exhaustedProvidersOf(availableModels) });
+		if (!pick) throw new Error(`${formatEconomyNoRouteMessage(candidates[0]!, cfg)}${task ? " No route passed the task quality gate; keep this work in the parent or supply verified model evidence." : ""}`);
 		result = [pick.model, ...kept.filter((route) => route !== pick.model)];
 	}
-	return result;
+	return constraints.fixed ? result.slice(0,1) : result;
 }

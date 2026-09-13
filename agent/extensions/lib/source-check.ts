@@ -160,20 +160,22 @@ export async function sourceCheck({paths,cwd,signal}: {paths:string[];cwd:string
   for(const error of data.errors) results.push({path:error.path,status:'unavailable' as const,checker:'file',diagnostics:[compact(error.error)]});
   const counts = {passed:0,failed:0,unavailable:0,incomplete:0};
   for(const result of results) counts[result.status]++;
-  const output: any = {kind:'source_check',ok:counts.passed>0&&!counts.failed&&!counts.unavailable&&!counts.incomplete,
+  const output: any = {kind:'syntax_check',ok:counts.passed>0&&!counts.failed&&!counts.unavailable&&!counts.incomplete,
     counts,results,scope:'Syntax only, from the supplied file snapshots. No type checking, imports, runtime tests, formatting verdict or environment/schema validation. .js uses module syntax; .cjs uses script syntax.'};
   // Preserve every file/status/digest; shorten only diagnostic prose if needed.
   if(JSON.stringify(output).length>16000) for(const result of results) {result.diagnostics=result.diagnostics.map(d=>d.slice(0,180));output.truncated=true;}
-  if(JSON.stringify(output).length>16000) return {kind:'source_check',ok:false,counts,incomplete:true,reason:'Result paths exceed output budget; use shorter workspace-relative paths or a smaller batch'};
+  if(JSON.stringify(output).length>16000) return {kind:'syntax_check',ok:false,counts,incomplete:true,reason:'Result paths exceed output budget; use shorter workspace-relative paths or a smaller batch'};
   return output;
 }
 
 export default function registerSourceCheck(pi: any) {
-  pi.registerTool({name:'source_check',label:'Source check',
+  if (process.env.PI_REASONING_AIDS === 'off') return;
+  pi.registerTool({name:'syntax_check',label:'Syntax check',
     description:'Batch syntax checks for explicit JS/TS/JSX/TSX, Python, Bash, Ruby, PHP, Go, JSON, YAML and TOML files. Installed parsers only; never executes project code, installs tools or writes files. Reports missing parsers and incomplete checks. Syntax does not replace project types/tests or configuration schema validation.',
     parameters:Type.Object({paths:Type.Array(Type.String({minLength:1,maxLength:1024}),{minItems:1,maxItems:20})}),
     async execute(_id: any,params: any,signal: AbortSignal,_onUpdate: any,ctx: any) {
       try {
+        if (process.env.PI_REASONING_AIDS === 'off') throw new Error('Reasoning aids disabled');
         const result=await sourceCheck({paths:params.paths,cwd:ctx.cwd,signal});
         return {isError:!result.ok,content:[{type:'text',text:JSON.stringify(result)}],details:result};
       } catch(error) {return {isError:true,content:[{type:'text',text:signal?.aborted?'Cancelled':compact((error as Error).message)}]};}

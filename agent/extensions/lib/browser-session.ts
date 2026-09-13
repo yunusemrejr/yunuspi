@@ -55,7 +55,7 @@ export function registerBrowserSession(pi: any) {
     name: "browser_session",
     label: "Isolated browser",
     description:
-      "Agent-owned Chromium: open/navigate, scoped snapshot, inspect DOM/HTML/computed CSS/hit target, click/fill/press, condition wait, viewport, screenshot, incremental logs/network, list/close. Use observed selector or exact role/name; optional frame is an observed iframe selector. Logs/network return nextCursor; pass it as since to avoid repeats. includeText reveals minimized console/script errors on explicit diagnostic reads. No personal profiles, downloads, arbitrary JS or credentials. Two sessions, 10-minute lifetime, 200 actions; bounded untrusted evidence. Never replay uncertain mutations: inspect current state first. render_see handles local files; web_search/web_research handle discovery.",
+      "Agent-owned Chromium: open/navigate, snapshot, inspect DOM/CSS and option labels, click/fill/press, select by option label, check to a desired boolean, verify exact supplied text, wait, viewport, screenshot, logs/network, renew/list/close. Use an observed selector or exact role/name; frame selects an observed iframe. No imported personal profiles/credentials, downloads or arbitrary JS. Two sessions; renewable 10-minute/200-action leases. Results include lease remaining; renew observes current state and preserves this temporary browser. Save progress in todo before expiry/restart. Verification returns a boolean without revealing field values. Logs/network use nextCursor as since; includeText enables minimized diagnostics. Never replay uncertain mutations: reconcile first. web_search/web_research handle discovery; render_see handles local files.",
     parameters: Type.Object({
       action: Type.Union(
         [
@@ -65,6 +65,10 @@ export function registerBrowserSession(pi: any) {
           "click",
           "fill",
           "press",
+          "select",
+          "check",
+          "verify",
+          "renew",
           "screenshot",
           "logs",
           "network",
@@ -81,6 +85,8 @@ export function registerBrowserSession(pi: any) {
       role: Type.Optional(Type.String({ maxLength: 50 })),
       name: Type.Optional(Type.String({ maxLength: 256 })),
       text: Type.Optional(Type.String({ maxLength: 8000 })),
+      option: Type.Optional(Type.String({ maxLength: 256, description: "Exact observed option label for select" })),
+      checked: Type.Optional(Type.Boolean({ description: "Desired checkbox/radio state for check" })),
       key: Type.Optional(Type.String({ maxLength: 80 })),
       frame: Type.Optional(Type.String({ maxLength: 256 })),
       since: Type.Optional(Type.Integer({ minimum: 0 })),

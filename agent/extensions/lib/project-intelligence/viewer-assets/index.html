@@ -30,8 +30,8 @@
       <span>Direction</span>
       <select id="directionSelect" aria-label="Dependency direction">
         <option value="both">Both directions</option>
-        <option value="upstream">Dependencies of focus</option>
-        <option value="downstream">Dependents of focus</option>
+        <option value="outgoing">Dependencies →</option>
+        <option value="incoming">← Dependents</option>
       </select>
     </label>
     <label>
@@ -40,7 +40,8 @@
         <option value="">Whole project</option>
       </select>
     </label>
-    <button id="focusButton" class="quiet" type="button">Focus selected</button>
+    <label class="depth-field"><span>Depth</span><select id="depthSelect" aria-label="Relationship depth"><option value="1">1 hop</option><option value="2">2 hops</option><option value="3">3 hops</option><option value="4">4 hops</option></select></label>
+    <button id="focusButton" class="quiet" type="button" disabled>Focus selected</button>
     <button id="fitButton" class="quiet" type="button">Fit graph</button>
     <button id="resetButton" class="quiet" type="button">Reset view</button>
   </section>
@@ -62,14 +63,19 @@
         <div class="section-heading"><h2>Relations</h2><button id="clearRelationFiltersButton" class="text-button" type="button">Clear</button></div>
         <div id="relationFilters" class="filter-list" role="group" aria-label="Filter by relation"></div>
       </section>
+      <section class="panel-section">
+        <h2>Evidence health</h2>
+        <p id="healthSummary" class="muted small">Reading evidence coverage…</p>
+        <label class="filter-item"><input id="inactiveToggle" type="checkbox">Include stale evidence</label>
+      </section>
       <section class="panel-section legend-section">
         <h2>Reading the map</h2>
-        <p class="muted small">Solid lines show known relations. Dashed groups contain entities outside the current view. Select a node to inspect evidence and status.</p>
+        <p class="muted small">Arrows read from subject to target: A → B means A imports or depends on B. Dashed lines mark inferred or grouped relations. Check the evidence before acting.</p>
         <div class="legend-row"><span class="legend-line"></span><span>Relation</span></div>
         <div class="legend-row"><span class="legend-line legend-line-dashed"></span><span>Aggregated entities</span></div>
       </section>
       <section class="panel-section activity-section">
-        <div class="section-heading"><h2>Recent changes</h2><span id="activityCount" class="count-label">0</span></div>
+        <div class="section-heading"><h2>Active sessions</h2><span id="activityCount" class="count-label">0</span></div>
         <ol id="activityList" class="activity-list" aria-live="polite"></ol>
       </section>
     </aside>
@@ -77,9 +83,22 @@
     <section class="graph-panel" aria-label="Interactive project graph">
       <div class="graph-toolbar">
         <span id="graphMode" class="mode-label">Live graph</span>
-        <span class="toolbar-hint">Drag nodes · scroll to zoom · arrow keys to navigate</span>
+        <div class="view-controls">
+          <button id="mapViewButton" class="quiet" type="button" aria-pressed="true">Map</button>
+          <button id="listViewButton" class="quiet" type="button" aria-pressed="false">Entities</button>
+          <select id="layoutSelect" aria-label="Graph layout"><option value="grid">By category</option><option value="cose">Relationships</option><option value="breadthfirst">Hierarchy</option></select>
+          <button id="arrangeButton" class="quiet" type="button">Arrange</button>
+        </div>
       </div>
       <div id="graphCanvas" class="graph-canvas" tabindex="0" role="application" aria-label="Interactive project intelligence graph. Use arrow keys to move between nodes."></div>
+      <div id="entityList" class="entity-list" hidden aria-label="Entities in this view"></div>
+      <div class="map-navigation">
+        <button id="backButton" class="quiet" type="button" disabled>← Back</button>
+        <span id="viewContext" class="muted small">Whole project</span>
+        <button id="previousPage" class="quiet" type="button" disabled>Previous</button>
+        <span id="pageLabel" class="muted small"></span>
+        <button id="nextPage" class="quiet" type="button" disabled>Next</button>
+      </div>
       <div id="graphEmpty" class="empty-state" hidden>
         <strong>No entities match this view.</strong>
         <span>Clear a filter or search a broader term.</span>
@@ -104,8 +123,8 @@
   </main>
 
   <footer class="statusbar">
-    <span id="statusMessage">Viewer session is starting…</span>
-    <span class="status-actions"><button id="showAllButton" class="text-button" type="button">Show all categories</button><span aria-hidden="true">•</span><span id="serverVersion">Local read-only session</span></span>
+    <span id="statusMessage" role="status">Viewer session is starting…</span>
+    <span class="status-actions"><button id="exportButton" class="text-button" type="button">Export view</button><span aria-hidden="true">•</span><button id="showAllButton" class="text-button" type="button">Show all categories</button><span aria-hidden="true">•</span><span id="serverVersion">Local read-only session</span></span>
   </footer>
 
   <script src="/cytoscape.min.js" defer></script>

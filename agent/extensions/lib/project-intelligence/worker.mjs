@@ -48,9 +48,9 @@ const bootstrap = (async () => {
   return identity;
 })();
 bootstrap.catch(() => {});
-function snapshot(all = false) {
+function snapshot(all = false, includeInactive = false) {
   const revision = store.revision(),
-    key = all ? "all" : identity.checkoutId;
+    key = `${all ? "all" : identity.checkoutId}:${includeInactive}`;
   if (
     !cache ||
     cache.revision !== revision ||
@@ -61,7 +61,7 @@ function snapshot(all = false) {
       revision,
       key,
       at: Date.now(),
-      value: store.snapshot(all ? {} : { scope: identity.checkoutId }),
+      value: store.snapshot({ ...(all ? {} : { scope: identity.checkoutId }), includeInactive }),
     };
   return cache.value;
 }
@@ -288,7 +288,8 @@ async function record(payload, signal) {
         throw Error(
           "Provide a verbatim evidence quote (up to 600 characters) found in sourceFile.",
         );
-      evidence = `; file:${rel} sha256:${hash(content).slice(0, 16)}`;
+      const line = content.slice(0, content.indexOf(input.quote)).split("\n").length;
+      evidence = `; file:${rel}:${line} sha256:${hash(content).slice(0, 16)}`;
     } finally {
       await handle.close();
     }
@@ -306,9 +307,13 @@ async function record(payload, signal) {
     ? localId
     : `agent:${workerData.sessionId}:${localId}`;
   const previous = store.sources().find((s) => s.id === id);
+  if (previous && previous.scope !== identity.checkoutId && previous.scope !== "shared")
+    throw Error("Record belongs to another checkout; correct it from that checkout.");
+  if (payload.action === "update" && !previous)
+    throw Error("Record no longer exists. Inspect its source before updating.");
   const expected =
     payload.expectedVersion ??
-    (previous?.fingerprint === hash(JSON.stringify(input))
+    ([hash(JSON.stringify([input, evidence])), hash(JSON.stringify(input))].includes(previous?.fingerprint)
       ? previous.version
       : 0);
   const root = nodeId("project", identity.id);
@@ -342,10 +347,10 @@ async function record(payload, signal) {
     });
   const source = {
     id,
-    scope: input.scope === "shared" ? "shared" : identity.checkoutId,
+    scope: input.scope === "shared" ? "shared" : input.scope === "checkout" ? identity.checkoutId : previous?.scope ?? identity.checkoutId,
     kind: "agent",
     locator: `session:${safeText(workerData.sessionId, 80)}${evidence}`,
-    fingerprint: hash(JSON.stringify(input)),
+    fingerprint: hash(JSON.stringify([input, evidence])),
     nodes: [subject, ...(target ? [target] : [])],
     claims,
     ...(status === "temporary"
@@ -362,6 +367,8 @@ async function record(payload, signal) {
   return {
     ...result,
     sourceId: id,
+    entityId: subject.id,
+    ...(target ? { targetId: target.id } : {}),
     version: store.sources().find((s) => s.id === id)?.version,
     status,
     provenance: source.locator,
@@ -379,6 +386,17 @@ async function run(op, payload, signal) {
       };
     case "refresh":
       return refresh(payload, signal);
+    case "inspect":
+      if (payload.sourceId) {
+        const source = store.source(payload.sourceId, { scope: payload.allScopes ? undefined : identity.checkoutId, limit: payload.limit });
+        if (!source) throw Error("Source not found in this checkout. Use allScopes only to inspect another checkout.");
+        while (JSON.stringify(source).length > 10000 && source.claims.length) { source.claims.pop(); source.truncated = true; }
+        while (JSON.stringify(source).length > 10000 && source.nodes.length) { source.nodes.pop(); source.truncated = true; }
+        return { revision: store.revision(), source, next: source.kind === "agent" ? "Correct with update: sourceId, expectedVersion=source.version and the complete replacement fact. Retract uses the same version." : "Source-owned evidence: refresh the source file instead of editing its claims." };
+      }
+      if (!payload.focus) throw Error("Inspect requires focus (entity ID or exact key) or sourceId.");
+      payload = { ...payload, hops: payload.hops ?? 1 };
+      // fall through to the shared bounded query
     case "query": {
       const stats = store.getMeta(`discovery-stats:${identity.checkoutId}`);
       const caveat = !stats?.at
@@ -390,7 +408,7 @@ async function run(op, payload, signal) {
             : Date.now() - stats.at > 86400000
               ? "Evidence has not refreshed in over a day. "
               : "";
-      const result = queryGraph(snapshot(payload.allScopes === true), {
+      const result = queryGraph(snapshot(payload.allScopes === true, payload.includeInactive === true), {
         ...payload,
         query: safeText(payload.query ?? "", 1000),
         // Coverage warnings share the hard response budget with the subgraph.
@@ -408,11 +426,21 @@ async function run(op, payload, signal) {
       return {
         project: identity,
         revision: store.revision(),
-        health: store.snapshot({ includeInactive: true }).health,
+        health: store.snapshot({ scope: payload.allScopes ? undefined : identity.checkoutId }).health,
         discovery: store.getMeta(`discovery-stats:${identity.checkoutId}`),
       };
     case "history":
-      return store.history({ limit: Math.min(30, payload.limit ?? 20) });
+      return store.history({ limit: Math.min(30, payload.limit ?? 20), sourceId: payload.sourceId, scope: payload.allScopes ? undefined : identity.checkoutId });
+    case "review_history":
+      return store.reviewHistory(
+        identity.checkoutId,
+        workerData.sessionId,
+        payload.samples,
+      );
+    case "update":
+      if (typeof payload.sourceId !== "string" || !payload.sourceId.startsWith("agent:") || !Number.isSafeInteger(payload.expectedVersion) || payload.expectedVersion < 1)
+        throw Error("Update requires an agent sourceId, its observed expectedVersion and a complete replacement fact. Inspect first.");
+      return record({ ...payload, action: "update", recordId: payload.sourceId }, signal);
     case "record":
       return record(payload, signal);
     case "observation": {
@@ -494,6 +522,8 @@ async function run(op, payload, signal) {
         throw Error(
           "Retract requires an agent sourceId and its observed expectedVersion. Refresh file/Git evidence instead.",
         );
+      const source = store.source(payload.sourceId, { scope: identity.checkoutId, limit: 1 });
+      if (!source) throw Error("Agent source not found in this checkout.");
       const result = store.removeSource(payload.sourceId, {
         expectedVersion: payload.expectedVersion,
       });
@@ -605,7 +635,7 @@ parentPort.on("message", async (message) => {
   } catch (error) {
     parentPort.postMessage({
       id: message.id,
-      error: { message: safeText(error.message, 300), code: error.code },
+      error: { message: safeText(error.message, 300), code: error.code, currentVersion: error.details?.currentVersion ?? error.currentVersion },
     });
   } finally {
     controllers.delete(message.id);

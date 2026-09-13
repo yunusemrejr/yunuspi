@@ -19,6 +19,135 @@ test.after(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
 });
 
+test("browser leases renew across long tasks, reserve reconciliation reads, and reject expired leases", async () => {
+  const { createBrowserLease } = await load("scripts/browser-session-lease.mjs");
+  let now = 0;
+  const lease = createBrowserLease(() => now);
+  for (let n = 0; n < 200; n++) lease.consume("click");
+  assert.equal(lease.receipt().actionsRemaining, 0);
+  assert.throws(() => lease.consume("fill"), /action limit/);
+  for (const action of ["snapshot", "inspect", "verify", "logs", "network", "renew"]) lease.consume(action);
+  now = 599_999;
+  lease.renew();
+  assert.equal(lease.receipt().generation, 2);
+  assert.equal(lease.receipt().actionsRemaining, 200);
+  now = 600_001; // Past the original process lifetime.
+  lease.consume("fill");
+  assert.equal(lease.receipt().actionsRemaining, 199);
+  assert.equal(lease.receipt().remainingMs, 599_998);
+  now = 1_199_999;
+  assert.throws(() => lease.consume("snapshot"), /expired/);
+  assert.throws(() => lease.renew(), /expired/);
+  lease.consume("close");
+  assert.equal(lease.receipt().remainingMs, 0);
+});
+
+test("niche discovery excludes mainstream hosts and their subdomains from actual search results", async () => {
+  const { parseDuckDuckGoResults } = await load("extensions/pi-web-access/duckduckgo.ts");
+  const urls = ["https://old.reddit.com/r/topic", "https://www.quora.com/question", "https://twitter.com/topic", "https://x.com/topic", "https://woodworking.example.org/threads/123", "https://reddit.com.example.org/forum"];
+  const html = urls.map((url, n) => `<a class="result-link" href="${url}">Venue ${n}</a>`).join("\n");
+  const results = parseDuckDuckGoResults(html, { domainFilter: ["-reddit.com", "-quora.com", "-twitter.com", "-x.com"] });
+  assert.deepEqual(results.map(result => result.url), urls.slice(4));
+});
+
+test("real forum workflow preserves drafts across renewal and reconciles a timed-out submit without duplicates", { timeout: 90000 }, async (t) => {
+  const { registerBrowserSession } = await load("extensions/lib/browser-session.ts");
+  const posts = [];
+  const pending = new Set();
+  const server = http.createServer(async (req, res) => {
+    res.setHeader("Content-Type", "text/html");
+    if (req.method === "POST" && req.url === "/submit") {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      posts.push(Object.fromEntries(new URLSearchParams(body)));
+      // Persist before deliberately withholding the response. The browser cannot
+      // infer failure from its timeout; /history is the reconciliation surface.
+      pending.add(res);
+      res.on("close", () => pending.delete(res));
+      return;
+    }
+    if (req.url === "/history") {
+      res.end(`<h1>Pending moderation</h1><article id="receipt"><h2>Submission ${posts.length}</h2><p>Account: fixture-author</p><a href="/entry/1">Entry receipt</a></article>`);
+      return;
+    }
+    if (req.url === "/entry/1") {
+      res.end(`<h1>Pending moderation</h1><p>Account: fixture-author</p><pre id="submitted"></pre><script>document.querySelector('#submitted').textContent=${JSON.stringify(posts[0]?.answer ?? "")}</script>`);
+      return;
+    }
+    res.end(`<!doctype html><h1>Specialist forum</h1><p>Account: fixture-author</p>
+      <form method="POST" action="/submit">
+      <label>Category<select name="category"><option value="general">General</option><option value="q">Questions</option><option disabled>Closed</option><option>Duplicate</option><option>Duplicate</option></select></label>
+      <label>Answer<textarea name="answer" required></textarea></label>
+      <label><input type="checkbox" name="disclosure" required>Disclose affiliation</label>
+      <label>Password<input type="password" value="FIXTURE_PRIVATE_VALUE"></label>
+      <div contenteditable="true" role="textbox" aria-label="Rich editor"></div>
+      <button>Submit answer</button></form>`);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  let tool;
+  const events = {};
+  registerBrowserSession({ registerTool: t => tool = t, on: (name, fn) => events[name] = fn });
+  const ctx = { cwd: scratch, model: { input: ["text"] }, sessionManager: { getSessionId: () => "forum-fixture" } };
+  const call = p => tool.execute("fixture", p, undefined, undefined, ctx);
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    let opened;
+    try { opened = await call({ action: "open", url }); }
+    catch (error) {
+      if (process.env.PI_BROWSER_REQUIRE === "1") throw error;
+      t.skip("Chromium unavailable; set PI_BROWSER_REQUIRE=1 to require it");
+      return;
+    }
+    const session = opened.details.session;
+    assert.equal(opened.details.lease.generation, 1);
+    const control = { session, role: "combobox", name: "Category" };
+    const options = await call({ ...control, action: "inspect" });
+    assert.equal(options.details.inspection.options[1].label, "Questions");
+    assert.equal(options.details.inspection.options[2].disabled, true);
+    assert.equal((await call({ ...control, action: "select", option: "Closed" })).isError, true);
+    assert.equal((await call({ ...control, action: "select", option: "Duplicate" })).isError, true);
+    assert.equal((await call({ ...control, action: "select", option: "Questions" })).details.ok, true);
+    const draft = "I maintain this tool.\nHere is the reproducible method and its limitation.";
+    const editor = { session, role: "textbox", name: "Answer" };
+    assert.equal((await call({ ...editor, action: "fill", text: draft })).details.ok, true);
+    assert.equal((await call({ ...editor, action: "verify", text: draft + "wrong" })).details.verification.matches, false);
+    assert.equal((await call({ ...editor, action: "verify", text: draft })).details.verification.matches, true);
+    const secret = await call({ session, action: "verify", selector: 'input[type="password"]', text: "guess" });
+    assert.equal(secret.isError, true);
+    assert.doesNotMatch(JSON.stringify(secret), /FIXTURE_PRIVATE_VALUE/);
+    const rich = { session, role: "textbox", name: "Rich editor" };
+    assert.equal((await call({ ...rich, action: "fill", text: "A helpful comment" })).details.ok, true);
+    assert.equal((await call({ ...rich, action: "verify", text: "A helpful comment" })).details.verification.matches, true);
+    const checkbox = { session, action: "check", role: "checkbox", name: "Disclose affiliation", checked: true };
+    assert.equal((await call(checkbox)).details.ok, true);
+    assert.equal((await call(checkbox)).details.ok, true); // Desired state must not toggle off.
+    const renewed = await call({ session, action: "renew" });
+    assert.equal(renewed.details.lease.generation, 2);
+    assert.equal(renewed.details.lease.actionsRemaining, 200);
+    assert.equal((await call({ ...editor, action: "verify", text: draft })).details.verification.matches, true);
+    const sent = await call({ session, action: "click", role: "button", name: "Submit answer", timeoutMs: 1000 });
+    assert.equal(sent.isError, true);
+    assert.equal(sent.details.failure.kind, "timeout");
+    assert.match(sent.details.failure.outcome, /unknown/);
+    assert.equal(posts.length, 1);
+    assert.deepEqual(posts[0], { category: "q", answer: draft.replaceAll("\n", "\r\n"), disclosure: "on" });
+    await call({ session, action: "navigate", url: url + "/history" });
+    assert.match(JSON.stringify(await call({ session, action: "snapshot" })), /Pending moderation/);
+    await call({ session, action: "navigate", url: url + "/entry/1" });
+    const receipt = await call({ session, action: "verify", selector: "#submitted", text: posts[0].answer });
+    assert.equal(receipt.details.verification.matches, true);
+    assert.equal(posts.length, 1, "reconciliation must not resubmit");
+    await call({ session, action: "close" });
+    await assert.rejects(call({ session, action: "renew" }), /Unknown or foreign/);
+    assert.equal((await call({ action: "list" })).details.sessions.length, 0);
+  } finally {
+    await events.session_shutdown();
+    for (const res of pending) res.destroy();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test("diagnostic buffers bound memory, paginate without repeats, expose gaps, and minimize sensitive values", async () => {
   const { createBrowserEvents, diagnosticText, browserFailure } = await load(
     "scripts/browser-diagnostics.mjs",

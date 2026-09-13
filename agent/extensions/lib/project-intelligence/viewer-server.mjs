@@ -15,7 +15,7 @@ const LEASE_TTL_MS = 30_000;
 const IDLE_GRACE_MS = 90_000;
 const VIEWER_TTL_MS = 35_000;
 const POLL_INTERVAL_MS = 2_500;
-const SERVER_VERSION = "project-intelligence-viewer/1";
+const SERVER_VERSION = "project-intelligence-viewer/2";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(ROOT, "viewer-assets");
@@ -97,66 +97,6 @@ function typeCounts(nodes = []) {
 	return result;
 }
 
-function hashString(value) {
-	let hash = 2166136261;
-	for (let index = 0; index < value.length; index += 1) {
-		hash ^= value.charCodeAt(index);
-		hash = Math.imul(hash, 16777619);
-	}
-	return hash >>> 0;
-}
-
-function fallbackSimplify(snapshot, options = {}) {
-	const allNodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
-	const allEdges = Array.isArray(snapshot?.edges) ? snapshot.edges : [];
-	const limit = clampInt(options.limit, MIN_LIMIT, DEFAULT_LIMIT, DEFAULT_LIMIT);
-	const query = String(options.query ?? "").trim().toLowerCase();
-	const requestedTypes = new Set(Array.isArray(options.types) ? options.types : []);
-	const keepProject = !requestedTypes.has("__none__");
-	const ranked = allNodes
-		.filter((node) => !requestedTypes.size || requestedTypes.has(node.type) || (keepProject && node.type === "project"))
-		.map((node, index) => {
-			const label = String(node.label ?? node.id ?? "");
-			const haystack = `${label} ${node.type ?? ""} ${node.id ?? ""}`.toLowerCase();
-			const score = query ? (haystack === query ? 0 : haystack.startsWith(query) ? 1 : haystack.includes(query) ? 2 : 3) : 0;
-			return { node, index, score };
-		})
-		.filter(({ score }) => !query || score < 3)
-		.sort((left, right) => left.score - right.score || String(left.node.id).localeCompare(String(right.node.id)) || left.index - right.index);
-	const project = ranked.find(({ node }) => node.type === "project")?.node ?? allNodes.find((node) => node.type === "project");
-	const selected = ranked.slice(0, Math.max(0, limit - (project ? 1 : 0))).map(({ node }) => node);
-	const selectedIds = new Set(selected.map((node) => node.id));
-	if (project) selectedIds.add(project.id);
-	const nodes = [...selected];
-	if (project && !nodes.some((node) => node.id === project.id)) nodes.unshift(project);
-	const hiddenByType = {};
-	for (const node of allNodes) {
-		if (!selectedIds.has(node.id)) hiddenByType[node.type ?? "other"] = (hiddenByType[node.type ?? "other"] ?? 0) + 1;
-	}
-	const aggregateNodes = [];
-	for (const [type, count] of Object.entries(hiddenByType).sort(([a], [b]) => a.localeCompare(b))) {
-		if (!count || nodes.length + aggregateNodes.length >= limit) continue;
-		aggregateNodes.push({ id: `aggregate:${type}`, type, label: `${type} · ${count} hidden`, aggregate: true, hiddenCount: count, status: "inferred", confidence: 0.5 });
-	}
-	nodes.push(...aggregateNodes);
-	const visibleIds = new Set(nodes.map((node) => node.id));
-	const edges = allEdges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target));
-	for (const aggregate of aggregateNodes) {
-		if (project) edges.push({ id: `aggregate-edge:${aggregate.type}`, source: project.id, target: aggregate.id, type: "contains", status: "inferred", confidence: 0.5, aggregate: true });
-	}
-	return {
-		revision: snapshot?.revision ?? 0,
-		project: snapshot?.project ?? project,
-		nodes,
-		edges,
-		facts: [],
-		health: snapshot?.health ?? {},
-		activity: snapshot?.activity ?? [],
-		counts: { totalNodes: allNodes.length, shownNodes: nodes.filter((node) => !node.aggregate).length, totalEdges: allEdges.length, shownEdges: edges.length, hiddenNodes: Math.max(0, allNodes.length - selectedIds.size), byType: typeCounts(allNodes), aggregated: aggregateNodes.map((node) => ({ type: node.type, count: node.hiddenCount })) },
-		clusters: Object.keys(hiddenByType).sort(),
-	};
-}
-
 function normalizeGraph(graph, snapshot, identity, options = {}) {
 	const result = graph && typeof graph === "object" ? graph : {};
 	const sourceNodes = Array.isArray(result.nodes) ? result.nodes : [];
@@ -170,6 +110,7 @@ function normalizeGraph(graph, snapshot, identity, options = {}) {
 		// transport model so the UI can style and expand the group correctly.
 			type: node.aggregate === true && safeSlug(node.aggregateFor) ? node.aggregateFor : safeSlug(node.type) ? node.type : "other",
 			label: asBoundedString(node.label ?? node.id, 260, node.id),
+			key: asBoundedString(node.key, 512),
 			status: asBoundedString(node.status, 40),
 			confidence: typeof node.confidence === "number" ? Math.max(0, Math.min(1, node.confidence)) : undefined,
 			aggregate: node.aggregate === true || String(node.id).startsWith("aggregate:"),
@@ -190,6 +131,7 @@ function normalizeGraph(graph, snapshot, identity, options = {}) {
 			status: asBoundedString(edge.status, 40),
 			confidence: typeof edge.confidence === "number" ? Math.max(0, Math.min(1, edge.confidence)) : undefined,
 			aggregate: edge.aggregate === true || edge.aggregated === true,
+			count: Number.isInteger(edge.count) ? edge.count : undefined,
 		}));
 	const counts = result.counts && typeof result.counts === "object" ? { ...result.counts } : {};
 	const allSnapshotNodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
@@ -198,7 +140,9 @@ function normalizeGraph(graph, snapshot, identity, options = {}) {
 	counts.totalEdges = Number.isFinite(counts.totalEdges) ? counts.totalEdges : Array.isArray(snapshot?.edges) ? snapshot.edges.length : edges.length;
 	counts.shownEdges = Number.isFinite(counts.shownEdges) ? counts.shownEdges : edges.length;
 	counts.hiddenNodes = Math.max(0, counts.totalNodes - counts.shownNodes);
-	counts.byType = counts.byType && typeof counts.byType === "object" ? counts.byType : typeCounts(allSnapshotNodes.length ? allSnapshotNodes : nodes);
+	counts.byType = typeCounts(allSnapshotNodes);
+	counts.byRelation = {};
+	for (const edge of snapshot.edges ?? []) counts.byRelation[edge.type] = (counts.byRelation[edge.type] ?? 0) + 1;
 	counts.aggregated = Array.isArray(counts.aggregated) ? counts.aggregated : nodes.filter((node) => node.aggregate).map((node) => ({ type: node.type, count: node.hiddenCount ?? 0 }));
 	return {
 		revision: Number.isFinite(result.revision) ? result.revision : snapshot?.revision ?? 0,
@@ -209,6 +153,7 @@ function normalizeGraph(graph, snapshot, identity, options = {}) {
 		health: result.health ?? snapshot?.health ?? {},
 		activity: Array.isArray(result.activity) ? result.activity.slice(0, 100) : Array.isArray(snapshot?.activity) ? snapshot.activity.slice(0, 100) : [],
 		counts,
+		page: result.page,
 		clusters: Array.isArray(result.clusters) ? result.clusters.slice(0, 100) : [],
 	};
 }
@@ -287,7 +232,8 @@ function parseOptions(url, identity) {
 	return {
 		query: asBoundedString(url.searchParams.get("query"), MAX_QUERY_CHARS),
 		focus: focus && safeNodeId(focus) ? focus : undefined,
-		direction: ["both", "upstream", "downstream"].includes(url.searchParams.get("direction")) ? url.searchParams.get("direction") : "both",
+		direction: ({ upstream: "outgoing", downstream: "incoming", incoming: "incoming", outgoing: "outgoing", both: "both" })[url.searchParams.get("direction")] || "both",
+		offset: clampInt(url.searchParams.get("offset"), 0, 2_000_000, 0),
 		hops: clampInt(url.searchParams.get("hops"), 0, 4, 1),
 		limit: clampInt(url.searchParams.get("limit"), MIN_LIMIT, DEFAULT_LIMIT, DEFAULT_LIMIT),
 		types: types?.includes("__none__") ? ["__none__"] : types?.filter(safeSlug),
@@ -297,29 +243,12 @@ function parseOptions(url, identity) {
 	};
 }
 
-function edgeMatchesDirection(edge, focus, direction) {
-	if (!focus || direction === "both") return true;
-	return direction === "upstream" ? edge.target === focus : edge.source === focus;
-}
-
-function filterDirection(graph, options) {
-	if (!options.focus || options.direction === "both") return graph;
-	const focusedEdges = graph.edges.filter((edge) => edge.source === options.focus || edge.target === options.focus);
-	const keptEdges = focusedEdges.filter((edge) => edgeMatchesDirection(edge, options.focus, options.direction));
-	const keep = new Set([options.focus]);
-	for (const edge of keptEdges) {
-		keep.add(edge.source);
-		keep.add(edge.target);
-	}
-	return { ...graph, nodes: graph.nodes.filter((node) => keep.has(node.id) || node.type === "project"), edges: keptEdges };
-}
-
 function sanitizeHistory(history) {
 	if (!Array.isArray(history)) return [];
 	return history.slice(0, 50).map((item) => {
 		if (!item || typeof item !== "object") return { label: String(item).slice(0, 240) };
 		const safe = {};
-		for (const key of ["id", "kind", "type", "event", "label", "subject", "predicate", "object", "revision", "createdAt", "observedAt", "sourceId", "scope"]) {
+		for (const key of ["id", "kind", "type", "event", "label", "subject", "predicate", "object", "revision", "createdAt", "observedAt", "sourceId", "scope", "at", "fromVersion", "toVersion"]) {
 			if (item[key] === undefined) continue;
 			safe[key] = typeof item[key] === "string" ? item[key].slice(0, 500) : item[key];
 		}
@@ -333,6 +262,7 @@ function sanitizeNode(node) {
 		id: asBoundedString(node.id, MAX_ID_CHARS),
 		type: safeSlug(node.type) ? node.type : "other",
 		label: asBoundedString(node.label ?? node.id, 600),
+		key: asBoundedString(node.key, 512),
 		status: asBoundedString(node.status, 80),
 		confidence: typeof node.confidence === "number" ? Math.max(0, Math.min(1, node.confidence)) : undefined,
 		provenance: Array.isArray(node.provenance) ? node.provenance.slice(0, 50).map((entry) => sanitizeProvenance(entry)) : [],
@@ -348,6 +278,9 @@ function sanitizeProvenance(entry) {
 		locator: asBoundedString(entry.locator, 800),
 		observedAt: asBoundedString(entry.observedAt, 80),
 		version: Number.isFinite(entry.version) ? entry.version : undefined,
+		active: entry.active !== false,
+		stale: entry.stale === true,
+		expiresAt: entry.expiresAt,
 	};
 }
 
@@ -355,6 +288,7 @@ function safeFact(fact) {
 	if (!fact || typeof fact !== "object") return null;
 	return {
 		subject: asBoundedString(fact.subject, MAX_ID_CHARS),
+		conflict: fact.conflict === true,
 		predicate: asBoundedString(fact.predicate, 160),
 		object: asBoundedString(fact.object, 1_000),
 		status: asBoundedString(fact.status, 80),
@@ -409,32 +343,37 @@ async function runServer(args) {
 
 	async function currentSnapshot(options = {}) {
 		const snapshot = store.snapshot({ scope: options.scope, includeInactive: options.includeInactive === true });
-		let graph;
-		try {
-			graph = typeof simplifyGraph === "function" ? simplifyGraph(snapshot, {
+		const graph = simplifyGraph(snapshot, {
 				limit: options.limit,
+				offset: options.offset,
+				direction: options.direction,
+				hops: options.hops,
+				includeInactive: options.includeInactive,
 				focus: options.focus,
 				types: options.types,
 				relations: options.relations,
 				query: options.query,
 				scope: options.scope,
-			}) : fallbackSimplify(snapshot, options);
-		} catch (graphError) {
-			graph = fallbackSimplify(snapshot, options);
-		}
-		return filterDirection(normalizeGraph(graph, snapshot, identity, options), options);
+		});
+		return { ...normalizeGraph(graph, snapshot, identity, options),
+			project: { ...snapshot.project, ...projectForResponse(identity) },
+			discovery: store.getMeta?.(`discovery-stats:${identity.checkoutId}`) ?? null };
 	}
 
 	async function nodeDetails(nodeId, options = {}) {
 		const snapshot = store.snapshot({ scope: options.scope, includeInactive: options.includeInactive === true });
 		const rawNode = Array.isArray(snapshot.nodes) ? snapshot.nodes.find((node) => node.id === nodeId) : undefined;
-		const edges = Array.isArray(snapshot.edges) ? snapshot.edges.filter((edge) => edge.source === nodeId || edge.target === nodeId).slice(0, 400) : [];
-		const facts = Array.isArray(snapshot.facts) ? snapshot.facts.filter((fact) => fact.subject === nodeId).slice(0, 400) : [];
+		const allEdges = (snapshot.edges ?? []).filter(edge => edge.source === nodeId || edge.target === nodeId);
+		const edges = allEdges.slice(0, 400);
+		const allFacts = (snapshot.facts ?? []).filter(fact => fact.subject === nodeId);
+		const facts = allFacts.slice(0, 400);
+		const nodeById = new Map(snapshot.nodes.map(node => [node.id, node]));
 		// The store's compact node rows intentionally omit provenance. Reconstruct
 		// the node evidence from the incident claims for the inspector while
 		// retaining the complete provenance entries on those claims.
-		const provenance = [];
-		const provenanceKeys = new Set();
+		const declarations = store.nodeSources(nodeId, options.scope).filter(source => options.includeInactive || source.active && !source.stale && (!source.expiresAt || Date.parse(source.expiresAt) > Date.now()));
+		const provenance = declarations.map(source => sanitizeProvenance({ ...source, sourceId: source.id }));
+		const provenanceKeys = new Set(provenance.map(source => `${source.sourceId}\u0000${source.version}\u0000${source.locator}`));
 		for (const item of [...edges, ...facts]) {
 			for (const entry of Array.isArray(item?.provenance) ? item.provenance : []) {
 				const safe = sanitizeProvenance(entry);
@@ -448,11 +387,13 @@ async function runServer(args) {
 			if (provenance.length >= 50) break;
 		}
 		let history = [];
-		try { history = sanitizeHistory(store.history?.({ limit: 20 }) ?? []); } catch {}
+		try { history = sanitizeHistory(store.history?.({ limit: 20, scope: options.scope, sourceIds: [...provenanceKeys].map(key => key.split("\u0000")[0]) }) ?? []); } catch {}
 		return {
 			revision: snapshot.revision ?? store.revision?.() ?? 0,
 			node: sanitizeNode(rawNode ? { ...rawNode, provenance } : rawNode),
-			edges: edges.map((edge) => ({ id: asBoundedString(edge.id, MAX_ID_CHARS), source: edge.source, target: edge.target, type: asBoundedString(edge.type, 120), status: asBoundedString(edge.status, 80), confidence: typeof edge.confidence === "number" ? Math.max(0, Math.min(1, edge.confidence)) : undefined, provenance: Array.isArray(edge.provenance) ? edge.provenance.slice(0, 20).map(sanitizeProvenance) : [] })),
+			counts: { edges: allEdges.length, facts: allFacts.length },
+			truncated: allEdges.length > edges.length || allFacts.length > facts.length,
+			edges: edges.map((edge) => ({ id: asBoundedString(edge.id, MAX_ID_CHARS), source: edge.source, target: edge.target, sourceLabel: nodeById.get(edge.source)?.label ?? edge.source, targetLabel: nodeById.get(edge.target)?.label ?? edge.target, type: asBoundedString(edge.type, 120), status: asBoundedString(edge.status, 80), confidence: typeof edge.confidence === "number" ? Math.max(0, Math.min(1, edge.confidence)) : undefined, provenance: Array.isArray(edge.provenance) ? edge.provenance.slice(0, 20).map(sanitizeProvenance) : [] })),
 			facts: facts.map(safeFact).filter(Boolean),
 			health: snapshot.health ?? {},
 			activity: Array.isArray(snapshot.activity) ? snapshot.activity.slice(0, 100) : [],
@@ -526,7 +467,7 @@ async function runServer(args) {
 		}
 		if (req.method === "GET" && url.pathname === "/api/history") {
 			const limit = clampInt(url.searchParams.get("limit"), 1, 50, 20);
-			json(res, 200, { revision: store.revision?.() ?? 0, history: sanitizeHistory(store.history?.({ limit }) ?? []) });
+			json(res, 200, { revision: store.revision?.() ?? 0, history: sanitizeHistory(store.history?.({ limit, scope: identity.checkoutId }) ?? []) });
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/focus") {
@@ -637,7 +578,6 @@ export {
 	IDLE_GRACE_MS,
 	MAX_BODY_BYTES,
 	MAX_QUERY_CHARS,
-	fallbackSimplify,
 	normalizeGraph,
 	parseArgs,
 	parseOptions,

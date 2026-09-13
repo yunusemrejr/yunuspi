@@ -1,6 +1,7 @@
 {
   "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file — retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (only pi CORE receives third-party updates). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
   "extensions": [
+    "media-tools.ts",
     "last-model.ts",
     "checkpoints.ts",
     "siblings.ts",
@@ -26,10 +27,12 @@
     "bulk-edit.ts",
     "sys-probe.ts",
     "session-hooks.ts",
-    "sandbox.ts",
-    "project-intelligence.ts"
+    "project-intelligence.ts",
+    "sandbox.ts"
   ],
   "lib": [
+    "media-process.ts",
+    "music-score.ts",
     "stall-core.ts",
     "output-distiller.ts",
     "smol-extraction.ts",
@@ -46,6 +49,7 @@
     "continuation-notice.ts",
     "code-guidance-signals.ts",
     "quality-review-signals.ts",
+    "quality-review.ts",
     "slop-guidance-signals.ts",
     "compact-tool-json.ts",
     "local-models.ts",
@@ -74,6 +78,7 @@
     "session-hooks.ts",
     "session-diagnostics.ts",
     "session-audit.ts",
+    "project-tests.ts",
     "browser-session.ts"
   ],
   "forks": {
@@ -349,6 +354,9 @@
   "supportFiles": [
     "scripts/render-capture.mjs",
     "scripts/render-page-state.mjs",
+    "scripts/browser-session-runner.mjs",
+    "scripts/browser-session-lease.mjs",
+    "scripts/browser-diagnostics.mjs",
     "scripts/workspace-facts.mjs",
     "scripts/wait-condition.mjs",
     "extensions/pi-memory/priming.ts",
@@ -373,7 +381,6 @@
     "extensions/pi-subagents/src/shared/progress-evidence.ts",
     "extensions/pi-subagents/src/runs/shared/common-task.ts",
     "extensions/pi-subagents/src/runs/shared/file-verification.ts",
-    "scripts/sandbox-runner.py",
     "extensions/lib/project-intelligence/client.mjs",
     "extensions/lib/project-intelligence/continuity.mjs",
     "extensions/lib/project-intelligence/discovery-parsers.mjs",
@@ -386,6 +393,22 @@
     "extensions/lib/project-intelligence/viewer.mjs",
     "extensions/lib/project-intelligence/worker.mjs",
     "extensions/lib/project-intelligence/viewer-assets/app.js",
-    "extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js"
+    "extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js",
+    "scripts/sandbox-runner.py",
+    "scripts/core-update.mjs",
+    "scripts/pi-launch.sh",
+    "scripts/auto-update.sh",
+    "scripts/lib/core-compatibility.mjs",
+    "scripts/compatibility/harness-load-test.mjs",
+    "scripts/compatibility/retry-lifecycle-test.mjs",
+    "scripts/compatibility/summary-recovery-test.mjs",
+    "scripts/compatibility/automatic-compaction-test.mjs",
+    "scripts/compatibility/hook-lifecycle-integrity-test.mjs",
+    "scripts/compatibility/tool-integrity-test.mjs",
+    "scripts/compatibility/skill-pack-routing-test.mjs",
+    "scripts/compatibility/reasoning-aids-loader-test.mjs",
+    "scripts/compatibility/session-recovery-guidance-test.mjs",
+    "scripts/compatibility/autonomous-recovery-test.mjs",
+    "scripts/compatibility/atomic-edit-preflight-test.mjs"
   ]
 }

@@ -2,7 +2,7 @@
 
 Never initialize Git in the live `~/.pi` directory. Never publish a private backup ZIP or session HTML/JSON export: restore backups contain credentials; session exports can contain personal prose.
 
-The public exporter reads only reusable extensions, skills, runtime scripts and dependency manifests. It excludes live settings/authentication, provider caches, histories, memories, logs, sessions, experiments, private benchmark fixtures, backups, node_modules, model weights and environments. It substitutes the source fallback credential with an environment lookup and normalizes personal home-path examples. The working local installation is not modified.
+The public exporter reads only reusable extensions, skills, runtime scripts, explicitly listed synthetic core compatibility checks and dependency manifests. It excludes live settings/authentication, provider caches, histories, memories, logs, sessions, experiments, private benchmark fixtures, backups, node_modules, model weights and environments. It substitutes the source fallback credential with an environment lookup and normalizes personal home-path examples. The working local installation is not modified.
 
 ## Export changes
 

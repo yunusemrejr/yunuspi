@@ -38,6 +38,9 @@ node ~/.pi/agent/scripts/verify-harness.mjs
 
 Read the results and resolve every failure before using Pi. The harness's patch modules are version-sensitive: keep core 0.85.1 until a later version has been validated with this harness. Do not silently continue after failed patch checks, or run an unattended global update. The public installation must not rely on the original author's credentials, machine paths or systemd units.
 
+Successful repair also installs the maintained CLI launcher. Subsequent core
+updates use its isolated compatibility gate; see [core updates and recovery](CORE-UPDATES.md).
+
 The installer itself does not patch an unrelated globally installed core or run a model request. Core verification and repair are separate steps because they modify installed application code. The first verification command modifies the installed core; the second checks the resulting installation.
 
 ## Bring your own credentials

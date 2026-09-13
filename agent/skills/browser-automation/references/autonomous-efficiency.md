@@ -8,6 +8,10 @@ Read a compact page summary first, then the relevant landmark, form, row or dial
 
 Track a small state receipt: `{tab, url, goal, last_verified_step, observed_result, pending_action, evidence}`. Keep identifiers and relevant excerpts, not cookies, authorization headers or full page content. Refresh the receipt after navigation, dialog transitions or mutations; it is historical evidence, not authority to reuse stale element references. Give a successor the receipt and evidence locations, then reacquire current state.
 
+For multi-venue questions, answers, comments, resource entries and marketing, load community-promotion and keep per-venue submission state in the existing todo plan. Preserve niche-site/domain exclusions and task authorization through resumptions. Save `submitting` before external writes; after a restart reconcile those entries as uncertain before doing any more submissions to the same destination.
+
+The installed `browser_session` returns a renewable lease receipt. Check remaining time/actions and call `renew` before expiry to retain this agent-owned page/profile; renewal takes a fresh observation without replaying actions. The browser remains temporary, and close, cancellation, expiry or process restart discards it. Save durable progress in todo, not only in a browser or background job handle. `select` uses an inspected option label, `check` sets a boolean, and `verify` compares supplied draft text without returning field values; inspect its `matches` result separately from tool success.
+
 ## Bound retries and concurrency
 
 Select semantic targets from observed page evidence. [Playwright locators](https://playwright.dev/docs/locators) can re-resolve targets; other tools may require a new snapshot. Wait for the intended condition with the available tool's timeout. [Actionability checks](https://playwright.dev/docs/actionability) help distinguish a ready control from one obscured or disabled; forcing a click is not a recovery strategy.

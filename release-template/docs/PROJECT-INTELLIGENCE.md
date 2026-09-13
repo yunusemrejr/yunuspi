@@ -17,6 +17,8 @@ The `project_intel` tool supports:
 | --- | --- |
 | `query` | Relevant architecture, dependencies, configuration and durable history |
 | `impact` | Incoming consumers/dependents around an entity before changes |
+| `inspect` | Entity evidence by exact key/ID, or source claims and the current source version |
+| `update` | Replace an agent record using its source ID and observed version |
 | `record` | A concise durable decision, constraint, finding or relationship |
 | `retract` | Withdraw an observed agent record using its source ID and version |
 | `refresh` | Refresh evidence, including Git and configuration changes |
@@ -27,9 +29,19 @@ Example queries:
 
 ```json
 {"action":"query","query":"authentication deployment"}
-{"action":"impact","query":"src/api.ts"}
+{"action":"impact","focus":"src/api.ts","hops":2,"relations":["imports"]}
 {"action":"query","query":"production","allScopes":true}
 ```
+
+Use `focus` for an exact entity ID, stable key or label. An unknown focus or
+unmatched search returns an empty result. `direction: "incoming"` follows
+consumers; `outgoing` follows dependencies, following the actual relation arrows.
+`hops` (0–6), `types`, `relations`, `limit` (1–40), and `maxChars` (400–6,000)
+bound retrieval. Returned nodes carry their distance from the matched roots.
+A bounded result marks omitted evidence; unrelated project data is not treated
+as omitted search results. `includeInactive` includes retained stale or expired
+evidence. Retracted claims leave the graph; inspect their source and history for
+the withdrawal receipt.
 
 An agent can add information that files do not adequately express:
 
@@ -49,7 +61,22 @@ An agent can add information that files do not adequately express:
 
 The quote must actually occur in the bounded, non-secret project file. Agent
 records cannot declare themselves verified. Use the returned source ID/version
-to revise or retract a record; stale writers receive `STALE_SOURCE`. Separate
+to inspect, revise or retract a record; stale writers receive `STALE_SOURCE`.
+
+```json
+{"action":"inspect","sourceId":"agent:<session>:login-compatibility"}
+{"action":"update","sourceId":"agent:<session>:login-compatibility","expectedVersion":1,"fact":{"entity":{"type":"constraint","key":"login-compatibility"},"description":"Preserve the documented v1 response until mobile clients migrate.","status":"inferred"}}
+{"action":"history","sourceId":"agent:<session>:login-compatibility"}
+```
+
+Read the returned `source.version` instead of assuming the example version. An
+update supplies the complete replacement fact. Source inspection includes stable
+entity keys, owned claims, scope, activity and version, with bounded output and
+counts when truncated. File/Git evidence is corrected at its source, then
+refreshed; `refresh` accepts `paths` for incremental work. Recorded file evidence
+includes its line and content fingerprint. Corrections are scoped to the current
+checkout or shared evidence; `allScopes` permits inspection of other checkouts.
+ Separate
 sessions can provide complementary evidence, or expose a disagreement.
 Project peers may deliberately revise or retract another session's agent record
 using its explicit source ID and observed version. Session provenance identifies
@@ -159,11 +186,22 @@ initial map. Always inspect provenance and verify consequential changes.
 ## Live viewer
 
 The viewer uses bundled Cytoscape.js and a detached local Node process. It
-supports pan/zoom, dragging, type/relation filters, search, incoming/outgoing
-relationships, focus, cluster expansion, details, evidence and recent activity.
+supports a labeled map and a keyboard-accessible entity list. Choose a category,
+relationship or hierarchy layout. Search includes literal facts and keeps empty
+results explicit. Category and relation filters remain available after filtering.
+Focus an entity, choose direction and 1–4 hops, follow named relationships in the
+inspector, then use Back to return. Category and search pages expose further
+matches beyond the rendering limit. The inspector shows claims, contradictions,
+source versions and source-specific history. Copy an agent impact query or export
+the current view as JSON. Evidence health reports partial coverage and stale data.
+The panel adapts to narrow windows and honors reduced motion.
 Large graphs are simplified to a bounded view with aggregate nodes and counts;
 the full internal model remains searchable. Updates reconcile elements while
-retaining node positions.
+retaining node positions, zoom, selection and updated inspector evidence. A page
+reload in the same viewer restores the arrangement and filters. Local storage
+belongs to the server's browser origin; a new server port starts a fresh browser
+view. A delayed poll cannot overwrite a newer search. Failed connections can
+recover even when the graph revision is unchanged.
 
 The server binds only to `127.0.0.1` on an ephemeral port. A random capability
 stays in the URL fragment and private state file. Requests require authorization;
@@ -171,7 +209,8 @@ cross-origin access is rejected, assets are local, and the viewer exposes no
 shell or arbitrary-file API. Treat its URL as private project access.
 
 Closing the window does not stop discovery or the terminal session. Repeated
-`/graph` calls reconnect to the project viewer. Browser focus may be restricted
+`/graph` calls reconnect to the current checkout’s viewer. Worktrees share the
+project store while keeping their viewer scope and browser preferences separate. Browser focus may be restricted
 by the desktop/window manager. An unavailable browser produces a launch error
 with a manual local URL. In a headless environment, use `project_intel` directly.
 
@@ -187,8 +226,30 @@ multi-session worker, real SDK and browser suites. They cover first/returning
 discovery, source and Git changes, conflicts, stale/removal behavior, concurrent
 CAS, worktrees, private evidence, interrupted transactions, worker crashes,
 session shutdown, child contributions, viewer reconnection/live updates and
-3,000-entity simplification. All fixtures are local; no inference is required.
+3,000-entity simplification, exact and empty searches, directed multi-hop traversal,
+versioned corrections, persistent filters, source inspection/history, live details,
+response races, retry recovery and narrow layouts. All fixtures are local; no inference is required.
 
 The public distribution includes portable SQLite/discovery/worker/viewer-server
 tests in `tests/project-intelligence.test.mjs`. Browser visual acceptance is
 performed against the installed harness's Playwright runtime.
+
+## Quality review context
+
+When automatic quality checkpoints are installed, they can query the existing
+project worker for bounded architecture evidence and outcomes from earlier
+sessions in the same checkout. The adapter starts no extra worker or model call.
+Unavailable or incomplete graph evidence stays explicit.
+
+The history stores only the review aspect, outcome, whether a defect was found,
+observation time and a hashed session identifier. It excludes the current
+session from returned statistics, retains at most 60 records from the last
+90 days, and supplies at most 20 earlier records. A later pass preserves the
+fact that the session initially found a defect. Source contents, review prose
+and raw session identifiers are not stored in these statistics.
+
+Prior outcomes guide reviewer attention. They do not lower acceptance standards,
+turn an unknown result into a pass, or grant additional review rounds. A session
+switch or cancellation invalidates outstanding adapter results; writes remain
+bound to the worker and checkout that accepted them. The quality checkpoint
+owns reviewer selection, repair limits and final parent assessment separately.

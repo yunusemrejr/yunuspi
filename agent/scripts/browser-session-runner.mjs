@@ -1,11 +1,13 @@
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import { inspectPageState } from "./render-page-state.mjs";
+import { createBrowserLease } from "./browser-session-lease.mjs";
 import {
   browserFailure,
   createBrowserEvents,
   diagnosticText,
   inspectBrowserElement,
+  verifyBrowserText,
   safeBrowserUrl,
 } from "./browser-diagnostics.mjs";
 export { safeBrowserUrl } from "./browser-diagnostics.mjs";
@@ -29,8 +31,8 @@ export async function runBrowserSession(input, output) {
     context,
     page,
     closing = false,
-    count = 0,
     requestId = 0;
+  const lease = createBrowserLease();
   const logs = createBrowserEvents(),
     network = createBrowserEvents();
   const requests = new WeakMap();
@@ -40,10 +42,15 @@ export async function runBrowserSession(input, output) {
     closing = true;
     await browser?.close().catch(() => {});
   };
-  const lifetime = setTimeout(() => {
-    close().finally(() => process.exit(0));
-  }, 10 * 60_000);
-  lifetime.unref();
+  let lifetime;
+  const armExpiry = () => {
+    clearTimeout(lifetime);
+    lifetime = setTimeout(() => {
+      close().finally(() => process.exit(0));
+    }, lease.receipt().remainingMs);
+    lifetime.unref();
+  };
+  armExpiry();
   const terminate = () => close().finally(() => process.exit(0));
   process.on("SIGTERM", terminate);
   const lines = createInterface({ input, crlfDelay: Infinity });
@@ -58,10 +65,7 @@ export async function runBrowserSession(input, output) {
         id = request.id;
         ({ action } = request);
         const p = request;
-        if (++count > 200)
-          throw Error(
-            "Browser session action limit reached; close and open a new session",
-          );
+        lease.consume(action);
         const timeout = p.timeoutMs ?? 5000;
         if (!Number.isInteger(timeout) || timeout < 100 || timeout > 15000)
           throw Error("Invalid timeoutMs: use 100–15000");
@@ -222,6 +226,25 @@ export async function runBrowserSession(input, output) {
             throw Error("Invalid key");
           await locate().press(p.key, { timeout });
           record("press");
+        } else if (action === "select") {
+          if (typeof p.option !== "string" || p.option.length > 256)
+            throw Error("select requires an observed option label, at most 256 characters");
+          await locate().evaluate((element, label) => {
+            if (element.tagName !== "SELECT") throw Error("select requires a native select control");
+            const options = Array.from(element.options).filter(option => option.label === label);
+            if (options.length !== 1) throw Error("select requires one unique option label; inspect the control");
+            if (options[0].disabled || options[0].closest("optgroup[disabled]")) throw Error("Selected option is disabled");
+          }, p.option, { timeout });
+          await locate().selectOption({ label: p.option }, { timeout });
+          record("select");
+        } else if (action === "check") {
+          if (typeof p.checked !== "boolean") throw Error("check requires a boolean checked state");
+          await locate().setChecked(p.checked, { timeout });
+          record("check");
+        } else if (action === "verify") {
+          if (typeof p.text !== "string" || p.text.length > 8000)
+            throw Error("verify requires text of at most 8000 characters");
+          result = { verification: await locate().evaluate(verifyBrowserText, { text: p.text }, { timeout }) };
         } else if (action === "wait") {
           if (
             !["attached", "detached", "visible", "hidden"].includes(
@@ -263,7 +286,7 @@ export async function runBrowserSession(input, output) {
           if (png.length > 1_100_000)
             throw Error("Screenshot exceeds attachment limit");
           result = { png: png.toString("base64"), mimeType: "image/png" };
-        } else if (action !== "snapshot")
+        } else if (!["snapshot", "renew"].includes(action))
           throw Error("Unsupported browser action");
         if (!result) {
           stage = "observation";
@@ -285,11 +308,17 @@ export async function runBrowserSession(input, output) {
               })),
           };
         }
+        if (action === "renew") {
+          // Renew only after a successful observation, without navigation or replay.
+          lease.renew();
+          armExpiry();
+        }
         result = {
           ok: true,
           url: safeBrowserUrl(page.url()),
           diagnostics: { logs: logs.summary(), network: network.summary() },
           untrusted: true,
+          lease: lease.receipt(),
           ...result,
         };
         output.write(JSON.stringify({ id, result }) + "\n");
@@ -297,7 +326,7 @@ export async function runBrowserSession(input, output) {
         const failure = browserFailure(error, stage, action);
         if (
           stage === "observation" &&
-          ["click", "fill", "press"].includes(action)
+          ["click", "fill", "press", "select", "check"].includes(action)
         )
           failure.outcome = "action completed; subsequent observation failed";
         record("action-error", { failure });
@@ -309,6 +338,7 @@ export async function runBrowserSession(input, output) {
               failure,
               url: page ? safeBrowserUrl(page.url()) : undefined,
               untrusted: true,
+              lease: lease.receipt(),
             },
           }) + "\n",
         );

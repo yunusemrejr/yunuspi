@@ -99,7 +99,7 @@ export function browserFailure(error, stage, action) {
                 )
               ? "invalid-request"
               : "action-failed";
-  const mutation = ["click", "fill", "press"].includes(action);
+  const mutation = stage !== "validation" && ["click", "fill", "press", "select", "check"].includes(action);
   return {
     stage,
     kind,
@@ -107,6 +107,8 @@ export function browserFailure(error, stage, action) {
     nextStep:
       kind === "unreachable"
         ? "Check the server task and HTTP URL before navigating again."
+        : /action limit reached/i.test(text)
+          ? "Inspect current state and renew the lease; no action was dispatched."
         : kind === "closed"
           ? "Open a new session and reconcile any previous mutation."
           : kind === "ambiguous-target"
@@ -115,6 +117,18 @@ export function browserFailure(error, stage, action) {
               ? "Inspect current state and logs before retrying; do not replay a mutation automatically."
               : "Inspect the current URL, target and diagnostics; correct the cause before retrying.",
   };
+}
+
+// Compare only caller-supplied text, without returning existing form values.
+export function verifyBrowserText(element, { text }) {
+  if (!element.getClientRects().length || getComputedStyle(element).visibility !== "visible" || element.closest('[hidden],[inert],[aria-hidden="true"]'))
+    throw Error("verify requires a visible text control or preview");
+  const tag = element.tagName.toLowerCase();
+  if (tag === "input" && !["text", "search", "url", "email", "tel"].includes(element.type))
+    throw Error("Unsupported verification field type");
+  if (["script", "style", "select", "option"].includes(tag)) throw Error("Unsupported verification target");
+  const value = ["input", "textarea"].includes(tag) ? element.value : element.innerText;
+  return { matches: value === text, comparison: "exact", evidence: "Current field/preview only; not proof of submission or publication" };
 }
 
 // Fixed read-only evaluator. No caller-provided JavaScript, form values or script bodies.
@@ -225,6 +239,10 @@ export function inspectBrowserElement(element, { properties = [] } = {}) {
   };
   return {
     element: summary(element),
+    ...(element.tagName === "SELECT" ? {
+      options: Array.from(element.options).slice(0, 30).map(option => ({ label: option.label.length <= 256 ? option.label : null, labelTruncated: option.label.length > 256, disabled: option.disabled || !!option.closest("optgroup[disabled]") })),
+      optionsTruncated: element.options.length > 30,
+    } : {}),
     bounds,
     visible:
       !!element.getClientRects().length &&

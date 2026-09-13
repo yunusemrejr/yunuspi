@@ -11,7 +11,7 @@ const {routeSkills}=await load('extensions/lib/skill-routing.ts');
 const {buildSkillIndex,rankSkills}=await load('extensions/lib/skill-relevance.ts');
 
 function fixture(names=['python-software-engineering','typescript-contract-engineering']) {
-  const active=['read','edit','write','skill_review','source_check'];
+  const active=['read','edit','write','skill_review','syntax_check'];
   const tools=new Map(),entries=[];
   const g=createRelevantGuidance({getActiveTools:()=>active,registerTool:t=>tools.set(t.name,t),appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
   const ctx={cwd:'/fixture/project',sessionManager:{getBranch:()=>entries}};
@@ -94,8 +94,8 @@ test('review is bounded to four skills and restored sessions forget compacted re
 test('changed config files suggest a single batched source checker using fresh paths',()=>{
   const f=fixture([]);
   for(const file of ['first.toml','second.yaml']) f.g.record({toolName:'write',input:{path:file,content:'key = 1'}});
-  const hint=f.g.candidates().find(h=>h.tool==='source_check');
+  const hint=f.g.candidates().find(h=>h.tool==='syntax_check');
   assert.ok(hint);assert.match(hint.text,/second.yaml/);assert.doesNotMatch(hint.text,/first.toml/);
-  f.g.record({toolName:'source_check',input:{paths:['second.yaml']}});
-  assert.ok(!f.g.candidates().some(h=>h.tool==='source_check'));
+  f.g.record({toolName:'syntax_check',input:{paths:['second.yaml']}});
+  assert.ok(!f.g.candidates().some(h=>h.tool==='syntax_check'));
 });

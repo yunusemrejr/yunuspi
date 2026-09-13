@@ -16,6 +16,7 @@ Hardlinks can alias the same inode through a different path. Native writes compa
 
 Public export is separate from mutation protection. Use the sanitized exporter, review the generated diff, and run the public scanner before publishing. Hooks and CI provide defense in depth; no pattern scanner can identify every confidential sentence. Never publish private backup archives or session histories.
 
+
 ## Shared skill sources
 
 Maintenance protection also covers global skill sources: the active `agent/skills`, `~/.agents/skills`, `~/.codex/skills`, and explicit `skills` paths from the harness's global `agent/settings.json` (for example `~/skills`). The guard captures these paths at trusted module startup. Existing skill symlink entries, their parent links, and their physical referents are included; configured destinations remain protected even before they exist. Changing cwd, clearing environment variables, or launching inside a shared skill directory grants no maintenance authority. Project settings and ordinary project-local `.agents/skills` and `.pi/skills` do not enlarge this global scope.

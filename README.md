@@ -26,12 +26,16 @@ Inspect the installer before applying it. It must not overwrite an existing inst
 - Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
 - Persistent project intelligence with automatic discovery, concurrent session contributions, bounded architecture retrieval and a live `/graph` window; see [project intelligence](docs/PROJECT-INTELLIGENCE.md).
 - Autonomous web search with bounded fallback, plus session activity counters and a `/metrics` panel for tools, agents, skills, hooks and cache usage; see [search and session metrics](docs/SESSION-METRICS.md).
+- [Long browser and community workflows](docs/ISOLATION-AND-WEB.md): niche-site discovery, renewable isolated browser sessions, form controls, draft checks and saved submission/reconciliation guidance for authorized questions, answers and marketing.
+- Local media tools for video frames, audio measurements, bounded editing and editable MIDI/WAV sketches, with skills for motion graphics, video analysis, sound analysis and music composition. FFmpeg/ffprobe and browser-based rendering require the corresponding installed runtimes.
 - Version-specific core patches and structural verification.
 - Launch-scoped harness mutation protection and on-demand self-maintenance, browser, community promotion and organic-growth guidance; see [security boundaries](docs/SECURITY.md).
 
 The optional mini preprocessing model is not bundled with a Python environment, weights or authentication. Its client falls back to raw data when unavailable. Model-specific tests and personal development artifacts are not distribution assets.
 
 Read [session cost accounting](docs/COST-ACCOUNTING.md) for the footer estimate, `/cost` breakdown, provider pricing and coverage limits.
+
+Read [model routing and automatic assistance](docs/MODEL-ROUTING.md) for task quality gates, cached benchmark research, free-model preference and autonomous subagent, swarm and fusion budgets.
 
 ## Privacy and updates
 
@@ -41,7 +45,7 @@ A private `/harness-backup` ZIP intentionally contains credentials for restorati
 
 ## Verification
 
-`node --test tests/*.test.mjs` runs distribution safety and installer tests. Installed harness structural checks are separate from behavioral tests and live provider availability. The public package does not include private session fixtures or historical evaluation corpora. No test count or catalog entry guarantees every model's output quality.
+`npm test` runs distribution safety and installer tests. Test files run serially so process-heavy fixtures do not contend with routing latency checks. Installed harness structural checks are separate from behavioral tests and live provider availability. The public package does not include private session fixtures or historical evaluation corpora. No test count or catalog entry guarantees every model's output quality.
 
 ## License
 

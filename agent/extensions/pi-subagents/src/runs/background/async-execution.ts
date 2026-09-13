@@ -888,7 +888,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			ctx.currentModel,
 			availableModels,
 			a.modelProvider ?? ctx.currentModelProvider,
-			{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
+			{ scope: modelScopes, task: s.task, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
 		);
 		const thinkingOverride = flatIndex === undefined ? undefined : thinkingOverridesByFlatIndex?.[flatIndex];
 		const effectiveThinking = externalRunner ? undefined : thinkingOverride ?? a.thinking;

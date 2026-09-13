@@ -1,5 +1,7 @@
 import {boundedContextLimit,normalizeModelLimits} from "./lib/context-limits.ts";
 import { registerLocalModels } from "./lib/local-models.ts";
+import { refreshModelResearch } from "./pi-subagents/src/runs/shared/model-research.ts";
+import { toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
 /**
  * Live Model Catalog — auto-lists provider models that the native pi.dev
  * catalog does not carry yet.
@@ -1523,14 +1525,16 @@ export default async function registerLiveModels(
 	// to OUR providers (never the pi.dev builtins). Per-provider TTLs guard
 	// the fetches, so frequent boots cost one cached list read, not I/O.
 	let sessionGeneration = 0;
+ let researchController = new AbortController();
 	let lastRouterRefresh = 0;
 	let routerRefreshPending = false;
 	pi.on("session_start", (_event, ctx) => {
+  researchController.abort(); researchController = new AbortController();
 		const generation = ++sessionGeneration;
 		lastRouterRefresh = Date.now();
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: [...REFRESHER_IDS, ...localProviderIds] })
-			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
+			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
 			.catch(() => {});
 		outputLimitStatus(ctx);
 	});
@@ -1543,10 +1547,10 @@ export default async function registerLiveModels(
 		routerRefreshPending = true;
 		const generation = sessionGeneration;
 		void ctx.modelRegistry.refresh({allowNetwork: true, providers: [...REFRESHER_IDS]})
-			.then(() => { if (generation === sessionGeneration) outputLimitStatus(ctx); })
+			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
 			.catch(() => {})
 			.finally(() => { routerRefreshPending = false; });
 	});
 	pi.on("model_select", (_event, ctx) => outputLimitStatus(ctx));
-	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; if (ctx.hasUI) ctx.ui.setStatus("model-output-limit", undefined); });
+	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; researchController.abort(); if (ctx.hasUI) ctx.ui.setStatus("model-output-limit", undefined); });
 }

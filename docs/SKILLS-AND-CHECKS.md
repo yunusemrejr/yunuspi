@@ -41,7 +41,7 @@ system as well. Ordinary lower-confidence suggestions never block work.
 
 ## Batch syntax checks
 
-Call `source_check` with explicit workspace-relative paths:
+Call `syntax_check` with explicit workspace-relative paths:
 
 ```json
 {"paths":["src/handler.ts","scripts/import.py","config/service.yaml"]}
@@ -74,7 +74,7 @@ Missing parsers, unsupported files, unsafe paths and truncated work never yield
 an overall pass. No results are reused across calls; edits require fresh checks.
 
 Post-edit hints suggest batching related paths. Success and failure hooks have
-separate once-per-session receipts. `source_check` is also available within the
+separate once-per-session receipts. `syntax_check` is also available within the
 existing read-only child capability ceiling and tool budgets.
 
 Syntax checks complement language-server types, behavior tests and environment

@@ -36,6 +36,14 @@
     selectedId: "",
     focus: "",
     direction: "both",
+    hops: 1,
+    offset: 0,
+    includeInactive: false,
+    navigation: [],
+    listView: false,
+    detailSerial: 0,
+    loading: false,
+    polling: false,
     query: "",
     typeFilter: null,
     relationFilter: null,
@@ -114,7 +122,7 @@
       const value = JSON.parse(window.localStorage.getItem(state.storageKey) || "{}");
       if (!value || typeof value !== "object") return;
       for (const [id, position] of Object.entries(value)) {
-        if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) state.positions[id] = { x: position.x, y: position.y };
+        if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) { state.positions[id] = { x: position.x, y: position.y }; state.restoredPositions = true; }
       }
     } catch { /* local storage is optional */ }
   }
@@ -125,12 +133,15 @@
     clearTimeout(savePositionsTimer);
     savePositionsTimer = window.setTimeout(() => {
       try {
-        const value = {};
+        const value = Object.fromEntries(Object.entries(state.positions).slice(-2000));
         state.cy.nodes().forEach((node) => {
           const position = node.position();
           if (Number.isFinite(position.x) && Number.isFinite(position.y)) value[node.id()] = { x: Math.round(position.x * 10) / 10, y: Math.round(position.y * 10) / 10 };
         });
         window.localStorage.setItem(state.storageKey, JSON.stringify(value));
+        window.localStorage.setItem(`${state.storageKey}:view`, JSON.stringify({ focus: state.focus, query: state.query, direction: state.direction, hops: state.hops,
+          types: state.typeFilter ? [...state.typeFilter] : null, relations: state.relationFilter ? [...state.relationFilter] : null,
+          includeInactive: state.includeInactive, layout: $("layoutSelect").value, listView: state.listView }));
       } catch { /* local storage is optional */ }
     }, 180);
   }
@@ -176,6 +187,9 @@
     const params = new URLSearchParams();
     params.set("limit", "220");
     params.set("direction", state.direction);
+    params.set("hops", String(state.hops));
+    params.set("offset", String(state.offset));
+    if (state.includeInactive) params.set("includeInactive", "1");
     if (state.query) params.set("query", state.query);
     if (state.focus) params.set("focus", state.focus);
     if (state.typeFilter) params.set("types", state.typeFilter.size ? [...state.typeFilter].join(",") : "__none__");
@@ -193,7 +207,7 @@
         group: "nodes",
         data: {
           id: node.id,
-          label: node.label || node.id,
+          label: node.aggregate ? `${formatCount(node.hiddenCount)} ${node.type}` : node.label || node.id,
           type: node.type || "other",
           status: node.status || "",
           confidence: escapeNumber(node.confidence, 0),
@@ -228,21 +242,23 @@
     return [
       { selector: "node", style: {
         "background-color": "data(color)",
+        "background-opacity": .14,
+        "shape": "round-rectangle",
         "border-color": "data(color)",
         "border-width": 1,
         "color": "#edf2fa",
         "font-family": "Inter, system-ui, sans-serif",
-        "font-size": 10,
+        "font-size": 12,
         "font-weight": 600,
         "label": "data(label)",
-        "min-zoomed-font-size": 7,
+        "min-zoomed-font-size": 0,
         "padding": 4,
         "text-wrap": "ellipsis",
-        "text-max-width": 112,
-        "text-valign": "bottom",
-        "text-margin-y": 8,
-        "width": "mapData(confidence, 0, 1, 20, 34)",
-        "height": "mapData(confidence, 0, 1, 20, 34)",
+        "text-max-width": 140,
+        "text-valign": "center",
+        "text-margin-y": 0,
+        "width": 140,
+        "height": 36,
         "overlay-opacity": 0,
       } },
       { selector: "node[?aggregate]", style: {
@@ -284,12 +300,13 @@
         "label": "",
         "overlay-opacity": 0,
       } },
+      { selector: "edge[status = 'inferred'], edge[status = 'assumed']", style: { "line-style": "dashed" } },
       { selector: "edge[?aggregate]", style: { "line-style": "dashed", "line-color": "#64718a", "target-arrow-color": "#64718a", "opacity": .6 } },
       { selector: ".faded", style: { "opacity": .12 } },
       { selector: "edge.faded", style: { "opacity": .06 } },
       { selector: "node.compact-label", style: { "label": "", "text-opacity": 0 } },
       { selector: ".related", style: { "opacity": 1, "border-width": 2 } },
-      { selector: "edge.related", style: { "line-color": "#9cc2ff", "target-arrow-color": "#9cc2ff", "width": 2.4, "opacity": .95 } },
+      { selector: "edge.related", style: { "line-color": "#9cc2ff", "target-arrow-color": "#9cc2ff", "width": 2.4, "opacity": .95, "label": "data(label)", "font-size": 10, "color": "#cbdcf5", "text-background-color": "#0d1117", "text-background-opacity": .9, "text-background-padding": 3, "text-rotation": "autorotate" } },
       { selector: ".selected-entity", style: { "border-color": "#ffffff", "border-width": 3, "shadow-blur": 12, "shadow-color": "data(color)", "shadow-opacity": .55 } },
     ];
   }
@@ -307,7 +324,7 @@
       const source = edge.data("source");
       const target = edge.data("target");
       const incident = source === state.selectedId || target === state.selectedId;
-      const directed = state.direction === "both" || (state.direction === "upstream" ? target === state.selectedId : source === state.selectedId);
+      const directed = state.direction === "both" || (state.direction === "incoming" ? target === state.selectedId : source === state.selectedId);
       if (incident && directed) {
         keepEdges.push(edge);
         keepNodes.add(source);
@@ -357,8 +374,7 @@
     if (!state.cy) return;
     const zoom = state.cy.zoom();
     state.cy.nodes().forEach((node) => {
-      const keep = node.data("aggregate") || node.data("type") === "project" || zoom >= .62 || node.degree() >= 3;
-      node.toggleClass("compact-label", !keep);
+      node.removeClass("compact-label");
     });
     updateAnchorStyles(zoom);
   }
@@ -366,6 +382,10 @@
   function buildCategoryFilters(graph) {
     const counts = graph?.counts?.byType && typeof graph.counts.byType === "object" ? graph.counts.byType : {};
     const types = Object.entries(counts).filter(([, count]) => Number(count) > 0).sort(([a], [b]) => a.localeCompare(b));
+    const signature = JSON.stringify([types, state.typeFilter && [...state.typeFilter]]);
+    if (categoryFilters.dataset.signature === signature) return;
+    categoryFilters.dataset.signature = signature;
+    const focusedType = categoryFilters.contains(document.activeElement) ? document.activeElement.dataset.type : null;
     categoryFilters.replaceChildren();
     for (const [type, count] of types) {
       const label = document.createElement("label");
@@ -379,6 +399,7 @@
         const selected = new Set([...categoryFilters.querySelectorAll("input[data-type]")].filter((input) => input.checked).map((input) => input.dataset.type));
         if (selected.size === types.length) state.typeFilter = null;
         else state.typeFilter = selected;
+        state.offset = 0;
         loadGraph();
       });
       checkbox.dataset.type = type;
@@ -393,16 +414,16 @@
       countLabel.textContent = formatCount(count);
       label.append(checkbox, swatch, text, countLabel);
       categoryFilters.append(label);
+      if (focusedType === type) checkbox.focus({ preventScroll: true });
     }
   }
 
   function buildRelationFilters(graph) {
-    const counts = new Map();
-    for (const edge of Array.isArray(graph?.edges) ? graph.edges : []) {
-      const type = String(edge?.type || "related");
-      counts.set(type, (counts.get(type) || 0) + 1);
-    }
-    const relations = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const relations = Object.entries(graph?.counts?.byRelation || {}).sort(([a], [b]) => a.localeCompare(b));
+    const signature = JSON.stringify([relations, state.relationFilter && [...state.relationFilter]]);
+    if (relationFilters.dataset.signature === signature) return;
+    relationFilters.dataset.signature = signature;
+    const focusedType = relationFilters.contains(document.activeElement) ? document.activeElement.dataset.type : null;
     relationFilters.replaceChildren();
     for (const [type, count] of relations) {
       const label = document.createElement("label");
@@ -415,6 +436,7 @@
         const selected = new Set([...relationFilters.querySelectorAll("input[data-type]")].filter((input) => input.checked).map((input) => input.dataset.type));
         if (selected.size === relations.length) state.relationFilter = null;
         else state.relationFilter = selected;
+        state.offset = 0;
         loadGraph();
       });
       checkbox.dataset.type = type;
@@ -429,6 +451,7 @@
       countLabel.textContent = formatCount(count);
       label.append(checkbox, swatch, text, countLabel);
       relationFilters.append(label);
+      if (focusedType === type) checkbox.focus({ preventScroll: true });
     }
   }
 
@@ -450,7 +473,7 @@
       item.append(document.createTextNode(String(label).slice(0, 180)));
       const time = document.createElement("time");
       time.dateTime = entry?.observedAt || entry?.updatedAt || entry?.createdAt || "";
-      time.textContent = formatDate(time.dateTime);
+      time.textContent = time.dateTime ? formatDate(time.dateTime) : `${typeof entry.state === "string" ? entry.state : "active"}${entry.files?.length ? ` · ${entry.files.length} files` : ""}`;
       item.append(time);
       activityList.append(item);
     }
@@ -458,14 +481,82 @@
 
   function updateSummary(graph) {
     const counts = graph?.counts || {};
-    const totalNodes = Number(counts.totalNodes || graph?.nodes?.length || 0);
-    const shownNodes = Number(counts.shownNodes || graph?.nodes?.filter((node) => !node.aggregate).length || 0);
-    const totalEdges = Number(counts.totalEdges || graph?.edges?.length || 0);
+    const totalNodes = Number(counts.totalNodes ?? graph?.nodes?.length ?? 0);
+    const shownNodes = Number(counts.shownNodes ?? graph?.nodes?.filter((node) => !node.aggregate).length ?? 0);
+    const totalEdges = Number(counts.totalEdges ?? graph?.edges?.length ?? 0);
     const aggregated = Array.isArray(counts.aggregated) ? counts.aggregated : [];
     setText(visibleCount, `${formatCount(shownNodes)} / ${formatCount(totalNodes)}`);
-    setText(graphSummary, `${formatCount(shownNodes)} entities shown · ${formatCount(totalEdges)} relations${aggregated.length ? ` · ${aggregated.length} groups collapsed` : ""}`);
+    setText(graphSummary, `${formatCount(shownNodes)} entities · ${formatCount(graph?.edges?.length ?? 0)} / ${formatCount(totalEdges)} relations${aggregated.length ? ` · ${aggregated.length} groups collapsed` : ""}`);
     setText(revisionLabel, `Revision ${graph?.revision ?? state.revision}`);
-    setText(graphMode, state.query ? `Search: ${state.query.slice(0, 28)}` : state.expandedType ? `Expanded ${state.expandedType}` : "Live graph");
+    setText(graphMode, state.query ? `Search: ${state.query.slice(0, 28)}` : state.expandedType ? `Expanded ${state.expandedType}` : state.focus ? "Focused neighborhood" : "Project overview");
+  }
+
+  function updateNavigation(graph) {
+    const page = graph.page || {};
+    $("previousPage").disabled = !state.offset;
+    $("nextPage").disabled = !page.hasMore || Boolean(state.focus);
+    $("pageLabel").textContent = page.hasMore || state.offset ? `${state.offset + 1}–${state.offset + graph.nodes.filter(node => !node.aggregate).length} of ${page.total}` : "";
+    $("backButton").disabled = !state.navigation.length;
+    const focus = graph.nodes.find(node => node.id === state.focus);
+    setText($("viewContext"), focus ? `${focus.label} · ${state.hops} hop${state.hops === 1 ? "" : "s"}` : state.query ? `Results for “${state.query}”` : state.typeFilter ? [...state.typeFilter].join(", ") : "Whole project");
+    const health = graph.health || {}, discovery = graph.discovery;
+    const issues = [];
+    if (health.conflicts?.length) issues.push(`${health.conflicts.length} conflicting claims`);
+    if (health.staleSources) issues.push(`${health.staleSources} stale sources`);
+    if (discovery?.lastError) issues.push("Refresh incomplete; previous evidence retained");
+    else if (discovery?.truncated || discovery?.coverageComplete === false) issues.push("Partial discovery; dependencies may be missing");
+    else if (!discovery?.at) issues.push("Discovery coverage not yet available");
+    $("healthSummary").classList.toggle("warning", Boolean(health.conflicts?.length || health.staleSources || discovery?.lastError));
+    setText($("healthSummary"), issues.length ? issues.join(". ") : `${formatCount(health.sourceCount)} sources · refreshed ${formatDate(discovery.at)}`);
+  }
+
+  function renderEntityList() {
+    const list = $("entityList");
+    const previousFocus = list.contains(document.activeElement) ? document.activeElement.dataset.nodeId : null;
+    list.replaceChildren();
+    for (const node of state.graph?.nodes || []) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "entity-row";
+      row.dataset.nodeId = node.id;
+      row.setAttribute("aria-pressed", String(node.id === state.selectedId));
+      for (const [className, text] of [["entity-name", node.label], ["entity-type", node.aggregate ? `${node.type} group` : node.type], ["entity-status", node.status || "—"]]) {
+        const span = document.createElement("span"); span.className = className; span.textContent = text; span.title = text; row.append(span);
+      }
+      row.addEventListener("click", () => void selectNode(node.id));
+      list.append(row);
+      if (node.id === previousFocus) row.focus({ preventScroll: true });
+    }
+  }
+
+  function rememberView() {
+    state.navigation.push({ focus: state.focus, query: state.query, direction: state.direction, hops: state.hops, offset: state.offset,
+      types: state.typeFilter ? [...state.typeFilter] : null, relations: state.relationFilter ? [...state.relationFilter] : null });
+    if (state.navigation.length > 30) state.navigation.shift();
+  }
+
+  async function navigateTo(nodeId) {
+    rememberView();
+    state.focus = nodeId;
+    state.selectedId = nodeId;
+    state.query = ""; state.offset = 0; state.typeFilter = null; state.relationFilter = null; state.expandedType = "";
+    $("searchInput").value = "";
+    await loadGraph();
+  }
+
+  function arrangeGraph() {
+    if (!state.cy?.nodes().length) return;
+    const name = $("layoutSelect").value;
+    const focus = state.cy.getElementById(state.focus || state.graph.project?.rootNodeId || "");
+    state.cy.nodes().removeStyle();
+    state.cy.layout({ name, animate: false, fit: false, randomize: false, padding: 50,
+      nodeDimensionsIncludeLabels: true, avoidOverlap: true, spacingFactor: name === "grid" ? 1.12 : 1.1,
+      ...(name === "grid" ? { cols: Math.max(1, Math.ceil(Math.sqrt(state.cy.nodes().length * state.cy.width() / Math.max(240, state.cy.height()) * 60 / 160))) } : {}),
+      nodeRepulsion: () => 16000, idealEdgeLength: () => 110, componentSpacing: 100, numIter: 450,
+      sort: (a, b) => Number(b.data("type") === "project") - Number(a.data("type") === "project") || String(a.data("type")).localeCompare(String(b.data("type"))) || String(a.data("label")).localeCompare(String(b.data("label"))),
+      directed: true, ...(focus.length ? { roots: focus } : {}) }).run();
+    state.cy.nodes().forEach(node => { state.positions[node.id()] = { ...node.position() }; });
+    fitGraph(); savePositions();
   }
 
   function updateFocusOptions(graph) {
@@ -510,6 +601,8 @@
 
   function renderInspector(node, details = null) {
     inspectorContent.replaceChildren();
+    $("focusButton").disabled = !node || node.aggregate;
+    for (const row of $("entityList").querySelectorAll("[data-node-id]")) row.setAttribute("aria-pressed", String(row.dataset.nodeId === node?.id));
     if (!node) {
       setText(inspectorTitle, "Nothing selected");
       setText(inspectorType, "Select a node in the graph");
@@ -527,7 +620,8 @@
     summaryGrid.className = "detail-grid";
     detailRow(summaryGrid, "Status", node.status || "unknown");
     detailRow(summaryGrid, "Confidence", typeof node.confidence === "number" ? `${Math.round(node.confidence * 100)}%` : "unknown");
-    detailRow(summaryGrid, "Identifier", node.id);
+    detailRow(summaryGrid, "Key", node.key || node.id);
+
     if (typeof node.confidence === "number") {
       const bar = document.createElement("div");
       bar.className = "confidence-bar";
@@ -538,6 +632,18 @@
     }
     summary.append(summaryGrid);
     inspectorContent.append(summary);
+    if (!node.aggregate) {
+      const actions = document.createElement("div"); actions.className = "inspector-actions";
+      for (const [label, run] of [["Explore relations", () => navigateTo(node.id)], ["Copy agent query", async () => {
+        const text = JSON.stringify({ action: "impact", focus: node.id, hops: state.hops });
+        try { await navigator.clipboard.writeText(text); setStatus("Copied project_intel impact query."); }
+        catch { setStatus(text); }
+      }]]) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "quiet"; button.textContent = label;
+        button.addEventListener("click", run); actions.append(button);
+      }
+      inspectorContent.append(actions);
+    }
 
     if (node.aggregate) {
       const aggregate = detailBlock("Collapsed group");
@@ -550,6 +656,8 @@
       button.type = "button";
       button.textContent = `Expand ${node.type || "group"}`;
       button.addEventListener("click", () => {
+        rememberView();
+        state.offset = 0; state.focus = ""; state.query = ""; $("searchInput").value = "";
         state.expandedType = node.type || "";
         // Keep the project anchor in view while expanding a collapsed
         // category; it remains the orientation point for the expanded slice.
@@ -586,7 +694,8 @@
         const locator = document.createElement("span");
         locator.textContent = entry.locator || "No locator";
         const meta = document.createElement("span");
-        meta.textContent = `${entry.scope || "shared"} · v${entry.version ?? "—"} · ${formatDate(entry.observedAt)}`;
+        meta.textContent = `${entry.scope || "shared"} · v${entry.version ?? "—"} · ${formatDate(entry.observedAt)}${entry.active === false ? " · withdrawn" : entry.stale ? " · stale" : ""}`;
+        const sourceId = document.createElement("span"); sourceId.textContent = entry.sourceId || ""; item.append(sourceId);
         item.append(kind, locator, meta);
         list.append(item);
       }
@@ -595,7 +704,7 @@
     inspectorContent.append(provenance);
 
     const edges = detailBlock("Nearby relations");
-    const relationEntries = Array.isArray(details.edges) ? details.edges.slice(0, 16) : [];
+    const relationEntries = Array.isArray(details.edges) ? details.edges.slice(0, 60) : [];
     if (!relationEntries.length) {
       const copy = document.createElement("p");
       copy.className = "muted small";
@@ -605,22 +714,28 @@
       const list = document.createElement("div");
       list.className = "relation-list";
       for (const edge of relationEntries) {
-        const item = document.createElement("div");
-        item.className = "relation";
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "relation-link";
         const kind = document.createElement("span");
         kind.className = "relation-kind";
-        kind.textContent = edge.type || "related";
+        kind.textContent = `${edge.type || "related"} · ${edge.status || "unknown"}`;
         const target = document.createElement("span");
-        target.textContent = edge.source === node.id ? `→ ${edge.target}` : `← ${edge.source}`;
+        const outgoing = edge.source === node.id;
+        target.textContent = outgoing ? `→ ${edge.targetLabel || edge.target}` : `← ${edge.sourceLabel || edge.source}`;
         item.append(kind, target);
+        const evidence = edge.provenance?.[0];
+        if (evidence) { const meta = document.createElement("span"); meta.className = "evidence-meta"; meta.textContent = `${evidence.locator} · v${evidence.version}`; item.append(meta); }
+        item.addEventListener("click", () => void navigateTo(outgoing ? edge.target : edge.source));
         list.append(item);
       }
       edges.append(list);
     }
+    if (details.edges?.length > relationEntries.length) { const more = document.createElement("p"); more.className = "muted small"; more.textContent = `Showing ${relationEntries.length} of ${details.counts?.edges ?? details.edges.length} relations. Explore the neighborhood or filter relation types.`; edges.append(more); }
     inspectorContent.append(edges);
 
     const facts = detailBlock("Literal facts");
-    const factEntries = Array.isArray(details.facts) ? details.facts.slice(0, 12) : [];
+    const factEntries = Array.isArray(details.facts) ? details.facts.slice(0, 40) : [];
     if (!factEntries.length) {
       const copy = document.createElement("p");
       copy.className = "muted small";
@@ -628,11 +743,18 @@
       facts.append(copy);
     } else {
       const grid = document.createElement("div");
-      grid.className = "detail-grid";
-      for (const fact of factEntries) detailRow(grid, fact.predicate || "fact", fact.object);
+      for (const fact of factEntries) {
+        const entry = document.createElement("div"); entry.className = `fact-entry${fact.conflict ? " fact-conflict" : ""}`;
+        const key = document.createElement("strong"); key.textContent = `${fact.predicate || "fact"}${fact.conflict ? " · conflicting evidence" : ""}`;
+        const value = document.createElement("p"); value.textContent = fact.object;
+        const meta = document.createElement("span"); meta.className = "evidence-meta";
+        meta.textContent = `${fact.status || "unknown"} · ${fact.provenance?.[0]?.locator || "no source"}`;
+        entry.append(key, value, meta); grid.append(entry);
+      }
       facts.append(grid);
     }
-    inspectorContent.append(facts);
+    inspectorContent.insertBefore(facts, provenance);
+    inspectorContent.insertBefore(edges, provenance);
 
     const historyEntries = Array.isArray(details.history) ? details.history.slice(0, 8) : [];
     if (historyEntries.length) {
@@ -646,7 +768,7 @@
         kind.className = "relation-kind";
         kind.textContent = entry.event || entry.kind || "change";
         const label = document.createElement("span");
-        label.textContent = entry.sourceId ? `${entry.sourceId} · ${formatDate(entry.createdAt || entry.observedAt)}` : formatDate(entry.createdAt || entry.observedAt);
+        label.textContent = entry.sourceId ? `${entry.sourceId} · ${formatDate(entry.at || entry.createdAt || entry.observedAt)}` : formatDate(entry.at || entry.createdAt || entry.observedAt);
         item.append(kind, label);
         list.append(item);
       }
@@ -656,16 +778,18 @@
   }
 
   async function selectNode(nodeId, options = {}) {
+    const serial = ++state.detailSerial;
     state.selectedId = nodeId || "";
     const node = state.graph?.nodes?.find((entry) => entry.id === state.selectedId) || null;
     renderInspector(node);
     applyHighlight();
+    updateSemanticLabels();
     if (!node || node.aggregate || options.loadDetails === false) return;
     try {
-      const details = await fetchJson(`/api/node?id=${encodeURIComponent(node.id)}`);
-      if (state.selectedId === node.id) renderInspector(node, details.node ? { ...details.node, edges: details.edges, facts: details.facts, history: details.history, health: details.health } : details);
+      const details = await fetchJson(`/api/node?id=${encodeURIComponent(node.id)}${state.includeInactive ? "&includeInactive=1" : ""}`);
+      if (state.selectedId === node.id && serial === state.detailSerial) renderInspector({ ...node, ...details.node }, details.node ? { ...details.node, edges: details.edges, facts: details.facts, history: details.history, health: details.health, counts: details.counts } : details);
     } catch (error) {
-      if (state.selectedId !== node.id) return;
+      if (state.selectedId !== node.id || serial !== state.detailSerial) return;
       const message = document.createElement("p");
       message.className = "muted small";
       message.textContent = `Provenance unavailable: ${error.message}`;
@@ -675,7 +799,8 @@
 
   function fitGraph() {
     if (!state.cy || !state.cy.nodes().length) return;
-    state.cy.fit(state.cy.elements(), 50);
+    state.cy.fit(state.cy.elements(), 40);
+    if (state.cy.zoom() > 1.2) { state.cy.zoom(1.2); state.cy.center(); }
     // Cytoscape emits zoom for most fit calls, but applying this explicitly
     // also covers a fit that keeps the same zoom level.
     updateSemanticLabels();
@@ -733,7 +858,7 @@
       autounselectify: true,
     });
     state.cy.on("tap", "node", (event) => void selectNode(event.target.id()));
-    state.cy.on("dragfree", "node", savePositions);
+    state.cy.on("dragfree", "node", (event) => { state.positions[event.target.id()] = { ...event.target.position() }; savePositions(); });
     state.cy.on("mouseover", "node", (event) => { root.setAttribute("aria-label", `${event.target.data("label")}, ${event.target.data("type")}. Press Enter to inspect.`); });
     state.cy.on("mouseout", "node", () => root.setAttribute("aria-label", "Interactive project intelligence graph. Use arrow keys to move between nodes."));
     state.cy.on("zoom", updateSemanticLabels);
@@ -783,32 +908,40 @@
     graphEmpty.hidden = Boolean(state.graph.nodes?.length);
     graphError.hidden = true;
     if (!state.cy) setupCy();
-    state.cy.elements().remove();
-    const elements = makeCyElements(state.graph);
-    if (elements.length) state.cy.add(elements);
-    state.cy.nodes().forEach((node) => {
-      const remembered = stablePosition(node.data(), 0);
-      node.position(remembered);
+    // Reconcile in place; preserve both manually dragged and layout positions.
+    state.cy.nodes().forEach(node => { state.positions[node.id()] = { ...node.position() }; });
+    const elements = makeCyElements(state.graph), ids = new Set(elements.map(element => element.data.id));
+    state.cy.batch(() => {
+      state.cy.elements().filter(element => !ids.has(element.id())).remove();
+      for (const element of elements) {
+        const existing = state.cy.getElementById(element.data.id);
+        if (existing.length) existing.data(element.data); else state.cy.add(element);
+      }
     });
+    renderEntityList(); updateNavigation(state.graph);
     updateSemanticLabels();
     if (!state.selectedId || !state.graph.nodes.some((node) => node.id === state.selectedId)) {
       state.selectedId = "";
       renderInspector(null);
     }
     applyHighlight();
-    if (!state.cy.nodes().length) return;
-    if (!state.hasFitted) { fitGraph(); state.hasFitted = true; }
+    if (!state.cy.nodes().length) { savePositions(); setStatus("No matching entities in this view."); return; }
+    if (!state.hasFitted) { if (state.restoredPositions) fitGraph(); else arrangeGraph(); state.hasFitted = true; }
+    if (state.selectedId) void selectNode(state.selectedId);
     savePositions();
     setStatus(`Live at revision ${state.revision}.`);
   }
 
   async function loadGraph() {
+    clearTimeout(state.searchTimer);
     const serial = ++state.requestSerial;
+    state.loading = true;
     setStatus("Reading the latest project graph…");
     try {
       const graph = await fetchJson(currentPath());
       if (serial !== state.requestSerial) return;
       renderGraph(graph);
+      arrangeGraph();
       setConnection("connected", "Connected");
     } catch (error) {
       if (serial !== state.requestSerial) return;
@@ -816,12 +949,16 @@
       graphError.hidden = false;
       graphErrorMessage.textContent = error.message;
       setStatus("Viewer could not read the project. Retry when the local server is available.");
-    }
+    } finally { if (serial === state.requestSerial) state.loading = false; }
   }
 
   async function pollGraph() {
+    if (state.loading || state.polling) return;
+    state.polling = true;
+    const serial = state.requestSerial, path = currentPath("/api/poll");
     try {
-      const reply = await fetchJson(currentPath("/api/poll") + `&since=${encodeURIComponent(state.revision)}`);
+      const reply = await fetchJson(path + `&since=${encodeURIComponent(state.revision)}`);
+      if (serial !== state.requestSerial || path !== currentPath("/api/poll")) return;
       if (Number.isFinite(reply.focusEpoch)) {
         const nextFocusEpoch = Number(reply.focusEpoch);
         if (nextFocusEpoch > state.focusEpoch) {
@@ -833,13 +970,13 @@
       if (reply.changed) {
         renderGraph(reply);
         setConnection("connected", "Updated");
-      } else if (state.connected) {
-        setConnection("connected", "Live");
+      } else {
+        graphError.hidden = true;
+        setConnection("connected", "Connected");
       }
     } catch (error) {
-      setConnection("error", "Reconnecting");
-      setStatus(error.message);
-    }
+      if (serial === state.requestSerial) { setConnection("error", "Reconnecting"); setStatus(error.message); }
+    } finally { state.polling = false; }
   }
 
   async function heartbeat(visible = document.visibilityState !== "hidden", closed = false) {
@@ -855,23 +992,47 @@
 
   function wireControls() {
     $("searchInput").addEventListener("input", (event) => {
+      state.requestSerial++; state.loading = false;
       state.query = String(event.target.value || "").trim().slice(0, 120);
+      state.offset = 0; state.focus = ""; state.selectedId = "";
       clearTimeout(state.searchTimer);
       state.searchTimer = window.setTimeout(() => void loadGraph(), 240);
     });
     $("directionSelect").addEventListener("change", (event) => { state.direction = event.target.value; if (state.focus) void loadGraph(); else applyHighlight(); });
-    focusSelect.addEventListener("change", (event) => {
-      state.focus = String(event.target.value || "");
-      state.selectedId = state.focus;
-      void loadGraph().then(() => { if (state.focus) void selectNode(state.focus); });
-    });
-    $("focusButton").addEventListener("click", () => { if (state.selectedId) { state.focus = state.selectedId; focusSelect.value = state.focus; void loadGraph(); } });
+    $("depthSelect").addEventListener("change", (event) => { state.hops = Number(event.target.value); if (state.focus) void loadGraph(); });
+    focusSelect.addEventListener("change", (event) => void navigateTo(String(event.target.value || "")));
+    $("focusButton").addEventListener("click", () => { if (state.selectedId) void navigateTo(state.selectedId); });
     $("fitButton").addEventListener("click", fitGraph);
-    $("resetButton").addEventListener("click", () => { state.focus = ""; state.direction = "both"; state.query = ""; state.typeFilter = null; state.relationFilter = null; state.expandedType = ""; $("searchInput").value = ""; $("directionSelect").value = "both"; void loadGraph(); });
-    $("clearFiltersButton").addEventListener("click", () => { state.typeFilter = null; state.expandedType = ""; void loadGraph(); });
-    $("clearRelationFiltersButton").addEventListener("click", () => { state.relationFilter = null; void loadGraph(); });
-    $("showAllButton").addEventListener("click", () => { state.typeFilter = null; state.relationFilter = null; state.expandedType = ""; void loadGraph(); });
-    $("retryButton").addEventListener("click", loadGraph);
+    $("resetButton").addEventListener("click", () => { state.selectedId = ""; state.offset = 0; state.hops = 1; $("depthSelect").value = "1"; state.focus = ""; state.direction = "both"; state.query = ""; state.typeFilter = null; state.relationFilter = null; state.expandedType = ""; $("searchInput").value = ""; $("directionSelect").value = "both"; void loadGraph(); });
+    $("clearFiltersButton").addEventListener("click", () => { state.offset = 0; state.typeFilter = null; state.expandedType = ""; void loadGraph(); });
+    $("clearRelationFiltersButton").addEventListener("click", () => { state.offset = 0; state.relationFilter = null; void loadGraph(); });
+    $("showAllButton").addEventListener("click", () => { state.offset = 0; state.typeFilter = null; state.relationFilter = null; state.expandedType = ""; void loadGraph(); });
+    $("retryButton").addEventListener("click", () => { if (!state.started) void start(); else void loadGraph(); });
+    $("arrangeButton").addEventListener("click", arrangeGraph);
+    $("layoutSelect").addEventListener("change", arrangeGraph);
+    $("inactiveToggle").addEventListener("change", event => { state.includeInactive = event.target.checked; state.offset = 0; void loadGraph(); });
+    for (const [id, listView] of [["mapViewButton", false], ["listViewButton", true]]) $(id).addEventListener("click", () => {
+      state.listView = listView; $("entityList").hidden = !listView; root.hidden = listView;
+      $("mapViewButton").setAttribute("aria-pressed", String(!listView)); $("listViewButton").setAttribute("aria-pressed", String(listView));
+      $("layoutSelect").disabled = listView; $("arrangeButton").disabled = listView;
+      if (!listView) state.cy?.resize();
+      savePositions();
+    });
+    $("nextPage").addEventListener("click", () => { state.offset += state.graph.page.size; void loadGraph(); });
+    $("previousPage").addEventListener("click", () => { state.offset = Math.max(0, state.offset - state.graph.page.size); void loadGraph(); });
+    $("backButton").addEventListener("click", () => {
+      const view = state.navigation.pop(); if (!view) return;
+      Object.assign(state, { focus: view.focus, selectedId: view.focus, query: view.query, direction: view.direction, hops: view.hops, offset: view.offset,
+        typeFilter: view.types ? new Set(view.types) : null, relationFilter: view.relations ? new Set(view.relations) : null });
+      $("searchInput").value = state.query; $("directionSelect").value = state.direction; $("depthSelect").value = String(state.hops);
+      void loadGraph();
+    });
+    $("exportButton").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify({ ...state.graph, view: { focus: state.focus, query: state.query, direction: state.direction, hops: state.hops }, positions: state.positions }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = "project-graph.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    document.addEventListener("keydown", event => { if (event.key === "/" && !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) { event.preventDefault(); $("searchInput").focus(); } });
+    new ResizeObserver(() => state.cy?.resize()).observe(root);
     document.addEventListener("visibilitychange", () => { void heartbeat(document.visibilityState !== "hidden"); });
     let closing = false;
     const markClosed = () => {
@@ -885,26 +1046,47 @@
   }
 
   async function start() {
+    if (state.starting) return;
+    state.starting = true;
     setConnection("connecting", "Connecting");
     if (!token) {
       setConnection("error", "Invalid link");
       graphError.hidden = false;
       graphErrorMessage.textContent = "This viewer link has no capability fragment. Reopen it from the /graph command.";
       setStatus("Viewer link is missing its private capability.");
+      state.starting = false;
       return;
     }
-    wireControls();
+    if (!state.wired) { wireControls(); state.wired = true; }
     try {
-      const bootstrap = await fetchJson(currentPath("/api/bootstrap"));
+      let bootstrap = await fetchJson(currentPath("/api/bootstrap"));
       const project = bootstrap.project || {};
-      state.storageKey = `project-intelligence:${project.id || location.origin}`;
+      state.storageKey = `project-intelligence:v2:${project.id || location.origin}:${project.checkoutId || "shared"}`;
       readPositions();
+      try {
+        const view = JSON.parse(localStorage.getItem(`${state.storageKey}:view`) || "null");
+        if (view && typeof view === "object") {
+          state.focus = typeof view.focus === "string" ? view.focus.slice(0, 512) : "";
+          state.query = typeof view.query === "string" ? view.query.slice(0, 120) : "";
+          state.direction = ["both", "incoming", "outgoing"].includes(view.direction) ? view.direction : "both";
+          state.hops = [1, 2, 3, 4].includes(view.hops) ? view.hops : 1;
+          state.typeFilter = Array.isArray(view.types) ? new Set(view.types.filter(type => typeof type === "string").slice(0, 20)) : null;
+          state.relationFilter = Array.isArray(view.relations) ? new Set(view.relations.filter(type => typeof type === "string").slice(0, 20)) : null;
+          state.includeInactive = view.includeInactive === true; $("inactiveToggle").checked = state.includeInactive;
+          $("searchInput").value = state.query; $("directionSelect").value = state.direction; $("depthSelect").value = String(state.hops);
+          if (["grid", "cose", "breadthfirst"].includes(view.layout)) $("layoutSelect").value = view.layout;
+          state.selectedId = state.focus;
+          if (view.listView) $("listViewButton").click();
+          bootstrap = await fetchJson(currentPath());
+        }
+      } catch { /* An unavailable preference store does not prevent opening. */ }
       setText(projectTitle, project.name || "Project intelligence");
       setText(projectContext, [project.branch && `branch ${project.branch}`, project.checkoutId && `checkout ${project.checkoutId}`].filter(Boolean).join(" · ") || "Local project graph");
       setText($("serverVersion"), bootstrap.serverVersion || "Local read-only session");
       renderGraph(bootstrap);
       setConnection("connected", "Connected");
       await heartbeat(true);
+      state.started = true;
       schedulePolling();
       window.setInterval(() => { void heartbeat(document.visibilityState !== "hidden"); }, 15_000);
     } catch (error) {
@@ -912,7 +1094,7 @@
       graphError.hidden = false;
       graphErrorMessage.textContent = error.message;
       setStatus("Viewer could not start. Retry when the local server is available.");
-    }
+    } finally { state.starting = false; }
   }
 
   void start();

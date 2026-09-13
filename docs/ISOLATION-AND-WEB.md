@@ -43,7 +43,19 @@ browser_session({action:"logs",session,includeText:true,since:0})
 browser_session({action:"network",session,since:0})
 ```
 
-`screenshot` returns PNG pixels to vision-capable models or a temporary file path. Screenshots may contain visible page data. At most two sessions are open per agent, with four queued operations, a ten-minute lifetime, 200 actions and eight retained captures. `close` removes profiles and captures. The interactive browser uses Chromium's normal graphics support; `render_see` retains its stricter GPU restrictions and reports a specific route for WebGL pages. Runtime graphics support must still be verified on the host.
+`screenshot` returns PNG pixels to vision-capable models or a temporary file path. Screenshots may contain visible page data. At most two sessions are open per agent, with four queued operations and eight retained captures. Each has a renewable ten-minute lease and 200 action attempts per lease; observation/diagnostic reads remain available at the action limit. Every ordinary result includes `lease` with `remainingMs`, `expiresAt`, `actionsRemaining` and `generation`. `renew` observes the current page and resets the window without navigation or replay. Renew before expiry for long workflows; abandoned browsers still expire. `close` removes profiles and captures. The interactive browser uses Chromium's normal graphics support; `render_see` retains its stricter GPU restrictions and reports a specific route for WebGL pages. Runtime graphics support must still be verified on the host.
+
+Native form controls support `select` with an exact unique `option` label and `check` with a desired `checked` boolean. `inspect` on a select returns up to 30 option labels and disabled flags, without option values; duplicate labels are rejected by `select`. `fill` also supports native contenteditable editors. `verify` compares caller-supplied `text` with a visible field or preview and returns `verification.matches`, without returning existing text. It rejects password, hidden and unsupported input types. `ok:true` means the comparison ran, and a matching draft is not evidence of publication. These controls use [Playwright's native input actions](https://playwright.dev/docs/input).
+
+```js
+browser_session({action:"inspect",session,role:"combobox",name:"Category"})
+browser_session({action:"select",session,role:"combobox",name:"Category",option:"Questions"})
+browser_session({action:"check",session,role:"checkbox",name:"Disclose affiliation",checked:true})
+browser_session({action:"verify",session,role:"textbox",name:"Answer",text:exactDraft})
+browser_session({action:"renew",session})
+```
+
+For long community workflows, the `community-promotion` skill covers niche discovery, questions, answers, blog comments, resource entries and marketing. It retains venue exclusions and authorization in the existing todo plan, records `submitting` before an external write, and distinguishes confirmed publication, pending moderation and uncertain outcomes. Browser handles and research jobs do not survive process restart; resume from saved evidence and reconcile effects before retrying. These are workflow instructions, not an enforced remote idempotency guarantee. Login-required venues still need a supported authorized account surface; an isolated browser starts unauthenticated.
 
 No personal browser profiles or credentials are imported. Downloads, popups, service workers, browser permissions, arbitrary JavaScript execution and file navigation are unavailable. The installed Chromium sandbox stays enabled; startup failure does not trigger an unsandboxed fallback. Rendering remains independently queued and stores captures per process/session, so one child's render lease cannot block another child's captures. Processes use private temporary homes and do not inherit provider secrets.
 

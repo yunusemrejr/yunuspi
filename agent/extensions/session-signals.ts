@@ -1,5 +1,5 @@
-import { collectSessionCost } from "./lib/session-cost.ts";
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
+import { collectSessionCost } from "./lib/session-cost.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";

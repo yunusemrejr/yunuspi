@@ -49,7 +49,7 @@ function normalizeDirection(value) {
 }
 
 function nodeText(node) {
-  return `${node?.id ?? ''} ${node?.type ?? ''} ${node?.label ?? ''}`;
+  return `${node?.id ?? ''} ${node?.type ?? ''} ${node?.label ?? ''} ${node?.key ?? ''}`;
 }
 
 function edgeText(edge) {
@@ -77,21 +77,35 @@ function lexicalScore(text, query, queryTokens) {
   return score;
 }
 
-function buildLexicalIndex(nodes, edges, facts) {
-  const index = new Map();
-  const add = (token, item) => {
-    if (!token) return;
-    let values = index.get(token);
-    if (!values) {
-      values = new Set();
-      index.set(token, values);
+// Use the same ranking for agent retrieval and the visual panel. Score literal
+// evidence on its subject; do not lose fact-only matches during root selection.
+function rankMatches(graph, query, queryTokens, allTerms = false) {
+  const textById = new Map(graph.nodes.map(node => [node.id, nodeText(node)]));
+  for (const fact of graph.facts) textById.set(fact.subject, `${textById.get(fact.subject) ?? ""} ${factText(fact)}`);
+  const scores = new Map(graph.nodes.map(node => [node.id, lexicalScore(nodeText(node), query, queryTokens)]));
+  for (const node of graph.nodes) {
+    if ([node.id, node.key, node.label].some(value => normalizeQuery(value) === query)) scores.set(node.id, 10000);
+  }
+  for (const fact of graph.facts) scores.set(fact.subject, (scores.get(fact.subject) ?? 0) + lexicalScore(factText(fact), query, queryTokens));
+  for (const edge of graph.edges) {
+    const score = lexicalScore(edge.type, query, queryTokens);
+    for (const id of [edge.source, edge.target]) {
+      scores.set(id, (scores.get(id) ?? 0) + score);
+      textById.set(id, `${textById.get(id) ?? ''} ${edge.type}`);
     }
-    values.add(item);
-  };
-  for (const node of nodes) for (const token of tokenize(nodeText(node))) add(token, `n:${node.id}`);
-  for (const edge of edges) for (const token of tokenize(edgeText(edge))) add(token, `e:${edge.id ?? `${edge.source}:${edge.type}:${edge.target}`}`);
-  for (const fact of facts) for (const token of tokenize(factText(fact))) add(token, `f:${fact.id ?? `${fact.subject}:${fact.predicate}:${fact.object}`}`);
-  return index;
+  }
+  const degree = stableDegree(graph.edges);
+  return graph.nodes.filter(node => scores.get(node.id) > 0 && (!allTerms || queryTokens.every(token => lexicalScore(textById.get(node.id), token, [token]) > 0))).sort((a, b) =>
+    scores.get(b.id) - scores.get(a.id) || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id));
+}
+
+function exactFocus(graph, focus) {
+  return [...new Set(asArray(focus).flatMap(value => {
+    if (typeof value !== 'string' || !value) return [];
+    const byId = graph.nodes.find(node => node.id === value);
+    if (byId) return [byId.id];
+    return graph.nodes.filter(node => node.key === value || node.label === value).map(node => node.id);
+  }))].sort();
 }
 
 function sourceMap(snapshot) {
@@ -158,30 +172,11 @@ function stableDegree(edges) {
 }
 
 function resolveRoots(graph, options, query, queryTokens) {
-  const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
-  const focusValues = asArray(options.focus).filter(item => typeof item === 'string' && item);
-  const focusIds = focusValues.filter(item => nodeById.has(item));
-  if (focusIds.length) return [...new Set(focusIds)].sort();
-  const candidateIds = new Set();
-  if (query) {
-    const index = buildLexicalIndex(graph.nodes, graph.edges, graph.facts);
-    for (const token of queryTokens) for (const item of index.get(token) ?? []) if (item.startsWith('n:')) candidateIds.add(item.slice(2));
-    for (const fact of graph.facts) if (lexicalScore(factText(fact), query, queryTokens) > 0) candidateIds.add(fact.subject);
-    for (const edge of graph.edges) if (lexicalScore(edgeText(edge), query, queryTokens) > 0) {
-      candidateIds.add(edge.source);
-      candidateIds.add(edge.target);
-    }
-  }
-  const degree = stableDegree(graph.edges);
-  const ranked = [...candidateIds].map(id => nodeById.get(id)).filter(Boolean).sort((a, b) => {
-    const scoreA = lexicalScore(nodeText(a), query, queryTokens);
-    const scoreB = lexicalScore(nodeText(b), query, queryTokens);
-    return scoreB - scoreA || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id);
-  });
-  if (ranked.length) return ranked.slice(0, Math.max(1, Math.min(4, clampInteger(options.limit, DEFAULT_LIMIT, 1, MAX_LIMIT)))).map(node => node.id);
-  const projectId = options.focus && nodeById.has(options.focus)
-    ? options.focus
-    : graph.nodes.find(node => node.id === options?.projectNodeId || node.type === 'project')?.id;
+  // An explicit missing focus or unmatched search is an empty answer, not an
+  // unrelated project overview that could be mistaken for impact evidence.
+  if (asArray(options.focus).some(Boolean)) return exactFocus(graph, options.focus);
+  if (query) return rankMatches(graph, query, queryTokens).map(node => node.id);
+  const projectId = graph.nodes.find(node => node.id === options?.projectNodeId || node.type === 'project')?.id;
   return projectId ? [projectId] : graph.nodes.slice().sort((a, b) => a.id.localeCompare(b.id)).slice(0, 1).map(node => node.id);
 }
 
@@ -219,14 +214,15 @@ function traverse(graph, roots, options, query, queryTokens) {
   const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
   const adjacency = buildAdjacency(graph.edges);
   const distances = new Map();
+  const via = new Map();
   const queue = [];
   for (const root of roots) {
     if (!nodeById.has(root)) continue;
     distances.set(root, 0);
     queue.push(root);
   }
-  while (queue.length) {
-    const current = queue.shift();
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const current = queue[cursor];
     const distance = distances.get(current) ?? 0;
     if (distance >= hops) continue;
     const edges = adjacentEdges(adjacency, current, direction);
@@ -234,6 +230,7 @@ function traverse(graph, roots, options, query, queryTokens) {
       const next = edge.source === current && direction !== 'incoming' ? edge.target : edge.source;
       if (!nodeById.has(next) || distances.has(next)) continue;
       distances.set(next, distance + 1);
+      via.set(next, edge.id);
       queue.push(next);
     }
   }
@@ -245,7 +242,7 @@ function traverse(graph, roots, options, query, queryTokens) {
     const scoreB = lexicalScore(nodeText(b), query, queryTokens);
     return distanceA - distanceB || scoreB - scoreA || (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id);
   });
-  return { nodes, distances };
+  return { nodes, distances, via };
 }
 
 function compactHealth(health) {
@@ -256,7 +253,7 @@ function compactHealth(health) {
 }
 
 function compactEvidence(item, sources, includeInactive) {
-  const result = { ...item };
+  const result = structuredClone(item);
   if (Array.isArray(item?.provenance)) result.provenance = selectedProvenance(item, sources, includeInactive);
   return result;
 }
@@ -279,7 +276,7 @@ function summaryText(revision, query, focus, nodes, edges, facts, health, activi
     return `${label}${checkout}`;
   });
   const sections = [
-    `${subject}; ${nodes.length} entities, ${edges.length} relations, ${facts.length} facts; revision ${revision}`,
+    `${!nodes.length && (query || focus) && !truncated ? 'No matching entities. ' : ''}${subject}; ${nodes.length} entities, ${edges.length} relations, ${facts.length} facts; revision ${revision}`,
     nodeLabels.length ? `entities: ${nodeLabels.join('; ')}` : '',
     relationLabels.length ? `relations: ${relationLabels.join('; ')}` : '',
     factLabels.length ? `facts: ${factLabels.join('; ')}` : '',
@@ -438,9 +435,9 @@ export function queryGraph(snapshot, options = {}) {
   const limit = clampInteger(safeOptions.limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
   const maxChars = clampInteger(safeOptions.maxChars, DEFAULT_MAX_CHARS, 96, 200000);
   const graph = filteredGraph(snapshot ?? {}, safeOptions);
-  const roots = resolveRoots({ ...graph, projectNodeId: snapshot?.project?.rootNodeId }, safeOptions, query, queryTokens);
+  const candidates = resolveRoots({ ...graph, projectNodeId: snapshot?.project?.rootNodeId }, safeOptions, query, queryTokens);
+  const roots = query && !safeOptions.focus ? candidates.slice(0, Math.min(4, limit)) : candidates;
   const traversed = traverse(graph, roots, safeOptions, query, queryTokens);
-  const degree = stableDegree(graph.edges);
   const selectedNodes = traversed.nodes.slice(0, limit);
   const selectedIds = new Set(selectedNodes.map(node => node.id));
   const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
@@ -454,10 +451,11 @@ export function queryGraph(snapshot, options = {}) {
     const scoreB = lexicalScore(factText(b), query, queryTokens);
     return scoreB - scoreA || String(a.id ?? '').localeCompare(String(b.id ?? ''));
   }).slice(0, limit);
-  const omittedByLimit = traversed.nodes.length > selectedNodes.length || graph.edges.length > edges.length || graph.facts.length > facts.length;
+  const relevantFacts = graph.facts.filter(fact => selectedIds.has(fact.subject));
+  const omittedByLimit = candidates.length > roots.length || traversed.nodes.length > selectedNodes.length || relevantFacts.length > facts.length;
   const result = {
     revision: Number(snapshot?.revision ?? 0),
-    nodes: selectedNodes.map(node => ({ ...node })),
+    nodes: selectedNodes.map(node => ({ ...node, distance: traversed.distances.get(node.id), ...(traversed.via.has(node.id) ? { via: traversed.via.get(node.id) } : {}) })),
     edges: edges.map(edge => compactEvidence(edge, graph.sources, Boolean(safeOptions.includeInactive))),
     facts: facts.map(fact => compactEvidence(fact, graph.sources, Boolean(safeOptions.includeInactive))),
     health: compactHealth(snapshot?.health),
@@ -469,6 +467,8 @@ export function queryGraph(snapshot, options = {}) {
   };
   const fitted = fitQueryBudget(result, maxChars);
   fitted.truncated = Boolean(fitted.truncated || omittedByLimit || fitted.nodes.length < selectedNodes.length || fitted.edges.length < edges.length || fitted.facts.length < facts.length);
+  const retainedEdges = new Set(fitted.edges.map(edge => edge.id));
+  for (const node of fitted.nodes) if (node.via && !retainedEdges.has(node.via)) delete node.via;
   return fitted;
 }
 
@@ -494,7 +494,7 @@ const OVERVIEW_PRIORITY_TYPES = Object.freeze([
   'dependency', 'issue', 'constraint', 'decision', 'change', 'external',
   'directory', 'file', 'session',
 ]);
-const OVERVIEW_DEFAULT_TYPE_CAP = 20;
+const OVERVIEW_DEFAULT_TYPE_CAP = 8;
 
 function selectOverviewNodes(ranked, projectId, actualLimit) {
   const selected = [];
@@ -537,53 +537,34 @@ export function simplifyGraph(snapshot, options = {}) {
   const queryTokens = tokenize(query);
   const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
   const degree = stableDegree(graph.edges);
-  const adjacency = buildAdjacency(graph.edges);
   const projectId = snapshot?.project?.rootNodeId && nodeById.has(snapshot.project.rootNodeId)
     ? snapshot.project.rootNodeId
     : graph.nodes.find(node => node.type === 'project')?.id;
-  const explicitFocus = typeof safeOptions.focus === 'string' && nodeById.has(safeOptions.focus)
-    ? safeOptions.focus : null;
+  const focusIds = exactFocus(graph, safeOptions.focus);
+  const explicitFocus = focusIds[0];
   const wholeProjectOverview = !query && !stringSet(safeOptions.types).size &&
-    !stringSet(safeOptions.relations).size && (!explicitFocus || explicitFocus === projectId);
-  const focus = typeof safeOptions.focus === 'string' && nodeById.has(safeOptions.focus) ? safeOptions.focus : projectId;
-  const focusedDistances = new Map();
-  if (focus) {
-    const queue = [focus];
-    focusedDistances.set(focus, 0);
-    while (queue.length) {
-      const current = queue.shift();
-      const distance = focusedDistances.get(current);
-      if (distance >= 4) continue;
-      for (const edge of adjacentEdges(adjacency, current, 'both')) {
-        const next = edge.source === current ? edge.target : edge.source;
-        if (!focusedDistances.has(next)) {
-          focusedDistances.set(next, distance + 1);
-          queue.push(next);
-        }
-      }
-    }
+    !stringSet(safeOptions.relations).size && (!safeOptions.focus || Boolean(explicitFocus && explicitFocus === projectId));
+  const direction = normalizeDirection(safeOptions.direction);
+  const hops = clampInteger(safeOptions.hops, 1, 0, 4);
+  let ranked;
+  if (safeOptions.focus && !wholeProjectOverview) {
+    ranked = traverse(graph, focusIds, { direction, hops }, '', []).nodes;
+  } else if (query) {
+    ranked = rankMatches(graph, query, queryTokens, true);
+  } else {
+    ranked = graph.nodes.slice().sort((a, b) => Number(b.id === projectId) - Number(a.id === projectId) ||
+      (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id));
   }
-  const ranked = graph.nodes.slice().sort((a, b) => {
-    const focusBonusA = a.id === projectId ? 100000 : a.id === focus ? 90000 : 0;
-    const focusBonusB = b.id === projectId ? 100000 : b.id === focus ? 90000 : 0;
-    const queryA = lexicalScore(nodeText(a), query, queryTokens);
-    const queryB = lexicalScore(nodeText(b), query, queryTokens);
-    const distanceA = focusedDistances.has(a.id) ? 5000 - focusedDistances.get(a.id) * 100 : 0;
-    const distanceB = focusedDistances.has(b.id) ? 5000 - focusedDistances.get(b.id) * 100 : 0;
-    return (focusBonusB + queryB + distanceB + (degree.get(b.id) ?? 0)) -
-      (focusBonusA + queryA + distanceA + (degree.get(a.id) ?? 0)) || a.id.localeCompare(b.id);
-  });
-  const aggregateBudget = Math.min(16, Math.max(0, Math.floor(limit * 0.08)));
+  // Search results and focused neighborhoods are exact slices. Only the
+  // overview/category browser aggregates nodes outside its current page.
+  const aggregateBudget = query || safeOptions.focus && !wholeProjectOverview ? 0 : Math.min(16, Math.max(0, Math.floor(limit * 0.08)));
   const actualLimit = Math.max(1, limit - aggregateBudget);
+  const offset = wholeProjectOverview || safeOptions.focus ? 0 : clampInteger(safeOptions.offset, 0, 0, MAX_LIMIT * 1000);
   const selectedActual = wholeProjectOverview
     ? selectOverviewNodes(ranked, projectId, actualLimit)
-    : ranked.slice(0, actualLimit);
-  if (!wholeProjectOverview && projectId && !selectedActual.some(node => node.id === projectId)) {
-    selectedActual.pop();
-    selectedActual.push(nodeById.get(projectId));
-  }
+    : ranked.slice(offset, offset + actualLimit);
   const selectedIds = new Set(selectedActual.map(node => node.id));
-  const hidden = graph.nodes.filter(node => !selectedIds.has(node.id));
+  const hidden = ranked.filter(node => !selectedIds.has(node.id));
   const hiddenByType = new Map();
   for (const node of hidden) hiddenByType.set(node.type, (hiddenByType.get(node.type) ?? 0) + 1);
   const aggregateTypes = [...hiddenByType.keys()].sort((a, b) => a.localeCompare(b)).slice(0, aggregateBudget);
@@ -591,11 +572,11 @@ export function simplifyGraph(snapshot, options = {}) {
   const aggregateByType = new Map(aggregates.map(node => [node.aggregateFor, node]));
   const outputNodes = [...selectedActual.map((node, index) => ({ ...node, aggregate: false, ...positionFor(node.id, index) })),
     ...aggregates.map((node, index) => ({ ...node, ...positionFor(node.id, selectedActual.length + index) }))];
-  const outputNodeIds = new Set(outputNodes.map(node => node.id));
   const outputEdges = new Map();
   const addEdge = edge => {
     const id = edge.id ?? `edge:${hashText(`${edge.source}\u0000${edge.type}\u0000${edge.target}`, 24)}`;
-    if (!outputEdges.has(id)) outputEdges.set(id, { ...edge, id });
+    if (!outputEdges.has(id)) outputEdges.set(id, { ...edge, id, ...(edge.aggregated ? { count: 1 } : {}) });
+    else if (edge.aggregated) outputEdges.get(id).count++;
   };
   for (const edge of graph.edges) {
     const sourceVisible = selectedIds.has(edge.source);
@@ -639,6 +620,7 @@ export function simplifyGraph(snapshot, options = {}) {
     health: { ...compactHealth(snapshot?.health), hiddenNodes: hidden.length },
     activity: asArray(snapshot?.activity),
     counts,
+    page: { offset, size: actualLimit, total: ranked.length, hasMore: !wholeProjectOverview && offset + selectedActual.length < ranked.length },
     clusters,
   };
 }

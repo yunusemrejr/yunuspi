@@ -1,0 +1,45 @@
+# Session recovery and project tests
+
+The main session's recovery hook resumes the pending inference continuation. Completed tool results stay in the conversation; recovery does not restart the task or replay tool executions.
+
+## Recovery order
+
+1. For an attributed OpenRouter upstream failure, fetch the selected model's current serving-endpoint metadata once per recovery episode. Try up to two unvisited endpoints with sufficient context/output capacity, required parameter support, compatible restrictions and token prices no higher than the selected route. Rank admitted endpoints using reported uptime, latency, throughput, price and recent local outcomes.
+2. Choose another configured and scoped route. Prefer the same model identity, then use current catalog capacity/reasoning/modality requirements and available benchmark proximity, recent reliability, price proximity and measured response speed. Models and their capabilities come from registry/catalog evidence; there is no baked-in model list or intelligence tier table.
+3. If no compatible route remains, honor shared cooldowns and recheck the primary within the existing four-attempt/two-minute recovery budget. Exhaustion pauses with history retained. New user input starts a fresh budget.
+
+Account-level quotas, billing exhaustion and authentication failures remain provider-wide. Only structured upstream attribution can narrow a quota failure. Content rejections are not rerouted. Manual model choices, cancellation, free-only restrictions, scoped model lists, configured economic admission and hard routing restrictions remain authoritative. OpenRouter privacy/allowlist policies are retained on endpoint retries; policies that cannot be translated to another API block cross-provider changes. Soft ordering alone does not disable recovery.
+
+Temporary endpoint pins stay in the session and are restored at settlement; credentials and persistent provider settings are untouched. `PI_AUTONOMOUS_MODEL_FALLBACK=off` disables automatic route changes. Offline mode avoids endpoint-catalog network requests. Endpoint discovery failure falls through to other configured routes without probing inference.
+
+The existing provider-health file keeps at most 100 recovery observations per observed route over seven days. Recent outcomes receive more weight. Observations are bound to endpoint/API/rate fingerprints; successes do not erase failure history. Economic admission retains its separate, stricter freshness rules. Response duration and capacity are operational/structural proxies, not proof of equivalent model intelligence. Missing evidence stays unknown. Generic errors without upstream attribution may skip endpoint recovery rather than override a provider cooldown.
+
+OpenRouter protocol references: [provider routing](https://openrouter.ai/docs/guides/routing/provider-selection), [endpoint metadata](https://openrouter.ai/docs/api/api-reference/endpoints/list-all-endpoints-for-a-model).
+
+## Project test lifecycle
+
+The checkpoints extension exposes `project_tests` and observes code/config changes and test-command results. Bounded local discovery finds existing test filenames, manifests and script names without executing them or following symlinks. The model assesses affected behavior, adds or updates meaningful unit tests, and runs appropriate checks through existing execution tools.
+
+Use `project_tests` with `action: "inspect"` to inspect the current change revision and evidence. Use `action: "assess"`, a concrete reason, and `disposition: "required"` with the focused commands to record the plan. `not_needed` and `blocked` preserve an explicit reason for work that does not require unit tests or cannot currently be verified.
+
+The harness records observed execution outcomes and invalidates evidence after further source/test changes. Missing or failed verification can trigger at most two continuation turns per user request. Background starts alone are not passes. Cancellation, explicit test opt-outs and read-only work suppress these continuations. Set `PI_PROJECT_TESTS=off` to disable this lifecycle; the checkpoints extension's existing disable/shadow controls also apply.
+
+A passing command is execution evidence, not a coverage or correctness verdict. The model still evaluates whether assertions cover the behavior, investigates failures and reports blockers. Large scans, unsupported command forms and unobserved external execution remain explicit limitations. No dependencies are installed and no project scripts are executed automatically by discovery or the checkpoint tool.
+
+## Automatic quality review
+
+The same checkpoints owner now exposes `quality_review`. Its shared bounded source scan also tracks HTML, CSS, copy/docs, configuration and WebAssembly files. Successful native edits invalidate earlier reviews, including paths outside scan limits. Shell changes are detected by source metadata; external changes and omitted paths remain explicit limitations. Existing dirty files are not automatically attributed to a read-only session.
+
+Before finishing changed work, the main agent can call `quality_review` with `action: "review"`. If it reaches idle with review work pending, the native settled hook starts the review and queues the results for parent assessment. The continuation notice makes that pending work visible. This is a bounded completion workflow, not a guarantee that an earlier assistant sentence never says “done.”
+
+Relevant rubrics cover behavioral correctness/tests, security/data boundaries, interface/accessibility, content/marketing/SEO, runtime/performance/WebAssembly, and delivery/environment boundaries. Reviewers receive the task, changed paths, current test checkpoint, and existing quality-pattern cues. When the project-intelligence quality adapter is installed, they also receive the checkout-scoped project graph with provenance caveats and recent review outcomes. Missing graph support is explicit, and relevant source inspection remains available. They inspect actual source and relevant consumers, using read-only Git diffs when available. Path routing is a cue, not evidence of a defect. Source inspection cannot establish pixels, performance, production behavior or marketing claims that require separate observations.
+
+At most three independent helpers share the applicable aspects. The existing native executor selects proven free routes first, then known inexpensive metered routes, with at most one metered helper; subscription/premium routes are not silently substituted. Each round has a 30-second deadline and a requested aggregate $0.01 usage budget; each helper has four tool calls and 12,000 tokens. Native admission and request-time provider gates remain authoritative. Provider billing can differ from local usage estimates. Helpers cannot edit, deploy, run host shell commands or delegate. If the separate sandbox capability is installed, disposable experiments use its existing isolation.
+
+There are at most two review rounds and three result follow-ups per user request. Extension follow-ups do not replenish those budgets. Edits invalidate earlier reviews without replenishing the round budget. Missing capacity, failed/empty/malformed responses, absent source-read receipts, omitted aspects and missing necessary evidence are recorded as unknown, never a pass. Optional polish does not block. A concrete blocking finding needs a repair followed by a current review or an explicit evidence-based dismissal by the main agent.
+
+Use `action: "inspect"` to read status, limits, reports and coverage caveats. Use `action: "assess"` with `disposition: "accepted"` and a concrete `reason` only after current independent reviews and project test evidence are resolved. For a false positive, include `dismissals: [{id: "correctness-1", reason: "Evidence explaining why this finding does not apply"}]`. Use `disposition: "blocked"` to stop with an explicit remaining gap when verification or the bounded budget cannot resolve it. Acceptance is a parent judgment supported by evidence, not an automatic correctness certificate.
+
+The optional project-intelligence quality adapter retains up to 60 category/outcome observations for the checkout, with a 90-day horizon. Review planning reads at most 20 from earlier sessions; the current session is excluded. An earlier blocking finding remains an attention signal even if a later round passes. Updates are atomic across workers. History changes attention order only: it never relaxes correctness standards or adds more rounds. Review prose/source excerpts remain in the originating session, outside this numeric/category history.
+
+Stop, shutdown, reload, session changes and explicit delegation/model restrictions are respected. Late completions cannot approve newer edits or append results to another session. Reload does not wake a review by itself. `PI_QUALITY_REVIEWS=off` (or `0`) disables the quality lifecycle; `PI_CHECKPOINTS=0` or `shadow` also suppresses it. `PI_AUTONOMOUS_FREE_ASSIST=off` prevents helper dispatch. Disabling project tests does not disable change discovery for quality review.

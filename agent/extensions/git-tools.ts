@@ -93,7 +93,7 @@ export async function runGitInfo(
   const filePath = validatePath(params.path);
   const revision = validateRevision(params.revision);
   const count = Math.min(Math.max(Math.floor(Number(params.count)) || 10, 1), 50);
-  const base = [...MANAGED_GIT_ARGS, "--literal-pathspecs"];
+  const base = [...MANAGED_GIT_ARGS, "--literal-pathspecs", "-c", "log.showSignature=false"];
   let args: string[];
 
   switch (action) {

@@ -39,6 +39,8 @@ import { capabilityCeilingAgentRestrictionSources, isAgentAllowedByCapabilityCei
 import { mergeRuntimeAgents, type RuntimeAgentOwner } from "./runtime-agent-registry.ts";
 import { listExternalJobProviders } from "../api/external-job-provider.ts";
 import { describeFreeRoutes, catalogRouteCapabilities } from "../runs/shared/free-route-evidence.ts";
+import { readRankCache } from "../runs/shared/model-selection.ts";
+import { modelIdentity, QUALITY_TTL_MS } from "../runs/shared/model-quality.ts";
 import { classifyModelEconomy, loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 
 type ManagementAction = "list" | "get" | "models" | "create" | "update" | "delete" | "eject" | "disable" | "enable" | "reset";
@@ -1050,6 +1052,8 @@ function handleModels(params: ManagementParams, ctx: ManagementContext): AgentTo
 			"",
 		);
 		const economy = loadModelEconomyConfig();
+		const intelligence = readRankCache().cache;
+  const evidenceNow = Date.now();
 		const rows = filteredModels.map((entry) => ({
 			entry,
 			policy: classifyModelEconomy(entry.fullId, entry, economy),
@@ -1057,11 +1061,13 @@ function handleModels(params: ManagementParams, ctx: ManagementContext): AgentTo
 		const eligible = (row: typeof rows[number]) => !economy.enabled || ["affordable", "subscription"].includes(row.policy.verdict);
 		rows.sort((a, b) => Number(eligible(b)) - Number(eligible(a)) || a.entry.fullId.localeCompare(b.entry.fullId));
 		for (const { entry, policy } of rows.slice(0, 40)) {
+			const benchmarks = (intelligence?.observations ?? []).filter(b=>modelIdentity(b.model)===modelIdentity(entry.id) && b.observedAt<=evidenceNow && evidenceNow-b.observedAt<QUALITY_TTL_MS);
+   const quality = benchmarks.length ? `benchmark evidence: ${benchmarks.length} measures (${[...new Set(benchmarks.map(b=>b.domain))].join(", ")}); task gate still applies` : "benchmark quality: unknown";
 			const rates = policy.rates ? `; worst-case $${policy.rates.input}/$${policy.rates.output} per M input/output` : "";
-			lines.push(`  ${entry.fullId}  [${describeModelThinking(entry)}; input: ${entry.input?.join(", ") ?? "unknown"}; tools: ${catalogRouteCapabilities(entry)?.toolCalling === true ? "yes" : catalogRouteCapabilities(entry)?.toolCalling === false ? "no" : "unknown"}; ${catalogRouteCapabilities(entry)?.catalogAddedAt ? `catalog added: ${new Date(catalogRouteCapabilities(entry)!.catalogAddedAt!).toISOString().slice(0,10)}; ` : ""}economy: ${economy.enabled ? policy.verdict : "disabled"}${rates}]`);
+			lines.push(`  ${entry.fullId}  [${describeModelThinking(entry)}; input: ${entry.input?.join(", ") ?? "unknown"}; tools: ${catalogRouteCapabilities(entry)?.toolCalling === true ? "yes" : catalogRouteCapabilities(entry)?.toolCalling === false ? "no" : "unknown"}; ${catalogRouteCapabilities(entry)?.catalogAddedAt ? `catalog added: ${new Date(catalogRouteCapabilities(entry)!.catalogAddedAt!).toISOString().slice(0,10)}; ` : ""}economy: ${economy.enabled ? policy.verdict : "disabled"}${rates}; ${quality}]`);
 		}
 		if (rows.length > 40) lines.push(`  ... ${rows.length - 40} more; narrow the query with a provider or model name.`);
-		lines.push("", "For automatic budget-aware selection use model: inherit. For an explicit route, choose an affordable/subscription entry with the required capabilities; expensive/zero-placeholder entries will be blocked unless already authorized. Pass a :thinking suffix only at a supported level. Registry capability is not a live probe; scope, quota and user constraints still apply.");
+		lines.push("", "For automatic budget-aware selection use model: inherit. For an explicit route, choose an affordable/subscription entry with the required capabilities; expensive/zero-placeholder entries will be blocked unless already authorized. Pass a :thinking suffix only at a supported level. Registry capability is not a live probe; scope, quota and user constraints still apply. Benchmark evidence is cached from exact model identities; a newer version is preferred only when comparable scores support it. Unknown quality permits bounded advice, not an automatic quality downgrade for implementation. Artificial Analysis data attribution: https://artificialanalysis.ai/.");
 		if (modelQuery.toLowerCase().split(/\s+/).includes("input:image"))
 			lines.push("Visual inspection of local files: narrow with input:image tools:true to require advertised tool calling as well as vision; unknown tool support is excluded by tools:true. Choose an eligible image route explicitly (default children may inherit your text-only model). Use a fresh read-only child with the absolute image paths and a concrete visual question; it must read the images and return observations, not edit files. If none is permitted, report the limitation rather than guessing.");
 		return result(lines.join("\n"));

@@ -90,6 +90,6 @@ test('workspace escapes, unsupported files and bounded reads remain explicit',as
 });
 
 test('failure and success hooks use different bounded receipts',()=>{
-  assert.equal(matchHook('source_check',{},true)?.key,'source-check-recovery');
-  assert.equal(matchHook('source_check',{})?.key,'source-check-scope');
+  assert.equal(matchHook('syntax_check',{},true)?.key,'source-check-recovery');
+  assert.equal(matchHook('syntax_check',{})?.key,'source-check-scope');
 });
