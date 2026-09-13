@@ -518,14 +518,16 @@ export function agentBrief(snapshot, options = {}) {
   for (let i = 0; i < Math.max(incoming.length,outgoing.length); i++) {
     for (const edge of [incoming[i],outgoing[i]]) if (edge && !seen.has(edge.id)) { seen.add(edge.id); near.push(edge); }
   }
-  const facts = graph.facts.map(fact => `${label(fact.subject)}.${safeString(fact.predicate,40)}=${safeString(fact.object,180)} ${evidence(fact)}`);
+  const intentFact = fact => ['decision','constraint'].includes(byId.get(fact.subject)?.type) && fact.predicate === 'description';
+  const facts = graph.facts.map(fact => `${label(fact.subject)}.${safeString(fact.predicate,40)}=${safeString(fact.object,intentFact(fact) ? 600 : 180)} ${evidence(fact)}`);
   const candidates = [
+    ...facts.filter((_,i) => intentFact(graph.facts[i])),
     ...roots.map(node => `entity: ${label(node.id)} [${node.type}]`),
     ...near.slice(0,2).map(edgeLine),
-    ...facts.filter((_,i) => graph.facts[i].conflict),
+    ...facts.filter((_,i) => graph.facts[i].conflict && !intentFact(graph.facts[i])),
     ...edges.filter(edge => !seen.has(edge.id)).map(edgeLine),
     ...near.slice(2).map(edgeLine),
-    ...facts.filter((_,i) => !graph.facts[i].conflict),
+    ...facts.filter((_,i) => !graph.facts[i].conflict && !intentFact(graph.facts[i])),
   ];
   const omitted = 'Additional evidence omitted; use project_intel with focus and direction to inspect more.';
   for (const line of candidates) {

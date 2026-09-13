@@ -1,5 +1,7 @@
 # Project intelligence
 
+Automatic [change-scope deliberation](CHANGE-SCOPE.md) connects relevant prior-session evidence to the graph and completion reviews. Its transcript retrieval is temporary; the graph retains bounded structural provenance rather than another copy of conversation prose. Conversation branches, native checkpoints and project Git references remain separate, with explicit links when the harness observes their relationship.
+
 YunusPi builds a private, persistent project model automatically. Start Pi in a
 project and discovery begins in a worker. Returning sessions reuse the model and
 refresh changed evidence. `/graph` opens its live interactive view in a separate

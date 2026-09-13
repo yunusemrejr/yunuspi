@@ -9,6 +9,12 @@ import { queryGraph, simplifyGraph, agentBrief } from "./query.mjs";
 import { discoverProject } from "./discovery.mjs";
 import { discoverContinuity } from "./continuity.mjs";
 import { safeText, secretFile } from "./privacy.mjs";
+import {
+  buildChangeProvenance,
+  buildReviewProvenance,
+  changeRecordKey,
+  normalizeWorkflow,
+} from "./workflow-record.mjs";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 function compactStats(stats) {
   return Object.fromEntries(
@@ -437,12 +443,48 @@ async function run(op, payload, signal) {
       };
     case "history":
       return store.history({ limit: Math.min(30, payload.limit ?? 20), sourceId: payload.sourceId, scope: payload.allScopes ? undefined : identity.checkoutId });
-    case "review_history":
-      return store.reviewHistory(
+    case "review_history": {
+      const workflow = normalizeWorkflow(payload.workflow, {
+        identity,
+        sessionId: workerData.sessionId,
+      });
+      const history = store.reviewHistory(
         identity.checkoutId,
         workerData.sessionId,
         payload.samples,
       );
+      if (!workflow || !Array.isArray(payload.samples) || payload.samples.length === 0)
+        return history;
+      const knownNodes = snapshot().nodes;
+      const linked = [];
+      for (const sample of payload.samples) {
+        const provenance = buildReviewProvenance({
+          workflow,
+          sample,
+          existingNodes: knownNodes,
+        });
+        const sourceId = `session-review:${safeText(workerData.sessionId, 80)}:${provenance.identity.slice(0, 24)}:${provenance.aspect}`;
+        const old = store.sources().find((source) => source.id === sourceId);
+        const source = {
+          id: sourceId,
+          scope: identity.checkoutId,
+          kind: "session",
+          locator: `session-review:${provenance.identity}:${provenance.aspect}`,
+          fingerprint: hash(JSON.stringify([provenance.identity, provenance.aspect, provenance.outcome, provenance.claims])),
+          nodes: provenance.nodes,
+          claims: provenance.claims,
+        };
+        const result = store.replaceSource(source, {
+          expectedVersion: old?.version ?? 0,
+        });
+        linked.push({ aspect: provenance.aspect, ...result });
+      }
+      cache = undefined;
+      // Preserve the long-standing review_history response (an array of prior
+      // category observations). Graph linkage is visible through query/history
+      // and never changes this caller-facing shape.
+      return history;
+    }
     case "update":
       if (typeof payload.sourceId !== "string" || !payload.sourceId.startsWith("agent:") || !Number.isSafeInteger(payload.expectedVersion) || payload.expectedVersion < 1)
         throw Error("Update requires an agent sourceId, its observed expectedVersion and a complete replacement fact. Inspect first.");
@@ -547,6 +589,10 @@ async function run(op, payload, signal) {
       });
       return { ok: true };
     case "changes": {
+      const workflow = normalizeWorkflow(payload.workflow, {
+        identity,
+        sessionId: workerData.sessionId,
+      });
       const files = [
         ...new Set(
           (payload.files ?? []).filter(
@@ -558,22 +604,26 @@ async function run(op, payload, signal) {
         .slice(0, 32);
       if (!files.length) return { changed: false };
       const session = safeText(workerData.sessionId, 80),
-        id = `session-change:${session}:${hash(files.join("\n")).slice(0, 16)}`;
+        id = changeRecordKey({ sessionId: workerData.sessionId, files, workflow });
       const old = store.sources().find((x) => x.id === id);
       const change = {
         id: nodeId("change", id),
         type: "change",
         label: `Changes from session ${session.slice(0, 8)}`,
       };
-      const nodes = [
-        change,
-        ...files.map((file) => ({
-          id: nodeId("file", file),
-          type: "file",
-          label: file,
-          key: file,
-        })),
-      ];
+      const fileNodes = files.map((file) => ({
+        id: nodeId("file", file),
+        type: "file",
+        label: file,
+        key: file,
+      }));
+      const nodes = [change, ...fileNodes];
+      const provenance = buildChangeProvenance({
+        workflow,
+        changeId: change.id,
+        existingNodes: snapshot().nodes,
+      });
+      nodes.push(...provenance.nodes);
       const claims = [
         {
           subject: nodeId("project", identity.id),
@@ -592,7 +642,7 @@ async function run(op, payload, signal) {
           status: "historical",
           confidence: 1,
         },
-        ...nodes.slice(1).map((file) => ({
+        ...fileNodes.map((file) => ({
           subject: change.id,
           predicate: "modified",
           object: file.id,
@@ -601,18 +651,23 @@ async function run(op, payload, signal) {
           confidence: 0.9,
         })),
       ];
+      claims.push(...provenance.claims);
       const source = {
         id,
         scope: identity.checkoutId,
         kind: "session",
         locator: `session:${session}`,
-        fingerprint: hash(files.join("\n")),
+        fingerprint: workflow
+          ? hash(JSON.stringify([files, provenance.identity, provenance.claims]))
+          : hash(files.join("\n")),
         nodes,
         claims,
       };
-      return store.replaceSource(source, {
+      const result = store.replaceSource(source, {
         expectedVersion: old?.version ?? 0,
       });
+      cache = undefined;
+      return result;
     }
     case "close":
       closed = true;

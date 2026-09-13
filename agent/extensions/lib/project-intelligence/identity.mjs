@@ -18,18 +18,12 @@ const MARKERS = [
 ];
 export async function gitRead(cwd, args, { signal, maxBuffer = 131072 } = {}) {
   const env = {
-    ...process.env,
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
     GIT_TERMINAL_PROMPT: "0",
     GIT_OPTIONAL_LOCKS: "0",
+    GIT_NO_LAZY_FETCH: "1",
     GIT_PAGER: "cat",
   };
-  for (const key of [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_COMMON_DIR",
-  ])
-    delete env[key];
   try {
     return (
       await exec("git", ["--no-pager", "-c", "core.fsmonitor=false", ...args], {

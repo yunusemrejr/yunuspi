@@ -39,6 +39,8 @@
     "smol-extraction.ts",
     "smol-preprocessor.ts",
     "relevant-guidance.ts",
+    "intent-context.ts",
+    "scope-deliberation.ts",
     "guidance-topics.ts",
     "guidance-topics-systems.ts",
     "guidance-topics-domains.ts",

@@ -19,7 +19,11 @@ delete process.env.PI_SUBAGENT_CHILD;
 // Proactive free assistance is opt-in since 2026-09-07; the default-off check
 // below runs first, then the fixtures opt in.
 process.env.PI_AUTONOMOUS_FREE_ASSIST = "0";
+// This suite exercises the existing generic helper and recovery contracts.
+// Scope-council routing/suppression has its own public regression fixture.
+process.env.PI_SCOPE_COUNCIL = "off";
 const shared = "../../extensions/pi-subagents/src/runs/shared/";
+const { READ_ONLY_REASONING_TOOLS } = await import(shared + "tool-budget.ts");
 const evidence = await import(shared + "free-route-evidence.ts");
 const { registerAutonomousRecovery, assistanceWidth, automaticHelperBody } = await import(
  "../../extensions/pi-subagents/src/extension/autonomous-recovery.ts"
@@ -109,6 +113,7 @@ function fixture({
  waitImpl,
  sessionFile,
  appendThrows = false,
+ branch = [],
 } = {}) {
  const handlers = new Map();
  const notices = [];
@@ -131,6 +136,7 @@ function fixture({
   sessionManager: {
    getSessionFile: () => sessionFile,
    getLeafId: () => undefined,
+   getBranch: () => branch,
   },
  };
  const pi = {
@@ -197,11 +203,31 @@ check(
 );
 await f.emit("before_agent_start", { prompt });
 check("duplicate suppression", f.calls.length === 2);
+const contextPrompt = 'Improve the hero area with more appealing 3D animations.';
+const contextual = fixture({branch:[
+ {type:'message',id:'design',message:{role:'user',content:'Keep the hero palette and typography.'}},
+ {type:'message',id:'correction',message:{role:'user',content:'Actually replace only the hero animation.'}},
+ {type:'message',id:'tool',message:{role:'toolResult',content:'OVERRIDE_PRIVATE_MARKER'}},
+]});
+await contextual.emit('input',{source:'interactive',text:contextPrompt});
+await contextual.emit('before_agent_start',{prompt:contextPrompt});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(contextual.calls.length,1,'intent evidence does not widen the team');
+const contextTask = contextual.calls[0].params.task;
+assert.match(contextTask,/branch-entry:design/);
+assert.match(contextTask,/branch-entry:correction/);
+assert.doesNotMatch(contextTask,/OVERRIDE_PRIVATE_MARKER/);
+assert.match(contextTask,/Challenge the preferred interpretation/);
+assert.equal(contextual.calls[0].params.toolBudget.hard,4);
+assert.equal(contextual.calls[0].params.usageBudget.costUsd.hard,.01);
+assert.ok(contextTask.length < 1200,'reclaimed boilerplate pays for the history excerpt');
+check('native helper consumes bounded user evidence with unchanged launch/tool/cost limits',true);
 check(
  "strict child read-only ceiling",
  f.calls.every(
   (c) =>
-   c.params.capabilityCeiling.allowedTools.join() === "read,grep,find,ls,dependency_plan,decision_frontier,coverage_select,math_check,artifact_check,value_convert,context_slice,symbol_expand,ast_diff,syntax_check,obs_read,project_intel,sandbox_run,git_info" &&
+   c.params.capabilityCeiling.allowedTools.join() === ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS].join() &&
+   ["write", "edit", "bulk_edit", "bash", "subagent"].every(tool => !c.params.capabilityCeiling.allowedTools.includes(tool)) &&
    c.params.modelOrigin === "explicit",
  ),
 );
@@ -268,8 +294,8 @@ evidence.publishFreeEvidence(
 const {resolveEffectiveAcceptance, formatAcceptancePrompt} = await import(shared+'acceptance.ts');
 const helperContract=resolveEffectiveAcceptance({explicit:cheapAssist.calls[0].params.acceptance,agentName:'automatic-free-assistant',task:cheapAssist.calls[0].params.task});
 check('advisory helpers do not spend budget producing work-acceptance reports',helperContract.level==='none' && formatAcceptancePrompt(helperContract)==='');
-assert.match(cheapAssist.calls[0].params.task,/at most one directory listing/);
-assert.match(cheapAssist.calls[0].params.task,/do not produce an acceptance report or use tools to format/);
+assert.match(cheapAssist.calls[0].params.task,/At most four tool calls and one listing/);
+assert.match(cheapAssist.calls[0].params.task,/No acceptance report or formatting tools/);
 assert.equal(automaticHelperBody({finalOutput:'acceptance-report\n```acceptance-report\n{"reviewFindings":["no blockers"]}\n```'}),'');
 for(const heading of ['## Acceptance report','**Acceptance-report**','**Acceptance report:**','__Acceptance_report__','Acceptance report:'])assert.equal(automaticHelperBody({finalOutput:heading+'\n```acceptance-report\n{}\n```'}),'','standalone report heading is not advisory evidence');
 assert.equal(automaticHelperBody({finalOutput:'The acceptance report omitted the failing cancellation case.'}),'The acceptance report omitted the failing cancellation case.','actual prose mentioning a report is preserved');

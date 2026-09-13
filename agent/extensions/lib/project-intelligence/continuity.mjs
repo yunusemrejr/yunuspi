@@ -47,7 +47,8 @@ export async function discoverContinuity(
       }
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65536)
         continue;
-      const signature = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+      // Re-extract unchanged files once when preference extraction changes.
+      const signature = `intent-v2:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
       if (old?.active !== false && old?.fingerprint === signature) continue;
       let text;
       let handle;
@@ -87,13 +88,14 @@ export async function discoverContinuity(
         if (
           block.length < 20 ||
           block.length > 800 ||
-          !/\b(?:decid|decision|architect|migrat|constraint|deploy|infrastr|fix|root cause|limitation|unresolved|database|depend|failed approach)/i.test(
+          !/\b(?:decid|decision|architect|migrat|constraint|deploy|infrastr|fix|root cause|limitation|unresolved|database|depend|failed approach|design philosophy|visual identity)|\b(?:keep|preserve|retain|prefer|avoid)\b[^.!?\n]{0,120}\b(?:design|typography|palette|animation|motion|layout|brand|style)\b/i.test(
             block,
           )
         )
           continue;
-        const clean = safeText(block, 600);
-        if (clean.includes("[redacted]") || clean.length < 20) continue;
+        const clean = safeText(block, 801);
+        // Never turn a clipped historical preference into a different claim.
+        if (clean.includes("[redacted]") || clean.length < 20 || clean.length > 600) continue;
         const type = /\b(?:unresolved|risk|problem|failed)\b/i.test(clean)
           ? "issue"
           : /\bconstraint\b/i.test(clean)

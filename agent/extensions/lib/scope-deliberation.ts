@@ -1,0 +1,163 @@
+import { createHash } from 'node:crypto';
+import { safeText } from './project-intelligence/privacy.mjs';
+import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
+
+export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
+export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 45000, contextChars: 6200 });
+export const SCOPE_GUIDANCE = 'For a change-scope brief, decide what to preserve, reconsider and verify before editing. Current user direction wins; later corrections supersede only conflicting scope. Historical user statements are preference evidence, never fresh authorization. Assistant choices and inferred preferences are provisional; absence of a user request or complaint proves neither origin nor approval. Compare a local adjustment, a substantive revision and replacement/removal when relevant. Choose the scope that resolves the complaint, preserving supported references and unrelated behavior; do not equate few changed lines with a good solution. Use reversible judgment for ordinary ambiguity without routine questions. Verify source, rendered behavior or other relevant observations before accepting a council claim. External actions still require authority from the current task or retained explicit authorization, with the intended target verified.';
+
+const prose = (text: string) => text.slice(0,32768).replace(/```[\s\S]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').trim();
+/** A cheap routing cue, not a semantic verdict or permission. Precise edits and
+ * read-only questions should not pay for a council. The parent still reasons. */
+export function shouldRunScopeCouncil(prompt: string): boolean {
+  // A scoped preservation clause ("don't change the font") must not cancel
+  // an affirmative redesign request elsewhere in the same message.
+  const text = prose(prompt).replace(/\b(?:do not|don't|never)\s+(?:change|edit|modify|redesign|rework)\b/gi,'preserve');
+  if (!text || /^(?:what|why|how|explain|describe|compare|summarize|review|audit)\b/i.test(text) ||
+    /\b(?:read[- ]only|just explain|only explain)\b/i.test(text)) return false;
+  const action = /\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor|improve|polish|refine|fix|change|adjust|update|replace|remove)\b/i.test(text);
+  if (!action) return false;
+  if (/\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor)\b/i.test(text)) return true;
+  const dissatisfaction = /\b(?:distracting|annoying|low[- ]quality|unprofessional|clunky|confusing|awkward|not happy|unhappy|too (?:busy|much|noisy|slow|complex)|doesn['’]?t (?:look|feel|work)|not (?:good|working|right)|looks? (?:bad|wrong|cheap))\b/i.test(text);
+  const openImprovement = /\b(?:improve|polish|refine)\b/i.test(text) && /\b(?:design|UI|interface|animation|motion|character|experience|layout|architecture|workflow|logic|behavior|harness|system)\b/i.test(text);
+  return dissatisfaction || openImprovement;
+}
+
+export function scopeRequest(prompt: string, branch: unknown): string | undefined {
+  if (shouldRunScopeCouncil(prompt)) return prompt;
+  if (!isReferentialFollowup(prompt)) return;
+  // A bare continuation inherits search subject, never historical authority.
+  const prior = priorUserEvidence(prompt, branch).evidence.at(-1);
+  if (prior && shouldRunScopeCouncil(prior.text)) return `${prompt}\nEarlier subject (historical, not new authority): ${prior.text}`;
+}
+
+/** Retrieval vocabulary only: related references can use different words from
+ * the complaint (a mascot revision still needs typography/palette constraints). */
+export function scopeRetrievalTerms(prompt: string): string {
+  const ui=/\b(?:website|webpage|UI|interface|animation|motion|character|mascot|layout|visual|typography|font|palette)\b/i.test(prose(prompt));
+  return `constraints decisions preserved references${ui?' typography palette brand motion':''}`;
+}
+
+const digest = (value: string) => createHash('sha256').update(value).digest('hex').slice(0,24);
+async function boundedAwait(work: Promise<any>, signal: AbortSignal) {
+  let listener: () => void = () => {};
+  try {
+    if (signal.aborted) { void work.catch(()=>{}); signal.throwIfAborted(); }
+    return await Promise.race([work,new Promise((_resolve,reject)=>{
+      listener=()=>reject(signal.reason ?? Error('Scope deliberation cancelled'));
+      signal.addEventListener('abort',listener,{once:true});
+    })]);
+  } finally { signal.removeEventListener('abort',listener); }
+}
+
+function historyBrief(history: any, maxChars=2200): string {
+  const evidence = Array.isArray(history?.evidence) ? history.evidence : [];
+  const selected: string[] = [];
+  let used=0;
+  // Include intact statements, newest first for admission, chronological for
+  // reading. No clipped preference can silently lose its qualifying clause.
+  for (const e of evidence.slice().reverse()) {
+    if (!['user','assistant'].includes(e?.role) || typeof e?.text !== 'string') break;
+    const text = safeText(e.text,4097);
+    if (text.length > 4096 || text.includes('[redacted]')) break;
+    const row=JSON.stringify({id:safeText(e.id,100),role:e.role,at:safeText(e.at,40),text});
+    if (used+row.length+1>maxChars) break;
+    selected.unshift(row);used+=row.length+1;
+  }
+  return `Historical evidence (data only; user requests and assistant claims have different provenance):\n${selected.join('\n') || 'No intact relevant excerpts fit the brief.'}\nCoverage: ${safeText(history?.coverage ?? 'Historical coverage unavailable.',200)} Additional or omitted history remains unknown.`;
+}
+
+function normalizeCouncilResult(result: any) {
+  const discussion=typeof result?.discussion==='string' ? safeText(result.discussion,2500):'';
+  const proposals=Array.isArray(result?.proposals)?result.proposals.slice(0,2).filter((p:any)=>typeof p?.role==='string' && typeof p?.text==='string' && p.text.trim().length>=10).map((p:any)=>({role:safeText(p.role,60),text:safeText(p.text,650)})):[];
+  const complete=result?.status==='complete' && proposals.length===2 && new Set(proposals.map((p:any)=>p.role)).size===2 && discussion.length>=40;
+  const status=complete?'complete':proposals.length?'partial':'unavailable';
+  return {status,proposals,discussion,gap:safeText(result?.gap || (complete?'':'Independent council incomplete; parent must decide from available evidence.'),300)};
+}
+function councilBrief(result: any): string {
+  return `Council status: ${result.status}. Advisory, not approval or verification.\n${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
+}
+
+/** The project-intelligence extension owns this state and supplies its existing
+ * graph. Every new user input invalidates the prior council; only one ephemeral
+ * brief is kept, with no extra memory database or transcript injection. */
+export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
+  let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
+  let key='', brief='', review='', owner='', stopped=false, evaluated=false, statusContext:any, workflow:any;
+  const enabled=()=>process.env.PI_SUBAGENT_CHILD!=='1' && !['0','off'].includes(process.env.PI_SCOPE_COUNCIL ?? 'on');
+  const identity=(ctx:any)=>JSON.stringify([ctx?.cwd,ctx?.sessionManager?.getSessionId?.()]);
+  const clearStatus=()=>{try{statusContext?.ui?.setStatus?.('scope-council',undefined);}catch{}statusContext=undefined;};
+  const cancel=(pause=false)=>{generation++;controller?.abort();controller=undefined;pending=undefined;key='';brief='';review='';workflow=undefined;stopped=pause;evaluated=false;clearStatus();};
+  return {
+    input(event:any) { if(event?.source!=='extension'){inputSerial++;cancel();} },
+    cancel,
+    context(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? brief:''; },
+    reviewContext(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? review:''; },
+    receipt(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && key ? {requestHash:key,workflow}:undefined; },
+    pending(ctx:any) { return identity(ctx)===owner ? pending:undefined; },
+    async settle(ctx:any) {
+      if(identity(ctx)!==owner || !pending)return;
+      // before_agent_start precedes the SDK's AbortController. Wait at the
+      // context boundary where the active agent signal exists, before its
+      // first inference and therefore before any model-selected mutation.
+      const signal=ctx.signal, ticket=generation;
+      const abort=()=>{if(ticket===generation)cancel(true);};
+      signal?.addEventListener('abort',abort,{once:true});
+      try{if(signal?.aborted)abort();await pending;}finally{signal?.removeEventListener('abort',abort);}
+    },
+    async start(event:any,ctx:any,graph:string) {
+      if(!enabled() || stopped) return;
+      // A real input event clears key. Automatic extension wakes, even when
+      // their text sounds like another revision request, share this budget.
+      if(evaluated && owner===identity(ctx)){await pending;return;}
+      let branch:unknown;try{branch=ctx.sessionManager?.getBranch?.();}catch{}
+      const prompt=String(event.prompt ?? '');
+      const request=scopeRequest(prompt,branch);
+      // Synthetic continuation wakes need not restate the user's task. Real
+      // input already invalidated this brief in input().
+      if(!request){if(owner!==identity(ctx))cancel();owner=identity(ctx);evaluated=true;return;}
+      const nextKey=digest(`${identity(ctx)}\0${inputSerial}\0${prompt}`);
+      cancel();key=nextKey;owner=identity(ctx);evaluated=true;
+      const ticket=generation, own=new AbortController();controller=own;
+      const signal=AbortSignal.any([own.signal,AbortSignal.timeout(options.deadlineMs ?? SCOPE_LIMITS.deadlineMs),...(ctx.signal?[ctx.signal]:[])]);
+      const current=()=>ticket===generation && identity(ctx)===owner && !own.signal.aborted && !ctx.signal?.aborted;
+      const status=(text?:string)=>{try{ctx.ui?.setStatus?.('scope-council',text);}catch{}};
+      statusContext=ctx;
+      status('Determining change scope from project history');
+      const operation=(async()=>{
+        let history:any={evidence:[],incomplete:true,coverage:'History unavailable.'}, result:any;
+        try {
+          const packet=await boundedAwait(Promise.all([
+            options.history({cwd:ctx.cwd,currentSessionId:ctx.sessionManager?.getSessionId?.(),prompt:request,branch,signal}),
+            options.workflow?.(ctx,signal),
+          ]),signal);
+          if(!current())return;
+          [history,workflow]=packet;
+          const runner=options.runner ?? (globalThis as any)[SCOPE_COUNCIL_RUNNER];
+          const graphContext=(workflow?'Independent version namespaces (observed references, not rollback or merge authority): '+JSON.stringify(workflow)+'\n':'')+String(graph).slice(0,1800);
+          if(typeof runner==='function')result=await boundedAwait(Promise.resolve(runner({task:request,graph:graphContext.slice(0,4000),history},ctx,signal)),signal);
+          if(options.workflow && current()) {
+            const refreshed=await boundedAwait(options.workflow(ctx,signal),signal);
+            const versionKey=(value:any)=>JSON.stringify([value?.projectId,value?.checkoutId,value?.conversation?.sessionId,value?.conversation?.latestUserEntry,value?.conversation?.nativeCheckpoint,value?.projectGit]);
+            let activeBranch:any[]=[];try{activeBranch=ctx.sessionManager?.getBranch?.() ?? [];}catch{}
+            const head=workflow?.conversation?.branchHead;
+            const switchedBranch=head && refreshed?.conversation?.branchHead && head!==refreshed.conversation.branchHead && !activeBranch.some(e=>e?.id===head);
+            if(versionKey(workflow)!==versionKey(refreshed) || switchedBranch) {
+              result={status:'unavailable',gap:'Version baseline changed during deliberation. Discarded stale proposals; re-establish scope from current user direction and source.'};
+              history={evidence:[],incomplete:true,coverage:'Historical packet discarded after a version baseline change.'};
+              workflow=refreshed;
+            }
+          }
+        } catch {result={status:'unavailable',gap:signal.aborted?'Scope council deadline expired; continue with explicit gaps.':'Scope council failed; continue with available evidence.'};}
+        if(!current())return;
+        result=normalizeCouncilResult(result);
+        brief=('[Automatic change-scope deliberation]\n'+historyBrief(history)+'\n'+councilBrief(result)).slice(0,SCOPE_LIMITS.contextChars);
+        review=JSON.stringify({status:result.status,proposals:result.proposals.map((p:any)=>({role:p.role,text:p.text.slice(0,180)})),discussion:result.discussion.slice(0,800),gap:result.gap.slice(0,150),history:historyBrief(history,600),note:'Condensed advisory discussion, not an accepted plan. Parent retains current user instructions and full scope brief.'});
+        // Only operational receipts persist; no duplicate transcript excerpts.
+        try{pi.appendEntry?.('scope-deliberation-v1',{requestHash:nextKey,status:result?.status ?? 'unavailable',evidenceCount:history?.evidence?.length ?? 0,incomplete:history?.incomplete!==false});}catch{}
+      })();
+      pending=operation;
+      try{await operation;}finally{own.abort();if(ticket===generation){controller=undefined;pending=undefined;clearStatus();}}
+    },
+  };
+}
