@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { Type } from "typebox";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { checkMutationPolicies } from "./lib/self-mutation-guard.ts";
 import { ScopedSnapshots } from "./lib/scoped-snapshots.ts";
 export default function (pi: any) {
   const store = new ScopedSnapshots(
@@ -52,6 +53,8 @@ export default function (pi: any) {
           const preview = await store.preview(ctx.cwd, p.id);
           if (preview.token !== p.token)
             throw Error("Missing or stale preview token; call preview first");
+          for (const change of preview.changes)
+            await checkMutationPolicies(pi, ctx, path.join(preview.root, change.path), "write");
           if (!ctx.hasUI)
             throw Error(
               "Destructive restoration requires interactive human confirmation; use preview in headless mode",
@@ -67,8 +70,12 @@ export default function (pi: any) {
             ctx.cwd,
             p.id,
             p.token,
-            withFileMutationQueue,
+            (file: string, apply: () => Promise<void>) => withFileMutationQueue(file, async () => {
+              await checkMutationPolicies(pi, ctx, file, "write");
+              return apply();
+            }),
           );
+          if (result.restored.length) try { pi.events?.emit("harness:mutation-committed", {ctx, paths: result.restored.map((file: string) => path.join(preview.root,file))}); } catch { /* committed receipt */ }
           break;
         }
         default:

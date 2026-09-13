@@ -545,7 +545,12 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	});
 	on("agent_settled", async (_event, ctx) => {
 		if (deadlineTimer) clearTimeout(deadlineTimer); deadlineTimer = undefined;
-		active?.abort();
+		// Settlement invalidates an in-flight recovery attempt before aborting it.
+		// An abort-aware wait rejects asynchronously; without a new generation its
+		// catch path can publish a cancellation notice after the parent already
+		// settled, leaving stale recovery state visible in the next turn.
+		const settling = active;
+		if (settling) { generation++; settling.abort(); }
 		if (restorePrimary && primary && ctx.model && (route(ctx.model) !== route(primary) || endpointSelected)) await setModel(primary, ctx);
 		restorePrimary = false;
 		endpointSelected = false;

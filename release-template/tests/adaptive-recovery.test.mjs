@@ -29,12 +29,12 @@ const sample=(m,ok,now=Date.now())=>{
  if(ok)h.recordSuccess({provider:m.provider,model:m.id,now,economyUsage:{input:1000,output:100,cacheRead:0,cacheWrite:0,costUsd:.001,rates,elapsedMs:2000}});
  else h.recordFailure({provider:m.provider,model:m.id,now,errorMessage:'500 server error',rates});
 };
-async function fixture({model=base,models=[base,{...base,provider:'direct',baseUrl:'https://direct.invalid/v1'}],getEndpoints=async()=>endpoints,prompt='Continue the task',usage=1000}={}) {
+async function fixture({model=base,models=[base,{...base,provider:'direct',baseUrl:'https://direct.invalid/v1'}],getEndpoints=async()=>endpoints,prompt='Continue the task',usage=1000,wait=async()=>{}}={}) {
  clear();
  const handlers=new Map(),selected=[],entries=[];let lookups=0;
  const ctx={model,scopedModels:[],getContextUsage:()=>({tokens:usage}),ui:{setStatus(){}},abort(){},modelRegistry:{getAvailable:()=>models},sessionManager:{getSessionFile:()=>path.join(dir,'session.jsonl'),getBranch:()=>[]}};
  const pi={on:(n,f)=>handlers.set(n,[...(handlers.get(n)??[]),f]),registerCommand(){},getActiveTools:()=>['read'],appendEntry:(type,data)=>entries.push({type,...data}),sendMessage(){},setModel:async m=>{ctx.model=m;selected.push(m);return true;}};
- registerAutonomousRecovery(pi,async()=>{throw Error('Unexpected delegation');},{endpoints:async(...args)=>{lookups++;return getEndpoints(...args);},wait:async()=>{}});
+ registerAutonomousRecovery(pi,async()=>{throw Error('Unexpected delegation');},{endpoints:async(...args)=>{lookups++;return getEndpoints(...args);},wait});
  const emit=async(n,event={})=>{let result;for(const f of handlers.get(n)??[]) {const r=await f(event,ctx);if(r)result=r;}return result;};
  await emit('input',{source:'user',text:prompt});
  const fail=async(error=upstream('Host a'))=>{const message={role:'assistant',provider:ctx.model.provider,model:ctx.model.id,stopReason:'error',content:[],errorMessage:error};h.recordFailure({provider:message.provider,model:message.model,errorMessage:error,endpoint:ctx.model.compat?.recoveryEndpointName});const event={message,signal:new AbortController().signal};await emit('pi_provider_recovery',event);return event;};
@@ -81,6 +81,19 @@ try {
  fx=await fixture();await fx.fail('429 account quota exceeded');assert.equal(fx.lookups(),0);assert.equal(fx.ctx.model.provider,'direct');await fx.emit('session_shutdown');
  fx=await fixture({getEndpoints:async()=>{throw Error('catalog unavailable');}});await fx.fail();assert.equal(fx.ctx.model.provider,'direct');await fx.emit('session_shutdown');
  fx=await fixture();assert.equal((await fx.fail('content filter: upstream unavailable')).decision,'pause');assert.equal(fx.selected.length,0);assert.equal(fx.lookups(),0);await fx.emit('session_shutdown');
+ let waitStarted=false;
+ const abortableWait=(_ms,signal)=>new Promise((resolve,reject)=>{
+  waitStarted=true;
+  const abort=()=>{signal.removeEventListener('abort',abort);reject(new Error('Cancelled'));};
+  if(signal.aborted)abort();else signal.addEventListener('abort',abort,{once:true});
+ });
+ fx=await fixture({models:[base],getEndpoints:async()=>[],wait:abortableWait});
+ const settling=fx.fail('500 server error');
+ while(!waitStarted)await Promise.resolve();
+ await fx.emit('agent_settled');
+ await settling;
+ assert.equal(fx.entries.filter(e=>e.type==='provider-recovery').length,1,'settlement invalidates an in-flight recovery before its abort rejection can publish stale status');
+ await fx.emit('session_shutdown');
  let release;fx=await fixture({getEndpoints:()=>new Promise(r=>release=r)});const pending=fx.fail();while(!release)await Promise.resolve();await fx.emit('model_select',{source:'user',model:base});release(endpoints);await pending;assert.equal(fx.selected.length,0,'manual selection cancels stale catalog continuation');await fx.emit('session_shutdown');
  // Manual selection of the original route during asynchronous auth must also
  // win over a stale temporary pin with that very same provider/model id.

@@ -52,6 +52,8 @@ import {
  *
  * Scope:
  * - Explicit background shell jobs only: /bg and bg_run spawn commands directly.
+ * - This registry is authoritative for explicit background jobs; managed-bash's
+ *   `process` tool owns only bounded internal wait_for/render helper captures.
  * - No Ctrl+B support for backgrounding an already-running built-in bash tool.
  * - No detached/restart reattachment: live child processes belong to this Pi
  *   extension runtime and are killed on session shutdown/reload.
@@ -59,7 +61,6 @@ import {
 
 const STATUS_INTERVAL_MS = 1000;
 const COMMAND_PREVIEW_CHARS = 90;
-const GIT_INSTALL_TARGET = "git:github.com/ismailsaleekh/pi-background-tasks";
 
 const packageInfo = readPackageInfo(
   new URL("../package.json", import.meta.url),
@@ -550,24 +551,16 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("bg-update", {
     description:
-      "Show how to update pi-background-tasks to the latest published version",
+      "Show the local-fork update status; never replace the installed extension",
     handler: (_args, ctx) => {
       const current = PACKAGE_VERSION ?? "unknown";
       const latest = latestKnownVersion;
-      const pinnedNpm = latest
-        ? `${PACKAGE_NAME}@${latest}`
-        : `${PACKAGE_NAME}@<version>`;
       const lines = [
         latest
-          ? `pi-background-tasks ${current} is installed; ${latest} is the latest published version.`
-          : `pi-background-tasks ${current} is installed.`,
-        "Update from npm:",
-        `  pi install npm:${PACKAGE_NAME}@latest`,
-        `  pi install npm:${pinnedNpm}`,
-        "Git releases are independent of npm versions; use main only when you want current repository state:",
-        `  pi install ${GIT_INSTALL_TARGET}@main`,
-        `For a pinned git release, first verify the tag exists, then use ${GIT_INSTALL_TARGET}@<existing-tag>.`,
-        "This command only prints update instructions; it does not install or self-update.",
+          ? `Local background-task fork ${current} is installed; ${latest} is the latest published package version.`
+          : `Local background-task fork ${current} is installed.`,
+        "This local fork is source-owned; /bg-update never installs or replaces it.",
+        "Review upstream changes and port them deliberately under the project extension directory before reloading Pi.",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
       return Promise.resolve();
@@ -675,11 +668,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgRunParams, BgRunDetails>({
     name: "bg_run",
     label: "Background Run",
-    description: `Start a named long-running shell command in the background; returns immediately with a task ID and output path. Terminal state (completed/failed/killed) is delivered as <background-task-notification>, which requests one coalesced follow-up after the active run settles (errors/aborts preserve pause) — never sleep or poll to wait. Logs are bounded to ${formatSize(MAX_LOG_BYTES)}.`,
+    description: `Start a named long-running shell command in the explicit background-task registry; returns immediately with a task ID and output path. Terminal state (completed/failed/killed) is delivered as <background-task-notification>. Finite work defaults to one coalesced follow-up after it settles; recognized persistent services default to a durable UI/receipt update without waking the agent, and wake only when triggerOnCompletion:true is explicitly requested (errors/aborts preserve pause). Never sleep or poll to wait. Manage these IDs with bg_status/bg_logs/bg_kill; they do not appear in managed-bash's process tool. Logs are bounded to ${formatSize(MAX_LOG_BYTES)}.`,
     promptSnippet:
-      "Start a named long-running shell command; default terminal notification wakes a follow-up turn, so yield instead of polling",
+      "Start named background work; finite completion can wake once, while persistent services default to UI-only status",
     promptGuidelines: [
-      "Use bash for short commands; bg_run for long tests/builds/servers. Give bg_run a short name; isAgent is true only for LLM processes. Keep completion notifications enabled; do other work or yield rather than poll. A terminal notification is authoritative; inspect its logs when needed, then report the result—not success before completion.",
+      "Use bash for short commands; bg_run for long tests/builds/servers. Give bg_run a short name; isAgent is true only for LLM processes. Keep completion notifications enabled; finite tasks request one coalesced wake by default, while recognized persistent services stay UI/receipt-only unless triggerOnCompletion:true is explicit. Do other work or yield rather than poll. A terminal notification is authoritative; inspect its logs when needed, then report the result—not success before completion.",
     ],
     parameters: BgRunParams,
     prepareArguments(args): BgRunParamsValue {
@@ -760,7 +753,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     name: "bg_status",
     label: "Background Status",
     description:
-      "Inspect one background task or list all running/recent background tasks. This is a point-in-time inspection tool, not a waiting primitive.",
+      "Inspect one explicit bg_run task or list all running/recent tasks in the background-task registry. Managed-bash helper jobs belong to the process tool. This is a point-in-time inspection tool, not a waiting primitive.",
     promptSnippet:
       "Inspect point-in-time status for one or all background tasks; never poll it as a wait loop",
     promptGuidelines: [
@@ -790,7 +783,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgLogsParams, BgLogsDetails>({
     name: "bg_logs",
     label: "Background Logs",
-    description: `Read bounded output from a background task for deliberate inspection, not as a waiting primitive; capped at ${formatSize(MAX_LOG_BYTES)}, with a pointer to the full file when truncated.`,
+    description: `Read bounded output from an explicit bg_run task for deliberate inspection, not as a waiting primitive; capped at ${formatSize(MAX_LOG_BYTES)}, with a pointer to the full file when truncated. Managed-bash helper output belongs to the process tool.`,
     promptSnippet:
       "Read bounded task output when needed; never tail it repeatedly as a wait loop",
     promptGuidelines: [
@@ -840,7 +833,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Stop a running background task by ID. Fails loudly if the task is unknown or already finished.",
     promptSnippet: "Stop a running background task by ID",
     promptGuidelines: [
-      "Use bg_kill when the user asks to stop a background task or when a bg_run command is no longer needed.",
+      "Use bg_kill for explicit bg_run tasks when the user asks to stop one or when it is no longer needed; use managed-bash's process tool for internal helper jobs.",
     ],
     parameters: BgKillParams,
     async execute(_toolCallId, params) {

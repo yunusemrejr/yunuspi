@@ -1,4 +1,5 @@
 // Shared by the MCP server and the automatically loaded harness extension.
+export const UTILITY_CONCURRENCY = 2;
 const str = (description) => ({ type: 'string', minLength: 1, maxLength: 4096, description });
 const choice = (...values) => ({ type: 'string', enum: values });
 const paths = { type: 'array', minItems: 1, maxItems: 100, items: str('Explicit workspace-relative file path; no globs or directory walks.') };

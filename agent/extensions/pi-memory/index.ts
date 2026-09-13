@@ -20,7 +20,7 @@
  *   memory_search  — search across all memory files via qmd (keyword, semantic, or deep)
  *
  * Context injection:
- *   - MEMORY.md + SCRATCHPAD.md + today's + yesterday's daily logs injected into every turn
+ *   - Stable memory paths only; contents are on demand unless PI_MEMORY_INJECT=content.
  */
 
 import { registerPriming } from './priming.ts';
@@ -29,7 +29,7 @@ import { addCompactionSalience } from './context-salience.ts';
 import { projectMemoryKey } from './project-identity.ts';
 import { acquireMemoryMutation, readMemoryForMutation, replaceMemoryFile } from './mutation.ts';
 import { type ExecFileOptions, execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type Message, StringEnum, Type } from "@earendil-works/pi-ai";
@@ -359,6 +359,7 @@ interface ExitSummaryResult {
 	summary: string | null;
 	error?: string;
 	hasMessages: boolean;
+	sourceMessageId?: string;
 }
 
 function formatExitSummaryReason(reason: ExitSummaryReason): string {
@@ -461,7 +462,7 @@ async function resolveExitSummaryApiKey(
 /**
  * Model used for exit summaries. Defaults to the session's active model;
  * PI_MEMORY_EXIT_SUMMARY_MODEL="provider/model-id" overrides it (e.g. to a
- * cheaper/faster model). Unresolvable specs fall back to the session model.
+ * cheaper/faster model). An unresolved explicit route skips automatic summaries.
  */
 function resolveExitSummaryModel(
 	ctx: ExtensionContext,
@@ -483,18 +484,19 @@ function resolveExitSummaryModel(
 	if (ctx.hasUI) {
 		try {
 			ctx.ui.notify(
-				`pi-memory: PI_MEMORY_EXIT_SUMMARY_MODEL "${spec}" not resolved; using session model`,
+				`pi-memory: PI_MEMORY_EXIT_SUMMARY_MODEL "${spec}" not resolved; skipping exit summary`,
 				"warning",
 			);
 		} catch {
 			/* UI may already be tearing down during shutdown */
 		}
 	}
-	return ctx.model;
+	return undefined;
 }
 
 async function generateExitSummary(
 	ctx: ExtensionContext,
+	signal: AbortSignal,
 ): Promise<ExitSummaryResult> {
 	const branch = getSessionBranch(ctx);
 	if (!branch) {
@@ -503,6 +505,15 @@ async function generateExitSummary(
 			error: "Session branch unavailable",
 			hasMessages: false,
 		};
+	}
+
+	const sourceMessageId = [...branch].reverse().find(entry => entry.type === "message")?.id;
+	// A resumed session with no new messages has no new summary material.
+	if (sourceMessageId && branch.some(entry => entry.type === "custom" &&
+		entry.customType === "memory-exit-summary-v1" &&
+		(entry.data as any)?.sourceMessageId === sourceMessageId &&
+		(entry.data as any)?.projectKey === projectMemoryKey(ctx.cwd))) {
+		return { summary: null, hasMessages: false };
 	}
 
 	const messages = branch
@@ -534,6 +545,7 @@ async function generateExitSummary(
 		};
 	}
 
+	if (signal.aborted) return { summary: null, hasMessages: true };
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
 	const {
@@ -566,9 +578,12 @@ async function generateExitSummary(
 		const response = await complete(
 			model,
 			{ systemPrompt: EXIT_SUMMARY_SYSTEM_PROMPT, messages: summaryMessages },
-			{ apiKey, reasoningEffort: "low" },
+			{ apiKey, reasoningEffort: "low", maxTokens: Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? Math.min(2048, model.maxTokens) : 2048, signal },
 		);
 
+		if (signal.aborted || ["error", "aborted", "length"].includes(response.stopReason)) {
+			return { summary: null, error: "Summary did not complete", hasMessages: true };
+		}
 		const summaryText = response.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
 			.map((c) => c.text)
@@ -579,7 +594,7 @@ async function generateExitSummary(
 			return { summary: null, error: "Summary was empty", hasMessages: true };
 		}
 
-		return { summary: summaryText, hasMessages: true };
+		return { summary: summaryText, hasMessages: true, sourceMessageId };
 	} catch (err) {
 		return {
 			summary: null,
@@ -609,6 +624,7 @@ export function shouldSummarizeLifecycleTransitions(): boolean {
  * with PI_MEMORY_EXIT_SUMMARY=0 (aliases: off/false/no). Default: enabled.
  */
 export function isExitSummaryEnabled(): boolean {
+	if (process.env.PI_OFFLINE === "1") return false;
 	const value = (process.env.PI_MEMORY_EXIT_SUMMARY ?? "").trim().toLowerCase();
 	return !(
 		value === "0" ||
@@ -1729,6 +1745,7 @@ export default function (pi: ExtensionAPI) {
 		exitSummaryReason = null;
 
 		let summaryTimer: ReturnType<typeof setTimeout> | undefined;
+		const summaryAbort = new AbortController();
 		try {
 			if (reason) {
 				ensureDirs();
@@ -1736,9 +1753,9 @@ export default function (pi: ExtensionAPI) {
 				// shutdown handlers with no timeout, so a hanging provider would
 				// otherwise block quitting indefinitely. On expiry nothing is
 				// persisted (the late result, if any, is simply dropped).
-				const summaryWork = generateExitSummary(ctx);
+				const summaryWork = generateExitSummary(ctx, summaryAbort.signal);
 				const expired = new Promise<null>((resolve) => {
-					summaryTimer = setTimeout(() => resolve(null), getExitSummaryTimeoutMs());
+					summaryTimer = setTimeout(() => { summaryAbort.abort(); resolve(null); }, getExitSummaryTimeoutMs());
 				});
 				const result = await Promise.race([summaryWork, expired]);
 				// Only persist real summaries. The old fallback appended an
@@ -1765,11 +1782,16 @@ export default function (pi: ExtensionAPI) {
 					} finally {
 						release();
 					}
+					if (result.sourceMessageId) {
+						try { pi.appendEntry("memory-exit-summary-v1", { sourceMessageId: result.sourceMessageId, projectKey: projectMemoryKey(ctx.cwd) }); }
+						catch { /* Memory is saved; unavailable session metadata cannot undo it. */ }
+					}
 					await ensureQmdAvailableForUpdate();
 					await runQmdUpdateNow();
 				}
 			}
 		} finally {
+			summaryAbort.abort();
 			if (summaryTimer) clearTimeout(summaryTimer);
 			if (updateTimer) {
 				clearTimeout(updateTimer);
@@ -1863,33 +1885,24 @@ export default function (pi: ExtensionAPI) {
 		try {
 			release = await acquireMemoryMutation(MEMORY_DIR);
 			ensureDirs();
-			const parts: string[] = [];
-
-			// Read and append under one owner: a handoff must not resurrect a fact
-			// another session forgot while this session was waiting for the lock.
+			// Daily logs already own their durable entries. Never copy their tail
+			// into themselves: a later compaction would recursively copy handoffs.
+			// Scratchpad is the current-state authority; this is bounded history.
 			const scratchpad = readMemoryForMutation(SCRATCHPAD_FILE);
-			if (scratchpad?.trim()) {
-				const openItems = parseScratchpad(scratchpad).filter((i) => !i.done);
-				if (openItems.length > 0) {
-					parts.push("**Open scratchpad items:**");
-					for (const item of openItems) {
-						parts.push(`- [ ] ${item.text}`);
-					}
-				}
-			}
-
+			const openItems = scratchpad?.trim() ? parseScratchpad(scratchpad).filter(item => !item.done) : [];
+			if (!openItems.length) return;
+			const bounded = openItems.slice(0,20).map(item => `- [ ] ${item.text.slice(0,500)}`).join("\n");
+			const digest = createHash("sha256").update(JSON.stringify([openItems.length,bounded])).digest("hex").slice(0,24);
 			const todayContent = readMemoryForMutation(filePath);
-			if (todayContent?.trim()) {
-				const lines = todayContent.trim().split("\n");
-				const tail = lines.slice(-15).join("\n");
-				parts.push(`**Recent daily log context:**\n${tail}`);
-			}
-			if (parts.length === 0) return;
-
+			const previous = [...(todayContent ?? "").matchAll(/<!-- HANDOFF_STATE ([a-f0-9]{24}) -->/g)].at(-1)?.[1];
+			if (previous === digest) return;
 			const handoff = [
 				`<!-- HANDOFF ${ts} [${sid}] -->`,
+				`<!-- HANDOFF_STATE ${digest} -->`,
 				"## Session Handoff",
-				...parts,
+				"Historical open-item snapshot; SCRATCHPAD.md owns current status. Daily history remains in this log; native checkpoints own conversation recovery.",
+				bounded,
+				...(openItems.length > 20 ? [`${openItems.length-20} additional open items remain in SCRATCHPAD.md.`] : []),
 			].join("\n");
 			const separator = todayContent?.trim() ? "\n\n" : "";
 			fs.mkdirSync(path.dirname(filePath), { recursive: true });

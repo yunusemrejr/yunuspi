@@ -201,7 +201,7 @@ function throwIfAborted(signal?: AbortSignal): void {
  * cannot spend its whole budget waiting on resolver failure. The resolver may
  * finish in the background, but its result is ignored after the race settles.
  */
-async function lookupWithAbort(hostname: string, lookup: Lookup, signal?: AbortSignal): Promise<LookupAddress[]> {
+export async function lookupWithAbort(hostname: string, lookup: Lookup, signal?: AbortSignal): Promise<LookupAddress[]> {
 	throwIfAborted(signal);
 	const lookupPromise = Promise.resolve().then(() => lookup(hostname));
 	if (!signal) return lookupPromise;

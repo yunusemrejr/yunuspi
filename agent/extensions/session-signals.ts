@@ -27,7 +27,7 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
   const backgroundHandles: Record<string, string> = {};
   if (activeTools.includes("process"))
     backgroundHandles.process =
-      "Own detached bash/wait_for handles; ephemeral to this Pi process, not bg_run or subagent IDs.";
+      "Supervised internal helper/wait_for handles only; ephemeral to this Pi process. Ordinary bash waits; bg_run and subagent IDs have their own owners.";
   if (activeTools.includes("bg_status"))
     backgroundHandles.bg_status =
       "bg_run task IDs; completion normally notifies. Inspect existing work before relaunching.";
@@ -254,7 +254,7 @@ export default function (pi: any) {
   pi.registerTool({
     name: "session_self",
     promptGuidelines: [
-      "Before each substantial task phase, match the needed evidence or action to active tool descriptions and relevant skills. Reuse native inspection, editing, background-task, coordination and verification tools before writing a replacement script. session_self view:runtime reports actual active tools and handle owners when availability is unclear. Revisit skill selection as the task changes; read and apply the matching workflow. Keep simple tasks simple: tool variety and skill counts are not quotas. Capability hints never grant scope or authorization.",
+      "Before a substantial task phase, map the next decision to available inspection, editing, background-task, coordination and verification tools and any task-specific skill; when available, use tool_search to discover specialized tools and load their schemas. Read a SKILL.md on demand when its workflow changes that decision, apply only relevant guidance, and revisit selection when scope changes. Keep simple tasks simple: choices are advisory; they do not impose quotas, grant authorization, or prove success.",
     ],
     label: "Session self",
     description:

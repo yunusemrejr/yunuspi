@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { UTILITY_CONCURRENCY } from './utility-mcp/catalog.mjs';
 
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 /** Owns exactly one MCP process for a harness session, with bounded restart. */
@@ -9,6 +10,8 @@ export class UtilityClient {
   private starting?: Promise<void>;
   private pending = new Map<number, Pending>();
   private sequence = 0;
+  private activeCalls = 0;
+  private waiting: Array<{ resolve: () => void; reject: (error: Error) => void; cleanup: () => void }> = [];
   private stopped = false;
   private restart?: ReturnType<typeof setTimeout>;
   private restartTimes: number[] = [];
@@ -97,13 +100,40 @@ export class UtilityClient {
       this.child!.stdin.write(line);
     });
   }
+  // The server owns two workers. Queue a bounded native-tool batch here so
+  // parallel model calls do not become avoidable concurrency errors/retries.
+  private acquire(signal?: AbortSignal): Promise<void> {
+    if (this.stopped) return Promise.reject(Error('Utility session is closed'));
+    if (signal?.aborted) return Promise.reject(Error('Utility request cancelled'));
+    if (this.activeCalls < UTILITY_CONCURRENCY) { this.activeCalls++; return Promise.resolve(); }
+    if (this.waiting.length >= 16 - UTILITY_CONCURRENCY) return Promise.reject(Error('Utility unavailable or busy'));
+    return new Promise((resolve, reject) => {
+      const cancel = () => {
+        const index = this.waiting.indexOf(job);
+        if (index < 0) return;
+        this.waiting.splice(index, 1); job.cleanup(); reject(Error('Utility request cancelled'));
+      };
+      const job = { resolve, reject, cleanup: () => signal?.removeEventListener('abort', cancel) };
+      this.waiting.push(job);
+      signal?.addEventListener('abort', cancel, { once: true });
+    });
+  }
+  private release() {
+    const job = this.waiting.shift();
+    if (job) { job.cleanup(); job.resolve(); }
+    else this.activeCalls--;
+  }
   async call(name: string, args: unknown, signal?: AbortSignal) {
-    if (signal?.aborted) throw Error('Utility request cancelled');
-    await this.start();
-    return this.request('tools/call', { name, arguments: args }, 7500, signal);
+    await this.acquire(signal);
+    try {
+      if (signal?.aborted) throw Error('Utility request cancelled');
+      await this.start();
+      return await this.request('tools/call', { name, arguments: args }, 7500, signal);
+    } finally { this.release(); }
   }
   close() {
     this.stopped = true; clearTimeout(this.restart);
+    for (const job of this.waiting.splice(0)) { job.cleanup(); job.reject(Error('Utility session is closed')); }
     const child = this.child;
     if (child) {
       child.stdin.end(); child.kill('SIGTERM');

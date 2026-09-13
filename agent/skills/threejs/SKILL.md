@@ -1,6 +1,6 @@
 ---
 name: threejs
-description: Three.js / WebGL 3D for the web — scene setup, lighting and color, draw calls, resource ownership, glTF assets, shaders and failure diagnosis. Use when adding 3D scenes or models, or fixing WebGL artifacts, performance or leaks.
+description: Three.js / WebGL 3D for the web — scene setup, lighting and color, voxel/low-poly composition, draw calls, resource ownership, glTF assets, shaders and failure diagnosis. Use when adding 3D scenes or models, including voxel art, or fixing WebGL artifacts, performance or leaks.
 ---
 
 # Three.js
@@ -10,6 +10,14 @@ description: Three.js / WebGL 3D for the web — scene setup, lighting and color
 Check the installed revision and renderer backend before copying examples. Use a single owned animation loop; convert elapsed milliseconds to seconds for motion. Resize the drawing buffer and camera aspect together and call `camera.updateProjectionMatrix()`. Choose pixel ratio from a measured quality/performance budget: DPR 2 costs four times the pixels of DPR 1, but 2 is not a correctness limit. Set a consistent world scale and keep the perspective near plane positive. Push near outward and far inward where composition permits; no fixed ratio guarantees freedom from z-fighting. [Renderer](https://threejs.org/docs/pages/WebGLRenderer.html), [camera](https://threejs.org/docs/pages/PerspectiveCamera.html).
 
 For clip blending, root motion, camera calculations, animated instancing and teardown, use [threejs-animation-engineering](../threejs-animation-engineering/SKILL.md).
+
+## Voxel and low-poly art
+
+Use this workflow for a Three.js/WebGL voxel or deliberately low-poly scene. Block the scene on a coarse grid before adding detail: choose a readable 3/4 silhouette, focal mass, negative space, ground contact and camera framing. Inspect the target viewport and a thumbnail so the composition survives scale changes.
+
+- **Palette and materials:** use a small role-based palette (base, shadow, highlight, accent) with value separation before texture detail. Prefer flat or nearest sampling, or vertex colors, for pixel-art surfaces. Choose Lambert for simple lit forms or Standard when roughness and metalness matter. Share materials; do not allocate one material per voxel.
+- **Surface choice:** keep boxes for small or irregular sets; for larger static volumes cull hidden faces and merge compatible faces or geometry. Use `InstancedMesh` for repeated decorations. Keep animated or independently edited pieces separate, preserve hard or flat normals, and avoid coplanar overlays.
+- **Light and verify:** one broad key with hemisphere or ambient fill and soft contact shadows usually keeps small faces readable. Set background contrast and restrained exposure. Render actual pixels through existing project, browser or render tools; check silhouette and occlusion, palette values, seams or z-fighting, clipping, shadow direction, nearest filtering and transparency. Fix the largest readability issue first. If only source or DOM evidence is available, report GPU rendering as unverified. For animation or Blender authoring, read the matching task-specific skill. Do not add a voxel framework or dependency solely for the look.
 
 ## Lighting and color
 

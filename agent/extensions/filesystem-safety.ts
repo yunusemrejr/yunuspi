@@ -1588,7 +1588,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	});
 
 	// Also intercept write and edit tools
-	pi.on("tool_call", async (event, ctx) => {
+	const mutationPolicy = async (event: any, ctx: any) => {
 		if (event.toolName !== "write" && event.toolName !== "edit") {
 			return undefined;
 		}
@@ -1677,6 +1677,10 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		}
 
 		return undefined;
+	};
+	pi.on("tool_call", mutationPolicy);
+	pi.events?.on("harness:mutation-preflight", (request: any) => {
+		request.checks.push(() => mutationPolicy({toolName: request.kind, input: {path: request.target}}, request.ctx));
 	});
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "write") return;

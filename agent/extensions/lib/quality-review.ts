@@ -217,7 +217,14 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (reviewed !== previousReview && disposition === 'blocked') {
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
-        try { pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${reason}`,display:true},{deliverAs:'followUp',triggerTurn:false}); } catch {}
+        const blockedKey = `blocked:${revision}`;
+        if (delivered === blockedKey) return;
+        try {
+          pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${reason}`,display:true},{deliverAs:'followUp',triggerTurn:false});
+          // Two settled hooks can await the same in-flight review. Mark the
+          // receipt only after delivery so a failed queue remains retryable.
+          delivered = blockedKey; save();
+        } catch {}
         return;
       }
       const content = advice(), key = `${revision}:${reviewed}:${status()}`;

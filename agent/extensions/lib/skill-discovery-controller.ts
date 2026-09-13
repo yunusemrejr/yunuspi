@@ -1,9 +1,18 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { buildSkillDiscoveryRequest, parseSkillDiscoverySuggestions } from './skill-discovery.ts';
 import { skillEvidenceContext, type SkillInfo } from './skill-relevance.ts';
 
 const RUNNER = Symbol.for('yunus-pi.skill-discovery-runner.v1');
-const OBSERVED_TOOLS = new Set(['read','edit','write','grep','find','ls','symbol_search','lsp_diagnostics','project_report','package_probe','openapi_probe','sqlite_probe','render_see','fetch_content','web_search','data_query','syntax_check','browser','browser_navigate','browser_snapshot','browser_click','browser_screenshot','http_request','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','artifact_check']);
+const OBSERVED_TOOLS = new Set([
+  'read','edit','write','grep','find','ls',
+  // Source-intelligence tools expose bounded path metadata and are useful
+  // evidence for skill discovery when they replace broad shell searches.
+  'symbol_search','module_report','read_symbol','symbol_references',
+  'lsp_navigation','ast_grep_search','context_slice','symbol_expand','context_code',
+  'lsp_diagnostics','project_report','package_probe','openapi_probe','sqlite_probe','render_see','fetch_content','web_search','data_query','syntax_check',
+  'browser','browser_navigate','browser_snapshot','browser_click','browser_screenshot','http_request','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','artifact_check',
+]);
 
 /** Advisory discovery piggybacks on successful native observations. No timers
  * start work, no transcript/body is copied, and results never wake the agent. */
@@ -33,18 +42,43 @@ export function createSkillDiscoveryController(options: {
     observe(event: any) {
       if (!ctx || attempted || !permitted() || event.isError || !OBSERVED_TOOLS.has(event.toolName)) return;
       const input = event.input ?? {};
-      if (typeof input.path === 'string' && /(?:^|[\\/])SKILL\.md$/i.test(input.path)) return;
-      let file = '';
-      if (typeof input.path === 'string' && input.path.length <= 1024) {
-        const relative = path.relative(ctx.cwd, path.resolve(ctx.cwd, input.path));
-        if (relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) file = relative;
+      // Several read-only diagnostics and query tools report their concrete
+      // scope as `paths:[...]`. Treat that as the same bounded metadata as a
+      // singular path; otherwise two successful path-scoped observations can
+      // trigger discovery with no file evidence at all. Keep only workspace
+      // relative paths and never include skill bodies or arbitrary URLs.
+      const rawFiles = [
+        ...(typeof input.path === 'string' ? [input.path] : []),
+        ...(typeof input.file_path === 'string' ? [input.file_path] : []),
+        ...(Array.isArray(input.paths) ? input.paths.slice(0, 24) : []),
+      ];
+      const observedFiles: string[] = [];
+      for (const value of rawFiles) {
+        if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || /(?:^|[\\/])SKILL\.md$/i.test(value)) continue;
+        const relative = path.relative(ctx.cwd, path.resolve(ctx.cwd, value));
+        if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) continue;
+        const normalized = relative.replaceAll(path.sep, '/');
+        if (!observedFiles.includes(normalized)) observedFiles.push(normalized);
+        if (observedFiles.length >= 12) break;
       }
-      const action = typeof input.action === 'string' && /^[a-z_]{1,24}$/.test(input.action) ? input.action : '';
-      const key = `${event.toolName}:${file}:${action}`;
+      if (!observedFiles.length && rawFiles.some(value => typeof value === "string" && /(?:^|[\\/])SKILL\.md$/i.test(value))) return;
+      const file = JSON.stringify(observedFiles);
+      const action = [input.action, input.operation, input.view].find(value => typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,47}$/.test(value)) ?? '';
+      // Search and AST tools often carry only a query/pattern/rule. Distinct
+      // bounded values should count as distinct observations, but the value
+      // itself must never enter the discovery packet or persisted metadata.
+      const variant = [input.query, input.pattern, input.rule].find(value => typeof value === 'string' && value.length <= 4096);
+      const variantKey = typeof variant === 'string'
+        ? createHash('sha256').update(variant).digest('hex').slice(0, 16)
+        : '';
+      const key = `${event.toolName}:${file}:${action}:${variantKey}`;
       if (observations.has(key)) return;
       if (observations.size >= 24) observations.delete(observations.values().next().value!);
       observations.add(key); tools.add(event.toolName);
-      if (file && files.size < 12) files.add(file);
+      for (const observedFile of observedFiles) {
+        if (files.size >= 12) break;
+        files.add(observedFile);
+      }
       if (observations.size < 2) return;
       const runner = (globalThis as any)[RUNNER];
       if (typeof runner !== 'function') return;

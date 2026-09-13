@@ -1,3 +1,5 @@
+import { acquireCatalogCacheLock } from "./lib/catalog-cache-lock.ts";
+import { MODEL_FACTS, currentModelFacts, directDeepseekCost } from "./lib/model-facts.ts";
 import {boundedContextLimit,normalizeModelLimits} from "./lib/context-limits.ts";
 import { registerLocalModels } from "./lib/local-models.ts";
 import { refreshModelResearch } from "./pi-subagents/src/runs/shared/model-research.ts";
@@ -42,7 +44,7 @@ import type {
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
 import type { FreeRouteCapabilities } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -99,7 +101,7 @@ function wireFor(providerId: string): { api: string; baseUrl: string } {
 	}
 }
 
-type PiModel = Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
+type PiModel = { liveImageInput?: boolean } & Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
 type RefreshModelContext = Parameters<
 	NonNullable<ProviderConfig["refreshModels"]>
 >[0];
@@ -122,28 +124,6 @@ interface CacheFile {
 
 let cacheWriteChain: Promise<void> = Promise.resolve();
 
-/** Serialize the existing cache transaction across Pi processes as well. */
-async function acquireCacheLock(signal?: AbortSignal): Promise<() => void> {
-	const lock = `${CACHE_FILE}.lock`;
-	const deadline = Date.now() + 5000;
-	for (;;) {
-		signal?.throwIfAborted();
-		try {
-			mkdirSync(lock, { mode: 0o700 });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			// Never remove another writer's lock based on age: two reclaimers can
-			// otherwise remove a newly acquired lock. Metadata stays usable in memory
-			// if a crashed writer leaves a lock requiring later manual cleanup.
-			if (Date.now() >= deadline) throw new Error(`Catalog cache lock timed out: ${lock}; inspect its owner and remove only an abandoned lock`);
-			await delay(25, undefined, { signal });
-			continue;
-		}
-		try { writeFileSync(join(lock, "owner"), String(process.pid), { mode: 0o600 }); }
-		catch (error) { rmSync(lock, { recursive: true, force: true }); throw error; }
-		return () => rmSync(lock, { recursive: true, force: true });
-	}
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -246,7 +226,7 @@ function saveCache(
 ): Promise<void> {
 	const write = cacheWriteChain.then(async () => {
 		if (signal?.aborted) return;
-		const release = await acquireCacheLock(signal);
+		const release = await acquireCatalogCacheLock(CACHE_FILE, signal);
 		const tmp = `${CACHE_FILE}.${process.pid}.tmp`;
 		try {
 			if (signal?.aborted) return;
@@ -1087,12 +1067,7 @@ interface RunInfraLiveModel {
  * blocked, just no image routing until they land here. Drop this set once
  * the catalog carries a real input-modality field.
  */
-const RUNINFRA_IMAGE_INPUT_IDS = new Set([
-	"glm-5-3-flash",
-	"qwen3-8-flash-next",
-	"ornith-1-5-35b",
-	"qwen3-8-27b",
-]);
+
 
 /**
  * WHY: reasoning is always-on fleet-wide — reasoning_effort accepts
@@ -1125,7 +1100,8 @@ function mapRunInfraModel(m: RunInfraLiveModel): PiModel | undefined {
 		name: m.id,
 		api: "openai-completions",
 		reasoning: true,
-		input: RUNINFRA_IMAGE_INPUT_IDS.has(m.id) ? ["text", "image"] : ["text"],
+		liveImageInput: /vlm/.test(modality),
+		input: /vlm/.test(modality) || currentModelFacts("runinfra")?.imageIds.includes(m.id) ? ["text", "image"] : ["text"],
 		contextWindow: ctx,
 		maxTokens: clampMaxTokens(ctx, m.max_output_tokens ?? Math.min(131_072, ctx)),
 		cost: {
@@ -1225,8 +1201,26 @@ function resolvedCatalogApiKey(
 // Catalog-wide uncertainty is metadata, not a terminal warning per model.
 // Keep the fallback honest without writing into the running TUI's stderr.
 const outputFallbacks = new Map<string, number>();
+type CatalogHealth = {source:"live" | "cache" | "fallback"; observedAt:number; failure?:"refresh failed" | "cache write failed" | "registry refresh failed"};
+const catalogHealth = new Map<string,CatalogHealth>();
+export function catalogDiagnostics(now = Date.now()) {
+  return [...catalogHealth].map(([provider,health]) => ({provider,...health,
+    ageMs:health.observedAt > 0 ? Math.max(0,now-health.observedAt) : null,
+    stale:health.source === "fallback" || health.observedAt <= 0 || now-health.observedAt >= ROUTER_CATALOG_TTL_MS,
+    facts: Object.hasOwn(MODEL_FACTS,provider) ? currentModelFacts(provider,now) ? "current" : "expired" : "not used",
+  }));
+}
+function catalogStatus(ctx: ExtensionContext): void {
+  if (!ctx.hasUI) return;
+  const row = catalogDiagnostics().find(item => item.provider === ctx.model?.provider);
+  ctx.ui.setStatus("model-catalog", row && (row.failure || row.stale || row.facts === "expired")
+    ? `Catalog: ${row.provider} ${row.source}${row.ageMs === null ? " (age unknown)" : ` (${Math.floor(row.ageMs/60000)}m old)`}${row.failure ? `; ${row.failure}` : ""}${row.facts === "expired" ? "; snapshot facts expired" : ""}`
+    : undefined);
+}
+
 function outputLimitStatus(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
+	catalogStatus(ctx);
 	const model = ctx.model;
 	const fallback = model && ((model as typeof model & { piUnlistedModel?: boolean }).piUnlistedModel ? model.maxTokens : outputFallbacks.get(`${model.provider}/${model.id}`));
 	const explicit = model && providerConfigJson(model.provider);
@@ -1248,7 +1242,7 @@ function minimalModel(
 		contextWindow: 131_072,
 		maxTokens: maxTokens ?? 8_192,
 		outputLimitEstimated: maxTokens === undefined,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output"] },
 	};
 }
 
@@ -1287,25 +1281,9 @@ async function refreshIdOnlyCatalog(
 		const override =
 			config?.modelOverrides?.[id]?.maxTokens ??
 			config?.models?.find((m) => m.id === id)?.maxTokens;
-		return { ...minimalModel(id, providerId, override ?? f?.maxTokens), ...f };
+		return minimalModel(id, providerId, override);
 	});
 }
-
-// Direct API only: https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-10).
-// Peak rates are conservative routing estimates; usage applies the UTC schedule.
-function deepseekPeakCost(id: string): PiModel["cost"] | undefined {
-    if (id === "deepseek-v4-pro") return Date.now() >= Date.parse("2026-09-14T04:00:00Z")
-        ? { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 }
-        : { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 };
-    if (["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].includes(id))
-        return { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 };
-}
-const DEEPSEEK_FLASH_FACTS: IdOnlyFacts = {
-    name: "DeepSeek V4.1 Flash", contextWindow: 1_000_000, maxTokens: 384_000,
-    reasoning: true, input: ["text", "image"],
-    thinkingLevelMap: {off: "none", minimal: "low", low: "low", medium: "high", high: "high", xhigh: "high", max: "max"},
-    compat: {thinkingFormat: "deepseek", supportsReasoningEffort: true, requiresReasoningContentOnAssistantMessages: true, maxTokensField: "max_tokens"},
-};
 
 async function refreshCerebras(context: RefreshModelContext): Promise<PiModel[]> {
     // Default public format has actual prices; /v1/models can be ID-only.
@@ -1326,7 +1304,7 @@ async function refreshCerebras(context: RefreshModelContext): Promise<PiModel[]>
         });
         if (models.length) return models;
     } catch { if (context.signal.aborted) return []; }
-    return refreshIdOnlyCatalog("cerebras", "https://api.cerebras.ai/v1/models", context, ID_ONLY_FACTS.cerebras);
+    return refreshIdOnlyCatalog("cerebras", "https://api.cerebras.ai/v1/models", context, idOnlyFacts("cerebras"));
 }
 
 // ── Refresh dispatcher ─────────────────────────────────────────────────
@@ -1347,16 +1325,9 @@ type Fetcher = (
 	cached: CacheEntry | undefined,
 ) => Promise<PiModel[]>;
 
-// Id-only provider facts: supplied live probes, 2026-09-06. Unknown ids still
-// use an explicitly warned conservative fallback, never guessed capabilities.
-const ID_ONLY_FACTS: Record<string, Record<string, IdOnlyFacts>> = {
-	cerebras: {
-		"qwen-3.8-27b": { maxTokens: 65_536 },
-		"qwen3-coder": { maxTokens: 65_536 },
-		"gpt-oss-120b": { maxTokens: 32_768 },
-	},
-	deepseek: Object.fromEntries(["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"].map(id => [id, DEEPSEEK_FLASH_FACTS])),
-};
+// Raw cache rows do not embed expiring snapshot overrides. Apply current
+// registry facts at publication so an old cache cannot extend their lifetime.
+const idOnlyFacts = (provider: string): Record<string, IdOnlyFacts> => currentModelFacts(provider)?.models ?? {};
 const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 	// Applies to fresh and cached catalogs; explicit model/provider overrides win.
 	openrouter: { sendSessionAffinityHeaders: true },
@@ -1368,17 +1339,21 @@ function publishModels(
 	models: PiModel[],
 	probes?: CacheEntry["probes"],
 ): PiModel[] {
-	const idOnly = Object.hasOwn(ID_ONLY_FACTS, provider);
+	const idOnly = ["cerebras", "deepseek"].includes(provider);
     const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""));
     // Publish the documented canonical ID even when an old cache predates release.
-    if (officialDeepSeek && !models.some(m => m.id === "deepseek-flash"))
-        models = [...models, {...minimalModel("deepseek-flash", provider, 384_000), ...DEEPSEEK_FLASH_FACTS}];
+    if (officialDeepSeek && idOnlyFacts("deepseek")["deepseek-flash"] && !models.some(m => m.id === "deepseek-flash"))
+        models = [...models, {...minimalModel("deepseek-flash", provider, 384_000), ...idOnlyFacts("deepseek")["deepseek-flash"]}];
 	const store = idOnly || provider === "together" ? storeModels(provider) : undefined;
 	const config = providerConfigJson(provider);
 	const configuredCompat = providerJsonCompat(provider);
 	for (const key of outputFallbacks.keys()) if (key.startsWith(`${provider}/`)) outputFallbacks.delete(key);
 	return validModels(models).map((cachedModel) => {
-		const { outputLimitEstimated, ...rawModel } = cachedModel;
+		const { outputLimitEstimated, ...cachedRaw } = cachedModel;
+		const historical = idOnly && (provider !== "deepseek" || officialDeepSeek) && Object.hasOwn(MODEL_FACTS[provider as "cerebras" | "deepseek"].models, cachedRaw.id);
+		const rawModel = historical && !currentModelFacts(provider)
+			? store?.get(cachedRaw.id) ?? minimalModel(cachedRaw.id, provider)
+			: cachedRaw;
 		// Probe results arrive after catalog persistence. Project them here so the
 		// next cached/offline refresh can use them without another network request.
 		const probe = probes?.[rawModel.id];
@@ -1395,8 +1370,8 @@ function publishModels(
 			}
 			: rawModel;
 		const facts =
-			idOnly && (provider !== "deepseek" || ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))) && Object.hasOwn(ID_ONLY_FACTS[provider], model.id)
-				? ID_ONLY_FACTS[provider][model.id]
+			idOnly && (provider !== "deepseek" || ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))) && Object.hasOwn(idOnlyFacts(provider), model.id)
+				? idOnlyFacts(provider)[model.id]
 				: undefined;
 		const explicit =
 			config?.modelOverrides?.[model.id]?.maxTokens ??
@@ -1420,9 +1395,10 @@ function publishModels(
 			configuredCompat,
 		);
 		const directPeak = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))
-            ? deepseekPeakCost(model.id) : undefined;
+            ? directDeepseekCost(model.id) : undefined;
 		return normalizeModelLimits({
 			...model,
+			...(provider === "runinfra" && !currentModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),
 			...(directPeak ? { cost: directPeak } : {}),
 			...facts,
 			...(Object.keys(compat).length ? { compat } : {}),
@@ -1437,7 +1413,7 @@ const REFRESHERS: Record<string, Fetcher> = {
 	friendli: refreshFriendli,
 	cerebras: refreshCerebras,
 	deepseek: (ctx, _cached) =>
-		refreshIdOnlyCatalog("deepseek", "https://api.deepseek.com/v1/models", ctx, ID_ONLY_FACTS.deepseek),
+		refreshIdOnlyCatalog("deepseek", "https://api.deepseek.com/v1/models", ctx, idOnlyFacts("deepseek")),
 	runinfra: refreshRunInfra,
 };
 
@@ -1449,17 +1425,21 @@ function refreshFor(
 		const cached = cache.providers[providerId];
 		// One fallback owner for offline restore AND failed refreshes. Serving
 		// stale data must never renew its six-hour freshness timestamp.
-		const previousModels = () => {
+		const previousModels = (failure?: CatalogHealth["failure"]) => {
+			catalogHealth.set(providerId,{source:cached?.models ? "cache" : "fallback",observedAt:cached?.ts ?? 0,...(failure ? {failure} : {})});
 			if (cached?.models) return publishModels(providerId, cached.models, cached.probes);
 			if (providerId === "orcarouter")
 				return publishModels(providerId, ORCA_FALLBACK_MODELS);
-			return publishModels(providerId, [...storeModels(providerId).values(), ...(providerId === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(providerId).baseUrl.replace(/\/$/, "")) ? [{...minimalModel("deepseek-flash", "deepseek", 384_000), ...DEEPSEEK_FLASH_FACTS}] : [])]);
+			return publishModels(providerId, [...storeModels(providerId).values(), ...(providerId === "deepseek" && idOnlyFacts("deepseek")["deepseek-flash"] && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(providerId).baseUrl.replace(/\/$/, "")) ? [{...minimalModel("deepseek-flash", "deepseek", 384_000), ...idOnlyFacts("deepseek")["deepseek-flash"]}] : [])]);
 		};
 		if (context.allowNetwork === false || context.signal.aborted)
 			return previousModels();
 		const fresh =
 			cached && Date.now() - cached.ts < ROUTER_CATALOG_TTL_MS && context.force !== true;
-		if (fresh) return publishModels(providerId, cached.models, cached.probes);
+		if (fresh) {
+            catalogHealth.set(providerId,{source:"cache",observedAt:cached.ts});
+            return publishModels(providerId, cached.models, cached.probes);
+        }
 		const startedAt = Date.now();
 		try {
 			const models = validModels(await REFRESHERS[providerId](context, cached));
@@ -1488,11 +1468,12 @@ function refreshFor(
 					context.signal,
 				);
 			}
+			catalogHealth.set(providerId,{source:"live",observedAt:startedAt,...(!persisted ? {failure:"cache write failed" as const} : {})});
 			return publishModels(providerId, models, cached?.probes);
 		} catch {
 			// Retain the previous list on failure (never throw: pi-ai treats
 			// a throwing refreshModels as "no models").
-			return previousModels();
+			return previousModels(context.signal.aborted ? undefined : "refresh failed");
 		}
 	};
 }
@@ -1503,6 +1484,13 @@ export default async function registerLiveModels(
 	pi: ExtensionAPI,
 ): Promise<void> {
 	const localProviderIds = registerLocalModels(pi, AGENT_DIR);
+	pi.registerCommand?.("catalog-status", {
+		description:"Show local catalog age, refresh failures and dated-fact expiry (no network)",
+		handler: async (_args: string, ctx: ExtensionContext) => {
+			const rows = catalogDiagnostics();
+			if (ctx.hasUI) ctx.ui.notify(rows.length ? rows.map(row => `${row.provider}: ${row.source}; ${row.ageMs === null ? "age unknown" : `${Math.floor(row.ageMs/60000)}m old`}; ${row.stale ? "stale" : "fresh"}${row.failure ? `; ${row.failure}` : ""}; facts ${row.facts}`).join("\n") : "Catalog has not been observed in this process.", "info");
+		},
+	});
 	for (const [providerId, meta] of [
 		["openrouter", "OpenRouter"],
 		["orcarouter", "OrcaRouter"],
@@ -1531,15 +1519,24 @@ export default async function registerLiveModels(
  let researchController = new AbortController();
 	let lastRouterRefresh = 0;
 	let routerRefreshPending = false;
+	const failedRegistryRefresh = (ctx: ExtensionContext) => {
+		const cached = loadCache();
+		for (const provider of REFRESHER_IDS) {
+			const previous = catalogHealth.get(provider);
+			catalogHealth.set(provider,{source:previous?.source ?? (cached.providers[provider] ? "cache" : "fallback"),observedAt:previous?.observedAt ?? cached.providers[provider]?.ts ?? 0,failure:"registry refresh failed"});
+		}
+		catalogStatus(ctx);
+	};
 	pi.on("session_start", (_event, ctx) => {
   researchController.abort(); researchController = new AbortController();
 		const generation = ++sessionGeneration;
+		routerRefreshPending = false;
 		lastRouterRefresh = Date.now();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: [...REFRESHER_IDS, ...localProviderIds] })
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
-			.catch(() => {});
+			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); });
 		outputLimitStatus(ctx);
 	});
 	// Refresh discovery during long sessions without timers, inference probes,
@@ -1553,9 +1550,9 @@ export default async function registerLiveModels(
 		const generation = sessionGeneration;
 		void ctx.modelRegistry.refresh({allowNetwork: true, providers: [...REFRESHER_IDS]})
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
-			.catch(() => {})
-			.finally(() => { routerRefreshPending = false; });
+			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
+			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });
 	});
 	pi.on("model_select", (_event, ctx) => outputLimitStatus(ctx));
-	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; researchController.abort(); if (ctx.hasUI) ctx.ui.setStatus("model-output-limit", undefined); });
+	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; researchController.abort(); if (ctx.hasUI) { ctx.ui.setStatus("model-output-limit", undefined); ctx.ui.setStatus("model-catalog", undefined); } });
 }

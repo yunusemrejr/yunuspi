@@ -105,6 +105,7 @@ export function planSwarmRecovery(
 		const base = match ? match[1] : record.key;
 		const attempt = match ? Number(match[2]) : 0;
 		if (!Number.isSafeInteger(attempt)) throw new TypeError("attempt suffix exceeds safe integer range");
+		if (match && attempt < 1) throw new TypeError(`record[${index}].key attempt suffix must be >= 1`);
 		if (record.status === "stopped") cancelled.add(base);
 		if (DEGRADED_STATUSES.has(record.status) && !degraded.includes(record.key)) {
 			degraded.push(record.key);

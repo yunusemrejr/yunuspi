@@ -108,6 +108,13 @@ test('unavailable reviewers settle once with an actionable gap and no automatic 
  assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);
  await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'Review capacity failure must never become a quality pass.'}),/missing evidence/);
 });
+test('concurrent settled hooks deliver one blocked status receipt',async t=>{
+ const f=await fixture(t,{runner:async()=>[]});await f.mutate();
+ await Promise.all([f.settle(),f.settle()]);
+ assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);
+ assert.equal(f.sent[0].m.customType,'quality-review-status');
+ assert.equal(f.sent[0].o.triggerTurn,false);
+});
 test('blocking findings require an explicit evidence-based dismissal or a repair and new review',async t=>{
  const f=await fixture(t,{runner:async req=>req.aspects.map(a=>({aspect:a.id,ok:true,text:JSON.stringify({outcome:'changes',evidence:['src/value.js:1 returns a wrong result for negative inputs.'],findings:[{severity:'blocking',file:'src/value.js',detail:'A negative input becomes positive, violating the documented result contract.'}],gap:''})}))});
  await f.mutate();await f.settle();

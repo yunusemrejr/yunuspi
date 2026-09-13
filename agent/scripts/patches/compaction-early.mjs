@@ -15,7 +15,7 @@
 // are bounded to leave continuation room. Ordinary large-window defaults and
 // Pi's automatic compact-and-continue lifecycle stay intact.
 //
-// Ten targets cover SDK/CLI thresholds, settings, nonempty-summary guards,
+// Targets cover SDK/CLI thresholds, settings, nonempty-summary guards,
 // bounded preparation, and the active model window at manual/automatic callsites.
 // Core owners:
 //   1. dist/core/compaction/compaction.js        — shouldCompact (SDK path)
@@ -347,6 +347,35 @@ function bundleTarget(name, anchor, replacement) {
     );
 }
 
+// Retained assistant messages keep their original usage for billing. That usage
+// describes the old request, not the smaller context after compaction. The
+// between-tool-turn check also calls this estimator, so fixing only the terminal
+// _checkCompaction guard leaves a second compaction trigger using stale totals.
+const USAGE_SDK_ANCHOR = `function getLastAssistantUsageInfo(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const usage = getAssistantUsage(messages[i]);
+        if (usage)
+            return { usage, index: i };
+    }
+    return undefined;
+}`;
+const USAGE_BUNDLE_ANCHOR = "function getLastAssistantUsageInfo(messages){for(let i=messages.length-1;i>=0;i--){let usage=getAssistantUsage(messages[i]);if(usage)return{usage,index:i}}}";
+const USAGE_REPLACEMENT = `function getLastAssistantUsageInfo(messages) {
+    /* PI_COMPACTION_USAGE_BOUNDARY */
+    let boundary = -Infinity;
+    for (const message of messages) {
+        if (message.role === "compactionSummary")
+            boundary = Number.isFinite(message.timestamp) ? Math.max(boundary, message.timestamp) : Infinity;
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (boundary !== -Infinity && !(Number.isFinite(message.timestamp) && message.timestamp > boundary)) continue;
+        const usage = getAssistantUsage(message);
+        if (usage) return { usage, index: i };
+    }
+    return undefined;
+}`;
+
 /** Validate both native and extension summaries before changing the durable branch. */
 export function patchCompactionCommit(source) {
     const calls = [...source.matchAll(/this\.sessionManager\.appendCompaction\(([^;]+?)\);/g)];
@@ -530,6 +559,10 @@ export function targets() {
     out.push(
         commitGuardTarget("sdk: validate compaction commit", path.join(core, "dist", "core", "agent-session.js")),
         commitGuardTarget("bundle: validate compaction commit", findBundleChunkContaining("_runAutoCompaction(", "PI_COMPACT_WINDOW_CALL")),
+    );
+    out.push(
+        makeStaticTarget("sdk: post-compaction usage accounting", sdkCompact, USAGE_SDK_ANCHOR, USAGE_REPLACEMENT, undefined, [USAGE_BUNDLE_ANCHOR]),
+        makeStaticTarget("bundle: post-compaction usage accounting", bundleCompact.file, USAGE_BUNDLE_ANCHOR, USAGE_REPLACEMENT, undefined, [USAGE_SDK_ANCHOR]),
     );
     return out;
 }

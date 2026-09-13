@@ -136,6 +136,10 @@ const large = [
     usage: { input: 205042, output: 0, cacheRead: 0, cacheWrite: 0 },
   },
 ];
+// A real retained tail includes old assistant usage: preserve it for billing,
+// but it must not trigger another compaction before any fresh model response.
+retained.unshift({role:"compactionSummary",summary:"Task state saved.",tokensBefore:205042,timestamp:2});
+retained.push({...large[0]});
 let calls = 0;
 const harness = {
   model: { contextWindow: 272000 },

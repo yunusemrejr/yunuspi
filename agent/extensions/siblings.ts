@@ -592,7 +592,7 @@ export default function siblingsExtension(pi: ExtensionAPI) {
 		}
 	});
 	pi.on("input",()=>overlapNotices.clear());
-	pi.on("tool_call",(event:any,ctx:any)=>{
+	const mutationPolicy = (event:any,ctx:any)=>{
 		if (typeof event.input?.path !== "string") return;
 		if (event.toolName === "read") {
 			try { const target=targetPath(ctx.cwd,event.input.path), version=fileVersion(target); readVersions.delete(target);
@@ -613,6 +613,18 @@ export default function siblingsExtension(pi: ExtensionAPI) {
 			for (const peer of fresh.slice(0,4-overlapNotices.size)) overlapNotices.add(peer.sid+":"+target);
 			pi.sendMessage({customType:"siblings-overlap",content:`[siblings] Peer scope/recent writes overlap ${JSON.stringify(target)} (${fresh.map(peer=>shortId(peer.sid)).join(", ")}). Advisory snapshot, not a lock: re-read current content and preserve others' edits. Use session_coordinate for details; continue independent work and keep your original user goal.`,display:false},{deliverAs:"nextTurn",triggerTurn:false});
 		} catch { /* coordination never blocks tools */ }
+	};
+	pi.on("tool_call", mutationPolicy);
+	pi.events?.on("harness:mutation-preflight", (request: any) => {
+		request.checks.push(() => mutationPolicy({toolName: request.kind, input: {path: request.target}}, request.ctx));
+	});
+	pi.events?.on("harness:mutation-committed", (event: any) => {
+		try {
+			const targets = event.paths.map((file: string) => targetPath(event.ctx.cwd, file));
+			for (const target of targets) readVersions.delete(target);
+			coordination = cleanCoordination({...coordination, recentWrites:[...targets, ...coordination.recentWrites.filter(file => !targets.includes(file))].slice(0,12)});
+			publish(event.ctx);
+		} catch { /* bookkeeping cannot invalidate committed files */ }
 	});
 	pi.on("tool_result",(event:any,ctx:any)=>{
 		if(event.toolName === "read") {

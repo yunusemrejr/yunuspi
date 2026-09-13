@@ -69,6 +69,8 @@
     "health-log.ts",
     "render-queue.ts",
     "context-limits.ts",
+    "model-facts.ts",
+    "catalog-cache-lock.ts",
     "mini-preprocessor.ts",
     "self-mutation-guard.ts",
     "session-metrics.ts",
@@ -90,7 +92,8 @@
     "context-anchor.ts",
     "skill-discovery.ts",
     "skill-discovery-controller.ts",
-    "harness-activity.ts"
+    "harness-activity.ts",
+    "tool-discovery.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

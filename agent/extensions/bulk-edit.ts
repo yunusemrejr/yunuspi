@@ -6,7 +6,7 @@
  * skipped, the file set is capped, and `apply` only runs with the token
  * returned by the immediately preceding `preview` (drift-safe).
  *
- * Rollback: this tool writes in place; call workdir_snapshot first for
+ * Failed commits roll back unchanged targets. Call workdir_snapshot first for
  * non-Git trees when a restore point is needed.
  */
 
@@ -16,6 +16,7 @@ import { randomBytes } from "node:crypto";
 import { Minimatch } from "minimatch";
 import { Type } from "typebox";
 import {
+  checkMutationPolicies,
   canonicalMutationPath,
   containsPath,
   selfMutationDenial,
@@ -217,7 +218,7 @@ export default function bulkEdit(pi: any) {
     name: "bulk_edit",
     label: "Bulk Edit",
     description:
-      "Multi-file text replacement with preview then apply. Use this INSTEAD of bash `sed -i` / `perl -pi`: workspace-confined, skips binary and >1 MB files, caps the file set, and apply requires the token returned by preview. Literal by default; set isRegex for regular expressions. For rollback on non-Git trees, snapshot first with workdir_snapshot.",
+      "Multi-file text replacement with preview then apply. Use this INSTEAD of bash `sed -i` / `perl -pi`: workspace-confined, skips binary and >1 MB files, caps the file set, and apply requires the token returned by preview. Literal by default; set isRegex for regular expressions. Failed commits roll back unchanged targets; concurrent rollback conflicts preserve backups. Snapshot first for durable recovery on non-Git trees.",
     promptSnippet: "Preview and apply a multi-file literal/regex replacement",
     promptGuidelines: [
       "Use bulk_edit (preview, then apply with its token) instead of `sed -i` or `perl -pi` for multi-file replacements.",
@@ -329,7 +330,10 @@ export default function bulkEdit(pi: any) {
           )
             throw new Error(`Concurrent edit since preview: ${entry.path}`);
         };
-        for (const entry of plan.entries) await validate(entry);
+        for (const entry of plan.entries) {
+          await checkMutationPolicies(pi, ctx, entry.absolute);
+          await validate(entry);
+        }
         if (epoch !== generation || signal?.aborted)
           throw new Error(
             "Session changed or operation cancelled; preview again",
@@ -341,34 +345,32 @@ export default function bulkEdit(pi: any) {
         applying = true;
         previews.delete(params.token);
         const written: string[] = [];
+        // Stage the complete batch before committing any target. Backups remain
+        // on disk until commit succeeds; rollback refuses to overwrite a peer.
+        const staged: Array<{entry: Entry; temp: string; backup: string; identity: string; committed: boolean; retain: boolean}> = [];
         try {
           for (const entry of plan.entries) {
-            if (signal?.aborted || epoch !== generation)
-              throw new Error(
-                `Cancelled after ${written.length} file(s); re-run preview before apply`,
-              );
-            const temp = path.join(
-              path.dirname(entry.absolute),
-              `.${path.basename(entry.absolute)}.bulk-${randomBytes(4).toString("hex")}.tmp`,
-            );
-            let created = false;
-            try {
-              await validate(entry);
-              await fs.writeFile(temp, entry.updated, {
-                mode: entry.mode,
-                flag: "wx",
-              });
-              created = true;
-              await validate(entry);
-              await fs.rename(temp, entry.absolute);
-            } catch (error) {
-              if (created) await fs.rm(temp, { force: true }).catch(() => {});
-              throw new Error(
-                `write failed for ${entry.path} after ${written.length} file(s) were written: ${(error as Error).message.slice(0, 160)}`,
-              );
-            }
-            written.push(entry.path);
+            if (signal?.aborted || epoch !== generation) throw new Error("Cancelled before commit");
+            await validate(entry);
+            const prefix = path.join(path.dirname(entry.absolute), `.${path.basename(entry.absolute)}.bulk-${randomBytes(8).toString("hex")}`);
+            const item = {entry, temp: prefix + ".tmp", backup: prefix + ".bak", identity: "", committed: false, retain: false};
+            staged.push(item);
+            await fs.copyFile(entry.absolute, item.backup, 1 /* COPYFILE_EXCL */);
+            if (contentHash(await fs.readFile(item.backup)) !== entry.hash) throw new Error(`Concurrent edit since preview: ${entry.path}`);
+            await fs.writeFile(item.temp, entry.updated, {mode: entry.mode, flag: "wx"});
+            await fs.chmod(item.temp, entry.mode);
+            const stat = await fs.lstat(item.temp);
+            item.identity = `${stat.dev}:${stat.ino}`;
           }
+          for (const entry of plan.entries) await validate(entry);
+          for (const item of staged) {
+            if (signal?.aborted || epoch !== generation) throw new Error("Cancelled during commit");
+            await validate(item.entry);
+            await fs.rename(item.temp, item.entry.absolute);
+            item.committed = true;
+            written.push(item.entry.path);
+          }
+          try { pi.events?.emit("harness:mutation-committed", {ctx, paths: written}); } catch { /* files committed */ }
           return {
             content: [
               {
@@ -385,7 +387,31 @@ export default function bulkEdit(pi: any) {
             ],
             details: { files: written.length },
           };
+        } catch (error) {
+          const recovery: string[] = [];
+          for (const item of staged.slice().reverse()) {
+            if (!item.committed) continue;
+            try {
+              const actual = safePath(root, item.entry.path);
+              const stat = await fs.lstat(actual);
+              if (actual !== item.entry.absolute || !stat.isFile() || stat.isSymbolicLink()
+                || `${stat.dev}:${stat.ino}` !== item.identity
+                || contentHash(await fs.readFile(actual)) !== contentHash(item.entry.updated))
+                throw new Error("Concurrent edit prevents rollback");
+              await fs.rename(item.backup, actual);
+            } catch {
+              item.retain = true;
+              recovery.push(item.backup);
+            }
+          }
+          throw new Error(`${error instanceof Error ? error.message : "Bulk commit failed"}; ${recovery.length
+            ? `rollback incomplete; preserved original backups: ${JSON.stringify(recovery)}`
+            : "all committed files rolled back"}`);
         } finally {
+          for (const item of staged) {
+            await fs.rm(item.temp, {force:true}).catch(() => {});
+            if (!item.retain) await fs.rm(item.backup, {force:true}).catch(() => {});
+          }
           applying = false;
         }
       } catch (error) {

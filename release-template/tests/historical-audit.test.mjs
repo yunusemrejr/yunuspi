@@ -35,3 +35,24 @@ test("historical audit selects workspace evidence before applying the file cap",
     await assert.rejects(scanSessionAudit({ sessionsDir: sessions, workspace, signal: abort.signal }));
   } finally { await fs.rm(temp, { recursive: true, force: true }); }
 });
+
+test('traffic audit aggregates raw text without returning bodies or cross-session duplicate claims', async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-traffic-audit-'));
+  try {
+    const payload = 'PRIVATE_SOURCE_BODY '.repeat(40);
+    const entries = [{type:'session',cwd:temp}];
+    for (let i=0;i<2;i++) entries.push(
+      {type:'message',message:{role:'assistant',content:[{type:'toolCall',id:`call-${i}`,name:'read',arguments:{path:'/private/source.txt'}}]}},
+      {type:'message',message:{role:'toolResult',toolName:'read',toolCallId:`call-${i}`,content:[{type:'text',text:payload}]}}
+    );
+    for (const name of ['one.jsonl','two.jsonl']) await fs.writeFile(path.join(temp,name),entries.map(e=>JSON.stringify(e)).join('\n')+'\n');
+    const report=await scanSessionAudit({sessionsDir:temp,scope:'all',maxFiles:2});
+    assert.equal(report.traffic.totalReturnedChars,payload.length*4);
+    assert.equal(report.traffic.totalResults,4);
+    assert.equal(report.traffic.identicalContentChars,payload.length*2);
+    assert.equal(report.traffic.exactRequestResultChars,payload.length*2);
+    assert.deepEqual(report.traffic.largestContributors,[{tool:'read',chars:payload.length*4}]);
+    assert.doesNotMatch(JSON.stringify(report),/PRIVATE_SOURCE_BODY|private\/source|call-0/);
+    assert.match(report.traffic.interpretation,/not wire tokens/);
+  } finally { await fs.rm(temp,{recursive:true,force:true}); }
+});

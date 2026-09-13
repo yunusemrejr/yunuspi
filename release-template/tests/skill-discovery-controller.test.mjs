@@ -47,3 +47,40 @@ test('native browser actions discover workflows without copying page content or 
   f.finish();await tick();
  }finally{f.cleanup();}
 });
+
+test('path-scoped observations contribute bounded workspace file evidence',async()=>{
+ const f=fixture();try {
+  f.controller.observe({toolName:'lsp_diagnostics',input:{paths:['src/app.ts','src/view.ts']},content:[{type:'text',text:'PRIVATE DIAGNOSTIC BODY'}]});
+  f.controller.observe({toolName:'syntax_check',input:{paths:['src/routes.ts']},content:[{type:'text',text:'PRIVATE SYNTAX BODY'}]});
+  await tick();assert.equal(f.calls.length,1);
+  assert.match(f.calls[0].request.brief,/app\.ts/);assert.match(f.calls[0].request.brief,/view\.ts/);assert.match(f.calls[0].request.brief,/routes\.ts/);
+  assert.doesNotMatch(f.calls[0].request.brief,/PRIVATE (?:DIAGNOSTIC|SYNTAX) BODY/);
+ }finally{f.cleanup();}
+});
+
+test('source-intelligence observations use their concrete path schemas',async()=>{
+ const f=fixture();try {
+  f.controller.observe({toolName:'module_report',input:{path:'src/app.ts'},content:[{type:'text',text:'PRIVATE OUTLINE BODY'}]});
+  f.controller.observe({toolName:'context_slice',input:{task:'find the handler',paths:['src/routes.ts','src/handler.ts']},content:[{type:'text',text:'PRIVATE SLICE BODY'}]});
+  await tick();assert.equal(f.calls.length,1);
+  assert.match(f.calls[0].request.brief,/app\.ts/);assert.match(f.calls[0].request.brief,/routes\.ts/);assert.match(f.calls[0].request.brief,/handler\.ts/);
+  assert.doesNotMatch(f.calls[0].request.brief,/PRIVATE (?:OUTLINE|SLICE) BODY/);
+ }finally{f.cleanup();}
+});
+
+test('source-intelligence operations and bounded query variants are distinct without leaking them',async()=>{
+ const f=fixture();try {
+  f.controller.observe({toolName:'lsp_navigation',input:{path:'src/app.ts',operation:'definition'},content:[{type:'text',text:'PRIVATE DEFINITION BODY'}]});
+  f.controller.observe({toolName:'lsp_navigation',input:{path:'src/app.ts',operation:'references'},content:[{type:'text',text:'PRIVATE REFERENCES BODY'}]});
+  await tick();assert.equal(f.calls.length,1);
+  assert.match(f.calls[0].request.brief,/app\.ts/);
+  assert.doesNotMatch(f.calls[0].request.brief,/definition|references|PRIVATE/);
+ }finally{f.cleanup();}
+});
+
+test('skill-only reads do not count toward source discovery',async()=>{
+ const f=fixture();try{
+  f.observe('read','/skills/layout/SKILL.md');f.observe('read','src/one.ts');await tick();assert.equal(f.calls.length,0);
+  f.observe('read','src/two.ts');await tick();assert.equal(f.calls.length,1);
+ }finally{f.cleanup();}
+});

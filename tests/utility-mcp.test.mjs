@@ -14,7 +14,7 @@ const template = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')].find(p => fs.existsSync(path.join(p, 'extensions/utility-tools.ts')));
 const mod = name => import(pathToFileURL(path.join(agent, 'extensions/lib', name)));
 const { UtilityClient } = await mod('utility-client.ts');
-const { TOOLS } = await mod('utility-mcp/catalog.mjs');
+const { TOOLS, UTILITY_CONCURRENCY } = await mod('utility-mcp/catalog.mjs');
 const { netProbe } = await mod('utility-mcp/net.mjs');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-utility-test-'));
 const client = new UtilityClient(root);
@@ -302,7 +302,7 @@ function protocolFixture() {
   const stdout = new EventEmitter(); stdout.write = text => replies.push(JSON.parse(text)); stdout.writableLength = 0;
   const source = fs.readFileSync(path.join(agent, 'extensions/lib/utility-mcp/server.mjs'), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('import.meta.url', JSON.stringify(pathToFileURL(path.join(agent, 'extensions/lib/utility-mcp/server.mjs')).href));
-  const api = vm.runInNewContext(source + '\n;({dispatch,shutdown,jobs})', {fs, Worker: FakeWorker, TOOLS, validate: (_name, args) => args, process: {argv:['node','server','--workspace',root],stdin,stdout,on(){}}, Buffer, URL, TextDecoder, setTimeout, clearTimeout});
+  const api = vm.runInNewContext(source + '\n;({dispatch,shutdown,jobs})', {fs, Worker: FakeWorker, TOOLS, UTILITY_CONCURRENCY, validate: (_name, args) => args, process: {argv:['node','server','--workspace',root],stdin,stdout,on(){}}, Buffer, URL, TextDecoder, setTimeout, clearTimeout});
   const send = (id, method, params = {}) => api.dispatch({jsonrpc:'2.0', ...(id === undefined ? {} : {id}), method, params});
   return {...api, workers, replies, send};
 }

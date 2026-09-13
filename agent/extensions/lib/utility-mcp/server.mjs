@@ -3,7 +3,7 @@
 // from blocking framing, cancellation, deadlines or lifecycle notifications.
 import fs from 'node:fs';
 import { Worker } from 'node:worker_threads';
-import { TOOLS, validate } from './catalog.mjs';
+import { TOOLS, validate, UTILITY_CONCURRENCY } from './catalog.mjs';
 
 const rootIndex = process.argv.indexOf('--workspace');
 if (rootIndex < 0 || !process.argv[rootIndex + 1]) throw Error('--workspace is required');
@@ -51,7 +51,7 @@ function dispatch(request) {
   let args;
   try { args = validate(params.name, params.arguments ?? {}); }
   catch (e) { return result(id, failure(e.message)); }
-  if (jobs.size >= 2) return result(id, failure('Utility concurrency limit reached; retry after an active call completes'));
+  if (jobs.size >= UTILITY_CONCURRENCY) return result(id, failure('Utility concurrency limit reached; retry after an active call completes'));
   const worker = new Worker(new URL('./worker.mjs', import.meta.url), { workerData: { root, name: params.name, args }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 16, stackSizeMb: 4 }, stdout: true, stderr: true });
   // Worker dependencies and inspection backends must never contaminate MCP stdout.
   worker.stdout.resume(); worker.stderr.resume();

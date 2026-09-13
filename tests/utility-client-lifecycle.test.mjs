@@ -17,7 +17,7 @@ const source = stripTypeScriptTypes(fs.readFileSync(filename, 'utf8'))
   .replaceAll('import.meta.url', JSON.stringify(pathToFileURL(filename).href));
 
 // Delay exit after kill, as real child processes do, so lifecycle races are deterministic.
-function fixture({ invalidFirst = false, holdInitialize = false, virtualTimers = false } = {}) {
+function fixture({ invalidFirst = false, holdInitialize = false, holdCalls = false, virtualTimers = false } = {}) {
   const children = [];
   const timers = new Set();
   const schedule = (fn, ms) => {
@@ -42,14 +42,14 @@ function fixture({ invalidFirst = false, holdInitialize = false, virtualTimers =
         if (message.method === 'initialize') {
           if (!holdInitialize) child.respond(message.id, { serverInfo: { name: invalidFirst && children[0] === child ? 'wrong-server' : 'yunuspi-utility-mcp' } });
         } else if (message.method === 'tools/list') child.respond(message.id, { tools: Array(8).fill({}) });
-        else child.respond(message.id, { ok: true });
+        else if (!holdCalls) child.respond(message.id, { ok: true });
       });
       return true;
     };
     children.push(child); return child;
   };
   const UtilityClient = vm.runInNewContext(source + '\nUtilityClient', {
-    spawn, fs, fileURLToPath, URL, process, Buffer,
+    spawn, fs, fileURLToPath, URL, process, Buffer, UTILITY_CONCURRENCY: 2,
     setTimeout: schedule, clearTimeout: cancelTimer,
   });
   const client = new UtilityClient(template);
@@ -124,4 +124,59 @@ test('crashes trigger at most three automatic restarts and close cancels a sched
     assert.equal(closing.timers.size, 0);
     assert.equal(closing.children.length, 1);
   } finally { closing.cleanup(); }
+});
+
+
+test('native parallel batches respect the two-worker MCP capacity', async () => {
+  const f = fixture({ holdCalls: true });
+  const calls = Array.from({ length: 6 }, () => f.client.call('fixture', {}));
+  const all = Promise.all(calls);
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const child = f.children[0];
+    let done = 0;
+    for (let wave = 0; wave < 3; wave++) {
+      const sent = child.messages.filter(m => m.method === 'tools/call');
+      assert.equal(sent.length - done, 2, 'only two requests may occupy MCP workers');
+      for (const request of sent.slice(done)) child.respond(request.id, { ok: true });
+      done = sent.length;
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal((await all).length, 6);
+  } finally { f.cleanup(); await all.catch(() => {}); }
+});
+
+test('queued utility calls are cancelled or closed without dispatch', async () => {
+  const f = fixture({ holdCalls: true });
+  const active = [f.client.call('fixture', {}), f.client.call('fixture', {})];
+  const activeDone = Promise.allSettled(active);
+  const controller = new AbortController();
+  const cancelled = f.client.call('cancelled', {}, controller.signal);
+  const cancelledCheck = assert.rejects(cancelled, /cancelled/);
+  const queued = f.client.call('closed', {});
+  const closedCheck = assert.rejects(queued, /closed/);
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    controller.abort();
+    await cancelledCheck;
+    assert.equal(f.children[0].messages.filter(m => m.method === 'tools/call').length, 2);
+    f.client.close();
+    await closedCheck;
+    await activeDone;
+    assert.equal(f.children[0].messages.some(m => ['cancelled', 'closed'].includes(m.params?.name)), false);
+  } finally { f.cleanup(); }
+});
+
+test('a native batch of three real utility requests completes without a capacity error', async () => {
+  const { UtilityClient } = await import(pathToFileURL(filename));
+  const client = new UtilityClient(template);
+  try {
+    const results = await Promise.all(Array.from({length:3},()=>client.call('contract_diff',{
+      before_value:{count:1},after_value:{count:'one'}
+    })));
+    for (const result of results) {
+      assert.equal(result.isError,false,JSON.stringify(result));
+      assert.ok(result.content.some(part=>part.type==='text'));
+    }
+  } finally { client.close(); }
 });

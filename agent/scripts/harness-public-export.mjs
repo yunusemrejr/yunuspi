@@ -241,6 +241,7 @@ try {
  copyTree(templates, "release-template");
  // Copy template root entries while preserving dotfiles and all plain files.
  for (const entry of fs.readdirSync(templates, { withFileTypes: true })) {
+  if (omitted.has(entry.name)) continue;
   const p = path.join(templates, entry.name);
   if (entry.isSymbolicLink()) throw Error("Template symlink");
   if (entry.isDirectory()) copyTree(p, entry.name);

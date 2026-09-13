@@ -350,3 +350,79 @@ test("ordinary repetitions pass while large degeneration and accidental truncati
   );
   assert.match(safety.writeReplacementRisk("a".repeat(20000), ""), /95%/);
 });
+
+test("bulk commit rolls back earlier files after a late rename failure", async () => {
+  const fsp = await import('node:fs/promises');
+  const originalRename = fsp.default.rename;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-rollback-'));
+  const instance = bulkTool();
+  try {
+    for (const name of ['a.txt','b.txt']) fs.writeFileSync(path.join(root,name),'old content');
+    fs.chmodSync(path.join(root,'a.txt'),0o640);
+    const input = {action:'preview',pattern:'old',replacement:'new',files:['a.txt','b.txt']};
+    const preview = await bulkCall(input,root,instance);
+    const token = JSON.parse(preview.content[0].text).token;
+    fsp.default.rename = async (from,to) => {
+      if (from.endsWith('.tmp') && to === path.join(root,'b.txt')) throw Error('injected disk failure');
+      return originalRename(from,to);
+    };
+    const result = await bulkCall({...input,action:'apply',token},root,instance);
+    assert.equal(result.isError,true);
+    assert.match(result.content[0].text,/all committed files rolled back/);
+    for (const name of ['a.txt','b.txt']) assert.equal(fs.readFileSync(path.join(root,name),'utf8'),'old content');
+    assert.equal(fs.statSync(path.join(root,'a.txt')).mode & 0o777,0o640);
+    assert.deepEqual(fs.readdirSync(root).sort(),['a.txt','b.txt']);
+  } finally { fsp.default.rename = originalRename; fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test("bulk rollback preserves a concurrent writer and leaves the original backup", async () => {
+  const fsp = await import('node:fs/promises');
+  const originalRename = fsp.default.rename;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bulk-conflict-'));
+  const instance = bulkTool();
+  try {
+    for (const name of ['a.txt','b.txt']) fs.writeFileSync(path.join(root,name),'old content');
+    const input = {action:'preview',pattern:'old',replacement:'new',files:['a.txt','b.txt']};
+    const preview = await bulkCall(input,root,instance);
+    const token = JSON.parse(preview.content[0].text).token;
+    fsp.default.rename = async (from,to) => {
+      if (from.endsWith('.tmp') && to === path.join(root,'b.txt')) {
+        fs.writeFileSync(path.join(root,'a.txt'),'peer update');
+        throw Error('injected disk failure');
+      }
+      return originalRename(from,to);
+    };
+    const result = await bulkCall({...input,action:'apply',token},root,instance);
+    assert.equal(result.isError,true);
+    assert.match(result.content[0].text,/rollback incomplete/);
+    assert.equal(fs.readFileSync(path.join(root,'a.txt'),'utf8'),'peer update');
+    const backups = fs.readdirSync(root).filter(name=>name.endsWith('.bak'));
+    assert.equal(backups.length,1);
+    assert.equal(fs.readFileSync(path.join(root,backups[0]),'utf8'),'old content');
+  } finally { fsp.default.rename = originalRename; fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test("extension mutations invoke the same filesystem policy before any write", async () => {
+  const listeners = new Map();
+  const events = {on:(name,fn)=>listeners.set(name,[...(listeners.get(name)??[]),fn]),emit:(name,event)=>{for(const fn of listeners.get(name)??[])fn(event)}};
+  safety.default({on(){},events});
+  let invoked = 0;
+  // A second owner participates in the same preflight; its rejection must
+  // prevent every target, including ones validated before the denied file.
+  events.on('harness:mutation-preflight', request => request.checks.push(async () => {invoked++; return {block:true,reason:'fixture overlapping peer'};}));
+  let instance;
+  bulk.default({registerTool:t=>instance=t,events});
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'bulk-policy-'));
+  try {
+    fs.writeFileSync(path.join(root,'a.txt'),'old');
+    const input={action:'preview',pattern:'old',replacement:'new',files:['a.txt']};
+    const preview=await bulkCall(input,root,instance);
+    const token=JSON.parse(preview.content[0].text).token;
+    const result=await bulkCall({...input,action:'apply',token},root,instance);
+    assert.equal(result.isError,true);
+    assert.match(result.content[0].text,/overlapping peer/);
+    assert.equal(invoked,1);
+    assert.equal(fs.readFileSync(path.join(root,'a.txt'),'utf8'),'old');
+    assert.deepEqual(fs.readdirSync(root),['a.txt']);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

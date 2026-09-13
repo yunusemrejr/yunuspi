@@ -1,5 +1,5 @@
 import os from 'node:os';
-import test from 'node:test';
+import test, {afterEach, beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +10,15 @@ const load=p=>import(pathToFileURL(path.join(agent,p)));
 const {createRelevantGuidance}=await load('extensions/lib/relevant-guidance.ts');
 const {routeSkills}=await load('extensions/lib/skill-routing.ts');
 const {buildSkillIndex,rankSkills}=await load('extensions/lib/skill-relevance.ts');
+
+// Gate tests opt into strict review explicitly. The runtime default is
+// advisory so an applicable hint does not require a read/defer round-trip.
+const inheritedSkillReview=process.env.PI_SKILL_REVIEW;
+beforeEach(()=>{process.env.PI_SKILL_REVIEW='required';});
+afterEach(()=>{
+  if(inheritedSkillReview===undefined) delete process.env.PI_SKILL_REVIEW;
+  else process.env.PI_SKILL_REVIEW=inheritedSkillReview;
+});
 
 function fixture(names=['python-software-engineering','typescript-contract-engineering'], skillRoot='/fixture/skills') {
   const active=['read','edit','write','skill_review','syntax_check'];
@@ -127,6 +136,49 @@ test('bulk edits and research are covered, while unavailable tools and user opt-
   assert.equal(research.g.beforeToolCall({toolName:'web_search',input:{query:'papers'}})?.block,true);
   research.start('Research scientific papers without skills');assert.equal(research.context().length,0);
   assert.equal(research.g.beforeToolCall({toolName:'web_search',input:{query:'papers'}}),undefined);
+});
+
+test('default skill guidance is advisory: ordinary execution stays open and no required checklist is projected',async()=>{
+  const inherited=process.env.PI_SKILL_REVIEW;
+  delete process.env.PI_SKILL_REVIEW;
+  try {
+    const f=fixture();f.start('Implement Python');
+    assert.ok(f.g.candidates().some(h=>h.skill),'the relevant workflow remains an optional hint');
+    assert.equal(f.edit('main.py'),undefined);
+    assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
+    assert.equal(f.context().length,0,'advisory mode does not add a persistent required checklist');
+    const status=await f.decide({action:'inspect'});
+    assert.equal(status.details.enabled,false,'strict enforcement is opt-in');
+    assert.equal(status.details.available,true,'skill_review inspect remains available');
+    assert.ok(status.details.skills.some(s=>s.status==='needs_review'));
+  } finally {
+    if(inherited===undefined) delete process.env.PI_SKILL_REVIEW;
+    else process.env.PI_SKILL_REVIEW=inherited;
+  }
+});
+
+test('skill_review search finds a non-task catalogue match without exposing the catalogue',async()=>{
+  const inherited=process.env.PI_SKILL_REVIEW;
+  delete process.env.PI_SKILL_REVIEW;
+  try {
+    const f=fixture(['database-migration','python-software-engineering','typescript-contract-engineering']);
+    f.start('Explain the current issue');
+    const before=await f.decide({action:'inspect'});
+    assert.deepEqual(before.details.skills,[],'a search is usable before any deterministic review target exists');
+    const found=await f.decide({action:'search',query:'database migration',limit:3});
+    assert.equal(found.isError,undefined);
+    assert.equal(found.details.results[0].name,'database-migration');
+    assert.equal(found.details.results[0].path,'/fixture/skills/database-migration/SKILL.md');
+    assert.deepEqual(Object.keys(found.details.results[0]).sort(),['description','name','path']);
+    assert.ok(found.details.results.every(result=>result.description.length<=240));
+    assert.doesNotMatch(found.content[0].text,/python-software-engineering|typescript-contract-engineering/);
+    assert.equal(f.edit('main.py'),undefined,'advisory search does not create a review obligation');
+    const unknown=await f.decide({action:'search',query:'unicorn quantum toaster'});
+    assert.deepEqual(unknown.details.results,[]);
+  } finally {
+    if(inherited===undefined) delete process.env.PI_SKILL_REVIEW;
+    else process.env.PI_SKILL_REVIEW=inherited;
+  }
 });
 
 test('compaction keeps the workflow obligation but requires reading its source again',()=>{

@@ -114,6 +114,12 @@ const core=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8',timeout:5
 const {loadSkillsFromDir}=await import(pathToFileURL(core));
 const loaded=loadSkillsFromDir({dir:path.join(root,'skills'),source:'user'});assert.deepEqual(loaded.diagnostics,[]);
 for(const [name] of cases)assert.ok(loaded.skills.some(s=>s.name===name),`Pi SDK loads ${name}`);
-console.log(`PASS: 34 skills, intent/file routing, ambiguity, priority, limits, receipts, compaction and real Pi discovery (${loaded.skills.length} total skills)`);
+const threejs=loaded.skills.find(s=>s.name==='threejs');assert.ok(threejs,'Pi SDK loads threejs');assert.match(threejs.description,/voxel\/low-poly/);
+const voxelCatalog='<available_skills>'+loaded.skills.map(s=>`<skill><name>${s.name}</name><description>${s.description}</description><location>${s.filePath}</location></skill>`).join('')+'</available_skills>';
+const voxelEntries=[];const voxelCtx={cwd:root,sessionManager:{getBranch:()=>voxelEntries}};
+const voxelGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>voxelEntries.push({type:'custom',customType,data})});
+voxelGuidance.restore(voxelCtx);voxelGuidance.start({prompt:'Create a voxel Three.js scene with low-poly composition',systemPrompt:voxelCatalog},voxelCtx);
+assert.ok(voxelGuidance.candidates().some(h=>h.skill===threejs.filePath&&/Voxel and low-poly art/.test(h.text)),'voxel task reaches the loaded threejs section');
+console.log(`PASS: 34 skills, intent/file routing, ambiguity, priority, limits, receipts, compaction, voxel relevance and real Pi discovery (${loaded.skills.length} total skills)`);
 
 assert.ok(!routeSkills('sudo cp /etc/sudoers.d/rule ~/backup\nsetfacl: /workspace/lib/Net.cpp.o: Operation not permitted').some(r=>r.name==='cpp-performance-engineering'));

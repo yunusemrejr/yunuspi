@@ -8,12 +8,12 @@
  * bash tool (extension-registered tools override built-ins by name in pi's
  * tool registry) with the SAME builtin tool definition — schema, rendering,
  * truncation, exit-code errors, commandPrefix and PI_* env semantics are all
- * inherited — but swaps the execution layer:
+ * inherited — but keeps the execution layer supervised:
  *
- *   - command runs under a 4s foreground grace period;
- *   - exits in time  -> identical normal bash result;
- *   - still running  -> detached to an in-process job registry, agent gets a
- *     handle and stays in control via the `process` tool;
+ *   - the user-facing bash tool keeps ordinary blocking/sequential semantics;
+ *   - bounded internal captures run under a 4s foreground grace period;
+ *   - an internal capture still running -> detached to an in-process job
+ *     registry, agent gets a handle and stays in control via `process`;
  *   - `timeout` is a DEADLINE on the managed job (kill at expiry, status
  *     timed_out), never an agent-blocking wait.
  *
@@ -37,7 +37,7 @@ import {
 import { Type } from "typebox";
 import { setTimeout as delay } from "node:timers/promises";
 
-/** Foreground grace period before a still-running command detaches. */
+/** Foreground grace period used by bounded internal capture helpers. */
 const GRACE_MS = 4000;
 /** Node setTimeout() upper bound; delays above this clamp to 1ms (see resolveTimeoutMs). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -48,6 +48,8 @@ const TAIL_CAP = 16 * 1024;
 const KILL_TERM_GRACE_MS = 3000;
 /** Finished jobs retained for later inspection; oldest finished job is dropped beyond this. */
 const MAX_FINISHED_JOBS = 32;
+/** Hard bound for live managed helper processes; finished-job retention is a separate limit. */
+export const MAX_ACTIVE_JOBS = 8;
 
 type JobState = "running" | "completed" | "failed" | "timed_out" | "killed";
 
@@ -169,7 +171,7 @@ function killJob(job: Job, force: boolean): void {
 	}
 	const pid = job.pid;
 	setTimeout(() => {
-		if (job.state === "killed") killTree(pid);
+		if (job.state === "killed" && hasLiveProcess(job)) killTree(pid);
 	}, KILL_TERM_GRACE_MS).unref();
 }
 
@@ -195,8 +197,21 @@ function spawnWatchdog(job: Job, timeoutSeconds: number): void {
 function forgetOldestFinished(): void {
 	for (const job of jobs.values()) {
 		if (jobs.size <= MAX_FINISHED_JOBS) break;
-		if (job.state !== "running") jobs.delete(job.id);
+		// A kill/timeout marks the outcome before the child emits `close`. Keep
+		// that entry until its exit code is observed so a live process cannot be
+		// evicted and then bypass the active-job bound.
+		if (!hasLiveProcess(job)) jobs.delete(job.id);
 	}
+}
+
+function hasLiveProcess(job: Job): boolean {
+	return job.pid !== undefined && job.exitCode === undefined;
+}
+
+function activeJobCount(): number {
+	let count = 0;
+	for (const job of jobs.values()) if (hasLiveProcess(job)) count++;
+	return count;
 }
 
 function resolveTimeoutMs(timeout: number | undefined): number | undefined {
@@ -216,8 +231,9 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 
 /**
  * Managed replacement for pi's local shell operations. Spawns with the same
- * shell config / env / cwd contract, gives the command a short foreground
- * grace period, then detaches it into the registry and hands back control.
+ * shell config / env / cwd contract. A finite `graceMs` gives a bounded helper
+ * a short foreground period before it detaches; `Infinity` preserves the
+ * builtin bash tool's ordinary blocking semantics.
  */
 function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 	return {
@@ -229,6 +245,13 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			} catch {
 				throw new Error(
 					`Working directory does not exist: ${cwd}\nCannot execute bash commands.`,
+				);
+			}
+			const active = activeJobCount();
+			if (active >= MAX_ACTIVE_JOBS) {
+				throw new Error(
+					`Managed bash active-job limit reached (${String(MAX_ACTIVE_JOBS)}); ` +
+					`inspect or stop a helper with process, or use bg_run for explicit background work.`,
 				);
 			}
 			const shellConfig = getShellConfig();
@@ -314,9 +337,9 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					const text = t.text(2048);
 					return `${name} (${t.bytes}B kept): ${text ? `\n${text}` : "(none yet)"}`;
 				};
-				onData(
+					onData(
 					Buffer.from(
-						`[managed bash] Still running — detached to background after ${fmtDuration(GRACE_MS)} grace.\n` +
+						`[managed bash] Still running — detached to background after ${fmtDuration(graceMs)} grace.\n` +
 							`  job: ${job.id} · pid ${job.pid} · state: running · elapsed ${fmtDuration(Date.now() - job.startedAt)}` +
 							(job.timeoutSeconds === undefined
 								? " · deadline: none"
@@ -405,12 +428,17 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					}, timeoutMs);
 				}
 				// WHY setTimeout not Promise.race: detach has side effects (listener removal, watchdog) and must run exactly once.
-				graceTimer = setTimeout(() => {
-					if (settled) return; // exit already won
-					detached = true;
-					detach();
-					resolve({ exitCode: 0 });
-				}, graceMs);
+				if (Number.isFinite(graceMs)) {
+					graceTimer = setTimeout(() => {
+						if (settled) return; // exit already won
+						detached = true;
+						detach();
+						// A detached process has not produced a terminal exit code yet.
+						// `null` is accepted by the builtin bash contract and prevents a
+						// still-running build from being reported as successful.
+						resolve({ exitCode: null });
+					}, graceMs);
+				}
 			});
 		},
 	} satisfies import("@earendil-works/pi-coding-agent").BashOperations;
@@ -451,7 +479,7 @@ const processSchema = Type.Object({
 		],
 		{
 			description:
-				"list: all jobs. status: one job's state. output: tail stdout/stderr. wait: block briefly for exit. kill: terminate (SIGTERM→SIGKILL; force=true skips TERM). remove: forget a finished job.",
+				"list: internal managed helper jobs. status: one helper's state. output: tail stdout/stderr. wait: block briefly for exit. kill: terminate (SIGTERM→SIGKILL; force=true skips TERM). remove: forget a finished helper. Explicit bg_run tasks use bg_status/bg_logs/bg_kill.",
 		},
 	),
 	id: Type.Optional(
@@ -510,22 +538,24 @@ function jobDetails(job: Job) {
 	};
 }
 
-function jobTailText(job: Job, bytes: number): string {
+function jobTailText(job: Job, bytes: number, includeStatus = true): string {
 	const out = job.out.text(bytes);
 	const err = job.err.text(bytes);
 	return (
-		`job ${job.id}: ${stateLabel(job)}\n` +
+		(includeStatus ? `job ${job.id}: ${stateLabel(job)}\n` : "") +
 		`--- stdout (last ${bytes}B of ${job.out.bytes}B kept) ---\n${out || "(empty)"}\n` +
 		`--- stderr (last ${bytes}B of ${job.err.bytes}B kept) ---\n${err || "(empty)"}`
 	);
 }
 
 export default function (pi: ExtensionAPI) {
-	const operations = createManagedBashOperations();
+	// Keep the user-facing builtin bash sequential. Internal bounded helpers
+	// call runManagedCommand and intentionally opt into the supervised registry.
+	const operations = createManagedBashOperations(Number.POSITIVE_INFINITY);
 	const register = (cwd: string) => {
 		const def = createBashToolDefinition(cwd, { operations });
 		def.description =
-			"Execute a bash command in the current working directory. Commands finishing within ~4s behave like ordinary foreground commands. Longer commands are detached to a supervised background job (still bounded by `timeout`, which is a deadline on the process, NOT a period you must wait): you get a job handle and manage it with the `process` tool (list/status/output/wait/kill/remove) instead of blocking. Stdout+stderr are returned; output is truncated to the last 2000 lines or 50KB, full output saved to a temp file if larger.";
+			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands such as wait_for may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; output is truncated to the last 2000 lines or 50KB, full output saved to a temp file if larger.";
 		pi.registerTool(def);
 	};
 	register(process.cwd());
@@ -545,7 +575,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				const pid = job.pid;
 				setTimeout(() => {
-					if (job.state === "killed") killTree(pid);
+					if (job.state === "killed" && hasLiveProcess(job)) killTree(pid);
 				}, 800).unref();
 			}
 		}
@@ -555,7 +585,7 @@ export default function (pi: ExtensionAPI) {
 		name: "process",
 		label: "process",
 		description:
-			"Manage bash commands detached to the background by the bash tool. Every long-running bash call returns a job id (e.g. `a1b2c301`); use this tool to inspect, wait for, or terminate those jobs instead of rerunning commands blindly.",
+			"Manage supervised helper commands created by wait_for or other internal managed-bash captures. These jobs use the process registry; explicit bg_run tasks belong to bg_status/bg_logs/bg_kill and never appear here. Use this tool to inspect, wait for, or terminate a helper instead of rerunning commands blindly.",
 		parameters: processSchema,
 		async execute(_id, args, signal) {
 			signal?.throwIfAborted();
@@ -592,17 +622,18 @@ export default function (pi: ExtensionAPI) {
 				case "wait": {
 					const max = Math.min(Math.max(seconds ?? 5, 0.1), 30);
 					const until = Date.now() + max * 1000;
-					while (job.state === "running" && Date.now() < until) {
+					while (hasLiveProcess(job) && Date.now() < until) {
 						await delay(200, undefined, { signal: signal ?? undefined });
 					}
+					const live = hasLiveProcess(job);
 					return {
 						content: [
 							{
 								type: "text",
 								text:
-									job.state === "running"
+									live
 										? `${jobStatusText(job)}\nStill running — use output to inspect progress or kill to stop it.`
-										: `${jobStatusText(job)}\n--- tail ---\n${jobTailText(job, 4096)}`,
+										: `${jobStatusText(job)}\n--- tail ---\n${jobTailText(job, 4096, false)}`,
 							},
 						],
 						details: jobDetails(job),
@@ -631,8 +662,8 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 				case "remove": {
-					if (job.state === "running")
-						throw new Error(`Job ${job.id} is still running — kill it first.`);
+					if (hasLiveProcess(job))
+						throw new Error(`Job ${job.id} is still live — wait for its process to exit before removing it.`);
 					jobs.delete(job.id);
 					return {
 						content: [

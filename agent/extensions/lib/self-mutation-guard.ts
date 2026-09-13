@@ -281,3 +281,17 @@ export function guardedCommand(
     ],
   };
 }
+
+/** One preflight protocol for extension-owned filesystem mutations. Policy
+ * owners append callbacks synchronously; callers await them before committing.
+ * Native tools use those same policy handlers through tool_call. */
+export async function checkMutationPolicies(pi: any, ctx: any, target: string, kind: "edit" | "write" = "edit"): Promise<void> {
+  const denial = selfMutationDenial(target, ctx.cwd);
+  if (denial) throw new Error(denial);
+  const checks: Array<() => unknown> = [];
+  pi.events?.emit("harness:mutation-preflight", {ctx, target, kind, checks});
+  for (const check of checks) {
+    const result = await check() as {block?: boolean; reason?: string} | undefined;
+    if (result?.block) throw new Error(result.reason ?? "Mutation denied by filesystem policy");
+  }
+}

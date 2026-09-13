@@ -10,8 +10,8 @@
  *     120s for ordinary commands, 180s for download/network-transfer
  *     commands (wget, curl, git clone/pull, scp, rsync, pip/npm installs,
  *     package-manager updates). Explicit positive timeouts remain authoritative.
- * Managed bash may detach after its foreground grace; this timeout remains a
- * process deadline, not a blocking wait.
+ * Ordinary bash waits for the terminal result. Internal managed helpers may
+ * detach; their timeout still remains a process deadline.
  *
  * Installed at ~/.pi/agent/extensions/ — auto-discovered by the harness.
  */

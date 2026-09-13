@@ -9,3 +9,5 @@ Keep credentials and deployment/account examples generic. Provider names and pub
 Keep release-template copies of public docs, installer, tests and safeguards synchronized with their root counterparts so subsequent private exports retain fixes. Never alter the user's live credentials while preparing a public release.
 
 State tested platform support accurately. Linux is the full target; Windows uses WSL2 and macOS can use a Linux VM. Do not claim native support or successful model inference from static checks or catalog presence.
+
+Before a substantial task phase, match the next decision to available tools and any task-specific skill. Read only the `SKILL.md` whose workflow will change that decision, apply the relevant guidance, and revisit the choice when scope changes. Keep simple work simple; skill descriptions guide choice and do not impose quotas, grant authorization or prove success.

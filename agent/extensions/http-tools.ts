@@ -11,8 +11,11 @@
  */
 
 import { compactJsonWhitespace } from "./lib/compact-tool-json.ts";
-import { request } from "undici";
+import { lookup as dnsLookup } from "node:dns/promises";
+import net from "node:net";
+import { Agent, request } from "undici";
 import { Type } from "typebox";
+import { lookupWithAbort, validateRemoteUrl, type Lookup, type LookupAddress } from "./pi-web-access/ssrf-protection.ts";
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 const URL_LIMIT = 2048;
@@ -36,6 +39,90 @@ export type HttpRequestBody = {
 };
 
 type HttpFailureKind = "cancelled" | "timeout" | "validation" | "network" | "unknown";
+
+type HttpTransportOptions = { lookup?: Lookup };
+
+const defaultLookup: Lookup = (hostname) =>
+  dnsLookup(hostname, { all: true, verbatim: true });
+
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const normalized = normalizeHostname(address);
+  if (net.isIP(normalized) === 4) return normalized.split(".")[0] === "127";
+  return normalized === "::1" || normalized === "0:0:0:0:0:0:0:1";
+}
+
+/**
+ * Validate a target and retain the exact DNS answers used by that validation.
+ * The request's Agent receives those answers through its lookup callback so a
+ * hostname cannot be re-resolved to a private address between validation and
+ * connect (DNS rebinding).
+ */
+async function validateHttpTarget(
+  url: URL,
+  signal: AbortSignal,
+  lookup: Lookup,
+): Promise<{ url: URL; addresses?: LookupAddress[] }> {
+  const resolved = new Map<string, LookupAddress[]>();
+  const captureLookup: Lookup = async (hostname) => {
+    const addresses = await lookup(hostname);
+    resolved.set(normalizeHostname(hostname), addresses);
+    return addresses;
+  };
+  const validated = await validateRemoteUrl(url, {
+    signal,
+    allowLoopback: true,
+    lookup: captureLookup,
+  });
+  const hostname = normalizeHostname(validated.hostname);
+  let addresses = resolved.get(hostname);
+  // validateRemoteUrl intentionally accepts the exact `localhost` name for
+  // explicit local APIs without DNS. Pin it to loopback before connecting so
+  // that the transport cannot turn that exception into a public re-resolution.
+  if (!addresses && hostname === "localhost") {
+    try {
+      addresses = (await lookupWithAbort("localhost", lookup, signal)).filter(({ address }) => isLoopbackAddress(address));
+    } catch (error) {
+      if (signal.aborted) throw error;
+      addresses = [];
+    }
+    if (addresses.length === 0) addresses = [{ address: "127.0.0.1", family: 4 }];
+  }
+  return { url: validated, ...(addresses ? { addresses } : {}) };
+}
+
+type PinnedLookupCallback = (
+  error: Error | null,
+  address?: string | LookupAddress[],
+  family?: number,
+) => void;
+
+function createPinnedLookup(
+  target: { url: URL; addresses?: LookupAddress[] },
+): (hostname: string, options: { family?: number; all?: boolean }, callback: PinnedLookupCallback) => void {
+  const targetHostname = normalizeHostname(target.url.hostname);
+  const pinned = target.addresses?.filter(({ address, family }) =>
+    typeof address === "string" && (family === 4 || family === 6),
+  ) ?? [];
+  return (hostname, options, callback) => {
+    const normalized = normalizeHostname(hostname);
+    if (normalized !== targetHostname || pinned.length === 0) {
+      callback(new Error(`No validated DNS address for ${hostname}`));
+      return;
+    }
+    const family = options?.family === 4 || options?.family === 6 ? options.family : undefined;
+    const candidates = family ? pinned.filter((entry) => entry.family === family) : pinned;
+    if (candidates.length === 0) {
+      callback(new Error(`No validated ${family === 4 ? "IPv4" : "IPv6"} address for ${hostname}`));
+      return;
+    }
+    if (options?.all) callback(null, candidates);
+    else callback(null, candidates[0].address, candidates[0].family);
+  };
+}
 
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return { value, truncated: false };
@@ -61,7 +148,7 @@ function describeHttpFailure(error: unknown, signal?: AbortSignal): {
     ? "cancelled"
     : lower.includes("timed out") || lower.includes("timeout")
       ? "timeout"
-      : /url |url is|unsupported method|only http|credentials|header|body|json|invalid request|allowed:|managed by/i.test(lower)
+      : /url |url is|unsupported method|only http|credentials|header|body|json|invalid request|allowed:|managed by|blocked internal|blocked hostname|blocked host|host is blocked|cloud metadata|remote urls? are not|resolved non-ip|ssrf/i.test(lower)
         ? "validation"
         : /fetch failed|econn|enotfound|enetwork|socket|dns|network|connect/i.test(lower)
           ? "network"
@@ -116,6 +203,7 @@ function validateHeaders(
 export async function performHttp(
   input: HttpRequestBody,
   signal?: AbortSignal,
+  transportOptions: HttpTransportOptions = {},
 ) {
   if (!input || typeof input !== "object")
     throw new Error("Invalid request input");
@@ -187,100 +275,113 @@ export async function performHttp(
     ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
 
+  const target = await validateHttpTarget(
+    url,
+    combined,
+    transportOptions.lookup ?? defaultLookup,
+  );
+  const dispatcher = new Agent({
+    connect: { lookup: createPinnedLookup(target) },
+  });
   let response: Awaited<ReturnType<typeof request>>;
   try {
-    response = await request(url, {
-      method,
-      headers,
-      body,
-      signal: combined,
-      maxRedirections: 0,
-    });
-  } catch (error: any) {
-    if (signal?.aborted) throw new Error("Cancelled");
-    if (timeoutSignal.aborted)
-      throw new Error(`Request timed out after ${timeoutMs}ms`);
-    const code = error?.code ? `${error.code}: ` : "";
-    throw new Error(
-      `${code}${String(error?.message ?? "request failed").slice(0, 240)}`,
-    );
-  }
-
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  let truncated = false;
-  if (response.body) {
     try {
-      for await (const chunk of response.body) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        bytes += buffer.length;
-        if (bytes > maxBytes) {
-          chunks.push(
-            buffer.subarray(0, Math.max(0, buffer.length - (bytes - maxBytes))),
-          );
-          truncated = true;
-          response.body.destroy();
-          break;
-        }
-        chunks.push(buffer);
-      }
+      response = await request(target.url, {
+        method,
+        headers,
+        body,
+        signal: combined,
+        maxRedirections: 0,
+        dispatcher,
+      });
     } catch (error: any) {
       if (signal?.aborted) throw new Error("Cancelled");
       if (timeoutSignal.aborted)
         throw new Error(`Request timed out after ${timeoutMs}ms`);
-      if (!truncated)
-        throw new Error(
-          `Response read failed: ${String(error?.message ?? error).slice(0, 200)}`,
-        );
+      const code = error?.code ? `${error.code}: ` : "";
+      throw new Error(
+        `${code}${String(error?.message ?? "request failed").slice(0, 240)}`,
+      );
     }
-  }
-  const raw = Buffer.concat(chunks);
-  const contentType = String(response.headers["content-type"] ?? "");
-  const returned: Record<string, string> = {};
-  for (const [name, value] of Object.entries(response.headers)) {
-    if (RETURNED_HEADERS.test(name) && typeof value === "string")
-      returned[name] = value.slice(0, 300);
-    if (
-      name.toLowerCase().startsWith("x-ratelimit-") &&
-      typeof value === "string"
-    )
-      returned[name] = value.slice(0, 100);
-  }
 
-  let text: string;
-  let encoding = "text";
-  if (/json/i.test(contentType)) {
-    const rawText = raw.toString("utf8");
-    try {
-      // Validate, then remove only lexical whitespace: preserve large integers,
-      // duplicate keys and escapes exactly as received.
-      JSON.parse(rawText);
-      text = compactJsonWhitespace(rawText, 0);
-      encoding = "json";
-    } catch {
-      text = rawText;
-      encoding = "text";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let truncated = false;
+    if (response.body) {
+      try {
+        for await (const chunk of response.body) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          bytes += buffer.length;
+          if (bytes > maxBytes) {
+            chunks.push(
+              buffer.subarray(0, Math.max(0, buffer.length - (bytes - maxBytes))),
+            );
+            truncated = true;
+            response.body.destroy();
+            break;
+          }
+          chunks.push(buffer);
+        }
+      } catch (error: any) {
+        if (signal?.aborted) throw new Error("Cancelled");
+        if (timeoutSignal.aborted)
+          throw new Error(`Request timed out after ${timeoutMs}ms`);
+        if (!truncated)
+          throw new Error(
+            `Response read failed: ${String(error?.message ?? error).slice(0, 200)}`,
+          );
+      }
     }
-  } else if (
-    /^text\/|xml|javascript|x-www-form-urlencoded/i.test(contentType) ||
-    raw.length === 0
-  ) {
-    text = raw.toString("utf8");
-  } else {
-    text = `base64:${raw.toString("base64")}`;
-    encoding = "base64";
+    const raw = Buffer.concat(chunks);
+    const contentType = String(response.headers["content-type"] ?? "");
+    const returned: Record<string, string> = {};
+    for (const [name, value] of Object.entries(response.headers)) {
+      if (RETURNED_HEADERS.test(name) && typeof value === "string")
+        returned[name] = value.slice(0, 300);
+      if (
+        name.toLowerCase().startsWith("x-ratelimit-") &&
+        typeof value === "string"
+      )
+        returned[name] = value.slice(0, 100);
+    }
+
+    let text: string;
+    let encoding = "text";
+    if (/json/i.test(contentType)) {
+      const rawText = raw.toString("utf8");
+      try {
+        // Validate, then remove only lexical whitespace: preserve large integers,
+        // duplicate keys and escapes exactly as received.
+        JSON.parse(rawText);
+        text = compactJsonWhitespace(rawText, 0);
+        encoding = "json";
+      } catch {
+        text = rawText;
+        encoding = "text";
+      }
+    } else if (
+      /^text\/|xml|javascript|x-www-form-urlencoded/i.test(contentType) ||
+      raw.length === 0
+    ) {
+      text = raw.toString("utf8");
+    } else {
+      text = `base64:${raw.toString("base64")}`;
+      encoding = "base64";
+    }
+
+    const bounded = truncateUtf8(text, maxBytes);
+
+    return {
+      status: response.statusCode,
+      headers: returned,
+      encoding,
+      body: bounded.value,
+      truncated: truncated || bounded.truncated,
+      bytes: raw.length,
+    };
+  } finally {
+    await dispatcher.close().catch(() => {});
   }
-
-  const bounded = truncateUtf8(text, maxBytes);
-
-  return {
-    status: response.statusCode,
-    headers: returned,
-    encoding,
-    body: bounded.value,
-    truncated: truncated || bounded.truncated,
-    bytes: raw.length,
-  };
 }
 
 export default function httpTools(pi: any) {

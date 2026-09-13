@@ -83,3 +83,16 @@ test('exporter refuses a hardcoded home path in executable source but sanitizes 
     assert.ok(!shipped.includes(os.homedir()));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
+
+test('template dependency installs are omitted from both exported roots',()=>{
+ const f=fixture();
+ try {
+  fs.mkdirSync(path.join(f.templates,'node_modules/.bin'),{recursive:true});
+  fs.symlinkSync('/unreadable/dependency',path.join(f.templates,'node_modules/.bin/tool'));
+  fs.writeFileSync(path.join(f.templates,'node_modules/generated.js'),'generated dependency');
+  const result=f.run();
+  assert.equal(result.status,0,result.stderr);
+  assert.equal(fs.existsSync(path.join(f.output,'node_modules')),false);
+  assert.equal(fs.existsSync(path.join(f.output,'release-template/node_modules')),false);
+ } finally {fs.rmSync(f.dir,{recursive:true,force:true});}
+});

@@ -5,14 +5,28 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 let agent=path.resolve(import.meta.dirname,'../agent');if(!fs.existsSync(agent))agent=path.resolve(import.meta.dirname,'../..');
 const {patchSource,isAppliedSource,targets}=await import(pathToFileURL(path.join(agent,'scripts/patches/native-read-mutation-queue.mjs')));
-const core=process.env.PI_HARNESS_PATCH_TEST_CORE??path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@earendil-works/pi-coding-agent');
+function resolveCore(){
+ if(process.env.PI_HARNESS_PATCH_TEST_CORE)return process.env.PI_HARNESS_PATCH_TEST_CORE;
+ try{return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))),'..');}catch{}
+ try{return path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@earendil-works/pi-coding-agent');}catch(error){
+  throw new Error('Pinned @earendil-works/pi-coding-agent is unavailable; run npm ci before this test', {cause:error});
+ }
+}
+const core=resolveCore();
+// The patch target helper uses this override too. Keep both the test and the
+// patch operation on the declared local core when CI has no npm-global install.
+process.env.PI_HARNESS_PATCH_TEST_CORE ??= core;
 const tick=()=>new Promise(resolve=>setTimeout(resolve,15));
 const gate=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 test('read queue patch is applied to SDK and CLI owner, idempotent, and rejects partial patches',()=>{
- for(const target of targets())assert.equal(target.isApplied(),true,target.name);
+ for(const target of targets()){
+  assert.equal(target.exists(),true,target.name);
+  if(!target.isApplied())target.apply();
+  assert.equal(target.isApplied(),true,target.name);
+ }
  const text=fs.readFileSync(path.join(core,'dist/core/tools/read.js'),'utf8');assert.equal(patchSource(text),text);assert.ok(isAppliedSource(text));
  assert.throws(()=>patchSource(text.replace('PI_NATIVE_READ_QUEUE_END','DRIFT')),/partial\/drifted/);
  const unpatched=text.replace('import { withFileMutationQueue } from "./file-mutation-queue.js";\n','').replace('await withFileMutationQueue(absolutePath, async () => { /* PI_NATIVE_READ_MUTATION_QUEUE */','').replace('}); /* PI_NATIVE_READ_QUEUE_END */','');

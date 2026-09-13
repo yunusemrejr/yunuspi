@@ -91,6 +91,7 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { registerHarnessActivity } from "./lib/harness-activity.ts";
+import { registerToolDiscovery, compactSkillCatalog } from "./lib/tool-discovery.ts";
 import { createRelevantGuidance } from "./lib/relevant-guidance.ts";
 import { createLoopTracker, repeatedReasoningNotice, reduceRepeatedReasoningBudget } from "./lib/stall-core.ts";
 import { replayFromBranch } from "./rpiv-todo/state/replay.ts";
@@ -409,6 +410,7 @@ function logReminderErr(where: string, err: unknown): void {
 // ---------------------------------------------------------------- extension
 
 export default function remindersExtension(pi: ExtensionAPI) {
+  registerToolDiscovery(pi);
   if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
 	// Children share skill routing/read receipts without inheriting the parent's
 	// manual reminder timers, todo nudges or continuation messages.
@@ -533,7 +535,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 
 	// One combined check-in per user submission: todo/drift/caution +
 	// every due manual reminder + any contextual safety rule — a single message.
-	pi.on("before_agent_start", async (_event, ctx) => {
+	const prepareReminderStart = async (_event: any, ctx: ExtensionContext) => {
 		try {
 			const sid = sidOf(ctx);
 			if (!sid) return undefined;
@@ -602,6 +604,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			logReminderErr("before_agent_start", err);
 			return undefined;
 		}
+	};
+	pi.on("before_agent_start", async (event, ctx) => {
+		const result = await prepareReminderStart(event, ctx);
+		// Local guidance captures the full inventory before its wire projection.
+		const systemPrompt = compactSkillCatalog(event, pi.getActiveTools?.() ?? []);
+		return systemPrompt === undefined ? result : {...(result ?? {}), systemPrompt};
 	});
 
 	// Only current-run observations are relevant; never blame the next task/model.

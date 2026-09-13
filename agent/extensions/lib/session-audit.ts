@@ -1,6 +1,7 @@
 import { opendir, open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { collectSessionDiagnostics } from "./session-diagnostics.ts";
+import { collectContextTraffic } from "./session-report.ts";
 
 /**
  * Offline, transcript-backed historical accounting.
@@ -64,6 +65,7 @@ interface ScanState {
 	truncatedDirectories: number;
 	tools: Record<string, number>;
 	otherTools: number;
+	traffic: { totalChars: number; totalResults: number; repeatedContentChars: number; repeatedRequestChars: number; byTool: Record<string, number> };
 	failureCategories: Record<string, number>;
 	totals: {
 		parentToolErrors: number;
@@ -154,6 +156,7 @@ function emptyState(): ScanState {
 		headerReadFailures: 0,
 		truncatedDirectories: 0,
 		tools: Object.create(null),
+		traffic: { totalChars: 0, totalResults: 0, repeatedContentChars: 0, repeatedRequestChars: 0, byTool: Object.create(null) },
 		otherTools: 0,
 		failureCategories: Object.create(null),
 		totals: {
@@ -464,6 +467,14 @@ function reportFor(
 		totals: { ...state.totals },
 		tools: sortedCounts(state.tools),
 		otherTools: state.otherTools,
+		traffic: {
+			totalReturnedChars: state.traffic.totalChars,
+			totalResults: state.traffic.totalResults,
+			identicalContentChars: state.traffic.repeatedContentChars,
+			exactRequestResultChars: state.traffic.repeatedRequestChars,
+			largestContributors: Object.entries(sortedCounts(state.traffic.byTool)).slice(0, 10).map(([tool, chars]) => ({ tool, chars })),
+			interpretation: "Raw returned text before context projection; not wire tokens, current occupancy or billed savings. Repetition is counted within each session; exact request/result is a subset of identical content and may be legitimate verification.",
+		},
 		recentFailureCategories: sortedCounts(state.failureCategories),
 		scope,
 		limits: {
@@ -529,6 +540,16 @@ export async function scanSessionAudit(options: SessionAuditOptions): Promise<Re
 		try {
 			const report = collectSessionDiagnostics(parsed.entries, { excerpts: false });
 			addActivity(state, report);
+			const traffic = collectContextTraffic(parsed.entries);
+			state.traffic.totalChars += traffic.totalChars;
+			state.traffic.totalResults += traffic.totalResults;
+			for (const row of traffic.tools) {
+				state.traffic.repeatedContentChars += row.repeatedContentChars;
+				state.traffic.repeatedRequestChars += row.repeatedChars;
+				let tool = safeToolName(row.tool) ?? "other";
+				if (!(tool in state.traffic.byTool) && Object.keys(state.traffic.byTool).length >= SESSION_AUDIT_LIMITS.maxToolNames) tool = "other";
+				state.traffic.byTool[tool] = (state.traffic.byTool[tool] ?? 0) + row.chars;
+			}
 		} catch (error) {
 			if (isAbortError(error)) throw error;
 			checkAborted(config.signal);
