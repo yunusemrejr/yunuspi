@@ -42,8 +42,12 @@ const cases=[
  ['anti-ai-slop','Review this artifact for anti-ai-slop'],
  ['natural-editorial-writing','Rewrite this article in my voice'],
  ['ui-antipattern-review','Review this generic UI design'],
+ ['github-readme-authoring','Write a README for the new library'],
+ ['github-repo-presentation','Add a CONTRIBUTING guide and issue templates'],
+ ['github-release-notes','Write release notes for v1.2.0'],
+ ['github-actions-workflows','Add a GitHub Actions workflow that runs the tests'],
 ];
-assert.equal(cases.length,35);
+assert.equal(cases.length,39);
 for(const prompt of ['Inspect the user interface design and marketing security, then publish these changes to the hosting server','Review website security on a shared hosting server'])
  assert.ok(!routeSkills(prompt).some(r=>r.name==='linux-host-defense'),'generic site security/hosting does not imply Linux host administration');
 for(const prompt of ['Inspect and improve the user interface and landing page','Review the website layout and screenshots'])

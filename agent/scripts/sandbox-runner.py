@@ -220,6 +220,13 @@ def launch(payload):
             '--service-type=exec', '--unit=' + unit,
             '-p', 'MemoryMax=' + str(MEMORY), '-p', 'MemorySwapMax=0', '-p', 'TasksMax=32',
             '-p', 'CPUQuota=100%', '-p', 'RuntimeMaxSec=' + str(timeout + 1),
+            # The kernel still enforces MemoryMax. OOMPolicy=continue only
+            # stops systemd from ending the unit in the "oom-kill" state:
+            # gnome-settings-daemon (gsd-housekeeping) raises a critical
+            # "Device memory is nearly full" desktop notification for every
+            # user unit whose Result becomes oom-kill, which turns an expected
+            # in-sandbox OOM into a false alarm about the whole device.
+            '-p', 'OOMPolicy=continue',
             # Exclude host-facing families such as VSOCK on VM/WSL hosts.
             # Native-only execution prevents a compat ABI bypass of the filter.
             '-p', 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',

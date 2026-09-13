@@ -111,7 +111,7 @@ function councilBrief(result: any): string {
  * brief is kept, with no extra memory database or transcript injection. */
 export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
   let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
-  let key='', brief='', review='', owner='', stopped=false, pausedSerial=-1, turnSerial=-1, evaluated=false, statusContext:any, workflow:any;
+  let key='', brief='', review='', owner='', stopped=false, pausedSerial=-1, turnSerial=-1, wakeOnly=false, evaluated=false, statusContext:any, workflow:any;
   const enabled=()=>scopeCouncilEnabled();
   const identity=(ctx:any)=>JSON.stringify([ctx?.cwd,ctx?.sessionManager?.getSessionId?.()]);
   const clearStatus=()=>{try{statusContext?.ui?.setStatus?.('scope-council',undefined);}catch{}statusContext=undefined;};
@@ -124,7 +124,13 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
   // following turn a stale aborted controller.
   const cancel=(pause=false)=>{generation++;const live=controller;controller=undefined;live?.abort();pending=undefined;key='';brief='';review='';workflow=undefined;stopped=pause;pausedSerial=pause?turnSerial:-1;evaluated=false;clearStatus();};
   return {
-    input(event:any) { if(event?.source!=='extension'){inputSerial++;cancel();} },
+    input(event:any) {
+      // The SDK emits injected wakes with source 'extension' and every other
+      // input (interactive, CLI, programmatic) as 'interactive'. Only the
+      // latter carries current user direction.
+      if(event?.source!=='extension'){inputSerial++;wakeOnly=false;cancel();}
+      else wakeOnly=true;
+    },
     cancel,
     context(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? brief:''; },
     reviewContext(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? review:''; },
@@ -148,6 +154,10 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       // keeps it silent.
       if(stopped && pausedSerial!==inputSerial){stopped=false;pausedSerial=-1;}
       if(!enabled() || stopped) return;
+      // An automatic wake before any real input has no current user direction to
+      // judge. Its text still reaches the parent as ordinary context, but the
+      // council must not present it as authoritative current user direction.
+      if(wakeOnly && !inputSerial){owner=identity(ctx);evaluated=true;return;}
       // A real input event clears key. Automatic extension wakes, even when
       // their text sounds like another revision request, share this budget.
       if(evaluated && owner===identity(ctx)){await pending;return;}

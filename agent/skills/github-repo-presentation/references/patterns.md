@@ -66,3 +66,7 @@ Rules are last-match-wins. Verify paths exist, use teams rather than individuals
 - [ ] Default branch protected; required checks match existing job names.
 - [ ] Auto-delete head branches, Dependabot security updates and private vulnerability reporting enabled.
 - [ ] Deprecated repositories archived with a pointer to the replacement.
+
+## Primary references
+
+Use the canonical community texts rather than rewriting them: <https://www.contributor-covenant.org/version/2/1/code_of_conduct/>, <https://choosealicense.com/>, and GitHub's own guidance at <https://docs.github.com/communities/setting-up-your-project-for-healthy-contributions>.

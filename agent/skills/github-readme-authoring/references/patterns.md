@@ -53,3 +53,7 @@
 - [ ] Images have alt text and are stored under a documented asset path.
 - [ ] Contributing/license/security links point at files that exist.
 - [ ] Rendered preview checked on GitHub (light and dark) at a narrow width.
+
+## Primary references
+
+README structure and badge conventions follow <https://www.makeareadme.com/> and <https://shields.io/>; Keep a Changelog and SemVer are linked from the release workflow.

@@ -20,6 +20,13 @@ const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history
 const REVIEW_CONTEXT = 'skill-review-context';
 const decode = (s: string) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, k) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }[k]!));
 const action = /\b(add|publish|export|convert|render|build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|inspect|review|audit|improve|deploy|migrate|redesign|update|updating|repair|refine|polish|animate|optimize)\b/i;
+/** Narrative and explanatory framing asks for prose about a subject, not work
+ * on it: "Tell me a story about a simulation" names a skill while requesting
+ * no engineering task, and the older two-term requirement used to filter that
+ * by accident. A work-verb allow list cannot do this job — real requests say
+ * "propagate", "simulate", "compute" — so the cue is the framing itself.
+ * Tool-driven calls re-run the same owner with real execution evidence. */
+const narrativeCue = /\b(?:tell|write|read|recite)\b[^\n]{0,40}\b(?:stor(?:y|ies)|tales?|poems?|essays?|novels?|blog posts?|books?)\b|\b(?:explain|describe|summari[sz]e|illustrate|narrate)\b|\b(?:what|who|when|where|why|how)\s+(?:is|are|was|were|does|do|did|would|should|can|could)\b|\btell me about\b/i;
 const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
 const env = /\b(production|deploy(?:ment)?|ci\/cd|server|migration|database|postgres|mysql|sqlite)\b/i;
 const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
@@ -162,6 +169,14 @@ export function createRelevantGuidance(pi: any) {
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
       if (skillCovered(ranked.skill.file)) continue;
       const terms = ranked.matched.map(term => term.split('~').at(-1)!);
+      // One naming token is decisive only while no other workflow's explicit
+      // route already owns that token. "python" routes to the language
+      // workflow, so a specialized pack such as wasm-python must not claim
+      // generic Python work through the one-term shortcut; a real two-term
+      // match still qualifies it.
+      if (ranked.matched.length === 1 && !ranked.matched[0].includes('~')
+        && skillRoutes.some(route => route.name !== ranked.skill.name && route.intent.test(terms[0])))
+        continue;
       // Require one genuinely fresh term instead of rejecting a workflow whose
       // whole match is shared vocabulary. Rejecting on any overlap let a single
       // high-scoring skill hide a distinct second workflow that shared a term,
@@ -497,7 +512,7 @@ export function createRelevantGuidance(pi: any) {
         if (skill) trackReview(skill,route.check,'task');
       }
       remember(currentIntent);
-      contextSkill();
+      if (!narrativeCue.test(prompt)) contextSkill();
       codeSeen = /\b(code|function|class|module|repository|codebase|implementation)\b/i.test(prompt);
       // Match narrow task intent against skills actually present in this run's catalog.
       const specialized = [

@@ -206,3 +206,21 @@ test('a global no-change constraint keeps a read-only review out of scope work',
   assert.equal(shouldRunScopeCouncil('Redesign the dashboard, but do not change anything in the API layer.'),true);
   assert.equal(shouldRunScopeCouncil('Please do not redesign the animation.'),false);
 });
+
+test('an automatic wake before any real input has no authoritative task to judge',async()=>{
+  let calls=0;
+  const lifecycle=createScopeDeliberation({},{history:async()=>{calls++;return history;},runner:async()=>{calls++;return result;}});
+  const ctx=context('wake-first');
+  // A mission/continuation wake can carry change-scope wording, but no user has
+  // spoken yet in this session, so there is no current direction to judge and
+  // nothing may be labelled as the authoritative task.
+  lifecycle.input({source:'extension',text:prompt});
+  await lifecycle.start({prompt},ctx,'graph');
+  assert.equal(calls,0,'an ungrounded wake pays no council or history cost');
+  assert.equal(lifecycle.context(ctx),'');
+  // The next real input still deliberates normally.
+  lifecycle.input({source:'interactive',text:prompt});
+  await lifecycle.start({prompt},ctx,'graph');
+  assert.equal(calls,2,'the real request scans history once and deliberates once');
+  assert.match(lifecycle.context(ctx),/Automatic change-scope deliberation/);
+});
