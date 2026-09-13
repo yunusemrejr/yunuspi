@@ -491,6 +491,8 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
 			}
 		};
+    let finishActivity: (()=>void) | undefined;
+    try { if (current()) finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`scope-${randomUUID()}`,label:'review'},ctx); } catch { /* UI is optional. */ }
 		try {
 			const [preservation, meaningful] = await Promise.all([
 				run(team[0]!, "preservation"),
@@ -543,6 +545,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
+      try { finishActivity?.(); } catch { /* UI cannot change advice. */ }
 			controller.abort();
 		}
 	};

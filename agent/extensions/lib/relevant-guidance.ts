@@ -1,6 +1,7 @@
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
- * No inference or autonomous tool execution. Only catalog heading metadata is
- * read; tool-output prose does not become routing instructions. */
+ * Deterministic routes remain authoritative; optional asynchronous discovery
+ * offers bounded catalog-backed advice. Tool-output prose is never authority. */
+import { createSkillDiscoveryController } from "./skill-discovery-controller.ts";
 import { createContextAnchor } from "./context-anchor.ts";
 import path from "node:path";
 import fs from "node:fs";
@@ -11,7 +12,7 @@ import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
-import { buildSkillIndex, rankSkills, skillTerms, headingOutline, bestSkillSection } from "./skill-relevance.ts";
+import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -112,6 +113,15 @@ export function createRelevantGuidance(pi: any) {
     }
     pending.set(hint.key, hint);
   };
+  const discovery = createSkillDiscoveryController({
+    catalog: () => skills,
+    covered: file => skillCovered(file) || reviewTargets.has(file) || deferredSkills.has(file),
+    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent'),
+    offer: (skill, reason) => add({key:`skillctx:${skill.file}`,skill:skill.file,priority:64,
+      text:`Async skill discovery (advisory): ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} — ${JSON.stringify(reason)} Read if useful; this suggestion is not a read receipt or a new requirement.`}),
+  });
+  for (const event of ['agent_end','session_shutdown','session_before_switch','session_before_fork','session_before_tree','model_select'])
+    pi.on?.(event, () => discovery.cancel());
   const skillHint = (topic: string, preferred: string[], terms: RegExp, nameOnly = false, priority = 0) => {
     // Exact known skills first; otherwise use a matching *loaded* description.
     // No fabricated paths and no catalogue/skill-body injection.
@@ -397,6 +407,7 @@ export function createRelevantGuidance(pi: any) {
       return {block:true,reason:`Before ${event.toolName}${file ? ` on ${JSON.stringify(supplied)}` : ''}, read the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, apply the relevant checks, then retry. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Source reads and discovery remain available.`};
     },
     userInput() {
+      discovery.cancel();
       const hadDeferrals = deferredSkills.size > 0;
       deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
@@ -417,6 +428,7 @@ export function createRelevantGuidance(pi: any) {
       if (hadTopics || hadDeferrals) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
     },
     restore(ctx: any) {
+      discovery.cancel(true);
       anchorContext = createContextAnchor();
       reviewTargets.clear(); deferredSkills.clear();
       bulkFiles.clear();
@@ -500,6 +512,7 @@ export function createRelevantGuidance(pi: any) {
       const taskPrompt = skillTaskText(rawPrompt);
       const prompt = skillIntentSegments(taskPrompt).join('\n');
       skillReviewDisabled = /\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(taskPrompt);
+      discovery.start(event, ctx);
       utilityHints(taskPrompt);
       if (!/\b(no subagents|do not delegate|don't delegate|no delegation|without delegation)\b/i.test(taskPrompt) && /\b(use|ask|launch|delegate|run)\b[\s\S]{0,100}\b(subagents?|reviewers?|swarm|council)\b/i.test(prompt))
         add({key:"delegation-contract",tool:"subagent",priority:70,text:'Delegation: fresh reviewers may not inherit skills or tools. Include the task-relevant skill paths and ask the child to read them; carry the original goal, constraints, evidence inputs and success check. Use listed capabilities and preserve provider extensions. Validate workflow scripts before fan-out. Recover only failed children and retain successful outputs.'});
@@ -611,6 +624,7 @@ export function createRelevantGuidance(pi: any) {
         return;
       }
       lastFailure = ""; failures = 0;
+      discovery.observe(event);
       if (name === 'bulk_edit' && input.action === 'preview') {
         // The native preview owns the concrete file set behind its apply token.
         // Route those paths, never infer files from a glob or arbitrary prose.
@@ -671,10 +685,12 @@ export function createRelevantGuidance(pi: any) {
       if (["read", "edit", "write"].includes(name) && file && !/SKILL\.md$/i.test(file)) {
         if (/\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) codeSeen = true;
         routedSkills("", file);
-        remember(path.basename(file));
+        remember(skillEvidenceContext({files:[file],tools:[name]}));
+        remember(path.basename(file).replace(/[-_.]/g, " "));
         const extension = /\.([a-z0-9]{1,8})$/.exec(file)?.[1]?.toLowerCase() ?? "";
-        // A new file type reshapes the session profile; recompute once per type.
-        if (extension && !extensions.has(extension) && extensions.size < 12) { extensions.add(extension); contextSkill(52); }
+        // New file names can reveal a domain even when the type is unchanged.
+        if (extension && !extensions.has(extension) && extensions.size < 12) extensions.add(extension);
+        contextSkill(52);
         if (uiFile.test(file)) uiHints();
         if (/\.(?:csv|tsv|parquet|jsonl)$/i.test(file) || /(?:^|\/)(?:openapi|swagger)\.(?:json|ya?ml)$/i.test(file)) precision();
         const language = /\.(php|py|rs|go)$/i.exec(file)?.[1]?.toLowerCase();

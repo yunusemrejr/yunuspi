@@ -1,5 +1,5 @@
 /** Local non-generative paragraph selection. The transcript always owns raw text. */
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {protectedEvidence, relevanceScores, taskTerms} from './local-intelligence.mjs';
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -85,6 +85,8 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
    stats.requests++;let accepted=false;
+   let finishActivity: (()=>void) | undefined;
+   try { finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`mini-${randomUUID()}`,label:'model'}); } catch { /* UI is optional. */ }
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
    const timer=setTimeout(()=>abort.abort(),450);timer.unref?.();
    try{
@@ -109,6 +111,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     return selection;
    }catch{return;}finally{
     clearTimeout(timer);
+    try { finishActivity?.(); } catch { /* UI cannot alter selection. */ }
     if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;}
     try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
     if(current===abort){busy=false;current=undefined;}

@@ -161,7 +161,7 @@ export function selectAffordableModel(
 		return true;
 	});
 	// One evidence snapshot for the whole selection, rather than disk I/O per model.
-	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:true}});
+	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:options?.requirements?.toolCalling !== false}});
  const freeIds = new Set(freeReport.candidates.filter(c=>c.eligible).map(c=>c.route));
  const qualityPool = pool.filter(m=>freeIds.has(m.fullId) || !options?.freeOnly && (isAutonomousMeteredEligible(m,cfg) || subscriptionEligible(m,cfg)));
  const quality = qualityTask ? assessModelQuality(qualityPool,cache?.observations ?? [],qualityTask,reference,timestamp) : undefined;

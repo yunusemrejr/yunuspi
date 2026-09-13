@@ -1,3 +1,4 @@
+import { registerSkillDiscoveryRunner } from "./skill-discovery-runner.ts";
 import { planAssistance, selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
 import { AUTOMATIC_HELPER_LIMITS, REVIEW_LIMITS } from "../runs/shared/automatic-budgets.ts";
 import { routeSkills } from "../runs/shared/skill-routing.ts";
@@ -199,6 +200,15 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		},
 		now,
 	});
+	if (!child) registerSkillDiscoveryRunner(pi, {
+    launch, available,
+    constraints: (ctx, task, model) => recoveryConstraints(ctx, task, model),
+    claimBudget: () => { if (groupUsed || busy || paused) return false; groupUsed = true; usedAssist = true; return true; },
+    captureCurrent: (ctx) => {
+      const epoch = generation, file = ctx.sessionManager.getSessionFile();
+      return () => epoch === generation && ctx.sessionManager.getSessionFile() === file;
+    },
+  });
 	// The checkpoints owner requests final quality reviews through this seam.
 	// Reuse native dispatch, request-time economy gates and cost accounting;
 	// no second process launcher or automatic premium-model fallback.
@@ -382,6 +392,13 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			try { branch = ctx.sessionManager?.getBranch?.(); } catch { /* missing history is unknown */ }
 			try { if (scopeRequest(prompt, branch)) return; } catch { /* existing helper gates remain authoritative */ }
 		}
+		// Prefer the smaller observation-driven skill scout over a generic single
+    // investigator when a skill catalog exists. Broad teams keep their role;
+    // the shared group budget still prevents stacking automatic helpers.
+    if (!['off','0'].includes(process.env.PI_SKILL_DISCOVERY ?? 'on')
+      && /<available_skills>[\s\S]*?<skill>/.test(String(event.systemPrompt ?? ''))
+      && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(prompt)
+      && planAssistance(prompt).roles.length === 1) return;
 		if (child || !freeAssistRequested() || usedAssist || busy || !usefulFreeAssistance(prompt)) return;
 		const constraints = primary ? recoveryConstraints(ctx, prompt, primary) : undefined;
 		if (constraints?.noDelegation || constraints?.fixedRoute || constraints?.sameModel) return;

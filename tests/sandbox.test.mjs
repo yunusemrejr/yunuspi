@@ -84,12 +84,17 @@ test("requests reject unsafe paths, special files, aliases and oversized inputs 
   assert.match(refused.stderr, /cgroup|syscall filtering/);
 });
 
-test("manifest, all builtin child allowlists and active-tool guidance expose the capability", () => {
+test("manifest, tool-using child allowlists and active-tool guidance expose the capability", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(agent, "extensions/manifest.json")));
   assert.ok(manifest.extensions.includes("sandbox.ts"));
   assert.ok(manifest.supportFiles.includes("scripts/sandbox-runner.py"));
   for (const name of fs.readdirSync(path.join(agent, "extensions/pi-subagents/agents")).filter(n => n.endsWith('.md'))) {
     const body = fs.readFileSync(path.join(agent, "extensions/pi-subagents/agents", name), "utf8");
+    if (name === 'automatic-skill-discovery.md') {
+      assert.match(body, /^tools:[ \t]*$/m, 'discovery is deliberately tool-free');
+      assert.doesNotMatch(body, /^subagentOnlyExtensions:/m);
+      continue;
+    }
     assert.match(body, /^tools:.*\bsandbox_run\b/m, name);
     assert.match(body, /^subagentOnlyExtensions:.*\.\.\/\.\.\/sandbox\.ts/m, name);
   }

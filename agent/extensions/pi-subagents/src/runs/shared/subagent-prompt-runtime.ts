@@ -56,12 +56,13 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
    payload.provider={...provider,max_price:cap};
   }
  }
+ const outputLimit = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery" ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens;
  const fields=["max_tokens","max_completion_tokens","max_output_tokens"].filter(key=>Object.hasOwn(payload,key));
  if(!fields.length) fields.push(model.api==="openai-responses"?"max_output_tokens":"max_tokens");
  for(const field of fields) {
   const prior=payload[field];
   if(prior!==undefined && (!Number.isSafeInteger(prior)||prior<=0))throw new Error("Invalid helper output budget");
-  payload={...payload,[field]:Math.min(prior??AUTOMATIC_HELPER_LIMITS.outputTokens,AUTOMATIC_HELPER_LIMITS.outputTokens,model.maxTokens || AUTOMATIC_HELPER_LIMITS.outputTokens)};
+  payload={...payload,[field]:Math.min(prior??outputLimit,outputLimit,model.maxTokens || outputLimit)};
  }
  return payload;
 }
@@ -477,7 +478,7 @@ export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget 
 	let toolCount = 0;
 	let softNudged = false;
 	let finalizedTools = false;
-	const automatic = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-free-assistant";
+	const automatic = ["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "");
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
 	onRuntimeEvent("tool_call", (event) => {
@@ -841,8 +842,9 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 		if(Array.isArray(parsed)&&parsed.length<=8&&parsed.every(route=>typeof route==="string"&&route.length<=512&&route.includes("/")&&!/[\s\x00-\x1f]/.test(route)))recoveryRoutes=[...new Set(parsed)];
 	} catch {}
 	if(recoveryRoutes.length>1) registerAutonomousRecovery(pi,async()=>{throw new Error("Nested helper launch disabled");},{childRoutes:recoveryRoutes});
-	if (process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-free-assistant") {
-		onRuntimeEvent("tool_call", (event: any) => ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS].includes(event.toolName) ? undefined : { block: true, reason: "Autonomous free assistance is strictly read-only." });
+	if (["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "")) {
+		const discovery = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery";
+		onRuntimeEvent("tool_call", (event: any) => !discovery && ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS].includes(event.toolName) ? undefined : { block: true, reason: discovery ? "Skill discovery cannot use tools." : "Autonomous free assistance is strictly read-only." });
 		onRuntimeEvent("before_provider_request", (event: any, ctx) => {
 			try {
 				if (!ctx?.model) throw new Error("Missing selected helper model");

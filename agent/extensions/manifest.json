@@ -87,7 +87,10 @@
     "project-tests.ts",
     "browser-session.ts",
     "utility-client.ts",
-    "context-anchor.ts"
+    "context-anchor.ts",
+    "skill-discovery.ts",
+    "skill-discovery-controller.ts",
+    "harness-activity.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

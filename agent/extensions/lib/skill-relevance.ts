@@ -12,20 +12,54 @@ export type SkillIndex = {
 };
 export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
-const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400;
+const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
 const FUZZY_MIN_TERM = 6;
 // Common prose that would otherwise let a generic description match any task.
 const STOP = new Set(("with this that from work task tasks when into your using used user users code files file skill skills workflow checks check verify ensure keep kept only before after other more most less than then them they must does each example examples actual current project projects relevant preserve existing avoid without within between during possible apply applies report reports about which where while there their these those have has been being will would should could would state states visible local needed needs need make makes made take takes gives given each other same different only also just like such very well over under more most much many some any all not use used uses using do don't doesn't did doing done also into onto off out up down here when whenever whether either neither because since until unless though although even still yet already always never often sometimes usually rarely truly simply really quite rather about above below across along among around behind beyond despite except inside outside through toward towards upon versus via per plus minus okay fine good better best great hard easy simple simply own hands hand thing things part parts area areas case cases time times day days week weeks month months year years first second third last next new old start starts started begin begins began end ends ended stop stops stopped run runs ran running step steps phase phases stage stages level levels type types kind kinds form forms mode modes way ways point points item items unit units value values number numbers set sets list lists page pages line lines word words text texts name names path paths file files data info information note notes result results output outputs input inputs cause causes effect effects issue issues problem problems error errors change changes changed update updates updated add adds added remove removes removed fix fixes fixed build builds built make makes create creates created write writes wrote read reads review review inspected inspect look looks look at see sees seen show shows shown tell tells told ask asks asked need needs needed want wants wanted give gives given get gets got take takes took put puts plus also item number part thing side top bottom front back left right open closes close closed full empty high low long short big small fast slow early late hard soft sure certain likely probably maybe perhaps almost nearly roughly approx also etc eg ie vs ok").split(/\s+/).filter(Boolean));
 /** Lowercased discriminating terms from text. Bounded, deduplicated, no stemming. */
 export function skillTerms(text: string, limit = MAX_TERMS): string[] {
   const out = new Set<string>();
-  for (const match of String(text ?? "").toLowerCase().matchAll(/[a-z][a-z0-9+#._-]{3,50}/g)) {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  limit = Math.min(MAX_TERMS, Math.floor(limit));
+  for (const match of String(text ?? "").slice(0, MAX_CONTEXT_CHARS).toLowerCase().matchAll(/[a-z][a-z0-9+#._-]{3,50}/g)) {
     const term = match[0].replace(/[._]+$/, "");
     if (term.length < MIN_TERM || term.length > MAX_TERM || STOP.has(term)) continue;
     out.add(term);
     if (out.size >= limit) break;
   }
   return [...out];
+}
+/** Translate successful native operation metadata into a small domain signal.
+ * Callers retain lifecycle/opt-out ownership. Never accepts tool-output prose,
+ * absolute directory names or inferred file contents as routing instructions. */
+export function skillEvidenceContext(evidence: { files?: readonly string[]; tools?: readonly string[] }): string {
+  const terms = new Set<string>();
+  const extensions: Record<string,string> = {
+    ts:'typescript', tsx:'typescript browser interface', js:'javascript', jsx:'javascript browser interface',
+    css:'stylesheet responsive browser interface', html:'markup browser interface', vue:'browser interface', svelte:'browser interface',
+    py:'python', php:'php application', rs:'rust', go:'golang', java:'java', cs:'dotnet',
+    c:'systems memory', cpp:'systems memory', sql:'database transactions queries',
+    csv:'tabular dataset', parquet:'tabular dataset', xlsx:'spreadsheet workbook', ipynb:'python notebook',
+    docx:'document authoring', pptx:'presentation slides', pdf:'document pdf', wasm:'webassembly',
+  };
+  for (const file of (evidence.files ?? []).slice(-32)) {
+    if (typeof file !== 'string' || file.length > 4096) continue;
+    const basename = file.split(/[\\/]/).at(-1)!.toLowerCase();
+    if (basename === 'skill.md') continue; // reading guidance is not task-domain evidence
+    const extension = basename.split('.').at(-1)!;
+    const signal = Object.hasOwn(extensions, extension) ? extensions[extension] : undefined;
+    if (signal) terms.add(signal);
+    if (/^(?:openapi|swagger)\.(?:json|ya?ml)$/.test(basename)) terms.add('api contracts schema');
+    if (/^(?:dockerfile|compose\.ya?ml|docker-compose\.ya?ml)$/.test(basename)) terms.add('containers deployment');
+  }
+  const operations: Record<string,string> = {
+    sqlite_probe:'database queries', sql_query:'database queries', coverage_probe:'testing coverage',
+    openapi_probe:'api contracts schema', contract_diff:'api contract compatibility',
+    lsp_diagnostics:'compiler diagnostics', render_see:'visual browser verification',
+    browser:'browser interaction', dependency_plan:'dependency architecture',
+  };
+  for (const name of (evidence.tools ?? []).slice(-32)) if (typeof name === 'string' && Object.hasOwn(operations, name)) terms.add(operations[name]);
+  return [...terms].join(' ').slice(0,1600);
 }
 export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
   const docs = skills.slice(0, 256).map(skill => {
@@ -135,7 +169,8 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
       if (!doc.tokens.has(term)) continue;
       carried++;
       if (doc.name.has(term)) inName++;
-      if (inName * 2 >= carried && inName > 0 && carried > 1) break;
+      // Later description-only mentions can invalidate the majority.
+      // Do not stop at an early prefix of the catalogue.
     }
     naming.set(term, inName > 0 && inName * 2 >= carried);
   }

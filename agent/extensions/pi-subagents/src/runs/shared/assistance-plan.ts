@@ -34,17 +34,18 @@ export interface AssistanceMember {route:string;proof:string;role:string;free:bo
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a swarm. */
-export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number} = {}): AssistanceMember[] {
+export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  const cheap = {...config,subscriptionProviders:[],maxInputPerMillion:Math.min(config.maxInputPerMillion,.2),maxOutputPerMillion:Math.min(config.maxOutputPerMillion,.5),operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
- const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && catalogRouteCapabilities(m)?.toolCalling===true);
+ const requiresTools = options.requiresTools !== false;
+ const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && (!requiresTools || catalogRouteCapabilities(m)?.toolCalling===true));
  const team: AssistanceMember[] = [];
  const used = new Set<string>();
  for (const role of plan.roles.slice(0,3)) {
   const candidates = pool.filter(m=>!used.has(modelIdentity(m.id)));
   const available = (freeOnly:boolean, diverse:boolean) => selectAffordableModel(diverse ? candidates.filter(m=>!team.some(member=>member.route.startsWith(m.provider+"/"))) : candidates,cheap,
-   {freeOnly,quality:{...taskQuality(options.task),level:"advisory"},requirements:{minContextWindow:16384,minOutputTokens,reasoning:false,inputModalities:["text"]}});
+   {freeOnly,quality:{...taskQuality(options.task),level:"advisory"},requirements:{minContextWindow:16384,minOutputTokens,reasoning:false,inputModalities:["text"],toolCalling:requiresTools}});
   const freeOnly = options.freeOnly || team.some(m=>!m.free);
   const pick = available(true,true) ?? available(true,false) ?? (!freeOnly ? available(false,true) ?? available(false,false) : undefined);
   if (!pick) break;
