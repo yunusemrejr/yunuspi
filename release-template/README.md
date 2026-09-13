@@ -4,63 +4,88 @@
   <img src="docs/assets/rat.gif" alt="Animated ASCII rat mascot from the YunusPi startup header" width="434">
 </p>
 
-A customized Pi coding-agent harness with bounded subagents, free/cheap model routing, lazy skills, contextual guidance, code-quality tools, extractive context utilities and durable runtime patches.
+**A Pi coding-agent harness with a broad set of tools and skills, designed to keep the agent's working context small.**
 
-Bring your own provider credentials. This repository contains reusable code and clean examples, not the author's accounts, sessions, memories, provider state or deployment details.
+YunusPi extends Pi with code inspection, browser and media tools, project memory, subagents, quality checks and runtime fixes. You bring your own model provider and credentials. The agent starts with a core tool set and can discover specialized capabilities as the task develops.
 
-## Install
+The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
 
-Start with [installation](docs/INSTALL.md) and [platform support](docs/PLATFORMS.md). The full harness targets Linux; use WSL2 on Windows or a Linux VM on macOS for the same environment. Native macOS limitations are documented. No native Windows compatibility is claimed.
+[Install](docs/INSTALL.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Security](docs/SECURITY.md)
 
-Inspect the installer before applying it. It must not overwrite an existing installation without explicit backup authorization. Provider configuration examples are in `config/`; replace credentials locally through provider login or environment variables. Never commit your populated configuration.
+## How a session works
 
-## What is included
+Start Pi in your project directory, choose an available model, and describe the work normally. You do not need to select a workflow or browse a catalog before every task.
 
-- Main-agent and subagent workflows, bounded parallel/fusion execution and failure recovery.
-- [Dynamic action plans](docs/ACTION-PLANS.md) with hierarchy, dependencies, execution modes, verification evidence, compact context and automatic peer file scopes.
-- [Disposable sandboxes](docs/SANDBOXES.md) for quick isolated experiments, with copied fixtures, no network, resource limits and automatic cleanup.
-- Capability-aware provider discovery, economical routing and provider-specific cache accounting.
-- Remembers the last model selected in the main interactive session for future launches; child and headless runs do not overwrite it. Explicit launch options and project configuration retain their normal precedence.
-- On-demand skills including programming, research, ML, office documents, Blender, CAD and terminal video/audio processing.
-- [Skill routing and batch source checks](docs/SKILLS-AND-CHECKS.md): broader catalog matching, scoped pre-edit skill review, component anti-boilerplate checks and compact syntax diagnostics across languages and configuration formats.
-- GitHub workflow skills for README authoring, repository presentation and community health files, release notes and changelogs, and GitHub Actions pipeline work; see [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
-- Evidence checks, diagnostics, snapshots, context slicing, output distillation and source-backed handoffs.
-- [Local evidence selection and ranking](docs/LOCAL-INTELLIGENCE.md): task-conditioned Kompress, recoverable compaction and child excerpts, exact near-duplicate deltas, failure-family references and telemetry-aware route optimization.
-- Persistent project intelligence with automatic discovery, concurrent session contributions, bounded architecture retrieval and a live `/graph` window; relevant revisions also get an automatic history-informed change-scope council. See [project intelligence](docs/PROJECT-INTELLIGENCE.md) and [scope decisions](docs/CHANGE-SCOPE.md).
-- Autonomous web search with bounded fallback, plus session activity counters and a `/metrics` panel for tools, agents, skills, hooks and cache usage; see [search and session metrics](docs/SESSION-METRICS.md).
-- [Long browser and community workflows](docs/ISOLATION-AND-WEB.md): niche-site discovery, renewable isolated browser sessions, form controls, draft checks and saved submission/reconciliation guidance for authorized questions, answers and marketing.
-- Local media tools for video frames, audio measurements, bounded editing and editable MIDI/WAV sketches, with skills for motion graphics, video analysis, sound analysis and music composition. FFmpeg/ffprobe and browser-based rendering require the corresponding installed runtimes.
-- Version-specific core patches and structural verification.
-- Launch-scoped harness mutation protection and on-demand self-maintenance, browser, community promotion and organic-growth guidance; see [security boundaries](docs/SECURITY.md).
+- **Start small.** Main sessions expose core editing, inspection, coordination and quality tools. Specialized tool schemas and the full skill catalog stay out of the initial model context.
+- **Discover when useful.** The agent can browse capability groups, search short descriptions, and load selected tools or read a relevant skill. Direct search and activation are also available; browsing is optional.
+- **Get gentle reminders.** Relevant checkpoints can invite the agent to explore tools or workflows. Invitations are deduplicated, have cooldowns, and stop after successful discovery within that request. These reminders make no model calls by default.
+- **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
 
-The optional mini preprocessing model is not bundled with a Python environment, weights or authentication. Its client falls back to raw data when unavailable. Model-specific tests and personal development artifacts are not distribution assets.
+Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
 
-Read [session cost accounting](docs/COST-ACCOUNTING.md) for the footer estimate, `/cost` breakdown, provider pricing and coverage limits.
+### Discovery in practice
 
-Read [model routing and automatic assistance](docs/MODEL-ROUTING.md) for task quality gates, cached benchmark research, free-model preference and autonomous subagent, swarm and fusion budgets.
+These are agent tool calls, not terminal commands:
 
-## See the harness
+```js
+// Search short previews without loading full tool schemas.
+tool_search({ query: "browser screenshots" })
 
-The `/metrics` panel groups failures with recovery clues, identifies repeated tool output and context-heavy results, and shows review evidence gaps and hook timing. Agents can inspect the same efficiency signals through `session_self({view:"efficiency"})`.
+// Enable a tool after choosing it. This does not execute it.
+tool_search({ names: ["browser_session"] })
+
+// Find a workflow without reading the entire skill collection.
+skill_review({ action: "search", query: "voxel scene" })
+```
+
+`tool_search({})` and `skill_review({action:"browse"})` show compact groups. Results are paginated, with three matches by default. A selected skill's file can then be read normally. Skill guidance is advisory by default; strict skill-read enforcement is an explicit option. See [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
+
+## What the harness offers
+
+| Area | Available capabilities |
+| --- | --- |
+| Understand and change code | Symbol, AST and language-server inspection; scoped context; batch edits; syntax diagnostics; review evidence; snapshots. [Source checks](docs/SKILLS-AND-CHECKS.md) |
+| Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
+| Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) |
+| Manage longer tasks | Background jobs, dependency-aware action plans and verification records. [Action plans](docs/ACTION-PLANS.md) |
+| Work with the web | Search, isolated browser sessions, page inspection, screenshots, forms and HTTP diagnostics. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
+| Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) |
+| Inspect and experiment | Structured-data and API tools, local utility MCP tools, and disposable sandboxes with resource limits. [Utility tools](agent/extensions/lib/utility-mcp/README.md) · [Sandboxes](docs/SANDBOXES.md) |
+
+Some capabilities need additional software or provider access. Browser rendering requires its browser runtime; media processing needs tools such as FFmpeg. Optional local preprocessing requires a separately installed model environment. Model weights, paid subscriptions and credentials are not bundled.
+
+## Context, cost and automatic assistance
+
+The harness uses bounded results, source selection, reusable evidence and recoverable compaction to reduce repeated or irrelevant material sent to the model. Compaction distinguishes old usage counters from the current retained context, avoiding repeated compaction caused by stale measurements. [Context selection and ranking](docs/LOCAL-INTELLIGENCE.md)
+
+The main session keeps your selected model. Child routing considers capability, quality evidence, availability and cost limits; a cheap price alone does not qualify a model for the task. Bounded automatic helpers and change-scope councils can also run when their policies permit. They have separate controls and budgets. The optional asynchronous skill advisor requires explicit opt-in in the default advisory mode. [Routing controls](docs/MODEL-ROUTING.md) · [Scope councils](docs/CHANGE-SCOPE.md)
+
+Less context does not guarantee a particular bill. Providers differ in tokenization, caching and pricing, and retries or extra agents still cost resources. `/cost` shows recorded and estimated usage with coverage limits. [Cost accounting](docs/COST-ACCOUNTING.md)
+
+## See what is happening
+
+Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context.
+
+`/metrics` shows grouped failures, recovery clues, repeated output, large context contributors and review evidence gaps. Agents can inspect efficiency through `session_self({view:"efficiency"})`.
 
 ![Metrics panel with grouped failures and context traffic](docs/assets/metrics-demo.png)
 
-The project graph connects source, dependencies, changes and decisions. Its bounded queries also give agents dependency context and evidence they can inspect directly.
+`/graph` opens the project graph for source, dependencies, changes and decisions.
 
 ![Project graph showing the checkout component and its dependencies](docs/assets/graph-demo.png)
 
-Both images use synthetic fixtures. The metrics image renders the native panel text; the graph image captures the live browser viewer. [Screenshot provenance and reproduction](docs/SCREENSHOTS.md).
+Both screenshots use synthetic fixtures. [Screenshot provenance](docs/SCREENSHOTS.md) · [Metrics guide](docs/SESSION-METRICS.md)
 
-## Privacy and updates
+## Install and maintain
 
-[Public release rules](docs/PUBLISHING.md) describe the export boundary, checks and update procedure. Run `node scripts/check-public.mjs` before every commit/push. CI scans tracked content and history as well. Hooks and CI reduce risk; they cannot prove that arbitrary prose contains no confidential information. Review each diff.
+Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installer preview, dependency setup, the pinned Pi core, patch verification and provider login. The full harness targets Linux. Windows uses WSL2; macOS can use a Linux VM. Native macOS limitations are documented, and native Windows support is not claimed.
 
-A private `/harness-backup` ZIP intentionally contains credentials for restoration. **Never publish it or a conversation export.** Public releases must come from the dedicated public exporter.
+This is a source distribution with maintained extensions and version-sensitive core patches. Stop active Pi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
 
-## Verification
+The public repository contains reusable code and clean configuration examples. Accounts, sessions, memories, private settings and local model environments stay on your machine. Private harness backups can contain credentials; never publish them or conversation exports. [Public release procedure](docs/PUBLISHING.md)
 
-`npm test` runs distribution safety and installer tests. Test files run serially so process-heavy fixtures do not contend with routing latency checks. Installed harness structural checks are separate from behavioral tests and live provider availability. The public package does not include private session fixtures or historical evaluation corpora. No test count or catalog entry guarantees every model's output quality.
+## Verification and license
 
-## License
+`npm test` runs the public regression suite, including installation, discovery, routing, safety, lifecycle and context behavior. Installed structural checks and live provider availability are separate checks; passing local tests does not establish every provider's behavior or model output quality.
 
-Custom code is MIT licensed. Vendored components retain their original licenses and notices; see [third-party notices](THIRD_PARTY_NOTICES.md). Model weights and external applications have their own terms and are not bundled.
+Custom code is MIT licensed. Vendored components retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). External models and applications have separate terms.
