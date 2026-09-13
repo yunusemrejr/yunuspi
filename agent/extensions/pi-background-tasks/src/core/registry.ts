@@ -1,3 +1,4 @@
+import { taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -849,6 +850,7 @@ export class BackgroundTaskRegistry {
       notified: false,
       notifyOnCompletion: options.notifyOnCompletion ?? true,
       triggerOnCompletion: options.triggerOnCompletion ?? false,
+      triggerOnCompletionExplicit: options.triggerOnCompletionExplicit ?? options.triggerOnCompletion !== undefined,
       timeoutSeconds,
       terminalPublicationGate: options.terminalPublicationGate,
       waiters: [],
@@ -1961,7 +1963,7 @@ export class BackgroundTaskRegistry {
           display: true,
           details: snapshot(task),
         },
-        { deliverAs: "followUp", triggerTurn: task.triggerOnCompletion && !requestedCleanup },
+        { deliverAs: "followUp", triggerTurn: taskTriggersCompletion(task) && !requestedCleanup },
       );
     } catch (error) {
       task.notified = false;

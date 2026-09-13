@@ -62,6 +62,7 @@ export interface BgTaskSnapshot {
   notified: boolean;
   notifyOnCompletion: boolean;
   triggerOnCompletion: boolean;
+  triggerOnCompletionExplicit?: boolean | undefined;
   timeoutSeconds?: number | undefined;
   contextUsage?: TaskContextUsage | undefined;
   tokenUsage?: TaskTokenUsage | undefined;
@@ -185,6 +186,7 @@ export interface StartTaskOptions {
   timeoutSeconds?: number | undefined;
   notifyOnCompletion?: boolean | undefined;
   triggerOnCompletion?: boolean | undefined;
+  triggerOnCompletionExplicit?: boolean | undefined;
   /** @internal EventBus protocol barrier; callers should not set this outside the extension service. */
   terminalPublicationGate?: Promise<void> | undefined;
 }
@@ -729,6 +731,7 @@ export function snapshot(task: BgTask): BgTaskSnapshot {
     notified: task.notified,
     notifyOnCompletion: task.notifyOnCompletion,
     triggerOnCompletion: task.triggerOnCompletion,
+    triggerOnCompletionExplicit: task.triggerOnCompletionExplicit,
     timeoutSeconds: task.timeoutSeconds,
     contextUsage: task.contextUsage,
     tokenUsage: task.tokenUsage,

@@ -16,6 +16,13 @@ export function createMetricsPanel(lines: string[], tui: any, theme: any, done: 
     handleInput(key: string) {
       if (isKeyRelease(key)) return;
       if (key === 'q' || matchesKey(key, 'escape') || matchesKey(key, 'enter')) return done();
+      const section = ({'1':'Failure evidence','2':'Context traffic','3':'Capabilities and evidence gaps','4':'Hook health','5':'Session activity'} as Record<string,string>)[key];
+      if (section) {
+        const line = lines.findIndex(text => text.startsWith(section));
+        const row = rows.findIndex(item => item.line === line);
+        if (row >= 0) move(row - offset);
+        return;
+      }
       if (key === 'j' || matchesKey(key, 'down')) move(1);
       else if (key === 'k' || matchesKey(key, 'up')) move(-1);
       else if (matchesKey(key, 'pageDown')) move(height);
@@ -41,7 +48,7 @@ export function createMetricsPanel(lines: string[], tui: any, theme: any, done: 
         lastWidth = width;
       }
       offset = Math.min(offset, maxOffset());
-      const header = theme.fg('accent', truncateToWidth('Session metrics · ↑/↓ PgUp/PgDn · Home/End · Esc close', width));
+      const header = theme.fg('accent', truncateToWidth('Session metrics · 1–5 sections · ↑/↓ PgUp/PgDn · Esc close', width));
       const body = rows.slice(offset, offset + height).map(row => truncateToWidth(row.text, width));
       const footer = theme.fg('dim', truncateToWidth(`${rows.length ? offset + 1 : 0}–${Math.min(rows.length, offset + height)} / ${rows.length} · snapshot`, width));
       return terminalRows === 1 ? [header] : terminalRows === 2 ? [header, footer] : [header, ...body, footer];

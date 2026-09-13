@@ -10,7 +10,7 @@ const contentText = (content: any) => typeof content === 'string' ? content : Ar
 
 /** Inspect a bounded branch window. Repetition is an observation, not a waste verdict. */
 export function collectContextTraffic(entries: any[]) {
-  const window = entries.slice(-2000), calls = new Map(), seen = new Set(), repeats = new Map(), tools = new Map();
+  const window = entries.slice(-2000), calls = new Map(), seen = new Set(), repeats = new Map(), contents = new Set(), tools = new Map();
   for (const entry of window) {
     const message = entry?.type === 'message' ? entry.message : undefined;
     if (message?.role === 'assistant') for (const call of Array.isArray(message.content) ? message.content : []) {
@@ -20,12 +20,25 @@ export function collectContextTraffic(entries: any[]) {
     if (message.toolCallId && seen.has(message.toolCallId)) continue;
     if (message.toolCallId) seen.add(message.toolCallId);
     const tool = message.toolName ?? 'unknown', text = contentText(message.content);
-    const row = tools.get(tool) ?? { tool, calls: 0, chars: 0, largest: 0, repeated: 0, repeatedChars: 0 };
-    row.calls++; row.chars += text.length; row.largest = Math.max(row.largest, text.length);
+    const row = tools.get(tool) ?? { tool, calls: 0, chars: 0, largest: 0, repeated: 0, repeatedChars: 0, repeatedContent: 0, repeatedContentChars: 0 };
+    row.calls++; row.chars += text.length;
     const call = calls.get(message.toolCallId);
+    if (text.length > row.largest) {
+      row.largest = text.length;
+      row.largestCallId = typeof message.toolCallId === 'string' && /^[a-zA-Z0-9_:.-]{1,96}$/.test(message.toolCallId) ? message.toolCallId : undefined;
+      const target = call?.arguments?.path ?? call?.arguments?.file_path ?? call?.arguments?.file;
+      // Only a filename locator, never full paths, URLs, commands or arguments.
+      const basename = typeof target === 'string' && !/[:?#]/.test(target) ? target.split(/[\\/]/).at(-1) : undefined;
+      row.largestTarget = basename && /^[a-zA-Z0-9_. -]{1,80}$/.test(basename) ? basename : undefined;
+    }
     // Require exact request AND exact complete text; missing arguments, images,
     // huge outputs and failures cannot establish a redundant read.
     const textOnly = typeof message.content === 'string' || Array.isArray(message.content) && message.content.every(part => part?.type === 'text');
+    if (!message.isError && textOnly && text.length >= 512 && text.length <= 262144) {
+      const contentKey = createHash('sha256').update(JSON.stringify([tool, text])).digest('hex');
+      if (contents.has(contentKey)) { row.repeatedContent++; row.repeatedContentChars += text.length; }
+      contents.add(contentKey);
+    }
     if (call?.name === tool && call.arguments && !message.isError && textOnly && text.length >= 512 && text.length <= 262144) {
       const input = JSON.stringify(call.arguments);
       if (input.length <= 16384) {
@@ -36,8 +49,11 @@ export function collectContextTraffic(entries: any[]) {
     }
     tools.set(tool, row);
   }
+  const rows = [...tools.values()].sort((a, b) => b.chars - a.chars);
   return { inspected: window.length, truncated: entries.length > window.length,
-    tools: [...tools.values()].sort((a, b) => b.chars - a.chars) };
+    totalChars: rows.reduce((sum, row) => sum + row.chars, 0), totalResults: rows.reduce((sum, row) => sum + row.calls, 0),
+    tools: rows };
+
 }
 
 /** Local-only panel: cumulative activity and explicitly scoped branch evidence. */
@@ -46,17 +62,22 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   const diagnostics = collectSessionDiagnostics(branch);
   const traffic = collectContextTraffic(branch);
   const lines = [
+    'Overview · current branch',
+    `${traffic.totalResults} tool results · ${number(traffic.totalChars)} raw returned chars · ${diagnostics.activity.parentToolErrors} tool errors · ${diagnostics.activity.parentModelErrors} provider errors · ${diagnostics.activity.childFailures} child failures`,
+    'Jump: 1 failures · 2 traffic · 3 skills/review · 4 hook health · 5 totals', '',
     'Failure evidence · current branch',
     `${diagnostics.total} diagnostic records in ${diagnostics.inspected} inspected entries${diagnostics.truncated ? ' (older entries outside this window)' : ''}; ${diagnostics.count} recent examples, ${diagnostics.omitted} additional records grouped below. Parent and child records can describe the same incident; do not add them as unique incidents.`,
     ...diagnostics.groups.slice(0, 16).map(group => `${group.count} × ${group.kind} / ${group.tool} / ${group.category}. Next: ${group.recovery}`),
     ...(diagnostics.omittedGroups ? [`${diagnostics.omittedGroups} additional failure groups omitted; inspect retained session evidence for the full window.`] : []),
-    ...(diagnostics.total ? diagnostics.failures.map(failure => `${failure.kind} · ${failure.tool} · ${failure.category}${failure.callId ? ` · call ${failure.callId}` : ''}${failure.attempts !== undefined ? ` · ${failure.attempts} attempts` : ''}${failure.outputPresence ? ` · output ${failure.outputPresence}` : ''}: ${failure.error || 'No error excerpt recorded.'}`)
+    ...(diagnostics.total ? diagnostics.failures.map(failure => `${failure.kind} · ${failure.tool} · ${failure.category}${failure.callId ? ` · call ${failure.callId}` : ''}${failure.runId ? ` · run ${failure.runId}` : ''}${failure.attempts !== undefined ? ` · ${failure.attempts} attempts` : ''}${failure.outputPresence ? ` · output ${failure.outputPresence}` : ''}: ${failure.error || 'No error excerpt recorded.'}`)
       : ['No recorded tool/model/child failures in this window. This does not certify task quality.']),
     '', 'Context traffic · current branch',
-    `Raw returned text across ${traffic.inspected} entries${traffic.truncated ? ' (window truncated)' : ''}; these are characters before context projection, not current occupancy, tokens or billed savings.`,
-    ...traffic.tools.slice(0, 8).map(row => `${row.tool}: ${number(row.chars)} chars in ${row.calls} results; largest ${number(row.largest)}; ${row.repeated} exact repeated request/result pairs (${number(row.repeatedChars)} repeated chars).`),
+    `${number(traffic.totalChars)} raw returned characters in ${traffic.totalResults} results across ${traffic.inspected} entries${traffic.truncated ? ' (window truncated)' : ''}; these are characters before context projection, not current occupancy, tokens or billed savings.`,
+    ...traffic.tools.slice(0, 8).map(row => `${row.tool}: ${number(row.chars)} chars (${traffic.totalChars ? (100 * row.chars / traffic.totalChars).toFixed(1) : '0'}%) in ${row.calls} results; largest ${number(row.largest)}.${row.repeatedContent ? ` Identical returned content: ${row.repeatedContent} repeats / ${number(row.repeatedContentChars)} chars.` : ''}${row.repeated ? ` Exact request/result pairs: ${row.repeated} repeats / ${number(row.repeatedChars)} chars (subset).` : ''}`),
   ];
-  if (traffic.tools.some(row => row.repeated >= 2)) lines.push('Repeated observations may be legitimate polling or verification. For unchanged source, reuse retained evidence and request a focused slice; inspect owned background tasks through completion notifications.');
+  const largest = traffic.tools.reduce((best, row) => !best || row.largest > best.largest ? row : best, undefined);
+  if (largest?.largest) lines.push(`Largest result: ${largest.tool} · ${number(largest.largest)} chars${largest.largestTarget ? ` · ${largest.largestTarget}` : ''}${largest.largestCallId ? ` · call ${largest.largestCallId}` : ''}. Inspect that result for a narrower query or focused slice.`);
+  if (traffic.tools.some(row => row.repeatedContent > 0)) lines.push('Repeated observations may be legitimate polling or verification. For unchanged source, reuse retained evidence and request a focused slice; inspect owned background tasks through completion notifications.');
   const suggestions = metrics.skillsRouted.filter((name: string) => !metrics.skillsRead.includes(name) && !metrics.skillsPartial.includes(name));
   lines.push('', 'Capabilities and evidence gaps',
     `Suggested skills without a recorded read: ${suggestions.slice(0, 12).join(', ') || 'none recorded'}. Suggestions can be irrelevant; use skill_review for the current task rather than reading every skill.`,

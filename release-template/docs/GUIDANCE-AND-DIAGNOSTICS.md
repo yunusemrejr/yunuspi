@@ -86,3 +86,11 @@ After two distinct successful observations, an optional discovery child can insp
 Discovery prefers proven free routes, otherwise admitted low-cost routes under the existing economy policy. Each attempt has reported-usage budgets of $0.001 and 16,000 cumulative tokens, plus a 1,024-output-token request cap and 25-second deadline. Reported-usage thresholds can be crossed by an in-flight response; they are not a provider billing guarantee. It shares the generic automatic-assistance budget, replacing a generic single investigator when a skill catalog is available. Offline sessions, child sessions, relevant opt-outs and unavailable capacity skip discovery quietly. Set `PI_SKILL_DISCOVERY=off` to disable it. No retry or premium fallback is added.
 
 The terminal status area shows short action labels for tools and automatic work, including skill discovery and local model preprocessing. Concurrent actions share a compact line; completion is briefly visible. These indicators contain no arguments or result bodies and add nothing to the model context or session messages.
+
+## Actionable session metrics and background services
+
+`/metrics` opens a terminal overlay with keys 1–5 for section navigation. The overview separates tool, provider and child failures. Failure rows distinguish read coverage, stale edit targets, read ranges, selectors and navigation. Context traffic reports raw returned characters, tool shares, largest-result locators and repeated content separately from identical requests; these are not wire-token or billing measurements.
+
+Memory append receipts no longer echo existing memory into model context. Native reads share the per-file mutation queue so concurrent edits cannot expose temporarily truncated files. Shell path validation respects quotes inside command substitutions.
+
+Recognized development and HTTP servers do not keep automatic continuation pending or inject completion messages into model context by default. Finite background jobs retain completion wakes. Explicit `triggerOnCompletion: true` opts a newly launched service into waking; legacy service records use the non-waking default. Restart existing Pi processes to load the updated callbacks and native read patch.

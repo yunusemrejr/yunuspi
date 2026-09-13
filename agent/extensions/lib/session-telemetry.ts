@@ -34,7 +34,7 @@ export function registerSessionTelemetry(pi:any) {
   if(!ctx.hasUI)return;
   await ctx.ui.custom((tui:any,theme:any,_keys:any,done:any)=>{
    return createMetricsPanel(report.lines,tui,theme,done);
-  });
+  }, {overlay:true, overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left"}});
  }});
  return {snapshot,flush};
 }

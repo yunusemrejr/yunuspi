@@ -1955,9 +1955,6 @@ export default function (pi: ExtensionAPI) {
 						maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 						mode: "end",
 					});
-					const existingSnippet = existingPreview.preview
-						? `\n\n${formatPreviewBlock("Existing daily log preview", existing, "end")}`
-						: "\n\nDaily log was empty.";
 
 					const separator = existing.trim() ? "\n\n" : "";
 					const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
@@ -1969,7 +1966,7 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Appended to daily log: ${filePath}${existingSnippet}`,
+								text: `Appended to daily log: ${filePath} (${content.length} characters).`,
 							},
 						],
 						details: {
@@ -1992,9 +1989,6 @@ export default function (pi: ExtensionAPI) {
 						maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 						mode: "middle",
 					});
-					const existingSnippet = existingPreview.preview
-						? `\n\n${formatPreviewBlock("Existing project memory preview", existing, "middle")}`
-						: "\n\nProject memory was empty.";
 					const separator = existing.trim() ? "\n\n" : "";
 					const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
 					fs.appendFileSync(filePath, separator + stamped, { encoding: "utf-8", mode: 0o600 });
@@ -2003,7 +1997,7 @@ export default function (pi: ExtensionAPI) {
 					await ensureQmdAvailableForUpdate();
 					scheduleQmdUpdate();
 					return {
-						content: [{ type: "text", text: `Appended to project memory: ${filePath}${existingSnippet}` }],
+						content: [{ type: "text", text: `Appended to project memory: ${filePath} (${content.length} characters).` }],
 						details: {
 							path: filePath,
 							target,
@@ -2023,9 +2017,6 @@ export default function (pi: ExtensionAPI) {
 					maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 					mode: "middle",
 				});
-				const existingSnippet = existingPreview.preview
-					? `\n\n${formatPreviewBlock("Existing MEMORY.md preview", existing, "middle")}`
-					: "\n\nMEMORY.md was empty.";
 
 				// Long-term writes change the ambient "background context" the model
 				// should always see. Mark snapshot dirty so the next turn refreshes.
@@ -2043,7 +2034,7 @@ export default function (pi: ExtensionAPI) {
 				scheduleQmdUpdate();
 				return {
 					content: [
-						{ type: "text", text: `Appended to MEMORY.md${existingSnippet}` },
+						{ type: "text", text: `Appended to MEMORY.md (${content.length} characters).` },
 					],
 					details: {
 						path: MEMORY_FILE,

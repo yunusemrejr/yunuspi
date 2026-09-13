@@ -15,6 +15,16 @@ export function failureCategory(error: string) {
     return { category: "guard", recovery: "Read the required skill completely or record a concise applicable deferral. If a complete read was rejected, inspect the skill-read receipt; do not repeat the same edit." };
   if (/Current independent reviews.*missing evidence|Current project test evidence is unresolved/i.test(error))
     return { category: "verification", recovery: "Inspect current review and test evidence. Record unavailable evidence as blocked; do not repeat an accepted assessment while gaps remain." };
+  if (/No verified read-tool coverage|Edit without read|RE-READ REQUIRED/i.test(error))
+    return {category:"read-coverage",recovery:"Read the target range with the native read tool, then retry the edit. Shell output and previews do not establish edit coverage."};
+  if (/Edit target not found|oldText.*(?:not found|appears \d+ times)/i.test(error))
+    return {category:"edit-conflict",recovery:"Read the current target and rebuild a unique oldText match; do not retry the same stale or ambiguous edit."};
+  if (/Offset \d+ is beyond end of file/i.test(error))
+    return {category:"read-range",recovery:"Refresh the file's current line range. If a same-file write is running, let it finish before reading."};
+  if (/Inspection selector timeout/i.test(error))
+    return {category:"selector",recovery:"Inspect the page DOM and choose a selector that exists in the requested state; repeating the missing selector will not help."};
+  if (/Inspection navigation unreachable/i.test(error))
+    return {category:"navigation",recovery:"Check the dev server and requested HTTP address before rendering again."};
   if (/outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
     return { category: "permission", recovery: "Check the declared scope and execution environment; retain the guard and request missing authority if required." };
   if (/budget|economy|price cap|cost limit/i.test(error))
@@ -79,10 +89,10 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     const group = groups.get(groupKey) ?? { kind, tool, ...classification, count: 0 };
     group.count++; groups.set(groupKey, group);
     if (failures.length >= 12) return;
-    failures.push({ kind, tool, ...(callId ? { callId } : {}), ...classification,
+    failures.push({ kind, tool, ...(callId ? { callId } : {}), ...(kind === "child" ? {runId:key.slice(6)} : {}), ...classification,
       ...(Number.isSafeInteger(evidence?.attemptCount) && evidence.attemptCount >= 0 ? { attempts: evidence.attemptCount } : {}),
       ...(['present', 'absent', 'unknown'].includes(evidence?.output) ? { outputPresence: evidence.output } : {}),
-      ...(excerpts ? { error: error.replace(/\s+/g, " ").slice(0, 180) } : {}) });
+      ...(excerpts ? { error: error.replace(/\s+/g, " ").slice(0, 360) } : {}) });
   };
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i], msg = e?.type === "message" ? e.message : undefined;

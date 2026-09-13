@@ -56,6 +56,7 @@ test('repetition needs exact complete request and result and excludes replayed r
   const rows = [...pair('1'), ...pair('2'), ...pair('3', 'x'.repeat(600), { path: 'other.ts' }), ...pair('4', 'y'.repeat(600))];
   const repeated = collectContextTraffic([...rows, rows[1]]).tools[0];
   assert.equal(repeated.calls, 4); assert.equal(repeated.repeated, 1); assert.equal(repeated.repeatedChars, 600);
+  assert.equal(repeated.repeatedContent, 2); assert.equal(repeated.repeatedContentChars, 1200);
   const image = pair('5'); image[1].message.content.push({ type: 'image', data: 'fixture' });
   assert.equal(collectContextTraffic([...pair('1'), ...image]).tools[0].repeated, 0);
 });
@@ -108,4 +109,33 @@ test('diagnostics classify validation echoes and actual workflow guards correctl
   assert.equal(failureCategory('Validation failed for tool "todo": action required; fields: acceptance, budget, evidence').category,'input');
   assert.equal(failureCategory('Before edit on "index.php", read the matching workflow(s): PHP').category,'guard');
   assert.equal(failureCategory('Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.').category,'verification');
+});
+
+
+test('traffic reports contributor shares and locates the largest result without exposing full arguments', () => {
+  const rows = [
+    message('assistant', { content: [{ type: 'toolCall', id: 'large-read', name: 'read', arguments: { path: '/private/project/source.ts', secret: 'PRIVATE-ARGUMENT' } }] }),
+    message('toolResult', { toolName: 'read', toolCallId: 'large-read', content: 'x'.repeat(1800) }),
+    message('toolResult', { toolName: 'grep', toolCallId: 'small-search', content: 'y'.repeat(600) }),
+  ];
+  const report = buildSessionReport(rows, rows);
+  assert.equal(report.traffic.totalChars, 2400);
+  assert.equal(report.traffic.totalResults, 2);
+  const traffic = report.lines.slice(report.lines.indexOf('Context traffic · current branch'), report.lines.indexOf('Capabilities and evidence gaps')).join('\n');
+  assert.match(traffic, /2,400 raw returned characters in 2 results/);
+  assert.match(traffic, /read: 1,800 chars \(75.0%\)/);
+  assert.match(traffic, /grep: 600 chars \(25.0%\)/);
+  assert.match(traffic, /Largest result: read · 1,800 chars · source.ts · call large-read/);
+  assert.doesNotMatch(traffic, /PRIVATE-ARGUMENT|\/private\/project|0 repeats|exact repeated/);
+  assert.match(traffic, /not current occupancy, tokens or billed savings/);
+});
+
+test('common observed failures give specific recovery instead of unclassified',()=>{
+ for(const [text,category] of [
+ ['🔄 RETRYABLE — No verified read-tool coverage for index.html','read-coverage'],
+ ['🔄 RETRYABLE — Edit target not found edits[1].oldText','edit-conflict'],
+ ['Offset 1822 is beyond end of file (1 lines total)','read-range'],
+ ['Render failed: Inspection selector timeout','selector'],
+ ['Render failed: Inspection navigation unreachable','navigation'],
+ ]) assert.equal(failureCategory(text).category,category);
 });

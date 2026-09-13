@@ -1363,8 +1363,39 @@ function literalShellWord(raw: string, variables: Map<string, string>): string {
 
 // A literal-operand guard, not a shell sandbox. It never executes substitutions.
 // Heredoc data and printf/echo payloads remain legal, including multiline text.
-export function invalidShellPath(command: string): string | undefined {
-	const source = stripShellData(command, "paths");
+export function invalidShellPath(command: string, depth = 0): string | undefined {
+	let source = stripShellData(command, "paths");
+	// $(...) starts a fresh shell quoting scope even inside double quotes.
+	// Its source is not a filename; keep it out of the literal-word regex below
+	// while checking literal paths inside the substitution independently.
+	let quote = "";
+	for (let i = 0; i < source.length; i++) {
+		const c = source[i];
+		if (c === "\\" && quote !== "'") { i++; continue; }
+		if (c === "'" && quote !== '"') { quote = quote ? "" : "'"; continue; }
+		if (quote === "'") continue;
+		if (c === '"') { quote = quote ? "" : '"'; continue; }
+		if (c !== "$" || source[i + 1] !== "(") continue;
+		const frames = [{ quote: "", parentheses: 1 }];
+		let end = i + 2;
+		for (; end < source.length && frames.length; end++) {
+			const frame = frames[frames.length - 1], ch = source[end];
+			if (ch === "\\" && frame.quote !== "'") { end++; continue; }
+			if (ch === "'" && frame.quote !== '"') { frame.quote = frame.quote ? "" : "'"; continue; }
+			if (frame.quote === "'") continue;
+			if (ch === '"') { frame.quote = frame.quote ? "" : '"'; continue; }
+			if (ch === "$" && source[end + 1] === "(") { frames.push({ quote: "", parentheses: 1 }); end++; continue; }
+			if (!frame.quote && ch === "(") frame.parentheses++;
+			if (!frame.quote && ch === ")" && --frame.parentheses === 0) frames.pop();
+		}
+		if (frames.length) continue; // Incomplete shell input stays with existing validation.
+		if (depth < 8) {
+			const reason = invalidShellPath(source.slice(i + 2, end - 1), depth + 1);
+			if (reason) return reason;
+		}
+		source = source.slice(0, i) + "__shell_substitution__" + source.slice(end);
+		i += "__shell_substitution__".length - 1;
+	}
 	const words =
 		source.match(
 			/(?:\$'(?:\\[\s\S]|[^'])*'|'[^']*'|"(?:\\[\s\S]|[^"\\])*"|\\[\s\S]|[^\s'"\\;|&<>()])+|(?:>>?|<{1,3}|[;\n|&()])/g,

@@ -18,7 +18,7 @@ export function collectSessionMetrics(entries, live) {
  const helperRuns=new Map();
  for(const e of entries){
   const d=e.type==='custom'&&e.customType==='subagent-cost-v1'?e.data:undefined;
-  if(!d||!/^(?:auto-assist|quality-review)-/.test(d.runId)||d.results?.length!==1)continue;
+  if(!d||!/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(d.runId)||d.results?.length!==1)continue;
   const r=d.results[0];
   if(!r||r.runId||(r.index??0)!==0||typeof r.sessionFile!=='string'||r.sessionFile.length>4096||r.sessionFile.split('/').some(p=>p==='.'||p==='..'))continue;
   const id=r.sessionFile.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];

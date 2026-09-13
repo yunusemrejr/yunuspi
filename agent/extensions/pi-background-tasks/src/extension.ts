@@ -1,3 +1,4 @@
+import { defaultCompletionTrigger, serviceNotificationOnly, taskTriggersCompletion } from "./core/service-policy.ts";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -134,7 +135,7 @@ const BgRunParams = Type.Object({
   triggerOnCompletion: Type.Optional(
     Type.Boolean({
       description:
-        "Whether that notification should automatically trigger a follow-up agent turn. Default: true for bg_run; requires notifyOnCompletion.",
+        "Whether that notification should automatically trigger a follow-up agent turn. Default: true for finite work, false for recognized persistent servers; requires notifyOnCompletion.",
     }),
   ),
 });
@@ -217,7 +218,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     pending: () =>
       registry
         .allTasks()
-        .filter((task) => task.status === "running" && task.triggerOnCompletion === true)
+        .filter((task) => task.status === "running" && taskTriggersCompletion(task))
         .map((task) => `${task.name || task.id} (${task.id}) will automatically resume this session when it finishes`),
   });
 
@@ -720,17 +721,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         name: params.name,
         isAgent: params.isAgent,
         notifyOnCompletion: params.notifyOnCompletion ?? true,
-        triggerOnCompletion: params.triggerOnCompletion ?? true,
+        triggerOnCompletion: defaultCompletionTrigger(params.command, params.isAgent, params.triggerOnCompletion),
+        triggerOnCompletionExplicit: params.triggerOnCompletion !== undefined,
       };
       if (params.description !== undefined)
         taskOptions.description = params.description;
       if (params.timeoutSeconds !== undefined)
         taskOptions.timeoutSeconds = params.timeoutSeconds;
       const task = await startTask(ctx, params.command, taskOptions);
-      const completionDelivery = deriveCompletionDeliveryGuidance(
-        task.notifyOnCompletion,
-        task.triggerOnCompletion,
-      );
+      const completionDelivery = serviceNotificationOnly(task)
+        ? { text: "Persistent service: completion is recorded in task status and the UI only; no agent turn will start. Continue the task without waiting for this server to exit." }
+        : deriveCompletionDeliveryGuidance(task.notifyOnCompletion, taskTriggersCompletion(task));
       return {
         content: textContent(
           `Started background task ${taskDisplayName(task)} (${task.id})\nStatus: ${task.status}\nPID: ${String(task.pid ?? "unknown")}\nOutput: ${task.outputPath}\n${completionDelivery.text}`,

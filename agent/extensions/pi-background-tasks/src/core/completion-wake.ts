@@ -1,3 +1,4 @@
+import { serviceNotificationOnly } from "./service-policy.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -76,6 +77,13 @@ export function createCompletionNotifier(
   });
   return (message: any, options: { triggerTurn: boolean }) => {
     if (!active) return;
+    if (serviceNotificationOnly(message?.details ?? {})) {
+      // The registry already persisted the terminal snapshot. Services never
+      // add hidden model context or a pending continuation merely by exiting.
+      const task = message.details;
+      try { context()?.ui?.notify?.(`Background service ${task.name || task.id || ""} ${task.status || "finished"}.`, "info"); } catch { /* Durable task metadata remains authoritative if the UI is unavailable. */ }
+      return;
+    }
     // triggerTurn:false also bypasses the follow-up queue during an active run.
     // Thus completions queued before a later invalid request cannot re-wake it.
     pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false });
