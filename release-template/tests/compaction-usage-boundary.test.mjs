@@ -30,6 +30,39 @@ try {
   const dest=path.join(stage,path.relative(core,file));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(file,dest);
  }
  process.env.PI_HARNESS_PATCH_TEST_CORE=stage;
+ for (const target of targets()) target.apply();
+ for (const target of targets().filter(t=>t.name.includes('shouldCompact'))) {
+  await test(target.name+' waits for exactly 80% of the whole model window',()=>{
+   const predicate=fn(fs.readFileSync(target.file,'utf8'),'shouldCompact',{});
+   for (const window of [8192,128000,272000,1000000,1310720]) {
+    const threshold=Math.ceil(window*.8);
+    for(const cap of [undefined,96000,256000,1]) {
+     const settings={enabled:true,maxContextTokens:cap,reserveTokens:window};
+     assert.equal(predicate(Math.floor(window*.06),window,settings),false);
+     assert.equal(predicate(threshold-1,window,settings),false);
+     assert.equal(predicate(threshold,window,settings),true);
+     assert.equal(predicate(window,window,{...settings,enabled:false}),false);
+    }
+   }
+  });
+ }
+ for (const target of targets().filter(t=>t.name.includes('automatic full-window gates'))) {
+  await test(target.name+' prevents early overflow or length recovery without changing history',async()=>{
+   const source=fs.readFileSync(target.file,'utf8');
+   for(const name of ['_checkCompaction','_runAutoCompaction']) {
+    const index=source.indexOf('async '+name+'(');assert.ok(index>=0);
+    const expression='async function '+source.slice(index+6);
+    const node=parseExpressionAt(expression,0,{ecmaVersion:'latest'});
+    let usage=95138,authCalls=0;
+    const execute=vm.runInNewContext('('+expression.slice(0,node.end)+')',{shouldCompact:(tokens,window,settings)=>settings.enabled&&tokens>=Math.ceil(window*.8),estimateContextTokens:()=>({tokens:usage})});
+    const messages=[{role:'assistant',stopReason:'error',errorMessage:'context length exceeded'}];
+    const host={model:{contextWindow:1000000},settingsManager:{getCompactionSettings:()=>({enabled:true,maxContextTokens:96000})},agent:{state:{messages}},_getSummarizationRequestAuth:async()=>{authCalls++;throw new Error('fixture stops before inference');},_resolveIdleWaitIfIdle(){}};
+    assert.equal(await execute.call(host,name==='_checkCompaction'?messages[0]:'overflow',true),false);
+    assert.equal(authCalls,0);assert.equal(host.agent.state.messages,messages);assert.equal(host._overflowRecoveryAttempted,undefined);
+    if(name==='_runAutoCompaction') {usage=800000;await execute.call(host,'threshold',false);assert.equal(authCalls,1,'exact threshold admits automatic preparation');}
+   }
+  });
+ }
  for(const target of targets().filter(t=>t.name.includes('post-compaction usage'))) {
   await test(target.name+' ignores retained stale usage without changing billing records',()=>{
    target.apply();assert.equal(target.isApplied(),true);
@@ -47,7 +80,7 @@ try {
    assert.equal(estimator([old,tool]).tokens,200104,'ordinary provider usage remains authoritative');
    assert.equal(estimator(compacted).lastUsageIndex,null,'old request is not a new context measurement');
    assert.equal(estimator(compacted).tokens,compacted.reduce((n,m)=>n+estimate(m),0));
-   assert.ok(estimator(compacted).tokens<100,'retained usage cannot immediately retrigger an 80k compaction threshold');
+   assert.ok(estimator(compacted).tokens<100,'retained usage cannot immediately retrigger automatic compaction');
    assert.equal(JSON.stringify(compacted),snapshot,'historical billing usage is unchanged');
    const fresh={...old,timestamp:30,usage:{...old.usage,input:12000}};
    assert.equal(estimator([...compacted,fresh,tool]).tokens,12104,'fresh provider usage resumes accounting');

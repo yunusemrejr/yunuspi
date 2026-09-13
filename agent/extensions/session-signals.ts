@@ -75,6 +75,24 @@ export default function (pi: any) {
   });
   const toolJson = createToolJsonCompactor();
   let riskAnnounced = false;
+  // Pressure notices are derived from the current model/session state. Keep
+  // an internal tag so a notice from before resume, model selection or
+  // compaction cannot be projected as if it described the current window.
+  const pressureInstance = `${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+  const pressureSignalKind = "context-pressure-v1";
+  let pressureGeneration = 0;
+  const resetPressureSignals = () => pressureGeneration++;
+  const pressureSignal = (content: string) => ({
+    customType: "runtime-signals",
+    content,
+    display: false,
+    details: {
+      kind: pressureSignalKind,
+      tag: `${pressureInstance}:${pressureGeneration}`,
+    },
+  });
   let requested: number | undefined;
   let outputRequest: OutputRequest | undefined;
   const terminatingTools = new Set<string>();
@@ -89,15 +107,18 @@ export default function (pi: any) {
           projectTrusted: ctx.isProjectTrusted?.() ?? false,
         }).getCompactionSettings(),
       requested,
-    );
+  );
   const notice = (ctx: any) => {
     const f = facts(ctx);
-    const risk = !riskAnnounced ? payloadPressureWarning(f.percent) : undefined;
+    const contextPercent = f.contextWindowPercent;
+    const risk = !riskAnnounced
+      ? payloadPressureWarning(contextPercent)
+      : undefined;
     if (risk) riskAnnounced = true;
     const lines = [];
-    if (thresholds.observe(f.percent ?? null) !== null)
+    if (thresholds.observe(contextPercent ?? null) !== null)
       lines.push(
-        `[context pressure] ${Math.round(f.percent!)}% of effective usable budget (${f.tokens}/${f.usableBudget}, ~${f.remaining} remaining; estimated). Compaction is routine: preserve the goal, decisions, evidence locations and next step, then continue required work. Do not rush or omit verification to avoid compaction. This notice saves nothing and does not interrupt execution.`,
+        `[context pressure] ${Math.round(contextPercent!)}% of the selected model context window (${f.tokens}/${f.contextWindow}; automatic compaction starts at ${f.compactionTrigger ?? "disabled"} tokens). Output/safety-adjusted usable budget is ${f.usableBudget} tokens (~${f.remaining ?? "unknown"} remaining; estimated). Preserve the goal, decisions, evidence locations and next step, then continue required work. This notice saves nothing and does not interrupt execution.`,
       );
     if (risk) lines.push(risk);
     return lines.join("\n") || undefined;
@@ -110,6 +131,7 @@ export default function (pi: any) {
     if (event.result.terminate === true) terminatingTools.add(event.toolCallId);
   });
   pi.on("session_start", () => {
+    resetPressureSignals();
     toolJson.reset();
     outputRequest = undefined;
     requested = undefined;
@@ -118,18 +140,29 @@ export default function (pi: any) {
     riskAnnounced = false;
   });
   pi.on("session_compact", () => {
+    resetPressureSignals();
     toolJson.reset();
     outputRequest = undefined;
     thresholds.reset();
     riskAnnounced = false;
   });
+  pi.on("session_switch", () => resetPressureSignals());
   // Runtime identity is available on demand via session_self. Remove legacy
   // conversation signals rather than moving them to the most recent position.
   pi.on("context", (event: any, ctx: any) => {
+    const currentPressureTag = `${pressureInstance}:${pressureGeneration}`;
+    const isPressureLine = (line: string) =>
+      line.startsWith("[context pressure]") ||
+      line.startsWith("[tool payload risk]");
     const messages = toolJson
       .transform(event.messages)
       .flatMap(
-        (m: { role: string; customType?: string; content?: unknown }) => {
+        (m: {
+          role: string;
+          customType?: string;
+          content?: unknown;
+          details?: { kind?: string; tag?: string };
+        }) => {
           if (m.role !== "custom") return [m];
           if (
             ["tool-payload-risk", "runtime-awareness"].includes(
@@ -142,10 +175,20 @@ export default function (pi: any) {
             typeof m.content !== "string"
           )
             return [m];
-          // Preserve pressure notices, but never replay a runtime date as a user turn.
-          const content = m.content
-            .split("\n")
-            .filter((line) => !line.startsWith("[runtime date]"))
+          const lines = m.content.split("\n");
+          const taggedPressure = m.details?.kind === pressureSignalKind;
+          // Tagged pressure messages from a previous generation are owned by
+          // this extension and safe to omit from projected context. Legacy
+          // untagged pressure lines are also removed on every projection,
+          // because context transforms do not rewrite the durable entry.
+          const staleTaggedPressure =
+            taggedPressure && m.details?.tag !== currentPressureTag;
+          const content = lines
+            .filter(
+              (line) =>
+                !line.startsWith("[runtime date]") &&
+                !(isPressureLine(line) && (!taggedPressure || staleTaggedPressure)),
+            )
             .join("\n");
           return content ? [content === m.content ? m : { ...m, content }] : [];
         },
@@ -159,6 +202,7 @@ export default function (pi: any) {
     return { messages };
   });
   pi.on("model_select", () => {
+    resetPressureSignals();
     outputRequest = undefined;
     requested = undefined;
     thresholds.reset();
@@ -208,11 +252,7 @@ export default function (pi: any) {
       systemPrompt: `${_e.systemPrompt}\n\n${dateAnchor().text}`,
       ...(n
         ? {
-            message: {
-              customType: "runtime-signals",
-              content: n,
-              display: false,
-            },
+            message: pressureSignal(n),
           }
         : {}),
     };
@@ -232,14 +272,7 @@ export default function (pi: any) {
     const n = notice(ctx);
     if (n) lines.push(n);
     if (lines.length)
-      pi.sendMessage(
-        {
-          customType: "runtime-signals",
-          content: lines.join("\n"),
-          display: false,
-        },
-        { deliverAs: "steer" },
-      );
+      pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.
@@ -258,7 +291,7 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics: view:context for effective pressure; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
+      "Current session diagnostics: view:context for full-window occupancy, the automatic compaction threshold and separate output/safety headroom; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
     parameters: Type.Object({
       view: Type.Optional(
         StringEnum(["session", "context", "runtime", "failures", "efficiency"]),

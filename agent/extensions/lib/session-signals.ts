@@ -2,7 +2,10 @@ import {
   PI_TOKEN_BUDGET_CEILING,
   PI_TOKEN_BUDGET_SCALE,
 } from "../../scripts/patches/token-budget.mjs";
-import { DEFAULT_MAX_CONTEXT_TOKENS, automaticCompactionThreshold, compactionSettingsForWindow } from "../../scripts/patches/compaction-early.mjs";
+import {
+  automaticCompactionThreshold,
+  compactionSettingsForWindow,
+} from "../../scripts/patches/compaction-early.mjs";
 export function pressureFacts(
   ctx: any,
   settings: any,
@@ -11,13 +14,22 @@ export function pressureFacts(
   const usage = ctx.getContextUsage(),
     window = ctx.model?.contextWindow;
   const runtimeSettings = usage?.compactionSettings;
-  settings = compactionSettingsForWindow(window, runtimeSettings ?? settings);
-  if (!window)
+  if (!Number.isFinite(window) || window <= 0)
     return {
       available: false,
       reason: "Active model context window unavailable",
     };
-  const tokens = usage?.tokens ?? null;
+  // `maxContextTokens` was a transport cap used by an older compaction
+  // policy. It must not shape diagnostics now that the selected model's full
+  // context window owns the automatic trigger. Keep the returned settings
+  // useful for the remaining reserve/tail fields, but remove that legacy
+  // input before window normalization so it cannot affect this report.
+  const suppliedSettings = runtimeSettings ?? settings ?? {};
+  const policySettings = { ...suppliedSettings };
+  delete policySettings.maxContextTokens;
+  settings = compactionSettingsForWindow(window, policySettings);
+  const rawTokens = usage?.tokens;
+  const tokens = Number.isFinite(rawTokens) && rawTokens >= 0 ? rawTokens : null;
   const output =
     requestedOutput ??
     Math.min(
@@ -29,19 +41,22 @@ export function pressureFacts(
     Math.min(PI_TOKEN_BUDGET_SCALE, Math.max(128, Math.floor(window / 8))),
     Math.ceil((tokens ?? 0) * 0.05),
   );
-  const compaction = settings.enabled
-    ? Math.min(
-        window - settings.reserveTokens,
-        typeof settings.maxContextTokens === "number" &&
-          settings.maxContextTokens > 0
-          ? settings.maxContextTokens
-          : DEFAULT_MAX_CONTEXT_TOKENS,
-      )
+  // Output and safety reservations describe request headroom only. They are
+  // intentionally separate from the full-window automatic-compaction gate.
+  const usable = Math.max(0, window - output - safety);
+  const contextWindowPercent =
+    tokens === null ? null : (tokens / window) * 100;
+  const usablePercent =
+    tokens === null
+      ? null
+      : usable
+        ? (tokens / usable) * 100
+        : tokens > 0
+          ? 100
+          : 0;
+  const compactionTrigger = settings.enabled
+    ? automaticCompactionThreshold(tokens ?? 0, window, settings)
     : null;
-  const usable = Math.max(
-    0,
-    Math.min(window - output - safety, compaction ?? Infinity),
-  );
   return {
     available: tokens !== null,
     model: `${ctx.model.provider}/${ctx.model.id}`,
@@ -54,10 +69,15 @@ export function pressureFacts(
         ? "window-bounded output allowance; actual request unavailable"
         : "observed provider request",
     safetyReservation: safety,
-    compaction, // Legacy input-budget cap; the proactive trigger is lower.
-    compactionTrigger: settings.enabled
-      ? automaticCompactionThreshold(tokens ?? 0, window, settings)
-      : null,
+    // Kept as a compatibility alias. Automatic compaction has one policy
+    // value now: the inclusive full-window trigger below.
+    compaction: compactionTrigger,
+    compactionTrigger,
+    contextWindowPercent,
+    // `percent` is the model-facing pressure metric. Keep usable headroom
+    // available for diagnostics without letting it drive pressure notices.
+    percent: contextWindowPercent,
+    usablePercent,
     compactionSettings: settings,
     settingsSource: runtimeSettings
       ? "active runtime settings"
@@ -65,12 +85,13 @@ export function pressureFacts(
     usableBudget: usable,
     remaining: tokens === null ? null : Math.max(0, usable - tokens),
     overBudgetTokens: tokens === null ? null : Math.max(0, tokens - usable),
-    percent: tokens === null ? null : usable ? Math.min(100, Math.max(0, (tokens / usable) * 100)) : tokens > 0 ? 100 : 0,
   };
 }
-export function payloadPressureWarning(percent: number | null | undefined) {
-  return percent != null && percent >= 90
-    ? "[tool payload risk] Context is at least 90% of the effective usable budget. While context remains this full, large write/edit/bash arguments are at increased risk of malformed JSON, corrupted paths, or repetitive content. Prefer small targeted calls, put path first, and read back changed regions. Preserve the current goal, decisions, evidence locations and next step before compaction, then continue. Compaction is routine; do not skip required work or verification to avoid it. This warning does not save or verify files."
+export function payloadPressureWarning(
+  contextWindowPercent: number | null | undefined,
+) {
+  return contextWindowPercent != null && contextWindowPercent >= 90
+    ? "[tool payload risk] Context is at least 90% of the selected model context window. While context remains this full, large write/edit/bash arguments are at increased risk of malformed JSON, corrupted paths, or repetitive content. Prefer small targeted calls, put path first, and read back changed regions. Preserve the current goal, decisions, evidence locations and next step before compaction, then continue. Compaction is routine; do not skip required work or verification to avoid it. This warning does not save or verify files."
     : undefined;
 }
 export interface OutputRequest {

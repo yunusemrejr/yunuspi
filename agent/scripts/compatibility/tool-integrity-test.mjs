@@ -134,11 +134,11 @@ const ctx = {
     },
   }),
 };
-assert.equal(pressureFacts(ctx, {}).percent, 90);
+assert.equal(pressureFacts(ctx, {}).percent, 9);
 tokens = 11190;
-assert.equal(pressureFacts(ctx, {}).percent, 100);
-assert.equal(pressureFacts(ctx, {}).remaining, 0);
-assert.equal(pressureFacts(ctx, {}).overBudgetTokens, 1190);
+assert.equal(pressureFacts(ctx, {}).percent, 11.19);
+assert.equal(pressureFacts(ctx, {}).remaining, 55618);
+assert.equal(pressureFacts(ctx, {}).overBudgetTokens, 0);
 assert.equal(payloadPressureWarning(89.9), undefined);
 assert.match(payloadPressureWarning(90), /malformed JSON, corrupted paths/);
 // Pressure guidance is delivered by the turn owner; the context hook removes
@@ -199,7 +199,7 @@ for (const invalidCap of [-1, 0, 1.5, NaN, Infinity, "4096"]) {
 
 // High context cannot wake canceled, failed or intentionally terminated work.
 // A skipped notice must remain available for the next continuing tool turn.
-tokens = 9000;
+tokens = 90000;
 const continuingTurn = {
   message: { role: "assistant", stopReason: "toolUse" },
   toolResults: [{ toolCallId: "pressure-tool" }],

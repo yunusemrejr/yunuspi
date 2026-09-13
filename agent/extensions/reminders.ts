@@ -77,9 +77,10 @@
  * Successful actions reset the evidence. No inference, timers, reasoning-token
  * guesses, forced edits, or automatic thinking-level changes.
  *
- * Cost: one tiny state file (~/.pi/reminders/state-<sid>.json); ambient-only
- * injections are display:false; manual-bearing ones are also shown in the
- * TUI/export. Delete the state file to remove.
+ * Cost: one tiny state file (~/.pi/reminders/state-<sid>.json) plus a
+ * metadata-only first-prompt orientation receipt; ambient-only injections are
+ * display:false; manual-bearing ones are also shown in the TUI/export. Delete
+ * the state file to remove scheduled reminders.
  */
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -107,6 +108,11 @@ import {
 	COOLDOWN_MS,
 	WINDOW_MS,
 } from "../scripts/patches/retry-429-policy.mjs";
+import {
+	buildHarnessOrientation,
+	hasOrientationReceipt,
+	markOrientationDelivered,
+} from "./lib/harness-orientation.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
@@ -432,6 +438,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	let recoveryRoute: { provider: string; model: string } | undefined;
 	let thinkingChars = 0, scannedChars = 0, streamingSteered = false;
 	const terminatingTools = new Set<string>();
+	// before_agent_start does not carry the input source. Track the real human
+	// input event so an extension wake before the first prompt cannot consume
+	// the one orientation opportunity, while continuation wakes stay silent.
+	const pendingHumanPrompts = new Set<string>();
 	const load = (sid: string): ReminderState => {
 		let st = live.get(sid);
 		if (!st) {
@@ -544,6 +554,20 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const st = load(sid);
 			st.promptCount += 1;
 			const now = Date.now();
+			// A single fixed orientation belongs beside the human's first prompt.
+			// It is optional, capability-grounded, and persisted independently of
+			// the reminder schema so reload/resume cannot repeat it. Children and
+			// extension-generated continuations never receive this note.
+			const activeTools = pi.getActiveTools?.() ?? [];
+			const humanFirstPrompt =
+				process.env.PI_SUBAGENT_CHILD !== "1" &&
+				pendingHumanPrompts.has(sid) &&
+				!hasOrientationReceipt(sid);
+			if (pendingHumanPrompts.has(sid)) pendingHumanPrompts.delete(sid);
+			const orientation =
+				humanFirstPrompt && buildHarnessOrientation(activeTools, _event.prompt);
+			// An explicit opt-out consumes the first-prompt opportunity too.
+			if (humanFirstPrompt && !orientation) markOrientationDelivered(sid);
 			const fire = shouldFire(st, now);
 			const dueManual = dueManualReminders(st, now);
 			// Contextual safety rules: inject only the slices whose topic the
@@ -553,6 +577,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			);
 			if (
 				hints.length === 0 &&
+				!orientation &&
 				ctxMatches.length === 0 &&
 				!fire.todo &&
 				!fire.drift &&
@@ -568,7 +593,11 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				now,
 				fire,
 				dueManual,
-				[...ctxMatches.map((r) => r.text), ...hints.map((h) => `[capability hint] ${h.text}`)],
+				[
+					...(orientation ? [orientation] : []),
+					...ctxMatches.map((r) => r.text),
+					...hints.map((h) => `[capability hint] ${h.text}`),
+				],
 				todoSnapshots.get(st),
 			);
 			if (!content.trim()) { writeState(sid, st); return undefined; }
@@ -576,6 +605,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			// re-fire from a later lifecycle event (structural dedup).
 			for (const r of dueManual) advanceDelivered(r, now);
 			for (const r of ctxMatches) st.shownCtx.push(r.tag);
+			if (orientation) markOrientationDelivered(sid);
 			guidance.commit(hints);
 			if (fire.todo) {
 				st.todoReminders += 1;
@@ -660,7 +690,17 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		} catch (err) { logReminderErr("reasoning steering", err); }
 	});
 
-	pi.on("input", (event) => { recoveryRoute = undefined; if (event.source !== "extension") { loop = createLoopTracker(); guidance.userInput(); } });
+	pi.on("input", (event, ctx) => {
+		recoveryRoute = undefined;
+		if (event.source !== "extension") {
+			try {
+				const sid = sidOf(ctx);
+				if (sid) pendingHumanPrompts.add(sid);
+			} catch { /* a closing session has no orientation opportunity */ }
+			loop = createLoopTracker();
+			guidance.userInput();
+		}
+	});
 	pi.on("tool_call", (event, ctx) => {
 		if (ctx.signal?.aborted) return;
 		const review = guidance.beforeToolCall(event);

@@ -1,44 +1,16 @@
-// Compaction-threshold cap patch — re-applied by verify-harness.mjs [8a].
-// Lives OUTSIDE node_modules so it survives `npm update`; the patched files
-// (pi bundle chunk + the SDK copies) do not.
-//
-// WHAT: stock compaction fires at `contextTokens > contextWindow - reserveTokens`.
-// On a 1.31M-token model that threshold is ~1.29M tokens, so tool-heavy
-// sessions grow to 195k+ with zero compaction and transport ~190k tokens per
-// tool continuation. This patch caps the threshold at an absolute budget
-// (default 256k) so large-context models compact long before window overflow.
-//
-// POLICY: compact at 85% of the effective input budget, after output and
-// safety reserves, bounded by maxContextTokens (default 256000). The old
-// window-minus-reserve trigger could exceed the safe input budget itself.
-// On small windows (or explicit small caps), summary reserve and retained tail
-// are bounded to leave continuation room. Ordinary large-window defaults and
-// Pi's automatic compact-and-continue lifecycle stay intact.
-//
-// Targets cover SDK/CLI thresholds, settings, nonempty-summary guards,
-// bounded preparation, and the active model window at manual/automatic callsites.
-// Core owners:
-//   1. dist/core/compaction/compaction.js        — shouldCompact (SDK path)
-//   2. bundle chunk                               — shouldCompact (runtime path)
-//   3. dist/core/settings-manager.js              — getCompactionSettings (SDK)
-//   4. bundle chunk                               — getCompactionSettings (runtime)
-//
-// Idempotent: checks the full current replacement, upgrades prior patches. Exits 0 on
-// success/no-op, 1 on anchor mismatch (upstream refactor — patch needs updating).
-// CLI: node compaction-early.mjs [--fix]   (default: report only)
+// Automatic compaction policy: use 80% of the selected model's full context
+// window. Legacy absolute caps, output reserves and recovery reasons must not
+// trigger earlier automatic summaries. Manual compaction remains explicit.
+// This version-sensitive patch owns SDK/CLI parity, valid summary commits,
+// bounded retained tails and post-compaction usage accounting. Historical
+// anchors below exist only to upgrade already-installed releases safely.
+// CLI: node compaction-early.mjs [--fix] (default: report only).
 import * as fs from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import * as path from "node:path";
-import {
-    PI_TOKEN_BUDGET_CEILING,
-    PI_TOKEN_BUDGET_SCALE,
-} from "./token-budget.mjs";
 
 const MARKER = "PI_COMPACT_CAP";
-/** Default absolute compaction budget when `maxContextTokens` is not set.
- * WHY: 256k bounds per-tool-continuation transport while keeping 20k recent
- * tokens (stock keepRecentTokens) for context on coding quality. Chosen
- * conservatively — not a "max context window" gate. */
+// Historical migration constant only; no longer an automatic context cap.
 export const DEFAULT_MAX_CONTEXT_TOKENS = 256_000;
 
 function piCoreDir() {
@@ -120,40 +92,15 @@ const SDK_COMPACT_HEADROOM_PREVIOUS = SDK_COMPACT_PREVIOUS.replace(
 
 const SDK_COMPACT_WINDOW_PREVIOUS = "export function shouldCompact(contextTokens, contextWindow, settings) {\n    if (!settings.enabled) return false;\n    /* PI_COMPACT_CAP: PI_COMPACT_HEADROOM \u2014 automatic before payload-risk warnings. */\n\n    const cap =\n        Number.isFinite(settings.maxContextTokens) &&\n        settings.maxContextTokens > 0\n            ? settings.maxContextTokens\n            : 256000;\n    const output = Math.max(\n        settings.reserveTokens ?? 16384,\n        Math.min(32768, contextWindow / 4),\n    );\n    const floor = Math.min(\n        8192,\n        Math.max(128, Math.floor(contextWindow / 8)),\n    );\n    const safety = Math.max(floor, Math.ceil(contextTokens * 0.05));\n    return contextTokens > Math.floor(\n        0.85 * Math.max(0, Math.min(cap, contextWindow - output - safety)),\n    );\n}";
 
-// Reserve the configured output ceiling on large windows; retain a useful
-// input budget on small ones, whose output is already bounded by token-budget.
-export function automaticCompactionThreshold(
-    contextTokens,
-    contextWindow,
-    settings,
-) {
+/** Full model window only; output/tail sizing cannot advance this threshold. */
+export function automaticCompactionThreshold(contextTokens, contextWindow, settings) {
     if (!Number.isFinite(contextWindow) || contextWindow <= 0) return Infinity;
-    const cap =
-        Number.isFinite(settings.maxContextTokens) &&
-        settings.maxContextTokens > 0
-            ? settings.maxContextTokens
-            : DEFAULT_MAX_CONTEXT_TOKENS;
-    const reserve = Number.isFinite(settings.reserveTokens) && settings.reserveTokens > 0
-        ? settings.reserveTokens : 16384;
-    const output = Math.min(
-        Math.max(reserve, Math.min(PI_TOKEN_BUDGET_CEILING, contextWindow / 4)),
-        Math.max(128, Math.floor(contextWindow / 4)),
-    );
-    const floor = Math.min(
-        PI_TOKEN_BUDGET_SCALE,
-        Math.max(128, Math.floor(contextWindow / 8)),
-    );
-    const safety = Math.max(floor, Math.ceil(contextTokens * 0.05));
-    return Math.floor(
-        0.85 * Math.max(0, Math.min(cap, contextWindow - output - safety)),
-    );
+    return Math.ceil(contextWindow * 0.8);
 }
 /** Preserve useful recent work while leaving room for a summary and continuation. */
 export function compactionSettingsForWindow(contextWindow, settings) {
     if (!Number.isFinite(contextWindow) || contextWindow <= 0) return settings;
-    const cap = Number.isFinite(settings.maxContextTokens) && settings.maxContextTokens > 0
-        ? settings.maxContextTokens : DEFAULT_MAX_CONTEXT_TOKENS;
-    const budget = Math.min(contextWindow, cap);
+    const budget = contextWindow;
     const reserve = Number.isFinite(settings.reserveTokens) && settings.reserveTokens > 0
         ? settings.reserveTokens : 16384;
     const recent = Number.isFinite(settings.keepRecentTokens) && settings.keepRecentTokens >= 0
@@ -172,15 +119,16 @@ const decisionBody = thresholdSource
         /\bDEFAULT_MAX_CONTEXT_TOKENS\b/g,
         String(DEFAULT_MAX_CONTEXT_TOKENS),
     )
-    .replace(/\bPI_TOKEN_BUDGET_CEILING\b/g, String(PI_TOKEN_BUDGET_CEILING))
-    .replace(/\bPI_TOKEN_BUDGET_SCALE\b/g, String(PI_TOKEN_BUDGET_SCALE))
     .replace("return Infinity", "return false")
-    .replace("return Math.floor", "return contextTokens > Math.floor");
+    .replace("return Math.ceil", "return Number.isFinite(contextTokens) && contextTokens >= Math.ceil");
 const SDK_COMPACT_REPLACEMENT = `export function shouldCompact(contextTokens, contextWindow, settings) {
     if (!settings.enabled) return false;
-    /* ${MARKER}: PI_COMPACT_HEADROOM — automatic before payload-risk warnings. */
+    /* ${MARKER}: PI_COMPACT_FULL_WINDOW_80 — no early automatic triggers. */
 ${decisionBody}}`;
 
+
+const SDK_COMPACT_BUDGET_PREVIOUS = "export function shouldCompact(contextTokens, contextWindow, settings) {\n    if (!settings.enabled) return false;\n    /* PI_COMPACT_CAP: PI_COMPACT_HEADROOM — automatic before payload-risk warnings. */\n\n    if (!Number.isFinite(contextWindow) || contextWindow <= 0) return false;\n    const cap =\n        Number.isFinite(settings.maxContextTokens) &&\n        settings.maxContextTokens > 0\n            ? settings.maxContextTokens\n            : 256000;\n    const reserve = Number.isFinite(settings.reserveTokens) && settings.reserveTokens > 0\n        ? settings.reserveTokens : 16384;\n    const output = Math.min(\n        Math.max(reserve, Math.min(32768, contextWindow / 4)),\n        Math.max(128, Math.floor(contextWindow / 4)),\n    );\n    const floor = Math.min(\n        8192,\n        Math.max(128, Math.floor(contextWindow / 8)),\n    );\n    const safety = Math.max(floor, Math.ceil(contextTokens * 0.05));\n    return contextTokens > Math.floor(\n        0.85 * Math.max(0, Math.min(cap, contextWindow - output - safety)),\n    );\n}";
+const PREPARATION_BUDGET_PREVIOUS = "function compactionSettingsForWindow(contextWindow, settings) {\n    if (!Number.isFinite(contextWindow) || contextWindow <= 0) return settings;\n    const cap = Number.isFinite(settings.maxContextTokens) && settings.maxContextTokens > 0\n        ? settings.maxContextTokens : 256000;\n    const budget = Math.min(contextWindow, cap);\n    const reserve = Number.isFinite(settings.reserveTokens) && settings.reserveTokens > 0\n        ? settings.reserveTokens : 16384;\n    const recent = Number.isFinite(settings.keepRecentTokens) && settings.keepRecentTokens >= 0\n        ? settings.keepRecentTokens : 20000;\n    return {\n        ...settings,\n        reserveTokens: Math.min(reserve, Math.max(128, Math.floor(budget / 8))),\n        keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 8))),\n    };\n}";
 // Exact pre-formatting revision deployed on 2026-09-07. Formatting the
 // generator changes Function.toString(), so retain this known upgrade anchor.
 const SDK_COMPACT_FORMAT_PREVIOUS = "export function shouldCompact(contextTokens, contextWindow, settings) {\n    if (!settings.enabled) return false;\n    /* PI_COMPACT_CAP: PI_COMPACT_HEADROOM \u2014 automatic before payload-risk warnings. */\n\n    const cap = Number.isFinite(settings.maxContextTokens) && settings.maxContextTokens > 0\n        ? settings.maxContextTokens : 256000;\n    const output = Math.max(settings.reserveTokens ?? 16384, Math.min(32768, contextWindow / 4));\n    const floor = Math.min(8192, Math.max(128, Math.floor(contextWindow / 8)));\n    const safety = Math.max(floor, Math.ceil(contextTokens * 0.05));\n    return contextTokens > Math.floor(0.85 * Math.max(0, Math.min(cap, contextWindow - output - safety)));\n}";
@@ -204,10 +152,15 @@ const SDK_SETTINGS_REPLACEMENT = [
     "            keepRecentTokens: this.getCompactionKeepRecentTokens(),",
     "            // " +
         MARKER +
-        ": absolute compaction budget; undefined falls back to the default in shouldCompact.",
+        ": legacy setting retained for compatibility; automatic compaction ignores this cap.",
     "            maxContextTokens: this.settings.compaction?.maxContextTokens,",
     "        };",
 ].join("\n");
+
+const SDK_SETTINGS_PREVIOUS = SDK_SETTINGS_REPLACEMENT.replace(
+    ": legacy setting retained for compatibility; automatic compaction ignores this cap.",
+    ": absolute compaction budget; undefined falls back to the default in shouldCompact.",
+);
 
 // ---------------------------------------------------------------------------
 // Targets 2 + 4: bundle chunk (minified; runtime path for the `pi` binary)
@@ -228,6 +181,11 @@ const BUNDLE_COMPACT_HEADROOM_PREVIOUS = BUNDLE_COMPACT_PREVIOUS.replace(
     "const output=Math.max(settings2.reserveTokens??16384,Math.min(32768,contextWindow/4)),safety=Math.max(8192,Math.ceil(contextTokens*.05));return contextTokens>Math.floor(.85*Math.max(0,Math.min(cap,contextWindow-output-safety)))/*PI_COMPACT_HEADROOM*/",
 );
 const BUNDLE_COMPACT_REPLACEMENT = SDK_COMPACT_REPLACEMENT.replace(
+    "export function shouldCompact(contextTokens, contextWindow, settings)",
+    "function shouldCompact(contextTokens,contextWindow,settings2)",
+).replace(/\bsettings\b/g, "settings2");
+
+const BUNDLE_COMPACT_BUDGET_PREVIOUS = SDK_COMPACT_BUDGET_PREVIOUS.replace(
     "export function shouldCompact(contextTokens, contextWindow, settings)",
     "function shouldCompact(contextTokens,contextWindow,settings2)",
 ).replace(/\bsettings\b/g, "settings2");
@@ -282,7 +240,7 @@ function makeStaticTarget(
         apply: () => {
             const src = fs.readFileSync(file, "utf8");
             if (src.includes(replacement)) return;
-            const matched = [anchor, ...previous].find((value) =>
+            const matched = [...previous, anchor].sort((a,b)=>b.length-a.length).find((value) =>
                 src.includes(value),
             );
             if (matched) {
@@ -307,7 +265,7 @@ function makeStaticTarget(
 function bundleTarget(name, anchor, replacement) {
     const compact = name.includes("shouldCompact");
     let previous = compact
-        ? [BUNDLE_COMPACT_PREVIOUS, BUNDLE_COMPACT_HEADROOM_PREVIOUS, BUNDLE_COMPACT_FORMAT_PREVIOUS, BUNDLE_COMPACT_WINDOW_PREVIOUS]
+        ? [BUNDLE_COMPACT_BUDGET_PREVIOUS, BUNDLE_COMPACT_PREVIOUS, BUNDLE_COMPACT_HEADROOM_PREVIOUS, BUNDLE_COMPACT_FORMAT_PREVIOUS, BUNDLE_COMPACT_WINDOW_PREVIOUS]
         : [];
     const chunk = findBundleChunkContaining(
         compact ? "function shouldCompact(" : anchor,
@@ -441,9 +399,14 @@ function preparationWindowTarget(name, file) {
     const helper = compactionSettingsForWindow.toString().replace(/\bDEFAULT_MAX_CONTEXT_TOKENS\b/g, String(DEFAULT_MAX_CONTEXT_TOKENS));
     const replacement = original.replace(/\)\s*\{$/, ", contextWindow) {") +
         `/* PI_COMPACT_WINDOW_SETTINGS */\n${settings} = (${helper})(contextWindow, ${settings});\n`;
-    // Exact first window-bounded revision; zero is a valid explicit tail size.
-    const previous = replacement.replace("settings.keepRecentTokens >= 0", "settings.keepRecentTokens > 0");
-    return makeStaticTarget(name, file, original, replacement, undefined, [previous, replacement.replace("keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 8)))", "keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 4)))"), previous.replace("keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 8)))", "keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 4)))")]);
+    const previous = [helper,PREPARATION_BUDGET_PREVIOUS].flatMap(text=>[
+        text, text.replace("settings.keepRecentTokens >= 0","settings.keepRecentTokens > 0"),
+    ]).flatMap(text=>[
+        text,text.replace("keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 8)))","keepRecentTokens: Math.min(recent, Math.max(256, Math.floor(budget / 4)))"),
+    ]).map(text=>replacement.replace(helper,text));
+    if(source.includes('PI_COMPACT_WINDOW_SETTINGS') && !previous.some(value=>source.includes(value)))
+        throw new Error(`${name}: unknown preparation wrapper revision`);
+    return makeStaticTarget(name,file,original,replacement,undefined,previous);
 }
 
 function preparationCallTarget(name, file) {
@@ -485,6 +448,52 @@ function preparationCallTarget(name, file) {
     };
 }
 
+// Gate every automatic path before auth, hooks, retry flags or context mutation.
+// Output-length/provider errors alone cannot spend a summary call below 80%.
+export function patchAutomaticWindowGates(source) {
+    let next = source;
+    for (const [method, marker] of [["_checkCompaction", "PI_AUTO_WINDOW_CHECK"], ["_runAutoCompaction", "PI_AUTO_WINDOW_RUN"]]) {
+        const guard = `/* ${marker} */if(!this.model||!shouldCompact(estimateContextTokens(this.agent.state.messages).tokens,this.model.contextWindow,this.settingsManager.getCompactionSettings()))return false;`;
+        if (next.includes(guard)) {
+            if (next.split(guard).length !== 2) throw new Error(`${method}: duplicate window gate`);
+            continue;
+        }
+        if (next.includes(marker)) throw new Error(`${method}: unknown window gate revision`);
+        const pattern = new RegExp(`async ${method}\\([^)]*\\)\\s*\\{`, "g");
+        const matches = [...next.matchAll(pattern)];
+        if (matches.length !== 1) throw new Error(`${method}: automatic owner drift`);
+        next = next.replace(matches[0][0], matches[0][0] + guard);
+    }
+    // Failed/truncated replies stay visible until a valid summary is committed.
+    // The existing success path removes retriable replies before continuing.
+    const sdk = `            const messages = this.agent.state.messages;
+            if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+                this.agent.state.messages = messages.slice(0, -1);
+            }
+            return await this._runAutoCompaction("overflow", willRetry);`;
+    const bundle = 'let messages=this.agent.state.messages;return messages.length>0&&messages[messages.length-1].role==="assistant"&&(this.agent.state.messages=messages.slice(0,-1)),await this._runAutoCompaction("overflow",willRetry)';
+    const preserved = '/* PI_AUTO_PRESERVE_FAILURE */return await this._runAutoCompaction("overflow",willRetry);';
+    if (!next.includes(preserved)) {
+        const anchor = [sdk,bundle].find(value=>next.includes(value));
+        if (!anchor || next.split(anchor).length !== 2 || next.includes('PI_AUTO_PRESERVE_FAILURE')) throw new Error('automatic overflow mutation owner drift');
+        next = next.replace(anchor,preserved);
+    }
+    return next;
+}
+function automaticWindowTarget(name, file) {
+    if (!file || !fs.existsSync(file)) throw new Error(`${name}: session owner missing`);
+    return {
+        name, file, exists:()=>fs.existsSync(file),
+        isApplied:()=>{try{const source=fs.readFileSync(file,'utf8');return patchAutomaticWindowGates(source)===source;}catch{return false;}},
+        apply:()=>{
+            const source=fs.readFileSync(file,'utf8'), next=patchAutomaticWindowGates(source);
+            if(next===source)return;
+            const temp=`${file}.compact-${process.pid}`;
+            fs.writeFileSync(temp,next,{mode:fs.statSync(file).mode});fs.renameSync(temp,file);
+        },
+    };
+}
+
 export function targets() {
     const core = piCoreDir();
     const sdkCompact = core
@@ -512,7 +521,7 @@ export function targets() {
                 SDK_COMPACT_ANCHOR,
                 SDK_COMPACT_REPLACEMENT,
                 undefined,
-                [SDK_COMPACT_PREVIOUS, SDK_COMPACT_HEADROOM_PREVIOUS, SDK_COMPACT_FORMAT_PREVIOUS, SDK_COMPACT_WINDOW_PREVIOUS],
+                [SDK_COMPACT_BUDGET_PREVIOUS, SDK_COMPACT_PREVIOUS, SDK_COMPACT_HEADROOM_PREVIOUS, SDK_COMPACT_FORMAT_PREVIOUS, SDK_COMPACT_WINDOW_PREVIOUS],
             ),
         );
     }
@@ -523,6 +532,8 @@ export function targets() {
                 sdkSettings,
                 SDK_SETTINGS_ANCHOR,
                 SDK_SETTINGS_REPLACEMENT,
+                undefined,
+                [SDK_SETTINGS_PREVIOUS],
             ),
         );
     }
@@ -563,6 +574,10 @@ export function targets() {
     out.push(
         makeStaticTarget("sdk: post-compaction usage accounting", sdkCompact, USAGE_SDK_ANCHOR, USAGE_REPLACEMENT, undefined, [USAGE_BUNDLE_ANCHOR]),
         makeStaticTarget("bundle: post-compaction usage accounting", bundleCompact.file, USAGE_BUNDLE_ANCHOR, USAGE_REPLACEMENT, undefined, [USAGE_SDK_ANCHOR]),
+    );
+    out.push(
+        automaticWindowTarget("sdk: automatic full-window gates", path.join(core,"dist","core","agent-session.js")),
+        automaticWindowTarget("bundle: automatic full-window gates", findBundleChunkContaining("async _checkCompaction(","PI_AUTO_WINDOW_CHECK")),
     );
     return out;
 }

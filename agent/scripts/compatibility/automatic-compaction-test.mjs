@@ -24,49 +24,26 @@ const code = fs
   .match(/function shouldCompact\([^}]+\}/)[0];
 const cli = vm.runInNewContext(`(${code})`);
 for (const predicate of [shouldCompact, cli]) {
-  assert.equal(predicate(170261, 272000, settings), false);
-  assert.equal(
-    predicate(205042, 272000, settings),
-    true,
-    "compact before the 90% unsafe-payload warning",
-  );
-  assert.equal(predicate(234364, 272000, settings), true);
-  assert.equal(
-    predicate(234364, 272000, { ...settings, enabled: false }),
-    false,
-  );
-  assert.equal(
-    predicate(40000, 272000, settings),
-    false,
-    "retained tail does not loop",
-  );
-  assert.equal(
-    predicate(220000, 1000000, settings),
-    true,
-    "large windows still respect the absolute cap",
-  );
-  assert.equal(
-    predicate(86000, 272000, { ...settings, maxContextTokens: 100000 }),
-    true,
-  );
-  for (const cap of [undefined, -1, NaN, Infinity, "1000"]) {
-    assert.equal(
-      predicate(100000, 272000, { ...settings, maxContextTokens: cap }),
-      false,
-    );
+  for (const window of [8192,32768,128000,272000,1000000,1310720]) {
+    const threshold = Math.ceil(window * 0.8);
+    assert.equal(automaticCompactionThreshold(0,window,settings),threshold);
+    for (const cap of [undefined,96000,100000,256000,-1,NaN,Infinity,"1000"]) {
+      const configured = {...settings,maxContextTokens:cap,reserveTokens:window};
+      assert.equal(predicate(Math.floor(window * 0.06),window,configured),false,'startup-sized context never compacts');
+      assert.equal(predicate(threshold-1,window,configured),false,'never before full-window 80%');
+      assert.equal(predicate(threshold,window,configured),true,'exact 80% boundary triggers');
+      assert.equal(predicate(threshold+1,window,configured),true);
+      assert.equal(predicate(window,window,{...configured,enabled:false}),false);
+    }
   }
-  for (const tokens of [1, 40000, 170261, 195000, 195100, 205042, 234364]) {
-    assert.equal(
-      predicate(tokens, 272000, settings),
-      tokens > automaticCompactionThreshold(tokens, 272000, settings),
-    );
-  }
+  assert.equal(predicate(95138,1000000,{...settings,maxContextTokens:96000}),false,'reported screenshot-sized history is below 80%');
+  for(const window of [0,-1,NaN,Infinity,undefined])assert.equal(predicate(500000,window,settings),false,'unknown window cannot trigger');
+  for(const tokens of [NaN,Infinity,-1])assert.equal(predicate(tokens,1000000,settings),false,'invalid usage cannot trigger');
 }
-assert.ok(automaticCompactionThreshold(205042, 272000, settings) < 205042);
 assert.deepEqual(compactionSettingsForWindow(272000, settings), settings, "large windows retain configured defaults");
 assert.equal(compactionSettingsForWindow(1000000, { ...settings, keepRecentTokens: 0 }).keepRecentTokens, 0, "explicit zero tail is preserved");
 for (const window of [8192, 16384, 32768]) {
-  const entries = Array.from({ length: 20 }, (_, i) => ({
+  const entries = Array.from({ length: 28 }, (_, i) => ({
     type: "message", id: `fixture-${i}`, parentId: i ? `fixture-${i-1}` : null,
     timestamp: new Date(i).toISOString(),
     message: { role: i % 2 ? "assistant" : "user", content: [{ type: "text", text: "x".repeat(Math.floor(window * 0.13)) }], timestamp: i },
@@ -105,10 +82,8 @@ assert.equal(
   facts.compactionTrigger,
   automaticCompactionThreshold(205042, 272000, settings),
 );
-assert.ok(
-  facts.compactionTrigger < facts.usableBudget * 0.9,
-  "the diagnostic distinguishes the proactive trigger from the budget cap",
-);
+assert.equal(facts.compactionTrigger,217600,"diagnostic uses 80% of the full model window");
+
 
 for (const window of [8192, 16384, 32768]) {
   const small = pressureFacts({ model: { provider: "fixture", id: "small", contextWindow: window, maxTokens: window },
@@ -133,7 +108,7 @@ const large = [
     role: "assistant",
     content: [],
     timestamp: 1,
-    usage: { input: 205042, output: 0, cacheRead: 0, cacheWrite: 0 },
+    usage: { input: 240000, output: 0, cacheRead: 0, cacheWrite: 0 },
   },
 ];
 // A real retained tail includes old assistant usage: preserve it for billing,
@@ -184,6 +159,20 @@ console.log(
   "PASS automatic compaction: live-budget regression, SDK/CLI parity, disabled policy, retained tail and between-turn continuation",
 );
 
+// All automatic reasons obey the same boundary, including old resumed errors.
+for (const reason of ['length','error','stop']) {
+ const message={role:'assistant',provider:'fixture',model:'large',content:[],stopReason:reason,errorMessage:'maximum context length exceeded',timestamp:10,usage:{input:95138,output:1,cacheRead:0,cacheWrite:0}};
+ let dispatched=0;
+ const host={model:{provider:'fixture',id:'large',contextWindow:1000000,maxTokens:32768},settingsManager:{getCompactionSettings:()=>({...settings,maxContextTokens:96000})},agent:{state:{messages:[message]}},sessionManager:{getBranch:()=>[]},_runAutoCompaction:async()=>{dispatched++;return true;},_getSummarizationRequestAuth:async()=>{throw new Error('must not request summary auth below80%');}};
+ const original=host.agent.state.messages;
+ assert.equal(await AgentSession.prototype._checkCompaction.call(host,message),false);
+ assert.equal(await AgentSession.prototype._runAutoCompaction.call(host,'overflow',true),false);
+ assert.equal(dispatched,0);
+ assert.equal(host.agent.state.messages,original,'failed reply preserved below threshold');
+ assert.equal(host._overflowRecoveryAttempted,undefined);
+}
+console.log('PASS early overflow/length rejection: no automatic summary or state mutation below80%');
+
 // Real preparation, persistence and automatic retry handoff on short history.
 // Only model inference is replaced with a deterministic summary.
 {
@@ -191,7 +180,7 @@ console.log(
  const manager=SessionManager.inMemory('/tmp');
  for(const message of [
   {role:'user',content:'Implement the requested fix and preserve constraints.',timestamp:1},
-  {role:'assistant',content:[{type:'text',text:'Inspected the code and identified the cause.'}],stopReason:'stop',timestamp:2},
+  {role:'assistant',content:[{type:'text',text:'Inspected the code and identified the cause.'}],stopReason:'stop',timestamp:2,usage:{input:27000,output:0,cacheRead:0,cacheWrite:0}},
   {role:'user',content:'Continue and test it.',timestamp:3},
  ]) manager.appendMessage(message);
  assert.equal(prepareCompaction(manager.getBranch(),settings,32768),undefined,'ordinary tail keeps this entire short history');

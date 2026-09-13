@@ -18,7 +18,7 @@ Start Pi in your project directory, choose an available model, and describe the 
 
 - **Start small.** Main sessions expose core editing, inspection, coordination and quality tools. Specialized tool schemas and the full skill catalog stay out of the initial model context.
 - **Discover when useful.** The agent can browse capability groups, search short descriptions, and load selected tools or read a relevant skill. Direct search and activation are also available; browsing is optional.
-- **Get gentle reminders.** Relevant checkpoints can invite the agent to explore tools or workflows. Invitations are deduplicated, have cooldowns, and stop after successful discovery within that request. These reminders make no model calls by default.
+- **Get gentle reminders.** Your first prompt includes a brief, once-per-session invitation to look over useful harness capabilities and then focus on the task. It shares the existing request, with no extra model call, and does not repeat on resume. Relevant checkpoints can invite further discovery; those invitations are deduplicated, have cooldowns, and stop after successful discovery within that request.
 - **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
 
 Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
@@ -56,7 +56,7 @@ Some capabilities need additional software or provider access. Browser rendering
 
 ## Context, cost and automatic assistance
 
-The harness uses bounded results, source selection, reusable evidence and recoverable compaction to reduce repeated or irrelevant material sent to the model. Compaction distinguishes old usage counters from the current retained context, avoiding repeated compaction caused by stale measurements. [Context selection and ranking](docs/LOCAL-INTELLIGENCE.md)
+The harness uses bounded results, source selection, reusable evidence and recoverable compaction to reduce repeated or irrelevant material sent to the model. Automatic compaction starts only at or above 80% of the selected model's full context window. `session_self {view:"context"}` reports `contextWindowPercent` and `compactionTrigger`; output and safety reservations remain separate headroom diagnostics. A provider overflow below 80% is surfaced as an error without an automatic summary; manual compaction remains available. Compaction distinguishes old usage counters from the current retained context, avoiding repeated compaction caused by stale measurements. [Context selection and ranking](docs/LOCAL-INTELLIGENCE.md)
 
 The main session keeps your selected model. Child routing considers capability, quality evidence, availability and cost limits; a cheap price alone does not qualify a model for the task. Bounded automatic helpers and change-scope councils can also run when their policies permit. They have separate controls and budgets. The optional asynchronous skill advisor requires explicit opt-in in the default advisory mode. [Routing controls](docs/MODEL-ROUTING.md) · [Scope councils](docs/CHANGE-SCOPE.md)
 
