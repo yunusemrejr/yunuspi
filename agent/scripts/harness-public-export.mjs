@@ -106,6 +106,7 @@ const allowedExt = new Set([
  ".scm",
  ".wasm",
  ".gif",
+ ".png",
  ".py",
  ".ipynb",
  ".sh",
@@ -159,7 +160,7 @@ function copyTree(dir, prefix) {
   )
    continue;
   let bytes = fs.readFileSync(p);
-  if (!/\.(?:wasm|gif)$/.test(p)) {
+  if (!/\.(?:wasm|gif|png)$/.test(p)) {
    let text = bytes.toString("utf8");
    text = text.replaceAll(os.homedir(), "/home/example");
    if (rel === "agent/extensions/live-models.ts")

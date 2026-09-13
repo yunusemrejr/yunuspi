@@ -37,6 +37,18 @@ Read [session cost accounting](docs/COST-ACCOUNTING.md) for the footer estimate,
 
 Read [model routing and automatic assistance](docs/MODEL-ROUTING.md) for task quality gates, cached benchmark research, free-model preference and autonomous subagent, swarm and fusion budgets.
 
+## See the harness
+
+The `/metrics` panel groups failures with recovery clues, identifies repeated tool output and context-heavy results, and shows review evidence gaps and hook timing. Agents can inspect the same efficiency signals through `session_self({view:"efficiency"})`.
+
+![Metrics panel with grouped failures and context traffic](docs/assets/metrics-demo.png)
+
+The project graph connects source, dependencies, changes and decisions. Its bounded queries also give agents dependency context and evidence they can inspect directly.
+
+![Project graph showing the checkout component and its dependencies](docs/assets/graph-demo.png)
+
+Both images use synthetic fixtures. The metrics image renders the native panel text; the graph image captures the live browser viewer. [Screenshot provenance and reproduction](docs/SCREENSHOTS.md).
+
 ## Privacy and updates
 
 [Public release rules](docs/PUBLISHING.md) describe the export boundary, checks and update procedure. Run `node scripts/check-public.mjs` before every commit/push. CI scans tracked content and history as well. Hooks and CI reduce risk; they cannot prove that arbitrary prose contains no confidential information. Review each diff.

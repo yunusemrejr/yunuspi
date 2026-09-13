@@ -72,6 +72,8 @@
     "session-cost.ts",
     "cost-evidence.ts",
     "session-telemetry.ts",
+    "session-report.ts",
+    "metrics-panel.ts",
     "bash-routing.ts",
     "data-query.ts",
     "bulk-edit.ts",

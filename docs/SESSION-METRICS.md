@@ -21,7 +21,17 @@ The footer adds wrapped rows alongside existing traffic, estimated cost and cach
 | Hook checks | Measured policy/context/tool checks, excluding streamed token notifications, UI/lifecycle observers and the telemetry observer; `?` means unavailable |
 | Compact | Recorded compactions |
 
-Run `/metrics` for a scrollable panel with tool counts, child outcomes, skill names, cache totals, reported reasoning tokens, hook errors and timings, and measured payload reductions. Use arrow keys, `j`/`k`, or Page Up/Down; close with Escape, Enter, or `q`. Viewing the panel does not add messages to model context.
+Run `/metrics` for a scrollable panel with tool counts, child outcomes, skill names, cache totals, reported reasoning tokens, hook errors and timings, and measured payload reductions. Use the mouse wheel, arrow keys, `j`/`k`, Page Up/Down, or Home/End (`g`/`G`); close with Escape, Enter, or `q`. The panel is a stable snapshot and retains its logical reading location when resized. Viewing it does not add messages to model context.
+
+The first sections show grouped failure categories and recovery clues, recent error excerpts and call IDs, the largest tool outputs, exact repeated request/result pairs, skill-read gaps, current review evidence and the slowest/erroring hooks. Failure totals continue beyond the 12-excerpt limit; up to 16 groups are shown with explicit omissions. A generic guard refusal does not hide a more specific budget or argument problem.
+
+Compact child accounting retains failure category, attempt count and output presence. Diagnostics use that evidence even when a later lifecycle receipt only says `failed`, without copying raw child prompts or output into telemetry.
+
+Failure and context-traffic sections use the newest 2,000 current-branch entries; cumulative activity and hook sections use all retained entries. The panel labels these scopes. Raw returned characters precede context projection and do not measure billed savings. Identical observations can be legitimate polling or verification. Agents can request the eight largest traffic contributors through `session_self({view:"efficiency"})`; no raw tool arguments or result excerpts appear in that view.
+
+## Terminal scrolling
+
+Automatic full redraws in the regular terminal renderer preserve scrollback and repaint the visible tail, including after content shrinks or the terminal resizes. This prevents redraws from erasing the history while it is being read. Old terminal rows remain historical snapshots; corrections to content that has already scrolled off screen are reflected in the retained session transcript. The fullscreen renderer has its own scroll view. Restart Pi after applying the core patch; extension reload alone cannot replace an already loaded renderer.
 
 Child status separates cumulative token traffic from current context occupancy and its peak. Cumulative traffic may exceed the model's context capacity across many turns. Observed progress reports completed tool results, failures, successful write calls and turns since the last successful write; these are activity evidence, not proof of correct edits or a runaway-loop diagnosis. Read-only work may make useful progress without any writes. Routine successful results omit the fan-out budget boilerplate; explicit status and failure details retain the budget.
 

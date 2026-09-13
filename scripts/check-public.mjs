@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const PUBLIC_BINARY_SHA256 = {
+  "docs/assets/metrics-demo.png": "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
+  "release-template/docs/assets/metrics-demo.png": "640054a295677ff9b522e30ac6a42612c16395ecc093ee7217780a668b00acf9",
+  "docs/assets/graph-demo.png": "e377cfea6d7f421fe0850ad1ebc1b866a7d908e0784f9e173a9cd475354c6c46",
+  "release-template/docs/assets/graph-demo.png": "e377cfea6d7f421fe0850ad1ebc1b866a7d908e0784f9e173a9cd475354c6c46",
   "docs/assets/rat.gif": "5509522c162182f1d42e3cdc705f0cd5da93cf894bda8651dae0e550cb6bc1c6",
   "release-template/docs/assets/rat.gif": "5509522c162182f1d42e3cdc705f0cd5da93cf894bda8651dae0e550cb6bc1c6",
   "agent/extensions/pi-lens/grammars/tree-sitter-bash.wasm": "807dcdb1380a59befb112ed8fbd3d3872c7fadaf5903a769282b50973b30696d",

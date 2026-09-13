@@ -1,4 +1,5 @@
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
+import { collectContextTraffic } from "./lib/session-report.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
@@ -257,15 +258,21 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics, effective context pressure, view:failures for bounded tool/model/child/workflow failure evidence and recovery clues on this branch, or view:runtime for live cwd, harness directory, session/model, active tools and background-handle owners. Runtime facts do not authorize new work; unavailable fields are explicit. Use session_audit for bounded aggregate counts from persisted past sessions; session_self remains the current-session and branch-local diagnostic view.",
+      "Current session diagnostics: view:context for effective pressure; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
     parameters: Type.Object({
       view: Type.Optional(
-        StringEnum(["session", "context", "runtime", "failures"]),
+        StringEnum(["session", "context", "runtime", "failures", "efficiency"]),
       ),
     }),
     async execute(_id: any, p: any, _s: any, _u: any, ctx: any) {
       const details =
-        p.view === "failures"
+        p.view === "efficiency"
+          ? (() => {
+            const traffic = collectContextTraffic(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries());
+            return { ...traffic, tools: traffic.tools.slice(0, 8), omittedTools: Math.max(0, traffic.tools.length - 8),
+              interpretation: "Last 2000 branch entries; raw returned characters before projection, not current occupancy or billed tokens. Exact repeated observations can be legitimate polling. Prefer focused source queries, retained evidence, and completion notifications when appropriate; do not skip necessary verification." };
+          })()
+          : p.view === "failures"
           ? recentFailures(ctx)
           : p.view === "runtime"
             ? runtimeFacts(pi, ctx)

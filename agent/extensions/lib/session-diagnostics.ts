@@ -7,7 +7,7 @@ const text = (content: any): string => typeof content === "string" ? content.sli
 
 /** Classifications are clues, never permission to change a model or budget. */
 export function failureCategory(error: string) {
-  if (/blocked:|outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
+  if (/outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
     return { category: "permission", recovery: "Check the declared scope and execution environment; retain the guard and request missing authority if required." };
   if (/budget|economy|price cap|cost limit/i.test(error))
     return { category: "budget", recovery: "Use an eligible route within the existing budget; do not increase caps or substitute an unauthorized model." };
@@ -23,6 +23,14 @@ export function failureCategory(error: string) {
     return { category: "verification", recovery: "Inspect the changed files and failed acceptance condition; repair the specific result before treating the child as complete." };
   if (/invalid.{0,20}(?:argument|parameter|schema)|validation|unknown (?:tool|action)/i.test(error))
     return { category: "input", recovery: "Read the active tool schema and correct the rejected arguments before retrying." };
+  if (/invalid[- ]output|structured.?output|invalid.?json|no (?:final|useful) output/i.test(error))
+    return { category: "output", recovery: "Inspect the required output contract and retained artifacts; missing or invalid output is not successful completion." };
+  if (/transport failure|\b(?:502|503|504|524|529)\b|fetch failed|socket hang up|connection.{0,20}(?:reset|closed|error)/i.test(error))
+    return { category: "transport", recovery: "Check provider and connection health, preserve partial results, and retry only through the owned bounded recovery route." };
+  if (/process[- ]signal/i.test(error))
+    return { category: "process", recovery: "Inspect the recorded exit signal and resource limits before restarting the owned process." };
+  if (/^\s*blocked:/i.test(error))
+    return { category: "guard", recovery: "Inspect the guard's specific reason and satisfy the missing precondition; do not repeat the rejected call or bypass the guard." };
   return { category: "unclassified", recovery: "Inspect the original error and retained evidence; an error count alone does not establish a harness defect." };
 }
 
@@ -38,11 +46,34 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     entry.message.toolName === "subagent" && !calls.has(entry.message.toolCallId);
   const metrics = collectSessionMetrics(entries.map(entry => unownedReceipt(entry)
     ? { ...entry, message: { ...entry.message, details: undefined } } : entry));
-  const failures: any[] = [], seen = new Set();
-  const add = (kind: string, tool: string, key: string, error: string, callId?: string) => {
+  // Lifecycle receipts can arrive after richer accounting. Retain the latest
+  // category-only ledger evidence so a later generic 'failed' cannot hide it.
+  const childEvidence = new Map();
+  for (const entry of entries) {
+    if (entry?.type !== 'custom' || entry.customType !== 'subagent-cost-v1' || !Array.isArray(entry.data?.results)) continue;
+    for (const [index, row] of entry.data.results.slice(0, 64).entries()) {
+      if (row?.evidence?.version !== 1) continue;
+      const id = `${row.runId ?? entry.data.runId}:${row.runId ? 0 : row.workflowKey ?? row.childId ?? row.index ?? index}`;
+      childEvidence.set(metrics.agentAliases[id] ?? id, row.evidence);
+    }
+  }
+  const reasonText: Record<string, string> = { budget: 'budget limit', context: 'context limit', capacity: '429 capacity',
+    timeout: 'timeout', permission: 'permission denied', dependency: 'ERR_MODULE_NOT_FOUND',
+    'invalid-output': 'invalid-output', acceptance: 'acceptance verification', transport: 'transport failure', 'process-signal': 'process-signal' };
+  const failures: any[] = [], seen = new Set(), groups = new Map();
+  let total = 0;
+  const add = (kind: string, tool: string, key: string, error: string, callId?: string, evidence?: any) => {
     if (seen.has(key)) return; seen.add(key);
+    total++;
+    const reason = evidence?.outcomeReason;
+    const classification = failureCategory(typeof reason === 'string' && Object.hasOwn(reasonText, reason) ? reasonText[reason] : error);
+    const groupKey = JSON.stringify([kind, tool, classification.category]);
+    const group = groups.get(groupKey) ?? { kind, tool, ...classification, count: 0 };
+    group.count++; groups.set(groupKey, group);
     if (failures.length >= 12) return;
-    failures.push({ kind, tool, ...(callId ? { callId } : {}), ...failureCategory(error),
+    failures.push({ kind, tool, ...(callId ? { callId } : {}), ...classification,
+      ...(Number.isSafeInteger(evidence?.attemptCount) && evidence.attemptCount >= 0 ? { attempts: evidence.attemptCount } : {}),
+      ...(['present', 'absent', 'unknown'].includes(evidence?.output) ? { outputPresence: evidence.output } : {}),
       ...(excerpts ? { error: error.replace(/\s+/g, " ").slice(0, 180) } : {}) });
   };
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -76,12 +107,15 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
       const status = r.state ?? r.status;
       if (r.stopped || r.interrupted || ["stopped", "paused"].includes(status)) { seen.add(key); continue; }
       if (r.error || r.timedOut || r.exitCode !== undefined && r.exitCode !== 0 || ["failed", "rejected"].includes(status))
-        add("child", "subagent", key, String(r.error ?? r.errorMessage ?? (r.timedOut ? "Child timed out" : "Child failed")), msg?.toolCallId);
+        add("child", "subagent", key, String(r.error ?? r.errorMessage ?? (r.timedOut ? "Child timed out" : "Child failed")), msg?.toolCallId, childEvidence.get(canonical));
       else if (r.exitCode === 0 || ["complete", "completed"].includes(status)) seen.add(key);
     }
   }
   return {
-    inspected: entries.length, truncated: Array.isArray(allEntries) && allEntries.length > entries.length, count: failures.length, failures,
+    inspected: entries.length, truncated: Array.isArray(allEntries) && allEntries.length > entries.length,
+    count: failures.length, total, omitted: total - failures.length, failures,
+    groups: [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 16),
+    omittedGroups: Math.max(0, groups.size - 16),
     activity: { tools: metrics.tools, parentToolErrors:metrics.errors, parentModelErrors:metrics.modelErrors,
       children:metrics.agents, childFailures:metrics.agentFailures, workflowFailures:metrics.workflowFailures,
       skillsOpened:metrics.skillsRead.length + metrics.skillsPartial.length, skillsSuggested:metrics.skillsRouted.length,
