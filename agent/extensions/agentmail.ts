@@ -46,7 +46,9 @@ export type ConfigResolution =
   | { ok: false; error: string; nextStep: string };
 
 /** Read configuration from the environment only. Pure so tests can inject env. */
-export function resolveConfig(env: Record<string, string | undefined> = process.env): ConfigResolution {
+export function resolveConfig(
+  env: Record<string, string | undefined> = process.env,
+): ConfigResolution {
   const apiKey = (env[API_KEY_ENV] ?? "").trim();
   if (!apiKey)
     return {
@@ -59,12 +61,24 @@ export function resolveConfig(env: Record<string, string | undefined> = process.
   try {
     url = new URL(rawBase);
   } catch {
-    return { ok: false, error: `${BASE_URL_ENV} is not a valid URL.`, nextStep: `Set ${BASE_URL_ENV} to an https API origin such as ${DEFAULT_BASE_URL}.` };
+    return {
+      ok: false,
+      error: `${BASE_URL_ENV} is not a valid URL.`,
+      nextStep: `Set ${BASE_URL_ENV} to an https API origin such as ${DEFAULT_BASE_URL}.`,
+    };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:")
-    return { ok: false, error: `${BASE_URL_ENV} must be http or https.`, nextStep: `Set ${BASE_URL_ENV} to an https API origin.` };
+    return {
+      ok: false,
+      error: `${BASE_URL_ENV} must be http or https.`,
+      nextStep: `Set ${BASE_URL_ENV} to an https API origin.`,
+    };
   if (url.username || url.password || url.search || url.hash)
-    return { ok: false, error: `${BASE_URL_ENV} must be a bare origin without credentials, query or fragment.`, nextStep: `Set ${BASE_URL_ENV} to an origin only, e.g. ${DEFAULT_BASE_URL}.` };
+    return {
+      ok: false,
+      error: `${BASE_URL_ENV} must be a bare origin without credentials, query or fragment.`,
+      nextStep: `Set ${BASE_URL_ENV} to an origin only, e.g. ${DEFAULT_BASE_URL}.`,
+    };
   const inbox = (env[INBOX_ENV] ?? "").trim();
   return {
     ok: true,
@@ -77,7 +91,8 @@ export function resolveConfig(env: Record<string, string | undefined> = process.
 }
 
 const PLAIN_ADDRESS = /^[^\s<>@,;:"]+@[^\s<>@,;:"]+\.[A-Za-z0-9-]{2,}$/;
-const NAMED_ADDRESS = /^[^<>()\\,";:\r\n]{1,64}\s*<[^\s<>@,;:"]+@[^\s<>@,;:"]+\.[A-Za-z0-9-]{2,}>$/;
+const NAMED_ADDRESS =
+  /^[^<>()\\,";:\r\n]{1,64}\s*<[^\s<>@,;:"]+@[^\s<>@,;:"]+\.[A-Za-z0-9-]{2,}>$/;
 const INBOX_ID = /^[A-Za-z0-9][A-Za-z0-9._%+-]{0,127}$/;
 const MESSAGE_ID = /^[A-Za-z0-9][A-Za-z0-9._=+@:-]{0,255}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$/;
@@ -87,7 +102,12 @@ function bad(field: string, why: string): never {
   throw new Error(`${field}: ${why}`);
 }
 
-function text(value: unknown, field: string, max: number, required = false): string | undefined {
+function text(
+  value: unknown,
+  field: string,
+  max: number,
+  required = false,
+): string | undefined {
   if (value === undefined || value === null) {
     if (required) bad(field, "is required");
     return undefined;
@@ -107,18 +127,31 @@ function text(value: unknown, field: string, max: number, required = false): str
 export function validateAddress(value: unknown, field: string): string {
   const address = text(value, field, 320, true)!;
   if (!PLAIN_ADDRESS.test(address) && !NAMED_ADDRESS.test(address))
-    bad(field, "must be an email address, optionally as `Display Name <user@domain>`");
+    bad(
+      field,
+      "must be an email address, optionally as `Display Name <user@domain>`",
+    );
   return address;
 }
 
 /** Accept one address or a bounded list; duplicates are collapsed. */
-export function validateRecipients(value: unknown, field: string, required = false): string[] {
-  const rows = value === undefined || value === null ? [] : Array.isArray(value) ? value : [value];
+export function validateRecipients(
+  value: unknown,
+  field: string,
+  required = false,
+): string[] {
+  const rows =
+    value === undefined || value === null
+      ? []
+      : Array.isArray(value)
+        ? value
+        : [value];
   if (!rows.length) {
     if (required) bad(field, "needs at least one recipient");
     return [];
   }
-  if (rows.length > MAX_RECIPIENTS) bad(field, `supports at most ${MAX_RECIPIENTS} recipients`);
+  if (rows.length > MAX_RECIPIENTS)
+    bad(field, `supports at most ${MAX_RECIPIENTS} recipients`);
   const out: string[] = [];
   for (const row of rows) {
     const address = validateAddress(row, field);
@@ -128,7 +161,8 @@ export function validateRecipients(value: unknown, field: string, required = fal
 }
 
 export function validateInboxId(value: unknown, fallback?: string): string {
-  const raw = value === undefined || value === null || value === "" ? fallback : value;
+  const raw =
+    value === undefined || value === null || value === "" ? fallback : value;
   if (raw === undefined || raw === null || raw === "")
     bad("inboxId", `is required; pass it explicitly or set ${INBOX_ENV}`);
   const id = text(raw, "inboxId", 320, true)!;
@@ -146,10 +180,15 @@ function validateMessageId(value: unknown): string {
 export function validateLabels(value: unknown): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) bad("labels", "must be an array of strings");
-  if (value.length > MAX_LABELS) bad("labels", `supports at most ${MAX_LABELS} labels`);
+  if (value.length > MAX_LABELS)
+    bad("labels", `supports at most ${MAX_LABELS} labels`);
   return value.map((row) => {
     const label = text(row, "labels", MAX_LABEL, true)!;
-    if (!LABEL.test(label)) bad("labels", "entries must be short words (letters, digits, space, _ or -)");
+    if (!LABEL.test(label))
+      bad(
+        "labels",
+        "entries must be short words (letters, digits, space, _ or -)",
+      );
     return label;
   });
 }
@@ -188,15 +227,22 @@ export type SendEnvelope = {
 };
 
 /** Build the exact AgentMail send payload; exported for tests. */
-export function buildSendPayload(input: SendInput, inboxId: string): { inboxId: string; envelope: SendEnvelope } {
+export function buildSendPayload(
+  input: SendInput,
+  inboxId: string,
+): { inboxId: string; envelope: SendEnvelope } {
   const to = validateRecipients(input.to, "to", true);
   const cc = validateRecipients(input.cc, "cc");
   const bcc = validateRecipients(input.bcc, "bcc");
-  const replyTo = input.replyTo === undefined ? [] : validateRecipients(input.replyTo, "replyTo");
+  const replyTo =
+    input.replyTo === undefined
+      ? []
+      : validateRecipients(input.replyTo, "replyTo");
   const subject = text(input.subject, "subject", MAX_SUBJECT, true)!;
   const textBody = validateBodyText(input.text, "text");
   const htmlBody = validateBodyText(input.html, "html");
-  if (!textBody && !htmlBody) bad("text", "or html is required: supply the message body");
+  if (!textBody && !htmlBody)
+    bad("text", "or html is required: supply the message body");
   const labels = validateLabels(input.labels);
   return {
     inboxId,
@@ -234,12 +280,17 @@ export async function agentMailRequest(
   options: RequestOptions,
   signal?: AbortSignal,
 ): Promise<AgentMailResult> {
-  const search = options.query?.length ? `?${new URLSearchParams(options.query).toString()}` : "";
+  const search = options.query?.length
+    ? `?${new URLSearchParams(options.query).toString()}`
+    : "";
   const result = await performHttp(
     {
       url: `${config.baseUrl}${options.path}${search}`,
       method: options.method,
-      headers: { authorization: `Bearer ${config.apiKey}`, accept: "application/json" },
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        accept: "application/json",
+      },
       ...(options.body === undefined ? {} : { json: options.body }),
       maxBytes: options.maxBytes ?? 16_384,
     },
@@ -253,15 +304,30 @@ export async function agentMailRequest(
       data = undefined;
     }
   }
-  return { status: result.status, data, text: result.body, truncated: result.truncated };
+  return {
+    status: result.status,
+    data,
+    text: result.body,
+    truncated: result.truncated,
+  };
 }
 
-type ApiErrorRow = { name?: string; message?: string; code?: string; fix?: string; docs?: string; errors?: unknown };
+type ApiErrorRow = {
+  name?: string;
+  message?: string;
+  code?: string;
+  fix?: string;
+  docs?: string;
+  errors?: unknown;
+};
 
 function apiError(data: unknown, raw: string): ApiErrorRow {
   if (data && typeof data === "object" && !Array.isArray(data)) {
     const row = data as Record<string, unknown>;
-    const str = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 400) : undefined);
+    const str = (value: unknown) =>
+      typeof value === "string" && value.trim()
+        ? value.trim().slice(0, 400)
+        : undefined;
     return {
       name: str(row.name),
       message: str(row.message),
@@ -271,39 +337,74 @@ function apiError(data: unknown, raw: string): ApiErrorRow {
       ...(row.errors === undefined ? {} : { errors: row.errors }),
     };
   }
-  return { message: raw.slice(0, 300).replace(/\s+/g, " ").trim() || "empty response body" };
+  return {
+    message:
+      raw.slice(0, 300).replace(/\s+/g, " ").trim() || "empty response body",
+  };
 }
 
-type Failure = { ok: false; status: number; kind: string; retryable: boolean; error: string; nextStep: string; code?: string; fix?: string; docs?: string; errors?: unknown };
+type Failure = {
+  ok: false;
+  status: number;
+  kind: string;
+  retryable: boolean;
+  error: string;
+  nextStep: string;
+  code?: string;
+  fix?: string;
+  docs?: string;
+  errors?: unknown;
+};
 
 /** Turn one non-2xx API response into a stable, actionable failure object. */
-export function describeApiFailure(status: number, data: unknown, raw: string): Failure {
+export function describeApiFailure(
+  status: number,
+  data: unknown,
+  raw: string,
+): Failure {
   const detail = apiError(data, raw);
   const kind =
-    status === 400 || status === 422 ? "validation"
-      : status === 401 ? "unauthorized"
-        : status === 403 ? "rejected"
-          : status === 404 ? "not_found"
-            : status === 409 ? "conflict"
-              : status === 429 ? "rate_limited"
-                : status >= 500 ? "server"
-                  : status >= 300 && status < 400 ? "redirect"
+    status === 400 || status === 422
+      ? "validation"
+      : status === 401
+        ? "unauthorized"
+        : status === 403
+          ? "rejected"
+          : status === 404
+            ? "not_found"
+            : status === 409
+              ? "conflict"
+              : status === 429
+                ? "rate_limited"
+                : status >= 500
+                  ? "server"
+                  : status >= 300 && status < 400
+                    ? "redirect"
                     : "http_error";
   const nextStep =
-    kind === "unauthorized" ? `Check ${API_KEY_ENV}; the key is missing, expired or does not cover this inbox.`
-      : kind === "rejected" ? "The API refused the message (sender/domain not verified, or blocked). Fix the account state before retrying; do not resend blindly."
-        : kind === "validation" ? "Fix the named fields and retry once."
-          : kind === "not_found" ? "Verify the inbox id and message id, then retry."
-            : kind === "rate_limited" ? "Back off before retrying; do not loop on sends."
-              : kind === "conflict" ? "The request conflicts with current state; re-read the resource and retry deliberately."
-                : kind === "server" ? "The API failed; retry once, then report the failure instead of looping."
-                  : kind === "redirect" ? "Unexpected redirect; check the configured base URL."
+    kind === "unauthorized"
+      ? `Check ${API_KEY_ENV}; the key is missing, expired or does not cover this inbox.`
+      : kind === "rejected"
+        ? "The API refused the message (sender/domain not verified, or blocked). Fix the account state before retrying; do not resend blindly."
+        : kind === "validation"
+          ? "Fix the named fields and retry once."
+          : kind === "not_found"
+            ? "Verify the inbox id and message id, then retry."
+            : kind === "rate_limited"
+              ? "Back off before retrying; do not loop on sends."
+              : kind === "conflict"
+                ? "The request conflicts with current state; re-read the resource and retry deliberately."
+                : kind === "server"
+                  ? "The API failed; retry once, then report the failure instead of looping."
+                  : kind === "redirect"
+                    ? "Unexpected redirect; check the configured base URL."
                     : "Inspect the status and body; retry only after correcting the cause.";
   return {
     ok: false,
     status,
     kind,
-    retryable: kind === "rate_limited" || kind === "server" || kind === "conflict",
+    retryable:
+      kind === "rate_limited" || kind === "server" || kind === "conflict",
     error: detail.message ?? `AgentMail returned HTTP ${status}`,
     nextStep,
     ...(detail.code ? { code: detail.code } : {}),
@@ -313,18 +414,26 @@ export function describeApiFailure(status: number, data: unknown, raw: string): 
   };
 }
 
-function str(value: unknown, max = 240): string | undefined {  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
+function str(value: unknown, max = 240): string | undefined {
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, max)
+    : undefined;
 }
 
 function list(value: unknown, max = 40): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const out = value.filter((row) => typeof row === "string").slice(0, max) as string[];
+  const out = value
+    .filter((row) => typeof row === "string")
+    .slice(0, max) as string[];
   return out.length ? out : undefined;
 }
 
 /** Compact list row: bodies stay out of list results on purpose. */
 export function distillMessage(row: unknown) {
-  const item = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+  const item = (row && typeof row === "object" ? row : {}) as Record<
+    string,
+    unknown
+  >;
   return {
     ...(str(item.message_id) ? { messageId: str(item.message_id) } : {}),
     ...(str(item.thread_id) ? { threadId: str(item.thread_id) } : {}),
@@ -339,21 +448,46 @@ export function distillMessage(row: unknown) {
 
 /** One message with bounded bodies; html is opt-in because it is token-heavy. */
 export function distillMessageDetail(row: unknown, includeHtml = false) {
-  const item = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+  const item = (row && typeof row === "object" ? row : {}) as Record<
+    string,
+    unknown
+  >;
   const attachments = Array.isArray(item.attachments)
-    ? item.attachments.slice(0, 20).map((entry) => {
-      const attachment = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
-      return { ...(str(attachment.filename, 200) ? { filename: str(attachment.filename, 200) } : {}), ...(str(attachment.content_type, 100) ? { contentType: str(attachment.content_type, 100) } : {}), ...(typeof attachment.size === "number" ? { size: attachment.size } : {}) };
-    }).filter((row) => Object.keys(row).length > 0)
+    ? item.attachments
+        .slice(0, 20)
+        .map((entry) => {
+          const attachment = (
+            entry && typeof entry === "object" ? entry : {}
+          ) as Record<string, unknown>;
+          return {
+            ...(str(attachment.filename, 200)
+              ? { filename: str(attachment.filename, 200) }
+              : {}),
+            ...(str(attachment.content_type, 100)
+              ? { contentType: str(attachment.content_type, 100) }
+              : {}),
+            ...(typeof attachment.size === "number"
+              ? { size: attachment.size }
+              : {}),
+          };
+        })
+        .filter((row) => Object.keys(row).length > 0)
     : undefined;
-  const body = str(item.text, MAX_TEXT_FIELD) ?? str(item.extracted_text, MAX_TEXT_FIELD);
+  const body =
+    str(item.text, MAX_TEXT_FIELD) ?? str(item.extracted_text, MAX_TEXT_FIELD);
   return {
     ...distillMessage(item),
     ...(list(item.cc) ? { cc: list(item.cc) } : {}),
     ...(list(item.bcc) ? { bcc: list(item.bcc) } : {}),
     ...(list(item.reply_to) ? { replyTo: list(item.reply_to) } : {}),
     ...(body ? { text: body } : {}),
-    ...(includeHtml ? { ...(str(item.html, MAX_TEXT_FIELD) ? { html: str(item.html, MAX_TEXT_FIELD) } : {}) } : {}),
+    ...(includeHtml
+      ? {
+          ...(str(item.html, MAX_TEXT_FIELD)
+            ? { html: str(item.html, MAX_TEXT_FIELD) }
+            : {}),
+        }
+      : {}),
     ...(attachments?.length ? { attachments } : {}),
   };
 }
@@ -364,43 +498,111 @@ function isSuccess(status: number): boolean {
 }
 
 function ok(value: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value };
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+    details: value,
+  };
 }
 
 function fail(value: unknown, isError = true) {
-  return { isError, content: [{ type: "text" as const, text: JSON.stringify(value) }], details: value };
+  return {
+    isError,
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+    details: value,
+  };
 }
 
 function configFailure(resolution: Extract<ConfigResolution, { ok: false }>) {
-  return fail({ ok: false, kind: "config", error: resolution.error, nextStep: resolution.nextStep });
+  return fail({
+    ok: false,
+    kind: "config",
+    error: resolution.error,
+    nextStep: resolution.nextStep,
+  });
 }
 
 function transportFailure(error: unknown, signal?: AbortSignal) {
-  const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 300) || "AgentMail request failed";
+  const message =
+    (error instanceof Error ? error.message : String(error))
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300) || "AgentMail request failed";
   const cancelled = signal?.aborted === true || /abort|cancel/i.test(message);
-  const validation = /must |is required|is not a valid|supports at most|at least one|needs at least/.test(message);
-  const kind = cancelled ? "cancelled" : validation ? "validation" : /timed out|timeout/i.test(message) ? "timeout" : /fetch failed|econn|enotfound|network|socket|dns/i.test(message) ? "network" : "unknown";
+  const validation =
+    /must |is required|is not a valid|supports at most|at least one|needs at least/.test(
+      message,
+    );
+  const kind = cancelled
+    ? "cancelled"
+    : validation
+      ? "validation"
+      : /timed out|timeout/i.test(message)
+        ? "timeout"
+        : /fetch failed|econn|enotfound|network|socket|dns/i.test(message)
+          ? "network"
+          : "unknown";
   return fail({
     ok: false,
     kind,
     error: message,
     retryable: kind === "timeout" || kind === "network",
-    nextStep: validation ? "Fix the named field and retry." : cancelled ? "The request was cancelled; retry only if the result is still needed." : "Check connectivity and the configured base URL, then retry once.",
+    nextStep: validation
+      ? "Fix the named field and retry."
+      : cancelled
+        ? "The request was cancelled; retry only if the result is still needed."
+        : "Check connectivity and the configured base URL, then retry once.",
   });
 }
 
-const GUIDELINE = "Use agentmail_status before the first send to confirm the key and the inbox; keep agentmail_send recipients verified from a real source page, respect any suppression list, and never pad a campaign to a requested count.";
+const GUIDELINE =
+  "Use agentmail_status before the first send to confirm the key and the inbox; keep agentmail_send recipients verified from a real source page, respect any suppression list, and never pad a campaign to a requested count.";
 
 const SEND_SCHEMA = Type.Object({
-  inboxId: Type.Optional(Type.String({ maxLength: 320, description: "Sender inbox; defaults to AGENTMAIL_INBOX_ID." })),
-  to: Type.Union([Type.String({ maxLength: 320 }), Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS })], { description: "Recipient address(es), plain or `Display Name <user@domain>`." }),
-  cc: Type.Optional(Type.Union([Type.String({ maxLength: 320 }), Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS })])),
-  bcc: Type.Optional(Type.Union([Type.String({ maxLength: 320 }), Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS })])),
-  replyTo: Type.Optional(Type.Union([Type.String({ maxLength: 320 }), Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS })])),
+  inboxId: Type.Optional(
+    Type.String({
+      maxLength: 320,
+      description: "Sender inbox; defaults to AGENTMAIL_INBOX_ID.",
+    }),
+  ),
+  to: Type.Union(
+    [
+      Type.String({ maxLength: 320 }),
+      Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS }),
+    ],
+    {
+      description:
+        "Recipient address(es), plain or `Display Name <user@domain>`.",
+    },
+  ),
+  cc: Type.Optional(
+    Type.Union([
+      Type.String({ maxLength: 320 }),
+      Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS }),
+    ]),
+  ),
+  bcc: Type.Optional(
+    Type.Union([
+      Type.String({ maxLength: 320 }),
+      Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS }),
+    ]),
+  ),
+  replyTo: Type.Optional(
+    Type.Union([
+      Type.String({ maxLength: 320 }),
+      Type.Array(Type.String({ maxLength: 320 }), { maxItems: MAX_RECIPIENTS }),
+    ]),
+  ),
   subject: Type.String({ maxLength: MAX_SUBJECT }),
-  text: Type.Optional(Type.String({ maxLength: MAX_BODY_BYTES, description: "Plain-text body; prefer this over html." })),
+  text: Type.Optional(
+    Type.String({
+      maxLength: MAX_BODY_BYTES,
+      description: "Plain-text body; prefer this over html.",
+    }),
+  ),
   html: Type.Optional(Type.String({ maxLength: MAX_BODY_BYTES })),
-  labels: Type.Optional(Type.Array(Type.String({ maxLength: MAX_LABEL }), { maxItems: MAX_LABELS })),
+  labels: Type.Optional(
+    Type.Array(Type.String({ maxLength: MAX_LABEL }), { maxItems: MAX_LABELS }),
+  ),
 });
 
 export default function agentMailTools(pi: any) {
@@ -410,23 +612,71 @@ export default function agentMailTools(pi: any) {
     description: `Report AgentMail email configuration (key from ${API_KEY_ENV}, default sender inbox from ${INBOX_ENV}) and, when configured, list the inboxes the key can use. Read-only; never prints the key.`,
     promptSnippet: "AgentMail configuration and inbox list",
     promptGuidelines: [GUIDELINE],
-    parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }),
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+    }),
     async execute(_id: any, params: { limit?: number }, signal: AbortSignal) {
       try {
         const resolution = resolveConfig();
         if (!resolution.ok)
-          return ok({ ok: false, configured: false, apiKeyEnv: API_KEY_ENV, defaultInboxId: process.env[INBOX_ENV]?.trim() || null, error: resolution.error, nextStep: resolution.nextStep });
+          return ok({
+            ok: false,
+            configured: false,
+            apiKeyEnv: API_KEY_ENV,
+            defaultInboxId: process.env[INBOX_ENV]?.trim() || null,
+            error: resolution.error,
+            nextStep: resolution.nextStep,
+          });
         const { config } = resolution;
-        const result = await agentMailRequest(config, { method: "GET", path: "/v0/inboxes", query: [["limit", String(params.limit ?? 20)]], maxBytes: 8_192 }, signal);
-        if (!isSuccess(result.status)) return fail(describeApiFailure(result.status, result.data, result.text));
+        const result = await agentMailRequest(
+          config,
+          {
+            method: "GET",
+            path: "/v0/inboxes",
+            query: [["limit", String(params.limit ?? 20)]],
+            maxBytes: 8_192,
+          },
+          signal,
+        );
+        if (!isSuccess(result.status))
+          return fail(
+            describeApiFailure(result.status, result.data, result.text),
+          );
         const payload = (result.data ?? {}) as Record<string, unknown>;
         const rows = Array.isArray(payload.inboxes) ? payload.inboxes : [];
         const inboxes = rows.slice(0, 100).map((row: unknown) => {
-          const item = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-          return { inboxId: str(item.inbox_id, 320) ?? null, email: str(item.email, 320) ?? null, ...(str(item.display_name, 320) ? { displayName: str(item.display_name, 320) } : {}) };
+          const item = (row && typeof row === "object" ? row : {}) as Record<
+            string,
+            unknown
+          >;
+          return {
+            inboxId: str(item.inbox_id, 320) ?? null,
+            email: str(item.email, 320) ?? null,
+            ...(str(item.display_name, 320)
+              ? { displayName: str(item.display_name, 320) }
+              : {}),
+          };
         });
-        const count = typeof payload.count === "number" ? payload.count : inboxes.length;
-        return ok({ ok: true, configured: true, baseUrl: config.baseUrl, defaultInboxId: config.defaultInboxId ?? null, count, inboxes, ...(config.defaultInboxId && !inboxes.some((row) => row.inboxId === config.defaultInboxId || row.email === config.defaultInboxId) ? { note: `${INBOX_ENV} is set to ${config.defaultInboxId}, which is not in this page of inboxes; verify it before sending.` } : {}) });
+        const count =
+          typeof payload.count === "number" ? payload.count : inboxes.length;
+        return ok({
+          ok: true,
+          configured: true,
+          baseUrl: config.baseUrl,
+          defaultInboxId: config.defaultInboxId ?? null,
+          count,
+          inboxes,
+          ...(config.defaultInboxId &&
+          !inboxes.some(
+            (row) =>
+              row.inboxId === config.defaultInboxId ||
+              row.email === config.defaultInboxId,
+          )
+            ? {
+                note: `${INBOX_ENV} is set to ${config.defaultInboxId}, which is not in this page of inboxes; verify it before sending.`,
+              }
+            : {}),
+        });
       } catch (error) {
         return transportFailure(error, signal);
       }
@@ -451,10 +701,33 @@ export default function agentMailTools(pi: any) {
         const { config } = resolution;
         const inboxId = validateInboxId(params.inboxId, config.defaultInboxId);
         const { envelope } = buildSendPayload(params, inboxId);
-        const result = await agentMailRequest(config, { method: "POST", path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/send`, body: envelope, maxBytes: 8_192 }, signal);
-        if (!isSuccess(result.status)) return fail({ ...describeApiFailure(result.status, result.data, result.text), inboxId });
+        const result = await agentMailRequest(
+          config,
+          {
+            method: "POST",
+            path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/send`,
+            body: envelope,
+            maxBytes: 8_192,
+          },
+          signal,
+        );
+        if (!isSuccess(result.status))
+          return fail({
+            ...describeApiFailure(result.status, result.data, result.text),
+            inboxId,
+          });
         const data = (result.data ?? {}) as Record<string, unknown>;
-        return ok({ ok: true, status: result.status, inboxId, messageId: str(data.message_id, 256) ?? null, threadId: str(data.thread_id, 256) ?? null, to: envelope.to, subject: envelope.subject, ...(envelope.cc?.length ? { cc: envelope.cc } : {}), ...(envelope.bcc?.length ? { bcc: envelope.bcc } : {}) });
+        return ok({
+          ok: true,
+          status: result.status,
+          inboxId,
+          messageId: str(data.message_id, 256) ?? null,
+          threadId: str(data.thread_id, 256) ?? null,
+          to: envelope.to,
+          subject: envelope.subject,
+          ...(envelope.cc?.length ? { cc: envelope.cc } : {}),
+          ...(envelope.bcc?.length ? { bcc: envelope.bcc } : {}),
+        });
       } catch (error) {
         return transportFailure(error, signal);
       }
@@ -464,17 +737,36 @@ export default function agentMailTools(pi: any) {
   pi.registerTool({
     name: "agentmail_messages",
     label: "AgentMail Messages",
-    description: "List recent email messages in an AgentMail inbox (most recent first) with compact rows: ids, from/to, subject, timestamp, labels and a short preview. Filter by labels, sender, subject or date; read a body with agentmail_message.",
+    description:
+      "List recent email messages in an AgentMail inbox (most recent first) with compact rows: ids, from/to, subject, timestamp, labels and a short preview. Filter by labels, sender, subject or date; read a body with agentmail_message.",
     promptSnippet: "List AgentMail inbox messages",
     promptGuidelines: [GUIDELINE],
     parameters: Type.Object({
       inboxId: Type.Optional(Type.String({ maxLength: 320 })),
-      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_MESSAGE_LIST })),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: MAX_MESSAGE_LIST }),
+      ),
       pageToken: Type.Optional(Type.String({ maxLength: 512 })),
-      labels: Type.Optional(Type.Array(Type.String({ maxLength: MAX_LABEL }), { maxItems: MAX_LABELS })),
-      from: Type.Optional(Type.String({ maxLength: 200, description: "Substring match on the sender." })),
-      subject: Type.Optional(Type.String({ maxLength: 200, description: "Substring match on the subject." })),
-      ascending: Type.Optional(Type.Boolean({ description: "Oldest first instead of newest first." })),
+      labels: Type.Optional(
+        Type.Array(Type.String({ maxLength: MAX_LABEL }), {
+          maxItems: MAX_LABELS,
+        }),
+      ),
+      from: Type.Optional(
+        Type.String({
+          maxLength: 200,
+          description: "Substring match on the sender.",
+        }),
+      ),
+      subject: Type.Optional(
+        Type.String({
+          maxLength: 200,
+          description: "Substring match on the subject.",
+        }),
+      ),
+      ascending: Type.Optional(
+        Type.Boolean({ description: "Oldest first instead of newest first." }),
+      ),
       includeSpam: Type.Optional(Type.Boolean()),
       includeTrash: Type.Optional(Type.Boolean()),
     }),
@@ -484,28 +776,52 @@ export default function agentMailTools(pi: any) {
         if (!resolution.ok) return configFailure(resolution);
         const { config } = resolution;
         const inboxId = validateInboxId(params.inboxId, config.defaultInboxId);
-        const query: Array<[string, string]> = [["limit", String(params.limit ?? 20)]];
-        for (const label of validateLabels(params.labels)) query.push(["labels", label]);
+        const query: Array<[string, string]> = [
+          ["limit", String(params.limit ?? 20)],
+        ];
+        for (const label of validateLabels(params.labels))
+          query.push(["labels", label]);
         const pageToken = text(params.pageToken, "pageToken", 512);
         if (pageToken) query.push(["page_token", pageToken]);
         const from = text(params.from, "from", 200);
         if (from) {
-          if (!SEARCH_TEXT.test(from)) bad("from", "must be a single-line substring");
+          if (!SEARCH_TEXT.test(from))
+            bad("from", "must be a single-line substring");
           query.push(["from", from]);
         }
         const subject = text(params.subject, "subject", 200);
         if (subject) {
-          if (!SEARCH_TEXT.test(subject)) bad("subject", "must be a single-line substring");
+          if (!SEARCH_TEXT.test(subject))
+            bad("subject", "must be a single-line substring");
           query.push(["subject", subject]);
         }
         if (params.ascending === true) query.push(["ascending", "true"]);
         if (params.includeSpam === true) query.push(["include_spam", "true"]);
         if (params.includeTrash === true) query.push(["include_trash", "true"]);
-        const result = await agentMailRequest(config, { method: "GET", path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages`, query, maxBytes: MESSAGE_LIST_BYTES }, signal);
-        if (!isSuccess(result.status)) return fail({ ...describeApiFailure(result.status, result.data, result.text), inboxId });
+        const result = await agentMailRequest(
+          config,
+          {
+            method: "GET",
+            path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages`,
+            query,
+            maxBytes: MESSAGE_LIST_BYTES,
+          },
+          signal,
+        );
+        if (!isSuccess(result.status))
+          return fail({
+            ...describeApiFailure(result.status, result.data, result.text),
+            inboxId,
+          });
         const data = (result.data ?? {}) as Record<string, unknown>;
         const rows = Array.isArray(data.messages) ? data.messages : [];
-        return ok({ ok: true, inboxId, count: typeof data.count === "number" ? data.count : rows.length, messages: rows.slice(0, MAX_MESSAGE_LIST).map(distillMessage), ...(result.truncated ? { truncated: true } : {}) });
+        return ok({
+          ok: true,
+          inboxId,
+          count: typeof data.count === "number" ? data.count : rows.length,
+          messages: rows.slice(0, MAX_MESSAGE_LIST).map(distillMessage),
+          ...(result.truncated ? { truncated: true } : {}),
+        });
       } catch (error) {
         return transportFailure(error, signal);
       }
@@ -515,13 +831,22 @@ export default function agentMailTools(pi: any) {
   pi.registerTool({
     name: "agentmail_message",
     label: "AgentMail Message",
-    description: "Read one AgentMail email message body by id (from agentmail_messages). Returns bounded plain text plus metadata; set includeHtml only when the HTML form is actually needed.",
+    description:
+      "Read one AgentMail email message body by id (from agentmail_messages). Returns bounded plain text plus metadata; set includeHtml only when the HTML form is actually needed.",
     promptSnippet: "Read one AgentMail message",
     promptGuidelines: [GUIDELINE],
     parameters: Type.Object({
-      id: Type.String({ maxLength: 256, description: "Message id from agentmail_messages." }),
+      id: Type.String({
+        maxLength: 256,
+        description: "Message id from agentmail_messages.",
+      }),
       inboxId: Type.Optional(Type.String({ maxLength: 320 })),
-      includeHtml: Type.Optional(Type.Boolean({ description: "Also return the HTML body (token-heavy; default false)." })),
+      includeHtml: Type.Optional(
+        Type.Boolean({
+          description:
+            "Also return the HTML body (token-heavy; default false).",
+        }),
+      ),
     }),
     async execute(_id: any, params: any, signal: AbortSignal) {
       try {
@@ -530,9 +855,27 @@ export default function agentMailTools(pi: any) {
         const { config } = resolution;
         const inboxId = validateInboxId(params.inboxId, config.defaultInboxId);
         const messageId = validateMessageId(params.id);
-        const result = await agentMailRequest(config, { method: "GET", path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/${encodeURIComponent(messageId)}`, maxBytes: MESSAGE_DETAIL_BYTES }, signal);
-        if (!isSuccess(result.status)) return fail({ ...describeApiFailure(result.status, result.data, result.text), inboxId, messageId });
-        return ok({ ok: true, inboxId, ...distillMessageDetail(result.data, params.includeHtml === true), ...(result.truncated ? { truncated: true } : {}) });
+        const result = await agentMailRequest(
+          config,
+          {
+            method: "GET",
+            path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/${encodeURIComponent(messageId)}`,
+            maxBytes: MESSAGE_DETAIL_BYTES,
+          },
+          signal,
+        );
+        if (!isSuccess(result.status))
+          return fail({
+            ...describeApiFailure(result.status, result.data, result.text),
+            inboxId,
+            messageId,
+          });
+        return ok({
+          ok: true,
+          inboxId,
+          ...distillMessageDetail(result.data, params.includeHtml === true),
+          ...(result.truncated ? { truncated: true } : {}),
+        });
       } catch (error) {
         return transportFailure(error, signal);
       }

@@ -758,10 +758,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `agentmail_message` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 515; literal)
-- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 464; literal)
-- `agentmail_send` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 436; literal)
-- `agentmail_status` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 407; literal)
+- `agentmail_message` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 831; literal)
+- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 737; literal)
+- `agentmail_send` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 686; literal)
+- `agentmail_status` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 609; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 79; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
@@ -884,7 +884,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 646)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 467)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 907)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 912)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3370)
 - /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 282)

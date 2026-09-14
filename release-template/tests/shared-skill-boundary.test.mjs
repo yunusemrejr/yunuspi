@@ -3,6 +3,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+/** Per-payload budget for a real isolated command. Kept short so an unavailable
+ * or hanging sandbox costs seconds, not half a minute per payload; the strict
+ * timeout assertion below turns a hang into a failure instead of a pass.
+ * 2026-09-14: raised 8s -> 20s after the guarded payload measured ~8.0s
+ * unloaded on this host and tripped the 8s budget (8016ms); 20s keeps the
+ * env override and the ETIMEDOUT assertion while leaving real headroom. */
+const ISOLATION_STEP_TIMEOUT_MS =
+  Number.parseInt(process.env.PI_ISOLATION_STEP_TIMEOUT_MS ?? "", 10) || 20000;
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 const template = path.resolve(
@@ -15,8 +24,21 @@ const agent = [path.join(template, "agent"), path.resolve(template, "..")].find(
 const { discoverMutationRoots, containsPath } = await import(
   pathToFileURL(path.join(agent, "extensions/lib/self-mutation-guard.ts"))
 );
+/** Fixture base for real-isolation tests. Avoid a directory with thousands of
+ * siblings: the guarded-command wrapper re-binds every existing sibling of a
+ * protected root's ancestors writable, so a fixture under a busy /tmp costs
+ * ~7k bubblewrap arguments per sandboxed payload (~9s) where a low-entry root
+ * costs ~135 (~0.4s). */
+const TEMP_BASE = ["/var/tmp", os.tmpdir()].find((dir) => {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK | fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}) ?? os.tmpdir();
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-shared-skills-"));
+  const root = fs.mkdtempSync(path.join(TEMP_BASE, "pi-shared-skills-"));
   const harness = path.join(root, "harness"),
     home = path.join(root, "home"),
     project = path.join(root, "project"),
@@ -195,10 +217,26 @@ test("real command isolation protects all shared roots, missing roots and aliase
       delete env.PI_SUBAGENT_CHILD;
       delete env.PI_HARNESS_MUTATION_DENIED;
       delete env.NODE_TEST_CONTEXT;
+      const startedAt = Date.now();
       const r = spawnSync(
         process.execPath,
         ["--input-type=module", "-e", child],
-        { cwd: f.project, env, encoding: "utf8", timeout: 30000 },
+        {
+          cwd: f.project,
+          env,
+          encoding: "utf8",
+          timeout: ISOLATION_STEP_TIMEOUT_MS,
+        },
+      );
+      if (process.env.PI_ISOLATION_TIMING === "1")
+        console.error(
+          `[isolation] ${Date.now() - startedAt}ms status=${r.status} error=${r.error?.code ?? "none"} payload=${code.slice(0, 60).replace(/\s+/g, " ")}`,
+        );
+      // A timed-out spawn returns status null. Asserting only "non-zero" would
+      // then read a hung sandbox as a correct denial and burn the whole budget.
+      assert.ok(
+        r.error?.code !== "ETIMEDOUT",
+        `guarded command did not finish within ${ISOLATION_STEP_TIMEOUT_MS}ms (payload: ${code})`,
       );
       assert.equal(r.status, 0, r.stderr);
       return JSON.parse(r.stdout);

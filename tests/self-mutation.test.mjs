@@ -15,8 +15,16 @@ const harness = path.dirname(agent);
 const wrapper = path.join(agent, 'scripts/harness-readonly-exec.py');
 assert.ok(fs.existsSync(wrapper), 'namespace launcher must be shipped');
 assert.ok(fs.existsSync(path.join(templateRoot, 'config/bwrap.apparmor')), 'Ubuntu namespace policy referenced by CI and installation must be shipped');
+/** Fixture base for real-isolation tests. Avoid a directory with thousands of
+ * siblings: the guarded-command wrapper re-binds every existing sibling of a
+ * protected root's ancestors writable, so a fixture under a busy /tmp costs
+ * ~7k bubblewrap arguments per sandboxed payload (~9s) where a low-entry root
+ * costs ~135 (~0.4s). */
+const TEMP_BASE = ['/var/tmp', os.tmpdir()].find((dir) => {
+ try { fs.accessSync(dir, fs.constants.W_OK | fs.constants.X_OK); return true; } catch { return false; }
+}) ?? os.tmpdir();
 function fixture() {
- const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-mutation-'));
+ const root = fs.mkdtempSync(path.join(TEMP_BASE, 'yunuspi-mutation-'));
  const protectedDir = path.join(root, 'harness'), project = path.join(root, 'project');
  fs.mkdirSync(protectedDir); fs.mkdirSync(project);
  fs.writeFileSync(path.join(protectedDir, 'original'), 'unchanged');

@@ -12,8 +12,13 @@
  * directly, so the old `custom`/`customBlocked`/`lastShownCtx`/`shown`
  * context-growth fields are gone. Manual reminders are now scheduled on an
  * exact, independent per-reminder cadence: after the command's immediate
- * delivery, `nextFireAt = createdAt + 2min`, then `previous nextFireAt + 2min`
- * thereafter (grid anchored at createdAt, never `now + 2min`).
+ * delivery, `nextFireAt = createdAt + 5min`, then `previous nextFireAt + 5min`
+ * thereafter (grid anchored at createdAt, never `now + 5min`).
+ *
+ * 2026-09-14: cadence widened 2min -> 5min (user feedback: the 2-minute grid
+ * repeated too often). The immediate first delivery is unchanged and is still
+ * structurally deduped: nextFireAt is anchored at createdAt + 5min, so the
+ * first repeat cannot fire until that grid point.
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -23,7 +28,7 @@ export const REMINDERS_STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
 /** Fixed manual-reminder cadence. First fire at createdAt + this, then every
  * this on the same anchored grid (whole-interval advancement only). */
-export const MANUAL_INTERVAL_MS = 2 * 60_000;
+export const MANUAL_INTERVAL_MS = 5 * 60_000;
 
 /** A /reminder-registered line with an exact independent schedule. */
 export interface ManualReminder {

@@ -21,9 +21,11 @@ The exporter also checks final bytes against exact credentials read locally, wit
 Copy only the reviewed public changes into your public checkout. Never copy the live agent folder wholesale. Run distribution tests in a separate throwaway copy of the sanitized export, so installed test dependencies stay outside the clean release tree:
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npm test
+npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
+PI_PUBLIC_TEST_CONCURRENCY=4 TMPDIR=/var/tmp npm test
 ```
+
+The suite runs one file at a time by default (`PI_PUBLIC_TEST_CONCURRENCY` raises it). Point the tests' temp root at a low-entry directory: the guarded-command wrapper keeps protected roots read-only by re-binding every existing sibling of each ancestor writable, so fixtures created under a busy `/tmp` produce thousands of bubblewrap arguments per sandboxed spawn (seconds each), while a root with few entries produces roughly a hundred (under a second).
 
 In the clean public checkout containing the same tested source bytes, stage explicit public paths and scan again. The scanner intentionally rejects installed dependency trees and examines the Git index and all reachable commit content, so deleting a secret later does not make its history safe.
 
@@ -39,7 +41,7 @@ Do not commit a personal denylist containing actual secrets. Exact local credent
 
 ## Automated publication
 
-`node /path/to/live-agent/scripts/publish-public.mjs --checkout /path/to/public-checkout --message "Describe the verified change"` exports to a fresh directory, verifies distribution tests in a separate temporary copy (`npm ci --ignore-scripts`), checks public content and publishes the resulting commit. Use `--dry-run` first to inspect differing paths; it performs no checkout writes or upload. Use `--verify-only` to export and test without changing the checkout, index or remote. Review the sanitized diff before publication. Live paths, ancestor overlaps and symlink aliases are rejected. The checkout must be clean unless its existing changes were explicitly reviewed with `--allow-dirty`.
+`node /path/to/live-agent/scripts/publish-public.mjs --checkout /path/to/public-checkout --message "Describe the verified change"` exports to a fresh directory, verifies distribution tests in a separate temporary copy (`npm ci --ignore-scripts --prefer-offline`), checks public content and publishes the resulting commit. The distribution run uses bounded file parallelism (`--test-concurrency N`, default is cores minus two capped at six, override with `PI_PUBLISH_TEST_CONCURRENCY`) and a low-entry temp root, and prints a `[publish] timings` line for each phase. Use `--dry-run` first to inspect differing paths; it performs no checkout writes or upload. Use `--verify-only` to export and test without changing the checkout, index or remote. Review the sanitized diff before publication. Live paths, ancestor overlaps and symlink aliases are rejected. The checkout must be clean unless its existing changes were explicitly reviewed with `--allow-dirty`.
 
 Publication refuses checkout-only paths that are absent from the sanitized export.
 Review and remove obsolete published paths explicitly before retrying; the command

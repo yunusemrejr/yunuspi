@@ -38,9 +38,11 @@
  *
  * Manual /reminder schedule (the reliability contract):
  *  - A newly registered `/reminder` is delivered immediately; its first
- *    repeat is `nextFireAt = createdAt + 2 min`, then every `previous
- *    nextFireAt + 2 min` thereafter — a grid anchored at createdAt, never
- *    `now + 2 min`, so the cadence cannot drift.
+ *    repeat is `nextFireAt = createdAt + 5 min`, then every `previous
+ *    nextFireAt + 5 min` thereafter — a grid anchored at createdAt, never
+ *    `now + 5 min`, so the cadence cannot drift. The immediate delivery is
+ *    deduped structurally: the anchored nextFireAt is already in the future,
+ *    so the first repeat cannot fire until that grid point.
  *  - Each reminder has an INDEPENDENT schedule; firing one never resets,
  *    delays, or merges another.
  *  - The agent may be busy inside a tool call or inference, so exact
@@ -51,14 +53,14 @@
  *    each reminder's schedule advances independently.
  *  - After a long tool, idle period, or restore, overdue reminders are
  *    delivered at the first opportunity and their `nextFireAt` is advanced by
- *    WHOLE two-minute intervals until it lies in the future (never `now + 2m`),
+ *    WHOLE five-minute intervals until it lies in the future (never `now + 5m`),
  *    so a long downtime cannot drift the grid or spawn a catch-up burst.
  *  - Persisted atomically per session: id, text, createdAt, nextFireAt,
  *    active/completed state. Delivery dedup is structural — a delivered
  *    occurrence has its nextFireAt advanced (persisted), so it cannot fire
  *    twice; there is no generic cooldown that could suppress an independent
  *    reminder.
- *  - Comprehension: a reminder looping every 2 min carries the user's full
+ *  - Comprehension: a reminder looping every 5 min carries the user's full
  *    bounded text on EVERY occurrence. Post-compaction, checkpoints.ts
  *    re-injects the full active texts.
  *  - Delivery framing (2026-09-02 audit fix): a manual delivery is a
@@ -282,7 +284,7 @@ export function dueManualReminders(
 	return selected;
 }
 
-/** Normal fire: advance exactly one 2-min interval (grid anchored at createdAt;
+/** Normal fire: advance exactly one 5-min interval (grid anchored at createdAt;
  * never `now + 2min`). */
 export function advanceOne(r: ManualReminder): void {
 	r.nextFireAt += MANUAL_INTERVAL_MS;
@@ -330,7 +332,7 @@ export function reminderText(
 	const lines: string[] =
 		dueManual.length > 0
 			? [
-					`[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~2 min until cleared with /reminder clear.`,
+					`[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~5 min until cleared with /reminder clear.`,
 				]
 			: [];
 	if (context && context.length) lines.push(context.join("\n"));
@@ -875,6 +877,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				{ deliverAs: "steer" },
 			);
 			// A rejected queue operation must not consume the reminder or nudge.
+			// Once the queue accepts the steer, consume the delivered manual
+			// occurrences immediately: a later step throwing must not leave a
+			// delivered occurrence still due and re-fire it on the next turn.
+			for (const r of dueManual) advanceDelivered(r, now);
 			guidance.commit(hints);
 			if (nudge) {
 				loop.nudged = true;
@@ -883,7 +889,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				st.overthinkReminders += 1;
 				st.lastOverthinkAt = now;
 			}
-			for (const r of dueManual) advanceDelivered(r, now);
 			writeState(sid, st);
 		} catch (err) {
 			logReminderErr("turn_end", err);
@@ -903,10 +908,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	});
 
 	// /reminder — register a line that reliably re-reminds the main agent every
-	// 2 min of active work, on an exact per-reminder schedule.
+	// 5 min of active work, on an exact per-reminder schedule.
 	pi.registerCommand("reminder", {
 		description:
-			"Remind the main agent every ~2 min — usage: /reminder <text> | list | clear [n|all]",
+			"Remind the main agent every ~5 min — usage: /reminder <text> | list | clear [n|all]",
 		argumentHint: "<text|list|clear [n|all]>",
 		handler: async (args, ctx) => {
 			try {

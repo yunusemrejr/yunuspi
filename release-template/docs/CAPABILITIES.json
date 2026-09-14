@@ -2095,7 +2095,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 907
+        "line": 912
       },
       {
         "name": "run",
@@ -2236,25 +2236,25 @@
       {
         "name": "agentmail_message",
         "source": "agent/extensions/agentmail.ts",
-        "line": 515,
+        "line": 831,
         "kind": "literal"
       },
       {
         "name": "agentmail_messages",
         "source": "agent/extensions/agentmail.ts",
-        "line": 464,
+        "line": 737,
         "kind": "literal"
       },
       {
         "name": "agentmail_send",
         "source": "agent/extensions/agentmail.ts",
-        "line": 436,
+        "line": 686,
         "kind": "literal"
       },
       {
         "name": "agentmail_status",
         "source": "agent/extensions/agentmail.ts",
-        "line": 407,
+        "line": 609,
         "kind": "literal"
       },
       {
@@ -2693,25 +2693,25 @@
       {
         "name": "agentmail_message",
         "source": "agent/extensions/agentmail.ts",
-        "line": 515,
+        "line": 831,
         "kind": "literal"
       },
       {
         "name": "agentmail_messages",
         "source": "agent/extensions/agentmail.ts",
-        "line": 464,
+        "line": 737,
         "kind": "literal"
       },
       {
         "name": "agentmail_send",
         "source": "agent/extensions/agentmail.ts",
-        "line": 436,
+        "line": 686,
         "kind": "literal"
       },
       {
         "name": "agentmail_status",
         "source": "agent/extensions/agentmail.ts",
-        "line": 407,
+        "line": 609,
         "kind": "literal"
       },
       {
