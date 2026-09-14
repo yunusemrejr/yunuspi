@@ -23,7 +23,9 @@ export function failureCategory(error: string) {
     return {category:"read-range",recovery:"Refresh the file's current line range. If a same-file write is running, let it finish before reading."};
   if (/Inspection selector timeout/i.test(error))
     return {category:"selector",recovery:"Inspect the page DOM and choose a selector that exists in the requested state; repeating the missing selector will not help."};
-  if (/Inspection navigation unreachable/i.test(error))
+  if (/\"status\"\s*:\s*\"failed\"/.test(error) && /\"stage\"\s*:\s*\"navigation\"/.test(error))
+    return {category:"navigation",recovery:"Read the renderer's transport code and nextStep; localhost is supported. Check the server task and readiness before retrying."};
+  if (/(?:Inspection|Render) navigation unreachable/i.test(error))
     return {category:"navigation",recovery:"Check the dev server and requested HTTP address before rendering again."};
   if (/outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
     return { category: "permission", recovery: "Check the declared scope and execution environment; retain the guard and request missing authority if required." };

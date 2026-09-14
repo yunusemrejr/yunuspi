@@ -80,7 +80,7 @@ export function registerBrowserSession(pi: any) {
         ].map((value) => Type.Literal(value)),
       ),
       session: Type.Optional(Type.String()),
-      url: Type.Optional(Type.String({ maxLength: 8192 })),
+      url: Type.Optional(Type.String({ maxLength: 8192, description: "HTTP(S), including localhost on the harness host, as with render_see. Storage isolation does not imply network isolation." })),
       selector: Type.Optional(Type.String({ maxLength: 256 })),
       role: Type.Optional(Type.String({ maxLength: 50 })),
       name: Type.Optional(Type.String({ maxLength: 256 })),

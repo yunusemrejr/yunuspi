@@ -137,5 +137,6 @@ test('common observed failures give specific recovery instead of unclassified',(
  ['Offset 1822 is beyond end of file (1 lines total)','read-range'],
  ['Render failed: Inspection selector timeout','selector'],
  ['Render failed: Inspection navigation unreachable','navigation'],
+ ['{"status":"failed","failure":{"stage":"navigation","kind":"unreachable","codes":["ECONNREFUSED"]}}','navigation'],
  ]) assert.equal(failureCategory(text).category,category);
 });

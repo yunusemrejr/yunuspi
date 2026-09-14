@@ -42,6 +42,25 @@ test("browser leases renew across long tasks, reserve reconciliation reads, and 
   assert.equal(lease.receipt().remainingMs, 0);
 });
 
+test("renderer classifies nested transport causes without inventing network restrictions or leaking URLs", async () => {
+  const { renderNavigationFailure } = await load("scripts/browser-diagnostics.mjs");
+  for (const [code, kind] of [["ECONNREFUSED", "unreachable"], ["ECONNRESET", "unreachable"], ["ENOTFOUND", "dns"], ["UND_ERR_CONNECT_TIMEOUT", "timeout"], ["DEPTH_ZERO_SELF_SIGNED_CERT", "tls"], ["EACCES", "access-denied"]]) {
+    const error = new TypeError("fetch failed", { cause: new AggregateError([Object.assign(Error("http://private.invalid/?token=PRIVATE_VALUE"), {code})]) });
+    const failure = renderNavigationFailure(error);
+    assert.equal(failure.kind, kind);
+    assert.deepEqual(failure.codes, [code]);
+    assert.match(failure.network, /including localhost/);
+    assert.doesNotMatch(JSON.stringify(failure), /PRIVATE_VALUE|private.invalid/);
+  }
+  const unknown = renderNavigationFailure(new TypeError("fetch failed"));
+  assert.equal(unknown.kind, "navigation-failed");
+  assert.deepEqual(unknown.codes, []);
+  assert.match(unknown.reason, /cause unavailable/);
+  assert.match(unknown.nextStep, /wait_for/);
+  assert.equal(renderNavigationFailure(Object.assign(Error("deadline"), {name:"TimeoutError"})).kind, "timeout");
+  assert.equal(renderNavigationFailure(Error("Response exceeds 5 MiB")).kind, "response-limit");
+});
+
 test("niche discovery excludes mainstream hosts and their subdomains from actual search results", async () => {
   const { parseDuckDuckGoResults } = await load("extensions/pi-web-access/duckduckgo.ts");
   const urls = ["https://old.reddit.com/r/topic", "https://www.quora.com/question", "https://twitter.com/topic", "https://x.com/topic", "https://woodworking.example.org/threads/123", "https://reddit.com.example.org/forum"];

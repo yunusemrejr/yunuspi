@@ -2419,7 +2419,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 80,
+        "line": 86,
         "kind": "literal"
       },
       {
@@ -2455,7 +2455,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 503,
+        "line": 510,
         "kind": "literal"
       },
       {
@@ -2540,7 +2540,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 53,
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -2705,7 +2705,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 80,
+        "line": 86,
         "kind": "literal"
       },
       {
@@ -2741,7 +2741,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 503,
+        "line": 510,
         "kind": "literal"
       },
       {
@@ -2771,7 +2771,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 53,
+        "line": 59,
         "kind": "literal"
       },
       {

@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { inspectPageState } from "./render-page-state.mjs";
+import { renderNavigationFailure } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
@@ -274,13 +275,7 @@ export async function renderCapture(p, output, signal) {
             // Chromium then reports only ERR_FAILED. Keep a static diagnosis
             // for the main document, without retaining URLs or response text.
             if (route.request().isNavigationRequest() && route.request().frame() === primary?.mainFrame()) {
-              navigationFailure = /Response exceeds|Remote loading byte cap exceeded/.test(e.message)
-                ? "navigation response exceeds the byte limit; use a smaller page or resource"
-                : e.name === "TimeoutError" || e.name === "AbortError"
-                  ? "navigation timeout; check the server task and readiness before retrying"
-                  : e.message === "fetch failed"
-                    ? "navigation unreachable; check the server task and HTTP URL"
-                    : "navigation request failed; check the server task and HTTP response";
+              navigationFailure = renderNavigationFailure(e);
             }
             return route.abort();
           }
@@ -520,9 +515,14 @@ export async function renderCapture(p, output, signal) {
     });
   } catch (e) {
     await fs.unlink(output).catch(() => {});
+    if (!signal?.aborted && stage === "navigation" && /^https?:\/\//i.test(p.source)) {
+      const failure = navigationFailure ?? renderNavigationFailure(
+        Date.now() - start >= ms ? Object.assign(Error("navigation timeout"), {name: "TimeoutError"}) : e,
+      );
+      throw Object.assign(new Error(`Render ${failure.reason} (stage: navigation). ${failure.network} ${failure.nextStep}`), { failure });
+    }
     if (outputMode !== "image") {
       const reason = signal?.aborted ? "cancelled"
-        : stage === "navigation" && navigationFailure ? navigationFailure
         : /Unsupported GPU\/WebGL/.test(String(e.message))
         ? "unsupported GPU/WebGL page; serve the app over HTTP and use browser_session for WebGL-capable inspection"
         : /ERR_CONNECTION_(?:REFUSED|RESET|CLOSED|TIMED_OUT)|ERR_NAME_NOT_RESOLVED|ERR_EMPTY_RESPONSE|ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED/.test(String(e.message))
@@ -560,7 +560,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       ),
     );
   } catch (e) {
-    console.error(e.message);
+    console.error(e.failure ? JSON.stringify({ status: "failed", failure: e.failure }) : e.message);
     process.exitCode = 1;
   }
 }

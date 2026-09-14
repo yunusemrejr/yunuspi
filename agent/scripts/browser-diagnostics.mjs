@@ -80,6 +80,49 @@ export function createBrowserEvents(capacity = 150) {
   };
 }
 
+/** Classify the host fetch proxy's cause, never echo URLs, headers or page text. */
+export function renderNavigationFailure(error) {
+  const known = {
+    ECONNREFUSED: ["unreachable", "connection refused; check that the server is running and listening on the requested address/port"],
+    ECONNRESET: ["unreachable", "connection reset by the server or transport"],
+    UND_ERR_SOCKET: ["unreachable", "connection closed before a response completed"],
+    ENOTFOUND: ["dns", "hostname could not be resolved"],
+    EAI_AGAIN: ["dns", "temporary hostname resolution failure"],
+    ETIMEDOUT: ["timeout", "connection timed out"],
+    UND_ERR_CONNECT_TIMEOUT: ["timeout", "connection timed out"],
+    CERT_HAS_EXPIRED: ["tls", "TLS certificate expired"],
+    DEPTH_ZERO_SELF_SIGNED_CERT: ["tls", "TLS certificate is self-signed"],
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: ["tls", "TLS certificate chain could not be verified"],
+    ERR_TLS_CERT_ALTNAME_INVALID: ["tls", "TLS certificate does not match the hostname"],
+    EACCES: ["access-denied", "transport access denied"],
+    EPERM: ["access-denied", "transport operation denied"],
+  };
+  const pending = [error], seen = new Set(), codes = [];
+  for (let n = 0; pending.length && n < 12; n++) {
+    const item = pending.shift();
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    if (Object.hasOwn(known, item.code) && !codes.includes(item.code)) codes.push(item.code);
+    if (item.cause) pending.push(item.cause);
+    if (Array.isArray(item.errors)) pending.push(...item.errors.slice(0, 8));
+  }
+  const text = String(error?.message ?? "");
+  const [kind, reason] = /Response exceeds|Remote loading byte cap exceeded/.test(text)
+    ? ["response-limit", "navigation response exceeds the byte limit; use a smaller page or resource"]
+    : error?.name === "TimeoutError" || error?.name === "AbortError" || /Timeout|timed out/.test(text)
+      ? ["timeout", "navigation timeout; check server readiness; use ready:load if networkidle never settles"]
+      : codes.length
+        ? [known[codes[0]][0], `navigation ${known[codes[0]][0]}: ${codes.map(code => known[code][1]).join("; ")}`]
+        : ["navigation-failed", "navigation request failed; transport cause unavailable"];
+  return {
+    stage: "navigation", kind, codes, reason,
+    network: "HTTP(S) uses the harness host network, including localhost. Browser isolation does not imply network isolation.",
+    nextStep: kind === "tls" ? "Correct the server certificate or URL; keep certificate verification enabled."
+      : kind === "response-limit" ? "Reduce the response size before retrying."
+      : "Inspect the server task/logs and listening address/port; confirm the URL with wait_for kind:http before retrying. A failed request alone does not justify deployment, a tunnel, asset rewrites or switching browsers.",
+  };
+}
+
 export function browserFailure(error, stage, action) {
   const text = String(error?.message ?? error);
   const kind = /strict mode|resolved to \d+ elements/i.test(text)

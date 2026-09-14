@@ -131,9 +131,16 @@ export function createRelevantGuidance(pi: any) {
         : 'Optional capability discovery: if a specialized capability would help, browse tool_search for a short match. Choose only what fits; no action is required.',
     };
   };
-  const renderEnvironmentFailure = (event: any) => event.toolName === "render_see" && event.isError === true &&
-    /browser startup failure|browserType\.launch|EROFS|EACCES|EPERM|read.only file system|No usable sandbox|Chromium sandboxing failed|SUID sandbox helper|Executable doesn.t exist|Unsupported chromium channel|Cannot find (?:module|package).*playwright/i.test(
-      (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? '').slice(0,8192)).slice(0,3).join('\n').split(/; diagnostics:|\nBrowser logs:/)[0]);
+  const renderEnvironmentFailure = (event: any) => {
+    if (event.toolName !== "render_see" || event.isError !== true) return false;
+    const text = (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? '').slice(0,8192)).slice(0,3).join('\n');
+    // A target's transport denial is not a broken Chromium installation.
+    let report = event.details;
+    if (!report) try { report = JSON.parse(text); } catch { /* legacy error text */ }
+    if (report?.status === "failed" && report.failure?.stage === "navigation") return false;
+    return /browser startup failure|browserType\.launch|EROFS|EACCES|EPERM|read.only file system|No usable sandbox|Chromium sandboxing failed|SUID sandbox helper|Executable doesn.t exist|Unsupported chromium channel|Cannot find (?:module|package).*playwright/i.test(
+      text.split(/; diagnostics:|\nBrowser logs:/)[0]);
+  };
   const observeAvailability = (event: any) => {
     if (event.toolName !== "render_see") return false;
     const before = unavailable.has("render_see");
