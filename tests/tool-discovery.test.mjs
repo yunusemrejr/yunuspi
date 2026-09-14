@@ -128,9 +128,17 @@ test("startup retains essential operations and loads specialized schemas only on
   result.details.tools.map((t) => t.name),
   ["browser_session"],
  );
- assert.ok(f.active().includes("browser_session"));
+ assert.ok(
+  !f.active().includes("browser_session"),
+  "activation stages without swapping the mid-turn wire",
+ );
  assert.equal(f.executed(), 0);
  assert.equal(f.entries.length, 1);
+ f.hooks.before_agent_start();
+ assert.ok(
+  f.active().includes("browser_session"),
+  "staged schemas join the wire at the run boundary",
+ );
  await f.call({ names: ["browser_session"] });
  assert.equal(f.entries.length, 1, "repeat discovery adds no receipts");
 });
@@ -161,6 +169,7 @@ test("activation receipts restore on resume and separate session switches retain
   .get("tool_search")
   .execute("id", { names: ["http_request"] }, undefined, undefined, other);
  assert.equal(result.isError, undefined);
+ f.hooks.before_agent_start();
  assert.ok(
   f.active().includes("http_request"),
   "switch does not lose original hidden catalog",
@@ -274,6 +283,11 @@ test("group browsing and query previews do not expose schemas until a specific a
  assert.deepEqual(f.active(), before);
  assert.equal(f.entries.length, 0);
  await f.call({ names: ["browser_session"] });
+ assert.ok(
+  !f.active().includes("browser_session"),
+  "names activation stages without swapping the mid-turn wire",
+ );
+ f.hooks.before_agent_start();
  assert.ok(f.active().includes("browser_session"));
  assert.equal(f.executed(), 0);
  assert.equal((await f.call({ group: "not-real" })).isError, true);

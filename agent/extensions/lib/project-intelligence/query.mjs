@@ -575,7 +575,7 @@ export function agentBrief(snapshot, options = {}) {
   // Keep warnings intact even if supplied keys fill the header allowance.
   if (JSON.stringify(result).length > maxChars) {
     result.truncated=true;
-    result.summary=[`revision ${graph.revision}; target label omitted`, options.caveat ? safeString(options.caveat,120) : '', omitted].filter(Boolean).join('\n');
+    result.summary=['target label omitted', options.caveat ? safeString(options.caveat,120) : '', omitted].filter(Boolean).join('\n');
   }
   return result;
 }

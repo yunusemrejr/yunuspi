@@ -129,23 +129,44 @@ export function registerToolDiscovery(pi: any) {
   if (process.env.PI_SUBAGENT_CHILD || process.env.PI_TOOL_DISCOVERY === 'off'
     || typeof pi.getAllTools !== 'function' || typeof pi.setActiveTools !== 'function'
     || typeof pi.getActiveTools !== 'function') return;
-  let allowed = new Set<string>(), expected = new Set<string>(), owner: string | undefined;
+  let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
   const identity = (ctx: any) => JSON.stringify([ctx.cwd,ctx.sessionManager?.getSessionId?.()]);
+  // Provider-cache stability: swapping the wire mid-session rewrites the
+  // tool schemas inside an already-prefilled prompt prefix and destroys the
+  // provider cache. Activations therefore stage into `expected` and reach
+  // the wire only at natural cache-death boundaries (next user run, run
+  // end, session boundary) - as a no-op when the set already matches.
+  const applyActive = (names: Iterable<string>) => {
+    const next = [...names];
+    let live: Set<string> | undefined;
+    try { live = new Set(pi.getActiveTools()); } catch { /* No live list: apply the staged change anyway. */ }
+    if (live && live.size === next.length && next.every(name => live.has(name))) { flushed = new Set(next); return; }
+    try { pi.setActiveTools(next); flushed = new Set(next); } catch { /* Host keeps its wire if refused; staging stays logical. */ }
+  };
+  const flushPending = () => { if (wireDirty) { wireDirty = false; applyActive(expected); } };
   const initialize = (_event: any, ctx: any) => {
     // Explicit CLI tool selections belong to the caller, including --no-tools.
     if (process.argv.some(arg => arg === '--tools' || arg.startsWith('--tools=') || arg === '--no-tools')) return;
     const current = pi.getActiveTools();
     if (!current.includes('tool_search')) return;
     const available = new Set(pi.getAllTools().map((tool: any) => tool.name));
-    allowed = owner && same(expected,new Set(current))
+    // Compare against the last flushed wire state, not the staging set:
+    // internally staged (wireDirty) additions must not read as an external
+    // selection change, or re-init drops them along with their receipts.
+    allowed = owner && same(flushed,new Set(current))
       ? new Set([...allowed].filter(name => available.has(name))) : new Set(current);
     owner = identity(ctx);
     const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
     expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
-    pi.setActiveTools([...expected]);
+    wireDirty = false;
+    applyActive(expected);
   };
   pi.on('session_start', initialize);
   pi.on('session_switch', initialize);
+  // Run boundaries where a cache reset is already unavoidable. Staged tools
+  // join the wire exactly once here, so mid-run prefixes stay intact.
+  pi.on('before_agent_start', flushPending);
+  pi.on('agent_end', flushPending);
   pi.registerTool({
     name:'tool_search',label:'Find tools',
     description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
@@ -172,10 +193,11 @@ export function registerToolDiscovery(pi: any) {
       if (_signal?.aborted) return answer({error:'Tool discovery cancelled.'},true);
       const kind = input.kind ?? 'tools';
       const explicitNames = Array.isArray(input.names) && input.names.length > 0;
-      const activationRequested = kind === 'tools' && (input.enable === true || (explicitNames && input.enable !== false));
+      const bundleActivationRequested = kind === 'capabilities' && (input.enable === true || (typeof input.id === 'string' && input.id.trim() !== '' && explicitNames && input.enable !== false));
+      const activationRequested = (kind === 'tools' && (input.enable === true || (explicitNames && input.enable !== false))) || bundleActivationRequested;
       const active = new Set(pi.getActiveTools());
       const ownerMatches = Boolean(owner && identity(ctx)===owner);
-      const selectionChanged = !ownerMatches || !same(expected,active);
+      const selectionChanged = !ownerMatches || (!wireDirty && !same(expected,active));
       // Read-only metadata discovery remains useful after an external tool
       // selection change. Any request that can alter schemas still requires
       // the discovery-owned active set and therefore fails closed.
@@ -186,25 +208,58 @@ export function registerToolDiscovery(pi: any) {
         return answer({error:'Unknown discovery kind. Use "tools", "capabilities", or "commands".'},true);
 
       if (kind === 'capabilities') {
-        if (explicitNames || input.enable === true)
+        if (explicitNames && !bundleActivationRequested)
           return answer({error:'The capability index is metadata only; use kind:"tools" with names or enable:true to change tool schemas.'},true);
         const groups = browseCapabilities({limit:1}).groups ?? [];
         const group = typeof input.group === 'string' ? input.group.trim() : '';
         if (group && !groups.some((item: any) => item.id === group))
           return answer({error:'Unknown capability index group.',group,groups:groups.map((item: any)=>item.id)},true);
         const id = typeof input.id === 'string' ? input.id.trim() : '';
+        // One semantic lookup can activate the complete relevant bundle.
+        // An explicitly named capability (id, tool, or entrypoint such as
+        // AgentMail) bypasses generic repeated discovery: kind:"capabilities"
+        // with id or query plus enable:true stages every available tool in
+        // the matched capability records in the same call, instead of
+        // requiring a metadata call followed by a separate names call.
+        const stageBundle = (records: any[]) => {
+          const visible = !selectionChanged ? allowed : active;
+          const wanted = new Set<string>();
+          for (const record of records) for (const name of record?.tools ?? []) if (typeof name === 'string' && visible.has(name)) wanted.add(name);
+          const added = [...wanted].filter(name => !expected.has(name));
+          if (added.length) {
+            expected = new Set([...expected, ...added]);
+            wireDirty = true;
+            try { pi.appendEntry?.(RECEIPT, {names: added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
+          }
+          return added;
+        };
         if (id) {
           const detail = getCapabilityDetail(id);
           if (!detail) return answer({error:'Unknown or unavailable capability id.',id},true);
-          return answer({capability:capabilityMetadata(detail,pi,true),note:'Metadata only; the capability was described and nothing was executed.'});
+          if (input.enable === true) {
+            const added = stageBundle([detail]);
+            return answer({capability:capabilityMetadata(detail,pi,true),staged:added,
+              note:added.length?'Staged: the complete capability bundle joins the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Capability bundle already staged for the wire. No tool executed this turn.'});
+          }
+          return answer({capability:capabilityMetadata(detail,pi,true),note:'Metadata only; the capability was described and nothing was executed. Re-request with enable:true to stage its complete tool bundle in one lookup.'});
         }
         const query = typeof input.query === 'string' ? input.query.trim() : '';
         const page = query
           ? searchCapabilities({query,group,limit:input.limit,offset:input.offset})
           : browseCapabilities({group,limit:input.limit,offset:input.offset});
-        const results = page.results.map((record: any) => input.detail === true
+        const results = page.results.map((record: any) => input.detail === true || input.enable === true
           ? getCapabilityDetail(record.id) ?? record
           : record);
+        if (input.enable === true) {
+          const added = stageBundle(results);
+          return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,true)),staged:added,
+          ...(page.groups ? {groups:page.groups} : {}),
+          ...(page.query ? {query:page.query} : {}),
+          ...(page.group ? {group:page.group} : {}),
+          offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
+          nextOffset:page.remaining ? page.offset + results.length : null,
+          note:added.length?'Staged: the complete matched capability bundle(s) join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Matched capability bundle(s) already staged for the wire. No tool executed this turn.'});
+        }
         return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
           ...(page.groups ? {groups:page.groups} : {}),
           ...(page.query ? {query:page.query} : {}),
@@ -282,16 +337,18 @@ export function registerToolDiscovery(pi: any) {
       const activate = input.enable === true || (explicit.length > 0 && input.enable !== false);
       const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
       if (added.length) {
-        const next = new Set([...expected,...added]);
-        pi.setActiveTools([...next]);
-        expected = next;
+        expected = new Set([...expected,...added]);
+        // Stage, don't swap: the set goes live at the next run boundary
+        // (see applyActive/flushPending), keeping this turn's provider
+        // prefix - and its cache - intact.
+        wireDirty = true;
         try { pi.appendEntry?.(RECEIPT,{names:added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
       }
       const resultingActive = new Set(pi.getActiveTools());
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,
-        note:activate?'Chosen schemas are available next. No tool executed.':'Preview only. Enable chosen tools with names; use offset for more matches.'});
+        note:activate?(added.length?'Staged: chosen schemas join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Chosen schemas are already staged for the wire. No tool executed this turn.'):'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });
 }

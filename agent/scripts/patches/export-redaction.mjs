@@ -29,6 +29,8 @@ export function piRedactExportEntry(entry) {
     entry?.type !== "message" ||
     !["user", "assistant", "toolResult"].includes(entry.message?.role)
   ) {
+    const safe = piRedactDiagnosticEntry(entry);
+    if (safe) return { ...base, ...safe };
     // Includes extension data, bashExecution, summaries, retained tails and unknown future entries.
     return { ...base, type: "custom", customType: "export-redacted", data: {} };
   }
@@ -97,6 +99,105 @@ export function piRedactExportEntry(entry) {
   return { ...base, type: "message", message };
 }
 
+/**
+ * Safe diagnostic metadata preserved in exports. Only fixed-shape numeric,
+ * boolean, enum and 8-hex hash fields cross the boundary: hook owner, event
+ * type/ID, before/after prefix hashes, changed position, chars/tokens changed,
+ * semantic hash, revision and cache age. Payloads, paths, prompts, outputs,
+ * errors and timestamps beyond the entry envelope never do.
+ */
+export function piRedactDiagnosticEntry(entry) {
+  if (entry?.type !== "custom" || typeof entry?.customType !== "string") return undefined;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+  const hex8 = (v) => (typeof v === "string" && /^[0-9a-f]{8}$/.test(v) ? v : undefined);
+  const words = (v) => (typeof v === "string" && /^[a-z0-9_.:/-]{1,160}$/i.test(v) ? v : undefined);
+  if (entry.customType === "session-metrics-v1") {
+    const data = entry.data ?? {};
+    const hooks = {};
+    for (const [key, value] of Object.entries(data.hooks ?? {}).slice(0, 256)) {
+      const name = words(key);
+      if (!name || !value || typeof value !== "object") continue;
+      const row = {};
+      for (const field of ["calls", "errors", "ms", "changed", "removedChars", "addedChars", "charsChanged", "tokensChanged", "changedAt", "revision", "cacheAgeMs"]) {
+        const n = num(value[field]);
+        if (n !== undefined) row[field] = n;
+      }
+      for (const field of ["beforeHash", "afterHash", "semanticHash"]) {
+        const h = hex8(value[field]);
+        if (h !== undefined) row[field] = h;
+      }
+      hooks[name] = row;
+    }
+    const events = {};
+    for (const field of ["swarms", "fusions", "recoveries", "aborted"]) {
+      const n = num(data.events?.[field]);
+      if (n !== undefined) events[field] = n;
+    }
+    return {
+      type: "custom",
+      customType: "session-metrics-v1",
+      data: {
+        ...(num(data.version) !== undefined ? { version: data.version } : {}),
+        ...(typeof data.segment === "string" ? { segment: "[redacted]" } : {}),
+        ...(num(data.startedAt) !== undefined ? { cacheAgeBasis: 0 } : {}),
+        hooks,
+        events,
+      },
+    };
+  }
+  if (entry.customType === "subagent-cost-v1" || entry.customType === "subagent-lifecycle-v1") {
+    const data = entry.data ?? {};
+    const rows = Array.isArray(data.results) ? data.results.slice(0, 64).map((row) => {
+      if (!row || typeof row !== "object") return {};
+      const out = {};
+      for (const field of ["index", "status", "state", "exitCode", "attemptCount", "turns"]) {
+        if (typeof row[field] === "string" && /^[a-z0-9_\-]{1,32}$/i.test(row[field])) out[field] = row[field];
+        else if (num(row[field]) !== undefined) out[field] = num(row[field]);
+      }
+      if (row.usage && typeof row.usage === "object") {
+        const usage = {};
+        for (const field of ["input", "output", "cacheRead", "cacheWrite", "turns"]) {
+          const n = num(row.usage[field]);
+          if (n !== undefined) usage[field] = n;
+        }
+        if (Object.keys(usage).length) out.usage = usage;
+      }
+      const evidence = row.evidence;
+      if (evidence && typeof evidence === "object" && num(evidence.version) !== undefined) {
+        const kept = { version: evidence.version };
+        if (typeof evidence.outcomeReason === "string" && /^[a-z0-9\-]{1,32}$/i.test(evidence.outcomeReason)) kept.outcomeReason = evidence.outcomeReason;
+        if (num(evidence.attemptCount) !== undefined) kept.attemptCount = evidence.attemptCount;
+        if (["present", "absent", "unknown"].includes(evidence.output)) kept.output = evidence.output;
+        out.evidence = kept;
+      }
+      return out;
+    }) : [];
+    return {
+      type: "custom",
+      customType: entry.customType,
+      data: {
+        ...(words(data.runId) ? { runId: data.runId } : {}),
+        ...(words(data.mode) ? { mode: data.mode } : {}),
+        ...(words(data.state) ? { state: data.state } : {}),
+        results: rows,
+      },
+    };
+  }
+  if (entry.customType === "quality-review-v1") {
+    const data = entry.data ?? {};
+    return {
+      type: "custom",
+      customType: "quality-review-v1",
+      data: {
+        ...(num(data.revision) !== undefined ? { revision: data.revision } : {}),
+        ...(num(data.reviewed) !== undefined ? { reviewed: data.reviewed } : {}),
+        ...(typeof data.disposition === "string" && /^[a-z_]{1,32}$/i.test(data.disposition) ? { disposition: data.disposition } : {}),
+      },
+    };
+  }
+  return undefined;
+}
+
 export function piRedactExportData(data) {
   return {
     header: piRedactExportEntry({ ...data.header, type: "session" }),
@@ -107,14 +208,53 @@ export function piRedactExportData(data) {
   };
 }
 
-const marker = "PI_EXPORT_REDACTION_V1";
-const helpers = [piRedactExportEntry, piRedactExportData]
+const marker = "PI_EXPORT_REDACTION_V2";
+const legacyMarker = "PI_EXPORT_REDACTION_V1";
+const helpers = [piRedactExportEntry, piRedactDiagnosticEntry, piRedactExportData]
   .map((fn) => fn.toString().replace(/^export /, ""))
   .join("\n");
 function replaceOnce(source, oldText, replacement) {
   if (source.split(oldText).length !== 2)
     throw new Error(`Export redaction anchor changed: ${oldText.slice(0, 90)}`);
   return source.replace(oldText, replacement);
+}
+/**
+ * V1 -> V2 migration for already-installed exports. V1 inlined only
+ * piRedactExportEntry/piRedactExportData; V2 additionally inlines
+ * piRedactDiagnosticEntry and routes custom entries through it. The
+ * replacement targets the exact V1 custom-branch block, then inserts the new
+ * helper before piRedactExportData. Anything unrecognized is drift, never a
+ * silent skip.
+ */
+const v1CustomBranch = `  if (
+    entry?.type !== "message" ||
+    !["user", "assistant", "toolResult"].includes(entry.message?.role)
+  ) {
+    // Includes extension data, bashExecution, summaries, retained tails and unknown future entries.
+    return { ...base, type: "custom", customType: "export-redacted", data: {} };
+  }`;
+const v2CustomBranch = `  if (
+    entry?.type !== "message" ||
+    !["user", "assistant", "toolResult"].includes(entry.message?.role)
+  ) {
+    const safe = piRedactDiagnosticEntry(entry);
+    if (safe) return { ...base, ...safe };
+    // Includes extension data, bashExecution, summaries, retained tails and unknown future entries.
+    return { ...base, type: "custom", customType: "export-redacted", data: {} };
+  }`;
+function migrateV1ToV2(source) {
+  if (!source.includes(legacyMarker) || source.includes(marker)) return source;
+  if (source.split(v1CustomBranch).length !== 2) throw new Error("Export redaction V1 migration drift: custom branch changed");
+  let next = source.replace(v1CustomBranch, () => v2CustomBranch);
+  const helperText = piRedactDiagnosticEntry.toString().replace(/^export /, "");
+  const dataFn = "function piRedactExportData(data) {";
+  // Installed copies inline helpers without the export keyword.
+  const installedDataFn = "function piRedactExportData(data) {";
+  if (next.split(installedDataFn).length < 2) throw new Error("Export redaction V1 migration drift: export data anchor changed");
+  if (next.includes("function piRedactDiagnosticEntry")) throw new Error("Export redaction V1 migration drift: unexpected helper present");
+  next = next.replace(installedDataFn, () => `${helperText}\n${installedDataFn}`);
+  next = next.split(legacyMarker).join(marker);
+  return next;
 }
 function upgradeUnknownReasoning(source) {
   return source.replace(
@@ -123,7 +263,8 @@ function upgradeUnknownReasoning(source) {
   );
 }
 export function patchJsonl(source) {
-  if (source.includes(marker)) return upgradeUnknownReasoning(source);
+  if (source.includes(marker) && !source.includes(legacyMarker)) return upgradeUnknownReasoning(source);
+  if (source.includes(legacyMarker)) return migrateV1ToV2(source);
   let next = replaceOnce(
     source,
     "JSON.stringify(header)",
@@ -142,7 +283,8 @@ export function patchJsonl(source) {
   return `/* ${marker} */\n${helpers}\n${next}`;
 }
 export function patchHtml(source) {
-  if (source.includes(marker)) return upgradeUnknownReasoning(source);
+  if (source.includes(marker) && !source.includes(legacyMarker)) return upgradeUnknownReasoning(source);
+  if (source.includes(legacyMarker)) return migrateV1ToV2(source);
   let next = replaceOnce(
     source,
     "function generateHtml(sessionData, themeName) {",
@@ -157,7 +299,8 @@ export function patchHtml(source) {
   return `/* ${marker} */\n${helpers}\n${next}`;
 }
 export function patchBundle(source) {
-  if (source.includes(marker)) return upgradeUnknownReasoning(source);
+  if (source.includes(marker) && !source.includes(legacyMarker)) return upgradeUnknownReasoning(source);
+  if (source.includes(legacyMarker)) return migrateV1ToV2(source);
   let next = replaceOnce(
     source,
     "JSON.stringify(header)],parentId=null",
@@ -185,8 +328,36 @@ export function patchBundle(source) {
   );
   return `/* ${marker} */\n${helpers}\n${next}`;
 }
+function migrateTemplateV1ToV2(source) {
+  // V1 and V2 install byte-identical template edits; only the marker
+  // advanced. Verify the V1 payload is intact, then swap the marker.
+  // Anything unrecognized is drift, never a silent skip (a silent skip here
+  // left template.js permanently MISSING after --fix converged everything
+  // else, because isApplied requires the V2 marker).
+  if (source.includes(marker))
+    throw new Error(
+      "Export redaction template V1 migration drift: mixed markers",
+    );
+  if (source.split(legacyMarker).length !== 2)
+    throw new Error(
+      "Export redaction template V1 migration drift: marker count changed",
+    );
+  const installed = [
+    "const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, reasoningUnreported: 0 };",
+    "else tokens.reasoningUnreported++;",
+    "responses unreported (included in output, not added again)",
+    "${data.exportNotice ? `<p>${escapeHtml(data.exportNotice)}</p>` : ''}",
+  ];
+  for (const snippet of installed)
+    if (source.split(snippet).length !== 2)
+      throw new Error(
+        "Export redaction template V1 migration drift: installed payload changed",
+      );
+  return source.split(legacyMarker).join(marker);
+}
 export function patchTemplate(source) {
-  if (source.includes(marker)) return source;
+  if (source.includes(marker) && !source.includes(legacyMarker)) return source;
+  if (source.includes(legacyMarker)) return migrateTemplateV1ToV2(source);
   let next = replaceOnce(
     source,
     "const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };",

@@ -2,12 +2,33 @@
 /** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
- const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false};
+ const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:{}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
  const text=c=>typeof c==='string'?c:Array.isArray(c)?c.filter(p=>p?.type==='text').map(p=>p.text).join('\n'):'';
  const usage=u=>{if(u)for(const k of ['input','output','cacheRead','cacheWrite','reasoning'])m[k]+=number(u[k]);};
+ // Turn-level cache accounting needs new-content context: characters appended
+ // since the previous assistant message plus that message's output. This
+ // mirrors scripts/lib/token-cost-diagnostics.mjs at transcript scale: it is
+ // a magnitude check, not a tokenizer, and separates uncached input,
+ // cached reuse, no-cache routes and prefix-invalidation excess explicitly.
+ let pendingChars=0, prevOutput=0;
+ const visibleChars=c=>typeof c==='string'?c.length:Array.isArray(c)?c.filter(p=>p?.type==='text'&&typeof p.text==='string').reduce((s,p)=>s+p.text.length,0)+c.filter(p=>p?.type==='toolCall').reduce((s,p)=>s+String(p.name??'').length,0):0;
+ const noteAssistant=u=>{
+  if(!u||typeof u!=='object')return;
+  const input=number(u.input),cacheRead=number(u.cacheRead),cacheWrite=number(u.cacheWrite),output=number(u.output);
+  const prompt=input+cacheRead+cacheWrite;
+  m.assistantTurns++;
+  m.uncachedInput+=input;m.cachedReuse+=cacheRead;
+  const route=typeof u.route==='string'?u.route.slice(0,160):null;
+  if(route){const r=m.perModel[route]??={turns:0,input:0,cacheRead:0,output:0};r.turns++;r.input+=input;r.cacheRead+=cacheRead;r.output+=output;}
+  if(cacheRead===0&&cacheWrite===0&&prompt>=3000){m.noCacheTurns++;m.noCacheInput+=input;}
+  const newContent=Math.round(pendingChars/4)+prevOutput;
+  const excess=input-newContent;
+  if(cacheRead>0&&excess>=3000){m.invalidationTurns++;m.invalidationExcessTokens+=excess;}
+  pendingChars=0;prevOutput=output+number(u.reasoning);
+ };
  const terminal=new Set(['completed','failed','stopped']);
  const hookNames=new Set(['input','before_agent_start','context','before_provider_request','tool_call','tool_result','session_before_switch','session_before_fork','session_before_compact','session_before_tree']);
  const normalizedState=v=>v==='complete'?'completed':v==='rejected'?'failed':['queued','running','completed','failed','stopped','paused','detached'].includes(v)?v:'unknown';
@@ -78,11 +99,16 @@ export function collectSessionMetrics(entries, live) {
  for(const [i,e] of entries.entries()) {
   const msg=e.type==='message'?e.message:undefined;
   if(msg?.role==='assistant') {
-   m.responses++;usage(msg.usage);if(msg.stopReason==='error')m.modelErrors++;
+   m.responses++;usage(msg.usage);noteAssistant(msg.usage);if(msg.stopReason==='error')m.modelErrors++;
+   // Aborted/zero-content attempts are telemetry, never model-visible
+   // evidence: counted here so the footer can report them without
+   // projecting their empty body back into context.
+   if((msg.stopReason==='aborted'||msg.stopReason==='error')&&visibleChars(msg.content)===0&&!String(msg.errorMessage??''))m.abortedTelemetry++;
+   else if(visibleChars(msg.content)===0&&(msg.content??[]).length===0&&number(msg.usage?.input)===0&&number(msg.usage?.output)===0)m.abortedTelemetry++;
    for(const c of msg.content??[])if(c.type==='toolCall'&&!calls.has(c.id??`call:${i}`)){calls.add(c.id??`call:${i}`);m.toolCalls++;callInputs.set(c.id,{name:c.name,input:c.arguments??{}});}
   }
   if(msg?.role==='toolResult'&&!results.has(msg.toolCallId??`result:${i}`)) {
-   results.add(msg.toolCallId??`result:${i}`);m.toolResults++;m.tools[msg.toolName]=(m.tools[msg.toolName]||0)+1;
+   results.add(msg.toolCallId??`result:${i}`);m.toolResults++;m.tools[msg.toolName]=(m.tools[msg.toolName]||0)+1;m.rawReturnedChars+=visibleChars(msg.content);pendingChars+=visibleChars(msg.content);
    if(msg.isError || msg.toolName==='web_search' && msg.details?.queryCount>0 && msg.details?.successfulQueries===0){m.errors++;if(/^Blocked:/.test(text(msg.content)))m.blocked++;}
    // Status/list/inspection can legally view another session's runs. Only
    // execution receipts and owner-scoped lifecycle ledgers contribute agents.
@@ -94,8 +120,9 @@ export function collectSessionMetrics(entries, live) {
     (full?read:partial).add(name(path));
    }
   }
-  if(e.type==='compaction'){m.compactions++;usage(e.usage);}
-  if(e.type==='branch_summary')usage(e.usage);
+  if(msg?.role==='user')pendingChars+=visibleChars(msg.content);
+  if(e.type==='compaction'){m.compactions++;usage(e.usage);noteAssistant(e.usage);pendingChars=0;}
+  if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage);}
   if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType))record(e.data,e.id,e.customType==='subagent-cost-v1');
   if(e.type==='custom'&&e.customType==='relevant-guidance'){
    for(const p of e.data?.read??[])read.add(name(p));
@@ -112,10 +139,15 @@ export function collectSessionMetrics(entries, live) {
   for(const [k,v] of Object.entries(s.hooks??{})){
    const cut=k.lastIndexOf(':'),owner=k.slice(0,cut).split('/').pop(),hook=k.slice(cut+1);
    if(!hookNames.has(hook)||['health-log.ts','session-telemetry.ts'].includes(owner)){m.hookExcluded+=number(v.calls);continue;}
-   const h=m.hooks[k]??={calls:0,errors:0,ms:0,changed:0,removedChars:0,addedChars:0};
-   for(const key of Object.keys(h))h[key]+=number(v[key]);
+   const h=m.hooks[k]??={calls:0,errors:0,ms:0,changed:0,removedChars:0,addedChars:0,charsChanged:0,tokensChanged:0};
+   for(const key of ['calls','errors','ms','changed','removedChars','addedChars','charsChanged','tokensChanged'])h[key]+=number(v[key]);
+   for(const key of ['beforeHash','afterHash','semanticHash'])if(h[key]===undefined&&typeof v[key]==='string'&&/^[0-9a-f]{8}$/.test(v[key]))h[key]=v[key];
+   if(Number.isSafeInteger(v.changedAt)&&v.changedAt>=0&&v.changedAt<=20000&&(h.changedAt===undefined||v.changedAt<h.changedAt))h.changedAt=v.changedAt;
+   if(Number.isSafeInteger(v.revision)&&v.revision>=0)h.revision=v.revision;
+   if(Number.isFinite(v.cacheAgeMs)&&v.cacheAgeMs>=0)h.cacheAgeMs=Math.max(h.cacheAgeMs??0,v.cacheAgeMs);
   }
   for(const k of ['swarms','fusions','recoveries'])m[s.version===2||k==='recoveries'?k:k==='swarms'?'legacySwarms':'legacyFusions']+=number(s.events?.[k]);
+  m.abortedTelemetry+=number(s.events?.aborted);
  }
  // Legacy auto-groups are only inferred when no corresponding new event exists.
  const measuredSince=Math.min(...[...segments.values()].map(s=>Number.isFinite(s.startedAt)?s.startedAt:Infinity));
@@ -131,6 +163,13 @@ export function collectSessionMetrics(entries, live) {
  m.skillsRead=[...read].sort();m.skillsPartial=[...partial].filter(s=>!read.has(s)).sort();m.skillsRouted=[...routed].sort();
  m.distinctTools=Object.keys(m.tools).length;
  const prompt=m.input+m.cacheRead+m.cacheWrite;m.cacheRate=prompt>0?100*m.cacheRead/prompt:null;
+ // Unique vs repeated: segment snapshots are cumulative and replaced by
+ // segment ID, so trimmedChars is unique context removed per segment, while
+ // addedChars is repeated projection churn (bytes re-added on later
+ // projections). Repeatedly processed characters are churn, never unique
+ // token savings and never billed savings.
+ m.uniqueContextRemovedChars=m.trimmedChars;m.projectionChurnChars=m.addedChars;
+ m.estimatedBilledSavingsNote='cached-token reuse avoids full-price rebill of the matched prefix; it is not a billed-amount saving and repeated churn must not be counted as savings';
  const parentFailures=m.errors+m.modelErrors, totalFailures=parentFailures+m.agentFailures+m.workflowFailures;
  // Bottom KPI layer: only the powers this session actually used, emoji + count.
  // The full breakdown stays in /metrics (m.detail); ordering is stable by count
@@ -153,7 +192,11 @@ export function collectSessionMetrics(entries, live) {
   `Parent + compaction token traffic: input ${m.input.toLocaleString('en-US')}, output ${m.output.toLocaleString('en-US')}, cached reads ${m.cacheRead.toLocaleString('en-US')}, cache writes ${m.cacheWrite.toLocaleString('en-US')}`,
   `Reported reasoning tokens: ${m.reasoning.toLocaleString('en-US')} (a subset of output, not additional traffic)`,
   `Cumulative prompt cache reuse: ${m.cacheRate===null?'unknown':m.cacheRate.toFixed(2)+'%'}; cached tokens were reused, not removed from traffic.`,
-  m.telemetry?`Measured hook payload reduction: ${m.trimmedChars.toLocaleString('en-US')} characters (~${Math.round(m.trimmedChars/4).toLocaleString('en-US')} tokens at 4 chars/token); additions: ${m.addedChars.toLocaleString('en-US')} chars. Counts each observed projection, not unique tokens or billed savings.`:'Historical harness token savings: unknown; context payload reductions were not recorded.',
+  `Cache detail: uncached input ${m.uncachedInput.toLocaleString('en-US')} tokens across ${m.assistantTurns} billed assistant turns; cached reuse ${m.cachedReuse.toLocaleString('en-US')} tokens; no-cache turns ${m.noCacheTurns} (${m.noCacheInput.toLocaleString('en-US')} uncached tokens on routes without caching); invalidation turns ${m.invalidationTurns} with ~${m.invalidationExcessTokens.toLocaleString('en-US')} excess uncached tokens (cached prefix stopped matching and was rebilled). New-content is chars/4 magnitude, not a tokenizer.`,
+  `Estimated billed effect: reuse avoids full-price rebill of the matched prefix; it is NOT a billed-amount saving. Repeated projection churn must never be reported as unique savings. Actual billed amounts live in /cost and session-cost evidence, not here.`,
+  `Context occupancy vs raw traffic: raw returned characters ${m.rawReturnedChars.toLocaleString('en-US')} in ${m.toolResults} results are pre-projection bytes, not active-context occupancy, tokens, or billed savings. Active occupancy is the live window (see session_self context); unique context removed is below.`,
+  m.telemetry?`Unique context removed: ${m.uniqueContextRemovedChars.toLocaleString('en-US')} characters (~${Math.round(m.uniqueContextRemovedChars/4).toLocaleString('en-US')} tokens at 4 chars/token), deduplicated by telemetry segment; repeated projection churn re-added: ${m.projectionChurnChars.toLocaleString('en-US')} chars. Churn is reprocessing cost, not savings.`:'Historical harness token savings: unknown; context payload reductions were not recorded.',
+  m.abortedTelemetry?`Aborted/zero-content assistant attempts kept as telemetry (not model-visible): ${m.abortedTelemetry}.`:'Aborted/zero-content assistant attempts: none counted; empty aborted attempts stay telemetry, never projected context.',
   `Parent skills suggested: ${m.skillsRouted.join(', ')||'none recorded'}`,
   `Parent skills fully read: ${m.skillsRead.join(', ')||'none recorded'}; partial reads only: ${m.skillsPartial.join(', ')||'none'}. A routed suggestion is not a read or proof of application.`,
   'Tools: '+Object.entries(m.tools).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(', '),

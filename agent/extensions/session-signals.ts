@@ -149,8 +149,32 @@ function sessionSkills(ctx: any) {
     "quality_review",
     "skill_review",
     "subagent",
+    "bg_wait",
     "web_search",
     "browser_session",
+    // Session introspection without shell archaeology: email, background,
+    // project, planning and research bundles are capability usage too.
+    "agentmail_status",
+    "agentmail_send",
+    "agentmail_messages",
+    "agentmail_message",
+    "bg_run",
+    "bg_status",
+    "bg_logs",
+    "bg_kill",
+    "project_intel",
+    "project_tests",
+    "todo",
+    "tool_search",
+    "obs_read",
+    "checkpoint_read",
+    "research_toolkit",
+    "web_research",
+    "fetch_content",
+    "source_check",
+    "lsp_diagnostics",
+    "symbol_expand",
+    "syntax_check",
   ];
   return {
     view: "skills",
@@ -262,7 +286,11 @@ export default function (pi: any) {
     .slice(2)}`;
   const pressureSignalKind = "context-pressure-v1";
   let pressureGeneration = 0;
-  const resetPressureSignals = () => pressureGeneration++;
+  let anchorText: string | undefined;
+  const resetPressureSignals = () => {
+    pressureGeneration++;
+    anchorText = undefined; // session/model boundary: the prefix is rebuilt anyway
+  };
   const pressureSignal = (content: string) => ({
     customType: "runtime-signals",
     content,
@@ -290,9 +318,9 @@ export default function (pi: any) {
   const notice = (ctx: any) => {
     const f = facts(ctx);
     const contextPercent = f.contextWindowPercent;
-    const risk = !riskAnnounced
-      ? payloadPressureWarning(contextPercent)
-      : undefined;
+    const risk = riskAnnounced
+      ? undefined
+      : payloadPressureWarning(contextPercent);
     if (risk) riskAnnounced = true;
     const lines = [];
     if (thresholds.observe(contextPercent ?? null) !== null)
@@ -333,6 +361,21 @@ export default function (pi: any) {
     const isPressureLine = (line: string) =>
       line.startsWith("[context pressure]") ||
       line.startsWith("[tool payload risk]");
+    let abortedDropped = 0;
+    const isAbortedEmpty = (m: any) => {
+      if (m?.role !== "assistant") return false;
+      const content = (m as any).content;
+      const hasToolCall = Array.isArray(content) && content.some((p: any) => p?.type === "toolCall");
+      if (hasToolCall) return false;
+      const text = typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("")
+        : "";
+      if (text.trim().length > 0) return false;
+      // Only aborted/errored attempts are safe to withhold: provider
+      // continuity (e.g. thinking blocks) on successful turns is preserved.
+      const stop = (m as any).stopReason;
+      return stop === "aborted" || stop === "error";
+    };
     const messages = toolJson
       .transform(event.messages)
       .flatMap(
@@ -342,6 +385,9 @@ export default function (pi: any) {
           content?: unknown;
           details?: { kind?: string; tag?: string };
         }) => {
+          // Aborted/zero-content assistant attempts are telemetry, not
+          // model-visible conversation: drop from projection, count in sink.
+          if (isAbortedEmpty(m)) { abortedDropped++; return []; }
           if (m.role !== "custom") return [m];
           if (
             ["tool-payload-risk", "runtime-awareness"].includes(
@@ -376,7 +422,14 @@ export default function (pi: any) {
         },
       );
 
+    if (abortedDropped > 0) {
+      try {
+        const sink = (globalThis as any)[Symbol.for("yunus-pi.metrics.v1")];
+        if (typeof sink === "function") for (let i = 0; i < abortedDropped; i++) sink("aborted");
+      } catch { /* telemetry loss must not break projection */ }
+    }
     if (
+      abortedDropped === 0 &&
       messages.length === event.messages.length &&
       messages.every((m: any, i: number) => m === event.messages[i])
     )
@@ -392,7 +445,7 @@ export default function (pi: any) {
   });
   pi.on("before_provider_request", (e: any, ctx: any) => {
     const p = stableToolOrder(e.payload);
-    const changed = p !== e.payload ? p : undefined;
+    const changed = p === e.payload ? undefined : p;
     // Auxiliary requests use the same runner while ctx still identifies the
     // primary model. A distinct wire model must not replace its cap evidence.
     if (typeof p?.model === "string" && p.model !== ctx.model?.id)
@@ -428,10 +481,15 @@ export default function (pi: any) {
   });
   pi.on("before_agent_start", (_e: any, ctx: any) => {
     const n = notice(ctx);
+    // Freeze the date for the whole session: re-anchoring (e.g. a midnight
+    // flip) would rewrite the system prompt and with it the entire prompt
+    // prefix the provider caches. Current time stays available on demand
+    // via session_self.
+    if (anchorText === undefined) anchorText = dateAnchor().text;
     return {
       // Stable for the whole run, including tool continuations and compaction.
       // Unlike custom messages this is metadata, not a fresh conversational turn.
-      systemPrompt: `${_e.systemPrompt}\n\n${dateAnchor().text}`,
+      systemPrompt: `${_e.systemPrompt}\n\n${anchorText}`,
       ...(n
         ? {
             message: pressureSignal(n),

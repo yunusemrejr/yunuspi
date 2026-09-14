@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
+import { writeGuardedStatus } from "../shared/status-revision.ts";
 import { resultFilePath, resultPayloadPathForSessionRun, writeAsyncResultFile } from "./result-files.ts";
 import { updateActiveRunIndex } from "./active-run-index.ts";
 import { readStatus } from "../../shared/utils.ts";
@@ -283,7 +284,10 @@ function buildFailedRepair(status: AsyncStatus, asyncDir: string, now: number, r
 function writeFailedRepair(asyncDir: string, status: AsyncStatus, resultPath: string, now: number, reason?: string): ReconcileAsyncRunResult {
 	const repair = buildFailedRepair(status, asyncDir, now, reason);
 	if (repair.result.sessionId) writeAsyncResultFile(resultPath, repair.result);
-	writeAtomicJson(path.join(asyncDir, "status.json"), repair.status);
+	// Guarded: a live runner may have finalized while the repair was being
+	// built. Losing that race must keep the newer state, not our repair.
+	const guarded = writeGuardedStatus(path.join(asyncDir, "status.json"), repair.status);
+	if (!guarded.written) return { status, repaired: false, message: `Stale-run repair skipped: on-disk status is newer (${guarded.reason ?? "unknown"}).` };
 	updateActiveRunIndex(asyncDir, repair.status.state, repair.status.toolCallId);
 	appendJsonlBestEffort(path.join(asyncDir, "events.jsonl"), {
 		type: "subagent.run.repaired_stale",
@@ -390,7 +394,10 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 			? terminalStatusFromResult(effectiveStatus, existingResultPath, now)
 			: undefined;
 		if (terminalStatus) {
-			writeAtomicJson(path.join(asyncDir, "status.json"), terminalStatus);
+			// Guarded: the runner's own final write may have landed first and
+			// carries the complete telemetry; a stale repair must not downgrade it.
+			const guarded = writeGuardedStatus(path.join(asyncDir, "status.json"), terminalStatus);
+			if (!guarded.written) return { status: effectiveStatus, repaired: false, resultPath: existingResultPath, message: `Terminal-status repair skipped: on-disk status is newer (${guarded.reason ?? "unknown"}).` };
 			updateActiveRunIndex(asyncDir, terminalStatus.state, terminalStatus.toolCallId);
 			return { status: terminalStatus, repaired: true, resultPath: existingResultPath, message: "Existing async result file was used to repair stale running status." };
 		}

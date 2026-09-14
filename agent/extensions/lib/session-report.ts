@@ -63,13 +63,14 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   const traffic = collectContextTraffic(branch);
   const lines = [
     'Overview · current branch',
-    `${traffic.totalResults} tool results · ${number(traffic.totalChars)} raw returned chars · ${diagnostics.activity.parentToolErrors} tool errors · ${diagnostics.activity.parentModelErrors} provider errors · ${diagnostics.activity.childFailures} child failures`,
-    'Jump: 1 failures · 2 traffic · 3 skills/review · 4 hook health · 5 totals', '',
+    `${traffic.totalResults} tool results · ${number(traffic.totalChars)} raw returned chars · ${diagnostics.activity.parentToolErrors} tool errors · ${diagnostics.activity.parentModelErrors} provider errors · ${diagnostics.activity.childFailures} child failures · ${diagnostics.uniqueIncidents ?? diagnostics.total} unique incidents`,
+    'Jump: 1 failures · 2 traffic · 3 skills/review · 4 hook health · 5 totals · 6 cache/models/costs', '',
     'Failure evidence · current branch',
-    `${diagnostics.total} diagnostic records in ${diagnostics.inspected} inspected entries${diagnostics.truncated ? ' (older entries outside this window)' : ''}; ${diagnostics.count} recent examples, ${diagnostics.omitted} additional records grouped below. Parent and child records can describe the same incident; do not add them as unique incidents.`,
+    `${diagnostics.total} diagnostic records (${diagnostics.uniqueIncidents ?? diagnostics.total} unique incidents by stable incident id) in ${diagnostics.inspected} inspected entries${diagnostics.truncated ? ' (older entries outside this window)' : ''}; ${diagnostics.count} recent examples, ${diagnostics.omitted} additional records grouped below. Records sharing one incident id are one incident, not unique failures.`,
     ...diagnostics.groups.slice(0, 16).map(group => `${group.count} × ${group.kind} / ${group.tool} / ${group.category}. Next: ${group.recovery}`),
     ...(diagnostics.omittedGroups ? [`${diagnostics.omittedGroups} additional failure groups omitted; inspect retained session evidence for the full window.`] : []),
-    ...(diagnostics.total ? diagnostics.failures.map(failure => `${failure.kind} · ${failure.tool} · ${failure.category}${failure.callId ? ` · call ${failure.callId}` : ''}${failure.runId ? ` · run ${failure.runId}` : ''}${failure.attempts !== undefined ? ` · ${failure.attempts} attempts` : ''}${failure.outputPresence ? ` · output ${failure.outputPresence}` : ''}: ${failure.error || 'No error excerpt recorded.'}`)
+    ...((diagnostics.incidents ?? []).slice(0, 12).map(row => `${row.id} · ${row.category} · ${row.kinds.join('+')} · ${row.tools.join('+')} · ${row.records} record(s)${row.callId ? ` · call ${row.callId}` : ''}${row.runId ? ` · run ${row.runId}` : ''}`)),
+    ...(diagnostics.total ? diagnostics.failures.map(failure => `${failure.incident ?? 'inc-unknown'} · ${failure.kind} · ${failure.tool} · ${failure.category}${failure.callId ? ` · call ${failure.callId}` : ''}${failure.runId ? ` · run ${failure.runId}` : ''}${failure.attempts !== undefined ? ` · ${failure.attempts} attempts` : ''}${failure.outputPresence ? ` · output ${failure.outputPresence}` : ''}: ${failure.error || 'No error excerpt recorded.'}`)
       : ['No recorded tool/model/child failures in this window. This does not certify task quality.']),
     '', 'Context traffic · current branch',
     `${number(traffic.totalChars)} raw returned characters in ${traffic.totalResults} results across ${traffic.inspected} entries${traffic.truncated ? ' (window truncated)' : ''}; these are characters before context projection, not current occupancy, tokens or billed savings.`,
@@ -102,7 +103,15 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   if (metrics.telemetry) {
     const hooks = Object.entries(metrics.hooks).sort(([, a]: any, [, b]: any) => b.errors - a.errors || b.ms - a.ms);
     for (const [key, value] of hooks.slice(0, 8) as [string, any][]) lines.push(`${key}: ${value.errors} errors / ${value.calls} checks; ${number(Math.round(value.ms))} ms cumulative, ${value.calls ? (value.ms / value.calls).toFixed(1) : '?'} ms/check. Includes waiting; not a CPU profile.`);
+    lines.push(`Hook payload accounting: unique context removed ${number(metrics.uniqueContextRemovedChars ?? metrics.trimmedChars)} chars; repeated projection churn re-added ${number(metrics.projectionChurnChars ?? metrics.addedChars)} chars. Churn is reprocessing, never unique savings.`);
   } else lines.push('Hook measurements unavailable; missing instrumentation does not mean zero errors.');
+  lines.push('', 'Cache, models and costs · all retained entries');
+  lines.push(`Prompt cache: reuse ${number(metrics.cachedReuse ?? metrics.cacheRead)} tokens (${metrics.cacheRate === null ? 'unknown' : metrics.cacheRate.toFixed(2) + '%'} of prompt); uncached input ${number(metrics.uncachedInput ?? metrics.input)} tokens in ${metrics.assistantTurns ?? metrics.responses} assistant turns; no-cache turns ${metrics.noCacheTurns ?? 0} (${number(metrics.noCacheInput ?? 0)} tokens on routes without caching); invalidation turns ${metrics.invalidationTurns ?? 0} with ~${number(metrics.invalidationExcessTokens ?? 0)} excess tokens (prefix stopped matching, rebilled at full price).`);
+  lines.push('Reuse avoids full-price rebill of the matched prefix; it is not a billed-amount saving. Repeated churn must never be counted as savings. Actual billed amounts: /cost (provider-reported vs estimated, per scope and route).');
+  lines.push(`Reasoning usage: ${number(metrics.reasoning)} tokens (subset of output, not additional traffic). Child traffic: ${number(metrics.childTokens)} tokens from ${metrics.childRowsWithUsage} of ${metrics.childRows} usage-bearing child rows. Raw returned chars: ${number(traffic.totalChars)} pre-projection bytes, not occupancy or billed tokens.`);
+  const modelRows = Object.entries(metrics.perModel ?? {}).sort(([, a]: any, [, b]: any) => b.input - a.input).slice(0, 8) as [string, any][];
+  lines.push(modelRows.length ? `Models: ${modelRows.map(([route, row]) => `${route} ${row.turns}t in${number(row.input)} reuse${number(row.cacheRead)} out${number(row.output)}`).join('; ')}.` : 'Models: no per-route usage recorded; cache stability by route is unknown.');
+  if (metrics.abortedTelemetry) lines.push(`Aborted/zero-content assistant attempts held as telemetry (not projected context): ${metrics.abortedTelemetry}.`);
   lines.push('', ...metrics.detail);
   return { lines: lines.map(reportText), diagnostics, traffic };
 }

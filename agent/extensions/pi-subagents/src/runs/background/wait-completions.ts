@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { readCostEvidence } from "../../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../../shared/cost-accounting.ts";
 import type { ArtifactPaths, SubagentState, Usage, WaitCompletion, WaitCompletionChild } from "../../shared/types.ts";
+import { childTerminalCause, classifyChildTerminal, groupCounters, groupLifecycleState } from "../shared/group-reliability.ts";
 import type { AsyncRunSummary } from "./async-status.ts";
 import { readCompletionReplay, writeCompletionReplay } from "./completion-replay.ts";
 import { fallbackResultPayloadPathForSessionRun, resultFilePath, resultPayloadPathForSessionRun } from "./result-files.ts";
@@ -64,6 +65,9 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 			const agent = asNonEmptyString(child.agent);
 			const childRunId = asNonEmptyString(child.runId);
 			const usage = projectedUsage(child.usage);
+			const terminalState = classifyChildTerminal(child as Parameters<typeof classifyChildTerminal>[0]);
+			const terminalCause = terminalState ? childTerminalCause(child as Parameters<typeof childTerminalCause>[0]) : undefined;
+			const provider = asNonEmptyString(child.provider);
             const total = child.totalCost as {costUsd?:unknown;costDetails?:unknown} | undefined;
             const totalCost = total && nonNegativeNumber(total.costUsd) !== undefined
               ? {costUsd:total.costUsd as number,...(total.costDetails?{costDetails:readCostEvidence({costDetails:total.costDetails})}:{})} : undefined;
@@ -77,6 +81,9 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 				...(agent ? { agent } : {}),
 				...(childRunId ? { runId: childRunId } : {}),
 				...(usage ? { usage } : {}),
+				...(terminalState ? { terminalState } : {}),
+				...(terminalCause ? { terminalCause } : {}),
+				...(provider ? { provider } : {}),
                 ...(totalCost ? {totalCost} : {}),
                 ...(children ? {children} : {}),
 				...(sessionFile ? { sessionFile } : {}),
@@ -95,6 +102,7 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 	const state = asNonEmptyString(data.state);
 	const workflowChildren = parseWorkflowChildSummary(data.workflowChildren);
 	if (workflowChildren && workflowChildren.workflowRunId !== runId) throw new Error("workflowChildren.workflowRunId does not match its completion run id.");
+	const counters = groupCounters(Array.isArray(data.results) ? data.results : results ?? [], typeof data.requestedChildren === "number" ? { requested: data.requestedChildren } : undefined);
 	return {
 		runId,
 		...(agent ? { agent } : {}),
@@ -103,6 +111,7 @@ export function toWaitCompletion(data: Record<string, unknown>, runId: string): 
 		...(typeof data.success === "boolean" ? { success: data.success } : {}),
 		...(results && results.length > 0 ? { results } : {}),
 		...(workflowChildren ? { workflowChildren } : {}),
+		...(counters.requested > 0 ? { groupCounters: counters, groupState: groupLifecycleState(counters) } : {}),
 	};
 }
 

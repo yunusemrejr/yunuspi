@@ -147,6 +147,12 @@ import { asyncStatusChildIdentity } from "../shared/child-identity.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { effectiveToolTimeoutMs, formatToolTimeoutMessage, toolTimeoutCallKey } from "../shared/tool-timeout.ts";
 import { usageBudgetExceededMessage, usageBudgetState } from "../shared/usage-budget.ts";
+import { childTerminalCause, classifyChildTerminal, groupCounters, groupLifecycleState, groupTelemetry, isProviderFailureText, isToolFailureText, type ChildTerminalFacts, type ChildTelemetrySource } from "../shared/group-reliability.ts";
+import { CHILD_BREAKER_EVAL_INTERVAL_MS } from "../shared/child-circuit-breakers.ts";
+import { assembleRunnerSpawnPreflight, buildChildRouteProvenance, formatSpawnPreflightBlocked } from "../shared/child-spawn-preflight.ts";
+import { evaluateRoute, readHealth } from "../shared/provider-health.ts";
+import { evaluateChildBreakers, resolveChildBreakerPolicy, type ChildBreakerReason } from "../shared/child-circuit-breakers.ts";
+import { decideStatusWrite, type RevisionedStatus } from "../shared/status-revision.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writePendingParallelHandoff } from "../shared/parallel-handoff.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, PI_AGGREGATE_EVENT_PROJECTOR, projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
@@ -1819,6 +1825,7 @@ async function runSingleStepInner(
 			childWatchdog,
 			waitToolEnabled: step.waitToolEnabled,
 			waitToolDefaultTimeoutMs: step.waitToolDefaultTimeoutMs,
+			gitAuthority: step.gitAuthority === true ? true : undefined,
 			thinkingCeiling: step.thinkingCeiling,
 			extensionBindings,
 		}));
@@ -2976,8 +2983,23 @@ async function runSubagent(
 	const writeStatusPayloadNow = (): void => {
 		refreshWorkflowGraph();
 		writeRecoverableStatusResult();
-		runPersistence.write(statusPath, statusPayload);
+		// Monotonic guard: the coalescer can flush a payload that a newer writer
+		// (reconciler repair, process-terminal overlay) already superseded. Decide
+		// first, then persist through the ENOSPC-resilient writer.
+		const decision = decideStatusWrite(readPersistedStatus(), { ...statusPayload, revision: Math.max(statusRevision, statusPayload.revision ?? 0) });
+		statusRevision = Math.max(statusRevision, decision.revision);
+		statusPayload.revision = statusRevision;
+		if (decision.action === "write") runPersistence.write(statusPath, statusPayload);
 		emitNestedSelfEvent(statusPayload.state === "running" || statusPayload.state === "queued" ? "subagent.nested.updated" : "subagent.nested.completed");
+	};
+	let statusRevision = 0;
+	const readPersistedStatus = (): RevisionedStatus | undefined => {
+		try {
+			const parsed = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as unknown;
+			return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as RevisionedStatus : undefined;
+		} catch {
+			return undefined;
+		}
 	};
 	const statusWriteCoalescer = createFileCoalescer(writeStatusPayloadNow, 100);
 	const writeStatusPayload = (immediate = true): void => {
@@ -3297,6 +3319,84 @@ async function runSubagent(
 	const activeLongRunningSteps = new Set<number>();
 	const mutatingFailureStates = initialStatusSteps.map(() => createMutatingFailureState());
 	const progressEvidence = initialStatusSteps.map(() => createProgressEvidence());
+	// Per-child circuit-breaker bookkeeping. Streaks reset on useful progress so
+	// a child that recovers is never tripped by its own history.
+	const childBreakerStates = new Map<number, {
+		consecutiveProviderFailures: number;
+		consecutiveToolFailures: number;
+		lastProgressAt: number;
+		costUsd: number;
+		tripped?: ChildBreakerReason;
+	}>();
+	const childBreakerPolicy = resolveChildBreakerPolicy();
+	const breakerStateFor = (index: number, now: number) => {
+		let state = childBreakerStates.get(index);
+		if (!state) {
+			state = { consecutiveProviderFailures: 0, consecutiveToolFailures: 0, lastProgressAt: now, costUsd: 0 };
+			childBreakerStates.set(index, state);
+		}
+		return state;
+	};
+	const markChildProgress = (index: number, now: number): void => {
+		breakerStateFor(index, now).lastProgressAt = now;
+	};
+	const recordChildFailure = (index: number, kind: "provider" | "tool", now: number): void => {
+		const state = breakerStateFor(index, now);
+		if (kind === "provider") {
+			state.consecutiveProviderFailures += 1;
+			state.consecutiveToolFailures = 0;
+		} else {
+			state.consecutiveToolFailures += 1;
+			state.consecutiveProviderFailures = 0;
+		}
+	};
+	const tripChildBreaker = (index: number, reason: ChildBreakerReason, detail: string, now: number): void => {
+		const step = statusPayload.steps[index];
+		if (!step) return;
+		const state = breakerStateFor(index, now);
+		if (state.tripped) return;
+		state.tripped = reason;
+		step.breakerReason = reason;
+		step.terminalCause = reason === "provider_failure_streak" ? "provider_failure"
+			: reason === "tool_failure_streak" || reason === "no_useful_progress" ? "tool_failure"
+				: reason === "excessive_turns" || reason === "runaway_cost" ? "budget_exhausted"
+				: "timeout";
+		appendJsonl(eventsPath, JSON.stringify({
+			type: "subagent.step.breaker_tripped",
+			ts: now,
+			runId: id,
+			stepIndex: index,
+			childId: step.childId ?? childStopTargetId(index),
+			agent: step.agent,
+			reason,
+			message: detail,
+		}));
+		console.warn(`[pi-subagents] child ${step.agent ?? index} breaker tripped (${reason}): ${detail}`);
+		// Stop only this child: successful siblings keep their work and the
+		// tripped child becomes terminal instead of holding the group open.
+		stopChildStep({ type: "stop", targetIndex: index, childId: step.childId ?? childStopTargetId(index) });
+	};
+	const evaluateChildBreakersNow = (now = Date.now()): void => {
+		if (statusPayload.state !== "running") return;
+		for (let index = 0; index < statusPayload.steps.length; index++) {
+			const step = statusPayload.steps[index]!;
+			if (step.status !== "running") continue;
+			const state = breakerStateFor(index, now);
+			const verdict = evaluateChildBreakers({
+				now,
+				...(step.startedAt !== undefined ? { startedAt: step.startedAt } : {}),
+				lastActivityAt: step.lastActivityAt ?? state.lastProgressAt,
+				lastProgressAt: state.lastProgressAt,
+				consecutiveProviderFailures: state.consecutiveProviderFailures,
+				consecutiveToolFailures: state.consecutiveToolFailures,
+				...(step.turnCount !== undefined ? { turns: step.turnCount } : {}),
+				...(step.toolCount !== undefined ? { toolCalls: step.toolCount } : {}),
+				costUsd: state.costUsd,
+				stopRequested: step.stopRequested === true,
+			}, childBreakerPolicy);
+			if (verdict.tripped) tripChildBreaker(index, verdict.reason, verdict.detail, now);
+		}
+	};
 	const pendingToolResults: Array<{ tool: string; path?: string; mutates: boolean; startedAt?: number } | undefined> = initialStatusSteps.map(() => undefined);
 	type ActiveToolCall = { key: string; tool: string; args: string; startedAt: number; path?: string; blocksSupervisor: boolean };
 	const activeToolCalls = initialStatusSteps.map(() => new Map<string, ActiveToolCall>());
@@ -3708,6 +3808,10 @@ async function runSubagent(
 				}
 			}
 			appendRecentStepOutput(step, resultText.split("\n").slice(-10));
+			// Breaker bookkeeping: a failed tool result advances the tool-failure
+			// streak; a clean result clears every streak (the child is progressing).
+			if (isToolFailureText(resultText) || (toolSnapshot?.mutates && didMutatingToolFail(resultText))) recordChildFailure(flatIndex, "tool", now);
+			else { breakerStateFor(flatIndex, now).consecutiveToolFailures = 0; breakerStateFor(flatIndex, now).consecutiveProviderFailures = 0; markChildProgress(flatIndex, now); }
 			if (toolSnapshot?.mutates && didMutatingToolFail(resultText)) {
 				const state = mutatingFailureStates[flatIndex]!;
 				recordMutatingFailure(state, omitUndefinedProperties({
@@ -3765,6 +3869,18 @@ async function runSubagent(
 				refreshUsageBudget();
 			}
 			statusPayload.turnCount = Math.max(statusPayload.turnCount ?? 0, step.turnCount);
+			markChildProgress(flatIndex, now);
+			breakerStateFor(flatIndex, now).consecutiveProviderFailures = 0;
+			breakerStateFor(flatIndex, now).consecutiveToolFailures = 0;
+			const messageError = (event.message as { errorMessage?: unknown; stopReason?: unknown }).errorMessage;
+			const stopReason = (event.message as { stopReason?: unknown }).stopReason;
+			if (typeof messageError === "string" && messageError.trim()) {
+				if (isProviderFailureText(messageError)) recordChildFailure(flatIndex, "provider", now);
+				else if (isToolFailureText(messageError)) recordChildFailure(flatIndex, "tool", now);
+			}
+			if (stopReason === "error" || stopReason === "aborted") recordChildFailure(flatIndex, "provider", now);
+			const stepCost = (event.message.usage as { cost?: unknown } | undefined)?.cost;
+			if (typeof stepCost === "number" && Number.isFinite(stepCost)) breakerStateFor(flatIndex, now).costUsd += Math.max(0, stepCost);
 		}
 		syncTopLevelCurrentTool();
 		step.lastActivityAt = now;
@@ -3841,6 +3957,13 @@ async function runSubagent(
 		}, 1000);
 		activityTimer.unref?.();
 	}
+	// Child circuit breakers run unconditionally: a child that is stuck or
+	// looping must not depend on control-channel config to be noticed.
+	const breakerTimer = setInterval(() => {
+		if (statusPayload.state !== "running") return;
+		evaluateChildBreakersNow();
+	}, CHILD_BREAKER_EVAL_INTERVAL_MS);
+	breakerTimer.unref?.();
 
 	const interruptRunner = () => {
 		consumeInterruptRequest(asyncDir);
@@ -3990,9 +4113,83 @@ async function runSubagent(
 		}),
 	);
 
+	// Pre-spawn preflight: resolve the launch picture (route, credentials,
+	// provider health, economy, budget) BEFORE any child process exists, record
+	// it on the status, and refuse to burn slots on a definitively dead launch.
+	// Checks the runner cannot perform report "unknown", never "fail".
+	const spawnPreflight = (() => {
+		const first = flatSteps.find((step) => !step.importAsyncRoot) ?? flatSteps[0];
+		const candidates = first?.modelCandidates;
+		const requested = candidates?.[0] ?? first?.model;
+		const fallbacks = candidates && candidates.length > 1 ? candidates.slice(1) : [];
+		const slash = requested?.indexOf("/") ?? -1;
+		const provider = slash > 0 && requested ? requested.slice(0, slash) : undefined;
+		const model = slash > 0 && requested ? requested.slice(slash + 1) : requested;
+		let rates: { input?: number; output?: number } | undefined;
+		try {
+			const info = findModelInfo(requested, first?.modelVerificationRegistry);
+			if (info?.cost) rates = { ...(typeof info.cost.input === "number" ? { input: info.cost.input } : {}), ...(typeof info.cost.output === "number" ? { output: info.cost.output } : {}) };
+		} catch {
+		// Unknown rates are an honest unknown, not a failure.
+		}
+		let health: { allowed: boolean; waitMs: number; kind?: string; boundBy?: string } | undefined;
+		try {
+			if (provider) {
+				const decision = evaluateRoute({ provider, ...(model ? { model } : {}) }, readHealth());
+				// Cooldown records only bind exact provider/model strings from the
+			// same store; a pass here is real, a miss is treated as healthy.
+			health = { allowed: decision.allowed, waitMs: decision.waitMs, ...(decision.kind ? { kind: decision.kind } : {}), ...(decision.boundBy ? { boundBy: decision.boundBy } : {}) };
+			}
+		} catch {
+		// An unreadable health store must not block launches.
+		}
+		return assembleRunnerSpawnPreflight({
+			...(requested ? { requestedModel: requested } : {}),
+			origin: requested ? "explicit" : "automatic",
+			...(requested ? { selected: requested } : {}),
+			...(fallbacks.length > 0 ? { fallbacks } : {}),
+			...(rates ? { rates } : {}),
+			...(health ? { health } : {}),
+			hasUsageBudgetConfig: config.usageBudget !== undefined,
+			usageBudgetAlreadyExhausted: false,
+			...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+			...(process.env.PI_CODING_AGENT_DIR ? { agentDir: process.env.PI_CODING_AGENT_DIR } : {}),
+		});
+	})();
+	statusPayload.spawnPreflight = spawnPreflight;
+	statusPayload.lastUpdate = Date.now();
+	const preflightBlockedMessage = spawnPreflight.ok ? undefined : formatSpawnPreflightBlocked(spawnPreflight);
+	if (preflightBlockedMessage) {
+		console.error(`[pi-subagents] ${preflightBlockedMessage}`);
+		appendJsonl(eventsPath, JSON.stringify({ type: "subagent.run.preflight_blocked", ts: Date.now(), runId: id, blockers: spawnPreflight.blockers }));
+		// Every planned child ends here, terminally failed with the blocker as
+		// its diagnostic — visible in the counters, never "still waiting".
+		const preflightCause = spawnPreflight.blockers.some((blocker) => blocker.startsWith("provider_health"))
+			? "provider_failure" as const
+				: spawnPreflight.blockers.some((blocker) => blocker.startsWith("economy") || blocker.startsWith("budget"))
+				? "budget_exhausted" as const
+					: "unknown" as const;
+		for (const step of statusPayload.steps) {
+			if (step.status !== "pending" && step.status !== "running") continue;
+			step.status = "failed";
+			step.error = preflightBlockedMessage;
+			step.exitCode = 1;
+			step.terminalState = "failed";
+			step.terminalCause = preflightCause;
+			step.endedAt = Date.now();
+			step.durationMs = step.startedAt ? Math.max(0, Date.now() - step.startedAt) : 0;
+			step.lastActivityAt = Date.now();
+		}
+		for (const step of flatSteps) {
+			results.push(omitUndefinedProperties({ agent: step.agent, context: step.context, output: preflightBlockedMessage, error: preflightBlockedMessage, success: false, exitCode: 1 }));
+		}
+		writeStatusPayload();
+	}
+	const preflightLaunchBlocked = preflightBlockedMessage !== undefined;
+
 	let flatIndex = 0;
 	let stepCursor = 0;
-	while (true) {
+	while (!preflightLaunchBlocked) {
 		if (interrupted || timedOut || stopped) break;
 		consumePendingAppendRequests();
 		if (stepCursor >= steps.length) break;
@@ -5362,6 +5559,7 @@ async function runSubagent(
 		clearInterval(activityTimer);
 		activityTimer = undefined;
 	}
+	clearInterval(breakerTimer);
 	if (timeoutTimer) {
 		clearTimeout(timeoutTimer);
 		timeoutTimer = undefined;
@@ -5381,6 +5579,45 @@ async function runSubagent(
 	})));
 	const partialWithEvidence = !stopped && !signalTerminated && !timedOut && !usageBudgetExceeded && !interrupted && results.some(partialEvidenceResult) && !results.some(concreteFailureResult);
 	statusPayload.state = stopped || signalTerminated ? "stopped" : timedOut || usageBudgetExceeded ? "failed" : interrupted ? "paused" : results.every((r) => r.success) ? "complete" : partialWithEvidence ? "partial" : "failed";
+	// Group reliability accounting: completion is counted by TERMINAL children,
+	// so children that ended badly stay visible in the counters instead of
+	// holding the group open as if they were still running.
+	const accountingNow = Date.now();
+	const groupTelemetrySources: ChildTelemetrySource[] = results.map((result, index) => ({
+		...(statusPayload.steps[index]?.childId ? { key: statusPayload.steps[index]?.childId } : {}),
+		...(statusPayload.steps[index]?.runId ? { runId: statusPayload.steps[index]?.runId } : {}),
+		...(result.agent ? { agent: result.agent } : {}),
+		...(result.model ? { model: result.model } : {}),
+		...(result.attemptedModels?.[0] ? { requestedModel: result.attemptedModels[0] } : {}),
+		...(result.usage ? { usage: result.usage as ChildTelemetrySource["usage"] } : {}),
+		...(typeof (result as unknown as { toolCount?: unknown }).toolCount === "number" ? { toolCount: (result as unknown as { toolCount: number }).toolCount } : {}),
+		...(statusPayload.steps[index]?.startedAt !== undefined ? { startedAt: statusPayload.steps[index]?.startedAt } : {}),
+		endedAt: accountingNow,
+		terminalCause: childTerminalCause(result as ChildTerminalFacts),
+		...result as ChildTerminalFacts,
+	}));
+	const groupReliability = groupTelemetry(groupTelemetrySources, { requested: statusPayload.steps.length });
+	statusPayload.groupCounters = groupReliability.counters;
+	statusPayload.groupState = groupReliability.state;
+	statusPayload.groupTelemetry = groupReliability;
+	for (const [index, step] of statusPayload.steps.entries()) {
+		const facts = results[index] as ChildTerminalFacts | undefined;
+		const terminalState = classifyChildTerminal({ ...facts, status: step.status });
+		if (terminalState) step.terminalState = terminalState;
+		const cause = childTerminalCause({ ...facts, status: step.status, terminalState });
+		if (terminalState) step.terminalCause = cause;
+		const result = results[index];
+		if (result) {
+			step.routeProvenance = buildChildRouteProvenance({
+				...(result.attemptedModels?.[0] ? { requestedModel: result.attemptedModels[0] } : {}),
+				...(result.model ? { model: result.model } : {}),
+				attemptedModels: result.attemptedModels,
+				modelAttempts: result.modelAttempts,
+				...(terminalState && cause ? { terminalCause: cause } : {}),
+				...(typeof result.error === "string" ? { error: result.error } : {}),
+			});
+		}
+	}
 	closeSteerInbox(asyncDir, statusPayload.state, (filePath, payload) => runPersistence.write(filePath, payload));
 	disposeControlInbox();
 	for (const request of consumeSteerRequests(asyncDir)) deliverSteerRequest(request);
@@ -5516,6 +5753,13 @@ async function runSubagent(
 				capabilityAudit: r.capabilityAudit,
 			})),
 			outputs,
+			// One compact group-finished envelope: counts, degraded state, summed
+			// telemetry and per-child result handles. The parent reads this instead
+			// of reconstructing the group from per-child wake-ups.
+			...(statusPayload.groupCounters ? { groupCounters: statusPayload.groupCounters } : {}),
+			...(statusPayload.groupState ? { groupState: statusPayload.groupState } : {}),
+			...(statusPayload.groupTelemetry ? { groupTelemetry: statusPayload.groupTelemetry } : {}),
+			...(statusPayload.spawnPreflight ? { spawnPreflight: statusPayload.spawnPreflight } : {}),
 			workflowGraph: statusPayload.workflowGraph,
 			parallelHandoff: statusPayload.parallelHandoff,
 			capabilityCeiling: statusPayload.capabilityCeiling,

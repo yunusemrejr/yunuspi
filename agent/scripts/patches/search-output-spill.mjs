@@ -58,23 +58,25 @@ const TOOLS = {
     indent: "                                ",
     occurrences: 1,
     anchor: {
-      original: () => [
-        "                                else {",
-        "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
-        "                                }",
-        "                                details = { truncation };",
-        "                            }",
-      ].join("\n"),
-      patched: () => [
-        "                                else {",
-        "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
-        "                                }",
-        "                                // Full raw output stays retrievable instead of vanishing at the byte cap.",
-        "                                const fullOutputPath = __piSpillOutput(\"pi-read\", selectedContent);",
-        "                                details = { truncation, fullOutputPath };",
-        "                                outputText += `\\n\\n[Full untruncated output: ${fullOutputPath}]`;",
-        "                            }",
-      ].join("\n"),
+      original: () =>
+        [
+          "                                else {",
+          "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
+          "                                }",
+          "                                details = { truncation };",
+          "                            }",
+        ].join("\n"),
+      patched: () =>
+        [
+          "                                else {",
+          "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
+          "                                }",
+          "                                // Full raw output stays retrievable instead of vanishing at the byte cap.",
+          '                                const fullOutputPath = __piSpillOutput("pi-read", selectedContent);',
+          "                                details = { truncation, fullOutputPath };",
+          "                                outputText += `\\n\\n[Full untruncated output: ${fullOutputPath}]`;",
+          "                            }",
+        ].join("\n"),
     },
   },
 };

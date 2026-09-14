@@ -291,6 +291,8 @@ interface TaskParam {
 	acceptance?: AcceptanceInput;
 	agentContract?: AgentContract;
 	toolBudget?: ToolBudgetConfig;
+	/** Explicit Git-authority delegation for this child (default read-only at the tool layer). */
+	gitAuthority?: boolean;
 }
 
 export interface SubagentParamsLike {
@@ -354,6 +356,8 @@ export interface SubagentParamsLike {
 	tasks?: TaskParam[];
 	concurrency?: number;
 	worktree?: boolean;
+	/** Call-level Git-authority delegation default; per-step gitAuthority overrides. Defaults to read-only children at the tool layer. */
+	gitAuthority?: boolean;
 	context?: "fresh" | "fork" | "profile";
 	/** Per-run intercom bridge config. It replaces the global config for this launch only. */
 	intercomBridge?: IntercomBridgeConfig;
@@ -3192,6 +3196,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		const defaults = <T extends SequentialStep | ParallelTaskItem>(step: T): T => compactOptional<T>({ ...step,
 			model: step.model ?? params.model, acceptance: step.acceptance ?? params.acceptance,
 			output: step.output ?? params.output, outputMode: step.outputMode ?? params.outputMode,
+			gitAuthority: step.gitAuthority ?? params.gitAuthority,
 		});
 		const rawChain: ChainStep[] = hasTasks
 			? [compactOptional<ParallelStep>({ parallel: params.tasks!.map(defaults), concurrency: params.concurrency, worktree: params.worktree })]
@@ -3818,6 +3823,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			maxSubagentDepth,
 			waitToolEnabled: deps.waitToolEnabled,
 			waitToolDefaultTimeoutMs: deps.waitToolDefaultTimeoutMs,
+			gitAuthority: params.gitAuthority === true ? true : undefined,
 			onUpdate: forwardSingleUpdate,
 			suppressUnchangedDelegationUpdates,
 			controlConfig,

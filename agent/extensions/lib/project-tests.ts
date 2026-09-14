@@ -2,6 +2,7 @@
  * write tests; the harness owns change revisions, execution receipts, stale
  * evidence and bounded continuation. There is no autonomous script executor. */
 import * as path from 'node:path';
+import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
@@ -10,12 +11,78 @@ import { registerContinuationSource } from './continuation-notice.ts';
 
 const ENTRY = 'project-test-checkpoint-v1';
 const MAX_FOLLOWUPS = 2;
-type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string };
+type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string };
 type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[] };
-type State = { root: string; revision: number; changed: string[]; assessment?: Assessment; checks: Check[]; followups: number; paused: boolean; optedOut: boolean };
-const fresh = (root = ''): State => ({ root, revision: 0, changed: [], checks: [], followups: 0, paused: false, optedOut: false });
+type State = { root: string; revision: number; changed: string[]; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
+const fresh = (root = ''): State => ({ root, revision: 0, changed: [], checks: [], evidence: [], followups: 0, paused: false, optedOut: false });
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+/** Stable identity of the observed sources: sorted path:hash entries hashed.
+ * Revision counters reset across scopes and reloads; the tree hash is what
+ * makes "the same code" comparable, so passed receipts stay reusable. */
+const treeHash = (sources: Record<string, string> | undefined) => {
+  if (!sources) return undefined;
+  return digest(JSON.stringify(Object.keys(sources).sort().map(k => `${k}:${sources[k]}`)));
+};
 const textOf = (content: any) => typeof content === 'string' ? content : Array.isArray(content) ? content.filter(p => p?.type === 'text').map(p => p.text ?? '').join('\n') : '';
+
+/** Content identity for reload reconciliation. Scan fingerprints are stat-based
+ * (size/mtime/ctime/ino), so a touch or an identical-output rebuild looks like
+ * a change; only a byte difference invalidates kept receipts. Files that
+ * cannot be hashed (oversized, unreadable, deleted) stay unhashable and force
+ * the conservative restore path. */
+const PROJECT_HASH_LIMIT = 1 << 20;
+const PROJECT_HASH_FILES = 64;
+function projectContentHash(root: string, file: string): string | undefined {
+  try {
+    const absolute = path.resolve(root, file);
+    const relative = path.relative(root, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+    const stat = fs.statSync(absolute);
+    if (!stat.isFile() || stat.size > PROJECT_HASH_LIMIT) return undefined;
+    return `${stat.size}:${createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')}`;
+  } catch { return undefined; }
+}
+/** Current bytes must match the bytes the persisted receipts were earned on,
+ * for every restored file, before kept state is trusted across a reload. */
+function verifyRestoredTree(root: string, changed: string[], persisted: unknown): Record<string, string> | undefined {
+  if (!persisted || typeof persisted !== 'object') return undefined;
+  const saved = persisted as Record<string, unknown>;
+  const verified: Record<string, string> = {};
+  for (const file of changed) {
+    const old = saved[file];
+    if (typeof old !== 'string') return undefined;
+    const current = projectContentHash(root, file);
+    if (!current || current !== old) return undefined;
+    verified[file] = current;
+  }
+  return verified;
+}
+function sanitizeRestoredAssessment(assessment: unknown, revision: number): Assessment | undefined {
+  if (!assessment || typeof assessment !== 'object') return undefined;
+  const candidate = assessment as any;
+  if (candidate.revision !== revision || !['required', 'not_needed', 'blocked'].includes(candidate.disposition) || typeof candidate.reason !== 'string') return undefined;
+  const checks = Array.isArray(candidate.checks) ? candidate.checks
+    .filter((c: any) => c && typeof c.key === 'string' && typeof c.label === 'string')
+    .map((c: any) => ({ key: c.key, label: c.label })) : [];
+  return { revision, disposition: candidate.disposition, reason: candidate.reason.slice(0, 1200), checks };
+}
+function sanitizeRestoredChecks(checks: unknown, revision: number): Check[] {
+  if (!Array.isArray(checks)) return [];
+  const out: Check[] = [];
+  for (const raw of checks.slice(-32)) {
+    if (!raw || typeof raw !== 'object' || (raw as any).revision !== revision || typeof (raw as any).key !== 'string') continue;
+    const candidate = raw as any;
+    if (!['passed', 'failed', 'unknown', 'running'].includes(candidate.outcome)) continue;
+    // In-flight checks can never be re-observed after a reload: demote
+    // running to unknown and drop dead task handles instead of stranding
+    // them in a state no event will ever resolve.
+    out.push({ key: candidate.key, label: typeof candidate.label === 'string' ? candidate.label : 'check', revision,
+      outcome: candidate.outcome === 'running' ? 'unknown' : candidate.outcome,
+      callId: typeof candidate.callId === 'string' ? candidate.callId : '',
+      ...(typeof candidate.tree === 'string' ? { tree: candidate.tree } : {}) });
+  }
+  return out;
+}
 
 /** A check receipt must describe the command that actually ran. Reject shell
  * composition, expansion and status masking; an echo of a runner is not a run.
@@ -63,11 +130,23 @@ export function projectTestNeed(state: State): string | null {
   const a = state.assessment;
   if (!a || a.revision !== state.revision) return 'assessment';
   if (a.disposition !== 'required') return null;
-  const checks = a.checks.length ? a.checks.map(p => [...state.checks].reverse().find(c => c.key === p.key && c.revision === state.revision))
-    : state.checks.filter(c => c.revision === state.revision);
-  if (checks.some(c => c?.outcome === 'running')) return 'running';
-  if (checks.some(c => c?.outcome === 'failed')) return 'failed';
-  if (!checks.length || checks.some(c => !c || c.outcome !== 'passed')) return 'missing';
+  const planned = a.checks.length ? a.checks.map(p => p.key)
+    : [...new Set(state.checks.filter(c => c.revision === state.revision).map(c => c.key))];
+  const live = [...state.checks].reverse();
+  const usable = (key: string) => {
+    const c = live.find(c => c.key === key && c.revision === state.revision);
+    if (c) return c;
+    // Reuse still-valid evidence: the same command key bound to the exact
+    // tree the scan observes now. Revision counters restart across scopes
+    // and reloads, so a passed receipt is honored without re-running only
+    // when its tree hash matches the current tree.
+    if (state.tree) { const e = state.evidence.find(e => e.key === key && e.tree === state.tree); if (e) return e; }
+    return undefined;
+  };
+  const resolved = planned.map(usable);
+  if (resolved.some(c => c?.outcome === 'running')) return 'running';
+  if (resolved.some(c => c?.outcome === 'failed')) return 'failed';
+  if (!resolved.length || resolved.some(c => !c || c.outcome !== 'passed')) return 'missing';
   return null;
 }
 
@@ -83,18 +162,33 @@ export function userSkipsProjectTests(input: string): boolean {
 export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts; onFacts?: (facts: any, observeChanges: boolean) => void } = {}) {
   let state = fresh(), facts: any, baseline: Record<string, string> | undefined, epoch = 0, active = true;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
-  let scanTail = Promise.resolve(), notedRevision = -1;
+  let scanTail = Promise.resolve(), notedRevision = -1, delivered = '';
+  let hashes: Record<string, string> = {};
   const starts = new Map<string, { revision: number; check: { key: string; label: string }; epoch: number }>();
   const earlyTerminals = new Map<string, any>();
   const discover = options.discover ?? projectTestFacts;
   const enabled = () => (process.env.PI_PROJECT_TESTS ?? 'on').toLowerCase() !== 'off';
   const capable = () => pi.getActiveTools?.().includes('project_tests') && pi.getActiveTools?.().some((t: string) => ['bash', 'bg_run'].includes(t));
-  const save = () => { try { pi.appendEntry?.(ENTRY, { ...state, changed: state.changed.slice(-128), checks: state.checks.slice(-32) }); } catch { /* history persistence is best effort */ } };
+  const save = () => { try { pi.appendEntry?.(ENTRY, { ...state, changed: state.changed.slice(-128), checks: state.checks.slice(-32),
+    hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => state.changed.includes(file)).slice(-128)) }); } catch { /* history persistence is best effort */ } };
   const changed = (files: string[]) => {
     if (!files.length) return;
     state.revision++;
     state.changed = [...new Set([...state.changed, ...files])].slice(-128);
     notedRevision = -1;
+    // Hash eagerly at change time: after a reload the in-memory map is gone,
+    // so only hashes persisted alongside the change can prove the tree is
+    // byte-identical later. Files are re-hashed on every change (a change is
+    // exactly when the old hash stops being true); unhashable files stay
+    // absent and force the conservative restore path.
+    for (const file of files) delete hashes[file];
+    let budgeted = PROJECT_HASH_FILES;
+    for (const file of files) {
+      if (budgeted <= 0) break;
+      const digest = state.root ? projectContentHash(state.root, file) : undefined;
+      if (digest) { hashes[file] = digest; budgeted--; }
+    }
+    for (const file of Object.keys(hashes)) if (!state.changed.includes(file)) delete hashes[file];
     save();
   };
   const scan = async (ctx: any, observeChanges = false) => {
@@ -121,12 +215,17 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         changed([...paths].filter(file => (observeChanges || state.changed.includes(file)) && next.sources[file] !== baseline![file] && (next.sources[file] !== undefined || !next.truncated)));
       }
       baseline = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
+      // Bind receipts to the exact observed tree. A truncated scan merges the
+      // previous baseline, so treeComplete records whether the hash covers
+      // the full observed tree or a merged partial view.
+      state.tree = treeHash(baseline);
+      state.treeComplete = next.truncated !== true;
       facts = next;
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };
   const summary = () => ({ ...state, disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
-    evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit.' });
+    evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit. Receipts are bound to the observed source tree hash; reuse across scopes requires an identical tree.' });
   const advice = () => {
     const need = projectTestNeed(state);
     if (!need || need === 'running') return '';
@@ -139,7 +238,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const receipt = (start: { revision: number; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
     state.checks = state.checks.filter(c => !(c.key === start.check.key && c.revision === start.revision));
-    state.checks.push({ ...start.check, revision: start.revision, outcome, callId, ...(handle ? { handle } : {}) });
+    state.checks.push({ ...start.check, revision: start.revision, outcome, callId, ...(state.tree ? { tree: state.tree } : {}), ...(handle ? { handle } : {}) });
     state.checks = state.checks.slice(-32); save();
   };
   const terminal = (task: any) => {
@@ -158,14 +257,38 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const api = {
     async restore(ctx: any) {
-      epoch++; active = true; state = fresh(); pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; starts.clear(); earlyTerminals.clear();
-      // The session branch remains the only durable owner. Restored receipts
-      // are stale until checked again; a reload never wakes work on its own.
+      epoch++; active = true; state = fresh(); pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear();
+      // The session branch remains the only durable owner, and a reload
+      // never wakes work on its own. Restored receipts never resume as live
+      // checks, but passed tree-bound evidence survives: the next scan
+      // recomputes the tree and reuse applies only on an identical hash
+      // (stale-marked by mismatch, never silently honored).
       const entry = ctx?.sessionManager?.getBranch?.().findLast((e: any) => e.type === 'custom' && e.customType === ENTRY);
       const data = entry?.data;
       if (data?.root === path.resolve(ctx?.cwd ?? '') && Number.isSafeInteger(data.revision) && Array.isArray(data.changed)) {
-        state = { ...fresh(data.root), revision: data.revision + 1, changed: data.changed.filter((p: any) => typeof p === 'string').slice(-128),
-          optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), paused: true };
+        // Restored receipts never resume as live checks, but passed
+        // tree-bound evidence survives: the next scan recomputes the tree
+        // and reuse applies only on an identical hash (stale-marked by
+        // mismatch, never silently honored).
+        const evidence = Array.isArray(data.evidence) ? data.evidence.filter((c: any) => c && typeof c.key === 'string' && typeof c.label === 'string' && typeof c.tree === 'string' && c.outcome === 'passed').slice(-32) : [];
+        // Byte-identical tree (content hashes persisted alongside the change
+        // match the current bytes for every restored file): the persisted
+        // assessment and receipts still describe this exact content, so they
+        // are restored at the same revision instead of resurrecting completed
+        // work as pending. Any byte difference, or a branch entry from before
+        // content hashes were persisted, takes the conservative path below.
+        const restoredChanged = data.changed.filter((p: any) => typeof p === 'string').slice(-128);
+        const verified = verifyRestoredTree(data.root, restoredChanged, (data as any)?.hashes);
+        if (verified) {
+          hashes = verified;
+          state = { ...fresh(data.root), revision: data.revision, changed: restoredChanged,
+            assessment: sanitizeRestoredAssessment((data as any)?.assessment, data.revision),
+            checks: sanitizeRestoredChecks((data as any)?.checks, data.revision),
+            optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), evidence, paused: true };
+        } else {
+          state = { ...fresh(data.root), revision: data.revision + 1, changed: restoredChanged,
+            optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), evidence, paused: true };
+        }
         pauseReason = 'reload';
       }
       await scan(ctx);
@@ -175,12 +298,15 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       // A completed scope is retained in branch history, not carried into an
       // unrelated later question as an outstanding test obligation.
       if (!state.paused && !state.optedOut && state.assessment && !projectTestNeed(state)) {
-        // Revisions restart in a fresh scope. Retire outstanding receipts so
-        // a late old check cannot collide with the new scope's revision.
+        // Revisions restart in a fresh scope. Retire live receipts but carry
+        // passed tree-bound evidence forward, so the next scope reuses a
+        // still-valid pass without re-running when the tree is identical — a
+        // late old check still cannot collide with the new scope's revision.
         epoch++; starts.clear(); earlyTerminals.clear();
-        const optedOut = state.optedOut; state = fresh(state.root); state.optedOut = optedOut;
+        const carry = [...state.evidence, ...state.checks.filter(c => c.outcome === 'passed' && typeof c.tree === 'string')].slice(-32);
+        const optedOut = state.optedOut; state = fresh(state.root); state.optedOut = optedOut; state.evidence = carry;
       }
-      state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1;
+      state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1; delivered = '';
       if (typeof event.text === 'string') {
         if (userSkipsProjectTests(event.text) || /^\s*(?:please )?(?:review only|read[ -]only(?: review)?)(?:,? (?:do not|don't) (?:edit|modify|change)(?: (?:any )?files)?)?[.!]?\s*$/i.test(event.text)) state.optedOut = true;
         else if (/\b(?:write|add|create|run|update|enable|resume)\b.{0,40}\btests?\b/i.test(event.text)) state.optedOut = false;
@@ -253,8 +379,13 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       await scan(ctx);
       if (ticket !== epoch || !active || !enabled() || !capable() || state.paused || state.optedOut || ctx?.signal?.aborted || state.followups >= MAX_FOLLOWUPS || ctx?.hasPendingMessages?.()) return;
       const content = advice(); if (!content) return;
+      // Edge-triggered: the same reason at the same revision with no new
+      // evidence never wakes the model again. The follow-up budget still
+      // bounds genuinely new reasons.
+      const key = `${state.revision}:${projectTestNeed(state)}`;
+      if (delivered === key) return;
       // Count only successful delivery, and never replenish on extension turns.
-      try { pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true }); state.followups++; save(); }
+      try { pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true }); state.followups++; delivered = key; save(); }
       catch { /* failed delivery may retry at the next native settled event */ }
     },
     shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); },

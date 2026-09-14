@@ -1872,6 +1872,55 @@
       "commands": []
     },
     {
+      "id": "research-toolkit",
+      "group": "web_media",
+      "summary": "Plan research angles and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research and verify primary sources.",
+      "entrypoints": [
+        "research_toolkit"
+      ],
+      "tools": [
+        "research_toolkit"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "plan",
+            "lead",
+            "company",
+            "source"
+          ],
+          "summary": "Toolkit operation."
+        },
+        {
+          "name": "goal|context",
+          "summary": "Research goal and optional context for plan."
+        },
+        {
+          "name": "name|company|role|domain",
+          "summary": "Candidate identity fields for lead/company."
+        },
+        {
+          "name": "sourceUrl|retrievedAt",
+          "summary": "Required http(s) provenance and timestamp."
+        },
+        {
+          "name": "evidence|quote",
+          "summary": "Bounded verbatim evidence for lead/company/source."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "memory-evidence",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/research-toolkit.ts"
+      ],
+      "doc": "docs/ISOLATION-AND-WEB.md",
+      "commands": []
+    },
+    {
       "id": "agentmail-email",
       "group": "communication",
       "summary": "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.",
@@ -1965,7 +2014,7 @@
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 227
+        "line": 251
       },
       {
         "name": "curator",
@@ -1985,12 +2034,17 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 767
+        "line": 784
       },
       {
         "name": "harness-backup",
         "source": "agent/extensions/harness-backup.ts",
         "line": 37
+      },
+      {
+        "name": "hook-audit",
+        "source": "agent/extensions/lib/session-telemetry.ts",
+        "line": 55
       },
       {
         "name": "jobs",
@@ -2065,12 +2119,12 @@
       {
         "name": "metrics",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 31
+        "line": 47
       },
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 643
+        "line": 650
       },
       {
         "name": "or-provider",
@@ -2110,7 +2164,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 467
+        "line": 525
       },
       {
         "name": "subagent-cost",
@@ -2509,7 +2563,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 590,
+        "line": 597,
         "kind": "literal"
       },
       {
@@ -2533,19 +2587,25 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 643,
+        "line": 660,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 332,
+        "line": 367,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
         "line": 86,
+        "kind": "literal"
+      },
+      {
+        "name": "research_toolkit",
+        "source": "agent/extensions/research-toolkit.ts",
+        "line": 57,
         "kind": "literal"
       },
       {
@@ -2563,7 +2623,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 532,
+        "line": 590,
         "kind": "literal"
       },
       {
@@ -2575,13 +2635,13 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 472,
+        "line": 530,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 516,
+        "line": 539,
         "kind": "literal"
       },
       {
@@ -2600,7 +2660,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 800,
+        "line": 829,
         "kind": "literal"
       },
       {
@@ -2648,7 +2708,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 149,
+        "line": 170,
         "kind": "literal"
       },
       {
@@ -2837,7 +2897,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 590,
+        "line": 597,
         "kind": "literal"
       },
       {
@@ -2849,19 +2909,25 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 643,
+        "line": 660,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 332,
+        "line": 367,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
         "line": 86,
+        "kind": "literal"
+      },
+      {
+        "name": "research_toolkit",
+        "source": "agent/extensions/research-toolkit.ts",
+        "line": 57,
         "kind": "literal"
       },
       {
@@ -2879,7 +2945,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 532,
+        "line": 590,
         "kind": "literal"
       },
       {
@@ -2891,19 +2957,19 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 472,
+        "line": 530,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 516,
+        "line": 539,
         "kind": "literal"
       },
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 800,
+        "line": 829,
         "kind": "literal"
       },
       {
@@ -2921,7 +2987,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 149,
+        "line": 170,
         "kind": "literal"
       },
       {
@@ -3123,11 +3189,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 516,
-      "registrationSites": 58,
+      "sourceFiles": 524,
+      "registrationSites": 59,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 76,
-      "uniqueStableTools": 75,
+      "stableRegistrationRows": 77,
+      "uniqueStableTools": 76,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -3228,6 +3294,10 @@
       },
       {
         "path": "agent/extensions/render-and-wait.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/research-toolkit.ts",
         "exists": true
       },
       {
@@ -3333,6 +3403,14 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/effort-policy.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/git-authority.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/guidance-topics-domains.ts",
         "exists": true
       },
@@ -3358,6 +3436,10 @@
       },
       {
         "path": "agent/extensions/lib/health-log.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/hook-ledger.ts",
         "exists": true
       },
       {
@@ -3811,11 +3893,19 @@
         "exists": true
       },
       {
+        "path": "agent/scripts/effort-audit.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/scripts/harness-readonly-exec.py",
         "exists": true
       },
       {
         "path": "agent/scripts/lib/core-compatibility.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/lib/effort-audit.mjs",
         "exists": true
       },
       {
@@ -3852,6 +3942,10 @@
       },
       {
         "path": "agent/scripts/systemd/pi-smol-preprocessor.service",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/transaction.mjs",
         "exists": true
       },
       {
@@ -3898,6 +3992,10 @@
       },
       {
         "path": "agent/scripts/patches/context-settings.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/edit-optimistic-concurrency.mjs",
         "kind": "mjs"
       },
       {

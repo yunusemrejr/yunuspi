@@ -10,6 +10,8 @@ import type { AgentConfig } from "../agents/agents.ts";
 import type { FSWatcher } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelScopeRule } from "../runs/shared/model-scope.ts";
+import type { ChildSpawnPreflight, ChildRouteProvenance } from "../runs/shared/child-spawn-preflight.ts";
+import type { ChildTerminalCause, ChildTerminalState, GroupCounters, GroupLifecycleState, GroupTelemetry } from "../runs/shared/group-reliability.ts";
 import type { ResolvedSubagentCapabilityCeiling, SubagentCapabilityAudit } from "../runs/shared/capability-ceiling.ts";
 import type { AuthorityPolicyConfig } from "../policy/authority.ts";
 import type { ThinkingLevel } from "./model-info.ts";
@@ -1343,6 +1345,12 @@ export interface WaitCompletionChild {
 	outputState?: SubagentOutputState;
 	error?: string;
 	model?: string;
+	/** Normalized terminal state of the child (succeeded/failed/cancelled/timed_out). */
+	terminalState?: ChildTerminalState;
+	/** Why the child ended; the parent's diagnostic, not its retry decision. */
+	terminalCause?: ChildTerminalCause;
+	/** Provider that actually served the child, when recorded as-run. */
+	provider?: string;
 	contextOverflow?: boolean;
 	artifactPaths?: Partial<ArtifactPaths>;
 	timeoutRecovery?: TimeoutRecoveryProjection;
@@ -1362,6 +1370,9 @@ export interface WaitCompletion {
 	archivePath?: string;
 	results?: WaitCompletionChild[];
 	workflowChildren?: WorkflowChildSummaryV1;
+	/** Compact group-finished envelope: counters, degraded state, one line per child. */
+	groupCounters?: GroupCounters;
+	groupState?: GroupLifecycleState;
 }
 
 export interface AgentCapabilitiesSnapshot {
@@ -1798,6 +1809,8 @@ export interface AsyncStatus {
 	activityMetrics?: Partial<Record<"swarms" | "fusions" | "recoveries", number>>;
 	lifecycleArtifactVersion?: SubagentLifecycleArtifactVersion;
 	runId: string;
+	/** Monotonic revision for guarded status.json writes; newer writers win. */
+	revision?: number;
 	/** Parent Pi process/window that owns local completion delivery. */
 	completionOwnerId?: string;
 	/** Host tool-call id retained when it differs from the internal run id. */
@@ -1844,6 +1857,14 @@ export interface AsyncStatus {
 	parallelGroups?: AsyncParallelGroupStatus[];
 	workflowGraph?: WorkflowGraphSnapshot;
 	preflight?: WorkflowPreflightV1;
+	/** Pre-spawn preflight record: route, credentials, provider health, economy, budget. */
+	spawnPreflight?: ChildSpawnPreflight;
+	/** Per-group terminal accounting: completion is defined by terminal children, not successful ones. */
+	groupCounters?: GroupCounters;
+	/** Explicit group lifecycle state, including RUNNING_DEGRADED / FINISHED_DEGRADED. */
+	groupState?: GroupLifecycleState;
+	/** Unified telemetry summed across the group's children. */
+	groupTelemetry?: GroupTelemetry;
 	processTerminal?: ProcessTerminalV1;
 	runFanoutBudget?: RunFanoutBudgetSnapshot;
 	runFanoutBudgetDescriptor?: RunFanoutBudgetDescriptor;
@@ -1888,6 +1909,14 @@ export interface AsyncStatus {
 		outputName?: string;
 		structured?: boolean;
 		status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected";
+		/** Normalized terminal state (succeeded/failed/cancelled/timed_out); absent while running. */
+		terminalState?: ChildTerminalState;
+		/** Why the child ended; drives metrics and the parent-facing summary. */
+		terminalCause?: ChildTerminalCause;
+		/** Circuit-breaker trip that ended this child, when one fired. */
+		breakerReason?: string;
+		/** Requested model -> selected route -> attempted provider/model -> fallback -> terminal reason. */
+		routeProvenance?: ChildRouteProvenance;
 		stopRequested?: boolean;
 		stopRequestedAt?: number;
 		children?: NestedRunSummary[];
@@ -2393,6 +2422,8 @@ export interface RunSyncOptions {
 	waitToolEnabled?: boolean;
 	/** Effective parent default wait window propagated to the child runtime. */
 	waitToolDefaultTimeoutMs?: number;
+	/** Explicit Git-authority delegation for this child (commit/push); default read-only at the tool layer. */
+	gitAuthority?: boolean;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	runFanoutBudget?: RunFanoutBudgetDescriptor;
 	nestedRoute?: NestedRouteInfo;

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
+import { decideStatusWrite } from "../shared/status-revision.ts";
 import {
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
 	type AsyncStatus,
@@ -225,16 +226,21 @@ function overlayStatus(asyncDir: string, proof: ProcessTerminalV1, candidate?: P
 	const statusPath = path.join(asyncDir, "status.json");
 	try {
 		const status = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as AsyncStatus;
-		status.processTerminal = proof;
+		// Guarded read-modify-write: a newer writer (reconciler repair or the
+		// runner's final state) must survive our proof overlay instead of
+		// being clobbered by the stale copy we just read.
+		const next = { ...status, processTerminal: proof } as AsyncStatus;
 		if (status.steps) {
-			for (const [index, step] of status.steps.entries()) {
+			next.steps = status.steps.map((step, index) => {
 				const records = candidate?.writers[String(index)] ?? [];
 				const expected = candidate?.expectedWriters?.[String(index)] ?? (records.length > 0 ? records.length : 0);
 				const stepState = expected === 0 ? "not-started" : proof.state === "observed" && records.length === expected ? "observed" : proof.state === "pending" ? "pending" : "unknown";
-				step.processTerminal = stepProcessTerminalProof(proof, index, stepState, records, resumeDisposition(step.status, step.sessionFile ?? candidate?.sessionFile));
-			}
+				return { ...step, processTerminal: stepProcessTerminalProof(proof, index, stepState as never, records, resumeDisposition(step.status, step.sessionFile ?? candidate?.sessionFile)) };
+			});
 		}
-		writeAtomicJson(statusPath, status);
+		const decision = decideStatusWrite(status, next);
+		if (decision.action !== "write") return;
+		writeAtomicJson(statusPath, { ...next, revision: decision.revision });
 	} catch {
 		// The proof sidecar remains authoritative when terminal status is unavailable.
 	}

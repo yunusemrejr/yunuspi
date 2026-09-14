@@ -62,6 +62,7 @@ import {
 	PERMISSION_POLICY_ENV,
 	type PermissionRules,
 } from "./permissions.ts";
+import { PI_GIT_AUTHORITY_ENV } from "../../../../lib/git-authority.ts";
 import {
 	SUBAGENT_CAPABILITY_CEILING_ENV,
 	capabilityCeilingAgentRestrictionSources,
@@ -221,6 +222,10 @@ export interface BuildPiArgsInput {
 	taskDelivery?: SubagentTaskDelivery;
 	waitToolEnabled?: boolean;
 	waitToolDefaultTimeoutMs?: number;
+	/** Explicit Git-authority delegation for this child. Every child defaults to
+	 *  commit=false/push=false at the tool layer (PI_GIT_AUTHORITY=read-only,
+	 *  enforced by the child runtime extension); true sets "delegate". */
+	gitAuthority?: boolean;
 	allowNestedSubagents?: boolean;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	thinkingCeiling?: import("../../shared/model-info.ts").ThinkingLevel;
@@ -859,6 +864,7 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 			? JSON.stringify(toolPlan.effectiveMcpTools)
 			: undefined;
 	env[SUBAGENT_CHILD_ENV] = "1";
+	env[PI_GIT_AUTHORITY_ENV] = input.gitAuthority === true ? "delegate" : "read-only";
 	env[SUBAGENT_FANOUT_CHILD_ENV] = toolPlan.fanoutAuthorized ? "1" : "0";
 	if (input.waitToolEnabled !== undefined) {
 		env[WAIT_TOOL_ENABLED_ENV] = input.waitToolEnabled ? "true" : "false";

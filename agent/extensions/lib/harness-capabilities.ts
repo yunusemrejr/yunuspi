@@ -776,6 +776,25 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/LOCAL-INTELLIGENCE.md",
 	}),
 	capability({
+		id: "research-toolkit",
+		group: "web_media",
+		summary: "Plan research angles and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research and verify primary sources.",
+		entrypoints: ["research_toolkit"],
+		tools: ["research_toolkit"],
+		options: [
+			option("action", "Toolkit operation.", ["plan", "lead", "company", "source"]),
+			option("goal|context", "Research goal and optional context for plan."),
+			option("name|company|role|domain", "Candidate identity fields for lead/company."),
+			option("sourceUrl|retrievedAt", "Required http(s) provenance and timestamp."),
+			option("evidence|quote", "Bounded verbatim evidence for lead/company/source."),
+		],
+		related: ["web-and-media", "memory-evidence", "safety-bounds"],
+		sourceFiles: [
+			"agent/extensions/research-toolkit.ts",
+		],
+		doc: "agent/public-template/docs/ISOLATION-AND-WEB.md",
+	}),
+	capability({
 		id: "agentmail-email",
 		group: "communication",
 		summary: "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.",

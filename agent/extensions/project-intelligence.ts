@@ -99,6 +99,7 @@ export default function projectIntelligence(pi: any) {
     cwd = "",
     session = "",
     capsule = "",
+    capsuleRevision = -1,
     task = "",
     activityState = "idle",
     generation = 0,
@@ -152,6 +153,7 @@ export default function projectIntelligence(pi: any) {
     scope.cancel();
     closed = false;
     capsule = "";
+    capsuleRevision = -1;
     identity = undefined;
     task = "";
     retrieval = { query: "", options: {} };
@@ -179,6 +181,7 @@ export default function projectIntelligence(pi: any) {
     assertCurrent(current, epoch, ctx);
     identity = info.identity;
     capsule = bounded(info.overview, 1100);
+    capsuleRevision = Number(info.overview?.revision ?? -1);
     // Discovery starts for unknown projects automatically; no tool call required.
     refreshPromise = refresh(ctx).catch(() => {});
     heartbeat = setInterval(() => {
@@ -224,11 +227,22 @@ export default function projectIntelligence(pi: any) {
         },
         { timeout: 1500 },
       );
-      if (epoch === generation && serial === retrievalSerial)
-        capsule = bounded(result);
+      // Cache stability: same-revision retrievals keep the anchored bytes,
+      // so per-query briefs never churn the block mid-history (each byte
+      // change would move the block and invalidate the provider cache
+      // prefix). Freshness: a newer graph revision (newly indexed evidence)
+      // invalidates the committed capsule. Committing only the first-ever
+      // retrieval froze the pre-index overview permanently.
+      if (epoch === generation && serial === retrievalSerial) {
+        const revision = Number(result?.revision ?? -1);
+        if (!capsule || revision > capsuleRevision) {
+          capsule = bounded(result);
+          capsuleRevision = revision;
+        }
+      }
       return result;
     } catch {
-      if (epoch === generation && serial === retrievalSerial)
+      if (!capsule && epoch === generation && serial === retrievalSerial)
         capsule =
           "Current graph retrieval unavailable; inspect source dependencies directly or retry project_intel. Previous context is not evidence for this target.";
     }
@@ -484,7 +498,10 @@ export default function projectIntelligence(pi: any) {
             display: false,
             timestamp: 0,
           },
-          `${generation}:${inputGeneration}`,
+          // Epoch identifies the client/session identity only. A per-turn
+          // component would force an unchanged block to the tail every turn,
+          // rewriting history and invalidating the cached prefix.
+          `${generation}`,
         ),
       };
     };

@@ -457,6 +457,7 @@ async function runSingleAttempt(
 		childWatchdog,
 		waitToolEnabled: options.waitToolEnabled,
 		waitToolDefaultTimeoutMs: options.waitToolDefaultTimeoutMs,
+		gitAuthority: options.gitAuthority,
 		capabilityCeiling: options.capabilityCeiling,
 		thinkingCeiling: options.thinkingCeiling,
 		extensionBindings: options.extensionBindings,

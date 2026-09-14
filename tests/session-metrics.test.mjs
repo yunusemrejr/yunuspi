@@ -342,12 +342,16 @@ test("SDK and CLI hook patches are idempotent and reject changed anchors or payl
     ["list2.push(handler),extension.handlers.set(event,list2)", true],
   ]) {
     const patched = transform(source, bundled);
-    assert.match(patched, /PI_HOOK_METRICS_V2/);
+    assert.match(patched, /PI_HOOK_METRICS_V3/);
     assert.equal(transform(patched, bundled), patched);
+    assert.ok(
+      patched.includes("performance.now()"),
+      "drift probe must land inside the installed payload",
+    );
     assert.throws(
       () =>
         transform(
-          patched.replace("ms:performance.now()-started", "ms:0"),
+          patched.replace("performance.now()", "Date.now()"),
           bundled,
         ),
       /drift/,

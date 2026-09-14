@@ -43,6 +43,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { launcherSpec, activePiProcesses } from "./core-update.mjs";
+import { leaseBlockingTarget } from "./write-lease.mjs";
 
 // WHY promisified execFile over a hand-rolled spawn wrapper: the runtime
 // already gives timeout (SIGTERM after N ms), maxBuffer output capping, and
@@ -66,8 +67,37 @@ async function checkSourceSyntax(file) {
     );
   else if (file.endsWith(".sh"))
     await execFileP("/bin/bash", ["-n", file], options);
-  else if (file.endsWith(".service"))
-    await execFileP("systemd-analyze", ["--user", "verify", file], options);
+  else if (file.endsWith(".service")) {
+    // Static shape first: always available, catches gross corruption
+    // (truncation, wrong file) without emulating systemd. Full semantic
+    // verification still runs below whenever a user bus exists.
+    const lines = fs
+      .readFileSync(file, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && !line.startsWith(";"));
+    if (
+      !lines.some((line) => /^\[service\]$/i.test(line)) ||
+      !lines.some((line) => /^execstart\s*=/i.test(line))
+    )
+      throw new Error(`service unit ${path.basename(file)} lacks a [Service] section or ExecStart`);
+    // systemd-analyze --user needs a user bus; containers and sandboxes have
+    // none. That is "cannot validate here", not a unit syntax error: real
+    // unit errors name the offending setting, bus failures name the bus.
+    try {
+      await execFileP("systemd-analyze", ["--user", "verify", file], options);
+    } catch (e) {
+      const msg = (e.stderr || e.message || "").toString();
+      if (
+        e.code === "ENOENT" ||
+        /failed to allocate user lookup socket|failed to connect to bus|d-bus.*(not available|cannot)|cannot connect.*bus/i.test(
+          msg,
+        )
+      )
+        return "systemd user bus unavailable; only static shape checked";
+      throw e;
+    }
+  }
   else if (/\.(?:[cm]?[jt]s|tsx|jsx)$/.test(file))
     await execFileP(
       "node",
@@ -266,6 +296,7 @@ async function checkPatch(file, label) {
     return;
   }
   let applied = 0;
+  let deferred = 0;
   for (const t of targets) {
     // WHY enforce the contract here: this is the sole consumer of targets().
     // A malformed module (e.g. a target without exists(), the 2026-08-31
@@ -292,6 +323,16 @@ async function checkPatch(file, label) {
         applied++;
         ok(`${t.name}: patch present`);
       } else if (FIX) {
+        const leaseHit = leaseBlockingTarget(t);
+        if (leaseHit) {
+          // Write-lease deferral: another writer holds a live lease on a
+          // target file. Racing it would corrupt the file mid-apply; the
+          // quiescent watchdog pass re-applies. Deferred is NOT a failure.
+          deferred++;
+          info(
+            `${t.name}: patch deferred — file leased by ${leaseHit.owner} (applies on next quiescent pass)`,
+          );
+        } else {
         t.apply();
         if (!t.isApplied())
           throw new Error(
@@ -299,6 +340,7 @@ async function checkPatch(file, label) {
           );
         applied++;
         fixed(`${t.name}: patch re-applied (was wiped by update)`);
+        }
       } else {
         bad(`${t.name}: patch MISSING — re-run with --fix`);
       }
@@ -306,10 +348,15 @@ async function checkPatch(file, label) {
       bad(`${t.name}: check/apply threw — ${String(e.message ?? e)}`);
     }
   }
-  if (applied === 0) {
+  if (applied === 0 && deferred === 0) {
     bad(`${label}: no targets applied — manual review needed`);
   }
 }
+
+// Write-lease gate: leaseFilesOf/leaseBlockingTarget live in
+// scripts/write-lease.mjs (single implementation, covered by its bench). A
+// patch target whose file carries a live foreign lease is DEFERRED in the
+// loop above, not failed; the quiescent watchdog pass re-applies it.
 
 // ── pi package location ────────────────────────────────────────────────
 function findPiPackage() {
@@ -449,15 +496,21 @@ async function main() {
     const parseResults = await Promise.all(
       parseTargets.sort().map(async (p) => {
         try {
-          await checkSourceSyntax(p);
-          return null;
+          const skipped = await checkSourceSyntax(p);
+          return skipped
+            ? { skipped: `${path.basename(p)}: ${skipped}` }
+            : null;
         } catch (e) {
           return `${path.basename(p)}: ${(e.stderr || e.message).toString().slice(0, 400)}`;
         }
       }),
     );
-    for (const failure of parseResults.filter(Boolean))
+    for (const failure of parseResults.filter((r) => typeof r === "string"))
       bad(`syntax error in ${failure}`);
+    for (const skip of parseResults.filter(
+      (r) => typeof r === "object" && r !== null,
+    ))
+      info(`validation skipped for ${skip.skipped}`);
     if (!parseResults.some(Boolean))
       ok(
         `all ${parseTargets.length} extension/lib/support files validate (JS/TS/Python syntax, JSON data and systemd units)`,

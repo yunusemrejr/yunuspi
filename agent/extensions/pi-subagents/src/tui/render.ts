@@ -26,6 +26,7 @@ import {
 	WIDGET_KEY,
 } from "../shared/types.ts";
 import { previewDisplayText, sanitizeDisplayText, truncateDisplayText } from "../shared/display-text.ts";
+import { groupCounters, groupLifecycleState, type ChildTerminalFacts, type GroupLifecycleState } from "../runs/shared/group-reliability.ts";
 import { FLEET_OPEN_SHORTCUT, formatShortcutLabel } from "../shared/shortcuts.ts";
 import { formatContextUsage, formatTokens, formatUsage, formatDuration, formatModelThinking, formatToolCall, formatTokenUsage, shortenPath } from "../shared/formatters.ts";
 import { getDisplayItems, getSingleResultOutput, PROMPT_REDACTED } from "../shared/utils.ts";
@@ -911,43 +912,62 @@ function isFailedResult(result: Details["results"][number]): boolean {
 	return typeof result.exitCode === "number" && result.exitCode !== 0;
 }
 
-/** One owner for parallel-group counters. `done` counts *terminal* children —
- * including failed ones — because a group finishes when every child is
- * terminal, not when every child succeeded. */
-export function groupProgressCounts(details: Details, groupStart: number, groupSize: number): { running: number; done: number; failed: number; total: number } {
-	let running = 0;
-	let done = 0;
-	let failed = 0;
+/** One owner for parallel-group counters. `terminal` counts children that can
+ * no longer change (succeeded, failed, stopped, cancelled, timed out) because
+ * a group finishes when every child is terminal, not when every child
+ * succeeded. `done` is the legacy alias of `terminal`; prefer the explicit
+ * running/succeeded/failed/terminal/degraded fields so a group with failures
+ * can never read as quietly complete (e.g. bare "0/5 done"). */
+export function groupProgressCounts(details: Details, groupStart: number, groupSize: number): { running: number; succeeded: number; failed: number; stopped: number; cancelled: number; timed_out: number; terminal: number; done: number; degraded: boolean; total: number; requested: number; state: GroupLifecycleState } {
+	// Project TUI evidence into the shared terminal taxonomy: completion is
+	// counted by TERMINAL children, so failed/cancelled/timed-out children stay
+	// visible in the counters and never in the running count.
+	const children: ChildTerminalFacts[] = [];
 	for (let index = groupStart; index < groupStart + groupSize; index++) {
 		const progressEntry = details.progress?.find((progress) => progress.index === index);
 		const resultEntry = details.results.find((result) => result.progress?.index === index) ?? details.results[index];
 		if (resultEntry && isTerminalResult(resultEntry)) {
-			done++;
-			if (isFailedResult(resultEntry)) failed++;
-			continue;
-		}
-		if (progressEntry?.status === "running") {
-			running++;
+			children.push({
+				...(resultEntry.progress?.status ? { status: resultEntry.progress.status } : {}),
+				...((resultEntry as { stopped?: unknown }).stopped === true ? { stopped: true } : {}),
+				...(resultEntry.interrupted === true ? { interrupted: true } : {}),
+				...(resultEntry.detached === true ? { detached: true } : {}),
+				...(typeof resultEntry.exitCode === "number" ? { exitCode: resultEntry.exitCode } : {}),
+				...(isFailedResult(resultEntry) ? { ok: false } : { ok: true }),
+			});
 			continue;
 		}
 		if (progressEntry?.status === "completed") {
-			done++;
+			children.push({ ok: true, status: "completed" });
 			continue;
 		}
 		if (resultEntry && isDoneResult(resultEntry)) {
-			done++;
+			children.push({ ok: true });
 			continue;
 		}
 		if (resultEntry && isFailedResult(resultEntry)) {
-			failed++;
-			done++;
+			children.push({ ok: false, ...(typeof resultEntry.exitCode === "number" ? { exitCode: resultEntry.exitCode } : {}) });
 			continue;
 		}
-		// No terminal evidence yet: the child has not finished. Counting it keeps
-		// `done + running === total`, so a group can never look quietly complete.
-		running++;
+		// No terminal evidence yet: the child has not finished. Non-terminal
+		// children keep `terminal + running === total`.
+		children.push(progressEntry?.status ? { status: progressEntry.status } : {});
 	}
-	return { running, done, failed, total: groupSize };
+	const counters = groupCounters(children, { requested: groupSize });
+	return {
+		running: counters.running,
+		succeeded: counters.succeeded,
+		failed: counters.failed,
+		stopped: counters.cancelled,
+		cancelled: counters.cancelled,
+		timed_out: counters.timed_out,
+		terminal: counters.terminal,
+		done: counters.terminal,
+		degraded: counters.degraded,
+		total: groupSize,
+		requested: counters.requested,
+		state: groupLifecycleState(counters),
+	};
 }
 
 function detailsHaveRunningResult(details: Details): boolean {
@@ -1688,10 +1708,14 @@ function buildMultiProgressLabel(details: Pick<Details, "mode" | "results" | "pr
 			statuses[index] = status;
 		}
 		const running = statuses.filter((status) => status === "running").length;
-		const done = statuses.filter((status) => status === "completed").length;
+		const succeeded = statuses.filter((status) => status === "completed").length;
+		const failed = statuses.filter((status) => status === "failed").length;
+		const stopped = statuses.filter((status) => status === "stopped").length;
+		const terminal = succeeded + failed + stopped;
+		const stateLabel = `${terminal}/${totalCount} terminal (${succeeded} succeeded · ${failed} failed${stopped ? ` · ${stopped} stopped` : ""})${failed + stopped > 0 && terminal === totalCount ? " · degraded" : ""}`;
 		const headerLabel = hasRunning
-			? `${formatAgentRunningLabel(running)} · ${done}/${totalCount} done`
-			: `${done}/${totalCount} done`;
+			? `${formatAgentRunningLabel(running)} · ${stateLabel}`
+			: stateLabel;
 		return { headerLabel, itemTitle, totalCount, hasParallelInChain, activeParallelGroup, groupStartIndex: 0, groupEndIndex: totalCount, showActiveGroupOnly: false, logicalStepCount: totalCount };
 	}
 
@@ -1701,12 +1725,11 @@ function buildMultiProgressLabel(details: Pick<Details, "mode" | "results" | "pr
 		const groupSize = span?.count ?? 1;
 		const counts = groupProgressCounts(details, groupStart, groupSize);
 		const running = counts.running;
-		const done = counts.done;
-		const failedSuffix = counts.failed ? ` · ${counts.failed} failed` : "";
+		const stateLabel = `${counts.terminal}/${groupSize} terminal (${counts.succeeded} succeeded · ${counts.failed} failed${counts.stopped ? ` · ${counts.stopped} stopped` : ""}${counts.timed_out ? ` · ${counts.timed_out} timed out` : ""})${counts.degraded ? ` · ${counts.state}` : ""}`;
 		const totalSteps = details.totalSteps ?? details.chainAgents?.length ?? 1;
 		const headerLabel = hasRunning
-			? `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${formatAgentRunningLabel(running)} · ${done}/${groupSize} done${failedSuffix}`
-			: `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${done}/${groupSize} done${failedSuffix}`;
+			? `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${formatAgentRunningLabel(running)} · ${stateLabel}`
+			: `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${stateLabel}`;
 		return { headerLabel, itemTitle, totalCount: groupSize, hasParallelInChain, activeParallelGroup, groupStartIndex: groupStart, groupEndIndex: groupEnd, showActiveGroupOnly: true, logicalStepCount: totalSteps };
 	}
 

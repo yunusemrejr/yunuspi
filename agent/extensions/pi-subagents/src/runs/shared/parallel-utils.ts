@@ -69,6 +69,8 @@ export interface RunnerSubagentStep {
 	toolTimeoutMs?: number;
 	waitToolEnabled?: boolean;
 	waitToolDefaultTimeoutMs?: number;
+	/** Explicit Git-authority delegation for this child (commit/push); default read-only at the tool layer. */
+	gitAuthority?: boolean;
 	structuredOutput?: import("./structured-output.ts").StructuredOutputRuntime;
 	structuredOutputSchema?: import("../../shared/types.ts").JsonSchemaObject;
 	agentContract?: import("../../shared/types.ts").AgentContract;

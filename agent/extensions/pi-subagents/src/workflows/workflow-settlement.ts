@@ -7,6 +7,7 @@ import type {
 } from "../shared/types.ts";
 import type { WorkflowReceipt } from "./workflow-receipt.ts";
 import { workflowChildSummary } from "./workflow-child-summary.ts";
+import { groupCounters, groupLifecycleState } from "../runs/shared/group-reliability.ts";
 
 export const UNSUPPORTED_DETACHED_WORKFLOW_CONTINUATION = "unsupported-continuation: detached workflow child settled, but JavaScript workflow continuation was not persisted. Resume the workflow explicitly instead of treating the completed child as top-level workflow completion.";
 export const INTERRUPTED_DETACHED_CHILD = "Interrupted. Waiting for explicit next action.";
@@ -233,11 +234,15 @@ export function planWorkflowSettlement(input: {
 		timestamp: now,
 	};
 	const terminal = status.state === "complete" || status.state === "failed" || status.state === "partial" || status.state === "stopped";
+	const completionCounters = terminal ? groupCounters(input.children) : undefined;
 	const completionEvent = terminal ? {
 		type: "subagent.workflow.completed",
 		state: status.state,
 		...(resolution ? { workflowResolution: resolution } : {}),
 		...(input.terminalOutcome ? { terminalOutcome: input.terminalOutcome } : {}),
+		// Compact group-finished envelope: the parent reads counts and result
+		// handles here instead of re-walking one wake-up per child.
+		...(completionCounters ? { groupCounters: completionCounters, groupState: groupLifecycleState(completionCounters) } : {}),
 		...(status.error ? { error: status.error } : {}),
 		...(status.activityState ? { activityState: status.activityState } : {}),
 		...input.eventMetadata,

@@ -20,6 +20,16 @@
 //   * per-hook injected characters come from session-metrics-v1 entries, which
 //     are CUMULATIVE within a segment. They are deduplicated by segment id
 //     (max per segment) before summing, otherwise totals overcount ~100x.
+//   * resume gaps (analyzeResumeGaps) attribute a cache miss across two
+//     consecutive provider requests to provider-side expiry vs harness-side
+//     mutation. The discriminator is the prompt-prefix identity: a stable hash
+//     over message roles+content (usage, timestamps, provider, model and ids
+//     excluded) plus the presence+size of injected custom blocks. An appended
+//     trailing message preserves the prefix (providers cache the common
+//     prefix), so growth alone is not a mutation. Same prefix + miss after a
+//     long idle gap reads as provider-side TTL expiry; a changed prefix (or a
+//     route change, or a compaction in between) reads as harness-side. Cache
+//     age is supporting evidence, never ground truth about provider TTLs.
 //
 // Privacy: the scan returns counts, identifiers (tool/model names, file
 // basenames) and dates only. It never returns message text or commands.
@@ -32,6 +42,8 @@
 //   * Provider routes without prompt caching report cacheRead == 0; those are
 //     counted as no-cache turns, not as harness-visible invalidations.
 
+import { createHash } from "node:crypto";
+
 export const TOKEN_COST_LIMITS = Object.freeze({
   maxFiles: 4000,
   maxFileBytes: 64 * 1024 * 1024,
@@ -40,6 +52,8 @@ export const TOKEN_COST_LIMITS = Object.freeze({
   minExcessTokens: 3000,
   charsPerToken: 4,
   topCount: 12,
+  idleReferenceMs: 5 * 60 * 1000,
+  maxResumeGaps: 50,
 });
 
 const LIVE_ROLES = new Set(["assistant", "user", "toolResult"]);
@@ -103,6 +117,170 @@ const routeOf = (message) => {
   return `${provider} / ${model}`;
 };
 
+// ── resume-after-idle cache destruction ────────────────────────────────
+// Bounds hashing per message so one pathological tool payload cannot dominate.
+const RESUME_SEGMENT_LIMIT = 4096;
+
+function resumeSegment(kind, body) {
+  const text =
+    typeof body === "string" ? body.slice(0, RESUME_SEGMENT_LIMIT) : "";
+  return `${kind}:${createHash("sha256").update(text).digest("hex")}`;
+}
+
+/** One stable segment per message: role plus visible content only. */
+function resumeMessageSegment(message) {
+  const parts = [];
+  const c = message?.content;
+  if (typeof c === "string") parts.push(`text:${c}`);
+  else if (Array.isArray(c)) {
+    for (const part of c) {
+      if (!part || typeof part !== "object") continue;
+      if (typeof part.text === "string") parts.push(`text:${part.text}`);
+      if (typeof part.thinking === "string")
+        parts.push(`thinking:${part.thinking}`);
+      if (part.type === "toolCall") {
+        let args = "";
+        try {
+          args = JSON.stringify(part.arguments ?? {});
+        } catch {
+          /* unstringifiable arguments only lose that estimate */
+        }
+        parts.push(`toolCall:${part.name ?? ""}:${args}`);
+      }
+    }
+  }
+  return resumeSegment(`msg:${message?.role ?? "?"}`, parts.join("\n"));
+}
+
+/**
+ * Attribute cache misses across consecutive provider requests to
+ * provider-side expiry vs harness-side mutation. Pure; no I/O. Boundary
+ * evidence carries custom entry TYPES (and injected-block sizes via the
+ * prefix hash) only — never transcript text, tool arguments or commands.
+ *
+ * Returns { totals, gaps } where each gap is { turn, gapMs, prefixSame,
+ * cacheBefore, cacheAfter, inputAfter, classification, boundary, route }.
+ * Classifications: hit | cache-write | provider-expiry-likely |
+ * harness-mutation | unexplained-miss | post-compaction.
+ */
+export function analyzeResumeGaps(entries, options = {}) {
+  const limits = { ...TOKEN_COST_LIMITS, ...options };
+  const totals = {
+    resumeGaps: 0,
+    providerExpiryLikely: 0,
+    harnessMutationGaps: 0,
+    unexplainedMissGaps: 0,
+    postCompactionGaps: 0,
+  };
+  const gaps = [];
+  let seq = [];
+  let boundary = [];
+  let sawCompaction = false;
+  let injectedSincePrev = false;
+  let prev = null;
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.type === "compaction") {
+      sawCompaction = true;
+      seq.push(resumeSegment("marker", "compaction"));
+      boundary.push("compaction");
+      continue;
+    }
+    if (entry.type === "custom_message") {
+      boundary.push(String(entry.customType ?? "?"));
+      if (BOUNDARY_CUSTOM_TYPES.has(entry.customType)) {
+        // Injected blocks ride the next prompt: presence+size join the
+        // prefix identity, text never leaves the transcript.
+        const size =
+          typeof entry.content === "string" ? entry.content.length : 0;
+        seq.push(resumeSegment(`custom:${entry.customType}`, String(size)));
+        injectedSincePrev = true;
+      }
+      continue;
+    }
+    if (entry.type === "custom") {
+      boundary.push(`custom:${entry.customType ?? "?"}`);
+      continue;
+    }
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (!message || !LIVE_ROLES.has(message.role)) continue;
+    seq.push(resumeMessageSegment(message));
+    if (message.role !== "assistant") continue;
+    const usage = usageOf(message);
+    if (!usage) continue;
+    const route = routeOf(message);
+    const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+    if (prev && promptTokens > limits.minPromptTokens) {
+      const ts =
+        typeof entry.timestamp === "string"
+          ? Date.parse(entry.timestamp)
+          : NaN;
+      const gapMs =
+        Number.isFinite(ts) && Number.isFinite(prev.ts) ? ts - prev.ts : null;
+      // Append-only natural growth preserves the cached common prefix; a
+      // divergent earlier segment or a harness-injected block between the
+      // turns changes the prompt prefix bytes.
+      const prefixSame =
+        !injectedSincePrev && prev.seq.every((h, i) => seq[i] === h);
+      const routeChanged = route !== prev.route;
+      let classification;
+      if (usage.cacheRead > 0) classification = "hit";
+      else if (usage.cacheWrite > 0) classification = "cache-write";
+      else if (sawCompaction) classification = "post-compaction";
+      else if (routeChanged) classification = "harness-mutation";
+      else if (!prefixSame) classification = "harness-mutation";
+      else if (gapMs === null || gapMs < 0)
+        classification = "unexplained-miss";
+      else if (gapMs >= limits.idleReferenceMs)
+        classification = "provider-expiry-likely";
+      else classification = "unexplained-miss";
+      const seen = new Set();
+      const boundaryKinds = [
+        ...(routeChanged ? [`route-change:${prev.route}->${route}`] : []),
+        ...boundary,
+      ].filter((b) => (seen.has(b) ? false : (seen.add(b), true)));
+      totals.resumeGaps++;
+      if (classification === "provider-expiry-likely")
+        totals.providerExpiryLikely++;
+      else if (classification === "harness-mutation")
+        totals.harnessMutationGaps++;
+      else if (classification === "unexplained-miss")
+        totals.unexplainedMissGaps++;
+      else if (classification === "post-compaction")
+        totals.postCompactionGaps++;
+      if (gaps.length < limits.maxResumeGaps) {
+        gaps.push({
+          turn: prev.turn + 1,
+          gapMs,
+          prefixSame,
+          cacheBefore: prev.usage.cacheRead,
+          cacheAfter: usage.cacheRead,
+          inputAfter: usage.input,
+          classification,
+          boundary: boundaryKinds,
+          route,
+        });
+      }
+    }
+    prev = {
+      ts:
+        typeof entry.timestamp === "string"
+          ? Date.parse(entry.timestamp)
+          : NaN,
+      usage,
+      route,
+      turn: (prev?.turn ?? 0) + 1,
+      seq: [...seq],
+    };
+    boundary = [];
+    sawCompaction = false;
+    injectedSincePrev = false;
+  }
+  return { totals, gaps };
+}
+
 /** Analyze one session's parsed JSON entries. Pure; no I/O, no transcript text returned. */
 export function analyzeSessionEntries(entries, options = {}) {
   const limits = { ...TOKEN_COST_LIMITS, ...options };
@@ -125,11 +303,18 @@ export function analyzeSessionEntries(entries, options = {}) {
     normalInput: 0,
     toolActivations: 0,
     compactions: 0,
+    resumeGaps: 0,
+    providerExpiryLikely: 0,
+    harnessMutationGaps: 0,
+    unexplainedMissGaps: 0,
+    postCompactionGaps: 0,
   };
   const byModel = new Map();
   const byDay = new Map();
   const injections = new Map(); // segmentId -> hook -> last cumulative
   const topTurns = [];
+  const resume = analyzeResumeGaps(entries, limits);
+  Object.assign(totals, resume.totals);
 
   let pendingChars = 0;
   let prevOutput = 0;
@@ -326,6 +511,9 @@ export function analyzeSessionEntries(entries, options = {}) {
       (a, b) => b.addedChars - a.addedChars,
     ),
     topTurns: topTurns.sort((a, b) => b.excess - a.excess),
+    topResumeGaps: [...resume.gaps]
+      .sort((a, b) => (b.inputAfter ?? 0) - (a.inputAfter ?? 0))
+      .slice(0, limits.topCount),
   };
 }
 
@@ -349,11 +537,17 @@ export function aggregateSessions(sessions, options = {}) {
     normalInput: 0,
     toolActivations: 0,
     compactions: 0,
+    resumeGaps: 0,
+    providerExpiryLikely: 0,
+    harnessMutationGaps: 0,
+    unexplainedMissGaps: 0,
+    postCompactionGaps: 0,
   };
   const byDay = new Map();
   const byModel = new Map();
   const injections = new Map();
   const topTurns = [];
+  const topResumeGaps = [];
 
   for (const session of sessions) {
     const t = session.totals;
@@ -423,6 +617,7 @@ export function aggregateSessions(sessions, options = {}) {
       injections.set(hook.hook, row);
     }
     topTurns.push(...session.topTurns);
+    topResumeGaps.push(...(session.topResumeGaps ?? []));
   }
 
   const pct = (part, whole) => (whole > 0 ? (100 * part) / whole : 0);
@@ -434,6 +629,7 @@ export function aggregateSessions(sessions, options = {}) {
       minPromptTokens: limits.minPromptTokens,
       minExcessTokens: limits.minExcessTokens,
       charsPerToken: limits.charsPerToken,
+      idleReferenceMs: limits.idleReferenceMs,
     },
     totals: {
       ...totals,
@@ -454,6 +650,9 @@ export function aggregateSessions(sessions, options = {}) {
     ),
     topTurns: topTurns
       .sort((a, b) => b.excess - a.excess)
+      .slice(0, limits.topCount),
+    topResumeGaps: topResumeGaps
+      .sort((a, b) => (b.inputAfter ?? 0) - (a.inputAfter ?? 0))
       .slice(0, limits.topCount),
   };
   return result;
@@ -611,6 +810,23 @@ export function formatReport(report) {
     for (const turn of report.topTurns.slice(0, 8)) {
       lines.push(
         `  excess=${integer(turn.excess)}  input=${integer(turn.input)}  ~new=${integer(turn.estimatedNewTokens)}  ${turn.scope}  ${turn.date}  ${turn.file}`,
+      );
+    }
+  }
+  if (report.topResumeGaps?.length) {
+    lines.push("");
+    lines.push(
+      `Resume gaps across consecutive requests (idle reference ${(report.thresholds?.idleReferenceMs ?? 300000) / 60000}min; same prefix + miss = provider-side, changed prefix = harness-side):`,
+    );
+    for (const gap of report.topResumeGaps.slice(0, 8)) {
+      const age =
+        gap.gapMs === null || gap.gapMs === undefined
+          ? "age?"
+          : gap.gapMs < 60000
+            ? `${Math.round(gap.gapMs / 1000)}s`
+            : `${(gap.gapMs / 60000).toFixed(1)}min`;
+      lines.push(
+        `  ${gap.classification}  input=${integer(gap.inputAfter)}  age=${age}  prefixSame=${gap.prefixSame}  cache=${integer(gap.cacheBefore)}->${integer(gap.cacheAfter)}  boundary=[${(gap.boundary ?? []).join(",")}]  ${gap.route ?? ""}`,
       );
     }
   }

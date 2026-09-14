@@ -118,6 +118,12 @@ test("model-visible briefs ignore bookkeeping revisions and anonymous container 
   assert.equal(later.summary, first.summary);
   assert.doesNotMatch(first.summary, /revision/);
   assert.equal(later.revision, 196, "the structured revision stays available");
+  // Degenerate overflow path: even when nothing fits, the summary stays
+  // revision-free — it is re-sent on every request and the revision lives on
+  // the structured result only.
+  const cramped = agentBrief(graph(199), { ...options, maxChars: 1 });
+  assert.doesNotMatch(cramped.summary, /revision/);
+  assert.equal(cramped.revision, 199);
   // Negative control: changed evidence still changes the brief.
   const grown = graph(197);
   grown.nodes.push(node("dependency"));

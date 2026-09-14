@@ -60,6 +60,19 @@ export function failureCategory(error: string) {
   return { category: "unclassified", recovery: "Inspect the original error and retained evidence; an error count alone does not establish a harness defect." };
 }
 
+function fnv1aHex(value) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) { hash ^= value.charCodeAt(i); hash = Math.imul(hash, 0x01000193); }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+function normalizeIncidentError(error) {
+  return String(error ?? '').toLowerCase().replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>').replace(/\b\d{4,}\b/g, '<n>').replace(/\/[^\s:;,]{3,}/g, ' <path>').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+/** Stable incident id: same category + same normalized cause + same linkage (call/run) is one incident, however many records describe it. */
+function incidentId(category, error, link) {
+  return `inc-${fnv1aHex(`${category}|${normalizeIncidentError(error)}|${link ?? ''}`).slice(0, 8)}`;
+}
+
 /** Bounded branch diagnostics shared by session_self and the offline auditor. */
 export function collectSessionDiagnostics(allEntries: any[], { excerpts = true } = {}) {
   const entries = Array.isArray(allEntries) ? allEntries.slice(-LIMIT) : [];
@@ -87,6 +100,7 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     timeout: 'timeout', permission: 'permission denied', dependency: 'ERR_MODULE_NOT_FOUND',
     'invalid-output': 'invalid-output', acceptance: 'acceptance verification', transport: 'transport failure', 'process-signal': 'process-signal' };
   const failures: any[] = [], seen = new Set(), groups = new Map();
+  const incidents = new Map();
   let total = 0;
   const add = (kind: string, tool: string, key: string, error: string, callId?: string, evidence?: any) => {
     if (seen.has(key)) return; seen.add(key);
@@ -96,8 +110,17 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     const groupKey = JSON.stringify([kind, tool, classification.category]);
     const group = groups.get(groupKey) ?? { kind, tool, ...classification, count: 0 };
     group.count++; groups.set(groupKey, group);
+    // Parent tool errors, child failures, workflow and budget records that share
+    // one cause + one linkage (same tool call / same child run) are one incident.
+    // Diagnostic records (every sighting) stay distinct from unique incidents.
+    const link = callId ?? (kind === "child" ? key.slice(6) : key);
+    const id = incidentId(classification.category, error, link);
+    const incident = incidents.get(id) ?? { id, category: classification.category, kinds: new Set(), tools: new Set(), records: 0, callId: callId ?? null, runId: kind === "child" ? key.slice(6) : null };
+    incident.kinds.add(kind); incident.tools.add(tool); incident.records++;
+    if (incident.representative === undefined && failures.length < 12) incident.representative = failures.length;
+    incidents.set(id, incident);
     if (failures.length >= 12) return;
-    failures.push({ kind, tool, ...(callId ? { callId } : {}), ...(kind === "child" ? {runId:key.slice(6)} : {}), ...classification,
+    failures.push({ kind, tool, incident: id, ...(callId ? { callId } : {}), ...(kind === "child" ? {runId:key.slice(6)} : {}), ...classification,
       ...(Number.isSafeInteger(evidence?.attemptCount) && evidence.attemptCount >= 0 ? { attempts: evidence.attemptCount } : {}),
       ...(['present', 'absent', 'unknown'].includes(evidence?.output) ? { outputPresence: evidence.output } : {}),
       ...(excerpts ? { error: error.replace(/\s+/g, " ").slice(0, 360) } : {}) });
@@ -137,15 +160,17 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
       else if (r.exitCode === 0 || ["complete", "completed"].includes(status)) seen.add(key);
     }
   }
+  const incidentList = [...incidents.values()].map(row => ({ id: row.id, category: row.category, kinds: [...row.kinds].sort(), tools: [...row.tools].sort(), records: row.records, ...(row.callId ? { callId: row.callId } : {}), ...(row.runId ? { runId: row.runId } : {}) })).sort((a, b) => b.records - a.records || a.id.localeCompare(b.id)).slice(0, 12);
   return {
     inspected: entries.length, truncated: Array.isArray(allEntries) && allEntries.length > entries.length,
     count: failures.length, total, omitted: total - failures.length, failures,
+    diagnosticRecords: total, uniqueIncidents: incidents.size, incidents: incidentList, omittedIncidents: Math.max(0, incidents.size - incidentList.length),
     groups: [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 16),
     omittedGroups: Math.max(0, groups.size - 16),
     activity: { tools: metrics.tools, parentToolErrors:metrics.errors, parentModelErrors:metrics.modelErrors,
       children:metrics.agents, childFailures:metrics.agentFailures, workflowFailures:metrics.workflowFailures,
       skillsOpened:metrics.skillsRead.length + metrics.skillsPartial.length, skillsSuggested:metrics.skillsRouted.length,
       cacheRate:metrics.cacheRate, swarms:metrics.swarms, fusions:metrics.fusions },
-    scope: "Newest evidence within the last 2000 branch entries; at most 12 diagnostics. Child/controller records are deduplicated; error categories are recovery clues, not proof of a harness defect. Model aborts are not failures. Unmatched subagent tool receipts cannot establish child ownership. Activity counts apply only to this window; missing earlier evidence remains unknown.",
+    scope: "Newest evidence within the last 2000 branch entries; at most 12 diagnostics. diagnosticRecords counts every sighting; uniqueIncidents counts stable incident ids (same cause + same call/run linkage). Parent/child/workflow/budget records for one incident share one incident id. Model aborts are not failures. Unmatched subagent tool receipts cannot establish child ownership. Activity counts apply only to this window; missing earlier evidence remains unknown.",
   };
 }

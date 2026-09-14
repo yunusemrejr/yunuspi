@@ -32,7 +32,8 @@
     "session-hooks.ts",
     "project-intelligence.ts",
     "sandbox.ts",
-    "utility-tools.ts"
+    "utility-tools.ts",
+    "research-toolkit.ts"
   ],
   "lib": [
     "media-process.ts",
@@ -82,6 +83,7 @@
     "session-cost.ts",
     "cost-evidence.ts",
     "session-telemetry.ts",
+    "hook-ledger.ts",
     "session-report.ts",
     "metrics-panel.ts",
     "bash-routing.ts",
@@ -100,7 +102,9 @@
     "harness-activity.ts",
     "tool-discovery.ts",
     "capability-groups.ts",
-    "harness-capabilities.ts"
+    "harness-capabilities.ts",
+    "git-authority.ts",
+    "effort-policy.mjs"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -423,6 +427,9 @@
     "scripts/pi-launch.sh",
     "scripts/auto-update.sh",
     "scripts/lib/core-compatibility.mjs",
+    "scripts/lib/effort-audit.mjs",
+    "scripts/effort-audit.mjs",
+    "scripts/transaction.mjs",
     "scripts/compatibility/harness-load-test.mjs",
     "scripts/compatibility/retry-lifecycle-test.mjs",
     "scripts/compatibility/summary-recovery-test.mjs",

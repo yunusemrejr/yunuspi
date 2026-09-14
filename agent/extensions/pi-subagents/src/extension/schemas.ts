@@ -58,6 +58,7 @@ const SubagentParamProperties = {
 	context: Type.Optional(Type.String({ enum: ["fresh", "fork", "profile"], description: "fresh/fork branch from the parent session; profile uses the agent's declared defaultContext. Omitted: config defaultSubagentContext wins." })),
 	cwd: Type.Optional(Type.String({ description: "Execution cwd (or target project directory for project.* actions)." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Managed isolation: each workflow child gets a separate git worktree; per-child override allowed." })),
+	gitAuthority: Type.Optional(Type.Boolean({ description: "Delegate Git commit/push authority to this call's children (single child) or as the per-child default for tasks/chain steps; per-step gitAuthority overrides. Every child is otherwise read-only at the tool layer regardless of prompt text: git commit/push/merge and publish runners are blocked; the parent owns integration." })),
 	output: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "Default child output file (string) or false. Durable workflow handoff: return the child's outputReference/outputPathMapping/artifactPaths." })),
 	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Timeout. Foreground/single async runs use config timeoutMs else 30m; async composites use a 10m supervisor deadline unless explicitly overridden." })),
 	outputSchema: Loose("JSON schema for a single child's structured output."),

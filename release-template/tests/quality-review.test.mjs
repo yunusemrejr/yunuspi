@@ -711,7 +711,10 @@ test("queued messages, failed delivery, reload and new user scopes retain bounde
  f.api.restore(f.ctx);
  await f.settle();
  assert.equal(f.sent.length, 1);
- assert.equal(f.state().reports.length, 0);
+ // Verified restore replays the still-valid pass evidence for assessment
+ // instead of invalidating it and re-spending a review round; no automatic
+ // re-review runs for the identical tree (explicit input below still does).
+ assert.equal(f.state().reports.length, 1);
  f.api.input({ source: "interactive", text: "Continue reviewing this change" });
  await f.settle();
  assert.equal(f.calls.length, 2);

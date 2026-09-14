@@ -321,7 +321,153 @@ export function runWithPublishLock(argv = process.argv.slice(1)) {
   return child.status ?? 1;
 }
 
+/** The verified export must still match the live source at publish time.
+ *
+ * The distribution test runs for minutes against the shared live tree, so an
+ * edit between export and copy (another session, or an automatic formatter)
+ * would otherwise publish bytes that no longer match the live source —
+ * observed 2026-09-14 when a formatter reformat landed mid-publish and the
+ * committed bytes diverged from the tree they claim to release. Re-export and
+ * require byte equality with what was verified. */
+export function assertExportStillCurrent(exportDir, runExport) {
+  const reExport = mkdtempSync(path.join(os.tmpdir(), "yunuspi-reexport-"));
+  try {
+    runExport(reExport);
+    const drifted = run(
+      "diff",
+      ["-rq", reExport, exportDir, "-x", ".git"],
+      AGENT_DIR,
+      { allowExit: [1], capture: true },
+    ).stdout.trim();
+    if (drifted)
+      throw new Error(
+        `Live source changed during distribution verification; the verified export is stale, publish refused. Re-run publish. First drift:\n${drifted.split("\n").slice(0, 3).join("\n")}`,
+      );
+  } finally {
+    rmSync(reExport, { recursive: true, force: true });
+  }
+}
+
+/** Commits the checkout holds that origin does not.
+ *
+ * A publish killed between `git commit` and `git push` leaves the checkout
+ * ahead of its remote with no record anywhere. Observed 2026-09-14: the
+ * background task `publish wave 7` was SIGTERM'd as "Killed during Pi session
+ * shutdown/reload" right after the commit, so the release stayed local and the
+ * next run reported "nothing to publish" and stranded it. The next run must
+ * detect and finish that state instead. */
+export function pendingReleaseCommits(checkout, branch, runner = run) {
+  const ref = `refs/remotes/origin/${branch}`;
+  const known =
+    runner("git", ["rev-parse", "--verify", "--quiet", ref], checkout, {
+      allowExit: [1],
+      capture: true,
+    }).code === 0;
+  if (!known) return [];
+  const ahead = runner("git", ["log", "--oneline", `${ref}..HEAD`], checkout, {
+    capture: true,
+  }).stdout.trim();
+  return ahead ? ahead.split("\n") : [];
+}
+
+/** How a scanned release finishes.
+ *
+ * `stagedChanges` false plus pending commits is the interrupted-release state:
+ * reporting "nothing to publish" there would silently strand a verified commit
+ * that origin never received, so it must push instead. */
+export function releaseCompletion({ stagedChanges, pendingCommits }) {
+  if (stagedChanges) return "commit-and-push";
+  if (pendingCommits > 0) return "push-pending";
+  return "nothing";
+}
+
+/** Push, then require the remote branch to actually carry the local HEAD.
+ *
+ * "git push exited 0" is not evidence the release landed; a rejected ref, a
+ * killed transfer or a mistyped remote all exit non-zero late or leave the
+ * remote ref unchanged. The postcondition is the remote SHA, so it is re-read
+ * from the remote rather than assumed. */
+export function pushAndVerifyRelease(checkout, branch, runner = run) {
+  const head = runner("git", ["rev-parse", "HEAD"], checkout, {
+    capture: true,
+  }).stdout.trim();
+  runner("git", ["push", "-q", "origin", branch], checkout, {
+    timeoutMs: 300000,
+  });
+  let remote = "";
+  try {
+    remote =
+      runner("git", ["ls-remote", "origin", `refs/heads/${branch}`], checkout, {
+        capture: true,
+      })
+        .stdout.trim()
+        .split(/\s+/)[0] || "";
+  } catch (error) {
+    throw new Error(
+      `git push ran but the remote SHA could not be verified (re-run to confirm origin/${branch}): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (remote !== head)
+    throw new Error(
+      `release did not land: origin/${branch}=${remote || "(absent)"} but local HEAD=${head}`,
+    );
+  return head;
+}
+
+const TERMINATION_SIGNALS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
+/** Session shutdown must not strand a release between commit and push.
+ *
+ * The commit/push section owns the point of no return, so termination signals
+ * arriving inside it are deferred and replayed right afterwards instead of
+ * killing the runner mid-release (the 2026-09-14 loss above). Outside that
+ * section the previous behavior is kept: the signal exits immediately. */
+export function installReleaseCompletionGuard(
+  target = process,
+  signals = TERMINATION_SIGNALS,
+) {
+  let critical = false;
+  let deferred = "";
+  for (const name of Object.keys(signals))
+    target.on(name, () => {
+      if (!critical) {
+        console.error(`[publish] aborted by ${name} before committing`);
+        target.exit(signals[name]);
+        return;
+      }
+      deferred = name;
+      console.error(
+        `[publish] deferring ${name} until the verified release is committed and pushed`,
+      );
+    });
+  return {
+    begin: () => {
+      critical = true;
+    },
+    end: () => {
+      critical = false;
+      return deferred;
+    },
+  };
+}
+
+/** Whether the index holds changes relative to HEAD.
+ *
+ * `git diff --cached --quiet` exits 1 when something is staged and 0 when
+ * nothing is. Reading that code as a truthy "has changes" flag is how the fix
+ * for the interrupted-release loss itself reported "nothing to publish" while
+ * 69 exported files sat staged (2026-09-15). The exit code is now named. */
+export function hasStagedChanges(checkout, runner = run) {
+  return (
+    runner("git", ["diff", "--cached", "--quiet"], checkout, {
+      allowExit: [1],
+    }).code === 1
+  );
+}
+
 function main() {
+  const guard = installReleaseCompletionGuard();
+  let deferredSignal = "";
   const opt = parseArgs(process.argv.slice(2));
   const timings = [];
   const testConcurrency = opt.testConcurrency || distributionTestConcurrency();
@@ -369,6 +515,15 @@ function main() {
     const beforeHead = run("git", ["rev-parse", "HEAD"], opt.checkout, {
       capture: true,
     }).stdout.trim();
+    const branch =
+      run("git", ["rev-parse", "--abbrev-ref", "HEAD"], opt.checkout, {
+        capture: true,
+      }).stdout.trim() || "main";
+    const stranded = pendingReleaseCommits(opt.checkout, branch);
+    if (stranded.length)
+      console.log(
+        `[publish] checkout holds ${stranded.length} commit(s) absent from origin/${branch} (earlier run was interrupted); this run finishes that release:\n${stranded.slice(0, 5).join("\n")}`,
+      );
     if (dirty && !opt.allowDirty)
       throw new Error(
         `Checkout has uncommitted changes; review or pass --allow-dirty:\n${dirty.slice(0, 800)}`,
@@ -390,36 +545,57 @@ function main() {
         "Checkout changed during distribution verification; review concurrent work before publishing.",
       );
     assertNoStaleCheckoutPaths(exportDir, opt.checkout);
+    console.log("[publish] re-export equality check against the live tree");
+    assertExportStillCurrent(exportDir, (dir) =>
+      run(
+        process.execPath,
+        ["scripts/harness-public-export.mjs", "--output", dir],
+        AGENT_DIR,
+      ),
+    );
     copyTree(exportDir, opt.checkout);
     console.log("[publish] scan    public safety checks");
     run(process.execPath, ["scripts/check-public.mjs", "."], opt.checkout);
     run("git", ["add", "-A"], opt.checkout);
-    if (
-      !run("git", ["diff", "--cached", "--quiet"], opt.checkout, {
-        allowExit: [1],
-      }).code
-    ) {
+    const stagedChanges = hasStagedChanges(opt.checkout);
+    const pending = pendingReleaseCommits(opt.checkout, branch);
+    const action = releaseCompletion({
+      stagedChanges,
+      pendingCommits: pending.length,
+    });
+    if (action === "nothing") {
       console.log("[publish] nothing to publish (checkout already current)");
       return;
     }
-    const message =
-      opt.message || `Harness update ${new Date().toISOString().slice(0, 10)}`;
-    run("git", ["commit", "-q", "-m", message], opt.checkout);
-    const branch =
-      run("git", ["rev-parse", "--abbrev-ref", "HEAD"], opt.checkout, {
-        capture: true,
-      }).stdout.trim() || "main";
-    run("git", ["push", "-q", "origin", branch], opt.checkout);
-    const head = run("git", ["log", "--oneline", "-1"], opt.checkout, {
-      capture: true,
-    }).stdout.trim();
-    console.log(`[publish] pushed ${head} to origin/${branch}`);
+    guard.begin();
+    if (action === "push-pending")
+      console.log(
+        `[publish] finishing an interrupted release: pushing ${pending.length} commit(s) already committed to the checkout but absent from origin/${branch}`,
+      );
+    else {
+      const message =
+        opt.message ||
+        `Harness update ${new Date().toISOString().slice(0, 10)}`;
+      run("git", ["commit", "-q", "-m", message], opt.checkout);
+    }
+    const head = pushAndVerifyRelease(opt.checkout, branch);
+    guard.end();
+    console.log(
+      `[publish] pushed ${head} to origin/${branch} (remote SHA verified)`,
+    );
   } finally {
+    deferredSignal = guard.end();
     cleanup?.();
     if (timings.length)
       console.log(
         `[publish] timings ${timings.map(([label, ms]) => `${label}=${(ms / 1000).toFixed(1)}s`).join(" ")}`,
       );
+  }
+  if (deferredSignal) {
+    console.error(
+      `[publish] release completed while ${deferredSignal} was pending; exiting with the interrupted status`,
+    );
+    process.exitCode = TERMINATION_SIGNALS[deferredSignal] ?? 1;
   }
 }
 

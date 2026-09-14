@@ -47,6 +47,8 @@ export interface SequentialStep {
 	gateOn?: ChainGateLayer;
 	/** Internal workflow child isolation; public workflowScript supplies this on runs.run. */
 	worktree?: boolean;
+	/** Explicit Git-authority delegation for this child (commit/push). Defaults to false: children are read-only at the tool layer. */
+	gitAuthority?: boolean;
 }
 
 /** Parallel task item within a parallel step */
@@ -70,6 +72,8 @@ export interface ParallelTaskItem {
 	acceptance?: AcceptanceInput;
 	agentContract?: AgentContract;
 	gateOn?: ChainGateLayer;
+	/** Explicit Git-authority delegation for this child (commit/push). Defaults to false: children are read-only at the tool layer. */
+	gitAuthority?: boolean;
 }
 
 export interface DynamicExpandSpec {

@@ -92,6 +92,24 @@ function reviewContentHash(file: string): string | undefined {
   } catch { return undefined; }
 }
 
+/** Reload reconciliation: every restored file must still hold the exact bytes
+ * the persisted disposition and reports were earned on. Unhashable files
+ * (oversized, unreadable, deleted) or entries from before hashes were
+ * persisted fail closed to the conservative bump-and-drop path. */
+function verifyReviewTree(root: string, changed: string[], persisted: unknown): Record<string, string> | undefined {
+  if (!persisted || typeof persisted !== 'object') return undefined;
+  const saved = persisted as Record<string, unknown>;
+  const verified: Record<string, string> = {};
+  for (const file of changed) {
+    const old = saved[file];
+    if (typeof old !== 'string') return undefined;
+    const current = reviewContentHash(path.join(root, file));
+    if (!current || current !== old) return undefined;
+    verified[file] = current;
+  }
+  return verified;
+}
+
 export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
   let releaseShared = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0;
@@ -106,7 +124,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
-  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow }); } catch {} };
+  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow,
+    hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
   const invalidate = (files: string[]) => {
     if (!files.length) return;
     for (const file of files) patterns.delete(file);
@@ -233,9 +252,25 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       scopeOverflow = false;
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
       if (data?.root === root && Number.isSafeInteger(data.revision) && Array.isArray(data.changed)) {
-        revision = data.revision + 1; changed = data.changed.filter((f:any) => typeof f === 'string' && isProjectReviewSource(f)).slice(-128);
+        const restoredChanged = data.changed.filter((f:any) => typeof f === 'string' && isProjectReviewSource(f)).slice(-128);
+        // Byte-identical tree: the persisted disposition and reports still
+        // describe this exact content, so resume keeps the revision instead of
+        // invalidating approval and re-spending review rounds on already
+        // reviewed work. Any byte difference, or an entry from before hashes
+        // were persisted, takes the conservative bump-and-drop path below.
+        const verified = verifyReviewTree(root, restoredChanged, (data as any)?.hashes);
+        revision = verified ? data.revision : data.revision + 1;
+        changed = restoredChanged;
+        if (verified) hashes = verified;
         rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
         scopeOverflow = data.scopeOverflow === true;
+        if (verified && (data.disposition === 'accepted' || data.disposition === 'blocked')) {
+          // An acceptance replays only alongside its own reports; a recorded
+          // evidence gap stays a gap, never a pass.
+          if (data.disposition === 'blocked' || Array.isArray(data.reports) && data.reports.length > 0) {
+            disposition = data.disposition; reason = String(data.reason ?? '').slice(0, 1200);
+          }
+        }
         // Resume invalidates approval, not evidence. Keep a bounded, validated
         // previous report available on explicit inspection; never replay it as
         // current evidence or inflate automatic continuation messages with it.

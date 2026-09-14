@@ -42,14 +42,15 @@ export function formatAgentRunningLabel(count: number): string {
 
 export function formatParallelOutcome(steps: StepStatusLike[], total: number, options: { showRunning?: boolean } = {}): string {
 	const running = steps.filter((step) => step.status === "running").length;
-	const done = steps.filter((step) => isCompletedStepStatus(step.status)).length;
+	const succeeded = steps.filter((step) => isCompletedStepStatus(step.status)).length;
 	const failed = steps.filter((step) => step.status === "failed").length;
 	const stopped = steps.filter((step) => step.status === "stopped").length;
 	const paused = steps.filter((step) => step.status === "paused").length;
-	const parts = [`${done}/${total} done`];
-	if (options.showRunning !== false && running > 0) parts.unshift(formatAgentRunningLabel(running));
-	if (failed > 0) parts.push(`${failed} failed`);
-	if (stopped > 0) parts.push(`${stopped} stopped`);
-	if (paused > 0) parts.push(`${paused} paused`);
+	const terminal = succeeded + failed + stopped;
+	const pending = Math.max(0, total - (running + succeeded + failed + stopped + paused));
+	const degraded = failed + stopped + paused > 0;
+	const parts = [`${terminal}/${total} terminal (${succeeded} succeeded · ${failed} failed · ${stopped} stopped${paused > 0 ? ` · ${paused} paused` : ""}${pending > 0 ? ` · ${pending} pending` : ""})`];
+	if (options.showRunning !== false && running > 0) parts.unshift(`${formatAgentRunningLabel(running)}`);
+	if (degraded && terminal === total) parts.push("degraded");
 	return parts.join(" · ");
 }

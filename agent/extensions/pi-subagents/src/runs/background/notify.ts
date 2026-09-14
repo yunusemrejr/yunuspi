@@ -18,6 +18,7 @@ import {
 } from "./completion-batcher.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ParallelHandoffReference, type ScheduleOrigin, type SubagentState } from "../../shared/types.ts";
 import { safeTerminalText } from "../../shared/display-text.ts";
+import { formatGroupCounters, type GroupCounters, type GroupLifecycleState } from "../shared/group-reliability.ts";
 import { resolveSubagentResultStatus } from "../../intercom/result-intercom.ts";
 import { isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import type { ResultDeliveryOwnership } from "./result-delivery-ownership.ts";
@@ -40,6 +41,8 @@ export interface SubagentNotifyDetails {
 	taskInfo?: string;
 	resultPreview: string;
 	durationMs?: number;
+	/** Compact group-finished line: counts, degraded state, per-child handles nearby. */
+	groupSummary?: string;
 	workflowRunId?: string;
 	childRuns?: Array<{ runId: string; workflowKey?: string; agent?: string; status?: string }>;
 	childOutputs?: SubagentNotifyChildOutput[];
@@ -254,6 +257,21 @@ function formatCorrelationLines(details: SubagentNotifyDetails): string[] {
 	].filter((line): line is string => line !== undefined);
 }
 
+/**
+ * One compact group-finished line: success/failure counts and the terminal
+ * state, so the parent reads the whole group without revisiting children.
+ */
+export function summarizeGroupCompletion(counters: unknown, state: unknown): string | undefined {
+	if (!counters || typeof counters !== "object" || Array.isArray(counters)) return undefined;
+	const record = counters as Partial<Record<"requested" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out" | "terminal", unknown>>;
+	const numbers = ["requested", "running", "succeeded", "failed", "cancelled", "timed_out", "terminal"].map((key) => record[key]);
+	if (numbers.some((value) => typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) return undefined;
+	const counts = record as GroupCounters;
+	const known: GroupLifecycleState[] = ["PENDING", "RUNNING", "RUNNING_DEGRADED", "FINISHED", "FINISHED_DEGRADED"];
+	const groupState = typeof state === "string" && (known as string[]).includes(state) ? ` · ${state}` : "";
+	return `Group: ${formatGroupCounters(counts)}${groupState}`;
+}
+
 export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 	const sessionLine = formatSessionLine(details);
 	const correlationLines = formatCorrelationLines(details);
@@ -263,7 +281,8 @@ export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 		: undefined;
 	return [
 		`${taskKind} ${details.status}: **${details.agent}**${details.taskInfo ?? ""}`,
-		"",
+		details.groupSummary,
+		details.groupSummary ? "" : undefined,
 		scheduleLine,
 		scheduleLine ? "" : undefined,
 		formatResultPreview(details),
@@ -351,6 +370,7 @@ export function formatGroupedCompletion(details: SubagentNotifyDetails[]): strin
 	for (let index = 0; index < details.length; index++) {
 		const detail = details[index];
 		if (!detail) continue;
+		if (detail.groupSummary) blocks.push(detail.groupSummary);
 		const sessionLine = formatSessionLine(detail);
 		blocks.push(`${index + 1}. ${detail.agent}${detail.taskInfo ?? ""}${detail.scheduleOrigin ? ` — scheduled run from ${detail.scheduleOrigin.name ?? detail.scheduleOrigin.id} (schedule ${detail.scheduleOrigin.id})` : ""}`);
 		blocks.push(formatResultPreview(detail));
@@ -463,6 +483,7 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 		})
 		: undefined;
 	const reconciledFromDetachedChild = typeof result.reconciledFromDetachedChild === "string" ? result.reconciledFromDetachedChild : undefined;
+	const groupSummary = summarizeGroupCompletion(result.groupCounters, result.groupState);
 	const session =
 		result.shareUrl
 			? { label: "Session", value: result.shareUrl }
@@ -487,6 +508,7 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 		...(workflowRunId ? { workflowRunId } : {}),
 		...(childRuns.length ? { childRuns } : {}),
 		...(childOutputs?.length ? { childOutputs } : {}),
+		...(groupSummary ? { groupSummary } : {}),
 		...(reconciledFromDetachedChild ? { reconciledFromDetachedChild } : {}),
 		...(session ? { sessionLabel: session.label, sessionValue: session.value } : {}),
 	};

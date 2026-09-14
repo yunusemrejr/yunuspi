@@ -27,6 +27,7 @@ import { getAgentDir, resolveWatchPath } from "../../shared/utils.ts";
 import { registerChildWatchdog } from "../../watchdog/register-child.ts";
 import { CHILD_WATCHDOG_CONFIG_ENV, decodeChildWatchdogConfig } from "../../watchdog/child-status.ts";
 import { requestWatchdogPermission, type WatchdogPermissionRequest, type WatchdogPermissionResult } from "../../watchdog/permission-arbiter.ts";
+import { formatGitAuthorityReason, gitAuthorityFromEnv, gitAuthorityToolDecision, scanGitAuthorityViolation } from "../../../../lib/git-authority.ts";
 import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
 import { resolveWaitToolConfig } from "../background/wait-config.ts";
 import { registerWaitTool } from "../background/wait-tool.ts";
@@ -738,10 +739,38 @@ export function registerSteeringInbox(
 	});
 }
 
+/**
+ * Git authority gate (PI_GIT_AUTHORITY, set by buildPiArgs for every child):
+ * children default to read-only at the tool layer. While read-only, git
+ * verbs that create commits or publish refs are blocked regardless of what
+ * the task prompt says; only an explicit launch delegation (gitAuthority)
+ * sets the mode to "delegate". Bash shells and nested command strings are
+ * scanned, so a child cannot smuggle a commit through sh -c or $(...).
+ */
+export function registerGitAuthorityGate(pi: ExtensionAPI): void {
+	// Inert for interactive parents (no PI_GIT_AUTHORITY): their existing
+	// bash review rules still apply. Every child has the mode set by
+	// buildPiArgs, so this gate runs regardless of the task prompt.
+	const authority = gitAuthorityFromEnv(process.env);
+	if (authority === undefined) return;
+	const onRuntimeEvent = pi.on as unknown as (
+		event: string,
+		handler: (event: { toolName?: string; input?: unknown }) => unknown,
+	) => void;
+	onRuntimeEvent("tool_call", (event) =>
+		gitAuthorityToolDecision(
+			process.env,
+			event?.toolName,
+			(event.input as { command?: unknown } | undefined)?.command,
+		),
+	);
+}
+
 export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 	registerRuntimeExtensionAcknowledgements(pi);
 	registerSteeringInbox(pi);
 	registerPermissionGate(pi);
+	registerGitAuthorityGate(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
 	registerChildWatchdog(pi);
 	const waitToolConfig = resolveWaitToolConfig();

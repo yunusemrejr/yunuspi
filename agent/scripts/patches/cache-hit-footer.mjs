@@ -102,6 +102,7 @@ export function transformActivity(source, bundled) {
         "66470b24ef2ad3ca2a719ea21c2a4e0dea383937e8ca33150b8b764bdf29c8dc",
         "ade04f0c3f0b5b8818b1ce65d2ffe5e043c62752f10b31ec160bd14be7213963",
         "585b245cd4e1b332f3a6214bf5cee637ac80606e59378f76a7dba3b6172b5a00",
+        "bb5072766b8b162ef5249af5aac00e43ca61fdab98595220a9a413b3b1f493fa",
       ].includes(createHash("sha256").update(helper).digest("hex"))
     ) {
       const old = activityCode(helper, bundled, 2);
@@ -222,8 +223,19 @@ function transformDisplay(source, bundled) {
   const newCost = `statsParts.push(${cost} + " total"); /* PI_FOOTER_ACCURACY_V2 */`;
   if (source.includes(priorCost))
     source = source.replace(priorCost, () => newCost);
+  // Session id in the bottom-right KPI area: appended to the right-aligned
+  // model segment so it survives statsLeft truncation and stays visible without
+  // shell archaeology. The activity line keeps the compact Powers detail; the
+  // id here is the positional anchor.
+  const sessionIdOld = bundled
+    ? "let rightSide=rightSideWithoutProvider;"
+    : "let rightSide = rightSideWithoutProvider;";
+  const sessionIdNew = bundled
+    ? "let rightSide=rightSideWithoutProvider;try{const sid=String(this.session.sessionManager.getSessionId());if(sid&&sid!==\"undefined\")rightSide+=` · ${sid.slice(0,8)}`}catch{}"
+    : "let rightSide = rightSideWithoutProvider;\n        try { const sid = String(this.session.sessionManager.getSessionId()); if (sid && sid !== \"undefined\") rightSide += ` · ${sid.slice(0, 8)}`; } catch {}";
   const pairs = [
     [oldCost, newCost],
+    [sessionIdOld, sessionIdNew],
     [
       bundled
         ? 'contextPercent=contextUsage?.percent!==null?contextPercentValue.toFixed(1):"?"'
@@ -241,22 +253,31 @@ function transformDisplay(source, bundled) {
         : 'let statsLeft = statsParts.sort((a,b)=>(a===contextPercentStr?0:a.startsWith("CH")?1:a.startsWith("$")||a==="sub"?2:3)-(b===contextPercentStr?0:b.startsWith("CH")?1:b.startsWith("$")||b==="sub"?2:3)).join(" ")',
     ],
   ];
-  if (source.includes("PI_FOOTER_ACCURACY_V2")) {
-    for (const [, next] of pairs)
+  // Apply-then-verify: already-patched files pick up missing pairs (e.g. the
+  // session-id anchor) instead of failing postcondition before migration.
+  for (const [old, next] of pairs) {
+    if (source.includes(next)) {
       if (count(source, next) !== 1)
-        throw Error(
+        throw new Error(
           "footer accuracy postcondition drift: " +
             next.slice(0, 80) +
             " count=" +
             count(source, next),
         );
-    return source;
-  }
-  for (const [old, next] of pairs) {
+      continue;
+    }
     if (count(source, old) !== 1)
-      throw Error("footer accuracy anchor drift: " + old.slice(0, 70));
+      throw new Error("footer accuracy anchor drift: " + old.slice(0, 70));
     source = source.replace(old, () => next);
   }
+  for (const [, next] of pairs)
+    if (count(source, next) !== 1)
+      throw new Error(
+        "footer accuracy postcondition drift: " +
+          next.slice(0, 80) +
+          " count=" +
+          count(source, next),
+      );
   return source;
 }
 

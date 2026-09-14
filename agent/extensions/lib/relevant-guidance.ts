@@ -360,6 +360,10 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('browser_session','Browser interaction: browser_session owns isolated HTTP(S) state for this agent. Inspect a fresh snapshot before choosing an exact target; use logs and state to reconcile timeouts before retrying. No shared personal browser profile. For local SVG/HTML/images/PDF use render_see.');
       if (/\b(research|search)\b/i.test(part) && /\b(background|multiple|several|thorough|comprehensive)\b/i.test(part))
         utilityHint('web_research','Research discovery: web_research runs 2–12 distinct supplied queries in background with shared provider pacing. Read the retained query receipts after completion; unavailable/empty results do not prove absence. Respect cooldowns and verify primary sources before concluding.');
+      if (/\b(agentmail|agent.?mail)\b/i.test(part) || (/\b(email|emails|inbox|inboxes)\b/i.test(part) && /\b(send|read|list|triage|outreach|reply|forward)\b/i.test(part)))
+        utilityHint('agentmail_send','Email via AgentMail (explicitly named capability): use agentmail_status to confirm the configured inbox, agentmail_send for a bounded send with a required subject, agentmail_messages to list compact inbox rows, and agentmail_message for one full read. Bypass generic repeated discovery: one tool_search({kind:"capabilities",id:"agentmail-email",enable:true}) stages the complete email bundle. Keep the API key in the environment; never persist, log, or echo it.');
+      if (/\b(lead|leads|prospect|prospects|company|companies|contact|contacts)\b/i.test(part) && /\b(research|find|discover|lookup|enrich|qualify|outreach|list)\b/i.test(part))
+        utilityHint('research_toolkit','Lead/company/contact research (composable, provenance-aware): research_toolkit plans query angles, records lead/company candidates with source URLs and retrieved-at evidence, and gathers source notes with hashes. Compose it with web_search/fetch_content/web_research for retrieval, then verify primary sources before outreach. One tool_search({kind:"capabilities",id:"research-toolkit",enable:true}) stages the bundle.');
       if (/\b(sandbox(?:es)?|isolated? (?:experiment|test|reproduction)s?|disposable|scratch environment|without (?:affecting|changing|touching) (?:the )?(?:project|workspace))\b/i.test(part))
         utilityHint('sandbox_run','Disposable experiments: sandbox_run runs a bounded script in a fresh environment with explicit copied files or fixtures, no project/home mounts or network, and automatic cleanup. Combine related steps in one call. If isolation cannot start, report it; never silently run the experiment on the host.');
       if (/\b(http|api endpoint|response headers?|status code)\b/i.test(part))
@@ -449,8 +453,15 @@ export function createRelevantGuidance(pi: any) {
     status: read.has(skill.file) ? 'read' : deferredSkills.has(skill.file) ? 'deferred' : 'needs_review',
     ...(deferredSkills.has(skill.file) ? { justification: deferredSkills.get(skill.file) } : {}),
   }));
+  const FILLER = new Set(['use','using','please','find','get','show','list','skill','skills','workflow','workflows','relevant','appropriate','best','good','right','proper','some','any','help','helpful','needed','need','needs','for','with','about','related']);
+  const normalizeSkillQuery = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s+#._-]+/g,' ').split(/\s+/).filter(term => term && !FILLER.has(term)).join(' ').slice(0,256);
+  const MARKETING_FAMILY = new Set(['resourceful-market-strategy','community-promotion','organic-growth-engineering','copywriting','natural-editorial-writing']);
   const searchSkills = (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown) => {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
+    // Explicit family requests such as "use marketing skills" reliably
+    // resolve: filler verbs and the generic skills/workflows token carry no
+    // signal, while the domain term must survive. Without this, "skills"
+    // dilutes the ranking and the marketing family loses to incidental prose.
     const group = typeof requestedGroup === 'string' ? requestedGroup.trim().slice(0, 64) : '';
     const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 3;
     const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, Number(requestedOffset)) : 0;
@@ -461,14 +472,26 @@ export function createRelevantGuidance(pi: any) {
     if (!text) {
       ordered = [...candidates].sort(sortSkills);
     } else {
+      const effective = normalizeSkillQuery(text) || text;
       const ranked = skillIndex
-        ? rankSkills(skillIndex, text, Math.min(256, Math.max(8, skills.length))).map(item => item.skill)
+        ? rankSkills(skillIndex, effective, Math.min(256, Math.max(8, skills.length))).map(item => item.skill)
           .filter(skill => !group || capabilityGroup(skill.name, skill.description) === group)
         : [];
       // Explicit discovery must honor direct short domain/name matches before
       // passive suggestions, whose deliberately stricter tokenizer drops PHP,
       // API and CSS. Keep fuzzy recovery and the full catalog behind those hits.
-      ordered = [...searchCapabilityMetadata(candidates, text), ...ranked];
+      // Search both the raw and the filler-stripped query so "use marketing
+      // skills" matches the marketing family instead of generic skill prose.
+      const lexical = [...searchCapabilityMetadata(candidates, text), ...searchCapabilityMetadata(candidates, effective)];
+      ordered = [...lexical, ...ranked];
+      // Explicit family request: when the stripped query names a known family
+      // domain, surface that family first while preserving advisory ranking
+      // behind it. "marketing" maps to the installed market/community/growth
+      // workflows; full bodies stay on demand via read.
+      if (/\bmarketing\b/i.test(effective)) {
+        const family = candidates.filter(skill => MARKETING_FAMILY.has(skill.name));
+        if (family.length) ordered = [...family.sort(sortSkills), ...ordered.filter(skill => !MARKETING_FAMILY.has(skill.name))];
+      }
     }
     const seen = new Set<string>();
     const unique = ordered.filter(skill => {
@@ -541,6 +564,10 @@ export function createRelevantGuidance(pi: any) {
           nextOffset:page.remaining ? page.offset+page.results.length : null,
           next:'Read a chosen result.path with the read tool when useful. To explore tools or local ML/SLM helpers, use tool_search({}).',
           scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
+        // Search stays side-effect-free by contract (see the scope note
+        // above): no per-search ledger rows. Selected/rejected arrive as
+        // read/defer receipts; a considered-set ledger needs a reader and a
+        // bound before it earns per-search writes.
         return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
       }
       if (input.action === 'defer') {
@@ -872,6 +899,9 @@ export function createRelevantGuidance(pi: any) {
         add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
         contextSkill(52);
+        // Selected ledger: the snapshot below records the read list plus the
+        // reviewTargets reasons, so selected/reason needs no extra entry and
+        // repeated reads keep the existing no-duplicate-metadata contract.
         try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory state only */ }
       }
       if (["edit", "write"].includes(name) && /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) {

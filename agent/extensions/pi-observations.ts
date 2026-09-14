@@ -449,12 +449,19 @@ export default function piObservationsExtension(
 			}
 			if (status.length > 2000) return message;
 			const sealed = sealedRenders.get(ref.id);
-			if (
-				sealed &&
-				sealed.resultHash === ref.resultHash &&
-				sealed.requires.every((required) => presentIds.has(required))
-			) {
-				if (sealed.content === null) return message;
+			if (sealed && sealed.resultHash === ref.resultHash) {
+				// The first rendering is authoritative for the branch lifetime.
+				// Never re-render here: mini/smol state and baseline availability
+				// vary per request, so a re-render flips provider-visible bytes
+				// and re-bills the whole prefix. A delta whose baseline is no
+				// longer visible degrades to the original in place - one
+				// deterministic change, stable afterwards - instead of a
+				// per-request projection.
+				if (
+					sealed.content === null ||
+					!sealed.requires.every((required) => presentIds.has(required))
+				)
+					return message;
 				changed = true;
 				return { ...message, content: sealed.content };
 			}
