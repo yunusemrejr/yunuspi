@@ -2345,7 +2345,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 284,
+        "line": 339,
         "kind": "literal"
       },
       {
@@ -2765,7 +2765,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 284,
+        "line": 339,
         "kind": "literal"
       },
       {

@@ -18,8 +18,10 @@ import {
   appendRecord,
   buildRecord,
   changeKey,
+  compareEnvelope,
   compositionFromBranch,
   DEFAULT_RING,
+  payloadEnvelope,
   prefixSummary,
   PROFILE_VERSION,
 } from "./lib/context-profile.mjs";
@@ -42,7 +44,17 @@ type SessionState = {
   lastAt: number | null;
   digests: unknown[];
   records: any[];
-  totals: Usage & { requests: number; breaks: number; resentChars: number };
+  totals: Usage & {
+    requests: number;
+    breaks: number;
+    envelopeBreaks: number;
+    resentChars: number;
+  };
+  /** Previous request envelope summary (hashes only) and the tool array it was
+   * computed from. Tools stay in memory: they explain the next divergence and
+   * are far too large to persist per request. */
+  envelope?: any;
+  tools?: unknown[] | null;
   pending?: unknown[] | null;
 };
 
@@ -83,12 +95,15 @@ function emptyState(id: string): SessionState {
     totals: {
       requests: 0,
       breaks: 0,
+      envelopeBreaks: 0,
       resentChars: 0,
       input: 0,
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
     },
+    envelope: undefined,
+    tools: null,
     pending: null,
   };
 }
@@ -110,7 +125,8 @@ function getState(id: string): SessionState {
 
 function writeState(id: string, state: SessionState): void {
   try {
-    const record = { ...state, pending: undefined };
+    // `pending` and the raw tool array are per-request memory, not state.
+    const record = { ...state, pending: undefined, tools: undefined };
     let serialized = JSON.stringify(record);
     if (serialized.length > MAX_STATE_CHARS) {
       serialized = JSON.stringify({
@@ -138,13 +154,46 @@ function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
 
-function recordRequest(ctx: any, wireMessages: unknown[] | null): void {
+/** Human-readable envelope attribution for one record: which pre-message part
+ * of the request changed (system prompt, tool list, request scalars). */
+function envelopeNote(record: any): string {
+  if (!record?.envelopeChanged) return "";
+  const parts = (record.envelopeChanges ?? []).map((change: any) => {
+    if (change?.component === "tools") {
+      const names = [
+        ...(change.added ?? []).map((name: string) => `+${name}`),
+        ...(change.removed ?? []).map((name: string) => `-${name}`),
+        ...(change.changed ?? []).map((name: string) => `~${name}`),
+      ];
+      return `tools ${change.previousCount}→${change.currentCount}${names.length ? ` (${names.slice(0, 6).join(", ")})` : ""}`;
+    }
+    if (change?.component === "systemPrompt")
+      return `systemPrompt ${change.previousChars}→${change.currentChars} chars`;
+    if (change?.component === "request-fields")
+      return `request fields ${(change.keys ?? []).join(", ")}`;
+    return String(change?.component ?? "envelope");
+  });
+  return ` | envelope changed: ${parts.join("; ")}`;
+}
+
+function recordRequest(
+  ctx: any,
+  wireMessages: unknown[] | null,
+  payload: any = null,
+): void {
   const id = sessionId(ctx);
   if (!id) return;
   const state = getState(id);
   const messages = state.pending ?? wireMessages ?? [];
   if (!Array.isArray(messages) || messages.length === 0) return;
   const now = Date.now();
+  // The envelope (system prompt, tool list, request scalars) sits in front of
+  // every message, so a change there invalidates the whole conversation even
+  // when the message tail appended cleanly. Attribute it separately.
+  const envelope = payloadEnvelope(payload);
+  const envelopeChanges = envelope
+    ? compareEnvelope(state.envelope, envelope, state.tools, payload?.tools)
+    : null;
   const { record, digests } = buildRecord({
     seq: state.seq + 1,
     at: now,
@@ -152,6 +201,7 @@ function recordRequest(ctx: any, wireMessages: unknown[] | null): void {
     messages,
     previousDigests: state.digests,
     baseline: state.seq === 0,
+    envelopeChanges,
   });
   state.seq += 1;
   state.lastAt = now;
@@ -159,7 +209,12 @@ function recordRequest(ctx: any, wireMessages: unknown[] | null): void {
   state.records = appendRecord(state.records, record, DEFAULT_RING);
   state.totals.requests += 1;
   if (record.firstChange) state.totals.breaks += 1;
+  if (record.envelopeChanged) state.totals.envelopeBreaks += 1;
   state.totals.resentChars += record.resentChars;
+  if (envelope) {
+    state.envelope = envelope;
+    state.tools = payload?.tools ?? payload?.functions ?? null;
+  }
   state.pending = null;
   state.updatedAt = new Date(now).toISOString();
   writeState(id, state);
@@ -184,7 +239,7 @@ function renderProfile(
     `context_profile — session ${state.session.slice(0, 24)} | ${state.totals.requests} recorded request(s), ${state.records.length}/${DEFAULT_RING} in ring`,
   );
   lines.push(
-    `prefix: ${summary.requests} shown | ${summary.breaks} break(s) | est. re-sent ${formatCount(summary.resentChars)} chars (~${formatCount(Math.ceil(summary.resentChars / 4))} tokens)`,
+    `prefix: ${summary.requests} shown | ${summary.breaks} break(s)${summary.envelopeBreaks ? ` (${summary.envelopeBreaks} envelope)` : ""} | est. re-sent ${formatCount(summary.resentChars)} chars (~${formatCount(Math.ceil(summary.resentChars / 4))} tokens)`,
   );
   if (prompt > 0) {
     lines.push(
@@ -208,7 +263,7 @@ function renderProfile(
           ? ` | ${(record.msSincePrev / 1000).toFixed(1)}s since previous`
           : "";
       lines.push(
-        `  #${record.seq} ${record.appendedOnly ? "append" : "break"} ${changeKey(record.firstChange)} lcp ${record.lcpIndex}/${record.messages} (${Math.round(record.lcpRatio * 100)}%) → est. ${formatCount(record.resentChars)} chars${usage}${gap}${record.digestsCapped ? " | digests capped" : ""}`,
+        `  #${record.seq} ${record.appendedOnly && !record.envelopeChanged ? "append" : "break"} ${changeKey(record.firstChange)} lcp ${record.lcpIndex}/${record.messages} (${Math.round(record.lcpRatio * 100)}%) → est. ${formatCount(record.resentChars)} chars${usage}${gap}${record.digestsCapped ? " | digests capped" : ""}${envelopeNote(record)}`,
       );
     }
   }
@@ -255,7 +310,7 @@ export default function contextProfileExtension(pi: any) {
     const fallback = Array.isArray(event?.payload?.messages)
       ? event.payload.messages
       : null;
-    recordRequest(ctx, fallback);
+    recordRequest(ctx, fallback, event?.payload ?? null);
     return undefined;
   });
 
@@ -285,7 +340,7 @@ export default function contextProfileExtension(pi: any) {
     name: "context_profile",
     label: "Context Profile",
     description:
-      "Native context-cost diagnostics for this session: context composition by owner (custom injections, tools, roles), cached vs uncached input from provider usage, prefix-hash/divergence history with the first changed message attributed to its owner, tool-output mass, and estimated invalidation waste. Read-only; stores hashes and counts only, never prompt text.",
+      "Native context-cost diagnostics for this session: context composition by owner (custom injections, tools, roles), cached vs uncached input from provider usage, prefix-hash/divergence history with the first changed message attributed to its owner, pre-message envelope attribution (changed system prompt, added/removed/changed tool schemas such as tool_search activation, changed request scalars), tool-output mass, and estimated invalidation waste. Read-only; stores hashes and counts only, never prompt text.",
     promptSnippet:
       "Inspect context composition, cache counters and prefix-break attribution",
     promptGuidelines: [

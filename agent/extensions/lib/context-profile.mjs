@@ -135,6 +135,7 @@ export function buildRecord({
   messages,
   previousDigests,
   baseline = false,
+  envelopeChanges = null,
 }) {
   const digests = messages.map(describeMessage);
   const comparison = compareMessages(previousDigests ?? [], digests);
@@ -158,6 +159,11 @@ export function buildRecord({
       ...(comparison.appendedOnly ? { appendedOnly: true } : {}),
       ...(comparison.digestsCapped ? { digestsCapped: true } : {}),
       firstChange: comparison.firstChange,
+      // A changed system prompt or tool list invalidates the entire prompt even
+      // when the message tail was appended cleanly, so it is its own signal.
+      ...(envelopeChanges
+        ? { envelopeChanges: envelopeChanges.slice(0, 3), envelopeChanged: true }
+        : {}),
       prefixHash: chainHash(digests, comparison.lcpIndex),
       fullHash: chainHash(digests),
       resentChars,
@@ -165,6 +171,122 @@ export function buildRecord({
     },
     digests: digests.slice(-MAX_DIGESTS),
   };
+}
+
+/** Provider-visible envelope: everything in the request that precedes the
+ * messages. A change here invalidates the whole conversation, not just the
+ * changed part, so system-prompt and tool-list churn must be attributed
+ * separately from message digests — the message-only probe cannot see it. */
+export function payloadEnvelope(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const system =
+    typeof payload.system === "string"
+      ? payload.system
+      : typeof payload.systemPrompt === "string"
+        ? payload.systemPrompt
+        : Array.isArray(payload.system)
+          ? JSON.stringify(payload.system)
+          : null;
+  const tools = Array.isArray(payload.tools)
+    ? payload.tools
+    : Array.isArray(payload.functions)
+      ? payload.functions
+      : null;
+  const scalars = {};
+  for (const key of [
+    "model",
+    "tool_choice",
+    "temperature",
+    "top_p",
+    "max_tokens",
+    "max_completion_tokens",
+    "max_output_tokens",
+    "stream",
+  ])
+    if (payload[key] !== undefined) scalars[key] = payload[key];
+  return {
+    system:
+      system === null ? null : { chars: system.length, hash: sha256(system) },
+    tools:
+      tools === null
+        ? null
+        : {
+            count: tools.length,
+            hash: sha256(
+              tools
+                .map((tool) => `${toolName(tool)}:${hashValue(tool)}`)
+                .join("|"),
+            ),
+          },
+    scalars: { hash: sha256(JSON.stringify(scalars)), keys: Object.keys(scalars) },
+  };
+}
+
+function toolName(tool) {
+  return String(tool?.name ?? tool?.function?.name ?? "?");
+}
+
+/** Which tools appeared, disappeared or changed schema. Bounded: this explains
+ * an invalidation, it is not a schema dump. */
+export function toolsDiff(previousTools, currentTools, cap = 6) {
+  const before = new Map(
+    (Array.isArray(previousTools) ? previousTools : []).map((t) => [
+      toolName(t),
+      hashValue(t),
+    ]),
+  );
+  const after = new Map(
+    (Array.isArray(currentTools) ? currentTools : []).map((t) => [
+      toolName(t),
+      hashValue(t),
+    ]),
+  );
+  const added = [];
+  const removed = [];
+  const changed = [];
+  for (const [name, hash] of after) {
+    if (!before.has(name)) added.push(name);
+    else if (before.get(name) !== hash) changed.push(name);
+  }
+  for (const name of before.keys()) if (!after.has(name)) removed.push(name);
+  return {
+    added: added.slice(0, cap),
+    removed: removed.slice(0, cap),
+    changed: changed.slice(0, cap),
+    addedCount: added.length,
+    removedCount: removed.length,
+    changedCount: changed.length,
+  };
+}
+
+/** First-changed envelope component(s) between two recorded requests. */
+export function compareEnvelope(
+  previous,
+  current,
+  previousTools,
+  currentTools,
+) {
+  if (!previous || !current) return null;
+  const changes = [];
+  if (previous.system?.hash !== current.system?.hash)
+    changes.push({
+      component: "systemPrompt",
+      previousChars: previous.system?.chars ?? 0,
+      currentChars: current.system?.chars ?? 0,
+    });
+  if (previous.tools?.hash !== current.tools?.hash)
+    changes.push({
+      component: "tools",
+      previousCount: previous.tools?.count ?? 0,
+      currentCount: current.tools?.count ?? 0,
+      ...toolsDiff(previousTools, currentTools),
+    });
+  if (previous.scalars?.hash !== current.scalars?.hash)
+    changes.push({
+      component: "request-fields",
+      keys: current.scalars?.keys ?? [],
+    });
+  return changes.length ? changes : null;
 }
 
 export function appendRecord(records, record, cap = DEFAULT_RING) {
@@ -185,14 +307,21 @@ export function prefixSummary(records) {
   const offenders = new Map();
   let breaks = 0;
   let resentChars = 0;
+  let envelopeBreaks = 0;
   for (const record of list) {
     if (!record) continue;
     resentChars += record.resentChars ?? 0;
     // The first recorded request is a baseline, and a pure tail append keeps
-    // the cached prefix intact — neither is a prefix break.
-    if (!record.firstChange || record.baseline || record.appendedOnly) continue;
+    // the cached prefix intact — neither is a prefix break. A changed system
+    // prompt or tool list breaks the prefix even when the tail only appended.
+    if (record.baseline) continue;
+    if (!record.firstChange && !record.envelopeChanged) continue;
+    if (record.appendedOnly && !record.envelopeChanged) continue;
     breaks++;
-    const key = changeKey(record.firstChange);
+    if (record.envelopeChanged) envelopeBreaks++;
+    const key = record.envelopeChanged
+      ? `envelope:${(record.envelopeChanges ?? []).map((change) => change.component).join("+")}`
+      : changeKey(record.firstChange);
     const row = offenders.get(key) ?? { key, breaks: 0, resentChars: 0 };
     row.breaks++;
     row.resentChars += record.resentChars ?? 0;
@@ -202,6 +331,7 @@ export function prefixSummary(records) {
     requests: list.length,
     breaks,
     stable: list.length - breaks,
+    envelopeBreaks,
     resentChars,
     offenders: [...offenders.values()]
       .sort((a, b) => b.resentChars - a.resentChars)
