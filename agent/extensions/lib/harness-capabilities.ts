@@ -775,6 +775,24 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		sourceFiles: ["agent/extensions/lib/local-intelligence.mjs", "agent/extensions/lib/mini-preprocessor.ts", "agent/extensions/pi-memory/context-tools.ts"],
 		doc: "agent/public-template/docs/LOCAL-INTELLIGENCE.md",
 	}),
+	capability({
+		id: "agentmail-email",
+		group: "communication",
+		summary: "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.",
+		entrypoints: ["agentmail_status", "agentmail_send", "agentmail_messages", "agentmail_message"],
+		tools: ["agentmail_status", "agentmail_send", "agentmail_messages", "agentmail_message"],
+		options: [
+			option("AGENTMAIL_API_KEY", "Required environment variable; read at call time and never persisted, logged or echoed."),
+			option("AGENTMAIL_INBOX_ID", "Default sender inbox (usually the sending address) used when a call omits inboxId."),
+			option("AGENTMAIL_BASE_URL", "Optional endpoint override, for example another AgentMail region."),
+			option("to|cc|bcc|replyTo|subject|text|html|labels", "Send fields; a subject and a text or html body are required, and CR/LF is rejected."),
+			option("inboxId|limit|pageToken|from|subject|labels|ascending|includeSpam|includeTrash", "Inbox listing scope and filters; list rows stay compact and carry a preview."),
+			option("includeHtml", "Opt-in HTML body on a single-message read."),
+		],
+		related: ["web-and-media", "safety-bounds"],
+		sourceFiles: ["agent/extensions/agentmail.ts", "agent/extensions/http-tools.ts"],
+		doc: "agent/public-template/docs/EMAIL.md",
+	}),
 ] as const);
 
 const CATALOG_BY_ID = new Map(HARNESS_CAPABILITIES.map((record) => [record.id, record]));

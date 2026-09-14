@@ -1870,6 +1870,59 @@
       ],
       "doc": "docs/LOCAL-INTELLIGENCE.md",
       "commands": []
+    },
+    {
+      "id": "agentmail-email",
+      "group": "communication",
+      "summary": "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.",
+      "entrypoints": [
+        "agentmail_status",
+        "agentmail_send",
+        "agentmail_messages",
+        "agentmail_message"
+      ],
+      "tools": [
+        "agentmail_status",
+        "agentmail_send",
+        "agentmail_messages",
+        "agentmail_message"
+      ],
+      "options": [
+        {
+          "name": "AGENTMAIL_API_KEY",
+          "summary": "Required environment variable; read at call time and never persisted, logged or echoed."
+        },
+        {
+          "name": "AGENTMAIL_INBOX_ID",
+          "summary": "Default sender inbox (usually the sending address) used when a call omits inboxId."
+        },
+        {
+          "name": "AGENTMAIL_BASE_URL",
+          "summary": "Optional endpoint override, for example another AgentMail region."
+        },
+        {
+          "name": "to|cc|bcc|replyTo|subject|text|html|labels",
+          "summary": "Send fields; a subject and a text or html body are required, and CR/LF is rejected."
+        },
+        {
+          "name": "inboxId|limit|pageToken|from|subject|labels|ascending|includeSpam|includeTrash",
+          "summary": "Inbox listing scope and filters; list rows stay compact and carry a preview."
+        },
+        {
+          "name": "includeHtml",
+          "summary": "Opt-in HTML body on a single-message read."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/agentmail.ts",
+        "agent/extensions/http-tools.ts"
+      ],
+      "doc": "docs/EMAIL.md",
+      "commands": []
     }
   ],
   "tools": {
@@ -2180,6 +2233,30 @@
       "ls"
     ],
     "stableRegistrations": [
+      {
+        "name": "agentmail_message",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 515,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_messages",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 464,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_send",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 436,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_status",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 407,
+        "kind": "literal"
+      },
       {
         "name": "archive_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
@@ -2614,6 +2691,30 @@
     ],
     "literalRegistrations": [
       {
+        "name": "agentmail_message",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 515,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_messages",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 464,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_send",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 436,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_status",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 407,
+        "kind": "literal"
+      },
+      {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 829,
@@ -3010,11 +3111,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 512,
-      "registrationSites": 53,
+      "sourceFiles": 513,
+      "registrationSites": 57,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 71,
-      "uniqueStableTools": 70,
+      "stableRegistrationRows": 75,
+      "uniqueStableTools": 74,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -3027,6 +3128,10 @@
     "extensions": [
       {
         "path": "agent/agent-context-tools.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/agentmail.ts",
         "exists": false
       },
       {
@@ -5102,6 +5207,10 @@
       {
         "name": "COST-ACCOUNTING.md",
         "path": "docs/COST-ACCOUNTING.md"
+      },
+      {
+        "name": "EMAIL.md",
+        "path": "docs/EMAIL.md"
       },
       {
         "name": "GUIDANCE-AND-DIAGNOSTICS.md",

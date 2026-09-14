@@ -120,6 +120,31 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
+### communication
+
+#### agentmail-email
+
+Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.
+
+**Entrypoints:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_message`
+
+**Catalog tool pointers:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_message`
+
+**Options:**
+
+- `AGENTMAIL_API_KEY`: Required environment variable; read at call time and never persisted, logged or echoed.
+- `AGENTMAIL_INBOX_ID`: Default sender inbox (usually the sending address) used when a call omits inboxId.
+- `AGENTMAIL_BASE_URL`: Optional endpoint override, for example another AgentMail region.
+- `to|cc|bcc|replyTo|subject|text|html|labels`: Send fields; a subject and a text or html body are required, and CR/LF is rejected.
+- `inboxId|limit|pageToken|from|subject|labels|ascending|includeSpam|includeTrash`: Inbox listing scope and filters; list rows stay compact and carry a preview.
+- `includeHtml`: Opt-in HTML body on a single-message read.
+
+**Related records:** `web-and-media`, `safety-bounds`
+
+**Source:** [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts), [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts)
+
+**Documentation:** [`docs/EMAIL.md`](EMAIL.md)
+
 ### coordination
 
 #### session-coordination
@@ -733,6 +758,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
+- `agentmail_message` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 515; literal)
+- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 464; literal)
+- `agentmail_send` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 436; literal)
+- `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 407; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 79; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
@@ -950,6 +979,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 ### Extensions
 
 - `agent/agent-context-tools.ts` (missing from sanitized source) — missing from source tree
+- `agent/agentmail.ts` (missing from sanitized source) — missing from source tree
 - `agent/bash-router.ts` (missing from sanitized source) — missing from source tree
 - `agent/bulk-edit.ts` (missing from sanitized source) — missing from source tree
 - `agent/checkpoints.ts` (missing from sanitized source) — missing from source tree
@@ -1370,6 +1400,7 @@ These modules are present under `agent/scripts/patches` in the sanitized export.
 - [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)
 - [`docs/COST-ACCOUNTING.md`](COST-ACCOUNTING.md)
+- [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 - [`docs/INSTALL.md`](INSTALL.md)
 - [`docs/INTENT.md`](INTENT.md)
