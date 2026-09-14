@@ -722,9 +722,14 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		const miss = skillCatalogProjectionMiss(event, pi.getActiveTools?.() ?? []);
 		if (!miss) return;
 		if (skillProjectionNotified.size >= 64)
-			skillProjectionNotified.delete(skillProjectionNotified.values().next().value);
+			skillProjectionNotified.delete(
+				skillProjectionNotified.values().next().value,
+			);
 		skillProjectionNotified.add(sid);
-		logReminderErr("skill-catalogue-projection", new Error(`projection missed: ${miss}`));
+		logReminderErr(
+			"skill-catalogue-projection",
+			new Error(`projection missed: ${miss}`),
+		);
 		ctx?.ui?.notify?.(
 			`Skill catalogue projection missed (${miss}); this session carries the full catalogue. Inspect extensions/lib/tool-discovery.ts after the core update.`,
 			"warning",

@@ -2070,7 +2070,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 348
+        "line": 579
       },
       {
         "name": "or-provider",
@@ -2095,7 +2095,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 931
+        "line": 936
       },
       {
         "name": "run",
@@ -2509,7 +2509,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 295,
+        "line": 526,
         "kind": "literal"
       },
       {
@@ -2837,7 +2837,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 295,
+        "line": 526,
         "kind": "literal"
       },
       {

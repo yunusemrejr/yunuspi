@@ -31,9 +31,24 @@ export const HELPER = `function __piSpillOutput(prefix, text) { /* ${MARKER} */
 // The truncation block is identical for find.js's two code paths; grep.js and
 // ls.js each have a single copy at their own indentation depth.
 const TOOLS = {
-  "grep.js": { name: "grep", prefix: "pi-grep", indent: "                            ", occurrences: 1 },
-  "find.js": { name: "find", prefix: "pi-find", indent: "                            ", occurrences: 2 },
-  "ls.js": { name: "ls", prefix: "pi-ls", indent: "                        ", occurrences: 1 },
+  "grep.js": {
+    name: "grep",
+    prefix: "pi-grep",
+    indent: "                            ",
+    occurrences: 1,
+  },
+  "find.js": {
+    name: "find",
+    prefix: "pi-find",
+    indent: "                            ",
+    occurrences: 2,
+  },
+  "ls.js": {
+    name: "ls",
+    prefix: "pi-ls",
+    indent: "                        ",
+    occurrences: 1,
+  },
 };
 
 const originalBlock = (indent) =>
@@ -61,7 +76,8 @@ export function isAppliedSource(source, tool) {
   return (
     source.split(MARKER).length === 2 &&
     source.split(HELPER).length === 2 &&
-    occurrencesOf(source, patchedBlock(spec.indent, spec.prefix)) === spec.occurrences &&
+    occurrencesOf(source, patchedBlock(spec.indent, spec.prefix)) ===
+      spec.occurrences &&
     occurrencesOf(source, originalBlock(spec.indent)) === 0
   );
 }
@@ -117,7 +133,8 @@ export function targets() {
     return {
       name: `search output spill: ${path.relative(core, target)}`,
       exists: () => fs.existsSync(target),
-      isApplied: () => isAppliedSource(fs.readFileSync(target, "utf8"), spec.name),
+      isApplied: () =>
+        isAppliedSource(fs.readFileSync(target, "utf8"), spec.name),
       apply() {
         const source = fs.readFileSync(target, "utf8"),
           next = patchSource(source, spec.name);

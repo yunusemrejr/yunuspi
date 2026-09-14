@@ -31,7 +31,13 @@
  * 1 = issues remain (needs attention, or repaired-but-verify-again).
  */
 
-import { execFile, execFileSync, execSync, spawn, spawnSync } from "node:child_process";
+import {
+  execFile,
+  execFileSync,
+  execSync,
+  spawn,
+  spawnSync,
+} from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -48,10 +54,26 @@ const execFileP = promisify(execFile);
 async function checkSourceSyntax(file) {
   const options = { timeout: 30_000, maxBuffer: 1_000_000 };
   if (file.endsWith(".json")) JSON.parse(fs.readFileSync(file, "utf8"));
-  else if (file.endsWith(".py")) await execFileP("python3", ["-c", "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_bytes(), filename=sys.argv[1])", file], options);
-  else if (file.endsWith(".sh")) await execFileP("/bin/bash", ["-n", file], options);
-  else if (file.endsWith(".service")) await execFileP("systemd-analyze", ["--user", "verify", file], options);
-  else if (/\.(?:[cm]?[jt]s|tsx|jsx)$/.test(file)) await execFileP("node", ["--experimental-strip-types", "--check", file], options);
+  else if (file.endsWith(".py"))
+    await execFileP(
+      "python3",
+      [
+        "-c",
+        "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_bytes(), filename=sys.argv[1])",
+        file,
+      ],
+      options,
+    );
+  else if (file.endsWith(".sh"))
+    await execFileP("/bin/bash", ["-n", file], options);
+  else if (file.endsWith(".service"))
+    await execFileP("systemd-analyze", ["--user", "verify", file], options);
+  else if (/\.(?:[cm]?[jt]s|tsx|jsx)$/.test(file))
+    await execFileP(
+      "node",
+      ["--experimental-strip-types", "--check", file],
+      options,
+    );
   else throw new Error("Unsupported syntax verifier for " + path.extname(file));
 }
 
@@ -313,13 +335,25 @@ function findPiPackage() {
 
 async function main() {
   console.log("== Pi harness verification ==");
-  if (!STAGED && fs.existsSync(path.join(AGENT_DIR,"logs/core-update-transaction.json"))) {
+  if (
+    !STAGED &&
+    fs.existsSync(path.join(AGENT_DIR, "logs/core-update-transaction.json"))
+  ) {
     let validating = false;
     try {
-      const held=fs.fstatSync(8),expected=fs.statSync(path.join(AGENT_DIR,"logs/harness-session.lock"));
-      validating=process.env.PI_HARNESS_SESSION_LOCK_HELD==="1"&&held.ino===expected.ino&&held.dev===expected.dev;
+      const held = fs.fstatSync(8),
+        expected = fs.statSync(
+          path.join(AGENT_DIR, "logs/harness-session.lock"),
+        );
+      validating =
+        process.env.PI_HARNESS_SESSION_LOCK_HELD === "1" &&
+        held.ino === expected.ino &&
+        held.dev === expected.dev;
     } catch {}
-    if (!validating) bad("interrupted core update pending — run auto-update.sh --repair-only before using Pi");
+    if (!validating)
+      bad(
+        "interrupted core update pending — run auto-update.sh --repair-only before using Pi",
+      );
   }
   const piPkg = findPiPackage();
   if (piPkg) {
@@ -389,9 +423,7 @@ async function main() {
     let libFiles = [];
     try {
       if (fs.existsSync(libDir) && fs.statSync(libDir).isDirectory()) {
-        libFiles = fs
-          .readdirSync(libDir)
-          .filter((f) => f.endsWith(".ts"));
+        libFiles = fs.readdirSync(libDir).filter((f) => f.endsWith(".ts"));
       } else {
         bad(`extension library directory missing: ${libDir}`);
       }
@@ -399,8 +431,12 @@ async function main() {
       bad(`extension library directory unreadable: ${libDir} — ${e.message}`);
     }
     if (manifest.ok) {
-      for (const file of libFiles.filter(file => !EXPECTED_LIB.includes(file)))
-        bad(`extension library not in manifest: lib/${file} — register or remove it`);
+      for (const file of libFiles.filter(
+        (file) => !EXPECTED_LIB.includes(file),
+      ))
+        bad(
+          `extension library not in manifest: lib/${file} — register or remove it`,
+        );
     }
     const parseTargets = [
       ...(manifest.supportFiles ?? []).map((f) => path.join(AGENT_DIR, f)),
@@ -546,62 +582,75 @@ async function main() {
 
   // ── 3a. Out-of-band update recovery (outside the replaceable package) ─
   console.log("\n[3a] Automatic repair units");
-  if (!manifest?.supportFiles?.some(file => file.startsWith("scripts/systemd/pi-harness-repair."))) {
+  if (
+    !manifest?.supportFiles?.some((file) =>
+      file.startsWith("scripts/systemd/pi-harness-repair."),
+    )
+  ) {
     info("optional automatic repair units are not part of this installation");
-  } else try {
-    if (!piPkg)
-      throw new Error(
-        "Cannot configure repair watch without a Pi installation",
-      );
-    const units = path.join(HOME, ".config", "systemd", "user");
-    // PathChanged takes one raw absolute path (spaces allowed), not shell quotes.
-    const unitPath = (p) => {
-      if (/[\r\n\0]/.test(p)) throw new Error("Invalid systemd watch path");
-      return p.replaceAll("%", "%%");
-    };
-    let changed = false;
-    for (const suffix of ["service", "timer", "path"]) {
-      const name = `pi-harness-repair.${suffix}`;
-      const source = fs
-        .readFileSync(path.join(AGENT_DIR, "scripts", "systemd", name), "utf8")
-        .replace("@CORE_PARENT@", unitPath(path.dirname(piPkg)))
-        .replace("@CORE_PACKAGE@", unitPath(path.join(piPkg, "package.json")));
-      const file = path.join(units, name);
-      if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === source)
-        continue;
-      if (!FIX || STAGED) {
-        bad(`${name} missing or drifted — run --fix`);
-        continue;
+  } else
+    try {
+      if (!piPkg)
+        throw new Error(
+          "Cannot configure repair watch without a Pi installation",
+        );
+      const units = path.join(HOME, ".config", "systemd", "user");
+      // PathChanged takes one raw absolute path (spaces allowed), not shell quotes.
+      const unitPath = (p) => {
+        if (/[\r\n\0]/.test(p)) throw new Error("Invalid systemd watch path");
+        return p.replaceAll("%", "%%");
+      };
+      let changed = false;
+      for (const suffix of ["service", "timer", "path"]) {
+        const name = `pi-harness-repair.${suffix}`;
+        const source = fs
+          .readFileSync(
+            path.join(AGENT_DIR, "scripts", "systemd", name),
+            "utf8",
+          )
+          .replace("@CORE_PARENT@", unitPath(path.dirname(piPkg)))
+          .replace(
+            "@CORE_PACKAGE@",
+            unitPath(path.join(piPkg, "package.json")),
+          );
+        const file = path.join(units, name);
+        if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === source)
+          continue;
+        if (!FIX || STAGED) {
+          bad(`${name} missing or drifted — run --fix`);
+          continue;
+        }
+        fs.mkdirSync(units, { recursive: true });
+        fs.writeFileSync(file, source);
+        changed = true;
+        fixed(`${name} installed from maintained source`);
       }
-      fs.mkdirSync(units, { recursive: true });
-      fs.writeFileSync(file, source);
-      changed = true;
-      fixed(`${name} installed from maintained source`);
+      const systemctl = (...argv) =>
+        execFileSync("systemctl", ["--user", ...argv], {
+          encoding: "utf8",
+          timeout: 10000,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      const triggers = ["pi-harness-repair.timer", "pi-harness-repair.path"];
+      if (FIX && !STAGED) {
+        if (changed) systemctl("daemon-reload");
+        systemctl("enable", "--now", ...triggers);
+        if (changed) systemctl("restart", "pi-harness-repair.path");
+      }
+      for (const unit of STAGED ? [] : triggers) {
+        if (systemctl("is-enabled", unit).trim() !== "enabled")
+          throw new Error(`${unit} is not enabled`);
+        if (systemctl("is-active", unit).trim() !== "active")
+          throw new Error(`${unit} is not active`);
+      }
+      ok(
+        STAGED
+          ? "repair unit sources match host-verified configuration (host services checked before staging)"
+          : "installation-change watch and periodic repair fallback enabled and active",
+      );
+    } catch (error) {
+      bad(`automatic repair unavailable: ${error.message}`);
     }
-    const systemctl = (...argv) =>
-      execFileSync("systemctl", ["--user", ...argv], {
-        encoding: "utf8",
-        timeout: 10000,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    const triggers = ["pi-harness-repair.timer", "pi-harness-repair.path"];
-    if (FIX && !STAGED) {
-      if (changed) systemctl("daemon-reload");
-      systemctl("enable", "--now", ...triggers);
-      if (changed) systemctl("restart", "pi-harness-repair.path");
-    }
-    for (const unit of STAGED ? [] : triggers) {
-      if (systemctl("is-enabled", unit).trim() !== "enabled")
-        throw new Error(`${unit} is not enabled`);
-      if (systemctl("is-active", unit).trim() !== "active")
-        throw new Error(`${unit} is not active`);
-    }
-    ok(
-      STAGED ? "repair unit sources match host-verified configuration (host services checked before staging)" : "installation-change watch and periodic repair fallback enabled and active",
-    );
-  } catch (error) {
-    bad(`automatic repair unavailable: ${error.message}`);
-  }
 
   // The normal CLI takes a shared session lease before loading any core code.
   // npm can replace its bin link, so launcher restoration belongs to repair.
@@ -609,19 +658,29 @@ async function main() {
     if (!piPkg) throw Error("Pi package unavailable");
     const launcher = launcherSpec(piPkg);
     const existing = fs.readFileSync(launcher.file, "utf8");
-    if (!fs.lstatSync(launcher.file).isSymbolicLink() && existing === launcher.source) {
+    if (
+      !fs.lstatSync(launcher.file).isSymbolicLink() &&
+      existing === launcher.source
+    ) {
       ok("Pi launcher protects sessions from concurrent update/repair");
     } else if (FIX && !STAGED) {
-      const ownedLink = fs.lstatSync(launcher.file).isSymbolicLink() && fs.realpathSync(launcher.file).startsWith(piPkg + path.sep);
-      if (!ownedLink && !existing.includes("# PI_HARNESS_LAUNCHER_V1\n")) throw Error("Unrecognized Pi launcher; preserve it for review");
+      const ownedLink =
+        fs.lstatSync(launcher.file).isSymbolicLink() &&
+        fs.realpathSync(launcher.file).startsWith(piPkg + path.sep);
+      if (!ownedLink && !existing.includes("# PI_HARNESS_LAUNCHER_V1\n"))
+        throw Error("Unrecognized Pi launcher; preserve it for review");
       const temp = `${launcher.file}.${process.pid}.tmp`;
       try {
         fs.writeFileSync(temp, launcher.source, { mode: 0o755, flag: "wx" });
         fs.renameSync(temp, launcher.file);
-      } finally { fs.rmSync(temp, { force: true }); }
+      } finally {
+        fs.rmSync(temp, { force: true });
+      }
       fixed("Pi session-lock launcher installed");
     } else bad("Pi session-lock launcher missing or drifted — run --fix");
-  } catch (error) { bad(`Pi launch protection unavailable: ${error.message}`); }
+  } catch (error) {
+    bad(`Pi launch protection unavailable: ${error.message}`);
+  }
 
   // ── 4. Config + memory store parse ───────────────────────────────────
   console.log("\n[4] Config + memory");
@@ -688,7 +747,10 @@ async function main() {
   // the recovery owner and the user-confirmed profile switch.
   const modelSelectionOwners = new Map([
     ["pi-subagents/src/extension/autonomous-recovery.ts", "bounded recovery"],
-    ["pi-subagents/src/slash/slash-commands.ts", "user-confirmed profile switch"],
+    [
+      "pi-subagents/src/slash/slash-commands.ts",
+      "user-confirmed profile switch",
+    ],
   ]);
   const observedOwners = new Set();
   let stickinessBad = 0;
@@ -697,7 +759,10 @@ async function main() {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (["node_modules", ".git"].includes(entry.name)) continue;
       const file = path.join(dir, entry.name);
-      if (entry.isDirectory()) { checkModelSelection(file); continue; }
+      if (entry.isDirectory()) {
+        checkModelSelection(file);
+        continue;
+      }
       if (!entry.isFile() || !/\.(?:ts|js|mjs)$/.test(entry.name)) continue;
       const relative = path.relative(EXT_DIR, file).split(path.sep).join("/");
       const text = fs.readFileSync(file, "utf-8");
@@ -705,18 +770,30 @@ async function main() {
       for (const m of text.matchAll(re)) {
         const lineStart = text.lastIndexOf("\n", m.index) + 1;
         const lineEnd = text.indexOf("\n", m.index);
-        const line = text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd).trim();
+        const line = text
+          .slice(lineStart, lineEnd < 0 ? text.length : lineEnd)
+          .trim();
         if (line.startsWith("*") || line.startsWith("//")) continue;
-        if (modelSelectionOwners.has(relative)) { observedOwners.add(relative); continue; }
+        if (modelSelectionOwners.has(relative)) {
+          observedOwners.add(relative);
+          continue;
+        }
         stickinessBad++;
-        bad(`${relative}: direct pi.setModel call on line ${text.slice(0, m.index).split("\n").length} — outside declared model-selection owners`);
+        bad(
+          `${relative}: direct pi.setModel call on line ${text.slice(0, m.index).split("\n").length} — outside declared model-selection owners`,
+        );
       }
     }
   }
   checkModelSelection(EXT_DIR);
-  for (const owner of observedOwners) info(`model-selection owner: ${owner} (${modelSelectionOwners.get(owner)})`);
+  for (const owner of observedOwners)
+    info(
+      `model-selection owner: ${owner} (${modelSelectionOwners.get(owner)})`,
+    );
   if (stickinessBad === 0)
-    ok("direct pi.setModel scan: no calls outside declared owners (structural coverage only)");
+    ok(
+      "direct pi.setModel scan: no calls outside declared owners (structural coverage only)",
+    );
 
   // ── 6. Install-script allowlist (npm 11 allowScripts policy) ───────────
   console.log("\n[6] Install-script allowlist (agent/npm)");
@@ -1026,7 +1103,20 @@ try {
     process.env.PI_HARNESS_LOCK_HELD === "1" &&
     held.ino === expected.ino &&
     held.dev === expected.dev &&
-    spawnSync("flock", ["-n", "9"], { stdio: ["ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", 9] }).status === 0;
+    spawnSync("flock", ["-n", "9"], {
+      stdio: [
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        "ignore",
+        9,
+      ],
+    }).status === 0;
 } catch {
   /* direct invocation must acquire the lock */
 }
@@ -1036,17 +1126,57 @@ if (locked) {
       const sessionLock = path.join(AGENT_DIR, "logs", "harness-session.lock");
       let sessionHeld = false;
       try {
-        const held = fs.fstatSync(8), expected = fs.statSync(sessionLock);
-        sessionHeld = process.env.PI_HARNESS_SESSION_LOCK_HELD === "1" && held.ino === expected.ino && held.dev === expected.dev &&
-          spawnSync("flock", ["-n", "8"], { stdio: ["ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", 8] }).status === 0;
+        const held = fs.fstatSync(8),
+          expected = fs.statSync(sessionLock);
+        sessionHeld =
+          process.env.PI_HARNESS_SESSION_LOCK_HELD === "1" &&
+          held.ino === expected.ino &&
+          held.dev === expected.dev &&
+          spawnSync("flock", ["-n", "8"], {
+            stdio: [
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              8,
+            ],
+          }).status === 0;
       } catch {}
       if (!sessionHeld) {
-        const child = spawn("/bin/bash", ["-c",
-          'exec 8>"$1" || exit 1; flock -n -E 75 8 || exit $?; export PI_HARNESS_SESSION_LOCK_HELD=1; exec "$2" "${@:3}"',
-          "harness-session-lock", sessionLock, process.execPath, ...process.argv.slice(1)],
-          { stdio: ["inherit", "inherit", "inherit", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", 9] });
-        child.on("error", error => { console.error(error.message); process.exitCode = 1; });
-        child.on("exit", code => {
+        const child = spawn(
+          "/bin/bash",
+          [
+            "-c",
+            'exec 8>"$1" || exit 1; flock -n -E 75 8 || exit $?; export PI_HARNESS_SESSION_LOCK_HELD=1; exec "$2" "${@:3}"',
+            "harness-session-lock",
+            sessionLock,
+            process.execPath,
+            ...process.argv.slice(1),
+          ],
+          {
+            stdio: [
+              "inherit",
+              "inherit",
+              "inherit",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              "ignore",
+              9,
+            ],
+          },
+        );
+        child.on("error", (error) => {
+          console.error(error.message);
+          process.exitCode = 1;
+        });
+        child.on("exit", (code) => {
           // Exit 75 means the exclusive session lease is held by a live session,
           // so a writing repair was deferred. Say so explicitly and point at the
           // read-only alternative instead of a bare non-zero exit.
@@ -1059,8 +1189,13 @@ if (locked) {
         return;
       }
       // Include legacy/direct launches that predate or bypass the wrapper.
-      if (!STAGED && fs.existsSync(path.join(AGENT_DIR,"logs/core-update-transaction.json"))) {
-        throw Error("Interrupted core update pending; run auto-update.sh --repair-only to recover before repairing");
+      if (
+        !STAGED &&
+        fs.existsSync(path.join(AGENT_DIR, "logs/core-update-transaction.json"))
+      ) {
+        throw Error(
+          "Interrupted core update pending; run auto-update.sh --repair-only to recover before repairing",
+        );
       }
       const core = findPiPackage();
       if (!STAGED && core && activePiProcesses(core).length) {

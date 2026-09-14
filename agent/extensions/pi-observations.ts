@@ -6,16 +6,34 @@
  * Numeric references survive compaction/reload/fork and are branch-scoped.
  */
 import { createHash } from "node:crypto";
-import {taskTerms, structuralFingerprint, fingerprintSimilarity, failureSimilarity} from "./lib/local-intelligence.mjs";
-import {createMiniPreprocessor, miniSource, miniProjection} from "./lib/mini-preprocessor.ts";
-import {createSmolPreprocessor, safeSmolOutput} from "./lib/smol-preprocessor.ts";
+import {
+	taskTerms,
+	structuralFingerprint,
+	fingerprintSimilarity,
+	failureSimilarity,
+} from "./lib/local-intelligence.mjs";
+import {
+	createMiniPreprocessor,
+	miniSource,
+	miniProjection,
+} from "./lib/mini-preprocessor.ts";
+import {
+	createSmolPreprocessor,
+	safeSmolOutput,
+} from "./lib/smol-preprocessor.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { distillOutput, outputDelta, outputLineDelta, MAX_OUTPUT_CHARS, isSearchCommand } from "./lib/output-distiller.ts";
+import {
+	distillOutput,
+	outputDelta,
+	outputLineDelta,
+	MAX_OUTPUT_CHARS,
+	isSearchCommand,
+} from "./lib/output-distiller.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
@@ -29,7 +47,10 @@ const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Whole-paragraph prose from local documentation also benefits from Kompress.
 // Structured code, status, errors and source qualifications remain protected.
-const isSkillRead = (tool: string, input: any) => tool === "read" && typeof input?.path === "string" && /(?:^|[\\/])SKILL\.md$/i.test(input.path);
+const isSkillRead = (tool: string, input: any) =>
+	tool === "read" &&
+	typeof input?.path === "string" &&
+	/(?:^|[\\/])SKILL\.md$/i.test(input.path);
 // Repeated identical failures dedup like successes, but the receipt must keep
 // failure visibility: the raw transcript keeps the original and this cue names
 // the first failure-looking line, bounded, without inventing a resolution.
@@ -39,7 +60,11 @@ const failureCue = (text: string): string => {
 		.find((entry) => /(?:FAIL|Error|error:|failed)/.test(entry));
 	return line ? ` First failure line: ${line.trim().slice(0, 160)}` : "";
 };
-const miniEligibleTool = (tool: string, input: any) => tool === "bash" || tool === "read" && typeof input?.path === "string" && /\.(?:txt|md|rst)$/i.test(input.path);
+const miniEligibleTool = (tool: string, input: any) =>
+	tool === "bash" ||
+	(tool === "read" &&
+		typeof input?.path === "string" &&
+		/\.(?:txt|md|rst)$/i.test(input.path));
 interface Reference {
 	version: 1;
 	id: number;
@@ -81,7 +106,11 @@ function signature(tool: string, input: unknown, content: unknown): string {
 	return createHash("sha256").update(encoded).digest("hex");
 }
 
-export default function piObservationsExtension(pi: ExtensionAPI, mini = createMiniPreprocessor(), smol = createSmolPreprocessor()) {
+export default function piObservationsExtension(
+	pi: ExtensionAPI,
+	mini = createMiniPreprocessor(),
+	smol = createSmolPreprocessor(),
+) {
 	let observations = new Map<string, number>();
 	let counter = 0;
 	let visionHintSent = false;
@@ -115,8 +144,14 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		visionHintSent = false;
 	}
 
-	pi.on("session_shutdown", () => {mini.reset(); smol.reset();});
-	pi.on("agent_end", () => {mini.reset(); smol.reset();});
+	pi.on("session_shutdown", () => {
+		mini.reset();
+		smol.reset();
+	});
+	pi.on("agent_end", () => {
+		mini.reset();
+		smol.reset();
+	});
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 	pi.on("session_compact", (_event, ctx) => restore(ctx));
@@ -161,7 +196,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 						text:
 							"[visual capability] Your current model cannot see this image. Reading source or capturing another screenshot does not provide visual evidence. " +
 							(canDelegate
-        ? 'For a visual task, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
+								? 'For a visual task, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
 								: "No subagent tool is active here. Report the visual limitation; do not claim to have inspected the pixels."),
 					},
 				],
@@ -180,7 +215,11 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 			(typeof event.details !== "object" || Array.isArray(event.details))
 		)
 			return;
-		const key = signature(event.toolName, event.input, {content: event.content, isError: event.isError === true, details: event.details ?? null});
+		const key = signature(event.toolName, event.input, {
+			content: event.content,
+			isError: event.isError === true,
+			details: event.details ?? null,
+		});
 		const id = observations.get(key);
 		if (id !== undefined) {
 			remember(key, id);
@@ -194,36 +233,96 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 					{
 						type: "text" as const,
 						text: event.isError
-						? `[observation #${id} — identical failing output already seen; the call executed again and failed identically.${failureCue(text)} Raw original: obs_read({id:${id}}).]`
-						: `[observation #${id} — exact output already seen; the call executed again. Retrieve the original with obs_read({id:${id}}).]`,
+							? `[observation #${id} — identical failing output already seen; the call executed again and failed identically.${failureCue(text)} Raw original: obs_read({id:${id}}).]`
+							: `[observation #${id} — exact output already seen; the call executed again. Retrieve the original with obs_read({id:${id}}).]`,
 					},
 				],
-				details: { ...event.details, observationId: id, deduplicated: true, observationResultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}) },
+				details: {
+					...event.details,
+					observationId: id,
+					deduplicated: true,
+					observationResultHash: signature("result", null, {
+						content: event.content,
+						isError: event.isError === true,
+						details: event.details ?? null,
+					}),
+				},
 			};
 		}
-		const ref: Reference = { version: 1, id: ++counter, signature: key, operation: signature(event.toolName, event.input, null), resultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}), ...(event.toolName === 'bash' && isSearchCommand(event.input?.command) ? {searchOutput:true} : {}) };
+		const ref: Reference = {
+			version: 1,
+			id: ++counter,
+			signature: key,
+			operation: signature(event.toolName, event.input, null),
+			resultHash: signature("result", null, {
+				content: event.content,
+				isError: event.isError === true,
+				details: event.details ?? null,
+			}),
+			...(event.toolName === "bash" && isSearchCommand(event.input?.command)
+				? { searchOutput: true }
+				: {}),
+		};
 		// Do not index until message_end: parallel siblings finish out of order
 		// but persist in source order. A forward pointer could lose its original
 		// when the user forks at that result. Same-batch originals stay intact.
 		// Original content stays in its normal toolResult entry, with a small id.
-		const finish = (selection?: unknown) => ({details: {...event.details, piObservation: ref, ...(selection ? {piMiniSelection: selection} : {})}});
+		const finish = (selection?: unknown) => ({
+			details: {
+				...event.details,
+				piObservation: ref,
+				...(selection ? { piMiniSelection: selection } : {}),
+			},
+		});
 		// Existing deterministic compression wins. Only bounded successful prose
 		// can spend local inference; the original tool body stays in the transcript.
-		if (miniEligibleTool(event.toolName,event.input) && !event.isError && !event.details?.truncation && !event.details?.truncated
-			&& !event.details?.cancelled && !event.details?.aborted && (event.details?.exitCode === undefined || event.details.exitCode === 0)
-			&& ctx?.model?.cost?.input >= 0 && process.env.PI_OUTPUT_DISTILLER !== "off"
-			&& pi.getActiveTools().includes("obs_read") && miniSource(text) && !distillOutput(event.toolName, text, ref.searchOutput)) {
+		if (
+			miniEligibleTool(event.toolName, event.input) &&
+			!event.isError &&
+			!event.details?.truncation &&
+			!event.details?.truncated &&
+			!event.details?.cancelled &&
+			!event.details?.aborted &&
+			(event.details?.exitCode === undefined || event.details.exitCode === 0) &&
+			ctx?.model?.cost?.input >= 0 &&
+			process.env.PI_OUTPUT_DISTILLER !== "off" &&
+			pi.getActiveTools().includes("obs_read") &&
+			miniSource(text) &&
+			!distillOutput(event.toolName, text, ref.searchOutput)
+		) {
 			let statusSize = Infinity;
-			try {statusSize = JSON.stringify({isError:false,details:event.details ?? {}}).length;} catch {}
-			if (statusSize <= 80) return mini.select(text, ctx.model.cost.input, taskSignal).then(finish, () => finish());
+			try {
+				statusSize = JSON.stringify({
+					isError: false,
+					details: event.details ?? {},
+				}).length;
+			} catch {}
+			if (statusSize <= 80)
+				return mini
+					.select(text, ctx.model.cost.input, taskSignal)
+					.then(finish, () => finish());
 		}
 		// Structured successful line output complements Kompress prose selection.
 		// Speculate without delaying this result; a pending first exposure stays
 		// raw while a validated source/task cache can serve later observations.
-		if (process.env.PI_OUTPUT_DISTILLER !== "off" && pi.getActiveTools().includes("obs_read")
-			&& !miniSource(text) && safeSmolOutput(event.toolName,text,event.isError === true,event.details)
-			&& !distillOutput(event.toolName,text,ref.searchOutput)) {
-			smol.offer(`${ref.id}:${ref.signature}`,text,ctx?.model?.cost?.input,taskSignal);
+		if (
+			process.env.PI_OUTPUT_DISTILLER !== "off" &&
+			pi.getActiveTools().includes("obs_read") &&
+			!miniSource(text) &&
+			safeSmolOutput(
+				event.toolName,
+				text,
+				event.isError === true,
+				event.details,
+			) &&
+			!distillOutput(event.toolName, text, ref.searchOutput)
+		) {
+			smol.offer(
+				`${ref.id}:${ref.signature}`,
+				text,
+				ctx?.model?.cost?.input,
+				taskSignal,
+			);
 		}
 		return finish();
 	});
@@ -233,63 +332,195 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 	// active ancestry. Recomputing in source order keeps an append-only prefix
 	// stable: later calls cannot alter how an earlier result was represented.
 	pi.on("context", (event) => {
-		if (process.env.PI_OUTPUT_DISTILLER === "off" || !pi.getActiveTools().includes("obs_read")) return;
-		const skillCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && isSkillRead(part.name, part.arguments) ? [part.id] : []) : []));
-		const baselines = new Map<string, { id: number; text: string; tool: string; fingerprint: Set<string> | undefined }>();
-		const failures: Array<{id:number;text:string;tool:string}> = [];
-		const searchCalls = new Set(event.messages.flatMap(message => message.role === 'assistant' && Array.isArray(message.content) ? message.content.flatMap(part => part.type === 'toolCall' && part.name === 'bash' && isSearchCommand(part.arguments?.command) ? [part.id] : []) : []));
+		if (
+			process.env.PI_OUTPUT_DISTILLER === "off" ||
+			!pi.getActiveTools().includes("obs_read")
+		)
+			return;
+		const skillCalls = new Set(
+			event.messages.flatMap((message) =>
+				message.role === "assistant" && Array.isArray(message.content)
+					? message.content.flatMap((part) =>
+							part.type === "toolCall" && isSkillRead(part.name, part.arguments)
+								? [part.id]
+								: [],
+						)
+					: [],
+			),
+		);
+		const baselines = new Map<
+			string,
+			{
+				id: number;
+				text: string;
+				tool: string;
+				fingerprint: Set<string> | undefined;
+			}
+		>();
+		const failures: Array<{ id: number; text: string; tool: string }> = [];
+		const searchCalls = new Set(
+			event.messages.flatMap((message) =>
+				message.role === "assistant" && Array.isArray(message.content)
+					? message.content.flatMap((part) =>
+							part.type === "toolCall" &&
+							part.name === "bash" &&
+							isSearchCommand(part.arguments?.command)
+								? [part.id]
+								: [],
+						)
+					: [],
+			),
+		);
 		let changed = false;
 		const messages = event.messages.map((message) => {
-			if (message.role !== "toolResult" || message.content.some(part => part.type !== "text")) return message;
+			if (
+				message.role !== "toolResult" ||
+				message.content.some((part) => part.type !== "text")
+			)
+				return message;
 			if (skillCalls.has(message.toolCallId)) return message;
 			const ref = message.details?.piObservation as Reference | undefined;
-			if (ref?.version !== 1 || !ref.operation || !TOOLS.has(message.toolName)) return message;
+			if (ref?.version !== 1 || !ref.operation || !TOOLS.has(message.toolName))
+				return message;
 			const raw = textOf(message.content);
 			if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return message;
 			// Carry all foreign status/provenance details verbatim into the visible
 			// receipt as well as retaining them on the original toolResult object.
-			const { piObservation: _ref, piMiniSelection: selection, ...details } = message.details ?? {};
+			const {
+				piObservation: _ref,
+				piMiniSelection: selection,
+				...details
+			} = message.details ?? {};
 			let status: string;
-			try { status = JSON.stringify({isError: message.isError === true, details}); } catch { return message; }
+			try {
+				status = JSON.stringify({ isError: message.isError === true, details });
+			} catch {
+				return message;
+			}
 			if (status.length > 2000) return message;
 			// Failure matching only adds a retrieval cue. Existing deterministic
 			// distillation still applies and originals remain recoverable.
 			let failureHint: string | undefined;
 			if (message.isError) {
-				const related = process.env.PI_LOCAL_INTELLIGENCE==='off' ? undefined : failures.slice(-16).filter(item=>item.tool===message.toolName)
-					.map(item=>({...item,similarity:failureSimilarity(raw,item.text)})).filter(item=>item.similarity>=.85).sort((a,b)=>b.similarity-a.similarity)[0];
-				failures.push({id:ref.id,text:raw,tool:message.toolName}); if(failures.length>16)failures.shift();
-				if(related) failureHint=`[Related historical failure: obs_read({id:${related.id}}); structural similarity ${related.similarity.toFixed(2)}, not a probability or verified resolution. The match does not establish current cause or resolution.]`;
+				const related =
+					process.env.PI_LOCAL_INTELLIGENCE === "off"
+						? undefined
+						: failures
+								.slice(-16)
+								.filter((item) => item.tool === message.toolName)
+								.map((item) => ({
+									...item,
+									similarity: failureSimilarity(raw, item.text),
+								}))
+								.filter((item) => item.similarity >= 0.85)
+								.sort((a, b) => b.similarity - a.similarity)[0];
+				failures.push({ id: ref.id, text: raw, tool: message.toolName });
+				if (failures.length > 16) failures.shift();
+				if (related)
+					failureHint = `[Related historical failure: obs_read({id:${related.id}}); structural similarity ${related.similarity.toFixed(2)}, not a probability or verified resolution. The match does not establish current cause or resolution.]`;
 			}
 			let baseline = baselines.get(ref.operation);
-			const exactChange = (previous:string) => outputDelta(previous,raw) ?? (process.env.PI_LOCAL_INTELLIGENCE==='off'?undefined:outputLineDelta(previous,raw));
-			let delta = !message.isError && !details.truncation && !details.truncated && baseline ? exactChange(baseline.text) : undefined;
-			if(!message.isError && !delta && !details.truncation && !details.truncated && process.env.PI_LOCAL_INTELLIGENCE!=='off') {
-				const fingerprint=structuralFingerprint(raw);
-				const candidates=[...baselines.values()].filter(item=>item.tool===message.toolName)
-					.map(item=>({item,score:fingerprintSimilarity(fingerprint,item.fingerprint)})).filter(item=>item.score>=.8).sort((a,b)=>b.score-a.score).slice(0,8);
-				for(const {item} of candidates) { const proposed=exactChange(item.text); if(proposed){baseline=item;delta=proposed;break;} }
-			}
-			const summary = delta ? undefined : distillOutput(message.toolName, raw, ref.searchOutput || searchCalls.has(message.toolCallId));
-			const localLines = process.env.PI_SMOL_PREPROCESSOR !== "off" ? smol.take(`${ref.id}:${ref.signature}`,raw) : undefined;
-			const selected = !delta && !summary && !message.isError
-				? (process.env.PI_MINI_PREPROCESSOR !== "off" ? miniProjection(raw, selection) : undefined) ?? localLines : undefined;
-			if (!delta && !summary && !selected) {
-				if (!message.isError && !details.truncation && !details.truncated && raw.length >= 3000) {
-					baselines.set(ref.operation, {id: ref.id, text: raw, tool:message.toolName, fingerprint:structuralFingerprint(raw)});
-					if (baselines.size > MAX_ENTRIES) baselines.delete(baselines.keys().next().value!);
+			const exactChange = (previous: string) =>
+				outputDelta(previous, raw) ??
+				(process.env.PI_LOCAL_INTELLIGENCE === "off"
+					? undefined
+					: outputLineDelta(previous, raw));
+			let delta =
+				!message.isError && !details.truncation && !details.truncated && baseline
+					? exactChange(baseline.text)
+					: undefined;
+			if (
+				!message.isError &&
+				!delta &&
+				!details.truncation &&
+				!details.truncated &&
+				process.env.PI_LOCAL_INTELLIGENCE !== "off"
+			) {
+				const fingerprint = structuralFingerprint(raw);
+				const candidates = [...baselines.values()]
+					.filter((item) => item.tool === message.toolName)
+					.map((item) => ({
+						item,
+						score: fingerprintSimilarity(fingerprint, item.fingerprint),
+					}))
+					.filter((item) => item.score >= 0.8)
+					.sort((a, b) => b.score - a.score)
+					.slice(0, 8);
+				for (const { item } of candidates) {
+					const proposed = exactChange(item.text);
+					if (proposed) {
+						baseline = item;
+						delta = proposed;
+						break;
+					}
 				}
-				if(failureHint) { changed=true; return {...message,content:[...message.content,{type:'text' as const,text:failureHint}]}; }
+			}
+			const summary = delta
+				? undefined
+				: distillOutput(
+						message.toolName,
+						raw,
+						ref.searchOutput || searchCalls.has(message.toolCallId),
+					);
+			const localLines =
+				process.env.PI_SMOL_PREPROCESSOR !== "off"
+					? smol.take(`${ref.id}:${ref.signature}`, raw)
+					: undefined;
+			const selected =
+				!delta && !summary && !message.isError
+					? ((process.env.PI_MINI_PREPROCESSOR !== "off"
+							? miniProjection(raw, selection)
+							: undefined) ?? localLines)
+					: undefined;
+			if (!delta && !summary && !selected) {
+				if (
+					!message.isError &&
+					!details.truncation &&
+					!details.truncated &&
+					raw.length >= 3000
+				) {
+					baselines.set(ref.operation, {
+						id: ref.id,
+						text: raw,
+						tool: message.toolName,
+						fingerprint: structuralFingerprint(raw),
+					});
+					if (baselines.size > MAX_ENTRIES)
+						baselines.delete(baselines.keys().next().value!);
+				}
+				if (failureHint) {
+					changed = true;
+					return {
+						...message,
+						content: [
+							...message.content,
+							{ type: "text" as const, text: failureHint },
+						],
+					};
+				}
 				return message;
 			}
 			changed = true;
 			const projection = delta
-				? JSON.stringify({kind: "exact-delta", baselineObservation: baseline!.id, offsetUnit: "UTF-16 code units", ...delta, currentChars: raw.length})
-				: selected ?? summary!.text;
-			return {...message, content: [{type: "text" as const, text:
-				`[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`}]};
+				? JSON.stringify({
+						kind: "exact-delta",
+						baselineObservation: baseline!.id,
+						offsetUnit: "UTF-16 code units",
+						...delta,
+						currentChars: raw.length,
+					})
+				: (selected ?? summary!.text);
+			return {
+				...message,
+				content: [
+					{
+						type: "text" as const,
+						text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`,
+					},
+				],
+			};
 		});
-		return changed ? {messages} : undefined;
+		return changed ? { messages } : undefined;
 	});
 
 	pi.registerTool({

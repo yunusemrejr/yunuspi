@@ -123,7 +123,12 @@ export function assertSafeCheckout(checkout, exportDir, agentDir = AGENT_DIR) {
   return checkout;
 }
 
-function run(cmd, argv, cwd, { allowExit = [], capture = false, env, timeoutMs } = {}) {
+function run(
+  cmd,
+  argv,
+  cwd,
+  { allowExit = [], capture = false, env, timeoutMs } = {},
+) {
   const result = spawnSync(cmd, argv, {
     cwd,
     encoding: "utf8",
