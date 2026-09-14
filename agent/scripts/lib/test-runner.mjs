@@ -5,8 +5,12 @@ import { randomUUID } from "node:crypto";
 
 // The curated catalogue owns which scripts are safe offline. Parallelism is
 // explicit because some historical suites share installed-runtime fixtures.
+export const DEFAULT_SUITE_DEADLINE_MS = 120000;
+// A longer deadline is explicit opt-in (--timeout), never the default: an
+// anonymous deadline kill used to look identical to a genuine suite failure.
+export const MAX_SUITE_DEADLINE_MS = 600000;
 export function parseSelection(args, tests) {
-  const requested = []; let jobs = 1, report, list = false;
+  const requested = []; let jobs = 1, report, list = false, timeoutMs = DEFAULT_SUITE_DEADLINE_MS;
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
     if (key === "--list") { list = true; continue; }
@@ -20,17 +24,23 @@ export function parseSelection(args, tests) {
       requested.push(...matches);
     }
     else if (key === "--jobs" && /^[1-4]$/.test(value ?? "")) jobs = Number(value);
+    else if (key === "--timeout" && /^\d+$/.test(value ?? "")) {
+      const seconds = Number(value);
+      if (seconds < 1 || seconds * 1000 > MAX_SUITE_DEADLINE_MS)
+        throw new Error(`Invalid --timeout ${value}: use whole seconds between 1 and ${MAX_SUITE_DEADLINE_MS / 1000}. Longer deadlines are deliberate, not a default.`);
+      timeoutMs = seconds * 1000;
+    }
     else if (key === "--report" && value && !value.startsWith("--")) report = path.resolve(value);
-    else throw new Error(`Invalid test selection: ${value ?? key}. Use --test <registered relative path>, --match <literal path text>, --list, --jobs <1-4>, or --report <file>.`);
+    else throw new Error(`Invalid test selection: ${value ?? key}. Use --test <registered relative path>, --match <literal path text>, --list, --jobs <1-4>, --timeout <1-600 seconds>, or --report <file>.`);
   }
-  return { selected: [...new Set(requested.length ? requested : tests)], jobs, report, list };
+  return { selected: [...new Set(requested.length ? requested : tests)], jobs, report, list, timeoutMs };
 }
 
 export function runSuite(test, file, { signal, env = process.env, cwd, timeoutMs = 120000 } = {}) {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new Error('Invalid suite deadline');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_SUITE_DEADLINE_MS) throw new Error('Invalid suite deadline');
   const started = performance.now();
   return new Promise((resolve) => {
-    let stdout = "", stderr = "", bytes = 0, error, hardKill;
+    let stdout = "", stderr = "", bytes = 0, error, hardKill, deadlineFired = false;
     const child = spawn("timeout", ["--kill-after=5s", `${timeoutMs / 1000}s`, process.execPath,
       "--no-warnings", "--experimental-strip-types", file], {
       env: { ...env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_MEMORY_EXIT_SUMMARY: "0", PI_MEMORY_QMD_UPDATE: "off" },
@@ -44,7 +54,7 @@ export function runSuite(test, file, { signal, env = process.env, cwd, timeoutMs
     };
     // GNU timeout stops watching when the direct child exits. Descendants
     // can still hold inherited stdout/stderr open, preventing close forever.
-    const deadline = setTimeout(() => { error ??= 'test exceeded suite deadline'; stop(); }, timeoutMs + 25);
+    const deadline = setTimeout(() => { deadlineFired = true; error ??= 'test exceeded suite deadline'; stop(); }, timeoutMs + 25);
     const abort = () => { error ??= "test run interrupted"; stop(); };
     const collect = (stream) => (data) => {
       const chunk = data.toString(); bytes += Buffer.byteLength(chunk);
@@ -60,8 +70,11 @@ export function runSuite(test, file, { signal, env = process.env, cwd, timeoutMs
     child.on("close", (status, childSignal) => {
       clearTimeout(deadline); clearTimeout(hardKill); signal?.removeEventListener("abort", abort);
       const ok = status === 0 && !error;
+      // A timeout is its own outcome, not an anonymous non-zero exit: GNU
+      // timeout reports 124, while the parent deadline can also win the race.
+      const timedOut = deadlineFired || status === 124;
       resolve({ test, ok, status, signal: childSignal, ms: Math.round(performance.now() - started),
-        error: error ?? null, failure: ok ? null : `${error ? error + "\n" : ""}${stdout}${stderr}`.slice(-6000) });
+        error: error ?? null, timedOut, failure: ok ? null : `${error ? error + "\n" : ""}${stdout}${stderr}`.slice(-6000) });
     });
   });
 }

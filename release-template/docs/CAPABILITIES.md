@@ -776,6 +776,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 188; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 303; definition)
+- `context_profile` — [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) (line 285; literal)
 - `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
 - `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
@@ -806,7 +807,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 584; literal)
-- `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 507; literal)
+- `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 521; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 332; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 86; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 9; literal)
@@ -862,7 +863,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3280)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 48)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3322)
-- /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 625)
+- /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 639)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)
 - /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 585)
 - /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 632)
@@ -983,6 +984,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - `agent/bash-router.ts` (missing from sanitized source) — missing from source tree
 - `agent/bulk-edit.ts` (missing from sanitized source) — missing from source tree
 - `agent/checkpoints.ts` (missing from sanitized source) — missing from source tree
+- `agent/context-profile.ts` (missing from sanitized source) — missing from source tree
 - `agent/continuation-notice.ts` (missing from sanitized source) — missing from source tree
 - `agent/filesystem-safety.ts` (missing from sanitized source) — missing from source tree
 - `agent/git-tools.ts` (missing from sanitized source) — missing from source tree
@@ -1094,6 +1096,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/project-intelligence/continuity.mjs`](../../agent/extensions/lib/project-intelligence/continuity.mjs)
 - [`agent/extensions/lib/project-intelligence/discovery-parsers.mjs`](../../agent/extensions/lib/project-intelligence/discovery-parsers.mjs)
 - [`agent/extensions/lib/project-intelligence/discovery.mjs`](../../agent/extensions/lib/project-intelligence/discovery.mjs)
+- [`agent/extensions/lib/project-intelligence/heartbeat.mjs`](../../agent/extensions/lib/project-intelligence/heartbeat.mjs)
 - [`agent/extensions/lib/project-intelligence/identity.mjs`](../../agent/extensions/lib/project-intelligence/identity.mjs)
 - [`agent/extensions/lib/project-intelligence/privacy.mjs`](../../agent/extensions/lib/project-intelligence/privacy.mjs)
 - [`agent/extensions/lib/project-intelligence/query.mjs`](../../agent/extensions/lib/project-intelligence/query.mjs)

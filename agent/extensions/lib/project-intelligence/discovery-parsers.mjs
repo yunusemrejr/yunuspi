@@ -50,6 +50,10 @@ const GENERATED_SEGMENTS = new Set([
   '.pytest_cache', '__pycache__', '.mypy_cache', '.ruff_cache', '.tox',
   '.venv', 'venv', 'env', 'tmp', 'temp', 'logs', 'uploads', 'storage',
   '.terraform', '.gradle',
+  // Self-generated copies are not project knowledge. Without these, a harness
+  // root's artifacts/backups consume the discovery file budget and stale
+  // copies surface as current dependencies (measured: 615/713 sources).
+  'artifacts', 'backups', 'worktrees', 'renders', 'outputs',
 ]);
 
 const PROTECTED_BASENAME_RE = /^(?:credentials?|secrets?|secret|private(?:[-_.].*)?|id_rsa(?:[-_.].*)?|token(?:[-_.].*)?|service[-_.]?account(?:[-_.].*)?)$/i;

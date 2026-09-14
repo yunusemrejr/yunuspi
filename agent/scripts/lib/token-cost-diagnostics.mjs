@@ -92,7 +92,8 @@ function usageOf(message) {
     cacheWrite: num(u.cacheWrite),
     output: num(u.output),
     reasoning: num(u.reasoning),
-    totalTokens: num(u.totalTokens) || num(u.input) + num(u.cacheRead) + num(u.output),
+    totalTokens:
+      num(u.totalTokens) || num(u.input) + num(u.cacheRead) + num(u.output),
   };
 }
 
@@ -163,7 +164,11 @@ export function analyzeSessionEntries(entries, options = {}) {
         const seg = bucket(injections, sid, () => new Map());
         for (const [hook, value] of Object.entries(data.hooks)) {
           if (!value || typeof value !== "object") continue;
-          const prev = seg.get(hook) ?? { addedChars: 0, removedChars: 0, calls: 0 };
+          const prev = seg.get(hook) ?? {
+            addedChars: 0,
+            removedChars: 0,
+            calls: 0,
+          };
           // Cumulative within a segment: keep the maximum, never sum repeats.
           seg.set(hook, {
             addedChars: Math.max(prev.addedChars, num(value.addedChars)),
@@ -175,7 +180,10 @@ export function analyzeSessionEntries(entries, options = {}) {
       continue;
     }
 
-    if (entry.type === "custom" && entry.customType === "harness-tool-activation-v1") {
+    if (
+      entry.type === "custom" &&
+      entry.customType === "harness-tool-activation-v1"
+    ) {
       totals.toolActivations++;
       continue;
     }
@@ -295,7 +303,12 @@ export function analyzeSessionEntries(entries, options = {}) {
   const hookRows = new Map();
   for (const seg of injections.values()) {
     for (const [hook, value] of seg) {
-      const row = hookRows.get(hook) ?? { hook, calls: 0, addedChars: 0, removedChars: 0 };
+      const row = hookRows.get(hook) ?? {
+        hook,
+        calls: 0,
+        addedChars: 0,
+        removedChars: 0,
+      };
       row.calls += value.calls;
       row.addedChars += value.addedChars;
       row.removedChars += value.removedChars;
@@ -309,7 +322,9 @@ export function analyzeSessionEntries(entries, options = {}) {
     totals,
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byModel: [...byModel.values()].sort((a, b) => b.input - a.input),
-    injections: [...hookRows.values()].sort((a, b) => b.addedChars - a.addedChars),
+    injections: [...hookRows.values()].sort(
+      (a, b) => b.addedChars - a.addedChars,
+    ),
     topTurns: topTurns.sort((a, b) => b.excess - a.excess),
   };
 }
@@ -384,12 +399,24 @@ export function aggregateSessions(sessions, options = {}) {
         noCacheInput: 0,
         normalInput: 0,
       };
-      for (const key of ["turns", "input", "cacheRead", "invalidationExcess", "noCacheInput", "normalInput"])
+      for (const key of [
+        "turns",
+        "input",
+        "cacheRead",
+        "invalidationExcess",
+        "noCacheInput",
+        "normalInput",
+      ])
         row[key] += model[key] ?? 0;
       byModel.set(model.route, row);
     }
     for (const hook of session.injections) {
-      const row = injections.get(hook.hook) ?? { hook: hook.hook, calls: 0, addedChars: 0, removedChars: 0 };
+      const row = injections.get(hook.hook) ?? {
+        hook: hook.hook,
+        calls: 0,
+        addedChars: 0,
+        removedChars: 0,
+      };
       row.calls += hook.calls;
       row.addedChars += hook.addedChars;
       row.removedChars += hook.removedChars;
@@ -410,14 +437,24 @@ export function aggregateSessions(sessions, options = {}) {
     },
     totals: {
       ...totals,
-      cacheHitRate: pct(totals.cacheRead, totals.input + totals.cacheRead + totals.cacheWrite),
+      cacheHitRate: pct(
+        totals.cacheRead,
+        totals.input + totals.cacheRead + totals.cacheWrite,
+      ),
       invalidationShareOfInput: pct(totals.invalidationExcess, totals.input),
-      reSentShareOfInput: pct(totals.invalidationExcess + totals.noCacheInput, totals.input),
+      reSentShareOfInput: pct(
+        totals.invalidationExcess + totals.noCacheInput,
+        totals.input,
+      ),
     },
     byDay: days,
     byModel: [...byModel.values()].sort((a, b) => b.input - a.input),
-    injections: [...injections.values()].sort((a, b) => b.addedChars - a.addedChars),
-    topTurns: topTurns.sort((a, b) => b.excess - a.excess).slice(0, limits.topCount),
+    injections: [...injections.values()].sort(
+      (a, b) => b.addedChars - a.addedChars,
+    ),
+    topTurns: topTurns
+      .sort((a, b) => b.excess - a.excess)
+      .slice(0, limits.topCount),
   };
   return result;
 }
@@ -465,7 +502,8 @@ export async function scanTokenCost(options) {
       if (files.length >= limits.maxFiles) return;
       const full = path.join(dir, dirent.name);
       if (dirent.isDirectory()) await walk(full, depth + 1);
-      else if (dirent.isFile() && dirent.name.endsWith(".jsonl")) files.push(full);
+      else if (dirent.isFile() && dirent.name.endsWith(".jsonl"))
+        files.push(full);
     }
   };
   await walk(root, 0);
@@ -493,7 +531,11 @@ export async function scanTokenCost(options) {
         filesSkipped++;
         continue;
       }
-      const analysis = analyzeSessionEntries(entries, { file: base, date, ...limits });
+      const analysis = analyzeSessionEntries(entries, {
+        file: base,
+        date,
+        ...limits,
+      });
       if (analysis.totals.turns === 0) {
         filesSkipped++;
         continue;
@@ -520,7 +562,9 @@ const integer = (value) => Number(value).toLocaleString("en-US");
 export function formatReport(report) {
   const lines = [];
   const t = report.totals;
-  lines.push(`Token/cache diagnostics · ${report.filesScanned} sessions scanned${report.since ? ` since ${report.since}` : ""}`);
+  lines.push(
+    `Token/cache diagnostics · ${report.filesScanned} sessions scanned${report.since ? ` since ${report.since}` : ""}`,
+  );
   lines.push(
     `Totals: ${integer(t.turns)} turns · ${integer(t.totalTokens)} total tokens · ${t.cacheHitRate.toFixed(1)}% cache hit`,
   );
@@ -533,7 +577,10 @@ export function formatReport(report) {
   lines.push("");
   lines.push("By day:");
   for (const day of report.byDay.slice(-14)) {
-    const hit = day.input + day.cacheRead > 0 ? (100 * day.cacheRead) / (day.input + day.cacheRead) : 0;
+    const hit =
+      day.input + day.cacheRead > 0
+        ? (100 * day.cacheRead) / (day.input + day.cacheRead)
+        : 0;
     lines.push(
       `  ${day.date}  turns=${integer(day.turns)}  total=${integer(day.totalTokens)}  hit=${hit.toFixed(0)}%  invalidation=${integer(day.invalidationExcess)} (${integer(day.invalidTurns)} turns)  noCache=${integer(day.noCacheInput)}`,
     );
@@ -550,7 +597,9 @@ export function formatReport(report) {
   if (report.injections.length) {
     lines.push("");
     lines.push("Hook payload additions (segment-deduplicated):");
-    for (const hook of report.injections.filter((h) => h.addedChars > 0).slice(0, 8)) {
+    for (const hook of report.injections
+      .filter((h) => h.addedChars > 0)
+      .slice(0, 8)) {
       lines.push(
         `  ${hook.hook}  calls=${integer(hook.calls)}  added=${integer(hook.addedChars)} chars (~${integer(Math.round(hook.addedChars / 4))} tok)  removed=${integer(hook.removedChars)}`,
       );

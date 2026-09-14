@@ -18,7 +18,8 @@ for (let i = 0; i < args.length; i++) {
   }
   const value = args[++i];
   if (key === "--sessions" && value) directory = path.resolve(value);
-  else if (key === "--since" && /^\d{4}-\d{2}-\d{2}$/.test(value)) since = value;
+  else if (key === "--since" && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    since = value;
   else {
     console.error("Use [--sessions DIR] [--since YYYY-MM-DD] [--json]");
     process.exit(2);

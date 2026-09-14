@@ -1985,7 +1985,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 625
+        "line": 639
       },
       {
         "name": "harness-backup",
@@ -2343,6 +2343,12 @@
         "kind": "definition"
       },
       {
+        "name": "context_profile",
+        "source": "agent/extensions/context-profile.ts",
+        "line": 285,
+        "kind": "literal"
+      },
+      {
         "name": "context_score",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 9,
@@ -2527,7 +2533,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 507,
+        "line": 521,
         "kind": "literal"
       },
       {
@@ -2757,6 +2763,12 @@
         "kind": "literal"
       },
       {
+        "name": "context_profile",
+        "source": "agent/extensions/context-profile.ts",
+        "line": 285,
+        "kind": "literal"
+      },
+      {
         "name": "context_score",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 9,
@@ -2837,7 +2849,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 507,
+        "line": 521,
         "kind": "literal"
       },
       {
@@ -3111,11 +3123,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 513,
-      "registrationSites": 57,
+      "sourceFiles": 516,
+      "registrationSites": 58,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 75,
-      "uniqueStableTools": 74,
+      "stableRegistrationRows": 76,
+      "uniqueStableTools": 75,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -3144,6 +3156,10 @@
       },
       {
         "path": "agent/checkpoints.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/context-profile.ts",
         "exists": false
       },
       {
@@ -3564,6 +3580,10 @@
       },
       {
         "path": "agent/extensions/lib/project-intelligence/discovery.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/heartbeat.mjs",
         "exists": true
       },
       {
