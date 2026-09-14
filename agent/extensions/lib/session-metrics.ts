@@ -2,7 +2,7 @@
 /** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
- const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false};
+ const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
@@ -56,6 +56,11 @@ export function collectSessionMetrics(entries, live) {
    }
    for(const id of ids)aliases.set(id,key);
    const tokens=['input','output','cacheRead','cacheWrite'].reduce((s,k)=>s+number(r.usage?.[k]),0);
+   // Coverage of child accounting: many ledger rows are non-terminal
+   // placeholders without usage (measured 81 of 166 rows on 2026-09-14), so a
+   // bare total would read as "zero child traffic" when it is really "no usage
+   // recorded yet for these rows".
+   m.childRows++;if(r.usage)m.childRowsWithUsage++;
    let status=normalizedState(r.status??r.state);
    if(r.stopped||status==='stopped')status='stopped';
    else if(r.interrupted||status==='paused')status='paused';
@@ -135,7 +140,7 @@ export function collectSessionMetrics(entries, live) {
   `Workflow controllers: ${m.workflows}; last observed active: ${m.workflowsActive}; failed: ${m.workflowFailures}; unknown outcome: ${m.workflowOutcomeUnknown}. Controllers are not child agents; a reported controller failure may also be a parent tool error.`,
   `Parent model responses: ${m.responses}; tool calls: ${m.toolCalls}; tool results: ${m.toolResults}; distinct tools observed: ${m.distinctTools}. Breadth is descriptive, not a target or proof of effective use.`,
   `Parent errors: ${m.errors} tool + ${m.modelErrors} model; blocked tools: ${m.blocked}; hook errors: ${m.telemetry?m.hookErrors:'unknown'}`,
-  `Compactions: ${m.compactions}; recorded child token traffic: ${m.childTokens.toLocaleString('en-US')}`,
+  `Compactions: ${m.compactions}; recorded child token traffic: ${m.childTokens.toLocaleString('en-US')} (from ${m.childRowsWithUsage.toLocaleString('en-US')} of ${m.childRows.toLocaleString('en-US')} recorded child row(s) carrying usage)`,
   `Parent + compaction token traffic: input ${m.input.toLocaleString('en-US')}, output ${m.output.toLocaleString('en-US')}, cached reads ${m.cacheRead.toLocaleString('en-US')}, cache writes ${m.cacheWrite.toLocaleString('en-US')}`,
   `Reported reasoning tokens: ${m.reasoning.toLocaleString('en-US')} (a subset of output, not additional traffic)`,
   `Cumulative prompt cache reuse: ${m.cacheRate===null?'unknown':m.cacheRate.toFixed(2)+'%'}; cached tokens were reused, not removed from traffic.`,
