@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import {taskTerms, structuralFingerprint, fingerprintSimilarity, failureSimilarity} from "./lib/local-intelligence.mjs";
 import {createMiniPreprocessor, miniSource, miniProjection} from "./lib/mini-preprocessor.ts";
+import {createSmolPreprocessor, safeSmolOutput} from "./lib/smol-preprocessor.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -71,7 +72,7 @@ function signature(tool: string, input: unknown, content: unknown): string {
 	return createHash("sha256").update(encoded).digest("hex");
 }
 
-export default function piObservationsExtension(pi: ExtensionAPI, mini = createMiniPreprocessor()) {
+export default function piObservationsExtension(pi: ExtensionAPI, mini = createMiniPreprocessor(), smol = createSmolPreprocessor()) {
 	let observations = new Map<string, number>();
 	let counter = 0;
 	let visionHintSent = false;
@@ -86,6 +87,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 
 	function restore(ctx: ExtensionContext): void {
 		mini.reset();
+		smol.reset();
 		taskSignal = "";
 		observations = new Map();
 		counter = 0;
@@ -104,8 +106,8 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		visionHintSent = false;
 	}
 
-	pi.on("session_shutdown", () => mini.reset());
-	pi.on("agent_end", () => mini.reset());
+	pi.on("session_shutdown", () => {mini.reset(); smol.reset();});
+	pi.on("agent_end", () => {mini.reset(); smol.reset();});
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 	pi.on("session_compact", (_event, ctx) => restore(ctx));
@@ -204,6 +206,14 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 			try {statusSize = JSON.stringify({isError:false,details:event.details ?? {}}).length;} catch {}
 			if (statusSize <= 80) return mini.select(text, ctx.model.cost.input, taskSignal).then(finish, () => finish());
 		}
+		// Structured successful line output complements Kompress prose selection.
+		// Speculate without delaying this result; a pending first exposure stays
+		// raw while a validated source/task cache can serve later observations.
+		if (process.env.PI_OUTPUT_DISTILLER !== "off" && pi.getActiveTools().includes("obs_read")
+			&& !miniSource(text) && safeSmolOutput(event.toolName,text,event.isError === true,event.details)
+			&& !distillOutput(event.toolName,text,ref.searchOutput)) {
+			smol.offer(`${ref.id}:${ref.signature}`,text,ctx?.model?.cost?.input,taskSignal);
+		}
 		return finish();
 	});
 
@@ -250,7 +260,9 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 				for(const {item} of candidates) { const proposed=exactChange(item.text); if(proposed){baseline=item;delta=proposed;break;} }
 			}
 			const summary = delta ? undefined : distillOutput(message.toolName, raw, ref.searchOutput || searchCalls.has(message.toolCallId));
-			const selected = !delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off" ? miniProjection(raw, selection) : undefined;
+			const localLines = process.env.PI_SMOL_PREPROCESSOR !== "off" ? smol.take(`${ref.id}:${ref.signature}`,raw) : undefined;
+			const selected = !delta && !summary && !message.isError
+				? (process.env.PI_MINI_PREPROCESSOR !== "off" ? miniProjection(raw, selection) : undefined) ?? localLines : undefined;
 			if (!delta && !summary && !selected) {
 				if (!message.isError && !details.truncation && !details.truncated && raw.length >= 3000) {
 					baselines.set(ref.operation, {id: ref.id, text: raw, tool:message.toolName, fingerprint:structuralFingerprint(raw)});

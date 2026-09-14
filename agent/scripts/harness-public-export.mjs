@@ -120,7 +120,7 @@ const allowedExt = new Set([
  * literal author home path rewritten to the /home/example placeholder still
  * ships, but as dead code for every other installation, so the export stops
  * instead. Documentation and example configuration keep the substitution. */
-const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh"]);
+const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh", ".service"]);
 const omitted = new Set([
  "node_modules",
  ".git",
@@ -232,11 +232,26 @@ try {
  }
  for (const name of ["package.json", "package-lock.json"])
   put("agent/npm/" + name, fs.readFileSync(path.join(source, "npm", name)));
- // Mini service and machine-specific systemd installation are opt-in, not a source runtime dependency.
+ // Ship only the portable local-inference unit templates. Authentication,
+ // weights, runtime descriptors and unrelated personal units remain private.
+ const modelUnits = ["pi-mini-preprocessor.service", "pi-smol-preprocessor.service"];
+ const shippedUnits = new Set();
+ for (const name of modelUnits) {
+  const file = path.join(source, "scripts/systemd", name);
+  if (!fs.existsSync(file)) continue;
+  if (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink())
+   throw Error("Inference unit must be a regular source file");
+  const temp = path.join(stage, ".model-unit");
+  fs.mkdirSync(temp);
+  fs.copyFileSync(file, path.join(temp, name));
+  copyTree(temp, "agent/scripts/systemd");
+  fs.rmSync(temp, { recursive: true });
+  shippedUnits.add(`scripts/systemd/${name}`);
+ }
  const manifestPath = path.join(stage, "agent/extensions/manifest.json");
  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
  manifest.supportFiles = (manifest.supportFiles ?? []).filter(
-  (p) => !p.startsWith("scripts/systemd/"),
+  (p) => !p.startsWith("scripts/systemd/") || shippedUnits.has(p),
  );
  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
  copyTree(templates, "release-template");

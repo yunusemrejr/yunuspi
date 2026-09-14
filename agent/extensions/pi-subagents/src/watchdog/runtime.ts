@@ -63,6 +63,7 @@ export interface WatchdogRuntimeSnapshot {
 	reviewConnected: boolean;
 	reviewDescription: string;
 	autoFollowQueued: boolean;
+	autoFollowActive: boolean;
 	autoFollowAttempts: number;
 	autoFollowStalemate: boolean;
 	reviewTrigger: "turn-delta" | "repo-edits";
@@ -82,6 +83,8 @@ interface MainWatchdogRuntimeOptions {
 	reviewDescription?: string;
 	displayWarning?: (warning: WatchdogWarningDetails, options?: { deliverAs?: "steer" }) => void;
 	sendUserMessage?: (message: string) => void | Promise<void>;
+	/** The shared quality owner normally owns continuation; standalone reviewers may opt in. */
+	ownsAutoFollow?: (config: ResolvedWatchdogConfig) => boolean;
 	reviewChangesOnly?: boolean;
 	lspDiagnostics?: WatchdogLspDiagnosticsFunction;
 	repoChangeSignature?: typeof computeWatchdogRepoChangeSignature;
@@ -118,6 +121,7 @@ export class MainWatchdogRuntime {
 	private readonly reviewDescription: string;
 	private readonly displayWarning: ((warning: WatchdogWarningDetails, options?: { deliverAs?: "steer" }) => void) | undefined;
 	private readonly sendUserMessage: ((message: string) => void | Promise<void>) | undefined;
+	private readonly ownsAutoFollow: (config: ResolvedWatchdogConfig) => boolean;
 	private readonly reviewChangesOnly: boolean;
 	private readonly lspDiagnostics: WatchdogLspDiagnosticsFunction;
 	private readonly repoChangeSignature: typeof computeWatchdogRepoChangeSignature;
@@ -174,6 +178,7 @@ export class MainWatchdogRuntime {
 		this.reviewDescription = options.reviewDescription ?? (options.review ? "injected seam" : "not wired");
 		this.displayWarning = options.displayWarning;
 		this.sendUserMessage = options.sendUserMessage;
+		this.ownsAutoFollow = options.ownsAutoFollow ?? (() => true);
 		this.reviewChangesOnly = options.reviewChangesOnly === true;
 		this.lspDiagnostics = options.lspDiagnostics ?? collectWatchdogLspDiagnostics;
 		this.repoChangeSignature = options.repoChangeSignature ?? computeWatchdogRepoChangeSignature;
@@ -461,6 +466,7 @@ export class MainWatchdogRuntime {
 			reviewConnected: this.reviewConnected,
 			reviewDescription: this.reviewDescription,
 			autoFollowQueued: this.autoFollowQueued,
+			autoFollowActive: this.isEnabled() && this.configResult.config.autoFollow.blockers && this.ownsAutoFollow(this.configResult.config),
 			autoFollowAttempts: this.autoFollowAttempts,
 			autoFollowStalemate: this.autoFollowStalemate,
 			reviewTrigger: this.reviewChangesOnly ? "repo-edits" : "turn-delta",
@@ -649,6 +655,7 @@ export class MainWatchdogRuntime {
 	}
 
 	private queueAutoFollowIfNeeded(warning: WatchdogWarningDetails | undefined): void {
+		if (!this.ownsAutoFollow(this.configResult.config)) return;
 		if (!warning || warning.severity !== "blocker" || warning.stale || !this.configResult.config.autoFollow.blockers || !this.isEnabled()) return;
 		const identity = warning.identity ?? reviewInputSignature([warning.severity, warning.summary, warning.evidence].join("\n"));
 		if (this.consecutiveAutoFollowIdentity === identity) this.consecutiveAutoFollowRepeats++;

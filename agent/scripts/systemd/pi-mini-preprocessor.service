@@ -1,0 +1,27 @@
+[Unit]
+Description=Pi bounded local paragraph preprocessor
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=%h/.pi/agent/local-models/tinybert-reranker/venv/bin/python %h/.pi/agent/scripts/mini-preprocessor.py --model %h/.pi/agent/local-models/kompress-small/model-gather-int8.onnx --tokenizer %h/.pi/agent/local-models/kompress-small/tokenizer.json --key-file %h/.pi/agent/local-models/kompress-small/api-key
+WorkingDirectory=%h/.pi
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Nice=10
+CPUQuota=100%
+MemoryMax=384M
+TasksMax=24
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

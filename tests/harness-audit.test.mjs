@@ -58,6 +58,12 @@ test("offline scheduler keeps explicit bounds and input ordering",async()=>{
   assert.equal(peak,2);assert.deepEqual(results,[3,1,2]);
   assert.equal(parseSelection([], ["one"]).jobs,1);
   assert.throws(()=>parseSelection(["--jobs","99"],["one"]));
+  const suites=["bench/quality-review.mjs","tests/quality-review.test.mjs","bench/provider.mjs"];
+  const listing=parseSelection(["--match","quality","--test",suites[0],"--list"],suites);
+  assert.equal(listing.list,true);
+  assert.deepEqual(listing.selected,suites.slice(0,2));
+  assert.deepEqual(parseSelection([], ["one","one"]).selected,["one"]);
+  for(const query of ["absent",".*",""]) assert.throws(()=>parseSelection(["--match",query],suites));
 });
 
 test("fuzzy skill retrieval needs two distinct concepts",()=>{

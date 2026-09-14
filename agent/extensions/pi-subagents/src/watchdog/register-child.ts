@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MainWatchdogRuntime } from "./runtime.ts";
 import { createMainWatchdogReview } from "./review.ts";
+import { createCoordinatedWatchdogReview } from "./coordinated-review.ts";
 import { DEFAULT_WATCHDOG_CONFIG } from "./settings.ts";
 import { createWatchdogWarningMessage } from "./warning-format.ts";
 import {
@@ -74,8 +75,9 @@ export function registerChildWatchdog(pi: ExtensionAPI, rawConfig = process.env[
 	const resolved = childResolvedConfig(childConfig);
 	const runtime = new MainWatchdogRuntime({
 		resolveConfig: () => ({ ok: true, config: resolved, errors: [], sources: [{ scope: "session", exists: true }] }),
-		review: createMainWatchdogReview(() => currentContext, { getThinkingLevel: () => pi.getThinkingLevel() }),
-		reviewDescription: "child model review",
+		review: createCoordinatedWatchdogReview(() => currentContext,createMainWatchdogReview(() => currentContext, { getThinkingLevel: () => pi.getThinkingLevel() })),
+		reviewDescription: "local diagnostics; parent owns integrated source review unless a child model is configured",
+		ownsAutoFollow: () => Boolean(childConfig.model),
 		reviewChangesOnly: true,
 		displayWarning: (details) => {
 			const childDetails = childWarningDetails(details, childConfig);

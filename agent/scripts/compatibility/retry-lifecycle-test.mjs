@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 import {
  transformRetryLifecycle,
+ transformDeterministicRejections,
  WINDOW_MS,
  COOLDOWN_MS,
 } from "../patches/retry-429-policy.mjs";
@@ -283,6 +284,25 @@ check("quota/billing rejections still fail fast", () =>
   false,
  ),
 );
+// Run the installed SDK retry loop before/after the durable declaration
+// upgrade with a virtual delay. This catches the wrapper precedence bug, not
+// merely a regex literal changing. Neither copy calls a model or writes core.
+const retrySource=fs.readFileSync(path.join(core,"node_modules/@earendil-works/pi-ai/dist/utils/retry.js"),"utf8");
+const upgradedRetry=transformDeterministicRejections(retrySource);
+const upgradedModule=await import("data:text/javascript;base64,"+Buffer.from(upgradedRetry).toString("base64"));
+const invalidRequest='400: '+JSON.stringify({message:"Provider returned error",metadata:{raw:JSON.stringify({error:{message:"The request contains invalid parameters.",type:"invalid_request_error"}})}});
+check("SDK installed declaration upgrades idempotently",()=>assert.equal(transformDeterministicRejections(upgradedRetry),upgradedRetry));
+check("CLI installed declaration upgrades idempotently",()=>{
+ const upgraded=transformDeterministicRejections(bundle,true);
+ assert.equal(transformDeterministicRejections(upgraded,true),upgraded);
+});
+for(const errorMessage of [invalidRequest,"Provider returned error: unsupported parameter temperature"]){
+ let produced=0,retries=0;
+ await upgradedModule.retryAssistantCall(async()=>{produced++;return {role:"assistant",content:[],stopReason:"error",errorMessage};},
+  {enabled:true,maxRetries:3,baseDelayMs:0},undefined,{onRetryScheduled:()=>retries++});
+ check("invalid payload exits after one provider attempt",()=>{assert.equal(produced,1);assert.equal(retries,0);});
+}
+check("upgraded SDK still retries transient HTTP 400 wrappers",()=>assert.equal(upgradedModule.isRetryableAssistantError({stopReason:"error",errorMessage:"400 Provider returned error: overloaded"}),true));
 console.log(
  `${checks - failures}/${checks} retry lifecycle checks passed${baseline ? " (patch-removed regression fixture)" : ""}`,
 );

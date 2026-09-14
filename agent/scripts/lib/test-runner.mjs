@@ -6,15 +6,24 @@ import { randomUUID } from "node:crypto";
 // The curated catalogue owns which scripts are safe offline. Parallelism is
 // explicit because some historical suites share installed-runtime fixtures.
 export function parseSelection(args, tests) {
-  const requested = []; let jobs = 1, report;
+  const requested = []; let jobs = 1, report, list = false;
   for (let i = 0; i < args.length; i++) {
-    const key = args[i], value = args[++i];
+    const key = args[i];
+    if (key === "--list") { list = true; continue; }
+    const value = args[++i];
     if (key === "--test" && tests.includes(value)) requested.push(value);
+    else if (key === "--match" && value && !value.startsWith("--")) {
+      // Search only the curated offline catalogue. Literal text cannot pull
+      // historical paid benchmarks into a run or expand an accidental glob.
+      const matches = tests.filter(test => test.includes(value));
+      if (!matches.length) throw new Error(`No registered offline suites match ${JSON.stringify(value)}. Use --list to inspect available suites.`);
+      requested.push(...matches);
+    }
     else if (key === "--jobs" && /^[1-4]$/.test(value ?? "")) jobs = Number(value);
     else if (key === "--report" && value && !value.startsWith("--")) report = path.resolve(value);
-    else throw new Error(`Invalid test selection: ${value ?? key}. Use --test <registered relative path>, --jobs <1-4>, or --report <file>.`);
+    else throw new Error(`Invalid test selection: ${value ?? key}. Use --test <registered relative path>, --match <literal path text>, --list, --jobs <1-4>, or --report <file>.`);
   }
-  return { selected: requested.length ? [...new Set(requested)] : tests, jobs, report };
+  return { selected: [...new Set(requested.length ? requested : tests)], jobs, report, list };
 }
 
 export function runSuite(test, file, { signal, env = process.env, cwd, timeoutMs = 120000 } = {}) {

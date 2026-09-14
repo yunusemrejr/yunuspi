@@ -30,23 +30,32 @@ export function projectCheckCommand(command: unknown, cwd: string, declared = fa
     directory = path.resolve(cwd, prefix[1]); bodyCommand = parts[1].trim();
     if (path.relative(cwd, directory).startsWith('..')) return null;
   }
-  const tokens = tokenizeSimple(bodyCommand);
-  if (!tokens?.length || tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return null;
+  const commandTokens = tokenizeSimple(bodyCommand);
+  if (!commandTokens?.length) return null;
+  // Literal leading environment assignments do not mask the runner's exit.
+  // Retain them in the receipt key: a pass with different environment values
+  // is not evidence for the declared command. Shell expansion stays rejected.
+  const firstCommand = commandTokens.findIndex(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
+  if (firstCommand < 0) return null;
+  const tokens = commandTokens.slice(firstCommand);
+  if (tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return null;
   const executable = path.basename(tokens[0]);
   if (/^(?:echo|printf|true|false|cat|sh|bash|zsh|eval|env|sudo)$/.test(executable)) return null;
   const body = tokens.slice(1).join(' ');
   const phpScript = tokens[tokens[1] === '-f' ? 2 : 1] ?? '';
   const phpTests = /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && !phpScript.startsWith('-')
     && /\.php$/i.test(phpScript) && /(?:^|[/_.-])(?:tests?|spec)(?:[/_.-]|$)/i.test(phpScript);
+  const pythonTests = /^python\d?(?:\.\d+)?$/.test(executable) && !tokens[1]?.startsWith('-')
+    && /\.py$/i.test(tokens[1] ?? '') && /(?:^|[/_.-])(?:tests?|spec)(?:[/_.-]|$)/i.test(tokens[1]);
   const runner = /^(?:pytest|vitest|jest|mocha|ava|phpunit|rspec)$/.test(executable)
-    || phpTests
+    || phpTests || pythonTests
     || /^(?:npm|pnpm|yarn|bun)$/.test(executable) && /^(?:(?:run|exec) )?(?:test(?::[\w.-]+)?|t|vitest|jest)(?: |$)/.test(body)
     || executable === 'npx' && /^(?:--no-install )?(?:vitest|jest|mocha)(?: |$)/.test(body)
     || /^(?:python\d?(?:\.\d+)?)$/.test(executable) && /^-m (?:pytest|unittest)(?: |$)/.test(body)
     || /^(?:cargo|go|dotnet|mvn|gradle|gradlew|swift)$/.test(executable) && /^test(?: |$)/.test(body)
     || /^node(?:js)?$/.test(executable) && (tokens.includes('--test') || tokens.slice(1).some(t => /(?:^|\/)[^/]*(?:test|spec)[^/]*\.[cm]?[jt]s$/.test(t))) && !tokens.some(t => ['-e', '--eval', '-p', '--print', '--check', '-c'].includes(t));
   if (!runner && !declared) return null;
-  return { key: digest(JSON.stringify([directory, tokens])), label: `${executable} check` };
+  return { key: digest(JSON.stringify([directory, commandTokens])), label: `${executable} check` };
 }
 
 export function projectTestNeed(state: State): string | null {
@@ -122,10 +131,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     const need = projectTestNeed(state);
     if (!need || need === 'running') return '';
     const message = need === 'assessment'
-      ? 'Review the changed behavior and its unit-test coverage with project_tests({action:"inspect"}); extend the existing suite, or create a small meaningful suite when absent. Cover the regression/boundary, update obsolete expectations, and avoid tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
+      ? 'Choose verification proportional to the changed behavior with project_tests({action:"inspect"}). Reuse focused existing checks and their current receipts; add or update regression coverage when it tests a changed contract or demonstrated defect. Avoid redundant runs and tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
       : need === 'failed'
-        ? 'A planned unit-test check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
-        : 'Unit-test evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its test exit status is observable; cd into the project with && is supported. Reassess after changing code/tests. A readback, linter or successful echo is not a unit-test pass.';
+        ? 'A planned check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
+        : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.';
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
   const receipt = (start: { revision: number; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
@@ -251,10 +260,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); },
     snapshot: summary,
   };
-  registerContinuationSource({ name: 'project tests', pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['review pending unit-test coverage and current execution evidence'] : [] });
+  registerContinuationSource({ name: 'project tests', pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
-    description: 'Inspect bounded local test setup, observed code changes and actual test execution receipts; assess which meaningful unit tests to add/update and which commands cover the change. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
+    description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('inspect'), Type.Literal('assess')]),
       disposition: Type.Optional(Type.Union([Type.Literal('required'), Type.Literal('not_needed'), Type.Literal('blocked')])),
       reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 })),

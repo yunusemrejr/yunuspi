@@ -27,6 +27,7 @@ export type WorkflowChildOutcome = {
 	ok?: unknown;
 	stopped?: unknown;
 	interrupted?: unknown;
+	terminalOutcome?: { reason?: unknown };
 	output?: unknown;
 };
 
@@ -44,8 +45,8 @@ function requireChildKey(item: WorkflowChildOutcome, index: number): string {
 
 /**
  * Map runs.all results to swarm recovery records. Explicit cancellation is terminal;
- * otherwise `ok` decides completed vs
- * error; timestamps collapse to `now` because workflow results do not carry
+ * consumed native budgets remain exhausted; otherwise `ok` decides completed
+ * vs error; timestamps collapse to `now` because workflow results do not carry
  * per-child clocks (attempt math drives scheduling, not timestamps).
  */
 export function childResultsToRecoveryRecords(results: unknown, now: number): SwarmRunRecord[] {
@@ -58,7 +59,12 @@ export function childResultsToRecoveryRecords(results: unknown, now: number): Sw
 		if (typeof item.ok !== "boolean") {
 			throw new TypeError(`runs.recover: results[${index}].ok must be a boolean`);
 		}
-		const status = item.stopped === true || item.interrupted === true ? "stopped" : item.ok ? "completed" : "error";
+		// Native workflow children retain why a partial run ended. Keep budget
+		// exhaustion through this seam so runs.recover cannot mint a fresh
+		// budget by treating it as an ordinary failed attempt.
+		const status = item.stopped === true || item.interrupted === true ? "stopped"
+			: item.ok ? "completed"
+				: item.terminalOutcome?.reason === "budget_exhausted" ? "budget-exhausted" : "error";
 		return { key, status, startedAt: now, endedAt: now } satisfies SwarmRunRecord;
 	});
 }

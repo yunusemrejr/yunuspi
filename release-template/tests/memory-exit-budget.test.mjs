@@ -16,6 +16,7 @@ register('data:text/javascript,'+encodeURIComponent(`export function resolve(nam
  return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
 }`),import.meta.url);
 const memory=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/index.ts')));
+const {registerPriming}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/priming.ts')));
 const original=Object.fromEntries(['PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY_MODEL','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
 // All provider imports are fixture-only; isolate host/offline runner settings.
 delete process.env.PI_MEMORY_EXIT_SUMMARY_MODEL;
@@ -99,4 +100,48 @@ test('compaction never copies the daily log into itself or repeats unchanged scr
  assert.equal(after.split('DAILY_TAIL_SENTINEL').length-1,1);
  assert.equal(after.split('<!-- HANDOFF_STATE').length-1,2);
  assert.match(after,/SECOND_OPEN_ITEM/);
+});
+
+test('default priming selects relevant project history once and abstains on generic or unrelated prompts',async()=>{
+ const cwd=path.join(root,'widget');fs.mkdirSync(cwd,{recursive:true});
+ const project=path.join(cwd,'project.md'),daily=path.join(cwd,'daily'),global=path.join(cwd,'global.md');
+ fs.mkdirSync(daily,{recursive:true});
+ fs.writeFileSync(project,'Widget authentication requires the current scoped cache policy.\n');
+ fs.writeFileSync(path.join(daily,'2026-01-01.md'),'Widget deployment used a previous release branch.\n');
+ fs.writeFileSync(global,'Widget authentication GLOBAL_OUT_OF_SCOPE reference.\n');
+ fs.rmSync(path.join(root,'memory-priming.json'),{force:true});
+ const make=()=>{
+  const hooks={},entries=[];
+  registerPriming({on:(name,fn)=>hooks[name]=fn,registerCommand(){},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},()=>({project,daily,global}));
+  const ctx={cwd,sessionManager:{getEntries:()=>entries}};
+  return {entries,start:()=>hooks.session_start({},ctx),prompt:prompt=>hooks.before_agent_start({prompt},ctx)};
+ };
+ const f=make();f.start();
+ assert.equal(await f.prompt('Continue working on this project'),undefined,'generic continuation does not spend the priming attempt');
+ assert.equal(f.entries.length,0);
+ const result=await f.prompt('Review widget authentication');
+ assert.match(result?.message.content??'',/current scoped cache policy/,'missing config enables selective retrieval');
+ assert.doesNotMatch(result.message.content,/previous release branch|GLOBAL_OUT_OF_SCOPE/);
+ assert.ok(result.message.content.length<1800);
+ assert.equal(await f.prompt('Review widget authentication'),undefined);
+ f.start();assert.equal(await f.prompt('Review widget authentication'),undefined,'resume preserves the once-session receipt');
+ const unrelated=make();unrelated.start();
+ assert.equal(await unrelated.prompt('authentication astronomy'),undefined,'project directory names do not supply a second task match');
+ const empty=make();empty.start();assert.equal(await empty.prompt(''),undefined);assert.equal(empty.entries.length,0);
+});
+
+test('explicit global and project priming opt-outs remain authoritative',async()=>{
+ const cwd=path.join(root,'opt-out-project');fs.mkdirSync(cwd,{recursive:true});
+ const project=path.join(cwd,'memory.md');fs.writeFileSync(project,'Widget authentication requires the current scoped cache policy.\n');
+ const config=path.join(root,'memory-priming.json');
+ try {
+  for(const settings of [{enabled:false,projects:{}},{enabled:true,projects:{[cwd]:false}}]){
+   fs.writeFileSync(config,JSON.stringify(settings));
+   const hooks={},entries=[];
+   registerPriming({on:(name,fn)=>hooks[name]=fn,registerCommand(){},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},()=>({project,global:project,daily:path.join(cwd,'missing')}));
+   const ctx={cwd,sessionManager:{getEntries:()=>entries}};hooks.session_start({},ctx);
+   assert.equal(await hooks.before_agent_start({prompt:'widget authentication'},ctx),undefined);
+   assert.equal(entries.length,0,'an explicit opt-out never consumes a priming attempt');
+  }
+ } finally {fs.rmSync(config,{force:true});}
 });

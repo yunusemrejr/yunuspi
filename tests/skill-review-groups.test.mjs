@@ -118,3 +118,19 @@ test("fallback catalogue search remains complete with ambient guidance disabled"
     else process.env.PI_RELEVANT_GUIDANCE = previous;
   }
 });
+
+test("explicit discovery keeps short domain names ahead of incidental description matches", async () => {
+  const skills = [
+    {name:'vanilla-web-libs',description:'Web libraries for server-side templating static site generators',filePath:'/fixture/skills/web/SKILL.md'},
+    {name:'php-application-engineering',description:'Build PHP applications across development and shared hosting.',filePath:'/fixture/skills/php/SKILL.md'},
+    {name:'api-design',description:'Design request contracts and HTTP responses.',filePath:'/fixture/skills/api/SKILL.md'},
+    {name:'capital-planning',description:'Capital investments and financing.',filePath:'/fixture/skills/capital/SKILL.md'},
+  ];
+  const f = fixture([], {skills});
+  const before = f.entries.length;
+  const php = await f.review.execute('search',{action:'search',query:'php server-side templating static site generator'});
+  assert.equal(php.details.results[0].name,'php-application-engineering');
+  const api = await f.review.execute('search',{action:'search',query:'API',limit:8});
+  assert.deepEqual(api.details.results.map(skill=>skill.name),['api-design']);
+  assert.equal(f.entries.length,before,'search does not create review obligations or delivery receipts');
+});

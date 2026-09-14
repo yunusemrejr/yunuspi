@@ -1,6 +1,6 @@
 # Skill routing and source checks
 
-Default guidance offers brief, optional invitations to browse grouped skills or search for a workflow. It does not select a workflow for the agent or launch a discovery model. The detailed routing below supplies local relevance signals and remains available through inspect and explicit strict mode. Skill routing is deterministic and uses no model calls. Explicit task and file
+Default guidance offers a brief, optional workflow match with its installed path and a bounded description or discovery reason. The agent decides whether to read and apply it; the suggestion creates no review requirement. Grouped browsing and search remain available when the match is insufficient. Deterministic routing uses no model calls; the enabled asynchronous advisor can add suggestions after distinct successful observations within the shared assistance budget. The detailed routing below supplies local relevance signals and remains available through inspect and explicit strict mode. Explicit task and file
 routes take priority; catalog descriptions provide additional suggestions when
 at least two distinct discriminating terms match. Hyphenated skill names also
 match ordinary prose. Negated clauses, quoted text and code fences do not become
@@ -131,6 +131,22 @@ These changes reduce repeated command assembly and output volume; they do not
 claim a measured cost reduction or guarantee every model's task quality.
 
 ## Component quality and shared review evidence
+
+Project-test assessment and unresolved planned checks own the next automatic
+verification step. Independent automatic review waits until those checks are
+resolved, preserving its two rounds for stable source. Explicit early reviews
+remain available, but acceptance still requires current test evidence. Review
+guidance is delivered once per revision/status, with one fresh delivery after
+compaction, session restoration, user input or provider-error recovery.
+
+`project_tests` asks for verification proportional to the change. Reuse existing
+focused checks; add regression coverage for a changed contract or demonstrated
+defect. `not_needed` and `blocked` remain valid reasoned assessments. Direct
+Python test scripts and literal environment prefixes such as
+`PYTHONPATH=src python3 -m pytest` produce reusable receipts even when execution
+precedes assessment. Environment values, command arguments, working directory
+and source revision remain part of receipt identity. Shell expansion, pipelines
+and status-masking commands cannot certify a planned check.
 
 `quality_review` allows two rounds per user turn. If later edits exhaust those
 rounds, `inspect` and `review` retain the last report under `previousReview`,

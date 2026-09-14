@@ -267,7 +267,7 @@ Read durable global/project notes, scratchpad and daily logs; search prior memor
 - `mode`: qmd search mode. Values: `keyword`, `semantic`, `deep`.
 - `limit`: Search result bound.
 - `scope`: Memory priming scope. Values: `project`, `global`.
-- `on|off`: Enable or disable opt-in memory priming.
+- `on|off`: Control selective memory priming, enabled by default with project/task relevance checks.
 
 **Related records:** `memory-notes`, `memory-evidence`, `context-diagnostics`
 
@@ -773,19 +773,19 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 1921; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 165; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 272; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 284; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 584; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 507; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 269; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 287; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 86; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 9; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2069; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 321; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 572; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 287; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 510; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 516; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 800; literal)
@@ -796,7 +796,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 173; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 86; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 143; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 142; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 96; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 59; literal)
@@ -848,9 +848,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113632)
 - /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) (line 113409)
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 600)
-- /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 171)
+- /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 184)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 31)
-- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 325)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 337)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 647)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 646)
@@ -874,7 +874,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-refresh-provider-models — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1206)
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1052)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1004)
-- /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 403)
+- /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3019)
 
@@ -1127,6 +1127,8 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/render-page-state.mjs`](../agent/scripts/render-page-state.mjs)
 - [`agent/scripts/repair-harness-hardlinks.py`](../agent/scripts/repair-harness-hardlinks.py)
 - [`agent/scripts/sandbox-runner.py`](../agent/scripts/sandbox-runner.py)
+- [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
+- [`agent/scripts/systemd/pi-smol-preprocessor.service`](../agent/scripts/systemd/pi-smol-preprocessor.service)
 - [`agent/scripts/wait-condition.mjs`](../agent/scripts/wait-condition.mjs)
 - [`agent/scripts/workspace-facts.mjs`](../agent/scripts/workspace-facts.mjs)
 

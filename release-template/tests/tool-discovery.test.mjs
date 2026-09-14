@@ -170,6 +170,19 @@ test('tool pages accept safe offsets beyond the old thousand item cap',async()=>
  assert.equal(page.details.offset,1104);
  assert.equal(page.details.remaining,0);
 });
+
+test('explicit tool search uses domain words without incidental substring matches',async()=>{
+ const f=fixture([
+  {name:'api_probe',description:'Inspect request contracts.'},
+  {name:'capital_report',description:'Capital investments and financing.'},
+  {name:'session_coordinate',description:'Inspect peer sessions and coordination in this workspace.'},
+ ]);
+ const api=await f.call({query:'API',limit:8});
+ assert.deepEqual(api.details.tools.map(tool=>tool.name),['api_probe']);
+ const peers=await f.call({query:'session sibling coordination board peer',limit:1});
+ assert.equal(peers.details.tools[0].name,'session_coordinate');
+ assert.equal(f.entries.length,0,'ranking changes no tool exposure');
+});
 test('resume bounds old discoveries, drops stale receipts and retains unresolved calls',async()=>{
  const {restoredToolNames}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
  const names=Array.from({length:40},(_,i)=>'special_'+i), allowed=new Set(names);

@@ -4,7 +4,9 @@ import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
 import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
+import { registerSharedQualityReview } from './quality-review-owner.ts';
 export { REVIEW_LIMITS };
+export { settleSharedQualityReview } from './quality-review-owner.ts';
 
 // Services retain their existing process/graph owners. This checkpoint never
 // launches a process, picks a provider, executes project code or owns a database.
@@ -74,14 +76,16 @@ async function withinDeadline<T>(work: Promise<T>, signal: AbortSignal): Promise
 }
 
 export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
+  let releaseShared = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
-  let truncated = false, delivered = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
+  let truncated = false, delivered = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
   let scopeOverflow = false;
   let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
+  const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
   const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow }); } catch {} };
   const invalidate = (files: string[]) => {
     if (!files.length) return;
@@ -98,6 +102,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     patterns: patternReport(),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess them without rerunning this revision.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Maximum two review rounds; report unresolved gaps when exhausted.`;
+  const automaticAdvice = () => testsPending() ? '' : advice();
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
   const refresh = async (ctx: any) => {
     // Every caller must await discovery; skipping an active scan can approve
@@ -107,10 +112,14 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     scanning = operation;
     try { await operation; } finally { if (scanning === operation) scanning = undefined; }
   };
-  const run = async (ctx: any, signal?: AbortSignal) => {
+  const run = async (ctx: any, signal?: AbortSignal, automatic = false) => {
     const entryGeneration = generation;
     await refresh(ctx);
     if (entryGeneration !== generation || signal?.aborted || ctx.signal?.aborted) return summary();
+    // Test assessment/execution owns the next automatic step while unresolved.
+    // An explicit source review still works, but parallel automatic reviews
+    // would spend their bounded rounds on source/tests that are still changing.
+    if (automatic && testsPending()) return summary();
     if (!enabled() || !active || paused || !changed.length || disposition || reviewed === revision || rounds >= REVIEW_LIMITS.rounds) return summary();
     if (busy) return busy;
     const ticket = generation, rev = revision;
@@ -179,7 +188,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       baseline = truncated && baseline ? Object.fromEntries(Object.entries({...baseline,...next}).slice(-4000)) : next;
     },
     restore(ctx: any) {
-      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; followups = 0; task = ''; delivered = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
+      releaseShared();
+      releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
+      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
       scopeOverflow = false;
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
@@ -207,7 +218,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     },
     input(event: any) {
       if (event.source === 'extension') return;
-      cancel(); paused = false; pauseReason = ''; rounds = 0; followups = 0; delivered = '';
+      cancel(); paused = false; pauseReason = ''; rounds = 0; followups = 0; delivered = ''; noted = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));
       if (disposition && !(disposition === 'blocked' && resume)) { changed = []; scopeOverflow = false; patterns.clear(); }
       // Explicit input grants a fresh bounded attempt, including recovery from
@@ -238,14 +249,20 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (event.message?.role !== 'assistant') return;
       const stop = event.message.stopReason;
       if (['aborted','error'].includes(stop)) { cancel(); paused = true; if (pauseReason !== 'stop') pauseReason = stop === 'aborted' ? 'stop' : 'error'; }
-      else if (pauseReason === 'error' && ['stop','toolUse','length'].includes(stop)) { paused = false; pauseReason = ''; }
+      else if (pauseReason === 'error' && ['stop','toolUse','length'].includes(stop)) { paused = false; pauseReason = ''; noted = ''; }
     },
-    notice: () => enabled() && capable() && !paused ? advice() : '',
-    async settled(_event: any, ctx: any) {
-      if (!enabled() || !capable() || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
+    notice() {
+      if (!enabled() || !capable() || !active || paused) return '';
+      const key = `${root}:${revision}:${reviewed}:${status()}`;
+      if (noted === key) return '';
+      const content = automaticAdvice(); if (content) noted = key; return content;
+    },
+    async settled(_event: any, ctx: any, signal?: AbortSignal) {
+      if (!enabled() || !capable() || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
       const ticket = generation;
-      await run(ctx);
-      if (ticket !== generation || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || followups >= 3) return;
+      await run(ctx,signal,true);
+      if (ticket !== generation || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || followups >= 3) return;
+      if (testsPending()) return;
       if (disposition === 'blocked' && reason.startsWith('Independent review unavailable:')) {
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
@@ -263,9 +280,10 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (!content || delivered === key) return;
       try { pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true}); followups++; delivered = key; save(); } catch {}
     },
-    shutdown() { cancel(); active = false; paused = true; }, snapshot: summary, run,
+    shutdown() { releaseShared(); cancel(); active = false; paused = true; }, snapshot: summary, run,
   };
-  registerContinuationSource({name:'quality review',pending:() => enabled() && capable() && active && !paused && followups < 3 && advice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
+  pi.on?.('session_compact', () => { noted = ''; });
+  registerContinuationSource({name:'quality review',pending:() => enabled() && capable() && active && !paused && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
     parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30}))}),
     async execute(_id: string, params: any, signal: any, _update: any, ctx: any) {

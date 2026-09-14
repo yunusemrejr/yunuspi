@@ -55,6 +55,30 @@ test('clean fixture exports without copying private configuration', () => {
     assert.ok(!fs.existsSync(path.join(f.output, 'agent/auth.json')));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
+
+test('portable inference service templates ship without private units or model state', () => {
+  const f = fixture();
+  try {
+    const units = path.join(f.source, 'scripts/systemd');
+    fs.mkdirSync(units);
+    const names = ['pi-mini-preprocessor.service', 'pi-smol-preprocessor.service'];
+    for (const name of [...names, 'personal-task.service']) fs.writeFileSync(path.join(units, name), '[Service]\nExecStart=%h/.pi/agent/scripts/worker\n');
+    fs.writeFileSync(path.join(f.source, 'extensions/manifest.json'), JSON.stringify({supportFiles:[...names, 'personal-task.service'].map(name=>'scripts/systemd/'+name)}));
+    fs.mkdirSync(path.join(f.source, 'local-models'));
+    fs.writeFileSync(path.join(f.source, 'local-models/runtime.json'), JSON.stringify({apiKey:'TEST_PRIVATE_RUNTIME_CANARY'}));
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(fs.readdirSync(path.join(f.output, 'agent/scripts/systemd')).sort(), names);
+    assert.equal(fs.existsSync(path.join(f.output, 'agent/local-models')), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.output, 'agent/extensions/manifest.json'))).supportFiles, names.map(name=>'scripts/systemd/'+name));
+    fs.rmSync(f.output, {recursive:true});
+    fs.unlinkSync(path.join(units, names[0]));
+    fs.symlinkSync(path.join(f.source, 'local-models/runtime.json'), path.join(units, names[0]));
+    const linked = f.run();
+    assert.notEqual(linked.status, 0);
+    assert.equal(fs.existsSync(f.output), false, 'a symlink must never copy private state through a service name');
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
 test('a registered capability catalog cannot publish without its inventory generator', () => {
   const f = fixture();
   try {

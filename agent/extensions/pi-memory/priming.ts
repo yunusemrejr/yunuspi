@@ -29,6 +29,17 @@ const terms = (s: string) =>
             "there",
             "their",
             "your",
+            "continue",
+            "resume",
+            "working",
+            "work",
+            "task",
+            "help",
+            "check",
+            "review",
+            "again",
+            "next",
+            "changes",
           ].includes(t),
       ),
     ),
@@ -59,7 +70,9 @@ export async function retrieveDigest(
   prompt: string,
   cwd = "",
 ) {
-  const query = terms(prompt + " " + path.basename(cwd));
+  // Sources already establish project ownership. A directory name must not
+  // turn one incidental task-word overlap into a relevant historical claim.
+  const query = terms(prompt);
   if (query.length < 2) return "";
   const start = Date.now(),
     hits: any[] = [];
@@ -163,14 +176,14 @@ export function registerPriming(
         await handle.close();
       }
     } catch (e: any) {
-      if (e.code === "ENOENT") return { enabled: false, projects: {} };
+      if (e.code === "ENOENT") return { enabled: true, projects: {} };
       throw e;
     }
   };
   const identity = async (cwd: string) => fs.realpath(cwd);
   pi.registerCommand("memory-prime", {
     description:
-      "Opt-in priming: on|off [global|project], or status (default off)",
+      "Selective project memory priming: on|off [global|project], or status (default on)",
     handler: async (args: string, ctx: any) => {
       const [action = "status", scope = "project"] = (
           args.trim() || "status"
@@ -195,7 +208,7 @@ export function registerPriming(
       }
       const now = await readConfig();
       ctx.ui.notify(
-        `Memory priming ${(now.projects?.[cwd] ?? now.enabled ?? false) ? "enabled" : "disabled"} for ${cwd}; at most once per session, next substantive prompt. Historical evidence only.`,
+        `Memory priming ${(now.projects?.[cwd] ?? now.enabled ?? true) ? "enabled" : "disabled"} for ${cwd}; at most once per session, next substantive prompt. Historical evidence only.`,
         "info",
       );
     },
@@ -212,7 +225,7 @@ export function registerPriming(
     if (attempted || terms(e.prompt ?? "").length < 2) return;
     const cwd = await identity(ctx.cwd),
       c = await readConfig();
-    if (!(c.projects?.[cwd] ?? c.enabled ?? false)) return;
+    if (!(c.projects?.[cwd] ?? c.enabled ?? true)) return;
     attempted = true;
     pi.appendEntry("memory-priming-attempt", { cwd });
     const s = sources(cwd),

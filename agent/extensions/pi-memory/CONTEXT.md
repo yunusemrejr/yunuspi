@@ -26,10 +26,11 @@ Existing memory and manual reminders retain their behavior.
   External web research must have an attributable local source first. A quote
   is evidence of what the file says; it is not proof that its assertion is true.
 
-Existing opt-in memory priming uses salience to select up to three relevant
-blocks within 1600 characters. Omitted candidates and critical source references
-are reported; the original memory files remain intact. Original priming opt-in
-settings are unchanged. Compaction receives up to 6000 characters of extractive
+Memory priming is enabled by default and uses salience to select up to three
+task-relevant blocks within 1600 characters, once per session. Unrelated and
+generic requests abstain; explicit user/project opt-outs remain authoritative.
+Omitted candidates and critical source references are reported, and the original
+memory files remain intact. Compaction receives up to 6000 characters of extractive
 retention priorities in its prepared input; original messages and previous
 summary are preserved. This assists the core summarizer, rather than claiming
 that every model will perfectly obey a ranking.

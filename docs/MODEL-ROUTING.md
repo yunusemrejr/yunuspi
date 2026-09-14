@@ -36,6 +36,19 @@ Teams contain at most three different model identities and prefer free routes ac
 
 Children perform advisory investigations; the parent owns changes, resolves disagreements and validates claims. Fusion preserves source ownership and failed-member counts. It does not turn agreement into proof or silently choose a factual winner. A single usable child remains a single helper. Existing executor cancellation, fleet capacity, request caps and recovery remain authoritative.
 
+Workflow recovery retains a child's native `budget_exhausted` outcome when
+planning respawns. An exhausted budget cannot become a fresh attempt merely
+because the child also returned `ok:false`; ordinary retryable failures retain
+their existing bounded recovery policy.
+
+Provider errors that identify an invalid request, invalid parameters or an
+unsupported parameter fail without resending the same payload, including router
+wrappers that say “Provider returned error.” Both the installed SDK and CLI use
+this rule. A generic HTTP 400 alone does not establish a deterministic failure;
+transient overloads keep their retry policy. The original diagnostic remains
+available so the request can be corrected. This prevents wasted retries without
+claiming to repair every provider-specific payload mismatch.
+
 `model-routing-decision` session entries record the selected mode, reason, routes, evidence explanations and budgets. Model listings distinguish capability metadata, price status and cached benchmark coverage. Set `PI_AUTONOMOUS_FREE_ASSIST=0` to disable proactive helpers while keeping manual delegation available.
 
 ## Local preprocessing reuse

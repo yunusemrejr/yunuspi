@@ -2,7 +2,7 @@
  * capabilities. Discovery changes schema exposure only; it never runs a tool
  * or grants access outside the host's original active/allowed tool set. */
 import { Type } from 'typebox';
-import { CAPABILITY_GROUPS, capabilityGroup, groupOverview } from './capability-groups.ts';
+import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from './capability-groups.ts';
 import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
 const RECEIPT = 'harness-tool-activation-v1';
 const RESUME_TOOLS = 6;
@@ -40,7 +40,6 @@ export const CORE_TOOLS = new Set([
   'project_report','module_report','symbol_search','context_slice',
 ]);
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
-const words = (text: string) => text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
 const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
 const pageLimit = (value: unknown, fallback = 3) => Number.isSafeInteger(value)
   ? Math.min(DISCOVERY_PAGE, Math.max(1, value as number)) : fallback;
@@ -233,16 +232,7 @@ export function registerToolDiscovery(pi: any) {
             next:'Use kind:"commands" with query, group, or id for a short registered command page.',
           });
         } else {
-          const terms = [...new Set(words(query))].filter(term => term.length > 1);
-          matches = sourceFiltered.map(command => {
-            const name = command.name.toLowerCase();
-            const description = String(command.description ?? '').toLowerCase();
-            const score = !query ? 1 : name === query ? 10000 :
-              terms.reduce((sum, term) => sum + (name.includes(term) ? 8 : 0) + (description.includes(term) ? 1 : 0), 0);
-            return {command,score};
-          }).filter(row => row.score > 0)
-            .sort((a,b) => b.score - a.score || a.command.name.localeCompare(b.command.name))
-            .map(row => row.command);
+          matches = searchCapabilityMetadata(sourceFiltered, query);
         }
         const offset = id ? 0 : safeOffset(input.offset);
         const limit = pageLimit(input.limit);
@@ -277,12 +267,7 @@ export function registerToolDiscovery(pi: any) {
             next:'Use kind:"capabilities" for the ability index, kind:"commands" for registered command metadata, group or query for tool previews, names to enable tools, or skill_review action:"browse"/"search" for workflows.',
           });
         }
-        const terms = [...new Set(words(query))].filter(term => term.length>1);
-        matches = catalog.map((tool: any) => {
-          const name = tool.name.toLowerCase(), text = String(tool.description??'').toLowerCase();
-          const score = !query ? 1 : name===query.toLowerCase() ? 10000 : terms.reduce((sum,term)=>sum+(name.includes(term)?8:0)+(text.includes(term)?1:0),0);
-          return {tool,score};
-        }).filter((row: any)=>row.score>0).sort((a: any,b: any)=>b.score-a.score||a.tool.name.localeCompare(b.tool.name)).map((row: any)=>row.tool);
+        matches = searchCapabilityMetadata(catalog, query);
       }
       const offset = explicit.length ? 0 : safeOffset(input.offset);
       const limit = pageLimit(input.limit,explicit.length || 3);

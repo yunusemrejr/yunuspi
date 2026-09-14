@@ -44,3 +44,15 @@ Do not commit a personal denylist containing actual secrets. Exact local credent
 Publication refuses checkout-only paths that are absent from the sanitized export.
 Review and remove obsolete published paths explicitly before retrying; the command
 does not silently retain excluded files or delete arbitrary checkout content.
+
+For normal maintenance, run the relevant focused checks, review a fresh export
+diff with `--dry-run`, then publish once. Publication includes isolated
+distribution validation. `--verify-only` is for validation without publication;
+it is not a prerequisite that must repeat the same tests immediately before
+publishing unchanged source. In a public checkout, run focused tests with
+`node --test tests/<name>.test.mjs`. Private installations that include the
+curated `scripts/test-harness.mjs` also support `--match <literal-path-text>
+--list` to find suites without launching them; removing `--list` runs that
+selection. The private runner and historical benches are not exported. Follow
+component imports when choosing integration coverage: name matching alone
+cannot establish affected behavior.

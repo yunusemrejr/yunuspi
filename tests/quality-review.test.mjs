@@ -11,16 +11,16 @@ const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsS
 // The release's dependency-free fixtures exercise actual lifecycle/IO owners.
 const schema='data:text/javascript,'+encodeURIComponent('export const Type=new Proxy({}, {get:(_t,name)=>(...args)=>({name,args})});');
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){return n==='typebox'?{url:${JSON.stringify(schema)},shortCircuit:true}:next(n,c);}`),import.meta.url);
-const {createQualityReviewLifecycle,reviewAspects,parseReviewReport,REVIEW_LIMITS}=await import(pathToFileURL(path.join(agent,'extensions/lib/quality-review.ts')));
+const {createQualityReviewLifecycle,reviewAspects,parseReviewReport,REVIEW_LIMITS,settleSharedQualityReview}=await import(pathToFileURL(path.join(agent,'extensions/lib/quality-review.ts')));
 const {projectTestFacts,isProjectReviewSource}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
 const storePath=path.join(agent,'extensions/lib/project-intelligence/store.mjs');
 const openStore=fs.existsSync(storePath)?(await import(pathToFileURL(storePath))).openStore:undefined;
 const pass=(aspect)=>({aspect,ok:true,text:JSON.stringify({outcome:'pass',evidence:['src/value.js:1 preserves zero and negative inputs; source and focused tests checked.'],findings:[],gap:''})});
 async function fixture(t,{runner,context,beforeRefresh}={}) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'quality-check-'));
- const tools={},sent=[],branch=[],calls=[];let idle=true,queued=false,tests={need:null},rejectDelivery=false;
- const ctx={cwd:dir,isIdle:()=>idle,hasPendingMessages:()=>queued,sessionManager:{getBranch:()=>branch}};
- const api=createQualityReviewLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['quality_review','project_tests','subagent'],appendEntry:(customType,data)=>branch.push({type:'custom',customType,data:structuredClone(data)}),sendMessage:(m,o)=>{if(rejectDelivery)throw Error('queue unavailable');sent.push({m,o});}},
+ const tools={},sent=[],branch=[],calls=[],hooks={};let idle=true,queued=false,tests={need:null},rejectDelivery=false;
+ const ctx={cwd:dir,isIdle:()=>idle,hasPendingMessages:()=>queued,sessionManager:{getBranch:()=>branch,getSessionId:()=>dir}};
+ const api=createQualityReviewLifecycle({on:(event,hook)=>hooks[event]=hook,registerTool:d=>tools[d.name]=d,getActiveTools:()=>['quality_review','project_tests','subagent'],appendEntry:(customType,data)=>branch.push({type:'custom',customType,data:structuredClone(data)}),sendMessage:(m,o)=>{if(rejectDelivery)throw Error('queue unavailable');sent.push({m,o});}},
   {refresh:async()=>{await beforeRefresh?.();api.observe(await projectTestFacts(dir),false)},tests:()=>tests,runner:async(...args)=>{calls.push(args);return runner?runner(...args):args[0].aspects.map(a=>pass(a.id));},context:context??(async()=>({graph:'Checkout-scoped source graph; evidence may be incomplete.',history:[]}))});
  api.restore(ctx);await api.run(ctx);api.input({source:'interactive',text:'Implement the behavior and verify quality'});
  t.after(()=>{api.shutdown();fs.rmSync(dir,{recursive:true,force:true});});
@@ -28,7 +28,7 @@ async function fixture(t,{runner,context,beforeRefresh}={}) {
   state:()=>api.snapshot(),
   async mutate(file='src/value.js',text='export const value = 1;',isError=false){if(!isError){fs.mkdirSync(path.dirname(path.join(dir,file)),{recursive:true});fs.writeFileSync(path.join(dir,file),text);}api.observe(await projectTestFacts(dir),true);api.result({toolName:'write',input:{path:file},isError},ctx);},
   tool:params=>tools.quality_review.execute('test',params,undefined,undefined,ctx),
-  settle:()=>api.settled({},ctx)};
+  compact:()=>hooks.session_compact?.({},ctx),settle:()=>api.settled({},ctx)};
 }
 
 test('routing includes text, CSS/HTML, technical stack, security and delivery without turning every project into a web audit',()=>{
@@ -59,6 +59,35 @@ test('automatic settled review runs once; parent assessment and current tests ar
  await f.mutate('src/value.js','export const value=3;');await f.settle();assert.equal(f.calls.length,2);assert.equal(f.state().status,'budget_exhausted');
  for(let i=0;i<5;i++){f.api.input({source:'extension',text:'continue'});await f.settle();}assert.ok(f.sent.length<=3);
  await f.tool({action:'assess',disposition:'blocked',reason:'The bounded review budget is exhausted; report the remaining source review gap.'});assert.equal(f.state().status,'blocked');
+});
+test('unresolved project checks own automatic continuation until their scoped evidence is ready',async t=>{
+ const f=await fixture(t);await f.mutate();
+ for(const need of ['assessment','missing','running','failed']){
+  f.tests({need});assert.equal(f.api.notice(),'','do not compete with pending project-test guidance');
+  await f.settle();assert.equal(f.calls.length,0);assert.equal(f.sent.length,0);
+ }
+ assert.equal(f.state().rounds,0,'waiting for checks does not consume an independent review round');
+ f.tests({need:null});assert.match(f.api.notice(),/quality_review/);
+ assert.equal(f.api.notice(),'','the same review instruction is not injected on every model call');
+ await f.compact();assert.match(f.api.notice(),/quality_review/);assert.equal(f.api.notice(),'','compaction restores one notice');
+ await f.settle();assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);
+ assert.match(f.api.notice(),/assess/);assert.equal(f.api.notice(),'');
+ await f.settle();assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);
+ const explicit=await fixture(t);await explicit.mutate();explicit.tests({need:'running'});
+ await explicit.tool({action:'review'});assert.equal(explicit.calls.length,1,'explicit early source review remains available');
+ await assert.rejects(explicit.tool({action:'assess',disposition:'accepted',reason:'The test process is still running and has no completed evidence.'}),/test evidence/);
+});
+
+test('watchdog joins the same quality owner without duplicate rounds, prompts or stale session access',async t=>{
+ const f=await fixture(t);await f.mutate();f.tests({need:'running'});
+ await settleSharedQualityReview(f.ctx);assert.equal(f.calls.length,0,'shared review respects the project-test owner');
+ f.tests({need:null});
+ await Promise.all([settleSharedQualityReview(f.ctx),f.settle(),settleSharedQualityReview(f.ctx)]);
+ assert.equal(f.calls.length,1);assert.equal(f.sent.length,1);assert.equal(f.state().rounds,1);
+ const other={...f.ctx,sessionManager:{...f.ctx.sessionManager,getSessionId:()=>f.dir+'-next'}};
+ f.api.restore(other);assert.equal(await settleSharedQualityReview(f.ctx),undefined,'restore releases the previous session owner');
+ assert.ok(await settleSharedQualityReview(other));
+ f.api.shutdown();assert.equal(await settleSharedQualityReview(other),undefined,'shutdown releases shared state');
 });
 test('docs and native writes beyond scan limits trigger reviews; read-only and failed writes do not',async t=>{
  const f=await fixture(t);await f.mutate('README.md','No write',true);await f.settle();assert.equal(f.calls.length,0);

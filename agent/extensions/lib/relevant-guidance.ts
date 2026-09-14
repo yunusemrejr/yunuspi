@@ -13,7 +13,7 @@ import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
-import { CAPABILITY_GROUPS, capabilityGroup, groupOverview } from "./capability-groups.ts";
+import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -46,7 +46,7 @@ const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
 const codeFile = /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i;
 const envFile = /(?:^|\/)(?:migrations?|\.github\/workflows|terraform)(?:\/|$)|(?:^|\/)(?:Dockerfile|compose\.ya?ml)|\.(?:sql|tf)$/i;
 type Skill = { name: string; file: string; description: string };
-type Hint = { key: string; text: string; tool?: string; skill?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
+type Hint = { key: string; text: string; tool?: string; skill?: string; reason?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
 
 export function createRelevantGuidance(pi: any) {
   let anchorContext = createContextAnchor();
@@ -102,11 +102,12 @@ export function createRelevantGuidance(pi: any) {
     catch { return new Set<string>(); }
   };
   const enabled = () => !requestDisabled && process.env.PI_RELEVANT_GUIDANCE !== "off";
-  // The default route only offers a small invitation to inspect capabilities.
-  // Keep direct workflow/tool wording for the explicit strict review mode so
-  // PI_SKILL_REVIEW=required retains its read checkpoint and safety contract.
-  // Advisory discovery is intentionally opt-in: merely noticing two files
-  // must not launch an inference turn in a long or resumed session.
+  // The default route offers one concrete optional match in each category.
+  // Keep the selected identity and reason: replacing those with generic browse
+  // instructions throws away the work of both deterministic and async routing.
+  // Strict review mode retains its separate read checkpoint and safety contract.
+  // Advisory discovery is available by default. Its controller owns the
+  // observation threshold, explicit opt-out, request budget and cancellation.
   const advisoryInvitation = (hint: Hint): Hint | undefined => {
     const operationalGuidance = new Set(['visual-handoff', 'render', 'workspace', 'delegation-contract']);
     if (reviewMode() !== 'advisory' || skillReviewDisabled || hint.key.startsWith('signal:') || operationalGuidance.has(hint.key)) return hint;
@@ -116,19 +117,33 @@ export function createRelevantGuidance(pi: any) {
     const tool = kind === 'workflow' ? 'skill_review' : 'tool_search';
     // A limited child/session may not expose the discovery surface. Preserve
     // its existing direct hint rather than dropping useful safety guidance.
-    if (!tools().has(tool)) return hint;
+    const active = tools();
+    if (!active.has(tool)) return hint;
+    if (kind === 'capability' && !active.has(hint.tool!)) {
+      // Registration can justify a metadata preview, never a promise that
+      // discovery owns permission to activate an inactive or restricted tool.
+      try {
+        const catalog = pi.getAllTools?.();
+        if (!Array.isArray(catalog) || !catalog.some(item => item?.name === hint.tool)) return undefined;
+      } catch { return undefined; }
+    }
+    const skill = kind === 'workflow' ? skills.find(skill => skill.file === hint.skill) : undefined;
+    const summary = (text: string, limit: number) => text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+    const text = skill
+      ? `Optional workflow: ${JSON.stringify(skill.name)} — ${JSON.stringify(summary(hint.reason ?? skill.description, 180))}. Read ${JSON.stringify(skill.file)} if useful; no review step is required.`
+      : kind === 'workflow'
+        ? 'Optional workflow discovery: skill_review can search installed workflows if useful for the current step.'
+        : `Optional capability (${JSON.stringify(hint.tool)}): ${summary(hint.text, 420)} ${active.has(hint.tool!) ? 'Use only if useful; no extra call is required.' : `If useful, preview tool_search({query:${JSON.stringify(hint.tool)}}) to check this session's availability.`}`;
     return {
       ...hint,
       // A fresh shared topic key avoids stale receipts for the old concrete
       // tool/skill key on resume. topicSeen supplies the existing three
       // request cooldown and persists only this bounded invitation metadata.
       key: `topic:discovery-${kind}`,
-      tool,
-      skill: undefined,
+      tool: kind === 'capability' && active.has(hint.tool!) ? hint.tool : tool,
+      skill: skill?.file,
       discovery: kind,
-      text: kind === 'workflow'
-        ? 'Optional workflow discovery: if a relevant workflow would help, use skill_review with action:"browse" or "search". Reading is optional; keep user intent, safety and quality in view.'
-        : 'Optional capability discovery: if a specialized capability would help, browse tool_search for a short match. Choose only what fits; no action is required.',
+      text,
     };
   };
   const renderEnvironmentFailure = (event: any) => {
@@ -184,9 +199,8 @@ export function createRelevantGuidance(pi: any) {
   const discovery = createSkillDiscoveryController({
     catalog: () => skills,
     covered: file => skillCovered(file) || reviewTargets.has(file) || deferredSkills.has(file),
-    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent')
-      && (reviewMode() !== 'advisory' || /^(?:1|on|true)$/i.test(process.env.PI_SKILL_DISCOVERY ?? '')),
-    offer: (skill, reason) => add({key:`skillctx:${skill.file}`,skill:skill.file,priority:64,
+    enabled: () => enabled() && !skillReviewDisabled && tools().has('read') && tools().has('subagent'),
+    offer: (skill, reason) => add({key:`skillctx:${skill.file}`,skill:skill.file,reason,priority:64,
       text:`Async skill discovery (advisory): ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} — ${JSON.stringify(reason)} Read if useful; this suggestion is not a read receipt or a new requirement.`}),
   });
   for (const event of ['agent_end','session_shutdown','session_before_switch','session_before_fork','session_before_tree','model_select'])
@@ -441,28 +455,20 @@ export function createRelevantGuidance(pi: any) {
     const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 3;
     const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, Number(requestedOffset)) : 0;
     if (!skills.length) return {results:[], offset, limit, remaining:0};
-    const canonicalName = (value: string) => value.toLowerCase().trim().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
-    const terms = [...new Set(text.toLowerCase().match(/[a-z0-9+#.-]{2,64}/g) ?? [])];
     const candidates = skills.filter(skill => !group || capabilityGroup(skill.name, skill.description) === group);
     const sortSkills = (left: Skill, right: Skill) => left.name.localeCompare(right.name) || left.file.localeCompare(right.file);
     let ordered: Skill[];
     if (!text) {
       ordered = [...candidates].sort(sortSkills);
     } else {
-      const exact = candidates.filter(skill => canonicalName(skill.name) === canonicalName(text)).sort(sortSkills);
       const ranked = skillIndex
         ? rankSkills(skillIndex, text, Math.min(256, Math.max(8, skills.length))).map(item => item.skill)
           .filter(skill => !group || capabilityGroup(skill.name, skill.description) === group)
         : [];
-      // Keep a direct metadata fallback so an explicit query remains useful
-      // for a single description term or a catalog larger than the ranker cap.
-      const lexical = candidates.map(skill => {
-        const name = skill.name.toLowerCase();
-        const description = skill.description.toLowerCase();
-        const score = terms.reduce((total, term) => total + (name.includes(term) ? 16 : 0) + (description.includes(term) ? 2 : 0), 0);
-        return {skill, score};
-      }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || sortSkills(a.skill, b.skill)).map(row => row.skill);
-      ordered = [...exact, ...ranked, ...lexical];
+      // Explicit discovery must honor direct short domain/name matches before
+      // passive suggestions, whose deliberately stricter tokenizer drops PHP,
+      // API and CSS. Keep fuzzy recovery and the full catalog behind those hits.
+      ordered = [...searchCapabilityMetadata(candidates, text), ...ranked];
     }
     const seen = new Set<string>();
     const unique = ordered.filter(skill => {

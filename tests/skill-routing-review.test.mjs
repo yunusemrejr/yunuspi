@@ -143,8 +143,9 @@ test('default skill guidance is advisory: ordinary execution stays open and no r
   delete process.env.PI_SKILL_REVIEW;
   try {
     const f=fixture();f.start('Implement Python');
-    assert.ok(f.g.candidates().some(h=>h.discovery==='workflow' && /action:"browse"/.test(h.text)),'a short invitation replaces a prescribed skill');
-    assert.ok(f.g.candidates().filter(h=>h.discovery).every(h=>!h.text.includes('SKILL.md')),'automatic invitation contains no skill paths');
+    const workflow=f.g.candidates().find(h=>h.discovery==='workflow');
+    assert.ok(workflow?.skill && workflow.text.includes(workflow.skill),'one relevant workflow is directly accessible without a catalog search');
+    assert.match(workflow.text,/optional|if useful/i,'a concrete match remains an invitation');
     assert.equal(f.edit('main.py'),undefined);
     assert.equal(f.g.beforeToolCall({toolName:'bash',input:{command:'python main.py'}}),undefined);
     assert.equal(f.context().length,0,'advisory mode does not add a persistent required checklist');

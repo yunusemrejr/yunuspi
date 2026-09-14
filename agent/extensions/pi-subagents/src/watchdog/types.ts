@@ -171,7 +171,9 @@ export interface ResolvedWatchdogConfig {
 	cadence: WatchdogCadenceConfig;
 	main: WatchdogEndpointConfig;
 	children: WatchdogChildrenConfig;
-	asyncCompletion: WatchdogAsyncCompletionConfig;
+	/** Legacy no-op accepted when reading old settings; completion diagnostics
+	 * already travel through the child result owner and are not a separate mode. */
+	asyncCompletion?: WatchdogAsyncCompletionConfig;
 	lsp: WatchdogLspConfig;
 	compactAtPercent: number;
 	reviewRetryDelayMs: number;

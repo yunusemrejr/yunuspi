@@ -779,6 +779,11 @@ const BUNDLE_RESET_REPLACEMENT =
 // ---------------------------------------------------------------------------
 
 const MOD_MARKER = "DETERMINISTIC_REJECTION_PATTERN";
+const MOD_PATTERN_LEGACY = "/data_inspection_failed|inappropriate content|content inspection|content filter|content moderation/i";
+// Invalid request bodies are deterministic even when a router wraps them in
+// "Provider returned error" (which the stock classifier treats as transient).
+// Do not classify all HTTP 400s: overloaded/transport failures can use that code.
+const MOD_PATTERN = "/data_inspection_failed|inappropriate content|content inspection|content filter|content moderation|invalid[ _-](?:request|parameters?|arguments?)|unsupported[ _-]parameter|unrecognized request argument/i";
 // Old v1 in-list patch (extra literals appended to RETRYABLE_PROVIDER_ERROR_PATTERN);
 // stripped if present so the v2 pattern is the single source of truth.
 const MOD_V1_INLINE =
@@ -791,59 +796,13 @@ const MOD_DECL_REPLACEMENT =
   "// payload (3 identical retries of a deterministic rejection is pure waste).\n" +
   "// They fail fast so the agent can modify the request or route elsewhere;\n" +
   "// transient provider errors keep the normal retry budget.\n" +
-  "const DETERMINISTIC_REJECTION_PATTERN = /data_inspection_failed|inappropriate content|content inspection|content filter|content moderation/i;\n" +
+  `const DETERMINISTIC_REJECTION_PATTERN = ${MOD_PATTERN};\n` +
   "class RetrySleepAbortError";
 const MOD_CHECK_ANCHOR =
   "    if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage))\n        return false;";
 const MOD_CHECK_REPLACEMENT =
   MOD_CHECK_ANCHOR +
   "\n    if (DETERMINISTIC_REJECTION_PATTERN.test(errorMessage))\n        return false; /* pi-harness local patch v2 */";
-
-function makeModerationTarget(file) {
-  return {
-    name: "sdk: pi-ai moderation fail-fast",
-    file,
-    exists: () => fs.existsSync(file),
-    isApplied: () => {
-      try {
-        const src = fs.readFileSync(file, "utf8");
-        return (
-          src.includes(MOD_MARKER) &&
-          src.includes("DETERMINISTIC_REJECTION_PATTERN.test(errorMessage)")
-        );
-      } catch {
-        return false;
-      }
-    },
-    apply: () => {
-      const src = fs.readFileSync(file, "utf8");
-      const bak = file + ".bak-harness";
-      fs.copyFileSync(file, bak);
-      let patched = src.replace(MOD_V1_INLINE, ""); // strip old in-list patch if any
-      if (!patched.includes(MOD_MARKER) && patched.includes(MOD_DECL_ANCHOR)) {
-        patched = patched.replace(MOD_DECL_ANCHOR, MOD_DECL_REPLACEMENT);
-      }
-      if (
-        !patched.includes(
-          "DETERMINISTIC_REJECTION_PATTERN.test(errorMessage)",
-        ) &&
-        patched.includes(MOD_CHECK_ANCHOR)
-      ) {
-        patched = patched.replace(MOD_CHECK_ANCHOR, MOD_CHECK_REPLACEMENT);
-      }
-      if (
-        patched === src ||
-        !patched.includes(MOD_MARKER) ||
-        !patched.includes("DETERMINISTIC_REJECTION_PATTERN.test(errorMessage)")
-      ) {
-        throw new Error(
-          `patch application failed (retry.js layout changed) in ${file} — manual review needed`,
-        );
-      }
-      fs.writeFileSync(file, patched);
-    },
-  };
-}
 
 /** Bundle-mirrored moderation fail-fast: the SDK target above patches
  *  pi-ai/dist/utils/retry.js, but the RUNTIME path is the minified bundle
@@ -855,56 +814,59 @@ const BUNDLE_MOD_DECL_ANCHOR =
   'NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN=buildProviderErrorPattern(["GoUsageLimitError","FreeUsageLimitError","Monthly usage limit reached","available balance","insufficient_quota","out of budget","quota exceeded","billing"]),';
 const BUNDLE_MOD_DECL_REPLACEMENT =
   BUNDLE_MOD_DECL_ANCHOR +
-  "DETERMINISTIC_REJECTION_PATTERN=/data_inspection_failed|inappropriate content|content inspection|content filter|content moderation/i,";
+  `DETERMINISTIC_REJECTION_PATTERN=${MOD_PATTERN},`;
 const BUNDLE_MOD_CHECK_ANCHOR =
   "return NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage2)?!1:RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage2)";
 const BUNDLE_MOD_CHECK_REPLACEMENT =
   "if(DETERMINISTIC_REJECTION_PATTERN.test(errorMessage2))return!1;/*PI_DETERMINISTIC_REJECTION_BUNDLE (local patch; re-applied by verify-harness.mjs): deterministic content-moderation rejections fail fast in the runtime path too — identical-payload retries are pure waste.*/" +
   BUNDLE_MOD_CHECK_ANCHOR;
 
-function makeBundleModerationTarget(chunk) {
+/** Upgrade only the known declaration; unknown/partial layouts fail before a write.
+ * Shared by SDK and CLI targets so fingerprint changes cannot silently skip
+ * the new fail-fast behavior on installations carrying the previous patch. */
+export function transformDeterministicRejections(source, bundled = false) {
+  const declaration = bundled ? `DETERMINISTIC_REJECTION_PATTERN=${MOD_PATTERN},` : `const DETERMINISTIC_REJECTION_PATTERN = ${MOD_PATTERN};`;
+  const legacy = bundled ? `DETERMINISTIC_REJECTION_PATTERN=${MOD_PATTERN_LEGACY},` : `const DETERMINISTIC_REJECTION_PATTERN = ${MOD_PATTERN_LEGACY};`;
+  const check = bundled ? "if(DETERMINISTIC_REJECTION_PATTERN.test(errorMessage2))return!1;" : "if (DETERMINISTIC_REJECTION_PATTERN.test(errorMessage))\n        return false;";
+  let result = source.replace(MOD_V1_INLINE, "");
+  if (result.includes(MOD_MARKER)) {
+    const existing = result.includes(declaration) ? declaration : legacy;
+    if (result.split(existing).length !== 2 || result.split(check).length !== 2 || result.includes(declaration) && result.includes(legacy))
+      throw new Error("deterministic rejection patch drift: declaration/check missing or duplicated");
+    return result.replace(existing, declaration);
+  }
+  const declarationAnchor = bundled ? BUNDLE_MOD_DECL_ANCHOR : MOD_DECL_ANCHOR;
+  const checkAnchor = bundled ? BUNDLE_MOD_CHECK_ANCHOR : MOD_CHECK_ANCHOR;
+  if (result.split(declarationAnchor).length !== 2 || result.split(checkAnchor).length !== 2)
+    throw new Error("deterministic rejection patch anchor missing or ambiguous");
+  result = result.replace(declarationAnchor, bundled ? BUNDLE_MOD_DECL_REPLACEMENT : MOD_DECL_REPLACEMENT)
+    .replace(checkAnchor, bundled ? BUNDLE_MOD_CHECK_REPLACEMENT : MOD_CHECK_REPLACEMENT);
+  return result;
+}
+
+function makeDeterministicTarget(file, bundled) {
   return {
-    name: "bundle: pi-ai moderation fail-fast (runtime parity)",
-    file: chunk,
-    exists: () => fs.existsSync(chunk),
+    name: bundled ? "bundle: pi-ai moderation fail-fast (runtime parity)" : "sdk: pi-ai moderation fail-fast",
+    file,
+    exists: () => fs.existsSync(file),
     isApplied: () => {
       try {
-        const src = fs.readFileSync(chunk, "utf8");
-        return (
-          src.includes("PI_DETERMINISTIC_REJECTION_BUNDLE") &&
-          src.includes("DETERMINISTIC_REJECTION_PATTERN.test(errorMessage2)")
-        );
-      } catch {
-        return false;
-      }
+        const source = fs.readFileSync(file, "utf8");
+        return transformDeterministicRejections(source, bundled) === source;
+      } catch { return false; }
     },
     apply: () => {
-      const src = fs.readFileSync(chunk, "utf8");
-      let patched = src;
-      if (!patched.includes(BUNDLE_MOD_DECL_REPLACEMENT)) {
-        if (!patched.includes(BUNDLE_MOD_DECL_ANCHOR))
-          throw new Error(
-            `bundle moderation decl anchor missing in ${chunk} — upstream refactor, patch needs updating`,
-          );
-        patched = patched.replace(
-          BUNDLE_MOD_DECL_ANCHOR,
-          BUNDLE_MOD_DECL_REPLACEMENT,
-        );
+      const source = fs.readFileSync(file, "utf8");
+      const result = transformDeterministicRejections(source, bundled);
+      if (result !== source) {
+        if (!bundled) fs.copyFileSync(file, file + ".bak-harness");
+        fs.writeFileSync(file, result);
       }
-      if (!patched.includes(BUNDLE_MOD_CHECK_REPLACEMENT)) {
-        if (!patched.includes(BUNDLE_MOD_CHECK_ANCHOR))
-          throw new Error(
-            `bundle moderation check anchor missing in ${chunk} — upstream refactor, patch needs updating`,
-          );
-        patched = patched.replace(
-          BUNDLE_MOD_CHECK_ANCHOR,
-          BUNDLE_MOD_CHECK_REPLACEMENT,
-        );
-      }
-      fs.writeFileSync(chunk, patched);
     },
   };
 }
+const makeModerationTarget = file => makeDeterministicTarget(file, false);
+const makeBundleModerationTarget = file => makeDeterministicTarget(file, true);
 
 // ---------------------------------------------------------------------------
 // Target table

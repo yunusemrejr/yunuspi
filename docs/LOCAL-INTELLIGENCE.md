@@ -29,6 +29,14 @@ Kompress is a token classifier, so task conditioning happens around its source-I
 
 ## Controls and evidence
 
+Selective project-memory priming is enabled by default. On the first substantive
+request, it can retrieve up to three bounded historical snippets with at least
+two matching task terms. Generic continuation prompts and unrelated memories
+produce no digest. Sources remain attributable and current instructions retain
+priority; a directory name alone cannot make old memory relevant. The existing
+once-per-session receipt and 16-file, 128 KiB scan limits prevent repeated
+history injection. `/memory-prime off` remains an explicit user control.
+
 `PI_LOCAL_INTELLIGENCE=off` disables the new selection and reranking paths; established context scoring and provider-health protection remain available. `PI_HANDOFF_SELECTION=off` disables child report selection alone. Existing `PI_MINI_PREPROCESSOR`, `PI_CONTEXT_MEMORY` and `PI_OUTPUT_DISTILLER` controls retain their scopes. Install changes through the normal update/reload workflow; running sessions need to load the updated extensions.
 
 The public `tests/local-intelligence.test.mjs` uses synthetic fixtures to test task switches, cache isolation, exact source reconstruction, critical overflow, compaction input reduction, saved-file handoffs, sparse metric changes, error polarity and stale telemetry. Existing context, observation, skill, graph, model-quality and recovery regressions cover integration. These tests establish their contracts, not broad model intelligence or measured production token savings. Optional local Kompress weights and service availability are separate from distribution tests.

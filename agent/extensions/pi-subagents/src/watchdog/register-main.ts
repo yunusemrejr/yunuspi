@@ -5,6 +5,7 @@ import { SLASH_TEXT_RESULT_TYPE } from "../shared/types.ts";
 import { recommendStrongWatchdogModel, resolveWatchdogModelInput, parseWatchdogThinkingInput } from "./model-selection.ts";
 import { renderWatchdogWarning } from "./render.ts";
 import { createMainWatchdogReview } from "./review.ts";
+import { createCoordinatedWatchdogReview } from "./coordinated-review.ts";
 import { MainWatchdogRuntime, type WatchdogReviewFunction } from "./runtime.ts";
 import { getWatchdogUserSettingsPath, writeUserWatchdogEnabled, writeWatchdogModelSettings } from "./settings.ts";
 import {
@@ -108,7 +109,7 @@ function lspLine(snapshot: ReturnType<MainWatchdogRuntime["getSnapshot"]>): stri
 export function buildWatchdogStatus(snapshot: ReturnType<MainWatchdogRuntime["getSnapshot"]>, ctx: ExtensionContext): string {
 	const lines = [
 		"Subagent watchdog",
-		`Main: ${boolLabel(snapshot.enabled)}${!snapshot.config.enabled && snapshot.sessionOverride === undefined ? " (default off)" : ""}`,
+		`Main: ${boolLabel(snapshot.enabled)}`,
 		`Runtime: ${statusLabel(snapshot.status)}${snapshot.bufferedDeltas > 0 ? ` · buffered deltas ${snapshot.bufferedDeltas}` : ""}`,
 		`Review trigger: ${snapshot.reviewTrigger === "repo-edits" ? "repo edits only" : "every non-empty turn delta"}`,
 		`Scope context: ${snapshot.config.scope.enabled ? "on" : "off"}`,
@@ -120,7 +121,7 @@ export function buildWatchdogStatus(snapshot: ReturnType<MainWatchdogRuntime["ge
 		childrenLine(snapshot),
 		recommendationLine(ctx),
 		`Agent-end timeout: ${snapshot.config.agentEndTimeoutMs}ms`,
-		`Auto-follow: ${snapshot.enabled && snapshot.config.autoFollow.blockers ? "on for blockers" : "off"} · attempts ${snapshot.autoFollowAttempts}${snapshot.config.autoFollow.maxAttempts === null ? "" : `/${snapshot.config.autoFollow.maxAttempts}`}${snapshot.autoFollowQueued ? " · queued" : ""}${snapshot.autoFollowStalemate ? " · stalemate" : ""}`,
+		`Auto-follow: ${snapshot.autoFollowActive ? "on for blockers" : "shared quality/completion owner"} · attempts ${snapshot.autoFollowAttempts}${snapshot.config.autoFollow.maxAttempts === null ? "" : `/${snapshot.config.autoFollow.maxAttempts}`}${snapshot.autoFollowQueued ? " · queued" : ""}${snapshot.autoFollowStalemate ? " · stalemate" : ""}`,
 		`Review model call: ${snapshot.reviewDescription}`,
 	];
 	if (snapshot.failedReviews > 0) lines.push(`Failed reviews: ${snapshot.failedReviews}`);
@@ -380,8 +381,9 @@ export function registerMainWatchdog(pi: ExtensionAPI, options: RegisterMainWatc
 		currentContext = ctx;
 	};
 	const runtime = options.runtime ?? new MainWatchdogRuntime({
-		review: options.review ?? createMainWatchdogReview(() => currentContext, { getThinkingLevel: () => pi.getThinkingLevel() }),
-		reviewDescription: options.review ? "injected seam" : "real model review",
+		review: options.review ?? createCoordinatedWatchdogReview(() => currentContext,createMainWatchdogReview(() => currentContext, { getThinkingLevel: () => pi.getThinkingLevel() })),
+		reviewDescription: options.review ? "injected seam" : "local diagnostics + shared quality review; configured model uses standalone review",
+		ownsAutoFollow: config => Boolean(options.review || config.main.model),
 		reviewChangesOnly: true,
 		displayWarning: (details, delivery) => {
 			pi.sendMessage(createWatchdogWarningMessage(details, { display: true, details }), delivery?.deliverAs === "steer" ? { deliverAs: "steer" } : undefined);
@@ -401,7 +403,7 @@ export function registerMainWatchdog(pi: ExtensionAPI, options: RegisterMainWatc
 	});
 
 	pi.registerCommand("subagents-watchdog", {
-		description: "Show or toggle the default-off subagent watchdog",
+		description: "Inspect automatic diagnostics and shared quality review; configure an independent watchdog model",
 		handler: (args, ctx) => {
 			rememberContext(ctx);
 			return handleWatchdogCommand(pi, runtime, args, ctx);

@@ -69,7 +69,7 @@ interface ParseMeta {
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
-	enabled: false,
+	enabled: true,
 	delivery: "held",
 	showDuringRun: false,
 	syncBacklog: "off",
@@ -93,10 +93,10 @@ export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
 		everyNTools: null,
 	},
 	main: {
-		enabled: false,
+		enabled: true,
 	},
 	children: {
-		enabled: false,
+		enabled: true,
 		watchdogTailTimeoutMs: 120_000,
 		autoFollow: {
 			blockers: true,
@@ -104,10 +104,6 @@ export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
 			stalemateRepeats: 3,
 		},
 		overrides: {},
-	},
-	asyncCompletion: {
-		enabled: false,
-		autoFollowBlockers: false,
 	},
 	lsp: {
 		enabled: true,
@@ -164,7 +160,6 @@ function cloneDefaultConfig(): ResolvedWatchdogConfig {
 			autoFollow: { ...DEFAULT_WATCHDOG_CONFIG.children.autoFollow },
 			overrides: {},
 		},
-		asyncCompletion: { ...DEFAULT_WATCHDOG_CONFIG.asyncCompletion },
 		lsp: { ...DEFAULT_WATCHDOG_CONFIG.lsp },
 	};
 }

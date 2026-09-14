@@ -627,7 +627,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("mode", "qmd search mode.", ["keyword", "semantic", "deep"]),
 			option("limit", "Search result bound."),
 			option("scope", "Memory priming scope.", ["project", "global"]),
-			option("on|off", "Enable or disable opt-in memory priming."),
+			option("on|off", "Control selective memory priming, enabled by default with project/task relevance checks."),
 		],
 		related: ["memory-notes", "memory-evidence", "context-diagnostics"],
 		sourceFiles: [

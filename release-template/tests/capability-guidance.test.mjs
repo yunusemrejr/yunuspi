@@ -63,6 +63,35 @@ test("utility tools receive automatic contextual guidance only when active", () 
   }
 });
 
+test("advisory capability hints retain one useful operation while preserving recovery priority", () => {
+  const f=fixture(['read','data_query','tool_search']);
+  f.start('Inspect JSON keys');
+  const hint=f.guidance.candidates().find(h=>h.discovery==='capability');
+  assert.ok(hint?.text.includes('data_query'),'a concrete match does not turn into generic catalog browsing');
+  assert.match(hint.text,/optional|if useful/i);
+  for(let i=0;i<3;i++)f.step('read',{path:'missing.txt'},true);
+  assert.equal(f.guidance.candidates()[0].key,'signal:repeated-failure','recovery keeps its higher priority');
+  f.take();
+  for(let i=0;i<20;i++)f.step('read',{path:'settings.json'});
+  assert.equal(f.guidance.candidates().filter(h=>h.discovery==='capability').length,0,'ignored advice stays coalesced for the request');
+});
+
+test("inactive capability advice checks registration and never promises activation authority", () => {
+  for(const registered of [false,true]) {
+    const f=fixture(['read','tool_search']);
+    f.pi.getAllTools=()=>[...f.active,...(registered?['data_query']:[])].map(name=>({name,description:name}));
+    f.start('Inspect JSON keys');
+    const hint=f.guidance.candidates().find(h=>h.discovery==='capability');
+    if(!registered)assert.equal(hint,undefined,'an unavailable tool is not advertised');
+    else {
+      assert.ok(hint?.text.includes('data_query'),'registered metadata can remain discoverable');
+      assert.match(hint.text,/query:/,'an inactive tool is previewed against the current session selection');
+      assert.doesNotMatch(hint.text,/names:|can enable/,'registration is not evidence of activation authority');
+    }
+    assert.deepEqual(f.active,['read','tool_search']);
+  }
+});
+
 test("sustained multi-phase work can discover twenty applicable tools without a catalog dump", () => {
   const f=fixture(toolNames); f.start(task);
   const delivered=[...f.take(),...f.take()];

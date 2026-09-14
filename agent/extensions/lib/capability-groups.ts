@@ -13,6 +13,30 @@ export type CapabilityMetadata = Readonly<{
   description?: string;
 }>;
 
+/** Explicit discovery keeps short domain words (PHP/API/CSS) and ranks names
+ * ahead of incidental prose. Substring scoring made API match "capital" and
+ * board match "keyboard". Prefixes of longer words remain useful for queries
+ * such as "diagnostic"; they never match inside an unrelated word. */
+export function searchCapabilityMetadata<T extends CapabilityMetadata>(items: readonly T[], query: string): T[] {
+  const tokens = (value: unknown, limit: number) => [...new Set(
+    (String(value ?? '').slice(0, limit).toLowerCase().match(/[a-z0-9]+(?:\+\+|#)?/g) ?? [])
+      .filter(term => term.length > 1),
+  )];
+  const terms = tokens(query, 256);
+  const identity = (value: string) => value.toLowerCase().trim().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
+  const exact = identity(query);
+  return items.map(item => {
+    const name = tokens(item.name, 256), description = tokens(item.description ?? '', 4096);
+    const match = (terms: string[], term: string) => terms.includes(term) ? 2
+      : term.length >= 4 && terms.some(candidate => candidate.startsWith(term)) ? 1 : 0;
+    const score = !query.trim() ? 1 : identity(item.name) === exact ? 10000
+      : terms.reduce((sum, term) => sum + 8 * match(name, term) + match(description, term), 0);
+    return {item, score};
+  }).filter(row => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name))
+    .map(row => row.item);
+}
+
 /** Keep this list short: it is exposed in the discovery overview. The final
  * `other` bucket is intentional so every installed capability is reachable. */
 export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = Object.freeze([

@@ -28,7 +28,10 @@ test('actual guidance delivers async advice through bounded candidates, without 
   f.observe();assert.equal(f.calls.length,0,'observation does not synchronously dispatch or wait for inference');await tick();assert.equal(f.calls.length,1);
   assert.match(f.calls[0].request.brief,/stylesheet responsive browser interface/);assert.doesNotMatch(f.calls[0].request.brief,/SECRET SOURCE BODY/);
   assert.equal(f.g.candidates().some(h=>h.skill===f.file),false,'stalled inference leaves ordinary work available');
-  f.finish();await tick();const candidates=f.g.candidates();assert.ok(candidates.some(h=>h.discovery==='workflow' && /Optional workflow discovery/.test(h.text)));assert.ok(candidates.length<=2);assert.equal(f.wakes(),0);
+  f.finish();await tick();const candidates=f.g.candidates();const workflow=candidates.find(h=>h.discovery==='workflow');
+  assert.ok(workflow?.text.includes(f.file),'advice retains a directly readable catalog path');
+  assert.match(workflow.text,/Observed styles and markup need composition proportion checks/,'task-specific discovery evidence survives delivery');
+  assert.match(workflow.text,/optional|if useful/i);assert.ok(workflow.text.length<800);assert.ok(candidates.length<=2);assert.equal(f.wakes(),0);
   assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined);
   const status=await f.registered.skill_review.execute('inspect',{action:'inspect'});assert.equal(status.details.skills.length,0,'advisory suggestion is not a mandatory review target');
   f.g.commit(candidates);assert.equal(f.g.candidates().some(h=>h.discovery==='workflow'),false,'delivered suggestion does not repeat');
@@ -49,4 +52,12 @@ test('pending advice is discarded after optout, native skill read, catalog repla
  }finally{f.cleanup();}}
 });
 
-test('default advisory observations do not call a model or wake the agent',async()=>{const f=fixture(false);try{f.observe();await tick();assert.equal(f.calls.length,0);assert.equal(f.wakes(),0);}finally{f.cleanup();}});
+test('default advisory discovery uses one bounded background request without waking or gating work',async()=>{
+ const f=fixture(false);try{
+  f.read('ui/world.css');await tick();assert.equal(f.calls.length,0,'one observation is insufficient');
+  f.read('ui/index.html');await tick();assert.equal(f.calls.length,1,'discovery is enabled without an opt-in environment variable');
+  assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined,'discovery never gates normal work');
+  f.finish();await tick();f.observe();await tick();assert.equal(f.calls.length,1,'additional observations do not launch repeated helper requests');
+  assert.equal(f.wakes(),0);
+ }finally{f.cleanup();}
+});
