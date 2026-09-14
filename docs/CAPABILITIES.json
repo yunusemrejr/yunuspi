@@ -2070,7 +2070,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 579
+        "line": 643
       },
       {
         "name": "or-provider",
@@ -2509,7 +2509,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 526,
+        "line": 590,
         "kind": "literal"
       },
       {
@@ -2837,7 +2837,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 526,
+        "line": 590,
         "kind": "literal"
       },
       {

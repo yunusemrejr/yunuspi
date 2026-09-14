@@ -43,6 +43,9 @@ import { hasRequestBodyLimit } from "../scripts/patches/request-body-gate.mjs";
 
 const MIN_DEDUP_CHARS = 400;
 const MAX_ENTRIES = 64;
+// Sealed renderings hold only a receipt or a reference to one, never a copy of
+// the raw output, so the bound can be far larger than the observation index.
+const MAX_SEALED = 2048;
 const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Whole-paragraph prose from local documentation also benefits from Kompress.
@@ -115,6 +118,42 @@ export default function piObservationsExtension(
 	let counter = 0;
 	let visionHintSent = false;
 	let taskSignal = "";
+	// Provider-visible history is append-only: the first rendering chosen for a
+	// message is sealed and reused verbatim on later requests. A rewritten
+	// earlier message invalidates the provider cache prefix and re-bills the
+	// whole conversation, so later state must never re-render it — not a
+	// distillation cache that filled after the fact, not a bounded baseline map
+	// that evicted an entry, not a shifted failure window. `content: null` means
+	// "leave the original in place"; that is a decision, not an absence.
+	let sealedRenders = new Map<
+		number,
+		{ resultHash: string | undefined; content: any[] | null; requires: number[] }
+	>();
+	const sealRender = (
+		id: number,
+		resultHash: string | undefined,
+		content: any[] | null,
+		requires: number[],
+	): void => {
+		if (sealedRenders.size >= MAX_SEALED)
+			sealedRenders.delete(sealedRenders.keys().next().value!);
+		sealedRenders.set(id, { resultHash, content, requires });
+	};
+	// The first rendering of a given message content is authoritative. Re-rendering
+	// is allowed when a dependency is temporarily invisible (a baseline that is not
+	// in this request, e.g. a reduced or compacted view), but that transient view
+	// must not replace the established seal — the full history would then be
+	// re-rendered on the next request and re-bill the whole prefix.
+	const sealFirstRender = (
+		id: number,
+		resultHash: string | undefined,
+		content: any[] | null,
+		requires: number[],
+	): void => {
+		const prior = sealedRenders.get(id);
+		if (prior && prior.resultHash === resultHash) return;
+		sealRender(id, resultHash, content, requires);
+	};
 
 	function remember(key: string, id: number): void {
 		observations.delete(key);
@@ -128,6 +167,8 @@ export default function piObservationsExtension(
 		smol.reset();
 		taskSignal = "";
 		observations = new Map();
+		// A replaced branch (new/forks/compaction) re-renders from scratch.
+		sealedRenders = new Map();
 		counter = 0;
 		// Include inactive branches when reserving ids, but NEVER when retrieving
 		// evidence. Also reserve legacy ids so they cannot alias new observations.
@@ -372,6 +413,15 @@ export default function piObservationsExtension(
 			),
 		);
 		let changed = false;
+		// A seal is valid only while the history it was rendered against is still
+		// visible: a delta receipt whose baseline observation is gone (compaction,
+		// branch move) must not be replayed as if it were. The cache is already
+		// broken in that case, so re-rendering there costs nothing extra.
+		const presentIds = new Set<number>();
+		for (const entry of event.messages) {
+			const visible = entry?.details?.piObservation?.id;
+			if (Number.isSafeInteger(visible)) presentIds.add(visible);
+		}
 		const messages = event.messages.map((message) => {
 			if (
 				message.role !== "toolResult" ||
@@ -398,6 +448,16 @@ export default function piObservationsExtension(
 				return message;
 			}
 			if (status.length > 2000) return message;
+			const sealed = sealedRenders.get(ref.id);
+			if (
+				sealed &&
+				sealed.resultHash === ref.resultHash &&
+				sealed.requires.every((required) => presentIds.has(required))
+			) {
+				if (sealed.content === null) return message;
+				changed = true;
+				return { ...message, content: sealed.content };
+			}
 			// Failure matching only adds a retrieval cue. Existing deterministic
 			// distillation still applies and originals remain recoverable.
 			let failureHint: string | undefined;
@@ -490,14 +550,14 @@ export default function piObservationsExtension(
 				}
 				if (failureHint) {
 					changed = true;
-					return {
-						...message,
-						content: [
-							...message.content,
-							{ type: "text" as const, text: failureHint },
-						],
-					};
+					const content = [
+						...message.content,
+						{ type: "text" as const, text: failureHint },
+					];
+					sealFirstRender(ref.id, ref.resultHash, content, []);
+					return { ...message, content };
 				}
+				sealFirstRender(ref.id, ref.resultHash, null, []);
 				return message;
 			}
 			changed = true;
@@ -510,15 +570,19 @@ export default function piObservationsExtension(
 						currentChars: raw.length,
 					})
 				: (selected ?? summary!.text);
-			return {
-				...message,
-				content: [
-					{
-						type: "text" as const,
-						text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`,
-					},
-				],
-			};
+			const projected = [
+				{
+					type: "text" as const,
+					text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`,
+				},
+			];
+			sealFirstRender(
+				ref.id,
+				ref.resultHash,
+				projected,
+				delta && baseline ? [baseline.id] : [],
+			);
+			return { ...message, content: projected };
 		});
 		return changed ? { messages } : undefined;
 	});
