@@ -81,6 +81,8 @@ Short terminal activity labels show tool and automatic-helper actions without ad
 
 `/metrics` shows grouped failures, recovery clues, repeated output, large context contributors and review evidence gaps. Agents can inspect efficiency through `session_self({view:"efficiency"})`.
 
+Reviews retain usable reports when budgets run out or source changes mid-review, with incomplete and stale evidence labeled explicitly. Unavailable independent review is an evidence gap, not proof that the user's task is unfinished. Idle checks do not add unrelated work from sibling sessions to a completed task.
+
 ![Metrics panel with grouped failures and context traffic](docs/assets/metrics-demo.png)
 
 `/graph` opens the project graph for source, dependencies, changes and decisions.

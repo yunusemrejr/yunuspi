@@ -132,6 +132,43 @@ claim a measured cost reduction or guarantee every model's task quality.
 
 ## Component quality and shared review evidence
 
+`quality_review` allows two rounds per user turn. If later edits exhaust those
+rounds, `inspect` and `review` retain the last report under `previousReview`,
+with its original revision. Resuming a session retains the same evidence as
+stale; it cannot approve newer source. Automatic reminders omit old report
+bodies. An unavailable-review notice retries failed queue delivery without
+launching another reviewer or model turn.
+
+The native runner retains source-backed reports emitted at a usage cutoff;
+an interrupted review stays incomplete even when its findings are usable.
+Exhausted background chains keep the completed child's report beside the budget
+notice. A final child that finishes all requested work is not retroactively
+failed because its final usage reaches the limit. Empty/malformed reports and
+missing source reads are recorded as failures, with specific diagnostics.
+Raw tool-protocol text is never executed; a route producing it is excluded
+from automatic review for that session without changing the parent's model.
+
+Reports that finish while their source changes are retained as incomplete
+evidence rather than discarded. Idle scans monitor the task's known files;
+unrelated changes from another session do not reopen an accepted review or a
+finished test checkpoint. New changes observed during this agent's mutation
+tools still enter its scope. Review availability describes independent evidence,
+not whether the user's task is complete: record unavailable evidence as blocked,
+disclose the gap, and finish when the actual requirements are met.
+
+Native PHP test scripts such as `php tests/run-tests.php` are recognized before
+coverage is declared, so a later assessment can use the observed run. Lint-only
+commands and shell commands that mask failures do not become test receipts.
+For a reliable receipt, run the simple test command directly; piping into
+`tail`/`grep` or appending `echo` can hide its exit status. Missing-evidence
+guidance explains this rather than treating a successful output-filter command
+as a passing test.
+
+On-write formatting honors the nearest `.prettierignore`, disables Prettier's
+embedded-language reformatting, and skips HTML containing inline SVG to preserve
+project-owned bytes. Explicit manual formatting remains available. This avoids
+automatic polish breaking embedded-widget or SVG equality checks after an edit.
+
 `artifact_check({operation:"ui",path:"src/Status.tsx"})` checks a complete workspace source file up to 24,000 characters. It reports a source hash and bounded advisory cues: decorative blinking live/status pills, competing primary font families, tiny tracked text, explicit opaque text/background pairs below 3:1, repeated absolute positioning, effect/motion clusters, placeholder links, clickable containers and removed focus outlines. Unsupported paths and oversized files do not receive a clean verdict.
 
 The same source policy runs on successful native writes and independent batch replacements. Edit hooks route relevant skills; `quality_review` receives code, UI and content cues. Partial edits retain earlier cues until a complete replacement or fresh source discovery invalidates them. A source cue cannot resolve the CSS cascade, prove a status is fake, or certify usability. Review against project rules and user requirements, then verify rendered appearance and interaction states. Font/color names alone are not a ban list. Decorative blinking LIVE pills are discouraged by default.

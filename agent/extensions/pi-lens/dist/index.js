@@ -82176,8 +82176,8 @@ function firstDiagnosticLine(text) {
   }
   return void 0;
 }
-async function resolveFormatterCommand(formatter, absolutePath, cwd) {
-  const resolved = formatter.resolveCommand ? await formatter.resolveCommand(absolutePath, cwd) : null;
+async function resolveFormatterCommand(formatter, absolutePath, cwd, options = {}) {
+  const resolved = formatter.resolveCommand ? await formatter.resolveCommand(absolutePath, cwd, options) : null;
   if (resolved === SKIP_FORMATTING)
     return SKIP_FORMATTING;
   if (resolved !== null)
@@ -82188,12 +82188,12 @@ async function resolveFormatterCommand(formatter, absolutePath, cwd) {
   }
   return fallback;
 }
-async function formatFile(filePath, formatter) {
+async function formatFile(filePath, formatter, options = {}) {
   try {
     const absolutePath = path144.resolve(filePath);
     const cwd = path144.dirname(absolutePath);
     const contentBefore = await fs101.readFile(absolutePath, "utf-8");
-    const cmd = await resolveFormatterCommand(formatter, absolutePath, cwd);
+    const cmd = await resolveFormatterCommand(formatter, absolutePath, cwd, options);
     if (cmd === SKIP_FORMATTING) {
       return { success: true, changed: false };
     }
@@ -82359,21 +82359,32 @@ var init_formatters = __esm({
         return hasBiomeConfig(cwd) || hasNearestPackageJsonDependency(cwd, "@biomejs/biome");
       }
     };
+    // PI_LENS_ON_WRITE_FORMAT_SAFETY: on-write Prettier preserves ignored files and embedded bytes.
     prettierFormatter = {
       name: "prettier",
       command: ["npx", "prettier", "--write", "$FILE"],
-      async resolveCommand(filePath, cwd) {
+      async resolveCommand(filePath, cwd, options = {}) {
         const styleArgs = await indentationArgs(filePath, "prettier", cwd);
         if (styleArgs === null)
           return SKIP_FORMATTING;
-        const args = ["--write", ...styleArgs];
+        // The explicit path is run with the file's directory as cwd. Pass the
+        // nearest ignore file so nested files still use project-root patterns.
+        const ignorePaths = await findUp([".prettierignore"], cwd);
+        const ignoreArgs = ignorePaths.length > 0 ? ["--ignore-path", ignorePaths[0]] : [];
+        const embeddedArgs = options.onWrite ? ["--embedded-language-formatting", "off"] : [];
+        const args = ["--write", ...ignoreArgs, ...embeddedArgs, ...styleArgs];
         const local = await findInNodeModules("prettier", cwd);
         if (local)
           return [local, ...args, filePath];
         const global = await findGlobalBinary("prettier");
         if (global)
           return [global, ...args, filePath];
-        return resolveManagedSmartDefaultCommand("prettier", filePath, args);
+        const managed = await resolveManagedSmartDefaultCommand("prettier", filePath, args);
+        if (managed)
+          return managed;
+        if (!assertInstallAllowed("formatter npx fallback: prettier"))
+          return SKIP_FORMATTING;
+        return ["npx", "prettier", ...args, filePath];
       },
       extensions: [
         ".js",
@@ -82942,6 +82953,7 @@ var init_formatters = __esm({
     detectionCache = new BoundedLruCache(32);
     FORMATTER_CONFIG_FILES = [
       "package.json",
+      ".prettierignore",
       "biome.json",
       "biome.jsonc",
       ".prettierrc",
@@ -90574,7 +90586,7 @@ var FormatService = class {
         allSucceeded: true
       };
     }
-    const results = await this.runFormattersWithConcurrency(absolutePath, formatters);
+    const results = await this.runFormattersWithConcurrency(absolutePath, formatters, DEFAULT_FORMATTER_CONCURRENCY, options);
     this.fileTime.read(absolutePath);
     for (const [index, result] of results.entries()) {
       recordFormatter(absolutePath, formatters[index]?.name ?? "unknown", result.changed, result.success);
@@ -90596,7 +90608,7 @@ var FormatService = class {
   /**
    * Run the selected formatter with timeout protection.
    */
-  async runFormattersWithConcurrency(filePath, formatters, _concurrency = DEFAULT_FORMATTER_CONCURRENCY) {
+  async runFormattersWithConcurrency(filePath, formatters, _concurrency = DEFAULT_FORMATTER_CONCURRENCY, options = {}) {
     const results = [];
     for (const formatter of formatters) {
       let formatTimer;
@@ -90606,7 +90618,7 @@ var FormatService = class {
           formatTimer = setTimeout(() => reject(new Error(`Formatter ${formatter.name} timed out after ${timeoutMs}ms`)), timeoutMs);
         });
         const result = await Promise.race([
-          loadFormatters().then(({ formatFile: formatFile2 }) => formatFile2(filePath, formatter)),
+          loadFormatters().then(({ formatFile: formatFile2 }) => formatFile2(filePath, formatter, options)),
           timeoutPromise
         ]);
         results.push(result);
@@ -93299,9 +93311,27 @@ function __piLensRecentlyWritten(filePath, dbg2) {
   return false;
 }
 
+function __piLensPreserveInlineSvgOnWrite(filePath, dbg2) {
+  const extension = path152.extname(filePath).toLowerCase();
+  if (extension !== ".html" && extension !== ".htm")
+    return false;
+  try {
+    const content = nodeFs7.readFileSync(filePath, "utf8");
+    if (!/<svg(?:\s|>)/i.test(content))
+      return false;
+    (dbg2 ?? (() => {}))("on-write formatter skipped " + filePath + ": inline SVG preservation");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runFormatPhase(filePath, getFormatService2, dbg2) {
   if (!lensWorkState(filePath, path152.dirname(filePath))) return { formatChanged: false, formattersUsed: [], formatFailures: [], fileContent: void 0 };
   if (__piLensRecentlyWritten(filePath, dbg2)) {
+    return { filePath, formatters: [], anyChanged: false, allSucceeded: true };
+  }
+  if (__piLensPreserveInlineSvgOnWrite(filePath, dbg2)) {
     return { filePath, formatters: [], anyChanged: false, allSucceeded: true };
   }
   let formatChanged = false;
@@ -93311,7 +93341,7 @@ async function runFormatPhase(filePath, getFormatService2, dbg2) {
   const formatService = getFormatService2();
   try {
     formatService.recordRead(filePath);
-    const result = await formatService.formatFile(filePath);
+    const result = await formatService.formatFile(filePath, { onWrite: true });
     formattersUsed = result.formatters.map((f) => f.name);
     if (result.anyChanged) {
       formatChanged = true;

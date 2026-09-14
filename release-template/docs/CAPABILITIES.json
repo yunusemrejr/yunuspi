@@ -1909,52 +1909,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113668
+        "line": 113698
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113372
+        "line": 113402
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113429
+        "line": 113459
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113464
+        "line": 113494
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113441
+        "line": 113471
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113583
+        "line": 113613
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113397
+        "line": 113427
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113365
+        "line": 113395
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113602
+        "line": 113632
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113379
+        "line": 113409
       },
       {
         "name": "logs",
@@ -2413,7 +2413,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 237,
+        "line": 259,
         "kind": "literal"
       },
       {
@@ -2699,7 +2699,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 237,
+        "line": 259,
         "kind": "literal"
       },
       {
@@ -3774,6 +3774,10 @@
       },
       {
         "path": "agent/scripts/patches/pi-lens-feedback-notices.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-format-safety.mjs",
         "kind": "mjs"
       },
       {

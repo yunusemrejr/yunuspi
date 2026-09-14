@@ -73,13 +73,39 @@ try {
  const one=fixture({models:[free('free/a')]});assert.equal((await one.run()).length,6);assert.equal(one.calls.length,1,'limited capacity groups aspects without dropping coverage');
  const large=fixture({models:[free('free/a')],result:async()=>({details:{results:[compactForegroundResult({exitCode:0,messages:[start,receipt],output:JSON.stringify({reviews:aspects.map(a=>({aspect:a.id,outcome:'pass',evidence:Array.from({length:3},()=>`src/value.js:1 ${'specific inspected source evidence '.repeat(15)}`),findings:[],gap:''}))})})]}})});
  assert.ok((await large.run()).every(r=>r.ok),'multi-aspect JSON exceeding the prose-preview cap stays intact');
+ const budgeted=fixture({models:[free('free/a')],result:async params=>{
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('.\nReturn ONLY JSON')[0]);
+  return {isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'tokens'},results:[compactForegroundResult({exitCode:1,error:'Usage budget exhausted.',messages:[start,receipt],finalOutput:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 report was emitted after reading the current source'],findings:[],gap:''}))})})]}};
+ }});
+ const budgetedResults=await budgeted.run();
+ assert.ok(budgetedResults.every(r=>r.ok),'a source-backed final report survives a hard usage budget wrapper failure');
+ assert.ok(budgetedResults.every(r=>r.text.includes('"outcome":"unknown"')&&/usage budget was exhausted/.test(r.text)),'non-clean budget salvage carries an explicit unknown gap');
+ assert.equal(budgeted.entries.at(-1).data.state,'failed','budget salvage keeps the native failure lifecycle truthful');
+ const cleanBudget=fixture({models:[free('free/a')],result:async params=>{
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('.\nReturn ONLY JSON')[0]);
+  return {isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'costUsd'},results:[compactForegroundResult({exitCode:0,messages:[start,receipt],finalOutput:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 clean terminal report checked against current source'],findings:[],gap:''}))})})]}};
+ }});
+ const cleanBudgetResults=await cleanBudget.run();
+ assert.ok(cleanBudgetResults.every(r=>r.ok&&r.text.includes('"outcome":"pass"')),'clean child completion keeps its validated outcome when the aggregate budget closes');
+ const budgetInvalid=fixture({models:[free('free/a')],result:async()=>({isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'tokens'},results:[{exitCode:1,error:'Usage budget exhausted.',reviewEvidence:{sourceReads:1},output:'not json'}]}})});
+ assert.ok((await budgetInvalid.run()).every(r=>!r.ok),'budget exhaustion never promotes malformed output to review evidence');
+ const budgetSignal=fixture({models:[free('free/a')],result:async params=>{
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('.\nReturn ONLY JSON')[0]);
+  return {isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'tokens'},results:[compactForegroundResult({exitCode:1,processSignal:'SIGTERM',messages:[start,receipt],finalOutput:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 report followed a source read'],findings:[],gap:''}))})})]}};
+ }});
+ assert.ok((await budgetSignal.run()).every(r=>!r.ok),'a signalled child is never salvaged as a budgeted review');
  for(const text of ['No subagents.','Do not delegate.','Use only this model.','Do not change the provider.']){const restricted=fixture({branch:[{type:'message',message:{role:'user',content:text}}]});const denied=await restricted.run();assert.equal(denied.length,6);assert.ok(denied.every(r=>!r.ok && /restriction/.test(r.gap)));assert.equal(restricted.calls.length,0);}
  const costly=fixture({models:[{...free('expensive'),cost:{input:5,output:20,cacheRead:0,cacheWrite:0}}]});assert.ok((await costly.run()).every(r=>!r.ok && /economy policy/.test(r.gap)));assert.equal(costly.calls.length,0);
  const tooSmall=fixture({models:[{...free('free/a'),maxTokens:1024}]});assert.ok((await tooSmall.run()).every(r=>!r.ok && /output capacity/.test(r.gap)));assert.equal(tooSmall.calls.length,0,'do not admit reviewers unable to fit the report budget');
- const noRead=fixture({result:async()=>({details:{results:[{exitCode:0,messages:[],output:JSON.stringify({reviews:aspects.map(a=>({aspect:a.id,outcome:'pass',evidence:['Claim with no native successful source read'],findings:[],gap:''}))})}]}})});assert.ok((await noRead.run()).every(r=>!r.ok));
+ const noRead=fixture({result:async()=>({details:{results:[{exitCode:0,messages:[],output:JSON.stringify({reviews:aspects.map(a=>({aspect:a.id,outcome:'pass',evidence:['Claim with no native successful source read'],findings:[],gap:''}))})}]}})});assert.ok((await noRead.run()).every(r=>!r.ok));assert.equal(noRead.entries.at(-1).data.state,'failed','a no-source report is not recorded as completed');
  for(const value of [undefined,{details:{results:[null]}},{isError:true,details:{results:[]}},{details:{results:[{exitCode:0,stopped:true}]}}]){const bad=fixture({models:[free('free/a')],result:async()=>value});assert.ok((await bad.run()).every(r=>!r.ok));assert.equal(bad.entries.at(-1).data.state,'failed');}
  const brokenSink=fixture({appendThrows:true});assert.ok((await brokenSink.run()).every(r=>r.ok));
  let resolve;const late=fixture({models:[free('free/a')],result:()=>new Promise(r=>resolve=r)});const pending=late.run();while(!resolve)await new Promise(r=>setImmediate(r));late.switch();const count=late.entries.length;resolve({details:{results:[]}});assert.ok((await pending).every(r=>!r.ok));assert.equal(late.entries.length,count);
+ const protocol=fixture({models:[free('free/a')],result:async()=>({details:{results:[{exitCode:0,reviewEvidence:{sourceReads:1},output:'<|message_model|>read<|content_invoke_tool_json|>{"path":"src/value.js"}<|end_message|>'}]}})});
+ const leaked=await protocol.run();assert.ok(leaked.every(r=>!r.ok && /raw tool-protocol/.test(r.gap)));assert.equal(protocol.calls.length,1);
+ await protocol.emit('input',{source:'interactive',text:'Review again'});
+ const excluded=await protocol.run();assert.equal(protocol.calls.length,1,'known broken tool protocol is not retried next round or user turn');assert.ok(excluded.every(r=>/no automatic retry/.test(r.gap)));
+ protocol.switch();await protocol.run();assert.equal(protocol.calls.length,2,'protocol exclusion belongs only to its session');
  process.env.PI_AUTONOMOUS_FREE_ASSIST='off';const disabled=fixture();assert.ok((await disabled.run()).every(r=>!r.ok && /disabled/.test(r.gap)));assert.equal(disabled.calls.length,0);
  console.log('PASS quality dispatch: native launch contracts, free/cost routing, 3 reviewers / 6 aspects, read receipts, restrictions, failure lifecycle, accounting and session isolation');
 }finally{fs.rmSync(root,{recursive:true,force:true});}

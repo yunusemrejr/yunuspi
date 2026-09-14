@@ -178,3 +178,59 @@ test('history is checkout-scoped, excludes the current session, is bounded and p
  for(let i=0;i<90;i++)db.reviewHistory('checkout-a','peer-'+i,[{aspect:'content',outcome:'unknown'}]);assert.equal(db.reviewHistory('checkout-a','last').length,20);
  assert.throws(()=>db.reviewHistory('checkout-a','session-a',[{aspect:'secret text',outcome:'pass'}]),/Invalid review/);
 });
+
+test('exhausted rounds retain earlier reports as stale evidence without approving changed source',async t=>{
+ const f=await fixture(t);await f.mutate();await f.settle();
+ await f.mutate('src/value.js','export const value=2;');await f.settle();
+ const previous=f.state();assert.equal(previous.reports.length,1);
+ await f.mutate('src/value.js','export const value=3;');const result=await f.tool({action:'review'});
+ assert.equal(f.calls.length,2);assert.equal(result.details.status,'budget_exhausted');
+ assert.equal(result.details.reports.length,0);
+ assert.deepEqual(result.details.previousReview,{revision:previous.revision,reports:previous.reports});
+ assert.match(result.details.reason,/changed.*not reviewed/i);
+ await f.settle();assert.ok(!f.sent.at(-1).m.content.includes('"previousReview"'),'automatic continuations do not replay stale report bodies');
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'An older report cannot verify the latest changed source.'}),/Current independent/);
+ f.api.restore(f.ctx);
+ const restored=await f.tool({action:'inspect'});
+ assert.deepEqual(restored.details.previousReview,{revision:previous.revision,reports:previous.reports});
+ assert.equal(restored.details.reports.length,0);
+});
+
+test('restored malformed reports are not exposed as retained evidence',async t=>{
+ const f=await fixture(t);await f.mutate();
+ f.branch.push({type:'custom',customType:'quality-review-v1',data:{root:f.dir,revision:2,reviewed:2,changed:['src/value.js'],rounds:2,reports:[{aspect:'correctness',outcome:'pass',evidence:[],findings:[]}]}});
+ f.api.restore(f.ctx);assert.equal(f.state().previousReview,undefined);
+});
+
+test('an unavailable-review receipt retries failed delivery without another review or model turn',async t=>{
+ const f=await fixture(t,{runner:async()=>[]});await f.mutate();f.rejectDelivery(true);await f.settle();
+ assert.equal(f.state().status,'blocked');assert.equal(f.sent.length,0);assert.equal(f.calls.length,1);
+ f.rejectDelivery(false);await f.settle();
+ assert.equal(f.sent.length,1);assert.equal(f.calls.length,1);assert.equal(f.sent[0].m.customType,'quality-review-status');
+ assert.equal(f.sent[0].o.triggerTurn,false);await f.settle();assert.equal(f.sent.length,1);
+});
+
+test('idle edits outside the observed task scope do not reopen an accepted review',async t=>{
+ const f=await fixture(t);await f.mutate();await f.settle();
+ await f.tool({action:'assess',disposition:'accepted',reason:'The current source and checks establish the scoped behavior.'});
+ const revision=f.state().revision;
+ fs.writeFileSync(path.join(f.dir,'peer.md'),'Unrelated work from another session');
+ await f.tool({action:'inspect'});
+ assert.equal(f.state().revision,revision);assert.equal(f.state().status,'accepted');
+ assert.ok(!f.state().changed.includes('peer.md'));
+ fs.writeFileSync(path.join(f.dir,'src/value.js'),'export const value=9;');
+ await f.tool({action:'inspect'});assert.equal(f.state().status,'pending','changes to reviewed files still invalidate acceptance');
+});
+
+test('a review invalidated in flight retains its output as incomplete evidence instead of disappearing',async t=>{
+ let finish;const f=await fixture(t,{runner:req=>new Promise(resolve=>finish=()=>resolve(req.aspects.map(a=>pass(a.id))))});
+ await f.mutate();const revision=f.state().revision;const pending=f.api.run(f.ctx);
+ while(!finish)await new Promise(resolve=>setImmediate(resolve));
+ await f.mutate('src/value.js','export const value=9;');finish();await pending;
+ const result=await f.tool({action:'inspect'});
+ assert.equal(result.details.reports.length,0);assert.equal(result.details.previousReview.revision,revision);
+ assert.equal(result.details.previousReview.reports[0].outcome,'unknown');
+ assert.match(result.details.previousReview.reports[0].gap,/changed during/i);
+ assert.equal(result.details.previousReview.reports[0].evidence.length,1);
+ assert.equal(result.details.rounds,1,'executed reviews still consume their bounded budget');
+});

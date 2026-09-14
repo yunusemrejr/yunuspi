@@ -35,7 +35,11 @@ export function projectCheckCommand(command: unknown, cwd: string, declared = fa
   const executable = path.basename(tokens[0]);
   if (/^(?:echo|printf|true|false|cat|sh|bash|zsh|eval|env|sudo)$/.test(executable)) return null;
   const body = tokens.slice(1).join(' ');
+  const phpScript = tokens[tokens[1] === '-f' ? 2 : 1] ?? '';
+  const phpTests = /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && !phpScript.startsWith('-')
+    && /\.php$/i.test(phpScript) && /(?:^|[/_.-])(?:tests?|spec)(?:[/_.-]|$)/i.test(phpScript);
   const runner = /^(?:pytest|vitest|jest|mocha|ava|phpunit|rspec)$/.test(executable)
+    || phpTests
     || /^(?:npm|pnpm|yarn|bun)$/.test(executable) && /^(?:(?:run|exec) )?(?:test(?::[\w.-]+)?|t|vitest|jest)(?: |$)/.test(body)
     || executable === 'npx' && /^(?:--no-install )?(?:vitest|jest|mocha)(?: |$)/.test(body)
     || /^(?:python\d?(?:\.\d+)?)$/.test(executable) && /^-m (?:pytest|unittest)(?: |$)/.test(body)
@@ -84,7 +88,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     notedRevision = -1;
     save();
   };
-  const scan = async (ctx: any, observeChanges = state.changed.length > 0) => {
+  const scan = async (ctx: any, observeChanges = false) => {
     if ((!enabled() && !options.onFacts) || !active || !ctx?.cwd) return;
     const ticket = epoch;
     const perform = async () => {
@@ -102,10 +106,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       options.onFacts?.(next, observeChanges);
       if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; starts.clear(); }
       state.root = next.root;
-      if (baseline && observeChanges) {
+      if (baseline && (observeChanges || state.changed.length)) {
         const paths = new Set([...Object.keys(baseline), ...Object.keys(next.sources)]);
         // A truncated scan does not prove that an omitted source was deleted.
-        changed([...paths].filter(file => next.sources[file] !== baseline![file] && (next.sources[file] !== undefined || !next.truncated)));
+        changed([...paths].filter(file => (observeChanges || state.changed.includes(file)) && next.sources[file] !== baseline![file] && (next.sources[file] !== undefined || !next.truncated)));
       }
       baseline = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
       facts = next;
@@ -121,7 +125,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       ? 'Review the changed behavior and its unit-test coverage with project_tests({action:"inspect"}); extend the existing suite, or create a small meaningful suite when absent. Cover the regression/boundary, update obsolete expectations, and avoid tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
       : need === 'failed'
         ? 'A planned unit-test check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
-        : 'Unit-test evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Reassess after changing code/tests. A readback, linter or successful echo is not a unit-test pass.';
+        : 'Unit-test evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its test exit status is observable; cd into the project with && is supported. Reassess after changing code/tests. A readback, linter or successful echo is not a unit-test pass.';
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
   const receipt = (start: { revision: number; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {

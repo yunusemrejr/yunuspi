@@ -5303,10 +5303,10 @@ async function runSubagent(
 
 	let summary = results.map((r) => `${r.agent}:\n${r.output || (r.exitCode !== 0 ? r.error : undefined) || "(no output)"}`).join("\n\n");
 	let truncated = false;
+	const lastArtifactPath = results[results.length - 1]?.artifactPaths?.outputPath;
 
 	if (maxOutput) {
 		const config = { ...DEFAULT_MAX_OUTPUT, ...maxOutput };
-		const lastArtifactPath = results[results.length - 1]?.artifactPaths?.outputPath;
 		const truncResult = truncateOutput(summary, config, lastArtifactPath);
 		if (truncResult.truncated) {
 			summary = truncResult.text;
@@ -5369,6 +5369,10 @@ async function runSubagent(
 	if (!timedOut && !stopped && !interrupted && config.timeoutMs !== undefined && results.some((result) => result.timedOut === true && result.error === timeoutMessage)) {
 		timedOut = true;
 	}
+	// Keep terminal usage telemetry current. The hard gate is intentionally
+	// checked before scheduling each next step; if the final requested child has
+	// already completed, its completion must not be retroactively downgraded.
+	refreshUsageBudget();
 	const signalTerminated = !stopped && !timedOut && !interrupted && results.some((result) => result.exitCode !== 0 && isUnexplainedProcessSignal(omitUndefinedProperties({
 		processSignal: result.processSignal,
 		interrupted: result.interrupted,
@@ -5426,6 +5430,15 @@ async function runSubagent(
 	setOptionalProperty(statusPayload, "shareUrl", shareUrl);
 	setOptionalProperty(statusPayload, "gistUrl", gistUrl);
 	setOptionalProperty(statusPayload, "shareError", shareError);
+	let persistedSummary = summary;
+	if (usageBudgetExceeded) {
+		// Keep the fallback receipt bounded even when callers did not request
+		// maxOutput. The child result rows and any artifact retain the complete
+		// report; this summary is only the inline finalization opportunity.
+		const bounded = truncateOutput(summary, { ...DEFAULT_MAX_OUTPUT }, lastArtifactPath);
+		persistedSummary = bounded.text;
+		truncated ||= bounded.truncated;
+	}
 	if ((statusPayload.state === "failed" || statusPayload.state === "partial") && !statusPayload.error) {
 		const concreteFailure = results.find(concreteFailureResult);
 		const failedStep = concreteFailure ? undefined : statusPayload.steps.find((s) => s.status === "failed");
@@ -5442,7 +5455,11 @@ async function runSubagent(
 			mode: resultMode,
 			success: statusPayload.state === "complete",
 			state: statusPayload.state,
-			summary: stopped ? stopMessage : signalTerminated ? (statusPayload.error ?? "Subagent process terminated by signal.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : usageBudgetExceeded ? (statusPayload.error ?? "Usage budget exhausted.") : interrupted ? "Paused after interrupt. Waiting for explicit next action." : statusPayload.state === "partial" ? (statusPayload.error ?? summary) : summary,
+			// A hard usage limit stops scheduling the next step, but it must not
+			// erase a report already emitted by the completed child. Keep the
+			// budget error as the leading status and retain the bounded summary
+			// as evidence. The limit remains hard: this only changes the receipt.
+			summary: stopped ? stopMessage : signalTerminated ? (statusPayload.error ?? "Subagent process terminated by signal.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : usageBudgetExceeded ? [statusPayload.error ?? "Usage budget exhausted.", persistedSummary].filter(Boolean).join("\n\n") : interrupted ? "Paused after interrupt. Waiting for explicit next action." : statusPayload.state === "partial" ? (statusPayload.error ?? summary) : summary,
 			...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
 			...(config.deadlineAt !== undefined ? { deadlineAt: config.deadlineAt } : {}),
 			...(statusPayload.toolBudget ? { toolBudget: statusPayload.toolBudget } : {}),

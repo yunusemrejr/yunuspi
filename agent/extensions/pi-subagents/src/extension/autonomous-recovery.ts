@@ -132,6 +132,10 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 	const visited = new Set<string>();
 	const exhausted = new Set<string>();
+	// A route that emits its tool protocol as final prose cannot complete this
+	// review contract. Avoid paying for it again in the same session; never
+	// interpret that text as executable tool calls or change the parent's model.
+	const reviewProtocolFailures = new Map<unknown, Set<string>>();
 	if (!child) registerEconomyRequestHook(pi, { automaticRoute: () => automaticRoute });
 	on("before_provider_request", (event, ctx) => {
 		const payload = event.payload;
@@ -219,10 +223,16 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		if (!ctx.model || !freeAssistRequested() || !pi.getActiveTools().includes('subagent')) return unavailable('Automatic review is disabled or the native subagent capability is unavailable.');
 		const constraints = recoveryConstraints(ctx, request.task, ctx.model);
 		if (constraints.noDelegation || constraints.fixedRoute || constraints.sameModel) return unavailable('The user\'s delegation or model/provider restriction prevents automatic independent review.');
-		const models = available(ctx);
+		const reviewSession = ctx.sessionManager.getSessionFile() ?? ctx.sessionManager;
+		let rejectedRoutes = reviewProtocolFailures.get(reviewSession);
+		if (!rejectedRoutes) {
+			if (reviewProtocolFailures.size >= 8) reviewProtocolFailures.delete(reviewProtocolFailures.keys().next().value);
+			rejectedRoutes = new Set<string>(); reviewProtocolFailures.set(reviewSession,rejectedRoutes);
+		}
+		const models = available(ctx).filter(model => !rejectedRoutes!.has(route(model)));
 		const plan = { mode:'swarm' as const, roles:aspects.slice(0,REVIEW_LIMITS.reviewers).map((a:any)=>`Review ${a.id} quality`), reason:'bounded completion quality review', deadlineMs:REVIEW_LIMITS.deadlineMs, maxCostUsd:REVIEW_LIMITS.costUsd };
 		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:constraints.freeOnly,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens});
-		if (!team.length) return unavailable('No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.');
+		if (!team.length) return unavailable(rejectedRoutes.size ? 'No permitted reviewer remains after a tool-protocol failure in this session; no automatic retry was made.' : 'No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.');
 		const sessionFile = ctx.sessionManager.getSessionFile(), epoch = generation;
 		const owns = () => epoch === generation && ctx.sessionManager.getSessionFile() === sessionFile;
 		const groups = team.map(()=>[] as any[]);
@@ -252,32 +262,61 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				if (owns()) {
 					try { persistSubagentCost(pi,{currentSessionId:sessionFile,completionOwnerId:launchId},{sessionId:sessionFile,completionOwnerId:launchId,runId:launchId,results:children}); } catch {}
 				}
-				if (!owns() || signal.aborted || result?.isError || children.length !== 1 || !children[0] || children[0].exitCode !== 0 || children[0].error || children[0].stopped || children[0].timedOut) {
-					const childResult = children[0];
-					const gap = signal.aborted || childResult?.timedOut ? 'The reviewer reached its deadline or was cancelled.' : childResult?.usageBudget?.exhausted ? `The reviewer exhausted its ${childResult.usageBudget.reason ?? 'usage'} budget.` : 'The native reviewer failed or was unable to start; no independent assessment was returned.';
+				const childResult = children[0];
+				const usageBudget = result?.details?.usageBudget ?? childResult?.usageBudget;
+				const budgetExhausted = usageBudget?.exhausted === true;
+				// A hard budget can be observed after the child has already emitted its
+				// terminal JSON. Keep that evidence available, but only through the
+				// strict source-read + assigned-envelope checks below. Ordinary wrapper
+				// errors, aborts and timeouts remain failures.
+				const childCompletedCleanly = Boolean(childResult && childResult.exitCode === 0 && !childResult.error && !childResult.processSignal && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.detached);
+				const sourceReads = Number.isSafeInteger(childResult?.reviewEvidence?.sourceReads) ? childResult.reviewEvidence.sourceReads : 0;
+				const body = childResult ? automaticHelperBody(childResult, {maxChars:30001}) : '';
+				let parsed: any;
+				let parseFailed = false;
+				if (body && body.length <= 30000) {
+					try { parsed = JSON.parse(body.replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1')); }
+					catch { parseFailed = true; }
+				}
+				const assignedEnvelopeComplete = Boolean(parsed && Array.isArray(parsed.reviews) && assigned.every((a:any) => parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id).length === 1));
+				const budgetReportFinalized = budgetExhausted && !signal.aborted && children.length === 1 && Boolean(childResult) && Number.isInteger(childResult.exitCode) && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.processSignal && !childResult.detached && !childResult.protocolError && sourceReads >= 1 && assignedEnvelopeComplete;
+				const hardFailure = !owns() || signal.aborted || children.length !== 1 || !childResult || childResult.stopped || childResult.timedOut || childResult.interrupted || childResult.processSignal || childResult.detached;
+				const childFailure = Boolean(result?.isError || childResult?.exitCode !== 0 || childResult?.error || childResult?.processSignal);
+				if (hardFailure || (childFailure && !budgetReportFinalized)) {
+					const gap = signal.aborted || childResult?.timedOut ? 'The reviewer reached its deadline or was cancelled.' : budgetExhausted ? `The reviewer exhausted its ${usageBudget?.reason ?? 'usage'} budget.` : 'The native reviewer failed or was unable to start; no independent assessment was returned.';
 					return pending.map(r=>({...r,gap}));
 				}
-				status = 'completed';
-				const childResult = children[0];
+				// A budget-salvaged non-clean child is useful evidence, but its outcome
+				// cannot be treated as a gap-free pass. The parent parser still receives
+				// the source evidence and findings with an explicit unknown gap.
+				if (/^<\|message_model\|>[\s\S]{0,120}<\|content_invoke_tool_json\|>/.test(body)) {
+					if (rejectedRoutes!.size >= 64) rejectedRoutes!.delete(rejectedRoutes!.values().next().value!);
+					rejectedRoutes!.add(member.route);
+					return pending.map(r=>({...r,gap:'The reviewer emitted raw tool-protocol text instead of a report. This route is excluded from automatic review for this session; no tool was executed from that text.'}));
+				}
 				// A fluent JSON pass with no successful source read is not a review.
-				if (!Number.isSafeInteger(childResult.reviewEvidence?.sourceReads) || childResult.reviewEvidence.sourceReads < 1) return pending.map(r=>({...r,gap:'The reviewer returned no successful native source-read receipt.'}));
+				if (sourceReads < 1) return pending.map(r=>({...r,gap:'The reviewer returned no successful native source-read receipt.'}));
 				// Structured multi-aspect reports need their own bounded envelope;
 				// the ordinary prose preview cap can cut otherwise valid JSON in half.
 				// Probe one extra character so truncation is classified, not parsed
 				// as malformed provider JSON. Never repair or infer review evidence.
-				const body = automaticHelperBody(childResult, {maxChars:30001});
 				const invalid = (gap: string) => pending.map(r=>({...r,gap}));
 				if (!body) return invalid('The reviewer returned an empty report.');
 				if (body.length > 30000) return invalid('The reviewer report exceeded the 30000-character envelope.');
-				let parsed: any;
-				try { parsed = JSON.parse(body.replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1')); }
-				catch { return invalid('The reviewer returned a report that was not valid JSON.'); }
+				if (parseFailed) return invalid('The reviewer returned a report that was not valid JSON.');
 				if (!parsed || !Array.isArray(parsed.reviews)) return invalid('The reviewer JSON did not contain a reviews array.');
-				return assigned.map((a:any) => {
+				const reports = assigned.map((a:any) => {
 					const matches = parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id);
-					return matches.length === 1 ? {aspect:a.id,ok:true,text:JSON.stringify(matches[0])}
-						: {aspect:a.id,ok:false,text:'',gap:'The reviewer JSON did not contain exactly one report for the assigned aspect.'};
+					if (matches.length !== 1) return {aspect:a.id,ok:false,text:'',gap:'The reviewer JSON did not contain exactly one report for the assigned aspect.'};
+					const report = !childCompletedCleanly && budgetExhausted
+						? {...matches[0], outcome:'unknown', gap:[typeof matches[0].gap === 'string' ? matches[0].gap.trim() : '', 'Reviewer output was finalized after its usage budget was exhausted; review completeness is unknown.'].filter(Boolean).join(' ').slice(0,900)}
+						: matches[0];
+					return {aspect:a.id,ok:true,text:JSON.stringify(report)};
 				});
+				// Only a validated, source-backed envelope counts as completed. Empty,
+				// malformed and no-source children remain failed in the lifecycle ledger.
+				status = childCompletedCleanly && reports.every((report:any) => report.ok === true) ? 'completed' : 'failed';
+				return reports;
 			} catch { return pending.map(r=>({...r,gap:'Reviewer execution failed before a report could be assessed.'})); }
 			finally { if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{index:0,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
 		}).map((operation,index)=>operation.then(reports=>{

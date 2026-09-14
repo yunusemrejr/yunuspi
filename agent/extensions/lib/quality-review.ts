@@ -90,7 +90,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   const status = () => !changed.length ? 'not_needed' : disposition || (reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file}))).slice(0,12);
-  const summary = () => ({ root, revision, changed, status: status(), rounds, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0, reason, truncated: truncated || scopeOverflow,
+  const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
+    ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
+    reason: reason || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''), truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history), historicalSamples: history.length,
     patterns: patternReport(),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Tests, visual evidence and deployed behavior require their own observations.' });
@@ -120,7 +122,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       const completed = new Map<string, ReviewReport>();
       const failures = new Map<string, string>();
       const onResult = (item: any) => {
-        if (ticket !== generation || rev !== revision || !active || paused || combined.aborted ||
+        if (ticket !== generation || !active || paused || combined.aborted ||
           !aspects.some(a => a.id === item?.aspect) || completed.has(item.aspect)) return;
         if (!item.ok || typeof item.text !== 'string') {
           if (typeof item.gap === 'string') failures.set(item.aspect,item.gap.slice(0,900));
@@ -136,8 +138,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       } catch { failure = combined.aborted ? 'The review deadline expired before this aspect completed.' : 'The native quality review runner failed before returning this aspect.'; }
       if (ticket !== generation || !active || paused || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       await refresh(ctx);
-      if (ticket !== generation || rev !== revision || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
+      if (ticket !== generation || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       const received: ReviewReport[] = aspects.map(a => completed.get(a.id) ?? { aspect:a.id, outcome:'unknown', evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.' });
+      if (rev !== revision) {
+        reports = received.map(report => ({...report,outcome:'unknown',gap:`Source changed during this review; evidence may span revisions and cannot approve current source. ${report.gap}`.slice(0,900)}));
+        reviewed = rev; save(); return summary();
+      }
       reports = received; reviewed = rev;
       if (received.every(r => r.outcome === 'unknown' && !r.evidence.length && !r.findings.length)) {
         disposition = 'blocked';
@@ -158,7 +164,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       root = facts.root; truncated = facts.truncated === true;
       if (truncated && disposition === 'accepted') { disposition = ''; reviewed = -1; reason = 'Current source discovery is incomplete; earlier acceptance cannot establish the current scope.'; }
       const next = facts.reviewSources ?? {};
-      if (baseline && (observeChanges || changed.length)) invalidate([...new Set([...Object.keys(baseline),...Object.keys(next)])].filter(f => next[f] !== baseline![f] && (next[f] !== undefined || !truncated)));
+      if (baseline && (observeChanges || changed.length)) invalidate([...new Set([...Object.keys(baseline),...Object.keys(next)])].filter(f =>
+        (observeChanges || changed.includes(f)) && next[f] !== baseline![f] && (next[f] !== undefined || !truncated)));
       baseline = truncated && baseline ? Object.fromEntries(Object.entries({...baseline,...next}).slice(-4000)) : next;
     },
     restore(ctx: any) {
@@ -170,6 +177,22 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         revision = data.revision + 1; changed = data.changed.filter((f:any) => typeof f === 'string' && isProjectReviewSource(f)).slice(-128);
         rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
         scopeOverflow = data.scopeOverflow === true;
+        // Resume invalidates approval, not evidence. Keep a bounded, validated
+        // previous report available on explicit inspection; never replay it as
+        // current evidence or inflate automatic continuation messages with it.
+        if (Number.isSafeInteger(data.reviewed) && data.reviewed >= 0 && data.reviewed <= data.revision && Array.isArray(data.reports)) {
+          const seen = new Set<string>();
+          for (const item of data.reports.slice(0,Object.keys(RUBRICS).length)) {
+            if (!item || !Object.hasOwn(RUBRICS,item.aspect) || seen.has(item.aspect)) continue;
+            const parsed = parseReviewReport(JSON.stringify(item),item.aspect);
+            if (!parsed.evidence.length && !parsed.findings.length) {
+              if (item.outcome !== 'unknown' || typeof item.gap !== 'string' || item.gap.trim().length < 12) continue;
+              parsed.gap = item.gap.slice(0,900);
+            }
+            seen.add(item.aspect); reports.push(parsed);
+          }
+          if (reports.length) reviewed = data.reviewed;
+        }
       }
     },
     input(event: any) {
@@ -211,10 +234,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     async settled(_event: any, ctx: any) {
       if (!enabled() || !capable() || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
       const ticket = generation;
-      const previousReview = reviewed;
       await run(ctx);
       if (ticket !== generation || !active || paused || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || followups >= 3) return;
-      if (reviewed !== previousReview && disposition === 'blocked') {
+      if (disposition === 'blocked' && reason.startsWith('Independent review unavailable:')) {
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
         const blockedKey = `blocked:${revision}`;
@@ -252,7 +274,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         disposition = params.disposition; reason = params.reason.trim().slice(0,1200); save();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
       }
-      signal?.throwIfAborted(); const data=summary();return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
+      signal?.throwIfAborted(); const data=summary(true);return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
     }
   });
   return api;
