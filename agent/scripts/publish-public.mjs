@@ -12,6 +12,7 @@ import {
   cpSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
@@ -268,6 +269,42 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
   }
 }
 
+const PUBLISH_LOCK = path.join(AGENT_DIR, "logs", "publish-public.lock");
+
+/** One release at a time per installation.
+ *
+ * Two sessions publishing together otherwise each run a full distribution suite
+ * and the second is refused by the checkout guard afterwards, which wastes the
+ * whole verification. `flock -n` makes the second call fail immediately with the
+ * holder named and exit 75 instead of queueing behind a minute of tests. */
+export function publishLockHeld(env = process.env) {
+  return env.PI_PUBLISH_LOCK_HELD === "1";
+}
+
+export function runWithPublishLock(argv = process.argv.slice(1)) {
+  if (publishLockHeld()) return main();
+  mkdirSync(path.dirname(PUBLISH_LOCK), { recursive: true });
+  const child = spawnSync(
+    "/bin/bash",
+    [
+      "-c",
+      'exec 9>"$1" || exit 1; flock -n -E 75 9 || exit $?; export PI_PUBLISH_LOCK_HELD=1; exec "$2" "${@:3}"',
+      "publish-lock",
+      PUBLISH_LOCK,
+      process.execPath,
+      ...argv,
+    ],
+    { stdio: "inherit" },
+  );
+  if (child.status === 75) {
+    console.error(
+      `[publish] refused: another publish holds ${PUBLISH_LOCK}; wait for it instead of starting a second distribution run`,
+    );
+    return 75;
+  }
+  return child.status ?? 1;
+}
+
 function main() {
   const opt = parseArgs(process.argv.slice(2));
   const timings = [];
@@ -375,7 +412,8 @@ if (
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
-    main();
+    const code = runWithPublishLock();
+    if (typeof code === "number") process.exitCode = code;
   } catch (error) {
     console.error(
       `[publish] refused: ${error instanceof Error ? error.message : String(error)}`,

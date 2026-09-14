@@ -29,14 +29,15 @@ const { discoverMutationRoots, containsPath } = await import(
  * protected root's ancestors writable, so a fixture under a busy /tmp costs
  * ~7k bubblewrap arguments per sandboxed payload (~9s) where a low-entry root
  * costs ~135 (~0.4s). */
-const TEMP_BASE = ["/var/tmp", os.tmpdir()].find((dir) => {
-  try {
-    fs.accessSync(dir, fs.constants.W_OK | fs.constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}) ?? os.tmpdir();
+const TEMP_BASE =
+  ["/var/tmp", os.tmpdir()].find((dir) => {
+    try {
+      fs.accessSync(dir, fs.constants.W_OK | fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }) ?? os.tmpdir();
 function fixture() {
   const root = fs.mkdtempSync(path.join(TEMP_BASE, "pi-shared-skills-"));
   const harness = path.join(root, "harness"),
