@@ -22,6 +22,20 @@ function fixture() {
 }
 const value = file => fs.readFileSync(path.join(file, 'value'), 'utf8');
 
+test('retirement checks match whole component names without flagging newer prefixed files', () => {
+  const source = fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
+  const declaration = source.match(/function retireNameRe\(name\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(declaration);
+  const pattern = vm.runInNewContext(`(${declaration})`);
+  for(const text of ['capabilities.ts','lib/capabilities.ts','"capabilities.ts"'])
+    assert.equal(pattern('capabilities.ts').test(text),true,text);
+  for(const text of ['harness-capabilities.ts','new_capabilities.ts','capabilities.tsx'])
+    assert.equal(pattern('capabilities.ts').test(text),false,text);
+  assert.equal(pattern('*-auto-models.ts').test('extensions/provider-auto-models.ts'),true);
+  assert.equal(pattern('*-auto-models.ts').test('"*-auto-models.ts"'),true);
+  assert.equal(pattern('pi-fff').test('node_modules/pi-fff/README.md'),true);
+});
+
 test('public releases include every required offline compatibility check', () => {
   assert.equal(new Set(CORE_COMPATIBILITY_TESTS).size, CORE_COMPATIBILITY_TESTS.length);
   assert.ok(CORE_COMPATIBILITY_TESTS.includes('harness-load-test.mjs'));

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {CORE_COMPATIBILITY_TESTS} from "./lib/core-compatibility.mjs";
 const ownAgent = path.resolve(
  path.dirname(fileURLToPath(import.meta.url)),
@@ -249,8 +250,30 @@ try {
    put(
     entry.name,
     fs.readFileSync(p),
-    fs.statSync(p).mode & 0o111 ? 0o755 : 0o644,
+     fs.statSync(p).mode & 0o111 ? 0o755 : 0o644,
    );
+ }
+ // Generate the inventory only after both the sanitized source and mirrored
+ // release template exist. The generated files are then included in the
+ // public scan and final exact-secret check.
+ const inventoryGenerator = path.join(stage, "agent/scripts/generate-capabilities-doc.mjs");
+ // Minimal/older source trees can predate the inventory feature. Once its
+ // catalog is registered, a missing generator must not publish stale docs.
+ if (manifest.lib?.includes("harness-capabilities.ts") || fs.existsSync(inventoryGenerator)) {
+ if (!fs.existsSync(inventoryGenerator)) throw Error("Capability inventory generator missing from source");
+ const generation = spawnSync(process.execPath, [inventoryGenerator, "--root", stage], { stdio: "inherit" });
+ if (generation.status !== 0) throw Error("Capability inventory generation failed");
+ for (const rel of [
+  "release-template/docs/CAPABILITIES.md",
+  "release-template/docs/CAPABILITIES.json",
+  "docs/CAPABILITIES.md",
+  "docs/CAPABILITIES.json",
+ ]) {
+  const bytes = fs.readFileSync(path.join(stage, rel));
+  const existing = files.find((file) => file.path === rel);
+  if (existing) existing.sha256 = createHash("sha256").update(bytes).digest("hex");
+  else files.push({ path: rel, sha256: createHash("sha256").update(bytes).digest("hex") });
+ }
  }
  const { scanTree } = await import(
   pathToFileURL(path.join(stage, "scripts/check-public.mjs"))

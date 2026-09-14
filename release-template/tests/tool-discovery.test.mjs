@@ -6,13 +6,18 @@ import {pathToFileURL} from 'node:url';
 const template=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/tool-discovery.ts')));
 const {registerToolDiscovery}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));
-function fixture() {
- const hooks={},entries=[],defs=new Map();let active=['read','bash','subagent','quality_review','session_self','project_report','browser_session','http_request','bg_run'],executed=0;
- const catalog=active.map(name=>({name,description:name==='browser_session'?'Browser navigation screenshot interaction':name.replaceAll('_',' '),parameters:{type:'object',properties:{}}}));
+function fixture(extraTools=[]) {
+ const hooks={},entries=[],defs=new Map();let active=['read','bash','subagent','quality_review','session_self','project_report','browser_session','http_request','bg_run',...extraTools.map(tool=>tool.name)],executed=0;
+ const catalog=active.map(name=>extraTools.find(tool=>tool.name===name) ?? ({name,description:name==='browser_session'?'Browser navigation screenshot interaction':name.replaceAll('_',' '),parameters:{type:'object',properties:{}}}));
+ const commands=[
+  {name:'inspect',description:'Inspect a source file',source:'extension',sourceInfo:{path:'/extensions/inspect.ts',scope:'user',source:'top-level',origin:'top-level'}},
+  {name:'plan',description:'Plan a change',source:'prompt',sourceInfo:{path:'/prompts/plan.md',scope:'project',source:'top-level',origin:'top-level'}},
+  {name:'skill:frontend',description:'Frontend workflow',source:'skill',sourceInfo:{path:'/skills/frontend/SKILL.md',scope:'user',source:'package',origin:'package'}},
+ ];
  const ctx={cwd:'/workspace',sessionManager:{getSessionId:()=> 'session-a',getBranch:()=>entries}};
- const api={on:(name,fn)=>{hooks[name]=fn;},getAllTools:()=>catalog,getActiveTools:()=>active,setActiveTools:names=>{active=names;},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data}),registerTool:def=>{defs.set(def.name,def);catalog.push(def);active.push(def.name);},executeTool:()=>{executed++;}};
+ const api={on:(name,fn)=>{hooks[name]=fn;},getAllTools:()=>catalog,getActiveTools:()=>active,getCommands:()=>commands.slice(),setActiveTools:names=>{active=names;},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data}),registerTool:def=>{defs.set(def.name,def);catalog.push(def);active.push(def.name);},executeTool:()=>{executed++;}};
  registerToolDiscovery(api);hooks.session_start?.({},ctx);
- return {hooks,entries,defs,api,ctx,active:()=>active,executed:()=>executed,call:input=>defs.get('tool_search').execute('id',input,undefined,undefined,ctx)};
+ return {hooks,entries,defs,api,ctx,catalog,active:()=>active,executed:()=>executed,call:input=>defs.get('tool_search').execute('id',input,undefined,undefined,ctx)};
 }
 test('startup retains essential operations and loads specialized schemas only on discovery',async()=>{
  const f=fixture();
@@ -79,6 +84,73 @@ test('group browsing and query previews do not expose schemas until a specific a
  assert.ok(f.active().includes('browser_session'));
  assert.equal(f.executed(),0);
  assert.equal((await f.call({group:'not-real'})).isError,true);
+});
+test('default overview points to live command metadata and command pages stay bounded',async()=>{
+ const f=fixture();
+ const overview=await f.call({});
+ assert.deepEqual(overview.details.commands.sources.map(group=>group.id),['extension','prompt','skill']);
+ assert.match(overview.details.next,/kind:"capabilities"/);
+ const page=await f.call({kind:'commands',query:'workflow',limit:1,detail:true});
+ assert.deepEqual(page.details.commands.map(command=>command.name),['skill:frontend']);
+ assert.equal(page.details.commands[0].source,'skill');
+ assert.equal(page.details.commands[0].sourceInfo.path,'/skills/frontend/SKILL.md');
+ assert.equal(page.details.note.includes('executed'),true);
+ assert.deepEqual(f.active(),['read','bash','subagent','quality_review','session_self','project_report','tool_search']);
+ const source=await f.call({kind:'commands',group:'extension',limit:1});
+ assert.deepEqual(source.details.commands.map(command=>command.name),['inspect']);
+ assert.equal((await f.call({kind:'commands',id:'missing'})).isError,true);
+ assert.equal((await f.call({kind:'commands',names:['inspect']})).isError,true);
+});
+test('capability index pages are bounded, source-backed on detail, and expose live tool status',async()=>{
+ const f=fixture();
+ const page=await f.call({kind:'capabilities',limit:2});
+ assert.ok(page.details.capabilities.length<=2);
+ assert.ok(page.details.groups.length>0);
+ assert.ok(page.details.capabilities.every(capability=>Array.isArray(capability.toolAvailability)));
+ assert.equal(page.details.capabilities[1].id,'tool-catalog');
+ assert.equal(page.details.capabilities[1].toolAvailability[0].name,'tool_search');
+ assert.equal(page.details.capabilities[1].toolAvailability[0].available,true);
+ assert.equal(page.details.capabilities[1].toolAvailability[0].active,true);
+ const detail=await f.call({kind:'capabilities',id:'tool-catalog'});
+ assert.equal(detail.details.capability.id,'tool-catalog');
+ assert.ok(detail.details.capability.sourceFiles.some(file=>file.endsWith('/agent/extensions/lib/tool-discovery.ts')));
+ assert.ok(detail.details.capability.doc.endsWith('/docs/GUIDANCE-AND-DIAGNOSTICS.md'));
+ const searched=await f.call({kind:'capabilities',query:'background',limit:1});
+ assert.ok(searched.details.capabilities.length<=1);
+ assert.equal((await f.call({kind:'capabilities',group:'not-real'})).isError,true);
+ assert.equal((await f.call({kind:'capabilities',id:'not-real'})).isError,true);
+ assert.equal((await f.call({kind:'capabilities',names:['browser_session']})).isError,true);
+ assert.equal(f.executed(),0);
+});
+test('read-only discovery follows the current active set after external or explicit selection',async()=>{
+ const f=fixture();
+ f.api.setActiveTools(['read','tool_search']);
+ const preview=await f.call({query:'browser screenshot',limit:1});
+ assert.equal(preview.isError,undefined);
+ assert.deepEqual(preview.details.tools,[]);
+ assert.equal((await f.call({kind:'commands',query:'inspect'})).isError,undefined);
+ assert.equal((await f.call({kind:'capabilities',id:'tool-catalog'})).isError,undefined);
+ assert.equal((await f.call({names:['http_request'],enable:false})).isError,true);
+ assert.deepEqual(f.active(),['read','tool_search']);
+ const oldArgv=process.argv;
+ try {
+  process.argv=[...oldArgv,'--tools=read,tool_search'];
+  const restricted=fixture();
+  restricted.api.setActiveTools(['read','tool_search']);
+  assert.equal((await restricted.call({kind:'commands',query:'inspect'})).isError,undefined);
+  assert.equal((await restricted.call({kind:'capabilities',query:'background',limit:1})).isError,undefined);
+  assert.deepEqual((await restricted.call({query:'browser screenshot'})).details.tools,[]);
+  assert.equal((await restricted.call({names:['browser_session']})).isError,true);
+  assert.deepEqual(restricted.active(),['read','tool_search']);
+ } finally { process.argv=oldArgv; }
+});
+test('tool pages accept safe offsets beyond the old thousand item cap',async()=>{
+ const extra=Array.from({length:1105},(_,i)=>({name:`special_${String(i).padStart(4,'0')}`,description:'A searchable special capability',parameters:{type:'object',properties:{}}}));
+ const f=fixture(extra);
+ const page=await f.call({query:'special',limit:1,offset:1104});
+ assert.deepEqual(page.details.tools.map(tool=>tool.name),['special_1104']);
+ assert.equal(page.details.offset,1104);
+ assert.equal(page.details.remaining,0);
 });
 test('resume bounds old discoveries, drops stale receipts and retains unresolved calls',async()=>{
  const {restoredToolNames}=await import(pathToFileURL(path.join(agent,'extensions/lib/tool-discovery.ts')));

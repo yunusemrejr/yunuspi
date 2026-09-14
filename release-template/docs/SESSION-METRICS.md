@@ -8,20 +8,14 @@ Automatic provider selection tries the supported session model and then DuckDuck
 
 ## Visible activity
 
-The footer adds wrapped rows alongside existing traffic, estimated cost and cache statistics:
+The footer keeps two compact activity rows alongside existing traffic, estimated cost and cache statistics:
 
 | Counter | Meaning |
 | --- | --- |
-| Swarms | Parallel groups with more than one child, including automatic helpers, native parallel results and executed `runs.all` calls |
-| Fusions | Executed fusion operations; automatic helpers count only when at least two advisory outputs are combined. Forwarding one answer is not a fusion |
 | Agents | Distinct accepted child runs, including async runs before completion, with a separate active count. Workflow controllers and planned children are excluded |
-| Tools | Parent tool results, including blocked and failed calls |
-| Errors | Parent tool/model errors, child-run failures and workflow-controller failures are labeled separately. Recovered errors remain in history |
-| Skills | Successfully opened skills and suggested skills are labeled separately; the panel distinguishes full and partial reads. A suggestion is not evidence of use |
-| Hook checks | Measured policy/context/tool checks, excluding streamed token notifications, UI/lifecycle observers and the telemetry observer; `?` means unavailable |
-| Compact | Recorded compactions |
+| Failures | Total parent, child and workflow-controller failures when present; the compact suffix labels them `P`, `C` and `W`. Recovered errors remain in history |
 
-Run `/metrics` for a scrollable panel with tool counts, child outcomes, skill names, cache totals, reported reasoning tokens, hook errors and timings, and measured payload reductions. Use the mouse wheel, arrow keys, `j`/`k`, Page Up/Down, or Home/End (`g`/`G`); close with Escape, Enter, or `q`. The panel is a stable snapshot and retains its logical reading location when resized. Viewing it does not add messages to model context.
+Run `/metrics` for the detailed scrollable panel with swarm/fusion activity, tool counts, child outcomes, skill names, cache totals, reported reasoning tokens, hook errors and timings, and measured payload reductions. Use the mouse wheel, arrow keys, `j`/`k`, Page Up/Down, or Home/End (`g`/`G`); close with Escape, Enter, or `q`. The panel is a stable snapshot and retains its logical reading location when resized. Viewing it does not add messages to model context.
 
 The first sections show grouped failure categories and recovery clues, recent error excerpts and call IDs, the largest tool outputs, exact repeated request/result pairs, skill-read gaps, current review evidence and the slowest/erroring hooks. Failure totals continue beyond the 12-excerpt limit; up to 16 groups are shown with explicit omissions. A generic guard refusal does not hide a more specific budget or argument problem.
 

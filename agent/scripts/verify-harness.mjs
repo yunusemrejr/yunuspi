@@ -156,14 +156,16 @@ function loadManifest() {
 // WHY an example name is NOT used here: this file is itself a scan target
 // for the retired-name check below, so code comments must stay name-free.
 
-/** Word-boundary matcher for a retired component name. The one glob form
+/** Component-boundary matcher for a retired name. Hyphens, dots and
+ * underscores belong to filenames, so a newer prefixed filename must not
+ * count as resurrection of an unrelated retired basename. The one glob form
  *  matches both the literal prose form (asterisk, as in the provider
  *  auto-catalog set) and real files of that family. */
 function retireNameRe(name) {
   const core = name
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     .replace(/\\\*/g, "(?:[a-z0-9-]+|\\*)");
-  return new RegExp(`(?:^|[^A-Za-z0-9])${core}(?:$|[^A-Za-z0-9])`);
+  return new RegExp(`(?:^|[^A-Za-z0-9_.-])${core}(?:$|[^A-Za-z0-9_.-])`);
 }
 
 /** A mention of a retired name counts as a deletion record ONLY when the

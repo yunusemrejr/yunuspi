@@ -37,9 +37,10 @@
  * loop consumes that steer at its next boundary; Stop remains authoritative.
  *
  * Manual /reminder schedule (the reliability contract):
- *  - `nextFireAt = createdAt + 2 min` for the first occurrence, then
- *    `previous nextFireAt + 2 min` thereafter — a grid anchored at createdAt,
- *    never `now + 2 min`, so the cadence cannot drift.
+ *  - A newly registered `/reminder` is delivered immediately; its first
+ *    repeat is `nextFireAt = createdAt + 2 min`, then every `previous
+ *    nextFireAt + 2 min` thereafter — a grid anchored at createdAt, never
+ *    `now + 2 min`, so the cadence cannot drift.
  *  - Each reminder has an INDEPENDENT schedule; firing one never resets,
  *    delays, or merges another.
  *  - The agent may be busy inside a tool call or inference, so exact
@@ -57,12 +58,9 @@
  *    occurrence has its nextFireAt advanced (persisted), so it cannot fire
  *    twice; there is no generic cooldown that could suppress an independent
  *    reminder.
- *  - Comprehension (2026-09-02 health pass): a reminder looping every 2 min
- *    must never degrade into an unrecognizable stub. Short texts (≤
- *    FULL_LINE_MAX chars) are delivered in full on EVERY occurrence;
- *    longer ones carry full text on first delivery, a digest line between,
- *    and a full re-anchor every FULL_REANCHOR_EVERY-th delivery. Post-
- *    compaction, checkpoints.ts re-injects the full active texts.
+ *  - Comprehension: a reminder looping every 2 min carries the user's full
+ *    bounded text on EVERY occurrence. Post-compaction, checkpoints.ts
+ *    re-injects the full active texts.
  *  - Delivery framing (2026-09-02 audit fix): a manual delivery is a
  *    directive — the header tells the agent to comply now, and the line is
  *    the user's own words with no filler. Ambient-only check-ins keep the
@@ -133,9 +131,6 @@ const CAUTION_GAP_MS = REMIND_GAP_MS; // min gap between caution reminders
 const CAUTION_MAX = 3; // per-session cap
 const CAUTION_FRESH_MS = 30 * 60_000; // mutations older than this are stale
 const CUSTOM_MAX = 4000; // max chars of a registered reminder text (long reminders allowed)
-const FULL_LINE_MAX = 240; // ≤ this many chars: every occurrence is the full text
-const CUSTOM_DIGEST = 140; // chars of a longer text's repeat-refresh digest line
-const FULL_REANCHOR_EVERY = 5; // longer texts: full text again every Nth delivery
 // Bound whole reminder lines, not a truncated tail marked as delivered.
 const MANUAL_TEXT_MAX = 2 * (CUSTOM_MAX + 20);
 
@@ -305,20 +300,10 @@ function oneLine(s: string, n: number): string {
 }
 
 function manualLine(r: ManualReminder): string {
-	// Comprehension contract: the user's own words are the instruction, and a
-	// reminder looping every ~2 min must stay recognizable. Short texts are
-	// delivered in full every occurrence (lossless, cheap); long ones carry
-	// full text on first delivery and re-anchor in full every
-	// FULL_REANCHOR_EVERY-th delivery, digest lines between. No filler tails:
-	// the cadence lives in the header, and "refresher (full text above)"
-	// measurably made models defer to a nonexistent obligation instead of
-	// complying now. (`delivered` is rendered BEFORE advancing, so full text
-	// lands on occurrences 1, 6, 11, …)
-	const full =
-		r.delivered === 0 ||
-		r.text.length <= FULL_LINE_MAX ||
-		r.delivered % FULL_REANCHOR_EVERY === 0;
-	return `[custom-reminder] ${full ? r.text : oneLine(r.text, CUSTOM_DIGEST)}`;
+	// The user's accepted text is the instruction. Repeat it exactly on every
+	// occurrence so an important suffix cannot disappear between re-anchors.
+	// Selection is bounded by MANUAL_TEXT_MAX before this line is rendered.
+	return `[custom-reminder] ${r.text}`;
 }
 
 export function reminderText(
@@ -882,10 +867,56 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						"error",
 					);
 				}
-				ctx.ui.notify(
-					`Reminder set: "${oneLine(arg, 80)}" — the main agent will be reminded every ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min for the rest of this session. Manage: /reminder list | clear <n|all>.`,
-					"info",
-				);
+				// The explicit slash command authorizes one immediate steer, even
+				// while the agent is idle. Periodic repeats remain turn-bound in
+				// before_agent_start/turn_end and cannot wake completed work.
+				const immediateMessage = {
+					customType: "reminders",
+					content: reminderText(
+						st,
+						sid,
+						now,
+						{ todo: false, drift: false },
+						[reminder],
+					),
+					display: true,
+				};
+				try {
+					if (typeof pi.sendMessage !== "function")
+						throw new Error("message delivery unavailable");
+					pi.sendMessage(immediateMessage, { deliverAs: "steer", triggerTurn: true });
+				} catch {
+					// A rejected queue must be due at the next available boundary;
+					// leave delivered=0 and retain the original createdAt grid for
+					// catchUp after that missed first occurrence is delivered.
+					reminder.nextFireAt = now;
+					writeState(sid, st);
+					ctx.ui.notify(
+						"Reminder set, but immediate delivery failed; it remains due for the next available active turn.",
+						"warning",
+					);
+					return;
+				}
+				// Keep the repeat anchored at registration+2min; the immediate
+				// delivery only records that the text was queued once. Persistence
+				// and notification are outside the queue-failure boundary so a UI
+				// problem cannot re-arm an already accepted delivery.
+				reminder.delivered += 1;
+				if (!writeState(sid, st)) {
+					try {
+						ctx.ui.notify(
+							`Reminder queued, but its delivery receipt could not be saved; it remains scheduled for ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min.`,
+							"warning",
+						);
+					} catch (err) { logReminderErr("reminder delivery notice", err); }
+					return;
+				}
+				try {
+					ctx.ui.notify(
+						`Reminder set and queued: "${oneLine(arg, 80)}" — it repeats every ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min for the rest of this session. Manage: /reminder list | clear <n|all>.`,
+						"info",
+					);
+				} catch (err) { logReminderErr("reminder delivery notice", err); }
 			} catch {
 				ctx.ui.notify("reminder: failed to update state", "error");
 			}

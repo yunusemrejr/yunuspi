@@ -3,8 +3,10 @@
  * or grants access outside the host's original active/allowed tool set. */
 import { Type } from 'typebox';
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview } from './capability-groups.ts';
+import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
 const RECEIPT = 'harness-tool-activation-v1';
 const RESUME_TOOLS = 6;
+const DISCOVERY_PAGE = 8;
 // Historical discovery is not a permanent schema subscription. Retain a small
 // recent working set and every unresolved call, without rewriting session history.
 export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
@@ -39,6 +41,80 @@ export const CORE_TOOLS = new Set([
 ]);
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
 const words = (text: string) => text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
+const pageLimit = (value: unknown, fallback = 3) => Number.isSafeInteger(value)
+  ? Math.min(DISCOVERY_PAGE, Math.max(1, value as number)) : fallback;
+
+function boundedSourceInfo(info: any): any {
+  if (!info || typeof info !== 'object') return undefined;
+  const result: any = {};
+  for (const key of ['path', 'source', 'scope', 'origin', 'baseDir']) {
+    if (typeof info[key] === 'string') result[key] = info[key].slice(0, 512);
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function commandSourceGroups(commands: readonly any[]) {
+  const counts = new Map<string, number>([['extension', 0], ['prompt', 0], ['skill', 0]]);
+  for (const command of commands) {
+    if (typeof command?.source !== 'string') continue;
+    counts.set(command.source, (counts.get(command.source) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 0)
+    .map(([id, count]) => ({id, label: id[0].toUpperCase() + id.slice(1), count}));
+}
+
+function commandMetadata(command: any, detail = false) {
+  const result: any = {
+    name: String(command.name).slice(0, 256),
+    description: String(command.description ?? '').slice(0, detail ? 512 : 160),
+    source: typeof command.source === 'string' ? command.source.slice(0, 64) : 'unknown',
+  };
+  if (detail) {
+    const sourceInfo = boundedSourceInfo(command.sourceInfo);
+    if (sourceInfo) result.sourceInfo = sourceInfo;
+  }
+  return result;
+}
+
+function normalizedCommandCatalog(pi: any): any[] | undefined {
+  if (typeof pi.getCommands !== 'function') return undefined;
+  let commands: unknown;
+  try { commands = pi.getCommands(); } catch { return undefined; }
+  if (!Array.isArray(commands)) return [];
+  return commands.filter((command: any) => command && typeof command.name === 'string' && command.name.length > 0);
+}
+
+/** Add live availability to the static ability index without presenting its
+ * pointers as a claim that a configured tool is currently registered. */
+function capabilityMetadata(record: any, pi: any, detail = false): any {
+  const tools = Array.isArray(record?.tools) ? record.tools.filter((name: any) => typeof name === 'string') : [];
+  const registered = new Set<string>();
+  try {
+    for (const tool of pi.getAllTools?.() ?? []) if (typeof tool?.name === 'string') registered.add(tool.name);
+  } catch { /* A descriptive index remains useful if a host cannot expose schemas. */ }
+  const active = new Set<string>();
+  try {
+    for (const name of pi.getActiveTools?.() ?? []) if (typeof name === 'string') active.add(name);
+  } catch { /* Treat current activity as unknown rather than granting it. */ }
+  const result: any = {
+    id: String(record?.id ?? '').slice(0, 128),
+    group: String(record?.group ?? '').slice(0, 64),
+    summary: String(record?.summary ?? '').slice(0, 512),
+    entrypoints: Array.isArray(record?.entrypoints) ? record.entrypoints.map((value: any) => String(value).slice(0, 128)) : [],
+    tools: tools.map((value: string) => value.slice(0, 128)),
+    commands: Array.isArray(record?.commands) ? record.commands.map((value: any) => String(value).slice(0, 128)) : [],
+    options: Array.isArray(record?.options) ? record.options : [],
+    related: Array.isArray(record?.related) ? record.related.map((value: any) => String(value).slice(0, 128)) : [],
+    toolAvailability: tools.map((name: string) => ({name: name.slice(0, 128),available:registered.has(name),active:active.has(name)})),
+  };
+  if (detail) {
+    if (Array.isArray(record?.sourceFiles)) result.sourceFiles = record.sourceFiles.map((value: any) => String(value).slice(0, 512));
+    if (typeof record?.doc === 'string') result.doc = record.doc.slice(0, 512);
+  }
+  return result;
+}
 export function registerToolDiscovery(pi: any) {
   if (process.env.PI_SUBAGENT_CHILD || process.env.PI_TOOL_DISCOVERY === 'off'
     || typeof pi.getAllTools !== 'function' || typeof pi.setActiveTools !== 'function'
@@ -62,24 +138,119 @@ export function registerToolDiscovery(pi: any) {
   pi.on('session_switch', initialize);
   pi.registerTool({
     name:'tool_search',label:'Find tools',
-    description:'Browse capability groups or search short tool previews. Enable chosen schemas with names or enable:true; no underlying tool runs. Search never enables tools by default.',
+    description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
     promptGuidelines:[
-      'Optional capabilities: source/AST/LSP, browser/web, media, memory, jobs, data/API/Git and coordination. tool_search({}) shows groups; a query previews matches; names enables chosen tools. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
+      'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
     ],
     parameters:Type.Object({
+      kind:Type.Optional(Type.Union([
+        Type.Literal('tools'),
+        Type.Literal('capabilities'),
+        Type.Literal('commands'),
+      ],{description:'Discovery surface: tools (default), capabilities, or registered extension/prompt/skill command metadata. Built-in UI slash commands are outside this API.'})),
       group:Type.Optional(Type.String({maxLength:64,description:'Group id from the overview; optional filter.'})),
       enable:Type.Optional(Type.Boolean({description:'Enable query matches explicitly. Exact names enable by default.'})),
       query:Type.Optional(Type.String({maxLength:256,description:'Task or capability, e.g. browser screenshot or symbol references.'})),
       names:Type.Optional(Type.Array(Type.String({minLength:1,maxLength:128}),{maxItems:8,description:'Exact tool names to enable.'})),
+      id:Type.Optional(Type.String({maxLength:256,description:'Exact capability or command id for a bounded detail lookup.'})),
+      detail:Type.Optional(Type.Boolean({description:'Include bounded source/details for an exact capability or command.'})),
       limit:Type.Optional(Type.Integer({minimum:1,maximum:8})),
-      offset:Type.Optional(Type.Integer({minimum:0,maximum:1000,description:'Page through query matches.'})),
+      offset:Type.Optional(Type.Integer({minimum:0,description:'Page through matches; any safe non-negative integer is accepted.'})),
     }),
     async execute(_id: string,input: any,_signal: any,_update: any,ctx: any) {
       const answer = (details: any,isError=false) => ({content:[{type:'text',text:JSON.stringify(details)}],details,...(isError?{isError:true}:{})});
       if (_signal?.aborted) return answer({error:'Tool discovery cancelled.'},true);
-      if (!owner || identity(ctx)!==owner || !same(expected,new Set(pi.getActiveTools())))
-        return answer({error:'Tool selection changed outside discovery; preserve the current tool set. Start a new session to reset discovery.'},true);
-      let catalog = pi.getAllTools().filter((tool: any) => allowed.has(tool.name) && tool.name!=='tool_search');
+      const kind = input.kind ?? 'tools';
+      const explicitNames = Array.isArray(input.names) && input.names.length > 0;
+      const activationRequested = kind === 'tools' && (input.enable === true || (explicitNames && input.enable !== false));
+      const active = new Set(pi.getActiveTools());
+      const ownerMatches = Boolean(owner && identity(ctx)===owner);
+      const selectionChanged = !ownerMatches || !same(expected,active);
+      // Read-only metadata discovery remains useful after an external tool
+      // selection change. Any request that can alter schemas still requires
+      // the discovery-owned active set and therefore fails closed.
+      if (activationRequested && selectionChanged)
+        return answer({error:'Tool activation is unavailable because the active selection is externally owned or changed outside discovery. Use metadata browsing, or start without an explicit tool restriction.'},true);
+
+      if (kind !== 'tools' && kind !== 'capabilities' && kind !== 'commands')
+        return answer({error:'Unknown discovery kind. Use "tools", "capabilities", or "commands".'},true);
+
+      if (kind === 'capabilities') {
+        if (explicitNames || input.enable === true)
+          return answer({error:'The capability index is metadata only; use kind:"tools" with names or enable:true to change tool schemas.'},true);
+        const groups = browseCapabilities({limit:1}).groups ?? [];
+        const group = typeof input.group === 'string' ? input.group.trim() : '';
+        if (group && !groups.some((item: any) => item.id === group))
+          return answer({error:'Unknown capability index group.',group,groups:groups.map((item: any)=>item.id)},true);
+        const id = typeof input.id === 'string' ? input.id.trim() : '';
+        if (id) {
+          const detail = getCapabilityDetail(id);
+          if (!detail) return answer({error:'Unknown or unavailable capability id.',id},true);
+          return answer({capability:capabilityMetadata(detail,pi,true),note:'Metadata only; the capability was described and nothing was executed.'});
+        }
+        const query = typeof input.query === 'string' ? input.query.trim() : '';
+        const page = query
+          ? searchCapabilities({query,group,limit:input.limit,offset:input.offset})
+          : browseCapabilities({group,limit:input.limit,offset:input.offset});
+        const results = page.results.map((record: any) => input.detail === true
+          ? getCapabilityDetail(record.id) ?? record
+          : record);
+        return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
+          ...(page.groups ? {groups:page.groups} : {}),
+          ...(page.query ? {query:page.query} : {}),
+          ...(page.group ? {group:page.group} : {}),
+          offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
+          note:'Metadata only; the ability index is descriptive and no tool, command, or workflow was executed.'});
+      }
+
+      // Slash commands are metadata exposed by the current SDK/runtime. They
+      // are intentionally read live on every request so reloads and extension
+      // registrations cannot leave a stale command inventory behind.
+      if (kind === 'commands') {
+        if (Array.isArray(input.names) && input.names.length)
+          return answer({error:'names enables tools only; use id or query for commands.'},true);
+        const commands = normalizedCommandCatalog(pi);
+        if (!commands) return answer({error:'Live command discovery is unavailable in this host.'},true);
+        const group = typeof input.group === 'string' ? input.group.trim().toLowerCase() : '';
+        if (group && !['extension','prompt','skill'].includes(group))
+          return answer({error:'Unknown command source. Use extension, prompt, or skill.'},true);
+        const sourceFiltered = group ? commands.filter(command => command.source === group) : commands;
+        const id = typeof input.id === 'string' ? input.id.trim() : '';
+        if (id && !sourceFiltered.some(command => command.name === id))
+          return answer({error:'Unknown or unavailable command id.',id},true);
+        const query = typeof input.query === 'string' ? input.query.trim().toLowerCase() : '';
+        let matches: any[];
+        if (id) {
+          matches = sourceFiltered.filter(command => command.name === id);
+        } else if (!query && !group) {
+          return answer({
+            commands:{count:commands.length,sources:commandSourceGroups(commands)},
+            next:'Use kind:"commands" with query, group, or id for a short registered command page.',
+          });
+        } else {
+          const terms = [...new Set(words(query))].filter(term => term.length > 1);
+          matches = sourceFiltered.map(command => {
+            const name = command.name.toLowerCase();
+            const description = String(command.description ?? '').toLowerCase();
+            const score = !query ? 1 : name === query ? 10000 :
+              terms.reduce((sum, term) => sum + (name.includes(term) ? 8 : 0) + (description.includes(term) ? 1 : 0), 0);
+            return {command,score};
+          }).filter(row => row.score > 0)
+            .sort((a,b) => b.score - a.score || a.command.name.localeCompare(b.command.name))
+            .map(row => row.command);
+        }
+        const offset = id ? 0 : safeOffset(input.offset);
+        const limit = pageLimit(input.limit);
+        const selected = matches.slice(offset,offset + limit);
+        return answer({
+          commands:selected.map(command => commandMetadata(command,input.detail === true || Boolean(id))),
+          offset,limit,remaining:Math.max(0,matches.length - offset - selected.length),
+          note:'Metadata only; registered extension, prompt-template, and skill commands are listed for orientation and were not executed.',
+        });
+      }
+
+      const visibleAuthority = !selectionChanged ? allowed : active;
+      let catalog = pi.getAllTools().filter((tool: any) => visibleAuthority.has(tool.name) && tool.name!=='tool_search');
       if (input.group) {
         if (!CAPABILITY_GROUPS.some(group=>group.id === input.group)) return answer({error:'Unknown capability group.'},true);
         catalog = catalog.filter((tool: any)=>capabilityGroup(tool.name,tool.description) === input.group);
@@ -92,7 +263,14 @@ export function registerToolDiscovery(pi: any) {
         matches = explicit.map(name => catalog.find((tool: any) => tool.name===name));
       } else {
         const query = typeof input.query==='string' ? input.query.trim() : '';
-        if (!query && !input.group) return answer({groups:groupOverview(catalog.map((tool: any)=>({name:tool.name,description:tool.description}))),next:'Use group or query for short previews; names enables chosen tools.'});
+        if (!query && !input.group) {
+          const commands = normalizedCommandCatalog(pi);
+          return answer({
+            groups:groupOverview(catalog.map((tool: any)=>({name:tool.name,description:tool.description}))),
+            commands:commands ? {count:commands.length,sources:commandSourceGroups(commands)} : {available:false},
+            next:'Use kind:"capabilities" for the ability index, kind:"commands" for registered command metadata, group or query for tool previews, names to enable tools, or skill_review action:"browse"/"search" for workflows.',
+          });
+        }
         const terms = [...new Set(words(query))].filter(term => term.length>1);
         matches = catalog.map((tool: any) => {
           const name = tool.name.toLowerCase(), text = String(tool.description??'').toLowerCase();
@@ -100,8 +278,9 @@ export function registerToolDiscovery(pi: any) {
           return {tool,score};
         }).filter((row: any)=>row.score>0).sort((a: any,b: any)=>b.score-a.score||a.tool.name.localeCompare(b.tool.name)).map((row: any)=>row.tool);
       }
-      const offset = explicit.length ? 0 : Math.min(1000,Math.max(0,input.offset??0));
-      const selected = matches.slice(offset,offset+Math.min(8,Math.max(1,input.limit??(explicit.length || 3))));
+      const offset = explicit.length ? 0 : safeOffset(input.offset);
+      const limit = pageLimit(input.limit,explicit.length || 3);
+      const selected = matches.slice(offset,offset+limit);
       const activate = input.enable === true || (explicit.length > 0 && input.enable !== false);
       const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
       if (added.length) {
@@ -110,8 +289,9 @@ export function registerToolDiscovery(pi: any) {
         expected = next;
         try { pi.appendEntry?.(RECEIPT,{names:added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
       }
-      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:expected.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
-        remaining:Math.max(0,matches.length-offset-selected.length),
+      const resultingActive = new Set(pi.getActiveTools());
+      return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
+        offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         note:activate?'Chosen schemas are available next. No tool executed.':'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });

@@ -10,7 +10,7 @@ YunusPi extends Pi with code inspection, browser and media tools, project memory
 
 The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
 
-[Install](docs/INSTALL.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Security](docs/SECURITY.md)
+[Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Security](docs/SECURITY.md)
 
 ## How a session works
 
@@ -22,6 +22,10 @@ Start Pi in your project directory, choose an available model, and describe the 
 - **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
 
 Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
+
+Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every two minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
+
+The footer keeps the harness counters to agents and failures, alongside current activity. Open `/metrics` for detailed tool, skill, hook and workflow counts.
 
 ### Discovery in practice
 
@@ -36,9 +40,18 @@ tool_search({ names: ["browser_session"] })
 
 // Find a workflow without reading the entire skill collection.
 skill_review({ action: "search", query: "voxel scene" })
+
+// Explore how harness abilities fit together, one small page at a time.
+tool_search({ kind: "capabilities", query: "memory" })
+tool_search({ kind: "capabilities", id: "memory-notes", detail: true })
+
+// Inspect live extension commands and prompt workflows without running them.
+tool_search({ kind: "commands", group: "extension", limit: 3 })
 ```
 
 `tool_search({})` and `skill_review({action:"browse"})` show compact groups. Results are paginated, with three matches by default. A selected skill's file can then be read normally. Skill guidance is advisory by default; strict skill-read enforcement is an explicit option. See [skill routing and source checks](docs/SKILLS-AND-CHECKS.md).
+
+The capability index explains entry points, supported options, related abilities and source references for model selection, subagents, swarms, fusion, reviews, hooks, safety boundaries, project graphs, plans, background work and memory. Detailed records appear only when requested. Memory retrieval and future-session notes are separate from live-session coordination; sessions sharing a checkout can inspect advisory objectives, file scopes and handoff notes, without acquiring locks or control over one another.
 
 ## What the harness offers
 

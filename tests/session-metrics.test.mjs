@@ -32,7 +32,7 @@ test('replayed results, child receipts and cumulative snapshots count once', () 
 test('legacy failures and missing history remain distinguishable', () => {
   const m = collectSessionMetrics([message('toolResult', {toolName:'web_search', details:{queryCount:2, successfulQueries:0}}), child('legacy',[{}])]);
   assert.equal(m.errors,1); assert.equal(m.agentOutcomeUnknown,1); assert.equal(m.telemetry,false);
-  assert.match(m.detail.join('\n'), /savings: unknown/); assert.ok(m.footer.includes('Hook checks ?'));
+  assert.match(m.detail.join('\n'), /savings: unknown/); assert.deepEqual(m.footer,['Agents 1 (0 active)','Failures 1 (P1 C0 W0)']);
   const parallel = message('toolResult', {toolName:'subagent', details:{mode:'parallel', runId:'group', results:[{runId:'a'},{runId:'b'}]}});
   assert.equal(collectSessionMetrics([parallel]).swarms,1);
 });
@@ -55,7 +55,7 @@ test('failed workflow controllers are visible even when no children start', () =
   const failed = {type:'custom',customType:'subagent-lifecycle-v1',data:{mode:'workflow',runId:'controller',state:'failed',results:[]}};
   const m = collectSessionMetrics([started,failed,failed,started]);
   assert.equal(m.agents,0); assert.equal(m.workflows,1); assert.equal(m.workflowFailures,1);
-  assert.equal(m.workflowsActive,0); assert.ok(m.footer.includes('Workflow failures 1'));
+  assert.equal(m.workflowsActive,0); assert.ok(m.footer.includes('Failures 1 (P0 C0 W1)'));
   const legacy = collectSessionMetrics([{type:'custom',customType:'subagent-cost-v1',data:{mode:'workflow',runId:'legacy',results:[]}}]);
   assert.equal(legacy.workflowFailures,0); assert.equal(legacy.workflowOutcomeUnknown,1);
 });
@@ -92,7 +92,7 @@ test('old group and fusion definitions remain labeled instead of becoming exact 
   const m = collectSessionMetrics([legacy,current]);
   assert.equal(m.swarms,1); assert.equal(m.fusions,1);
   assert.equal(m.legacySwarms,1); assert.equal(m.legacyFusions,1);
-  assert.ok(m.footer.includes('Fusions 1 +1 legacy'));
+  assert.deepEqual(m.footer,['Agents 0 (0 active)','Failures 0']);
 });
 
 test('hook instrumentation preserves receiver, result, errors and sink isolation', async () => {

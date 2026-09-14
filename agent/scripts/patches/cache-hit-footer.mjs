@@ -48,7 +48,7 @@ export function transformActivity(source, bundled) {
     const start = source.indexOf(activityPrefix), end = source.indexOf(activitySuffix,start+activityPrefix.length);
     const helper = source.slice(start+activityPrefix.length,end);
     // Audited released V2 collectors before skillctx/helper identity and invocation-failure accounting repairs.
-    if (['69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47','61c16b6a591f8438e1fca219d159cf80e4f95a8ebd78aa80dc8220d731f6e4a7','b2171c708285aa3bf92c1ada0ab6a69fe0195b7e27d49e68b81f9f28ed62bc34'].includes(createHash('sha256').update(helper).digest('hex'))) {
+    if (['69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47','61c16b6a591f8438e1fca219d159cf80e4f95a8ebd78aa80dc8220d731f6e4a7','b2171c708285aa3bf92c1ada0ab6a69fe0195b7e27d49e68b81f9f28ed62bc34','ecb678a2a9ad99683c80ce5b4b63261604ce7b9c0394879a3397b943bc2fa5f3'].includes(createHash('sha256').update(helper).digest('hex'))) {
       const old = activityCode(helper,bundled,2);
       if (source.split(old).length === 2) source = source.replace(old,()=>code);
     }

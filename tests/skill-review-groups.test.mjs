@@ -16,7 +16,7 @@ const names = [
   "research-notes", "misc-thing", "video-editing",
 ];
 
-function fixture() {
+function fixture(skillNames = names, systemPromptOptions) {
   const tools = new Map();
   const entries = [];
   const active = ["read", "skill_review"];
@@ -26,11 +26,11 @@ function fixture() {
     appendEntry: (customType, data) => entries.push({type: "custom", customType, data}),
   };
   const ctx = {cwd: "/fixture", sessionManager: {getBranch: () => entries}};
-  const systemPrompt = `<available_skills>${names.map(name =>
+  const systemPrompt = `<available_skills>${skillNames.map(name =>
     `<skill><name>${name}</name><description>${name.replaceAll("-", " ")}</description><location>/fixture/skills/${name}/SKILL.md</location></skill>`).join("")}</available_skills>`;
   const guidance = createRelevantGuidance(pi);
   guidance.restore(ctx);
-  guidance.start({prompt: "Explain the available workflows", systemPrompt}, ctx);
+  guidance.start({prompt: "Explain the available workflows", systemPrompt, systemPromptOptions}, ctx);
   return {guidance, review: tools.get("skill_review"), entries, ctx};
 }
 
@@ -85,4 +85,36 @@ test("restored skill review targets are paginated without losing later items", a
   assert.equal(next.details.skills.length,7);
   assert.equal(next.details.remaining,0);
   assert.equal(new Set([...first.details.skills,...next.details.skills].map(skill=>skill.path)).size,10);
+});
+
+test("the complete SDK catalogue remains searchable and pageable beyond old caps", async () => {
+  const skills = Array.from({length:1105}, (_,i) => ({
+    name:`workflow-${String(i).padStart(4,'0')}`,
+    description:'Installed workflow metadata',
+    filePath:`/fixture/skills/workflow-${i}/SKILL.md`,
+  }));
+  const f = fixture(['prompt-only-decoy'], {skills});
+  const overview = await f.review.execute('browse',{action:'browse'});
+  assert.equal(overview.details.groups.reduce((sum,g)=>sum+g.count,0),1105);
+  const found = await f.review.execute('search',{action:'search',query:'workflow-1104'});
+  assert.equal(found.details.results[0].name,'workflow-1104');
+  const tail = await f.review.execute('search',{action:'search',offset:1100,limit:8});
+  assert.equal(tail.details.results.length,5);
+  assert.equal(tail.details.remaining,0);
+  assert.equal(tail.details.results.at(-1).name,'workflow-1104');
+  assert.doesNotMatch(JSON.stringify(tail.details),/prompt-only-decoy/);
+});
+
+test("fallback catalogue search remains complete with ambient guidance disabled", async () => {
+  const previous = process.env.PI_RELEVANT_GUIDANCE;
+  process.env.PI_RELEVANT_GUIDANCE = 'off';
+  try {
+    const f = fixture(Array.from({length:300},(_,i)=>`fallback-${i}`));
+    const found = await f.review.execute('search',{action:'search',query:'fallback-299'});
+    assert.equal(found.details.results[0].name,'fallback-299');
+    assert.deepEqual(f.guidance.candidates(),[],'discovery does not re-enable ambient suggestions');
+  } finally {
+    if(previous === undefined) delete process.env.PI_RELEVANT_GUIDANCE;
+    else process.env.PI_RELEVANT_GUIDANCE = previous;
+  }
 });

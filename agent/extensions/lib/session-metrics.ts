@@ -126,7 +126,8 @@ export function collectSessionMetrics(entries, live) {
  m.skillsRead=[...read].sort();m.skillsPartial=[...partial].filter(s=>!read.has(s)).sort();m.skillsRouted=[...routed].sort();
  m.distinctTools=Object.keys(m.tools).length;
  const prompt=m.input+m.cacheRead+m.cacheWrite;m.cacheRate=prompt>0?100*m.cacheRead/prompt:null;
- m.footer=[`Swarms ${m.swarms}${m.legacySwarms?` +${m.legacySwarms} legacy`:""}`,`Fusions ${m.fusions}${m.legacyFusions?` +${m.legacyFusions} legacy`:""}`,`Agents ${m.agents} (${m.agentsActive} active)`,`Tools ${m.toolResults}`,`Parent errors ${m.errors+m.modelErrors}`,`Child failures ${m.agentFailures}`,`Workflow failures ${m.workflowFailures}${m.workflowOutcomeUnknown?` (${m.workflowOutcomeUnknown} unknown)`:""}`,`Skills ${m.skillsRead.length+m.skillsPartial.length} opened/${m.skillsRouted.length} suggested`,`Hook checks ${m.telemetry?m.hookCalls:'?'}`,`Compact ${m.compactions}`];
+ const parentFailures=m.errors+m.modelErrors, totalFailures=parentFailures+m.agentFailures+m.workflowFailures;
+ m.footer=[`Agents ${m.agents} (${m.agentsActive} active)`,totalFailures?`Failures ${totalFailures} (P${parentFailures} C${m.agentFailures} W${m.workflowFailures})`:'Failures 0'];
  m.detail=[
   'Session activity (all retained entries; includes pre-compaction history)',
   `Verified swarm / parallel-group operations: ${m.swarms}; fusions: ${m.fusions}; legacy records with older definitions: ${m.legacySwarms} swarms, ${m.legacyFusions} fusions (may include reused groups or single-output forwarding); recovery plans: ${m.telemetry?m.recoveries:'unknown before telemetry'}`,

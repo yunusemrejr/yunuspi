@@ -1,0 +1,5113 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "agent/scripts/generate-capabilities-doc.mjs",
+  "source": {
+    "manifest": "agent/extensions/manifest.json",
+    "catalog": "agent/extensions/lib/harness-capabilities.ts",
+    "toolEvidence": "literal registrations, source-owned factories/catalogs/constants, native core names and explicitly named dynamic owners"
+  },
+  "capabilities": [
+    {
+      "id": "skill-catalog",
+      "group": "discovery",
+      "summary": "Browse and search installed SKILL.md workflows with bounded group and query pages; inspect or defer a tracked skill when a file route requests it.",
+      "entrypoints": [
+        "skill_review"
+      ],
+      "tools": [
+        "skill_review"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "browse",
+            "search",
+            "inspect",
+            "defer"
+          ],
+          "summary": "Operation to perform."
+        },
+        {
+          "name": "group",
+          "summary": "Capability group id from browse."
+        },
+        {
+          "name": "query",
+          "summary": "Case-insensitive name or description query."
+        },
+        {
+          "name": "skill",
+          "summary": "Skill name or file path for inspect/defer."
+        },
+        {
+          "name": "reason",
+          "summary": "Task-specific rationale required for defer."
+        },
+        {
+          "name": "limit",
+          "summary": "Page size, 1–8."
+        },
+        {
+          "name": "offset",
+          "summary": "Metadata page offset."
+        }
+      ],
+      "related": [
+        "tool-catalog",
+        "workflow-orchestration"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/relevant-guidance.ts",
+        "agent/extensions/lib/skill-relevance.ts",
+        "agent/extensions/lib/capability-groups.ts"
+      ],
+      "doc": "docs/SKILLS-AND-CHECKS.md",
+      "commands": []
+    },
+    {
+      "id": "tool-catalog",
+      "group": "discovery",
+      "summary": "Preview active tool schemas by group or query, then explicitly enable selected names while preserving the host's original authority.",
+      "entrypoints": [
+        "tool_search"
+      ],
+      "tools": [
+        "tool_search"
+      ],
+      "options": [
+        {
+          "name": "group",
+          "summary": "Tool capability group id."
+        },
+        {
+          "name": "query",
+          "summary": "Name or description search text."
+        },
+        {
+          "name": "names",
+          "summary": "Exact tool names to enable, up to 8."
+        },
+        {
+          "name": "enable",
+          "summary": "Enable query matches only when true."
+        },
+        {
+          "name": "limit",
+          "summary": "Preview page size, 1–8."
+        },
+        {
+          "name": "offset",
+          "summary": "Preview page offset."
+        }
+      ],
+      "related": [
+        "skill-catalog",
+        "quick-commands"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/tool-discovery.ts",
+        "agent/extensions/lib/capability-groups.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
+      "commands": []
+    },
+    {
+      "id": "hook-guidance",
+      "group": "commands",
+      "summary": "Attach one deterministic workflow reminder to the first matching tool result; hooks annotate and recover without blocking or changing authority.",
+      "entrypoints": [
+        "tool_call",
+        "tool_result",
+        "session_start",
+        "session_switch"
+      ],
+      "options": [
+        {
+          "name": "PI_SESSION_HOOKS",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Disable this annotation surface when set to off."
+        },
+        {
+          "name": "tool_call",
+          "summary": "Match the tool name and input before execution."
+        },
+        {
+          "name": "tool_result",
+          "summary": "Annotate the corresponding success or failure once."
+        }
+      ],
+      "related": [
+        "quick-commands",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/session-hooks.ts",
+        "agent/extensions/lib/session-hooks.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
+      "tools": [],
+      "commands": []
+    },
+    {
+      "id": "subagent-dispatch",
+      "group": "orchestration",
+      "summary": "Launch one child, native parallel tasks or a sequential chain with explicit context, model, skills, output and acceptance controls.",
+      "entrypoints": [
+        "subagent",
+        "bg_wait",
+        "runs.run",
+        "runs.all",
+        "runs.steer",
+        "runs.status"
+      ],
+      "tools": [
+        "subagent",
+        "bg_wait"
+      ],
+      "commands": [
+        "run",
+        "subagents",
+        "subagents-stop",
+        "subagents-steer",
+        "subagents-detach"
+      ],
+      "options": [
+        {
+          "name": "agent",
+          "summary": "Named child agent for one-child execution or management."
+        },
+        {
+          "name": "task",
+          "summary": "Optional one-child prompt."
+        },
+        {
+          "name": "tasks",
+          "summary": "1–64 native parallel child objects."
+        },
+        {
+          "name": "chain",
+          "summary": "1–64 sequential child objects; previous output can flow forward."
+        },
+        {
+          "name": "commonTask",
+          "summary": "Shared brief for native tasks or chain."
+        },
+        {
+          "name": "async",
+          "summary": "Run composite or child work in the background."
+        },
+        {
+          "name": "context",
+          "values": [
+            "fresh",
+            "fork",
+            "profile"
+          ],
+          "summary": "Child context mode."
+        },
+        {
+          "name": "model",
+          "summary": "Explicit provider/id route with optional :thinking suffix."
+        },
+        {
+          "name": "thinking",
+          "summary": "Thinking level for supported control actions."
+        },
+        {
+          "name": "skill",
+          "summary": "Child skill name, names, or false."
+        },
+        {
+          "name": "cwd",
+          "summary": "Execution project working directory (workdir)."
+        },
+        {
+          "name": "worktree",
+          "summary": "Use managed per-child Git isolation."
+        },
+        {
+          "name": "output",
+          "summary": "Inline output path or false."
+        },
+        {
+          "name": "timeoutMs",
+          "summary": "Positive execution timeout."
+        },
+        {
+          "name": "acceptance",
+          "summary": "Structured completion contract."
+        },
+        {
+          "name": "gate",
+          "summary": "Host gate command, mutually exclusive with acceptance."
+        }
+      ],
+      "related": [
+        "workflow-orchestration",
+        "agent-model-management",
+        "background-tasks",
+        "swarm-execution",
+        "fusion-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/extension/index.ts",
+        "agent/extensions/pi-subagents/src/extension/schemas.ts",
+        "agent/extensions/pi-subagents/src/extension/public-execution.ts",
+        "agent/extensions/pi-subagents/src/intercom/result-intercom.ts"
+      ],
+      "doc": "docs/SUBAGENT-CONTRACTS.md"
+    },
+    {
+      "id": "workflow-orchestration",
+      "group": "orchestration",
+      "summary": "Run extension-owned review/run-ci resources or repeatable prompt workflows with bounded arguments and explicit foreground/background flags.",
+      "entrypoints": [
+        "subagent",
+        "workflow",
+        "workflowScript",
+        "workflowScriptPath",
+        "prompt-workflow"
+      ],
+      "tools": [
+        "subagent"
+      ],
+      "commands": [
+        "prompt-workflow"
+      ],
+      "options": [
+        {
+          "name": "workflow",
+          "values": [
+            "review",
+            "run-ci"
+          ],
+          "summary": "Named resource; currently review or run-ci."
+        },
+        {
+          "name": "args.task",
+          "summary": "Required non-empty task for review."
+        },
+        {
+          "name": "args.command",
+          "values": [
+            "npm test",
+            "npm run typecheck"
+          ],
+          "summary": "run-ci command."
+        },
+        {
+          "name": "args.timeoutMs",
+          "summary": "run-ci timeout, 1–86400000."
+        },
+        {
+          "name": "workflowScript",
+          "summary": "Inline filesystem-free workflow body for supported maintenance sessions."
+        },
+        {
+          "name": "workflowScriptPath",
+          "summary": "Workflow file path relative to request cwd."
+        },
+        {
+          "name": "async",
+          "summary": "Background execution flag."
+        },
+        {
+          "name": "--fork",
+          "summary": "Prompt-workflow child context override."
+        },
+        {
+          "name": "--fresh",
+          "summary": "Prompt-workflow fresh-context override."
+        },
+        {
+          "name": "--bg|--async",
+          "summary": "Prompt-workflow background flag."
+        },
+        {
+          "name": "--subagent",
+          "summary": "Prompt-workflow agent override."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "prompt-workflows",
+        "quality-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/workflows/workflow-resources.ts",
+        "agent/extensions/pi-subagents/src/extension/public-execution.ts",
+        "agent/extensions/pi-subagents/src/extension/schemas.ts",
+        "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts"
+      ],
+      "doc": "docs/SUBAGENT-CONTRACTS.md"
+    },
+    {
+      "id": "prompt-workflows",
+      "group": "orchestration",
+      "summary": "Discover package, user and project Markdown prompt workflows, substitute positional arguments and optionally chain their outputs.",
+      "entrypoints": [
+        "prompt-workflow",
+        "getPromptDirectories",
+        "discoverPromptWorkflows"
+      ],
+      "commands": [
+        "prompt-workflow"
+      ],
+      "options": [
+        {
+          "name": "list",
+          "summary": "List discovered prompt workflows."
+        },
+        {
+          "name": "$ARGUMENTS|$@",
+          "summary": "Substitute all runtime arguments in a prompt body."
+        },
+        {
+          "name": "$1..$N",
+          "summary": "Substitute one positional runtime argument."
+        },
+        {
+          "name": "${N:-fallback}",
+          "summary": "Use a fallback when a positional argument is absent."
+        },
+        {
+          "name": "chain",
+          "summary": "Frontmatter workflow names joined by ' -> '."
+        },
+        {
+          "name": "--fork",
+          "summary": "Run with fork context."
+        },
+        {
+          "name": "--fresh",
+          "summary": "Run with fresh context."
+        },
+        {
+          "name": "--bg|--async",
+          "summary": "Run the workflow in the background."
+        },
+        {
+          "name": "--subagent",
+          "summary": "Override the declared agent."
+        }
+      ],
+      "related": [
+        "workflow-orchestration",
+        "subagent-dispatch"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts",
+        "agent/extensions/pi-subagents/src/shared/prompt-resources.ts"
+      ],
+      "doc": "docs/SUBAGENT-CONTRACTS.md",
+      "tools": []
+    },
+    {
+      "id": "scope-council",
+      "group": "review",
+      "summary": "Automatically deliberate over open-ended change scope with preservation and meaningful-change perspectives under a shared bounded budget; it has no opt-in user tool.",
+      "entrypoints": [
+        "scope-council-runner",
+        "before_agent_start",
+        "context"
+      ],
+      "options": [
+        {
+          "name": "PI_SCOPE_COUNCIL",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Disable automatic scope deliberation when set to off."
+        },
+        {
+          "name": "deadlineMs",
+          "summary": "Shared council deadline; default 45000."
+        },
+        {
+          "name": "tokens",
+          "summary": "Aggregate child token ceiling; default 144000."
+        },
+        {
+          "name": "tools",
+          "summary": "Aggregate child tool ceiling; default 12."
+        },
+        {
+          "name": "costUsd",
+          "summary": "Aggregate runtime ceiling; default 0.01."
+        },
+        {
+          "name": "fixedRoute|sameModel|freeOnly|noDelegation",
+          "summary": "Constraints that can make the council unavailable."
+        }
+      ],
+      "related": [
+        "project-intelligence",
+        "quality-review",
+        "subagent-dispatch"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/extension/scope-council-runner.ts",
+        "agent/extensions/lib/scope-deliberation.ts"
+      ],
+      "doc": "docs/CHANGE-SCOPE.md",
+      "tools": [],
+      "commands": []
+    },
+    {
+      "id": "swarm-execution",
+      "group": "orchestration",
+      "summary": "Run separable child investigations in parallel and preserve each outcome, failure and acceptance evidence for parent review.",
+      "entrypoints": [
+        "subagent.tasks",
+        "runs.all",
+        "runs.recover",
+        "todo.execution:swarm"
+      ],
+      "tools": [
+        "subagent",
+        "todo"
+      ],
+      "options": [
+        {
+          "name": "tasks",
+          "summary": "Parallel child array with agent/task and per-child options."
+        },
+        {
+          "name": "commonTask",
+          "summary": "Shared brief injected into every child."
+        },
+        {
+          "name": "concurrency",
+          "summary": "Positive native task concurrency."
+        },
+        {
+          "name": "async",
+          "summary": "Keep the composite running without blocking the parent."
+        },
+        {
+          "name": "runs.recover",
+          "summary": "Build a bounded respawn plan for failed fanout members."
+        },
+        {
+          "name": "execution",
+          "values": [
+            "swarm"
+          ],
+          "summary": "Todo execution annotation."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "fusion-review",
+        "todo-planning",
+        "agent-model-management"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/runs/shared/assistance-plan.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/swarm-recovery.ts",
+        "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts",
+        "agent/extensions/rpiv-todo/tool/types.ts"
+      ],
+      "doc": "docs/MODEL-ROUTING.md",
+      "commands": []
+    },
+    {
+      "id": "fusion-review",
+      "group": "orchestration",
+      "summary": "Merge child outputs deterministically with provenance, retaining duplicate, complementary and conflicting sections for review.",
+      "entrypoints": [
+        "runs.fuse",
+        "runs.fuseFragments",
+        "todo.execution:fusion"
+      ],
+      "tools": [
+        "subagent",
+        "todo"
+      ],
+      "options": [
+        {
+          "name": "runs.fuse",
+          "summary": "Fuse text outputs from a completed run set."
+        },
+        {
+          "name": "runs.fuseFragments",
+          "summary": "Fuse structured owner/kind/body/updatedAt fragments."
+        },
+        {
+          "name": "fragments[].owner",
+          "summary": "Source worker identity."
+        },
+        {
+          "name": "fragments[].kind",
+          "values": [
+            "duplicate",
+            "complementary",
+            "conflict"
+          ],
+          "summary": "Fragment classification."
+        },
+        {
+          "name": "fragments[].body",
+          "summary": "Source-preserving fragment body."
+        },
+        {
+          "name": "fragments[].updatedAt",
+          "summary": "Finite ordering timestamp."
+        },
+        {
+          "name": "config.maxBodyChars",
+          "summary": "Positive fused-body bound, at most 131072."
+        },
+        {
+          "name": "execution",
+          "values": [
+            "fusion"
+          ],
+          "summary": "Todo execution annotation."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "swarm-execution",
+        "quality-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/runs/shared/fusion.ts",
+        "agent/extensions/pi-subagents/src/workflows/recovery-seam.ts",
+        "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts"
+      ],
+      "doc": "docs/MODEL-ROUTING.md",
+      "commands": []
+    },
+    {
+      "id": "agent-model-management",
+      "group": "models",
+      "summary": "List executable agents and their capabilities, inspect or edit scoped definitions, and ask for effective models without hardcoding a provider inventory.",
+      "entrypoints": [
+        "subagent",
+        "action:list",
+        "action:get",
+        "action:models",
+        "action:create",
+        "action:update"
+      ],
+      "tools": [
+        "subagent"
+      ],
+      "commands": [
+        "subagents",
+        "subagents-models",
+        "subagents-doctor",
+        "subagents-profiles",
+        "subagents-load-profile",
+        "subagents-check-profile"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "list",
+            "get",
+            "models",
+            "create",
+            "update",
+            "delete",
+            "eject",
+            "disable",
+            "enable",
+            "reset"
+          ],
+          "summary": "Management operation."
+        },
+        {
+          "name": "agent",
+          "summary": "Agent name or alias."
+        },
+        {
+          "name": "agentScope",
+          "values": [
+            "user",
+            "project",
+            "both"
+          ],
+          "summary": "Definition scope."
+        },
+        {
+          "name": "capabilities",
+          "summary": "Include compact executable capability rows for list."
+        },
+        {
+          "name": "config",
+          "summary": "Agent config object or JSON for create/update."
+        },
+        {
+          "name": "model",
+          "summary": "Model selector for models or explicit child route."
+        },
+        {
+          "name": "thinking",
+          "summary": "Configured thinking level or ceiling."
+        },
+        {
+          "name": "skill",
+          "summary": "Declared child skill name(s)."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "model-selection",
+        "provider-routing",
+        "skill-catalog"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/agents/agent-management.ts",
+        "agent/extensions/pi-subagents/src/extension/schemas.ts",
+        "agent/extensions/pi-subagents/src/slash/slash-commands.ts"
+      ],
+      "doc": "docs/SUBAGENT-CONTRACTS.md"
+    },
+    {
+      "id": "model-selection",
+      "group": "models",
+      "summary": "Filter the live session model registry by exact name, free eligibility, provider, input modality, tools support or catalog addition month.",
+      "entrypoints": [
+        "subagent",
+        "action:models",
+        "filterModelsByQuery"
+      ],
+      "tools": [
+        "subagent"
+      ],
+      "commands": [
+        "subagents-models"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "models"
+          ],
+          "summary": "Use model listing mode."
+        },
+        {
+          "name": "model",
+          "summary": "All-token selector query."
+        },
+        {
+          "name": "free:true",
+          "summary": "Keep eligible free routes after economy checks."
+        },
+        {
+          "name": "provider:<id>",
+          "summary": "Filter to an exact provider id from the current registry."
+        },
+        {
+          "name": "input:<modality>",
+          "summary": "Filter advertised input modality."
+        },
+        {
+          "name": "tools:true",
+          "summary": "Require advertised tool calling support."
+        },
+        {
+          "name": "added:this-month|added:YYYY-MM",
+          "summary": "Filter provider catalog addition timestamps in UTC."
+        },
+        {
+          "name": "model: provider/id:thinking",
+          "summary": "Pass an exact route with optional supported thinking suffix."
+        }
+      ],
+      "related": [
+        "agent-model-management",
+        "provider-routing",
+        "fusion-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/agents/agent-management.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/model-selection.ts",
+        "agent/extensions/pi-subagents/src/shared/model-info.ts"
+      ],
+      "doc": "docs/MODEL-ROUTING.md"
+    },
+    {
+      "id": "provider-routing",
+      "group": "models",
+      "summary": "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",
+      "entrypoints": [
+        "provider",
+        "or-provider",
+        "models.json providers.openrouter.modelOverrides"
+      ],
+      "commands": [
+        "provider",
+        "or-provider"
+      ],
+      "options": [
+        {
+          "name": "subcommand",
+          "values": [
+            "list",
+            "status",
+            "order",
+            "only",
+            "sort",
+            "clear",
+            "reset",
+            "json"
+          ],
+          "summary": "Provider command operation."
+        },
+        {
+          "name": "model",
+          "summary": "Optional selected or provider/model target."
+        },
+        {
+          "name": "tag",
+          "summary": "Exact endpoint tag returned by the live endpoint listing."
+        },
+        {
+          "name": "sort key",
+          "values": [
+            "price",
+            "latency",
+            "throughput",
+            "uptime"
+          ],
+          "summary": "Endpoint metric used by sort."
+        },
+        {
+          "name": "json.only|order|ignore",
+          "summary": "Endpoint tag arrays in raw routing JSON."
+        },
+        {
+          "name": "json.allow_fallbacks",
+          "summary": "Boolean fallback policy in raw routing JSON."
+        }
+      ],
+      "related": [
+        "model-selection",
+        "agent-model-management"
+      ],
+      "sourceFiles": [
+        "agent/extensions/provider-cmd.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts"
+      ],
+      "doc": "docs/MODEL-ROUTING.md",
+      "tools": []
+    },
+    {
+      "id": "quality-review",
+      "group": "review",
+      "summary": "Run or inspect bounded read-only aspect reviews, then accept or block only with retained independent evidence and explicit rationale.",
+      "entrypoints": [
+        "quality_review",
+        "quality-review-followup"
+      ],
+      "tools": [
+        "quality_review"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "inspect",
+            "review",
+            "assess"
+          ],
+          "summary": "Review lifecycle operation."
+        },
+        {
+          "name": "disposition",
+          "values": [
+            "accepted",
+            "blocked"
+          ],
+          "summary": "Assessment outcome."
+        },
+        {
+          "name": "reason",
+          "summary": "Evidence-based assessment rationale, 20–1200 characters."
+        },
+        {
+          "name": "dismissals",
+          "summary": "Blocking finding ids with concrete dismissal reasons."
+        }
+      ],
+      "related": [
+        "scope-council",
+        "project-intelligence",
+        "source-intelligence"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/quality-review.ts",
+        "agent/extensions/lib/quality-review-signals.ts"
+      ],
+      "doc": "docs/RECOVERY-AND-TESTING.md",
+      "commands": []
+    },
+    {
+      "id": "quick-commands",
+      "group": "commands",
+      "summary": "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
+      "entrypoints": [
+        "pi.getCommands",
+        "registerCommand"
+      ],
+      "commands": [
+        "cost",
+        "self",
+        "metrics",
+        "obs",
+        "effort",
+        "reminder",
+        "graph",
+        "provider",
+        "or-provider",
+        "todos",
+        "memory-prime",
+        "bg",
+        "tasks",
+        "bg-tasks",
+        "bg-clear",
+        "bg-update",
+        "jobs",
+        "logs",
+        "kill",
+        "subagents",
+        "run",
+        "subagents-doctor",
+        "subagents-inspect-rpc",
+        "subagents-refine",
+        "subagents-fleet",
+        "subagents-detach",
+        "subagents-stop",
+        "subagents-steer",
+        "subagents-models",
+        "subagents-profiles",
+        "subagents-load-profile",
+        "subagents-refresh-provider-models",
+        "subagents-generate-profiles",
+        "subagents-check-profile",
+        "subagents-watchdog",
+        "prompt-workflow",
+        "google-account"
+      ],
+      "options": [
+        {
+          "name": "pi.getCommands()",
+          "summary": "Read the live command registry; command availability can depend on loaded extensions and configuration."
+        },
+        {
+          "name": "/self",
+          "summary": "Current-session diagnostics."
+        },
+        {
+          "name": "/cost|/metrics|/obs",
+          "summary": "Session accounting, metrics and observations."
+        },
+        {
+          "name": "/effort",
+          "summary": "Thinking control alias owned by the extension."
+        },
+        {
+          "name": "/graph",
+          "summary": "Open the project intelligence viewer."
+        },
+        {
+          "name": "/todos",
+          "summary": "Show the hierarchical action plan."
+        }
+      ],
+      "related": [
+        "tool-catalog",
+        "context-diagnostics",
+        "todo-planning",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/session-signals.ts",
+        "agent/extensions/lib/session-telemetry.ts",
+        "agent/extensions/thinking.ts",
+        "agent/extensions/project-intelligence.ts",
+        "agent/extensions/rpiv-todo/todo.ts",
+        "agent/extensions/pi-background-tasks/src/extension.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
+      "tools": []
+    },
+    {
+      "id": "safety-bounds",
+      "group": "safety",
+      "summary": "Run disposable experiments and guarded mutations with explicit path, process, resource and authority boundaries; unavailable isolation fails closed.",
+      "entrypoints": [
+        "sandbox_run",
+        "filesystem-safety",
+        "harness:mutation-preflight"
+      ],
+      "tools": [
+        "sandbox_run",
+        "git_info"
+      ],
+      "options": [
+        {
+          "name": "command",
+          "summary": "Inline sandbox Bash script."
+        },
+        {
+          "name": "files[].path",
+          "summary": "Relative disposable destination."
+        },
+        {
+          "name": "files[].content|source",
+          "summary": "Exactly one inline fixture or project source."
+        },
+        {
+          "name": "timeoutMs",
+          "summary": "Sandbox execution timeout, 1000–120000."
+        },
+        {
+          "name": "maxOutputBytes",
+          "summary": "Sandbox output bound, 1024–65536."
+        },
+        {
+          "name": "PI_WRITE_DEGENERATION",
+          "values": [
+            "0"
+          ],
+          "summary": "Disable the repeated-write degeneration heuristic only when set to 0."
+        },
+        {
+          "name": "PI_SIBLING_STALE_WRITES",
+          "summary": "Restore advisory-only sibling write behavior when off."
+        }
+      ],
+      "related": [
+        "session-coordination",
+        "subagent-dispatch",
+        "quick-commands"
+      ],
+      "sourceFiles": [
+        "agent/extensions/sandbox.ts",
+        "agent/extensions/filesystem-safety.ts",
+        "agent/extensions/siblings.ts"
+      ],
+      "doc": "docs/SECURITY.md",
+      "commands": []
+    },
+    {
+      "id": "project-intelligence",
+      "group": "project",
+      "summary": "Query and maintain project-scoped architecture and dependency evidence, inspect versions and impact, or open the live graph viewer.",
+      "entrypoints": [
+        "project_intel",
+        "graph",
+        "project_intelligence"
+      ],
+      "tools": [
+        "project_intel"
+      ],
+      "commands": [
+        "graph"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "query",
+            "impact",
+            "inspect",
+            "update",
+            "record",
+            "retract",
+            "refresh",
+            "health",
+            "history"
+          ],
+          "summary": "Graph operation."
+        },
+        {
+          "name": "query|focus",
+          "summary": "Search text or exact entity key."
+        },
+        {
+          "name": "direction",
+          "values": [
+            "incoming",
+            "outgoing",
+            "both"
+          ],
+          "summary": "Impact traversal direction."
+        },
+        {
+          "name": "hops",
+          "summary": "Traversal depth, 0–6."
+        },
+        {
+          "name": "limit",
+          "summary": "Candidate bound, 1–40."
+        },
+        {
+          "name": "maxChars",
+          "summary": "Response bound, 400–6000."
+        },
+        {
+          "name": "types|relations",
+          "summary": "Entity or relationship filters."
+        },
+        {
+          "name": "expectedVersion",
+          "summary": "Required optimistic version for updates."
+        }
+      ],
+      "related": [
+        "scope-council",
+        "quality-review",
+        "todo-planning"
+      ],
+      "sourceFiles": [
+        "agent/extensions/project-intelligence.ts",
+        "agent/extensions/lib/project-intelligence/query.mjs",
+        "agent/extensions/lib/project-intelligence/store.mjs"
+      ],
+      "doc": "docs/PROJECT-INTELLIGENCE.md"
+    },
+    {
+      "id": "todo-planning",
+      "group": "planning",
+      "summary": "Maintain a durable hierarchical plan with dependencies, execution annotations, file scopes and evidence-backed completion.",
+      "entrypoints": [
+        "todo",
+        "todos"
+      ],
+      "tools": [
+        "todo"
+      ],
+      "commands": [
+        "todos"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "create",
+            "update",
+            "list",
+            "get",
+            "delete",
+            "clear",
+            "batch"
+          ],
+          "summary": "Plan mutation."
+        },
+        {
+          "name": "view",
+          "values": [
+            "tree",
+            "frontier"
+          ],
+          "summary": "List projection."
+        },
+        {
+          "name": "execution",
+          "values": [
+            "self",
+            "subagent",
+            "swarm",
+            "fusion"
+          ],
+          "summary": "Native orchestration annotation."
+        },
+        {
+          "name": "parentId|blockedBy",
+          "summary": "Hierarchy and dependency ids."
+        },
+        {
+          "name": "files",
+          "summary": "Explicit relative paths in a task scope."
+        },
+        {
+          "name": "acceptance|evidence",
+          "summary": "Completion contract and observed verification."
+        },
+        {
+          "name": "refs",
+          "summary": "Project fact, observation or source references."
+        },
+        {
+          "name": "operations",
+          "summary": "Atomic create/update/delete batch, up to 32."
+        }
+      ],
+      "related": [
+        "session-coordination",
+        "swarm-execution",
+        "fusion-review",
+        "memory-notes"
+      ],
+      "sourceFiles": [
+        "agent/extensions/rpiv-todo/todo.ts",
+        "agent/extensions/rpiv-todo/tool/types.ts",
+        "agent/extensions/rpiv-todo/state/plan.ts"
+      ],
+      "doc": "docs/ACTION-PLANS.md"
+    },
+    {
+      "id": "background-tasks",
+      "group": "async",
+      "summary": "Track explicit shell jobs in the local background registry, receive durable completion notifications and inspect bounded output by task id.",
+      "entrypoints": [
+        "bg_run",
+        "bg_status",
+        "bg_logs",
+        "bg_kill",
+        "background-task-notification"
+      ],
+      "tools": [
+        "bg_run",
+        "bg_status",
+        "bg_logs",
+        "bg_kill"
+      ],
+      "commands": [
+        "bg",
+        "tasks",
+        "bg-tasks",
+        "bg-clear",
+        "bg-update",
+        "jobs",
+        "logs",
+        "kill"
+      ],
+      "options": [
+        {
+          "name": "name",
+          "summary": "Short task name."
+        },
+        {
+          "name": "command",
+          "summary": "Shell command to start."
+        },
+        {
+          "name": "isAgent",
+          "summary": "Whether the command launches an LLM/agent process."
+        },
+        {
+          "name": "description",
+          "summary": "Optional task context."
+        },
+        {
+          "name": "timeoutSeconds",
+          "summary": "Positive task timeout."
+        },
+        {
+          "name": "notifyOnCompletion",
+          "summary": "Deliver the durable terminal notification."
+        },
+        {
+          "name": "triggerOnCompletion",
+          "summary": "Request an agent wake for a finite task or explicitly opted-in service."
+        },
+        {
+          "name": "taskId",
+          "summary": "Task id or unambiguous prefix for status/logs/kill."
+        },
+        {
+          "name": "maxBytes|tail",
+          "summary": "Bound and direction for log reads."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "session-coordination",
+        "quick-commands"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-background-tasks/src/extension.ts",
+        "agent/extensions/pi-background-tasks/src/core/registry.ts",
+        "agent/extensions/pi-background-tasks/src/core/completion-wake.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
+    },
+    {
+      "id": "subagent-intercom",
+      "group": "async",
+      "summary": "Coordinate a child with its supervisor through explicit decision, interview or progress messages and deliver grouped run receipts; targets are run/session scoped and completed children may be unreachable.",
+      "entrypoints": [
+        "contact_supervisor",
+        "subagent_supervisor",
+        "subagent:result-intercom",
+        "intercomBridge"
+      ],
+      "tools": [
+        "contact_supervisor",
+        "subagent_supervisor"
+      ],
+      "options": [
+        {
+          "name": "reason",
+          "values": [
+            "need_decision",
+            "interview_request",
+            "progress_update"
+          ],
+          "summary": "Child-to-supervisor message kind."
+        },
+        {
+          "name": "message",
+          "summary": "Bounded question, update or reply text."
+        },
+        {
+          "name": "interview",
+          "summary": "Structured supervisor questions for interview_request."
+        },
+        {
+          "name": "action",
+          "values": [
+            "list",
+            "send",
+            "ask",
+            "reply",
+            "pending",
+            "status"
+          ],
+          "summary": "Parent supervisor operation."
+        },
+        {
+          "name": "to|replyTo",
+          "summary": "Explicit intercom target or pending request id."
+        },
+        {
+          "name": "intercomBridge.mode",
+          "values": [
+            "off",
+            "fork-only",
+            "always"
+          ],
+          "summary": "Child bridge activation mode."
+        },
+        {
+          "name": "intercomBridge.resultDelivery",
+          "summary": "Deliver grouped completion receipts to an acknowledged intercom listener."
+        },
+        {
+          "name": "PI_INTERCOM_SESSION_ID|PI_SUBAGENT_INTERCOM_SESSION_NAME",
+          "summary": "Optional target identity used by the native bridge."
+        },
+        {
+          "name": "PI_INTERCOM_ASK_TIMEOUT_MS",
+          "summary": "Native supervisor reply wait bound."
+        }
+      ],
+      "related": [
+        "subagent-dispatch",
+        "session-coordination",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/intercom/intercom-bridge.ts",
+        "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
+        "agent/extensions/pi-subagents/src/intercom/result-intercom.ts",
+        "agent/extensions/pi-subagents/src/shared/types.ts"
+      ],
+      "doc": "docs/SUBAGENT-CONTRACTS.md",
+      "commands": []
+    },
+    {
+      "id": "session-coordination",
+      "group": "coordination",
+      "summary": "Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes and a local Markdown board; peers are advisory, not remote messaging or locks.",
+      "entrypoints": [
+        "session_coordinate",
+        "sibling-bridge",
+        "todo-plan-changed"
+      ],
+      "tools": [
+        "session_coordinate"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "status",
+            "publish",
+            "clear"
+          ],
+          "summary": "Coordination operation."
+        },
+        {
+          "name": "objective",
+          "summary": "Bounded objective text, up to 240 characters."
+        },
+        {
+          "name": "note",
+          "summary": "Bounded handoff note, up to 500 characters."
+        },
+        {
+          "name": "files",
+          "summary": "Up to 32 absolute or cwd-resolved files/directories."
+        },
+        {
+          "name": "PI_SIBLING_STALE_WRITES",
+          "summary": "Disable stale-read write blocking when set to off."
+        },
+        {
+          "name": "coordinationRoot",
+          "summary": "Canonical same-checkout identity joins nested paths and symlink aliases."
+        }
+      ],
+      "related": [
+        "todo-planning",
+        "background-tasks",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/siblings.ts",
+        "agent/extensions/rpiv-todo/state/plan.ts"
+      ],
+      "doc": "docs/ACTION-PLANS.md",
+      "commands": []
+    },
+    {
+      "id": "memory-retrieval",
+      "group": "memory",
+      "summary": "Read durable global/project notes, scratchpad and daily logs; search prior memory with qmd keyword, semantic or deep modes and check search health.",
+      "entrypoints": [
+        "memory_read",
+        "memory_search",
+        "memory_status",
+        "memory-prime"
+      ],
+      "tools": [
+        "memory_read",
+        "memory_search",
+        "memory_status"
+      ],
+      "commands": [
+        "memory-prime"
+      ],
+      "options": [
+        {
+          "name": "target",
+          "values": [
+            "long_term",
+            "project",
+            "scratchpad",
+            "daily",
+            "list"
+          ],
+          "summary": "Memory read target."
+        },
+        {
+          "name": "date",
+          "summary": "Daily log date in YYYY-MM-DD form."
+        },
+        {
+          "name": "query",
+          "summary": "Prior-memory search text."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "keyword",
+            "semantic",
+            "deep"
+          ],
+          "summary": "qmd search mode."
+        },
+        {
+          "name": "limit",
+          "summary": "Search result bound."
+        },
+        {
+          "name": "scope",
+          "values": [
+            "project",
+            "global"
+          ],
+          "summary": "Memory priming scope."
+        },
+        {
+          "name": "on|off",
+          "summary": "Enable or disable opt-in memory priming."
+        }
+      ],
+      "related": [
+        "memory-notes",
+        "memory-evidence",
+        "context-diagnostics"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-memory/index.ts",
+        "agent/extensions/pi-memory/priming.ts"
+      ],
+      "doc": "docs/LOCAL-INTELLIGENCE.md"
+    },
+    {
+      "id": "memory-notes",
+      "group": "memory",
+      "summary": "Record future-session notes, project-scoped decisions and checklist state, with recoverable forget/restore operations and bounded compaction handoffs.",
+      "entrypoints": [
+        "memory_write",
+        "scratchpad",
+        "memory_forget",
+        "memory_restore"
+      ],
+      "tools": [
+        "memory_write",
+        "scratchpad",
+        "memory_forget",
+        "memory_restore"
+      ],
+      "options": [
+        {
+          "name": "target",
+          "values": [
+            "long_term",
+            "project",
+            "daily"
+          ],
+          "summary": "Write target."
+        },
+        {
+          "name": "content",
+          "summary": "Markdown note to append."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "append"
+          ],
+          "summary": "Write mode; append is the supported mode."
+        },
+        {
+          "name": "action",
+          "summary": "Scratchpad or restore operation."
+        },
+        {
+          "name": "match",
+          "summary": "Case-insensitive memory_forget match."
+        },
+        {
+          "name": "recoveryId",
+          "summary": "Recovery record id for memory_restore."
+        },
+        {
+          "name": "text",
+          "summary": "Scratchpad item or substring."
+        }
+      ],
+      "related": [
+        "memory-retrieval",
+        "memory-evidence",
+        "todo-planning"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-memory/index.ts",
+        "agent/extensions/pi-memory/priming.ts",
+        "agent/extensions/pi-memory/mutation.ts"
+      ],
+      "doc": "docs/LOCAL-INTELLIGENCE.md",
+      "commands": []
+    },
+    {
+      "id": "memory-evidence",
+      "group": "memory",
+      "summary": "Keep small verbatim project observations with SHA256 provenance and retrieve unchanged evidence from the active session branch; inferred claims and unattributed URLs are rejected.",
+      "entrypoints": [
+        "evidence_cache",
+        "context_score",
+        "handoff_capsule"
+      ],
+      "tools": [
+        "evidence_cache",
+        "context_score",
+        "handoff_capsule"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "put",
+            "query"
+          ],
+          "summary": "Evidence cache operation."
+        },
+        {
+          "name": "source",
+          "summary": "Local project source path or attributable source id."
+        },
+        {
+          "name": "quote",
+          "summary": "Verbatim observation to cache."
+        },
+        {
+          "name": "query",
+          "summary": "Evidence relevance query."
+        },
+        {
+          "name": "goal",
+          "summary": "Goal used to build a handoff capsule."
+        },
+        {
+          "name": "items",
+          "summary": "Bounded context items for scoring or capsule extraction."
+        },
+        {
+          "name": "maxChars",
+          "summary": "Capsule output bound; default 2200."
+        }
+      ],
+      "related": [
+        "memory-notes",
+        "memory-retrieval",
+        "context-diagnostics"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-memory/context-tools.ts",
+        "agent/extensions/pi-memory/context-evidence.ts",
+        "agent/extensions/pi-memory/context-salience.ts"
+      ],
+      "doc": "docs/LOCAL-INTELLIGENCE.md",
+      "commands": []
+    },
+    {
+      "id": "context-diagnostics",
+      "group": "diagnostics",
+      "summary": "Inspect selected-model full-window context occupancy and 80% automatic compaction threshold alongside separate runtime, failure, efficiency and past-session diagnostics.",
+      "entrypoints": [
+        "session_self",
+        "session_audit",
+        "self",
+        "cost",
+        "metrics"
+      ],
+      "tools": [
+        "session_self",
+        "session_audit"
+      ],
+      "commands": [
+        "self",
+        "cost",
+        "metrics"
+      ],
+      "options": [
+        {
+          "name": "view",
+          "values": [
+            "session",
+            "context",
+            "runtime",
+            "failures",
+            "efficiency"
+          ],
+          "summary": "Session diagnostic view."
+        },
+        {
+          "name": "scope",
+          "values": [
+            "workspace",
+            "all"
+          ],
+          "summary": "Past-session audit scope."
+        },
+        {
+          "name": "contextWindow",
+          "summary": "Selected model's full context window."
+        },
+        {
+          "name": "contextWindowPercent",
+          "summary": "Current tokens divided by full context window."
+        },
+        {
+          "name": "compactionTrigger",
+          "summary": "Inclusive automatic threshold at 80% of full window."
+        },
+        {
+          "name": "usablePercent",
+          "summary": "Separate output/safety headroom pressure diagnostic."
+        }
+      ],
+      "related": [
+        "memory-retrieval",
+        "quick-commands",
+        "quality-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/session-signals.ts",
+        "agent/extensions/lib/session-signals.ts",
+        "agent/extensions/lib/session-audit.ts",
+        "agent/extensions/lib/session-telemetry.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
+    },
+    {
+      "id": "source-intelligence",
+      "group": "engineering",
+      "summary": "Inspect bounded syntax, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
+      "entrypoints": [
+        "syntax_check",
+        "context_slice",
+        "symbol_expand",
+        "ast_diff",
+        "git_info"
+      ],
+      "tools": [
+        "syntax_check",
+        "context_slice",
+        "symbol_expand",
+        "ast_diff",
+        "git_info"
+      ],
+      "options": [
+        {
+          "name": "paths",
+          "summary": "Explicit source files for context_slice or symbol_expand."
+        },
+        {
+          "name": "task",
+          "summary": "Task identifiers used to rank context_slice results."
+        },
+        {
+          "name": "symbol",
+          "summary": "Symbol name for bounded expansion."
+        },
+        {
+          "name": "maxHops|maxNodes|maxChars",
+          "summary": "AST and response bounds."
+        },
+        {
+          "name": "path",
+          "summary": "Source path for syntax or Git inspection."
+        },
+        {
+          "name": "base|before|after",
+          "summary": "Git base or supplied source pair for ast_diff."
+        },
+        {
+          "name": "action",
+          "values": [
+            "scope",
+            "status",
+            "diff",
+            "log",
+            "show",
+            "branch"
+          ],
+          "summary": "Git inspection operation."
+        }
+      ],
+      "related": [
+        "quality-review",
+        "project-intelligence",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/source-check.ts",
+        "agent/extensions/pi-lens/context-tools.ts",
+        "agent/extensions/git-tools.ts"
+      ],
+      "doc": "docs/GUIDANCE-AND-DIAGNOSTICS.md",
+      "commands": []
+    },
+    {
+      "id": "web-and-media",
+      "group": "web_media",
+      "summary": "Search and read web sources, diagnose pages, inspect browser state and analyze or transform local media through bounded extension tools.",
+      "entrypoints": [
+        "web_search",
+        "source_check",
+        "fetch_content",
+        "get_search_content",
+        "web_research",
+        "web_probe",
+        "browser_session",
+        "wait_for",
+        "render_see",
+        "media_info",
+        "video_frames",
+        "audio_analyze",
+        "media_edit",
+        "music_compose"
+      ],
+      "tools": [
+        "web_search",
+        "source_check",
+        "fetch_content",
+        "get_search_content",
+        "web_research",
+        "web_probe",
+        "browser_session",
+        "wait_for",
+        "render_see",
+        "media_info",
+        "video_frames",
+        "audio_analyze",
+        "media_edit",
+        "music_compose"
+      ],
+      "commands": [
+        "websearch",
+        "search",
+        "curator",
+        "google-account"
+      ],
+      "options": [
+        {
+          "name": "query|queries",
+          "summary": "One or several search angles."
+        },
+        {
+          "name": "provider",
+          "summary": "Configured search route or explicit provider list."
+        },
+        {
+          "name": "fallbackProviders",
+          "summary": "Research routes tried after an empty or failed preceding route."
+        },
+        {
+          "name": "sourceUrls",
+          "summary": "Known HTTP sources for bounded background research."
+        },
+        {
+          "name": "readPages",
+          "summary": "Research source page bound, 0–8."
+        },
+        {
+          "name": "recencyFilter|domainFilter",
+          "summary": "Search narrowing filters."
+        },
+        {
+          "name": "workflow",
+          "values": [
+            "none",
+            "summary-review",
+            "auto-summary"
+          ],
+          "summary": "Search workflow."
+        },
+        {
+          "name": "url|urls",
+          "summary": "Web or local source targets."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "readable",
+            "raw",
+            "answer"
+          ],
+          "summary": "Fetch mode."
+        },
+        {
+          "name": "action",
+          "summary": "Browser or media operation selected by the tool schema."
+        },
+        {
+          "name": "path|times|count|width|height",
+          "summary": "Local media and frame bounds."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "safety-bounds",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-web-access/index.ts",
+        "agent/extensions/pi-web-access/research-jobs.ts",
+        "agent/extensions/pi-web-access/web-probe.ts",
+        "agent/extensions/lib/browser-session.ts",
+        "agent/extensions/render-and-wait.ts",
+        "agent/extensions/media-tools.ts"
+      ],
+      "doc": "docs/ISOLATION-AND-WEB.md"
+    }
+  ],
+  "tools": {
+    "commandRegistrations": [
+      {
+        "name": "bash-routes",
+        "source": "agent/extensions/bash-router.ts",
+        "line": 72
+      },
+      {
+        "name": "bg",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 502
+      },
+      {
+        "name": "bg-clear",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 544
+      },
+      {
+        "name": "bg-tasks",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 536
+      },
+      {
+        "name": "bg-update",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 552
+      },
+      {
+        "name": "catalog-status",
+        "source": "agent/extensions/live-models.ts",
+        "line": 1487
+      },
+      {
+        "name": "claude-cache",
+        "source": "agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts",
+        "line": 2161
+      },
+      {
+        "name": "cost",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 59
+      },
+      {
+        "name": "curator",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 3280
+      },
+      {
+        "name": "effort",
+        "source": "agent/extensions/thinking.ts",
+        "line": 48
+      },
+      {
+        "name": "google-account",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 3322
+      },
+      {
+        "name": "graph",
+        "source": "agent/extensions/project-intelligence.ts",
+        "line": 625
+      },
+      {
+        "name": "harness-backup",
+        "source": "agent/extensions/harness-backup.ts",
+        "line": 37
+      },
+      {
+        "name": "jobs",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 585
+      },
+      {
+        "name": "kill",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 632
+      },
+      {
+        "name": "lens-allow-edit",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113668
+      },
+      {
+        "name": "lens-context-toggle",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113372
+      },
+      {
+        "name": "lens-drift",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113429
+      },
+      {
+        "name": "lens-health",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113464
+      },
+      {
+        "name": "lens-map",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113441
+      },
+      {
+        "name": "lens-perf",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113583
+      },
+      {
+        "name": "lens-tdi",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113397
+      },
+      {
+        "name": "lens-toggle",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113365
+      },
+      {
+        "name": "lens-tools",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113602
+      },
+      {
+        "name": "lens-widget-toggle",
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "line": 113379
+      },
+      {
+        "name": "logs",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 600
+      },
+      {
+        "name": "memory-prime",
+        "source": "agent/extensions/pi-memory/priming.ts",
+        "line": 171
+      },
+      {
+        "name": "metrics",
+        "source": "agent/extensions/lib/session-telemetry.ts",
+        "line": 31
+      },
+      {
+        "name": "obs",
+        "source": "agent/extensions/pi-observations.ts",
+        "line": 325
+      },
+      {
+        "name": "or-provider",
+        "source": "agent/extensions/provider-cmd.ts",
+        "line": 647
+      },
+      {
+        "name": "prompt-workflow",
+        "source": "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts",
+        "line": 254
+      },
+      {
+        "name": "provider",
+        "source": "agent/extensions/provider-cmd.ts",
+        "line": 646
+      },
+      {
+        "name": "provider-health",
+        "source": "agent/extensions/provider-gate.ts",
+        "line": 467
+      },
+      {
+        "name": "reminder",
+        "source": "agent/extensions/reminders.ts",
+        "line": 778
+      },
+      {
+        "name": "run",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 876
+      },
+      {
+        "name": "search",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 3370
+      },
+      {
+        "name": "self",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 282
+      },
+      {
+        "name": "subagent-cost",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 914
+      },
+      {
+        "name": "subagents",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 869
+      },
+      {
+        "name": "subagents-check-profile",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1278
+      },
+      {
+        "name": "subagents-detach",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 992
+      },
+      {
+        "name": "subagents-doctor",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 921
+      },
+      {
+        "name": "subagents-fleet",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 958
+      },
+      {
+        "name": "subagents-generate-profiles",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1240
+      },
+      {
+        "name": "subagents-inspect-rpc",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 928
+      },
+      {
+        "name": "subagents-load-profile",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1153
+      },
+      {
+        "name": "subagents-models",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1123
+      },
+      {
+        "name": "subagents-profiles",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1141
+      },
+      {
+        "name": "subagents-refine",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 945
+      },
+      {
+        "name": "subagents-refresh-provider-models",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1206
+      },
+      {
+        "name": "subagents-steer",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1052
+      },
+      {
+        "name": "subagents-stop",
+        "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
+        "line": 1004
+      },
+      {
+        "name": "subagents-watchdog",
+        "source": "agent/extensions/pi-subagents/src/watchdog/register-main.ts",
+        "line": 403
+      },
+      {
+        "name": "tasks",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 528
+      },
+      {
+        "name": "websearch",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 3019
+      }
+    ],
+    "commandDynamicOwners": [
+      {
+        "source": "agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts",
+        "signals": [
+          "registerCommand() receives a computed name"
+        ],
+        "lines": [
+          364
+        ]
+      },
+      {
+        "source": "agent/extensions/rpiv-todo/todo.ts",
+        "signals": [
+          "registerCommand() receives a computed name"
+        ],
+        "lines": [
+          118
+        ]
+      }
+    ],
+    "nativeCore": [
+      "read",
+      "bash",
+      "edit",
+      "write",
+      "grep",
+      "find",
+      "ls"
+    ],
+    "stableRegistrations": [
+      {
+        "name": "archive_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 26,
+        "kind": "catalog"
+      },
+      {
+        "name": "artifact_check",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 79,
+        "kind": "factory"
+      },
+      {
+        "name": "ast_diff",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "line": 12,
+        "kind": "definition"
+      },
+      {
+        "name": "audio_analyze",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 161,
+        "kind": "factory"
+      },
+      {
+        "name": "bash",
+        "source": "agent/extensions/managed-bash.ts",
+        "line": 556,
+        "kind": "sdk-factory",
+        "evidence": "createBashToolDefinition() supplies the builtin bash definition"
+      },
+      {
+        "name": "bg_kill",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 829,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_logs",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 783,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_run",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 668,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_status",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 752,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_wait",
+        "source": "agent/extensions/pi-subagents/src/runs/background/wait-tool.ts",
+        "line": 36,
+        "kind": "definition"
+      },
+      {
+        "name": "browser_session",
+        "source": "agent/extensions/lib/browser-session.ts",
+        "line": 54,
+        "kind": "literal"
+      },
+      {
+        "name": "bulk_edit",
+        "source": "agent/extensions/bulk-edit.ts",
+        "line": 217,
+        "kind": "literal"
+      },
+      {
+        "name": "checkpoint_read",
+        "source": "agent/extensions/checkpoints.ts",
+        "line": 188,
+        "kind": "literal"
+      },
+      {
+        "name": "contact_supervisor",
+        "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
+        "line": 303,
+        "kind": "definition"
+      },
+      {
+        "name": "context_score",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "context_slice",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "line": 10,
+        "kind": "definition"
+      },
+      {
+        "name": "contract_diff",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 20,
+        "kind": "catalog"
+      },
+      {
+        "name": "coverage_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 18,
+        "kind": "catalog"
+      },
+      {
+        "name": "coverage_select",
+        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
+        "line": 21,
+        "kind": "factory"
+      },
+      {
+        "name": "data_query",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 100,
+        "kind": "factory"
+      },
+      {
+        "name": "decision_frontier",
+        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
+        "line": 20,
+        "kind": "factory"
+      },
+      {
+        "name": "dependency_plan",
+        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
+        "line": 19,
+        "kind": "factory"
+      },
+      {
+        "name": "env_audit",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 22,
+        "kind": "catalog"
+      },
+      {
+        "name": "evidence_cache",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 11,
+        "kind": "literal"
+      },
+      {
+        "name": "fetch_content",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 191,
+        "kind": "configured-default",
+        "configurable": true
+      },
+      {
+        "name": "get_search_content",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 192,
+        "kind": "configured-default",
+        "configurable": true
+      },
+      {
+        "name": "git_info",
+        "source": "agent/extensions/git-tools.ts",
+        "line": 189,
+        "kind": "literal"
+      },
+      {
+        "name": "handoff_capsule",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 10,
+        "kind": "literal"
+      },
+      {
+        "name": "http_request",
+        "source": "agent/extensions/http-tools.ts",
+        "line": 388,
+        "kind": "literal"
+      },
+      {
+        "name": "math_check",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 70,
+        "kind": "factory"
+      },
+      {
+        "name": "media_edit",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 162,
+        "kind": "factory"
+      },
+      {
+        "name": "media_info",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 159,
+        "kind": "factory"
+      },
+      {
+        "name": "memory_forget",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2387,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_read",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2256,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_restore",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2530,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_search",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2629,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_status",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2773,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_write",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 1921,
+        "kind": "literal"
+      },
+      {
+        "name": "music_compose",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 165,
+        "kind": "factory"
+      },
+      {
+        "name": "net_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 24,
+        "kind": "catalog"
+      },
+      {
+        "name": "obs_read",
+        "source": "agent/extensions/pi-observations.ts",
+        "line": 272,
+        "kind": "literal"
+      },
+      {
+        "name": "openapi_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 16,
+        "kind": "catalog"
+      },
+      {
+        "name": "package_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 14,
+        "kind": "catalog"
+      },
+      {
+        "name": "process",
+        "source": "agent/extensions/managed-bash.ts",
+        "line": 584,
+        "kind": "literal"
+      },
+      {
+        "name": "project_intel",
+        "source": "agent/extensions/project-intelligence.ts",
+        "line": 507,
+        "kind": "literal"
+      },
+      {
+        "name": "quality_review",
+        "source": "agent/extensions/lib/quality-review.ts",
+        "line": 237,
+        "kind": "literal"
+      },
+      {
+        "name": "render_see",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 80,
+        "kind": "literal"
+      },
+      {
+        "name": "sandbox_run",
+        "source": "agent/extensions/sandbox.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "scratchpad",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2069,
+        "kind": "literal"
+      },
+      {
+        "name": "session_audit",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 321,
+        "kind": "literal"
+      },
+      {
+        "name": "session_coordinate",
+        "source": "agent/extensions/siblings.ts",
+        "line": 572,
+        "kind": "literal"
+      },
+      {
+        "name": "session_self",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 287,
+        "kind": "literal"
+      },
+      {
+        "name": "skill_review",
+        "source": "agent/extensions/lib/relevant-guidance.ts",
+        "line": 503,
+        "kind": "literal"
+      },
+      {
+        "name": "source_check",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 190,
+        "kind": "configured-default",
+        "configurable": true
+      },
+      {
+        "name": "sqlite_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 12,
+        "kind": "catalog"
+      },
+      {
+        "name": "structured_output",
+        "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
+        "line": 800,
+        "kind": "literal"
+      },
+      {
+        "name": "subagent",
+        "source": "agent/extensions/pi-subagents/src/extension/fanout-child.ts",
+        "line": 179,
+        "kind": "definition"
+      },
+      {
+        "name": "subagent",
+        "source": "agent/extensions/pi-subagents/src/extension/index.ts",
+        "line": 711,
+        "kind": "definition"
+      },
+      {
+        "name": "subagent_supervisor",
+        "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
+        "line": 22,
+        "kind": "constant"
+      },
+      {
+        "name": "symbol_expand",
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "line": 11,
+        "kind": "definition"
+      },
+      {
+        "name": "syntax_check",
+        "source": "agent/extensions/lib/source-check.ts",
+        "line": 173,
+        "kind": "literal"
+      },
+      {
+        "name": "sys_probe",
+        "source": "agent/extensions/sys-probe.ts",
+        "line": 86,
+        "kind": "literal"
+      },
+      {
+        "name": "todo",
+        "source": "agent/extensions/rpiv-todo/tool/types.ts",
+        "line": 11,
+        "kind": "constant"
+      },
+      {
+        "name": "tool_search",
+        "source": "agent/extensions/lib/tool-discovery.ts",
+        "line": 139,
+        "kind": "literal"
+      },
+      {
+        "name": "value_convert",
+        "source": "agent/extensions/lib/small-tools.ts",
+        "line": 96,
+        "kind": "factory"
+      },
+      {
+        "name": "video_frames",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 160,
+        "kind": "factory"
+      },
+      {
+        "name": "wait_for",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 53,
+        "kind": "literal"
+      },
+      {
+        "name": "web_probe",
+        "source": "agent/extensions/pi-web-access/web-probe.ts",
+        "line": 120,
+        "kind": "literal"
+      },
+      {
+        "name": "web_research",
+        "source": "agent/extensions/pi-web-access/research-jobs.ts",
+        "line": 69,
+        "kind": "literal"
+      },
+      {
+        "name": "web_search",
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "line": 189,
+        "kind": "configured-default",
+        "configurable": true
+      },
+      {
+        "name": "workdir_snapshot",
+        "source": "agent/extensions/scoped-snapshots.ts",
+        "line": 12,
+        "kind": "literal"
+      }
+    ],
+    "literalRegistrations": [
+      {
+        "name": "bg_kill",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 829,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_logs",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 783,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_run",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 668,
+        "kind": "literal"
+      },
+      {
+        "name": "bg_status",
+        "source": "agent/extensions/pi-background-tasks/src/extension.ts",
+        "line": 752,
+        "kind": "literal"
+      },
+      {
+        "name": "browser_session",
+        "source": "agent/extensions/lib/browser-session.ts",
+        "line": 54,
+        "kind": "literal"
+      },
+      {
+        "name": "bulk_edit",
+        "source": "agent/extensions/bulk-edit.ts",
+        "line": 217,
+        "kind": "literal"
+      },
+      {
+        "name": "checkpoint_read",
+        "source": "agent/extensions/checkpoints.ts",
+        "line": 188,
+        "kind": "literal"
+      },
+      {
+        "name": "context_score",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "evidence_cache",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 11,
+        "kind": "literal"
+      },
+      {
+        "name": "git_info",
+        "source": "agent/extensions/git-tools.ts",
+        "line": 189,
+        "kind": "literal"
+      },
+      {
+        "name": "handoff_capsule",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 10,
+        "kind": "literal"
+      },
+      {
+        "name": "http_request",
+        "source": "agent/extensions/http-tools.ts",
+        "line": 388,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_forget",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2387,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_read",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2256,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_restore",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2530,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_search",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2629,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_status",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2773,
+        "kind": "literal"
+      },
+      {
+        "name": "memory_write",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 1921,
+        "kind": "literal"
+      },
+      {
+        "name": "obs_read",
+        "source": "agent/extensions/pi-observations.ts",
+        "line": 272,
+        "kind": "literal"
+      },
+      {
+        "name": "process",
+        "source": "agent/extensions/managed-bash.ts",
+        "line": 584,
+        "kind": "literal"
+      },
+      {
+        "name": "project_intel",
+        "source": "agent/extensions/project-intelligence.ts",
+        "line": 507,
+        "kind": "literal"
+      },
+      {
+        "name": "quality_review",
+        "source": "agent/extensions/lib/quality-review.ts",
+        "line": 237,
+        "kind": "literal"
+      },
+      {
+        "name": "render_see",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 80,
+        "kind": "literal"
+      },
+      {
+        "name": "sandbox_run",
+        "source": "agent/extensions/sandbox.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "scratchpad",
+        "source": "agent/extensions/pi-memory/index.ts",
+        "line": 2069,
+        "kind": "literal"
+      },
+      {
+        "name": "session_audit",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 321,
+        "kind": "literal"
+      },
+      {
+        "name": "session_coordinate",
+        "source": "agent/extensions/siblings.ts",
+        "line": 572,
+        "kind": "literal"
+      },
+      {
+        "name": "session_self",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 287,
+        "kind": "literal"
+      },
+      {
+        "name": "skill_review",
+        "source": "agent/extensions/lib/relevant-guidance.ts",
+        "line": 503,
+        "kind": "literal"
+      },
+      {
+        "name": "structured_output",
+        "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
+        "line": 800,
+        "kind": "literal"
+      },
+      {
+        "name": "syntax_check",
+        "source": "agent/extensions/lib/source-check.ts",
+        "line": 173,
+        "kind": "literal"
+      },
+      {
+        "name": "sys_probe",
+        "source": "agent/extensions/sys-probe.ts",
+        "line": 86,
+        "kind": "literal"
+      },
+      {
+        "name": "tool_search",
+        "source": "agent/extensions/lib/tool-discovery.ts",
+        "line": 139,
+        "kind": "literal"
+      },
+      {
+        "name": "wait_for",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 53,
+        "kind": "literal"
+      },
+      {
+        "name": "web_probe",
+        "source": "agent/extensions/pi-web-access/web-probe.ts",
+        "line": 120,
+        "kind": "literal"
+      },
+      {
+        "name": "web_research",
+        "source": "agent/extensions/pi-web-access/research-jobs.ts",
+        "line": 69,
+        "kind": "literal"
+      },
+      {
+        "name": "workdir_snapshot",
+        "source": "agent/extensions/scoped-snapshots.ts",
+        "line": 12,
+        "kind": "literal"
+      }
+    ],
+    "dynamicOwners": [
+      {
+        "source": "agent/extensions/lib/small-tools.ts",
+        "signals": [
+          "registration passes names through a local factory; literal factory call sites are enumerated"
+        ],
+        "lines": [
+          53
+        ],
+        "knownNames": [
+          "artifact_check",
+          "data_query",
+          "math_check",
+          "value_convert"
+        ]
+      },
+      {
+        "source": "agent/extensions/managed-bash.ts",
+        "signals": [
+          "registration receives the SDK createBashToolDefinition() for the active cwd"
+        ],
+        "lines": [
+          559
+        ],
+        "knownNames": [
+          "bash",
+          "process"
+        ]
+      },
+      {
+        "source": "agent/extensions/media-tools.ts",
+        "signals": [
+          "registration passes names through a local factory; literal factory call sites are enumerated"
+        ],
+        "lines": [
+          149
+        ],
+        "knownNames": [
+          "audio_analyze",
+          "media_edit",
+          "media_info",
+          "music_compose",
+          "video_frames"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "signals": [
+          "registration loops over definitions; literal definition names are enumerated"
+        ],
+        "lines": [
+          14
+        ],
+        "knownNames": [
+          "ast_diff",
+          "context_slice",
+          "symbol_expand"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/extension/fanout-child.ts",
+        "signals": [
+          "registration receives the source-owned subagent definition"
+        ],
+        "lines": [
+          192
+        ],
+        "knownNames": [
+          "subagent"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/extension/index.ts",
+        "signals": [
+          "registration receives the source-owned subagent definition"
+        ],
+        "lines": [
+          761
+        ],
+        "knownNames": [
+          "subagent"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/extension/reasoning-aids.ts",
+        "signals": [
+          "registration passes names through a local factory; literal factory call sites are enumerated"
+        ],
+        "lines": [
+          8
+        ],
+        "knownNames": [
+          "coverage_select",
+          "decision_frontier",
+          "dependency_plan"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
+        "signals": [
+          "registration receives source-owned supervisor tool definitions"
+        ],
+        "lines": [
+          311,
+          638
+        ],
+        "knownNames": [
+          "contact_supervisor",
+          "subagent_supervisor"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/background/wait-tool.ts",
+        "signals": [
+          "registration receives the source-owned primaryTool definition"
+        ],
+        "lines": [
+          42
+        ],
+        "knownNames": [
+          "bg_wait"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "signals": [
+          "registration uses configurable toolNames; checked-in defaults are enumerated"
+        ],
+        "lines": [
+          1654,
+          2242,
+          2341,
+          2685
+        ],
+        "knownNames": [
+          "fetch_content",
+          "get_search_content",
+          "source_check",
+          "web_search"
+        ]
+      },
+      {
+        "source": "agent/extensions/rpiv-todo/todo.ts",
+        "signals": [
+          "registration uses the source-owned TOOL_NAME constant"
+        ],
+        "lines": [
+          70
+        ],
+        "knownNames": [
+          "todo"
+        ]
+      },
+      {
+        "source": "agent/extensions/utility-tools.ts",
+        "signals": [
+          "registration loops over the static TOOLS catalog; catalog names are enumerated"
+        ],
+        "lines": [
+          23
+        ],
+        "knownNames": [
+          "archive_probe",
+          "contract_diff",
+          "coverage_probe",
+          "env_audit",
+          "net_probe",
+          "openapi_probe",
+          "package_probe",
+          "sqlite_probe"
+        ]
+      }
+    ],
+    "coverage": {
+      "sourceFiles": 508,
+      "registrationSites": 53,
+      "indirectRegistrationSites": 16,
+      "stableRegistrationRows": 71,
+      "uniqueStableTools": 70,
+      "dynamicOwnerCount": 12,
+      "excludedGeneratedDirectories": [
+        "dist",
+        "build",
+        "generated"
+      ]
+    }
+  },
+  "inventory": {
+    "extensions": [
+      {
+        "path": "agent/bash-router.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/bulk-edit.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/checkpoints.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/continuation-notice.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/filesystem-safety.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/git-tools.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/harness-backup.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/health-log.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/http-tools.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/last-model.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/live-models.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/managed-bash.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/media-tools.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/pi-observations.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/project-intelligence.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/provider-cmd.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/provider-gate.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/reasoning-aids.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/reminders.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/render-and-wait.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/sandbox.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/scoped-snapshots.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-hooks.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-signals.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/siblings.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/sys-probe.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/thinking.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/timeout-guard.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/utility-tools.ts",
+        "exists": false
+      }
+    ],
+    "libraries": [
+      {
+        "path": "agent/artifact-checks.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/authored-review.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/bash-routing.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/browser-session.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/bulk-edit.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/capability-groups.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/catalog-cache-lock.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/checkpoint-files.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/code-guidance-signals.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/code-lexical-mask.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/compact-tool-json.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/context-anchor.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/context-limits.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/continuation-notice.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/cost-evidence.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/data-query.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/guidance-topics-domains.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/guidance-topics-systems.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/guidance-topics.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/harness-activity.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/harness-capabilities.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/harness-orientation.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/health-log.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/image-compaction.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/intent-context.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/local-models.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/media-process.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/metrics-panel.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/mini-preprocessor.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/model-facts.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/music-score.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/numeric-checks.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/output-distiller.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/project-tests.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/quality-review-signals.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/quality-review.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/reasoning-aids.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/relevant-guidance.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/reminders-state.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/render-queue.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/scope-deliberation.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/scoped-snapshots.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/self-mutation-guard.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-audit.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-cost.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-diagnostics.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-hooks.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-metrics.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-report.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-signals.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/session-telemetry.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/skill-discovery-controller.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/skill-discovery.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/skill-relevance.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/skill-routing.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/slop-guidance-signals.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/small-tools.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/smol-extraction.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/smol-preprocessor.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/source-check.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/stable-tool-order.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/stall-core.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/sys-probe.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/tool-discovery.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/utility-client.ts",
+        "exists": false
+      }
+    ],
+    "forks": [
+      {
+        "path": "agent/extensions/pi-background-tasks",
+        "package": "pi-background-tasks",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens",
+        "package": "pi-lens",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory",
+        "package": "pi-memory",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-subagents",
+        "package": "pi-subagents",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-web-access",
+        "package": "pi-web-access",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/rpiv-todo",
+        "package": "@juicesharp/rpiv-todo",
+        "exists": true
+      }
+    ],
+    "supportFiles": [
+      {
+        "path": "agent/extensions/lib/project-intelligence/client.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/continuity.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/discovery-parsers.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/discovery.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/identity.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/privacy.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/query.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/store.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/viewer-assets/app.js",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/viewer-assets/cytoscape.min.js",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/viewer-server.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/viewer.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-intelligence/worker.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/contract.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/coverage.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/env.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/files.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/net.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/openapi.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/package.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/probe.py",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/server.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/shapes.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/worker.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-background-tasks/src/core/completion-wake.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/context-code.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/context-lsp.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/context-tools.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/semantic-radar/fuzzy-identifiers.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/semantic-radar/neural-ranker.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/semantic-radar/rank-features.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-lens/semantic-radar/reuse-ranker-model.json",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/context-evidence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/context-salience.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/context-tools.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/mutation.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/priming.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-memory/project-identity.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-subagents/src/runs/shared/common-task.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-subagents/src/runs/shared/file-verification.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-subagents/src/shared/progress-evidence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/rpiv-todo/state/plan.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/auto-update.sh",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/browser-diagnostics.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/browser-session-lease.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/browser-session-runner.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/atomic-edit-preflight-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/automatic-compaction-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/autonomous-recovery-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/harness-load-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/hook-lifecycle-integrity-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/reasoning-aids-loader-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/retry-lifecycle-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/session-recovery-guidance-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/skill-pack-routing-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/summary-recovery-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/tool-integrity-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/compatibility/utility-mcp-loader-test.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/core-update.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/harness-readonly-exec.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/lib/core-compatibility.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/lib/paragraph_selector.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/mini-preprocessor.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/pi-launch.sh",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/render-capture.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/render-page-state.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/repair-harness-hardlinks.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/sandbox-runner.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/wait-condition.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/workspace-facts.mjs",
+        "exists": true
+      }
+    ],
+    "patchModules": [
+      {
+        "path": "agent/scripts/patches/autonomous-recovery.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/background-task-signal-status.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/background-task-terminal-publish.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/cache-hit-footer.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/cache-usage-accuracy.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/calculate-cost.js",
+        "kind": "js"
+      },
+      {
+        "path": "agent/scripts/patches/catalog-refresh-credential-gate.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/compaction-early.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/context-settings.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/export-redaction.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/hook-metrics-wrapper.js",
+        "kind": "js"
+      },
+      {
+        "path": "agent/scripts/patches/hook-metrics.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/local-context-allocation.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/model-selector-custom.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/mutation-path-boundary.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/native-read-mutation-queue.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/notify-broker-delivery.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/openai-service-pricing.js",
+        "kind": "js"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-atomic-preflight.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-autofix-debounce.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-compact-reports.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-diagnostic-scope.md",
+        "kind": "md"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-diagnostic-scope.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-feedback-notices.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-fuzzy-identifiers.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-radar-state.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-read-guard.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-semantic-dry.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-tool-result-profile.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/pi-lens-workspace-facts.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/post-update-repair.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/preserve-terminal-scrollback.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/provider-price-accuracy.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/request-body-gate.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/retry-429-policy.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/session-cost-display.js",
+        "kind": "js"
+      },
+      {
+        "path": "agent/scripts/patches/stream-idle.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/summary-effort.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/thinking-reflow.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/token-budget.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/tool-validation.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/truncation-context.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/tui-branding.mjs",
+        "kind": "mjs"
+      }
+    ],
+    "foldedMarkers": [
+      {
+        "file": "extensions/pi-lens/dist/index.js",
+        "marker": "PI_LENS_MARK_DEDUP",
+        "label": "pi-lens exact-repeat mark dedup (bundle; per-module copies deleted in fork trim)"
+      },
+      {
+        "file": "extensions/pi-memory/index.ts",
+        "marker": "PROJECT_SCOPE",
+        "label": "pi-memory project scope"
+      },
+      {
+        "file": "extensions/pi-subagents/src/runs/background/subagent-runner.ts",
+        "marker": "PI_SUBAGENT_PRESSURE",
+        "label": "subagent background runner inference gate"
+      },
+      {
+        "file": "extensions/pi-subagents/src/runs/foreground/execution.ts",
+        "marker": "PI_SUBAGENT_PRESSURE",
+        "label": "subagent foreground inference gate"
+      }
+    ],
+    "vendoredDependencies": [
+      "@ast-grep/cli",
+      "@ast-grep/napi",
+      "@mozilla/readability",
+      "acorn",
+      "defuddle",
+      "jiti",
+      "js-yaml",
+      "linkedom",
+      "minimatch",
+      "p-limit",
+      "pidusage",
+      "playwright",
+      "promise.try",
+      "turndown",
+      "typebox",
+      "undici",
+      "unpdf",
+      "vscode-jsonrpc",
+      "web-tree-sitter",
+      "yaml"
+    ],
+    "npmPackages": [],
+    "retired": [
+      {
+        "name": "*-auto-models.ts",
+        "retired": "2026-08-31",
+        "why": "the 7 provider auto-catalog extensions (openrouter, baseten, cerebras, friendli, lmstudio, orcarouter, together) — superseded by native pi-ai catalogs + static models.json; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/live-models.ts (single live-catalog extension for openrouter/orcarouter/together/friendli — native catalog lacks orcarouter entirely; live lists merged over the store)"
+      },
+      {
+        "name": "a-speech-fix.ts",
+        "retired": "2026-08-31",
+        "why": "speech-to-text misdecoding rewriter (input-hook mapping/fuzzy corrector) removed at user direction; its config speech-fix.json deleted with it; both moved to backups/retired-extensions/"
+      },
+      {
+        "name": "auto-apply-extensions.sh",
+        "retired": "2026-09-01",
+        "why": "sole consumer of the PI_AUTOUPDATE banner trigger; removed with it (auto-update.sh also no longer runs pi update --extensions)"
+      },
+      {
+        "name": "auto-recover.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "auto-update-extensions.mjs",
+        "retired": "2026-09-01",
+        "why": "dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/"
+      },
+      {
+        "name": "capabilities.ts",
+        "retired": "2026-09-02",
+        "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
+      },
+      {
+        "name": "context-composition.json",
+        "retired": "2026-08-31",
+        "why": "orphan of deleted pi-context-router; no writer/reader since 2026-08-12"
+      },
+      {
+        "name": "context-mode",
+        "retired": "2026-09-01",
+        "why": "user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate"
+      },
+      {
+        "name": "DOCTRINE.md",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "governor-core.ts",
+        "retired": "2026-09-02",
+        "why": "user direction: governor policy core removed with governor.ts (see that tombstone) — no broker remains; each extension owns its own injection gating. Do not recreate"
+      },
+      {
+        "name": "governor.ts",
+        "retired": "2026-09-02",
+        "why": "user direction: injection-budget broker removed permanently (no backup) — governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate"
+      },
+      {
+        "name": "greybeard",
+        "retired": "2026-09-01",
+        "why": "user direction: Greybeard standards engine removed entirely — fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate"
+      },
+      {
+        "name": "harness-config.json",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "long-prompt-offload.ts",
+        "retired": "2026-08-31",
+        "why": "long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted"
+      },
+      {
+        "name": "loop.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "micro-agents.ts",
+        "retired": "2026-09-02",
+        "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate"
+      },
+      {
+        "name": "minify-system-prompt.mjs",
+        "retired": "2026-09-02",
+        "why": "user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate"
+      },
+      {
+        "name": "openrouter-provider.ts",
+        "retired": "2026-08-31",
+        "why": "provider routing redundant with native catalogs + suffix selectors; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/provider-cmd.ts (/provider + /or-provider slash command: interactive pick, order/only/sort/list/status/clear/json, persists providers.openrouter.modelOverrides[].compat.openRouterRouting)"
+      },
+      {
+        "name": "pi-agent-extensions.ts",
+        "retired": "2026-08-12",
+        "why": "todo duty moved to the rpiv-todo fork"
+      },
+      {
+        "name": "pi-cache-optimizer.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-capabilities.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-context-router.ts",
+        "retired": "2026-08-12",
+        "why": "task classifier (doctrine/memory/goal/todo/gov injection, context budgets); 2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-evaluator.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-fff",
+        "retired": "2026-09-01",
+        "why": "user direction: fffind/ffgrep (fuzzy find/grep via @ff-labs/fff-node, native libfff_c.so through ffi-rs) removed ENTIRELY — fork source DELETED with NO backup retained (user: no rollback ability wanted), FFF_DEFER session_start-defer folded marker removed, vendored node_modules (@ff-labs/fff-node + ffi-rs + @yuuang/ffi-rs-linux-x64-gnu native platform binding) deleted with it, ~/.pi/agent/fff/ runtime state (frecency/history index) deleted, harness-backup vendored-deps machinery removed. Do not recreate"
+      },
+      {
+        "name": "pi-goal",
+        "retired": "2026-08-31",
+        "why": "goal-tracker extension removed; todo duty is the rpiv-todo fork. Not to be confused with pi-goals.ts (older, also deleted 2026-08-12)"
+      },
+      {
+        "name": "pi-goals.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate (distinct from pi-goal)"
+      },
+      {
+        "name": "pi-hermes-memory.ts",
+        "retired": "2026-08-12",
+        "why": "superseded by the pi-memory fork"
+      },
+      {
+        "name": "pi-mcp-adapter.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-orchestrator.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-subagents.ts",
+        "retired": "2026-08-12",
+        "why": "extension file superseded by npm:pi-subagents (the package name stays live)"
+      },
+      {
+        "name": "pi-tinyfish.ts",
+        "retired": "2026-08-31",
+        "why": "web_search/web_fetch overlap with npm:pi-web-access; moved to backups/retired-extensions/"
+      },
+      {
+        "name": "pi-ux.ts",
+        "retired": "2026-09-01",
+        "why": "user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate"
+      },
+      {
+        "name": "ponytail",
+        "retired": "2026-08-31",
+        "why": "pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename \"pilot\" deliberately NOT tombstoned — too generic a token for word-boundary matching.)"
+      },
+      {
+        "name": "pressure-journal.mjs",
+        "retired": "2026-09-01",
+        "why": "patch module folded into retry-429-policy.mjs (single owner per file: both edited pi-ai retry.js/retryAssistantCall and that pairing broke once); moved to backups/retired-patches/"
+      },
+      {
+        "name": "repo-recon.json",
+        "retired": "2026-08-31",
+        "why": "orphan of deleted pi-context-router; backup backups/repo-recon.json.20260831.bak"
+      },
+      {
+        "name": "session-bridge.ts",
+        "retired": "2026-08-31",
+        "why": "cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations"
+      },
+      {
+        "name": "session-reviewer.ts",
+        "retired": "2026-08-31",
+        "why": "review channel superseded by checkpoints; references scrubbed"
+      },
+      {
+        "name": "subagent-tool-description.md",
+        "retired": "2026-09-02",
+        "why": "runtime-orphaned custom tool-description file (its toolDescriptionMode: 'custom' loader retired with the tool-desc-overrides seam 2026-09-02). Delegation posture folded into the pi-subagents fork's DEFAULT_SUBAGENT_TOOL_DESCRIPTION + SUBAGENT_TOOL_PROMPT_GUIDELINES (src/extension/tool-description.ts), which now own the subagent tool prompt; file moved to backups/retired-extensions/. Do not recreate"
+      },
+      {
+        "name": "telemetry.json",
+        "retired": "2026-08-31",
+        "why": "orphan of deleted pi-context-router; nothing wrote or read it since 2026-08-12"
+      },
+      {
+        "name": "thinking-control.ts",
+        "retired": "2026-08-31",
+        "why": "full /effort alias + dynamic thinking control superseded by minimal extensions/thinking.ts (2026-08-31, same session); pi-native /thinking stays authoritative for native level-setting"
+      },
+      {
+        "name": "tool-desc-overrides.mjs",
+        "retired": "2026-09-02",
+        "why": "user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) — patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate"
+      },
+      {
+        "name": "tool-loader.ts",
+        "retired": "2026-09-01",
+        "why": "user direction: default pi tool exposure restored. Its reason to exist was the oversized tool/skill surface of context-mode + greybeard + pi-ux, all retired 2026-09-01; gating 6 groups (files/intel/web/memory/delegate/bg) behind `load_tools` no longer pays for itself. Removed: load_tools + skills catalogue tools, session_start group deactivation, turn_end settle re-apply, drift warning, JIT skills/pi-docs prompt strips, deferred-skill path tracking. Consequence (accepted): every registered tool schema ships every turn (~86KB at 15 extensions) and the skills/pi-docs prompt blocks are no longer stripped. File moved to backups/retired-extensions/tool-loader.ts. Do not recreate"
+      },
+      {
+        "name": "ultimate-pi.ts",
+        "retired": "2026-08-12",
+        "why": "2026-08-12 refactor — do not recreate"
+      }
+    ],
+    "serviceOwners": [
+      {
+        "source": "agent/extensions/http-tools.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/project-intelligence/client.mjs",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-client.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/contract.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/coverage.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/env.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/files.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/net.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/openapi.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/package.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/server.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/shapes.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/worker.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-background-tasks/src/core/registry.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-lens/context-tools.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-lens/dist/index.js",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/agents/agent-management.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/agents/agent-serializer.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/agents/agents.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/agents/runtime-agent-registry.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/api/preflight.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/inspectors/herdr/client.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/background/async-execution.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/background/async-resume.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/background/run-status.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/foreground/execution.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/acceptance.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/claude-code-adapter.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/codex-exec-adapter.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/completion-guard.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/cursor-agent-adapter.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/dynamic-fanout.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/external-cli-contract.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/external-cli-runner.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/mcp-config-sources.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-allowlist.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/mcp-direct-tool-grant.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/model-research.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/parallel-utils.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/pi-args.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/single-output.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/skill-routing.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/runs/shared/tool-availability.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/shared/launch-contract.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/shared/types.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/slash/delegation-adapters.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/slash/subagents-admin.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/project-intelligence.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/utility-tools.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      }
+    ],
+    "skills": [
+      {
+        "name": "accessible-interaction-design",
+        "path": "agent/skills/accessible-interaction-design/SKILL.md"
+      },
+      {
+        "name": "ai-engineering",
+        "path": "agent/skills/ai-engineering/SKILL.md"
+      },
+      {
+        "name": "algorithm-design",
+        "path": "agent/skills/algorithm-design/SKILL.md"
+      },
+      {
+        "name": "animation-libraries",
+        "path": "agent/skills/animation-libraries/SKILL.md"
+      },
+      {
+        "name": "anti-ai-slop",
+        "path": "agent/skills/anti-ai-slop/SKILL.md"
+      },
+      {
+        "name": "api-design",
+        "path": "agent/skills/api-design/SKILL.md"
+      },
+      {
+        "name": "audio-processing",
+        "path": "agent/skills/audio-processing/SKILL.md"
+      },
+      {
+        "name": "behavioral-contracts",
+        "path": "agent/skills/behavioral-contracts/SKILL.md"
+      },
+      {
+        "name": "blender-production",
+        "path": "agent/skills/blender-production/SKILL.md"
+      },
+      {
+        "name": "browser-animation-engineering",
+        "path": "agent/skills/browser-animation-engineering/SKILL.md"
+      },
+      {
+        "name": "browser-automation",
+        "path": "agent/skills/browser-automation/SKILL.md"
+      },
+      {
+        "name": "browser-javascript-engineering",
+        "path": "agent/skills/browser-javascript-engineering/SKILL.md"
+      },
+      {
+        "name": "browser-ml",
+        "path": "agent/skills/browser-ml/SKILL.md"
+      },
+      {
+        "name": "browser-task-recovery",
+        "path": "agent/skills/browser-task-recovery/SKILL.md"
+      },
+      {
+        "name": "c-systems-engineering",
+        "path": "agent/skills/c-systems-engineering/SKILL.md"
+      },
+      {
+        "name": "cad-engineering",
+        "path": "agent/skills/cad-engineering/SKILL.md"
+      },
+      {
+        "name": "classical-ml-modeling",
+        "path": "agent/skills/classical-ml-modeling/SKILL.md"
+      },
+      {
+        "name": "cloudflare-platform-engineering",
+        "path": "agent/skills/cloudflare-platform-engineering/SKILL.md"
+      },
+      {
+        "name": "coding-practices",
+        "path": "agent/skills/coding-practices/SKILL.md"
+      },
+      {
+        "name": "color-theory",
+        "path": "agent/skills/color-theory/SKILL.md"
+      },
+      {
+        "name": "colors",
+        "path": "agent/skills/colors/SKILL.md"
+      },
+      {
+        "name": "community-promotion",
+        "path": "agent/skills/community-promotion/SKILL.md"
+      },
+      {
+        "name": "compiler-construction",
+        "path": "agent/skills/compiler-construction/SKILL.md"
+      },
+      {
+        "name": "component-libraries",
+        "path": "agent/skills/component-libraries/SKILL.md"
+      },
+      {
+        "name": "concurrency-memory-models",
+        "path": "agent/skills/concurrency-memory-models/SKILL.md"
+      },
+      {
+        "name": "copywriting",
+        "path": "agent/skills/copywriting/SKILL.md"
+      },
+      {
+        "name": "cpp-performance-engineering",
+        "path": "agent/skills/cpp-performance-engineering/SKILL.md"
+      },
+      {
+        "name": "css-battle",
+        "path": "agent/skills/css-battle/SKILL.md"
+      },
+      {
+        "name": "custom-svg",
+        "path": "agent/skills/custom-svg/SKILL.md"
+      },
+      {
+        "name": "data-lineage-validation",
+        "path": "agent/skills/data-lineage-validation/SKILL.md"
+      },
+      {
+        "name": "data-viz",
+        "path": "agent/skills/data-viz/SKILL.md"
+      },
+      {
+        "name": "databases",
+        "path": "agent/skills/databases/SKILL.md"
+      },
+      {
+        "name": "debugging",
+        "path": "agent/skills/debugging/SKILL.md"
+      },
+      {
+        "name": "design-systems",
+        "path": "agent/skills/design-systems/SKILL.md"
+      },
+      {
+        "name": "desktop-app-dev",
+        "path": "agent/skills/desktop-app-dev/SKILL.md"
+      },
+      {
+        "name": "desktop-ui",
+        "path": "agent/skills/desktop-ui/SKILL.md"
+      },
+      {
+        "name": "distributed-systems",
+        "path": "agent/skills/distributed-systems/SKILL.md"
+      },
+      {
+        "name": "dotnet-linux-engineering",
+        "path": "agent/skills/dotnet-linux-engineering/SKILL.md"
+      },
+      {
+        "name": "edge-model-deployment",
+        "path": "agent/skills/edge-model-deployment/SKILL.md"
+      },
+      {
+        "name": "evidence-first-engineering",
+        "path": "agent/skills/evidence-first-engineering/SKILL.md"
+      },
+      {
+        "name": "financial-statement-analysis",
+        "path": "agent/skills/financial-statement-analysis/SKILL.md"
+      },
+      {
+        "name": "fonts",
+        "path": "agent/skills/fonts/SKILL.md"
+      },
+      {
+        "name": "formal-model-checking",
+        "path": "agent/skills/formal-model-checking/SKILL.md"
+      },
+      {
+        "name": "fortran-scientific-computing",
+        "path": "agent/skills/fortran-scientific-computing/SKILL.md"
+      },
+      {
+        "name": "frontend-design",
+        "path": "agent/skills/frontend-design/SKILL.md"
+      },
+      {
+        "name": "frontend-js",
+        "path": "agent/skills/frontend-js/SKILL.md"
+      },
+      {
+        "name": "git-github",
+        "path": "agent/skills/git-github/SKILL.md"
+      },
+      {
+        "name": "github-actions-workflows",
+        "path": "agent/skills/github-actions-workflows/SKILL.md"
+      },
+      {
+        "name": "github-identity-integration",
+        "path": "agent/skills/github-identity-integration/SKILL.md"
+      },
+      {
+        "name": "github-readme-authoring",
+        "path": "agent/skills/github-readme-authoring/SKILL.md"
+      },
+      {
+        "name": "github-release-notes",
+        "path": "agent/skills/github-release-notes/SKILL.md"
+      },
+      {
+        "name": "github-repo-presentation",
+        "path": "agent/skills/github-repo-presentation/SKILL.md"
+      },
+      {
+        "name": "go-service-engineering",
+        "path": "agent/skills/go-service-engineering/SKILL.md"
+      },
+      {
+        "name": "google-colab-training",
+        "path": "agent/skills/google-colab-training/SKILL.md"
+      },
+      {
+        "name": "google-identity-integration",
+        "path": "agent/skills/google-identity-integration/SKILL.md"
+      },
+      {
+        "name": "harness-self-maintenance",
+        "path": "agent/skills/harness-self-maintenance/SKILL.md"
+      },
+      {
+        "name": "hybrid-ml-systems",
+        "path": "agent/skills/hybrid-ml-systems/SKILL.md"
+      },
+      {
+        "name": "image-analysis",
+        "path": "agent/skills/image-analysis/SKILL.md"
+      },
+      {
+        "name": "incremental-computation",
+        "path": "agent/skills/incremental-computation/SKILL.md"
+      },
+      {
+        "name": "industrial-automation-control",
+        "path": "agent/skills/industrial-automation-control/SKILL.md"
+      },
+      {
+        "name": "industrial-device-protocols",
+        "path": "agent/skills/industrial-device-protocols/SKILL.md"
+      },
+      {
+        "name": "inference-serving",
+        "path": "agent/skills/inference-serving/SKILL.md"
+      },
+      {
+        "name": "investment-risk-analysis",
+        "path": "agent/skills/investment-risk-analysis/SKILL.md"
+      },
+      {
+        "name": "java-platform-engineering",
+        "path": "agent/skills/java-platform-engineering/SKILL.md"
+      },
+      {
+        "name": "libreoffice-automation",
+        "path": "agent/skills/libreoffice-automation/SKILL.md"
+      },
+      {
+        "name": "linux",
+        "path": "agent/skills/linux/SKILL.md"
+      },
+      {
+        "name": "linux-host-defense",
+        "path": "agent/skills/linux-host-defense/SKILL.md"
+      },
+      {
+        "name": "llm-dataset-preparation",
+        "path": "agent/skills/llm-dataset-preparation/SKILL.md"
+      },
+      {
+        "name": "llm-fine-tuning",
+        "path": "agent/skills/llm-fine-tuning/SKILL.md"
+      },
+      {
+        "name": "llm-systems-engineering",
+        "path": "agent/skills/llm-systems-engineering/SKILL.md"
+      },
+      {
+        "name": "local-network-analysis",
+        "path": "agent/skills/local-network-analysis/SKILL.md"
+      },
+      {
+        "name": "media-in-web",
+        "path": "agent/skills/media-in-web/SKILL.md"
+      },
+      {
+        "name": "memory-resource-ownership",
+        "path": "agent/skills/memory-resource-ownership/SKILL.md"
+      },
+      {
+        "name": "ml-engineering",
+        "path": "agent/skills/ml-engineering/SKILL.md"
+      },
+      {
+        "name": "model-evaluation",
+        "path": "agent/skills/model-evaluation/SKILL.md"
+      },
+      {
+        "name": "motion",
+        "path": "agent/skills/motion/SKILL.md"
+      },
+      {
+        "name": "motion-graphics-production",
+        "path": "agent/skills/motion-graphics-production/SKILL.md"
+      },
+      {
+        "name": "music-composition",
+        "path": "agent/skills/music-composition/SKILL.md"
+      },
+      {
+        "name": "natural-editorial-writing",
+        "path": "agent/skills/natural-editorial-writing/SKILL.md"
+      },
+      {
+        "name": "network-iso-compliance",
+        "path": "agent/skills/network-iso-compliance/SKILL.md"
+      },
+      {
+        "name": "network-traffic-analysis",
+        "path": "agent/skills/network-traffic-analysis/SKILL.md"
+      },
+      {
+        "name": "nlp-system-design",
+        "path": "agent/skills/nlp-system-design/SKILL.md"
+      },
+      {
+        "name": "node-runtime-engineering",
+        "path": "agent/skills/node-runtime-engineering/SKILL.md"
+      },
+      {
+        "name": "numerical-computing",
+        "path": "agent/skills/numerical-computing/SKILL.md"
+      },
+      {
+        "name": "optimization-modeling",
+        "path": "agent/skills/optimization-modeling/SKILL.md"
+      },
+      {
+        "name": "organic-growth-engineering",
+        "path": "agent/skills/organic-growth-engineering/SKILL.md"
+      },
+      {
+        "name": "performance-experiments",
+        "path": "agent/skills/performance-experiments/SKILL.md"
+      },
+      {
+        "name": "php-application-engineering",
+        "path": "agent/skills/php-application-engineering/SKILL.md"
+      },
+      {
+        "name": "physical-animation-systems",
+        "path": "agent/skills/physical-animation-systems/SKILL.md"
+      },
+      {
+        "name": "physics-modeling",
+        "path": "agent/skills/physics-modeling/SKILL.md"
+      },
+      {
+        "name": "ponytail",
+        "path": "agent/skills/ponytail/SKILL.md"
+      },
+      {
+        "name": "presentation-authoring",
+        "path": "agent/skills/presentation-authoring/SKILL.md"
+      },
+      {
+        "name": "procedural-animation-math",
+        "path": "agent/skills/procedural-animation-math/SKILL.md"
+      },
+      {
+        "name": "product-ui-verification",
+        "path": "agent/skills/product-ui-verification/SKILL.md"
+      },
+      {
+        "name": "property-based-testing",
+        "path": "agent/skills/property-based-testing/SKILL.md"
+      },
+      {
+        "name": "proxy-operations",
+        "path": "agent/skills/proxy-operations/SKILL.md"
+      },
+      {
+        "name": "python-software-engineering",
+        "path": "agent/skills/python-software-engineering/SKILL.md"
+      },
+      {
+        "name": "rag-engineering",
+        "path": "agent/skills/rag-engineering/SKILL.md"
+      },
+      {
+        "name": "reinforcement-learning",
+        "path": "agent/skills/reinforcement-learning/SKILL.md"
+      },
+      {
+        "name": "research",
+        "path": "agent/skills/research/SKILL.md"
+      },
+      {
+        "name": "resourceful-market-strategy",
+        "path": "agent/skills/resourceful-market-strategy/SKILL.md"
+      },
+      {
+        "name": "rl-decision-systems",
+        "path": "agent/skills/rl-decision-systems/SKILL.md"
+      },
+      {
+        "name": "rust-systems-engineering",
+        "path": "agent/skills/rust-systems-engineering/SKILL.md"
+      },
+      {
+        "name": "scientific-paper-research",
+        "path": "agent/skills/scientific-paper-research/SKILL.md"
+      },
+      {
+        "name": "search-discoverability",
+        "path": "agent/skills/search-discoverability/SKILL.md"
+      },
+      {
+        "name": "simulation-engineering",
+        "path": "agent/skills/simulation-engineering/SKILL.md"
+      },
+      {
+        "name": "small-model-engineering",
+        "path": "agent/skills/small-model-engineering/SKILL.md"
+      },
+      {
+        "name": "software-engineering-wisdom",
+        "path": "agent/skills/software-engineering-wisdom/SKILL.md"
+      },
+      {
+        "name": "sound-analysis",
+        "path": "agent/skills/sound-analysis/SKILL.md"
+      },
+      {
+        "name": "spreadsheet-authoring",
+        "path": "agent/skills/spreadsheet-authoring/SKILL.md"
+      },
+      {
+        "name": "sql-query-engineering",
+        "path": "agent/skills/sql-query-engineering/SKILL.md"
+      },
+      {
+        "name": "statistical-experiments",
+        "path": "agent/skills/statistical-experiments/SKILL.md"
+      },
+      {
+        "name": "storytelling",
+        "path": "agent/skills/storytelling/SKILL.md"
+      },
+      {
+        "name": "svg-assessment",
+        "path": "agent/skills/svg-assessment/SKILL.md"
+      },
+      {
+        "name": "svg-motion-engineering",
+        "path": "agent/skills/svg-motion-engineering/SKILL.md"
+      },
+      {
+        "name": "systems-security",
+        "path": "agent/skills/systems-security/SKILL.md"
+      },
+      {
+        "name": "terminal-video-editing",
+        "path": "agent/skills/terminal-video-editing/SKILL.md"
+      },
+      {
+        "name": "threejs",
+        "path": "agent/skills/threejs/SKILL.md"
+      },
+      {
+        "name": "threejs-animation-engineering",
+        "path": "agent/skills/threejs-animation-engineering/SKILL.md"
+      },
+      {
+        "name": "type-driven-design",
+        "path": "agent/skills/type-driven-design/SKILL.md"
+      },
+      {
+        "name": "typescript-contract-engineering",
+        "path": "agent/skills/typescript-contract-engineering/SKILL.md"
+      },
+      {
+        "name": "ubuntu-operations",
+        "path": "agent/skills/ubuntu-operations/SKILL.md"
+      },
+      {
+        "name": "ui-antipattern-review",
+        "path": "agent/skills/ui-antipattern-review/SKILL.md"
+      },
+      {
+        "name": "ui-ux-principles",
+        "path": "agent/skills/ui-ux-principles/SKILL.md"
+      },
+      {
+        "name": "vanilla-web-libs",
+        "path": "agent/skills/vanilla-web-libs/SKILL.md"
+      },
+      {
+        "name": "video-analysis",
+        "path": "agent/skills/video-analysis/SKILL.md"
+      },
+      {
+        "name": "visual-composition",
+        "path": "agent/skills/visual-composition/SKILL.md"
+      },
+      {
+        "name": "wasm-animation-pipelines",
+        "path": "agent/skills/wasm-animation-pipelines/SKILL.md"
+      },
+      {
+        "name": "wasm-browsers",
+        "path": "agent/skills/wasm-browsers/SKILL.md"
+      },
+      {
+        "name": "wasm-c-cpp",
+        "path": "agent/skills/wasm-c-cpp/SKILL.md"
+      },
+      {
+        "name": "wasm-python",
+        "path": "agent/skills/wasm-python/SKILL.md"
+      },
+      {
+        "name": "wasm-runtime-engineering",
+        "path": "agent/skills/wasm-runtime-engineering/SKILL.md"
+      },
+      {
+        "name": "wasm-rust",
+        "path": "agent/skills/wasm-rust/SKILL.md"
+      },
+      {
+        "name": "web-component-patterns",
+        "path": "agent/skills/web-component-patterns/SKILL.md"
+      },
+      {
+        "name": "web-effects",
+        "path": "agent/skills/web-effects/SKILL.md"
+      },
+      {
+        "name": "web-patterns",
+        "path": "agent/skills/web-patterns/SKILL.md"
+      },
+      {
+        "name": "web-performance",
+        "path": "agent/skills/web-performance/SKILL.md"
+      },
+      {
+        "name": "web-security",
+        "path": "agent/skills/web-security/SKILL.md"
+      },
+      {
+        "name": "web-ui-stack-selection",
+        "path": "agent/skills/web-ui-stack-selection/SKILL.md"
+      },
+      {
+        "name": "wireless-signal-analysis",
+        "path": "agent/skills/wireless-signal-analysis/SKILL.md"
+      },
+      {
+        "name": "word-document-authoring",
+        "path": "agent/skills/word-document-authoring/SKILL.md"
+      },
+      {
+        "name": "x86-assembly-engineering",
+        "path": "agent/skills/x86-assembly-engineering/SKILL.md"
+      }
+    ],
+    "documentation": [
+      {
+        "name": "ACTION-PLANS.md",
+        "path": "docs/ACTION-PLANS.md"
+      },
+      {
+        "name": "CHANGE-SCOPE.md",
+        "path": "docs/CHANGE-SCOPE.md"
+      },
+      {
+        "name": "CORE-UPDATES.md",
+        "path": "docs/CORE-UPDATES.md"
+      },
+      {
+        "name": "COST-ACCOUNTING.md",
+        "path": "docs/COST-ACCOUNTING.md"
+      },
+      {
+        "name": "GUIDANCE-AND-DIAGNOSTICS.md",
+        "path": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
+      },
+      {
+        "name": "INSTALL.md",
+        "path": "docs/INSTALL.md"
+      },
+      {
+        "name": "INTENT.md",
+        "path": "docs/INTENT.md"
+      },
+      {
+        "name": "ISOLATION-AND-WEB.md",
+        "path": "docs/ISOLATION-AND-WEB.md"
+      },
+      {
+        "name": "LOCAL-INTELLIGENCE.md",
+        "path": "docs/LOCAL-INTELLIGENCE.md"
+      },
+      {
+        "name": "MODEL-ROUTING.md",
+        "path": "docs/MODEL-ROUTING.md"
+      },
+      {
+        "name": "ORCHESTRATION-EVIDENCE.md",
+        "path": "docs/ORCHESTRATION-EVIDENCE.md"
+      },
+      {
+        "name": "PLATFORMS.md",
+        "path": "docs/PLATFORMS.md"
+      },
+      {
+        "name": "PROJECT-INTELLIGENCE.md",
+        "path": "docs/PROJECT-INTELLIGENCE.md"
+      },
+      {
+        "name": "PUBLISHING.md",
+        "path": "docs/PUBLISHING.md"
+      },
+      {
+        "name": "RECOVERY-AND-TESTING.md",
+        "path": "docs/RECOVERY-AND-TESTING.md"
+      },
+      {
+        "name": "SANDBOXES.md",
+        "path": "docs/SANDBOXES.md"
+      },
+      {
+        "name": "SCREENSHOTS.md",
+        "path": "docs/SCREENSHOTS.md"
+      },
+      {
+        "name": "SECURITY.md",
+        "path": "docs/SECURITY.md"
+      },
+      {
+        "name": "SESSION-METRICS.md",
+        "path": "docs/SESSION-METRICS.md"
+      },
+      {
+        "name": "SKILLS-AND-CHECKS.md",
+        "path": "docs/SKILLS-AND-CHECKS.md"
+      },
+      {
+        "name": "SUBAGENT-CONTRACTS.md",
+        "path": "docs/SUBAGENT-CONTRACTS.md"
+      }
+    ]
+  }
+}

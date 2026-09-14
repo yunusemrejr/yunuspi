@@ -55,6 +55,16 @@ test('clean fixture exports without copying private configuration', () => {
     assert.ok(!fs.existsSync(path.join(f.output, 'agent/auth.json')));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
+test('a registered capability catalog cannot publish without its inventory generator', () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(path.join(f.source,'extensions/manifest.json'),JSON.stringify({supportFiles:[],lib:['harness-capabilities.ts']}));
+    const result=f.run();
+    assert.notEqual(result.status,0);
+    assert.match(result.stderr,/Capability inventory generator missing/);
+    assert.equal(fs.existsSync(f.output),false);
+  } finally { fs.rmSync(f.dir,{recursive:true,force:true}); }
+});
 test('exporter refuses a hardcoded home path in executable source but sanitizes docs', () => {
   const f = fixture();
   try {

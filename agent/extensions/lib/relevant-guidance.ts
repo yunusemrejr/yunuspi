@@ -432,7 +432,7 @@ export function createRelevantGuidance(pi: any) {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
     const group = typeof requestedGroup === 'string' ? requestedGroup.trim().slice(0, 64) : '';
     const limit = Number.isInteger(requestedLimit) ? Math.min(8, Math.max(1, Number(requestedLimit))) : 3;
-    const offset = Number.isInteger(requestedOffset) ? Math.min(1000, Math.max(0, Number(requestedOffset))) : 0;
+    const offset = Number.isSafeInteger(requestedOffset) ? Math.max(0, Number(requestedOffset)) : 0;
     if (!skills.length) return {results:[], offset, limit, remaining:0};
     const canonicalName = (value: string) => value.toLowerCase().trim().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
     const terms = [...new Set(text.toLowerCase().match(/[a-z0-9+#.-]{2,64}/g) ?? [])];
@@ -466,8 +466,8 @@ export function createRelevantGuidance(pi: any) {
     const selected = unique.slice(offset, offset + limit);
     return {
       results: selected.map((skill) => ({
-        name: skill.name.slice(0, 100),
-        path: skill.file.slice(0, 512),
+        name: skill.name,
+        path: skill.file,
         description: skill.description.slice(0, 240),
       })),
       offset,
@@ -510,7 +510,7 @@ export function createRelevantGuidance(pi: any) {
       group: Type.Optional(Type.String({maxLength:64,description:'Group id from browse; optional search filter.'})),
       query: Type.Optional(Type.String({maxLength:256,description:'Case-insensitive catalogue name/description query; bounded and advisory.'})),
       limit: Type.Optional(Type.Integer({minimum:1,maximum:8,default:3,description:'Maximum matching skills to return (default 3).'})),
-      offset: Type.Optional(Type.Integer({minimum:0,maximum:1000,description:'Page through bounded metadata matches.'})),
+      offset: Type.Optional(Type.Integer({minimum:0,description:'Page through metadata matches; each response remains bounded.'})),
     }),
     async execute(_id: any, input: any) {
       if (input.action === 'browse' || input.action === 'search') {
@@ -657,18 +657,30 @@ export function createRelevantGuidance(pi: any) {
       matchingPrompt = false;
       advisoryDiscoveryDelivered.clear();
       requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
-      if (!enabled()) return;
-      matchingPrompt = true;
-      const catalog = [...String(event.systemPrompt ?? '').matchAll(/<available_skills>([\s\S]*?)<\/available_skills>/g)].slice(0,8).map(match => match[1]).join('\n');
-      skills = [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)].slice(0, 256)
-        .map(m => ({ name: decode(m[1]), description: decode(m[2]), file: decode(m[3]) }))
-        .filter(s => path.isAbsolute(s.file) && s.file.length < 512 && s.name.length < 100);
+      // Discovery owns the complete installed metadata catalogue, independently
+      // of whether ambient suggestions are enabled. Only responses/ranking are
+      // bounded; later skills must not disappear from search or pagination.
+      const configured = event.systemPromptOptions?.skills;
+      const catalog = Array.isArray(configured) ? '' : [...String(event.systemPrompt ?? '').matchAll(/<available_skills>([\s\S]*?)<\/available_skills>/g)].map(match => match[1]).join('\n');
+      const metadata = Array.isArray(configured)
+        ? configured.map(s => ({name:s.name, description:s.description ?? '', file:s.filePath}))
+        : [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)]
+          .map(m => ({name:decode(m[1]),description:decode(m[2]),file:decode(m[3])}));
+      const seenFiles = new Set<string>();
+      skills = metadata.filter(s => {
+        if (typeof s.name !== 'string' || !s.name || typeof s.description !== 'string'
+          || typeof s.file !== 'string' || !path.isAbsolute(s.file) || seenFiles.has(s.file)) return false;
+        seenFiles.add(s.file);
+        return true;
+      });
       // Read receipts are advisory metadata from an earlier catalogue
       // snapshot. Drop entries that are no longer available so a renamed or
       // removed skill cannot suppress a current recommendation after restore.
       const availableSkillFiles = new Set(skills.map(skill => skill.file));
       read = new Set([...read].filter(file => availableSkillFiles.has(file)));
       skillIndex = buildSkillIndex(skills);
+      if (!enabled()) return;
+      matchingPrompt = true;
       const rawPrompt = String(event.prompt ?? "");
       const taskPrompt = skillTaskText(rawPrompt);
       const prompt = skillIntentSegments(taskPrompt).join('\n');
