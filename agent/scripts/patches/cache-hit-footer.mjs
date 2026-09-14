@@ -51,7 +51,7 @@ export function transformActivity(source, bundled) {
     // 66470b24… is the body the previous source revision produced (installed by the
     // last --fix); without it the repair path could not migrate its own output and
     // the postcondition below failed as drift (caught by cache-hit-footer-test).
-    if (['69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47','61c16b6a591f8438e1fca219d159cf80e4f95a8ebd78aa80dc8220d731f6e4a7','b2171c708285aa3bf92c1ada0ab6a69fe0195b7e27d49e68b81f9f28ed62bc34','ecb678a2a9ad99683c80ce5b4b63261604ce7b9c0394879a3397b943bc2fa5f3','66470b24ef2ad3ca2a719ea21c2a4e0dea383937e8ca33150b8b764bdf29c8dc'].includes(createHash('sha256').update(helper).digest('hex'))) {
+    if (['69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47','61c16b6a591f8438e1fca219d159cf80e4f95a8ebd78aa80dc8220d731f6e4a7','b2171c708285aa3bf92c1ada0ab6a69fe0195b7e27d49e68b81f9f28ed62bc34','ecb678a2a9ad99683c80ce5b4b63261604ce7b9c0394879a3397b943bc2fa5f3','66470b24ef2ad3ca2a719ea21c2a4e0dea383937e8ca33150b8b764bdf29c8dc','ade04f0c3f0b5b8818b1ce65d2ffe5e043c62752f10b31ec160bd14be7213963','585b245cd4e1b332f3a6214bf5cee637ac80606e59378f76a7dba3b6172b5a00'].includes(createHash('sha256').update(helper).digest('hex'))) {
       const old = activityCode(helper,bundled,2);
       if (source.split(old).length === 2) source = source.replace(old,()=>code);
     }

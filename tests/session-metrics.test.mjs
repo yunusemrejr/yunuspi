@@ -33,6 +33,14 @@ test('legacy failures and missing history remain distinguishable', () => {
   const m = collectSessionMetrics([message('toolResult', {toolName:'web_search', details:{queryCount:2, successfulQueries:0}}), child('legacy',[{}])]);
   assert.equal(m.errors,1); assert.equal(m.agentOutcomeUnknown,1); assert.equal(m.telemetry,false);
   assert.match(m.detail.join('\n'), /savings: unknown/); assert.deepEqual(m.footer,['Agents 1 (0 active)','Failures 1 (P1 C0 W0)']);
+  // Bottom KPI layer: only harness powers actually used, plus the session id.
+  // Plain utility wrappers (read/bash/grep/web_search/http_request/...) are not
+  // powers and must not crowd the line.
+  const powered = collectSessionMetrics([{type:'session', id:'01a0a0f7-1753-7646-a8e5-7d6e65bbf644'},
+    message('toolResult', {toolCallId:'p1', toolName:'project_tests', content:[]}),
+    message('toolResult', {toolCallId:'p2', toolName:'project_tests', content:[]}),
+    message('toolResult', {toolCallId:'p3', toolName:'web_search', details:{queryCount:1, successfulQueries:1}, content:[]})]);
+  assert.deepEqual(powered.footer, ['Agents 0 (0 active)','Failures 0','Powers 🧪2','session 01a0a0f7']);
   const parallel = message('toolResult', {toolName:'subagent', details:{mode:'parallel', runId:'group', results:[{runId:'a'},{runId:'b'}]}});
   assert.equal(collectSessionMetrics([parallel]).swarms,1);
 });
