@@ -523,14 +523,14 @@ export default function piObservationsExtension(
 						ref.searchOutput || searchCalls.has(message.toolCallId),
 					);
 			const localLines =
-				process.env.PI_SMOL_PREPROCESSOR !== "off"
-					? smol.take(`${ref.id}:${ref.signature}`, raw)
-					: undefined;
+				process.env.PI_SMOL_PREPROCESSOR === "off"
+					? undefined
+					: smol.take(`${ref.id}:${ref.signature}`, raw);
 			const selected =
 				!delta && !summary && !message.isError
-					? ((process.env.PI_MINI_PREPROCESSOR !== "off"
-							? miniProjection(raw, selection)
-							: undefined) ?? localLines)
+					? ((process.env.PI_MINI_PREPROCESSOR === "off"
+							? undefined
+							: miniProjection(raw, selection)) ?? localLines)
 					: undefined;
 			if (!delta && !summary && !selected) {
 				if (
