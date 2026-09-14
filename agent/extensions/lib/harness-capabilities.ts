@@ -760,6 +760,21 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		],
 		doc: "agent/public-template/docs/ISOLATION-AND-WEB.md",
 	}),
+	capability({
+		id: "local-intelligence",
+		group: "models",
+		summary: "Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.",
+		entrypoints: ["context_score", "handoff_capsule", "evidence_cache", "session_self"],
+		tools: ["context_score", "handoff_capsule", "evidence_cache", "session_self"],
+		options: [
+			option("context_score", "Rank supplied items by task relevance and protected evidence; scores are priorities, not probabilities."),
+			option("handoff_capsule", "Prepare a short extractive handoff instead of copying an entire session."),
+			option("automatic preprocessing", "Optional local SLM selects original paragraphs; unavailable workers preserve source text. No direct inference tool is implied."),
+		],
+		related: ["memory-evidence", "context-diagnostics", "skill-catalog"],
+		sourceFiles: ["agent/extensions/lib/local-intelligence.mjs", "agent/extensions/lib/mini-preprocessor.ts", "agent/extensions/pi-memory/context-tools.ts"],
+		doc: "agent/public-template/docs/LOCAL-INTELLIGENCE.md",
+	}),
 ] as const);
 
 const CATALOG_BY_ID = new Map(HARNESS_CAPABILITIES.map((record) => [record.id, record]));

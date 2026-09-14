@@ -7,6 +7,8 @@ const text = (content: any): string => typeof content === "string" ? content.sli
 
 /** Classifications are clues, never permission to change a model or budget. */
 export function failureCategory(error: string) {
+  // Recovery prose is not failure evidence (e.g. a hook mentioning timeout).
+  error = error.split('[session-hooks]')[0];
   // Validator messages echo schema field names and user input. Classify the
   // failed validation itself before words such as acceptance/budget in that echo.
   if (/^\s*Validation failed for tool\b/i.test(error))
@@ -27,6 +29,10 @@ export function failureCategory(error: string) {
     return {category:"navigation",recovery:"Read the renderer's transport code and nextStep; localhost is supported. Check the server task and readiness before retrying."};
   if (/(?:Inspection|Render) navigation unreachable/i.test(error))
     return {category:"navigation",recovery:"Check the dev server and requested HTTP address before rendering again."};
+  if (/Browser (?:open|action) failed \(navigation\//i.test(error) || /^Render failed:.*page\.goto:/is.test(error))
+    return {category:"navigation",recovery:"Check the browser's navigation cause and the server task/URL. Localhost is supported; this does not establish a provider failure."};
+  if (/Command exited with code (?:137|143)\b/.test(error))
+    return {category:"process",recovery:"The command reported a signal-style exit (137/143). Inspect cancellation, timeout and process ownership evidence before restarting; the exit alone does not establish the cause."};
   if (/outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
     return { category: "permission", recovery: "Check the declared scope and execution environment; retain the guard and request missing authority if required." };
   if (/budget|economy|price cap|cost limit/i.test(error))

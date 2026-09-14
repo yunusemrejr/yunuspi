@@ -112,6 +112,10 @@ function capabilityMetadata(record: any, pi: any, detail = false): any {
   if (detail) {
     if (Array.isArray(record?.sourceFiles)) result.sourceFiles = record.sourceFiles.map((value: any) => String(value).slice(0, 512));
     if (typeof record?.doc === 'string') result.doc = record.doc.slice(0, 512);
+  } else {
+    // Summary pages should not spend context on empty detail-only fields.
+    for (const key of ['entrypoints','commands','options','related']) delete result[key];
+    result.inspect = {kind:'capabilities',id:result.id};
   }
   return result;
 }
@@ -200,6 +204,7 @@ export function registerToolDiscovery(pi: any) {
           ...(page.query ? {query:page.query} : {}),
           ...(page.group ? {group:page.group} : {}),
           offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
+          nextOffset:page.remaining ? page.offset + results.length : null,
           note:'Metadata only; the ability index is descriptive and no tool, command, or workflow was executed.'});
       }
 
@@ -268,6 +273,7 @@ export function registerToolDiscovery(pi: any) {
           return answer({
             groups:groupOverview(catalog.map((tool: any)=>({name:tool.name,description:tool.description}))),
             commands:commands ? {count:commands.length,sources:commandSourceGroups(commands)} : {available:false},
+            shortcuts:{skills:{tool:'skill_review',arguments:{action:'browse'}},abilities:{tool:'tool_search',arguments:{kind:'capabilities'}},localAI:{tool:'tool_search',arguments:{kind:'capabilities',id:'local-intelligence'}}},
             next:'Use kind:"capabilities" for the ability index, kind:"commands" for registered command metadata, group or query for tool previews, names to enable tools, or skill_review action:"browse"/"search" for workflows.',
           });
         }
@@ -292,6 +298,7 @@ export function registerToolDiscovery(pi: any) {
       const resultingActive = new Set(pi.getActiveTools());
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
+        nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,
         note:activate?'Chosen schemas are available next. No tool executed.':'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });

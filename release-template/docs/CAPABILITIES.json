@@ -1827,6 +1827,49 @@
         "agent/extensions/media-tools.ts"
       ],
       "doc": "docs/ISOLATION-AND-WEB.md"
+    },
+    {
+      "id": "local-intelligence",
+      "group": "models",
+      "summary": "Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.",
+      "entrypoints": [
+        "context_score",
+        "handoff_capsule",
+        "evidence_cache",
+        "session_self"
+      ],
+      "tools": [
+        "context_score",
+        "handoff_capsule",
+        "evidence_cache",
+        "session_self"
+      ],
+      "options": [
+        {
+          "name": "context_score",
+          "summary": "Rank supplied items by task relevance and protected evidence; scores are priorities, not probabilities."
+        },
+        {
+          "name": "handoff_capsule",
+          "summary": "Prepare a short extractive handoff instead of copying an entire session."
+        },
+        {
+          "name": "automatic preprocessing",
+          "summary": "Optional local SLM selects original paragraphs; unavailable workers preserve source text. No direct inference tool is implied."
+        }
+      ],
+      "related": [
+        "memory-evidence",
+        "context-diagnostics",
+        "skill-catalog"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/local-intelligence.mjs",
+        "agent/extensions/lib/mini-preprocessor.ts",
+        "agent/extensions/pi-memory/context-tools.ts"
+      ],
+      "doc": "docs/LOCAL-INTELLIGENCE.md",
+      "commands": []
     }
   ],
   "tools": {
@@ -2522,7 +2565,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 139,
+        "line": 143,
         "kind": "literal"
       },
       {
@@ -2765,7 +2808,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 139,
+        "line": 143,
         "kind": "literal"
       },
       {

@@ -38,6 +38,17 @@ const task = [
 ].join(". ");
 const toolNames = ["data_query","git_info","http_request","sys_probe","bulk_edit","web_probe","bg_run","wait_for","todo","math_check","artifact_check","value_convert","handoff_capsule","evidence_cache","context_score","context_slice","symbol_expand","ast_diff","lsp_diagnostics","lens_diagnostics"];
 
+test("browser inspection does not receive submission recovery or posting workflow prompts",()=>{
+ for (const action of ['open','navigate','snapshot','inspect','logs']) {
+  const failure=matchHook('browser_session',{action},true);
+  assert.equal(failure.key,'browser-session-read-recovery');
+  assert.doesNotMatch(failure.line,/successful post|submission receipt/);
+  assert.equal(matchHook('browser_session',{action}),null);
+ }
+ assert.equal(matchHook('browser_session',{action:'click'},true).key,'browser-session-recovery');
+ assert.equal(matchHook('browser_session',{action:'press'}).key,'browser-session-workflow');
+});
+
 test("utility tools receive automatic contextual guidance only when active", () => {
   for (const [tool, prompt] of [
     ['sqlite_probe', 'Inspect SQLite tables'], ['package_probe', 'Check the installed package version'],

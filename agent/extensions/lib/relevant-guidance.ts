@@ -531,7 +531,10 @@ export function createRelevantGuidance(pi: any) {
         }
         const query = typeof input.query === 'string' ? input.query.trim().slice(0,256) : '';
         const page = searchSkills(query,input.limit,input.offset,group);
-        const result = {query, ...(group ? {group} : {}), ...page, scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
+        const result = {query, ...(group ? {group} : {}), ...page,
+          nextOffset:page.remaining ? page.offset+page.results.length : null,
+          next:'Read a chosen result.path with the read tool when useful. To explore tools or local ML/SLM helpers, use tool_search({}).',
+          scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
         return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
       }
       if (input.action === 'defer') {

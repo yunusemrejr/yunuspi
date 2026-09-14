@@ -91,12 +91,17 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "browser-session-recovery", tools: ["browser_session"], onError: true,
+		when: (args) => ["click", "fill", "press", "select", "check"].includes(String(args.action)),
 		line: "Reconcile current page, account history or submission receipt before retrying an uncertain action. A timeout may follow a successful post. Save the outcome in the existing plan and continue independent work.",
+	},
+	{
+		key: "browser-session-read-recovery", tools: ["browser_session"], onError: true,
+		line: "Use the reported stage and nextStep. For navigation failures check the server task and URL; for inspection failures check current selectors and state before retrying.",
 	},
 	{
 		key: "browser-session-workflow", tools: ["browser_session"],
 		line: "Retain task authorization and destination rules; verify exact draft and account before submitting. Record outcomes in todo. Renew before lease expiry; after restart reacquire state and reconcile pending submissions.",
-		when: (args) => !["list", "close"].includes(String(args.action)),
+		when: (args) => ["click", "fill", "press", "select", "check"].includes(String(args.action)),
 	},
 	{
 		key: 'source-check-recovery', tools: ['syntax_check'], onError: true,

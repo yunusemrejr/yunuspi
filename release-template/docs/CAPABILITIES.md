@@ -402,6 +402,26 @@ Inspect and persist OpenRouter provider selection pins for the selected model, w
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
+#### local-intelligence
+
+Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.
+
+**Entrypoints:** `context_score`, `handoff_capsule`, `evidence_cache`, `session_self`
+
+**Catalog tool pointers:** `context_score`, `handoff_capsule`, `evidence_cache`, `session_self`
+
+**Options:**
+
+- `context_score`: Rank supplied items by task relevance and protected evidence; scores are priorities, not probabilities.
+- `handoff_capsule`: Prepare a short extractive handoff instead of copying an entire session.
+- `automatic preprocessing`: Optional local SLM selects original paragraphs; unavailable workers preserve source text. No direct inference tool is implied.
+
+**Related records:** `memory-evidence`, `context-diagnostics`, `skill-catalog`
+
+**Source:** [`agent/extensions/lib/local-intelligence.mjs`](../../agent/extensions/lib/local-intelligence.mjs), [`agent/extensions/lib/mini-preprocessor.ts`](../../agent/extensions/lib/mini-preprocessor.ts), [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts)
+
+**Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
+
 ### orchestration
 
 #### subagent-dispatch
@@ -776,7 +796,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 173; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 86; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 139; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 143; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 96; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 160; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 59; literal)

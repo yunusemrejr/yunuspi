@@ -111,6 +111,9 @@ test('capability index pages are bounded, source-backed on detail, and expose li
  assert.equal(page.details.capabilities[1].toolAvailability[0].name,'tool_search');
  assert.equal(page.details.capabilities[1].toolAvailability[0].available,true);
  assert.equal(page.details.capabilities[1].toolAvailability[0].active,true);
+ assert.deepEqual(page.details.capabilities[1].inspect,{kind:'capabilities',id:'tool-catalog'});
+ assert.equal(page.details.capabilities[1].options,undefined,'summary pages omit empty detail fields');
+ assert.equal(page.details.nextOffset,2);
  const detail=await f.call({kind:'capabilities',id:'tool-catalog'});
  assert.equal(detail.details.capability.id,'tool-catalog');
  assert.ok(detail.details.capability.sourceFiles.some(file=>file.endsWith('/agent/extensions/lib/tool-discovery.ts')));
@@ -144,6 +147,21 @@ test('read-only discovery follows the current active set after external or expli
   assert.deepEqual(restricted.active(),['read','tool_search']);
  } finally { process.argv=oldArgv; }
 });
+test('discovery shortcuts reach local ML and SLM metadata without starting inference or activating tools',async()=>{
+ const f=fixture(),before=f.active().slice();
+ const overview=await f.call({});
+ const entry=overview.details.shortcuts.localAI;
+ assert.equal(entry.tool,'tool_search');
+ const detail=await f.call(entry.arguments);
+ assert.equal(detail.details.capability.id,'local-intelligence');
+ assert.match(detail.details.capability.summary,/optional Kompress SLM/);
+ assert.ok(detail.details.capability.sourceFiles.every(file=>fs.existsSync(file)));
+ const searched=await f.call({kind:'capabilities',query:'SLM'});
+ assert.ok(searched.details.capabilities.some(row=>row.id==='local-intelligence'));
+ assert.deepEqual(f.active(),before);
+ assert.equal(f.executed(),0);
+});
+
 test('tool pages accept safe offsets beyond the old thousand item cap',async()=>{
  const extra=Array.from({length:1105},(_,i)=>({name:`special_${String(i).padStart(4,'0')}`,description:'A searchable special capability',parameters:{type:'object',properties:{}}}));
  const f=fixture(extra);
