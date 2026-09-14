@@ -1985,7 +1985,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 639
+        "line": 767
       },
       {
         "name": "harness-backup",
@@ -2070,7 +2070,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 337
+        "line": 348
       },
       {
         "name": "or-provider",
@@ -2095,7 +2095,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 912
+        "line": 931
       },
       {
         "name": "run",
@@ -2345,7 +2345,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 285,
+        "line": 284,
         "kind": "literal"
       },
       {
@@ -2509,7 +2509,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 284,
+        "line": 295,
         "kind": "literal"
       },
       {
@@ -2533,7 +2533,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 521,
+        "line": 643,
         "kind": "literal"
       },
       {
@@ -2765,7 +2765,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 285,
+        "line": 284,
         "kind": "literal"
       },
       {
@@ -2837,7 +2837,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 284,
+        "line": 295,
         "kind": "literal"
       },
       {
@@ -2849,7 +2849,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 521,
+        "line": 643,
         "kind": "literal"
       },
       {
@@ -4006,6 +4006,10 @@
       },
       {
         "path": "agent/scripts/patches/retry-429-policy.mjs",
+        "kind": "mjs"
+      },
+      {
+        "path": "agent/scripts/patches/search-output-spill.mjs",
         "kind": "mjs"
       },
       {

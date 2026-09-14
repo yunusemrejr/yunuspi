@@ -187,7 +187,7 @@ test("child sessions and explicit opt-out preserve their original tool selection
  }
 });
 test("skill projection removes only the configured SDK catalog and keeps user instructions", async () => {
- const { compactSkillCatalog } = await import(
+ const { compactSkillCatalog, skillCatalogProjectionMiss } = await import(
   pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts"))
  );
  const skill = {
@@ -235,6 +235,28 @@ test("skill projection removes only the configured SDK catalog and keeps user in
   undefined,
   "ambiguous duplicates are preserved",
  );
+ assert.equal(skillCatalogProjectionMiss(event, ["skill_review"]), null);
+ assert.equal(
+  skillCatalogProjectionMiss(
+   {
+    ...event,
+    systemPromptOptions: {
+     skills: [{ ...skill, description: "Different registered evidence" }],
+    },
+   },
+   ["skill_review"],
+  ),
+  "block-not-exact",
+  "a foreign block is reported, never rewritten",
+ );
+ assert.equal(
+  skillCatalogProjectionMiss(
+   { ...event, systemPrompt: event.systemPrompt + "\n" + block },
+   ["skill_review"],
+  ),
+  "duplicate-blocks",
+ );
+ assert.equal(skillCatalogProjectionMiss(event, ["read"]), null);
 });
 
 test("group browsing and query previews do not expose schemas until a specific activation", async () => {

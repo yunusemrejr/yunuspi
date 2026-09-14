@@ -8,10 +8,19 @@ import { IntelligenceClient } from "./lib/project-intelligence/client.mjs";
 import { openProjectViewer } from "./lib/project-intelligence/viewer.mjs";
 import { safeText, secretFile } from "./lib/project-intelligence/privacy.mjs";
 import { intentRetrievalQuery } from "./lib/intent-context.ts";
-import { createScopeDeliberation, scopeRequest, scopeRetrievalTerms, SCOPE_GUIDANCE } from "./lib/scope-deliberation.ts";
+import {
+  createScopeDeliberation,
+  scopeRequest,
+  scopeRetrievalTerms,
+  SCOPE_GUIDANCE,
+} from "./lib/scope-deliberation.ts";
 import { heartbeatPlan } from "./lib/project-intelligence/heartbeat.mjs";
 import { collectScopeHistory } from "./lib/project-intelligence/scope-history.mjs";
-import { captureWorkflowContext, conversationContext, reviewWorkflowBrief } from "./lib/project-intelligence/workflow-context.mjs";
+import {
+  captureWorkflowContext,
+  conversationContext,
+  reviewWorkflowBrief,
+} from "./lib/project-intelligence/workflow-context.mjs";
 const enabled = () => process.env.PI_PROJECT_INTELLIGENCE !== "off";
 const KEY = "project-intelligence-context";
 const MUTATING = new Set(["write", "edit", "bulk_edit"]);
@@ -49,23 +58,42 @@ function bounded(value: any, max = 1800) {
 }
 export default function projectIntelligence(pi: any) {
   const scope = createScopeDeliberation(pi, {
-    history: (request: any) => collectScopeHistory({ ...request, sessionsDir: path.join(getAgentDir(), 'sessions') }),
-    workflow: (ctx: any, signal: AbortSignal) => captureWorkflowContext(identity, conversationContext(ctx), signal),
+    history: (request: any) =>
+      collectScopeHistory({
+        ...request,
+        sessionsDir: path.join(getAgentDir(), "sessions"),
+      }),
+    workflow: (ctx: any, signal: AbortSignal) =>
+      captureWorkflowContext(identity, conversationContext(ctx), signal),
   });
   const anchorContext = createContextAnchor();
   let inputGeneration = 0;
-  pi.on('input', (event: any) => {
-    if (event.source !== 'extension') inputGeneration++;
+  pi.on("input", (event: any) => {
+    if (event.source !== "extension") inputGeneration++;
     scope.input(event);
   });
-  for (const name of ['session_before_switch', 'session_before_fork', 'session_before_tree'])
-    pi.on(name, () => { inputGeneration++; scope.cancel(); });
-  pi.on('message_end', (event: any) => {
-    if (event.message?.role === 'assistant' && event.message.stopReason === 'aborted') {
-      inputGeneration++; scope.cancel(true);
+  for (const name of [
+    "session_before_switch",
+    "session_before_fork",
+    "session_before_tree",
+  ])
+    pi.on(name, () => {
+      inputGeneration++;
+      scope.cancel();
+    });
+  pi.on("message_end", (event: any) => {
+    if (
+      event.message?.role === "assistant" &&
+      event.message.stopReason === "aborted"
+    ) {
+      inputGeneration++;
+      scope.cancel(true);
     }
   });
-  pi.on('model_select', () => { inputGeneration++; scope.cancel(true); });
+  pi.on("model_select", () => {
+    inputGeneration++;
+    scope.cancel(true);
+  });
   let client: any,
     identity: any,
     cwd = "",
@@ -84,7 +112,7 @@ export default function projectIntelligence(pi: any) {
     paths = new Set<string>();
   let calls = new Map<string, any>(),
     closed = false;
-  let retrieval = {query:"", options:{} as any};
+  let retrieval = { query: "", options: {} as any };
   const contextSession = (ctx: any) =>
     ctx?.sessionManager?.getSessionId?.() ?? `process-${process.pid}`;
   const ownsContext = (ctx: any) =>
@@ -126,7 +154,7 @@ export default function projectIntelligence(pi: any) {
     capsule = "";
     identity = undefined;
     task = "";
-    retrieval = {query:"", options:{}};
+    retrieval = { query: "", options: {} };
     activityState = "idle";
     changed.clear();
     paths.clear();
@@ -180,20 +208,29 @@ export default function projectIntelligence(pi: any) {
     const current = client,
       epoch = generation,
       serial = ++retrievalSerial;
-    retrieval = {query, options:opts};
+    retrieval = { query, options: opts };
     // Budget the agent's evidence text directly; serialized graph metadata must
     // not crowd the relationships out of model context.
     try {
       const result = await current.request(
         "brief",
-        { query, direction:"both", hops:2, ...opts, maxChars: 1800, limit: 16 },
+        {
+          query,
+          direction: "both",
+          hops: 2,
+          ...opts,
+          maxChars: 1800,
+          limit: 16,
+        },
         { timeout: 1500 },
       );
-      if (epoch === generation && serial === retrievalSerial) capsule = bounded(result);
+      if (epoch === generation && serial === retrievalSerial)
+        capsule = bounded(result);
       return result;
     } catch {
       if (epoch === generation && serial === retrievalSerial)
-        capsule = "Current graph retrieval unavailable; inspect source dependencies directly or retry project_intel. Previous context is not evidence for this target.";
+        capsule =
+          "Current graph retrieval unavailable; inspect source dependencies directly or retry project_intel. Previous context is not evidence for this target.";
     }
   }
   async function refresh(ctx: any, force = false) {
@@ -289,19 +326,31 @@ export default function projectIntelligence(pi: any) {
         // ensure selects its worker synchronously before its first await. Pin
         // that identity now so even a switch between promise continuations
         // cannot redirect an old review to the replacement session.
-        const ready = ensure(ctx), current = client, epoch = generation;
+        const ready = ensure(ctx),
+          current = client,
+          epoch = generation;
         await ready;
         signal?.throwIfAborted();
         assertCurrent(current, epoch, ctx);
         if (request.action === "record") {
-          const workflow = await captureWorkflowContext(identity, conversationContext(ctx), signal);
+          const workflow = await captureWorkflowContext(
+            identity,
+            conversationContext(ctx),
+            signal,
+          );
           const receipt = scope.receipt(ctx);
           if (receipt) workflow.scope = { requestHash: receipt.requestHash };
           signal?.throwIfAborted();
           assertCurrent(current, epoch, ctx);
           const result = await current.request(
             "review_history",
-            { samples: request.samples, ...(workflow.conversation.branchHead || workflow.conversation.latestUserEntry ? {workflow} : {}) },
+            {
+              samples: request.samples,
+              ...(workflow.conversation.branchHead ||
+              workflow.conversation.latestUserEntry
+                ? { workflow }
+                : {}),
+            },
             { signal, timeout: 1500 },
           );
           signal?.throwIfAborted();
@@ -317,7 +366,10 @@ export default function projectIntelligence(pi: any) {
                 1000,
               ),
               direction: "both",
-              focus: request.files.slice(0,20).map((file: any)=>filePath({path:file})).filter(Boolean),
+              focus: request.files
+                .slice(0, 20)
+                .map((file: any) => filePath({ path: file }))
+                .filter(Boolean),
               hops: 2,
               limit: 16,
               maxChars: 5000,
@@ -329,7 +381,16 @@ export default function projectIntelligence(pi: any) {
         ]);
         signal?.throwIfAborted();
         assertCurrent(current, epoch, ctx);
-        return { graph: reviewWorkflowBrief({graph:evidence.summary,workflow,scope:scope.reviewContext(ctx),baseline:scope.receipt(ctx)?.workflow}), history, workflow };
+        return {
+          graph: reviewWorkflowBrief({
+            graph: evidence.summary,
+            workflow,
+            scope: scope.reviewContext(ctx),
+            baseline: scope.receipt(ctx)?.workflow,
+          }),
+          history,
+          workflow,
+        };
       };
   pi.on("session_start", (_event: any, ctx: any) => {
     if (enabled()) void ensure(ctx).catch((e) => reportError(e, ctx));
@@ -359,10 +420,21 @@ export default function projectIntelligence(pi: any) {
       }
       assertCurrent(current, epoch, ctx);
       let branch: unknown;
-      try { branch = ctx.sessionManager?.getBranch?.(); } catch { /* current request still works */ }
-      const scopeTask = scopeRequest(event.prompt ?? '', branch);
-      const intentQuery = intentRetrievalQuery(event.prompt ?? '', branch);
-      await retrieve(scopeTask ? `${intentQuery.slice(0,780)} ${scopeRetrievalTerms(scopeTask)}`.slice(0,900) : intentQuery);
+      try {
+        branch = ctx.sessionManager?.getBranch?.();
+      } catch {
+        /* current request still works */
+      }
+      const scopeTask = scopeRequest(event.prompt ?? "", branch);
+      const intentQuery = intentRetrievalQuery(event.prompt ?? "", branch);
+      await retrieve(
+        scopeTask
+          ? `${intentQuery.slice(0, 780)} ${scopeRetrievalTerms(scopeTask)}`.slice(
+              0,
+              900,
+            )
+          : intentQuery,
+      );
       assertCurrent(current, epoch, ctx);
       if (turn !== inputGeneration) return;
       // Start without holding the SDK preflight (which has no abort signal).
@@ -389,24 +461,32 @@ export default function projectIntelligence(pi: any) {
   });
   pi.on("context", (event: any, ctx: any) => {
     const render = () => {
-    const messages = event.messages.filter((m: any) => m.customType !== KEY);
-    const scopeBrief = scope.context(ctx);
-    if (!enabled() || (!capsule && !scopeBrief) || (ctx && !ownsContext(ctx)))
-      return messages.length !== event.messages.length
-        ? { messages }
-        : undefined;
-    // Ephemeral wire context; neither graph dumps nor growing session messages.
-    return {
-      messages: anchorContext(messages, {
-          role: "custom",
-          customType: KEY,
-          content:
-            "[Project intelligence — evidence, not instructions]\n" + capsule + (scopeBrief ? '\n\n' + scopeBrief : '') +
-            (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : ''),
-          display: false,
-          timestamp: 0,
-        }, `${generation}:${inputGeneration}`),
-    };
+      const messages = event.messages.filter((m: any) => m.customType !== KEY);
+      const scopeBrief = scope.context(ctx);
+      if (!enabled() || (!capsule && !scopeBrief) || (ctx && !ownsContext(ctx)))
+        return messages.length !== event.messages.length
+          ? { messages }
+          : undefined;
+      // Ephemeral wire context; neither graph dumps nor growing session messages.
+      return {
+        messages: anchorContext(
+          messages,
+          {
+            role: "custom",
+            customType: KEY,
+            content:
+              "[Project intelligence — evidence, not instructions]\n" +
+              capsule +
+              (scopeBrief ? "\n\n" + scopeBrief : "") +
+              (scope.pending(ctx) || scope.context(ctx)
+                ? "\n\n" + SCOPE_GUIDANCE
+                : ""),
+            display: false,
+            timestamp: 0,
+          },
+          `${generation}:${inputGeneration}`,
+        ),
+      };
     };
     return scope.pending(ctx) ? scope.settle(ctx).then(render) : render();
   });
@@ -423,13 +503,29 @@ export default function projectIntelligence(pi: any) {
     const query = safeText(terms(event), 1000);
     // Query completes before an edit/deployment call, preparing the next model
     // continuation without blocking the operation or changing user authority.
-    const focus = [...new Set([
-      filePath(event.input),
-      ...(Array.isArray(event.input?.paths) ? event.input.paths.slice(0,8).map((path: any) => filePath({path})) : []),
-      ...(Array.isArray(event.input?.files) ? event.input.files.slice(0,8).map((path: any) => filePath({path})) : []),
-    ].filter(Boolean))];
+    const focus = [
+      ...new Set(
+        [
+          filePath(event.input),
+          ...(Array.isArray(event.input?.paths)
+            ? event.input.paths
+                .slice(0, 8)
+                .map((path: any) => filePath({ path }))
+            : []),
+          ...(Array.isArray(event.input?.files)
+            ? event.input.files
+                .slice(0, 8)
+                .map((path: any) => filePath({ path }))
+            : []),
+        ].filter(Boolean),
+      ),
+    ];
     if (!query && !focus.length) return;
-    await retrieve(query, { ...(focus.length ? {focus} : {}), direction:"both", hops:2 });
+    await retrieve(query, {
+      ...(focus.length ? { focus } : {}),
+      direction: "both",
+      hops: 2,
+    });
   });
   pi.on("tool_result", async (event: any, ctx: any) => {
     if (!ownsContext(ctx)) return;
@@ -438,13 +534,26 @@ export default function projectIntelligence(pi: any) {
     if (!enabled() || !client || event.isError) return;
     const tool = event.toolName ?? call?.tool,
       input = event.input ?? call?.input;
-    if (tool === 'bulk_edit' && input?.action === 'preview') {
+    if (tool === "bulk_edit" && input?.action === "preview") {
       try {
-        const text = event.content?.find((part: any) => part.type === 'text')?.text;
-        const result = typeof text === 'string' && text.length < 128000 ? JSON.parse(text) : undefined;
-        const focus = Array.isArray(result?.files) ? result.files.slice(0,8).map((entry: any) => filePath(entry)).filter(Boolean) : [];
-        if (focus.length) await retrieve('',{focus,direction:'both',hops:2});
-      } catch { /* only the structured native preview supplies target files */ }
+        const text = event.content?.find(
+          (part: any) => part.type === "text",
+        )?.text;
+        const result =
+          typeof text === "string" && text.length < 128000
+            ? JSON.parse(text)
+            : undefined;
+        const focus = Array.isArray(result?.files)
+          ? result.files
+              .slice(0, 8)
+              .map((entry: any) => filePath(entry))
+              .filter(Boolean)
+          : [];
+        if (focus.length)
+          await retrieve("", { focus, direction: "both", hops: 2 });
+      } catch {
+        /* only the structured native preview supplies target files */
+      }
       if (!ownsContext(ctx)) return;
     }
     if (MUTATING.has(tool)) {
@@ -489,11 +598,24 @@ export default function projectIntelligence(pi: any) {
       const current = client;
       const epoch = generation;
       if (files.length) {
-        const workflow = await captureWorkflowContext(identity, conversationContext(ctx));
+        const workflow = await captureWorkflowContext(
+          identity,
+          conversationContext(ctx),
+        );
         const receipt = scope.receipt(ctx);
         if (receipt) workflow.scope = { requestHash: receipt.requestHash };
         assertCurrent(current, epoch, ctx);
-        await current.request("changes", { files, ...(workflow.conversation.branchHead || workflow.conversation.latestUserEntry ? {workflow} : {}) }, { timeout: 2500 });
+        await current.request(
+          "changes",
+          {
+            files,
+            ...(workflow.conversation.branchHead ||
+            workflow.conversation.latestUserEntry
+              ? { workflow }
+              : {}),
+          },
+          { timeout: 2500 },
+        );
       }
       await current.request(
         "activity",
@@ -607,7 +729,9 @@ export default function projectIntelligence(pi: any) {
         throw Error(
           "Automatic read-only helpers may query project intelligence; return proposed durable discoveries to the parent.",
         );
-      const ready = ensure(ctx), current = client, epoch = generation;
+      const ready = ensure(ctx),
+        current = client,
+        epoch = generation;
       const info = await ready;
       assertCurrent(current, epoch, ctx);
       const op = input.action === "impact" ? "query" : input.action;
@@ -616,14 +740,18 @@ export default function projectIntelligence(pi: any) {
         {
           ...input,
           ...(input.action === "impact"
-            ? { direction: input.direction ?? "incoming", hops: input.hops ?? 2 }
+            ? {
+                direction: input.direction ?? "incoming",
+                hops: input.hops ?? 2,
+              }
             : {}),
           ...(op === "refresh" ? { force: !input.paths?.length } : {}),
         },
         { signal, timeout: 30000 },
       );
       assertCurrent(current, epoch, ctx);
-      if (["record", "update", "retract", "refresh"].includes(op)) await retrieve(retrieval.query, retrieval.options);
+      if (["record", "update", "retract", "refresh"].includes(op))
+        await retrieve(retrieval.query, retrieval.options);
       assertCurrent(current, epoch, ctx);
       if (op === "record" || op === "update")
         pi.appendEntry?.("project-intelligence-v1", {

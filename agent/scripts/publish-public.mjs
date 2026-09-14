@@ -123,14 +123,23 @@ export function assertSafeCheckout(checkout, exportDir, agentDir = AGENT_DIR) {
   return checkout;
 }
 
-function run(cmd, argv, cwd, { allowExit = [], capture = false, env } = {}) {
+function run(cmd, argv, cwd, { allowExit = [], capture = false, env, timeoutMs } = {}) {
   const result = spawnSync(cmd, argv, {
     cwd,
     encoding: "utf8",
     stdio: capture ? "pipe" : "inherit",
     ...(env ? { env } : {}),
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: "SIGKILL" } : {}),
   });
   const code = result.status;
+  // A timed-out child must be reported as a timeout, not as an anonymous
+  // non-zero exit (status is null once the kill signal wins).
+  if (
+    timeoutMs &&
+    code === null &&
+    (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL")
+  )
+    throw new Error(`${cmd} ${argv.join(" ")} timed out after ${timeoutMs}ms`);
   if (code !== 0 && !allowExit.includes(code))
     throw new Error(
       `${cmd} ${argv.join(" ")} failed: exit=${code ?? result.error?.message ?? "none"}`,
@@ -250,10 +259,12 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
           "--prefer-offline",
         ],
         fixture,
+        { timeoutMs: 600000 },
       ),
     );
     timed(`tests(concurrency=${testConcurrency})`, () =>
       run("npm", ["test"], fixture, {
+        timeoutMs: 1200000,
         env: {
           ...process.env,
           PI_PUBLIC_TEST_CONCURRENCY: String(testConcurrency),

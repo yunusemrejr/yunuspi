@@ -1046,7 +1046,16 @@ if (locked) {
           "harness-session-lock", sessionLock, process.execPath, ...process.argv.slice(1)],
           { stdio: ["inherit", "inherit", "inherit", "ignore", "ignore", "ignore", "ignore", "ignore", "ignore", 9] });
         child.on("error", error => { console.error(error.message); process.exitCode = 1; });
-        child.on("exit", code => { process.exitCode = code ?? 1; });
+        child.on("exit", code => {
+          // Exit 75 means the exclusive session lease is held by a live session,
+          // so a writing repair was deferred. Say so explicitly and point at the
+          // read-only alternative instead of a bare non-zero exit.
+          if (code === 75)
+            console.error(
+              "Pi sessions active; repairs deferred (exit 75). Re-run after sessions end, or use `verify-harness.mjs --staged` to validate without writing.",
+            );
+          process.exitCode = code ?? 1;
+        });
         return;
       }
       // Include legacy/direct launches that predate or bypass the wrapper.
@@ -1055,7 +1064,9 @@ if (locked) {
       }
       const core = findPiPackage();
       if (!STAGED && core && activePiProcesses(core).length) {
-        console.error("Pi sessions active; repairs deferred");
+        console.error(
+          "Pi sessions active; repairs deferred (exit 75). Re-run after sessions end, or use `verify-harness.mjs --staged` to validate without writing.",
+        );
         process.exitCode = 75;
         return;
       }

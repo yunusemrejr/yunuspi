@@ -30,6 +30,15 @@ const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Whole-paragraph prose from local documentation also benefits from Kompress.
 // Structured code, status, errors and source qualifications remain protected.
 const isSkillRead = (tool: string, input: any) => tool === "read" && typeof input?.path === "string" && /(?:^|[\\/])SKILL\.md$/i.test(input.path);
+// Repeated identical failures dedup like successes, but the receipt must keep
+// failure visibility: the raw transcript keeps the original and this cue names
+// the first failure-looking line, bounded, without inventing a resolution.
+const failureCue = (text: string): string => {
+	const line = text
+		.split("\n")
+		.find((entry) => /(?:FAIL|Error|error:|failed)/.test(entry));
+	return line ? ` First failure line: ${line.trim().slice(0, 160)}` : "";
+};
 const miniEligibleTool = (tool: string, input: any) => tool === "bash" || tool === "read" && typeof input?.path === "string" && /\.(?:txt|md|rst)$/i.test(input.path);
 interface Reference {
 	version: 1;
@@ -172,7 +181,7 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 		)
 			return;
 		const key = signature(event.toolName, event.input, {content: event.content, isError: event.isError === true, details: event.details ?? null});
-		const id = event.isError ? undefined : observations.get(key);
+		const id = observations.get(key);
 		if (id !== undefined) {
 			remember(key, id);
 			// Restricted tool profiles can disable retrieval mid-session. Preserve
@@ -184,7 +193,9 @@ export default function piObservationsExtension(pi: ExtensionAPI, mini = createM
 				content: [
 					{
 						type: "text" as const,
-						text: `[observation #${id} — exact output already seen; the call executed again. Retrieve the original with obs_read({id:${id}}).]`,
+						text: event.isError
+						? `[observation #${id} — identical failing output already seen; the call executed again and failed identically.${failureCue(text)} Raw original: obs_read({id:${id}}).]`
+						: `[observation #${id} — exact output already seen; the call executed again. Retrieve the original with obs_read({id:${id}}).]`,
 					},
 				],
 				details: { ...event.details, observationId: id, deduplicated: true, observationResultHash: signature("result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}) },

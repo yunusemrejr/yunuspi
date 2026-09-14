@@ -296,19 +296,45 @@ export function registerToolDiscovery(pi: any) {
   });
 }
 
+const escapeCatalogText = (value: string) => value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;');
+
+function buildSkillCatalog(skills: any[]): string {
+  return ['<available_skills>',...skills.flatMap((skill: any)=>[
+    '  <skill>',`    <name>${escapeCatalogText(skill.name)}</name>`,`    <description>${escapeCatalogText(skill.description)}</description>`,`    <location>${escapeCatalogText(skill.filePath)}</location>`,'  </skill>',
+  ]),'</available_skills>'].join('\n');
+}
+
+/** Skills eligible for projection, or null when projection does not apply. */
+function projectionSkills(event: any, activeTools: string[]): any[] | null {
+  if (process.env.PI_SKILL_CATALOG === 'full' || process.env.PI_SUBAGENT_CHILD
+    || !activeTools.includes('skill_review')) return null;
+  const skills = event.systemPromptOptions?.skills?.filter((skill: any)=>!skill.disableModelInvocation);
+  if (!Array.isArray(skills) || !skills.length) return null;
+  if (skills.some((skill: any)=>![skill.name,skill.description,skill.filePath].every(value=>typeof value==='string'))) return null;
+  return skills;
+}
+
 /** Project only the SDK's exact configured skill inventory, after local skill
  * routing has read it. User/project text and custom prompt sections stay intact. */
 export function compactSkillCatalog(event: any, activeTools: string[]): string | undefined {
-  if (process.env.PI_SKILL_CATALOG === 'full' || process.env.PI_SUBAGENT_CHILD
-    || !activeTools.includes('skill_review')) return;
+  const skills = projectionSkills(event, activeTools);
   const source = event.systemPrompt;
-  const skills = event.systemPromptOptions?.skills?.filter((skill: any)=>!skill.disableModelInvocation);
-  if (typeof source!=='string' || !Array.isArray(skills) || !skills.length) return;
-  const escape = (value: string) => value.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&apos;');
-  if (skills.some((skill: any)=>![skill.name,skill.description,skill.filePath].every(value=>typeof value==='string'))) return;
-  const catalog = ['<available_skills>',...skills.flatMap((skill: any)=>[
-    '  <skill>',`    <name>${escape(skill.name)}</name>`,`    <description>${escape(skill.description)}</description>`,`    <location>${escape(skill.filePath)}</location>`,'  </skill>',
-  ]),'</available_skills>'].join('\n');
+  if (!skills || typeof source !== 'string') return;
+  const catalog = buildSkillCatalog(skills);
   if (source.split(catalog).length!==2) return;
   return source.replace(catalog,`Installed skills are available on demand (${skills.length} workflows). Use skill_review action:"browse" for groups or action:"search" with a query for short matches. Read a chosen workflow when useful. Discovery and workflows are optional.`);
+}
+
+/** Explain why projection could not run, so a silent full-catalogue injection
+ * becomes a one-time maintenance signal. Foreign catalogue text is never
+ * rewritten; the strict match above stays the only rewrite path. */
+export function skillCatalogProjectionMiss(event: any, activeTools: string[]): string | null {
+  const skills = projectionSkills(event, activeTools);
+  const source = event.systemPrompt;
+  if (!skills || typeof source !== 'string') return null;
+  const occurrences = source.split(buildSkillCatalog(skills)).length - 1;
+  if (occurrences === 1) return null;
+  if (occurrences > 1) return 'duplicate-blocks';
+  if (source.includes('<available_skills>')) return 'block-not-exact';
+  return null;
 }

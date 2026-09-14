@@ -95,6 +95,7 @@ import { registerHarnessActivity } from "./lib/harness-activity.ts";
 import {
 	registerToolDiscovery,
 	compactSkillCatalog,
+	skillCatalogProjectionMiss,
 } from "./lib/tool-discovery.ts";
 import { createRelevantGuidance } from "./lib/relevant-guidance.ts";
 import {
@@ -712,10 +713,28 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			return undefined;
 		}
 	};
+	// A silent full-catalogue injection is a maintenance signal, not a normal
+	// state: report drift once per session without touching foreign text.
+	const skillProjectionNotified = new Set<string>();
+	const reportSkillProjectionMiss = (event: any, ctx: any) => {
+		const sid = sidOf(ctx);
+		if (!sid || skillProjectionNotified.has(sid)) return;
+		const miss = skillCatalogProjectionMiss(event, pi.getActiveTools?.() ?? []);
+		if (!miss) return;
+		if (skillProjectionNotified.size >= 64)
+			skillProjectionNotified.delete(skillProjectionNotified.values().next().value);
+		skillProjectionNotified.add(sid);
+		logReminderErr("skill-catalogue-projection", new Error(`projection missed: ${miss}`));
+		ctx?.ui?.notify?.(
+			`Skill catalogue projection missed (${miss}); this session carries the full catalogue. Inspect extensions/lib/tool-discovery.ts after the core update.`,
+			"warning",
+		);
+	};
 	pi.on("before_agent_start", async (event, ctx) => {
 		const result = await prepareReminderStart(event, ctx);
 		// Local guidance captures the full inventory before its wire projection.
 		const systemPrompt = compactSkillCatalog(event, pi.getActiveTools?.() ?? []);
+		if (systemPrompt === undefined) reportSkillProjectionMiss(event, ctx);
 		return systemPrompt === undefined
 			? result
 			: { ...(result ?? {}), systemPrompt };

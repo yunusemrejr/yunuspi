@@ -177,8 +177,7 @@ function renderProfile(
   const prompt = totals.input + totals.cacheRead + totals.cacheWrite;
   const branchChars = composition.reduce((sum, row) => sum + row.chars, 0);
   const breaks = records.filter(
-    (record) =>
-      record?.firstChange && !record.baseline && !record.appendedOnly,
+    (record) => record?.firstChange && !record.baseline && !record.appendedOnly,
   );
   const lines: string[] = [];
   lines.push(
@@ -301,7 +300,13 @@ export default function contextProfileExtension(pi: any) {
         }),
       ),
     }),
-    async execute(_id: any, params: { limit?: number }, _signal: AbortSignal, _update: any, ctx: any) {
+    async execute(
+      _id: any,
+      params: { limit?: number },
+      _signal: AbortSignal,
+      _update: any,
+      ctx: any,
+    ) {
       const id = sessionId(ctx);
       const state = id ? getState(id) : null;
       let branch: any[] = [];
@@ -315,8 +320,7 @@ export default function contextProfileExtension(pi: any) {
           content: [
             {
               type: "text" as const,
-              text:
-                "context_profile: no session identity available; run this tool in an interactive session.",
+              text: "context_profile: no session identity available; run this tool in an interactive session.",
             },
           ],
         };
