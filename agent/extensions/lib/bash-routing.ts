@@ -399,3 +399,34 @@ export function classifyBashCommand(command: string): BashRoute | null {
 
   return null;
 }
+
+/**
+ * Detect a signal tool whose `-f` pattern also matches the invoking shell's own
+ * command line. `pkill -f chrome` cannot exclude the `bash -c '...pkill -f
+ * chrome...'` process it runs in, so it kills its own shell (observed exit 137).
+ * The bracket form `pkill -f '[c]hrome'` keeps the pattern from appearing
+ * literally in the command line and is the copyable safe replacement.
+ */
+export function selfMatchingSignal(command: string): { reason: string; replacement: string } | null {
+  if (typeof command !== "string" || !/\b(?:pkill|pgrep)\b/.test(command)) return null;
+  const invocations = command.matchAll(/(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:\S*\/)?(pkill|pgrep)\b([^\n;&|]*)/gi);
+  for (const match of invocations) {
+    const tool = match[1];
+    const args = tokenizeSimple(match[2].trim()) ?? match[2].trim().split(/\s+/).filter(Boolean);
+    const hasFullMatch = args.some((a) => a === "-f" || /^-[A-Za-z]*f$/.test(a) || a === "--full");
+    if (!hasFullMatch) continue;
+    const pattern = [...args].reverse().find((a) => !a.startsWith("-"));
+    if (!pattern) continue;
+    const literal = pattern.replace(/^['"]|['"]$/g, "");
+    // A bracket expression (e.g. [c]hrome) does not appear literally, so pkill
+    // cannot match the shell command line that contains it. Anything else does.
+    if (/\[[^\]]*\]/.test(literal)) continue;
+    if (!command.includes(literal)) continue;
+    const escaped = literal.length > 0 ? `[${literal[0]}]${literal.slice(1)}` : literal;
+    return {
+      reason: `\`${tool} -f ${literal}\` also matches this shell's own command line and can terminate the command (exit 137). Use the bracket form so the pattern is not literal in the command line.`,
+      replacement: `${tool} -f '${escaped}'`,
+    };
+  }
+  return null;
+}

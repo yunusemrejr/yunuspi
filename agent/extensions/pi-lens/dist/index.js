@@ -64094,14 +64094,19 @@ function lensApplyEnforcement(diagnostic, ctx) {
 function lensDiagnosticKey(d) {
   return [d.tool ?? "", d.rule ?? d.id ?? "", d.line ?? 1, d.column ?? 1, d.message ?? ""].join("\u0001");
 }
+function lensRoutineKey(d) {
+  return [d.tool ?? "", d.rule ?? d.id ?? "", d.message ?? ""].join("\u0001");
+}
 function lensRoutineDiagnostics(visible, all, ctx, baseline) {
   if (ctx.analysisOnly) return { visible, preexisting: 0, outside: 0, advisory: 0 };
-  const prior = new Set((baseline ?? []).map(lensDiagnosticKey));
+  const priorExact = new Set((baseline ?? []).map(lensDiagnosticKey));
+  const priorRule = new Set((baseline ?? []).map(lensRoutineKey));
+  const isPrior = d => priorExact.has(lensDiagnosticKey(d)) || priorRule.has(lensRoutineKey(d));
   const maintained = !!lensWorkState(ctx.filePath, ctx.projectRoot ?? ctx.cwd);
   const changed = d => maintained && ctx.modifiedRanges?.some(r => (d.line ?? 1) >= r.start && (d.line ?? 1) <= r.end);
-  const preexisting = all.filter(d => prior.has(lensDiagnosticKey(d))).length;
-  const outside = all.filter(d => !prior.has(lensDiagnosticKey(d)) && !changed(d)).length;
-  const current = visible.filter(d => !prior.has(lensDiagnosticKey(d)) && changed(d));
+  const preexisting = all.filter(d => isPrior(d)).length;
+  const outside = all.filter(d => !isPrior(d) && !changed(d)).length;
+  const current = visible.filter(d => !isPrior(d) && changed(d));
   return { visible: current, preexisting, outside, advisory: current.filter(d => d.severity !== "error" && d.semantic !== "fixed").length };
 }
 function lensCoverageState(ctx, rows) {

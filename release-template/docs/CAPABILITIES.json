@@ -1877,7 +1877,7 @@
       {
         "name": "bash-routes",
         "source": "agent/extensions/bash-router.ts",
-        "line": 72
+        "line": 96
       },
       {
         "name": "bg",
@@ -1952,52 +1952,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113698
+        "line": 113703
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113402
+        "line": 113407
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113459
+        "line": 113464
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113494
+        "line": 113499
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113471
+        "line": 113476
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113613
+        "line": 113618
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113427
+        "line": 113432
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113395
+        "line": 113400
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113632
+        "line": 113637
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113409
+        "line": 113414
       },
       {
         "name": "logs",
@@ -2456,7 +2456,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 289,
+        "line": 332,
         "kind": "literal"
       },
       {
@@ -2742,7 +2742,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 289,
+        "line": 332,
         "kind": "literal"
       },
       {

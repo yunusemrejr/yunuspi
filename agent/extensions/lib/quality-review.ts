@@ -1,4 +1,6 @@
 import path from 'node:path';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
@@ -77,6 +79,19 @@ async function withinDeadline<T>(work: Promise<T>, signal: AbortSignal): Promise
   } finally { signal.removeEventListener('abort',abort); }
 }
 
+/** Stat fingerprints change without any byte changing when a build rewrites
+ * identical output, a tool touches a file, or an atomic replace keeps content.
+ * Confirm a real content change before charging a review revision; oversized or
+ * unreadable files stay stat-only and are treated as changed (conservative). */
+const REVIEW_HASH_LIMIT = 1 << 20;
+function reviewContentHash(file: string): string | undefined {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > REVIEW_HASH_LIMIT) return undefined;
+    return `${stat.size}:${createHash('sha1').update(fs.readFileSync(file)).digest('hex')}`;
+  } catch { return undefined; }
+}
+
 export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
   let releaseShared = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0;
@@ -85,6 +100,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let scopeOverflow = false;
   let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
+  // File -> last confirmed content hash. Shared by the discovery pass and the
+  // native receipt path so one real edit is charged exactly one revision.
+  let hashes: Record<string, string> = {};
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
@@ -181,16 +199,34 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const api = {
     observe(facts: any, observeChanges: boolean) {
       if (!active || !enabled()) return;
-      if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; history = []; scopeOverflow = false; patterns.clear(); }
+      if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; history = []; scopeOverflow = false; patterns.clear(); hashes = {}; }
       root = facts.root; truncated = facts.truncated === true;
       if (truncated && disposition === 'accepted') { disposition = ''; reviewed = -1; reason = 'Current source discovery is incomplete; earlier acceptance cannot establish the current scope.'; }
       const next = facts.reviewSources ?? {};
-      if (baseline && (observeChanges || changed.length)) invalidate([...new Set([...Object.keys(baseline),...Object.keys(next)])].filter(f =>
-        (observeChanges || changed.includes(f)) && next[f] !== baseline![f] && (next[f] !== undefined || !truncated)));
+      if (baseline && (observeChanges || changed.length)) {
+        // A stat-only change (build rewrite, touch, chmod, atomic replace) must
+        // not invalidate an otherwise-current review. Confirm content first; the
+        // stored hash also lets a later native write/edit receipt see that this
+        // exact content was already accounted for instead of double-counting it.
+        const candidates = [...new Set([...Object.keys(baseline),...Object.keys(next)])].filter(f =>
+          (observeChanges || changed.includes(f)) && next[f] !== baseline![f] && (next[f] !== undefined || !truncated));
+        invalidate(candidates.filter(f => {
+          if (next[f] === undefined) { delete hashes[f]; return true; }
+          const current = reviewContentHash(path.join(root,f));
+          if (current && hashes[f] === current) return false;
+          if (current) hashes[f] = current;
+          return true;
+        }));
+      }
+      for (const f of Object.keys(next)) if (hashes[f] === undefined && next[f] !== undefined) {
+        const current = reviewContentHash(path.join(root,f));
+        if (current) hashes[f] = current;
+      }
       baseline = truncated && baseline ? Object.fromEntries(Object.entries({...baseline,...next}).slice(-4000)) : next;
     },
     restore(ctx: any) {
       releaseShared();
+      hashes = {};
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
       cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
@@ -237,7 +273,14 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       // successful edit invalidates a review, even a same-size/same-stat write.
       if (!file.startsWith('../') && !path.isAbsolute(file) && isProjectReviewSource(file)) {
         const earlier = patterns.get(file) ?? [];
-        invalidate([file]);
+        // The discovery pass that runs with every native write/edit already owns
+        // scanned paths. Charge the receipt only for content it has not accounted
+        // for, so a single edit cannot bump the review revision twice.
+        const current = reviewContentHash(path.resolve(root || ctx.cwd,file));
+        if (!(current && hashes[file] === current)) {
+          invalidate([file]);
+          if (current) hashes[file] = current;
+        }
         if (patterns.size >= 128) patterns.delete(patterns.keys().next().value!);
         const snippets = authoredReviewSnippets(event.toolName,event.input);
         const fresh = authoredReviewSignals(file,snippets);
