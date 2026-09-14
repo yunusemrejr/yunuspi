@@ -166,6 +166,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       // A completed scope is retained in branch history, not carried into an
       // unrelated later question as an outstanding test obligation.
       if (!state.paused && !state.optedOut && state.assessment && !projectTestNeed(state)) {
+        // Revisions restart in a fresh scope. Retire outstanding receipts so
+        // a late old check cannot collide with the new scope's revision.
+        epoch++; starts.clear(); earlyTerminals.clear();
         const optedOut = state.optedOut; state = fresh(state.root); state.optedOut = optedOut;
       }
       state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1;

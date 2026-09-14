@@ -833,7 +833,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Stop a running background task by ID. Fails loudly if the task is unknown or already finished.",
     promptSnippet: "Stop a running background task by ID",
     promptGuidelines: [
-      "Use bg_kill for explicit bg_run tasks when the user asks to stop one or when it is no longer needed; use managed-bash's process tool for internal helper jobs.",
+      "Use bg_kill for explicit bg_run tasks on user cancellation or when no longer needed; use managed-bash's process for internal helpers.",
     ],
     parameters: BgKillParams,
     async execute(_toolCallId, params) {

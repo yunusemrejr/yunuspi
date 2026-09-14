@@ -33,6 +33,13 @@ try {
  for(const name of fs.readdirSync(builtinDir)) {
   if(!name.endsWith('.md'))continue;
   const source=fs.readFileSync(path.join(builtinDir,name),'utf8');
+  if(name==='automatic-skill-discovery.md') {
+   assert.match(source,/^tools:[ \t]*$/m,'the packet-only selector must not receive tools');
+   assert.doesNotMatch(source,/^subagentOnlyExtensions:/m);
+   for(const field of ['inheritProjectContext','inheritGlobalContext','inheritSkills'])
+    assert.ok(source.includes(`${field}: false`),`${name}: ${field}`);
+   continue;
+  }
   const match=source.match(/^subagentOnlyExtensions: (.+)$/m);
   assert.ok(match,name);
   const resolved=match[1].split(',').map(entry=>path.resolve(builtinDir,entry.trim()));

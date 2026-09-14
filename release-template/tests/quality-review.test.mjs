@@ -16,12 +16,12 @@ const {projectTestFacts,isProjectReviewSource}=await import(pathToFileURL(path.j
 const storePath=path.join(agent,'extensions/lib/project-intelligence/store.mjs');
 const openStore=fs.existsSync(storePath)?(await import(pathToFileURL(storePath))).openStore:undefined;
 const pass=(aspect)=>({aspect,ok:true,text:JSON.stringify({outcome:'pass',evidence:['src/value.js:1 preserves zero and negative inputs; source and focused tests checked.'],findings:[],gap:''})});
-async function fixture(t,{runner,context}={}) {
+async function fixture(t,{runner,context,beforeRefresh}={}) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'quality-check-'));
  const tools={},sent=[],branch=[],calls=[];let idle=true,queued=false,tests={need:null},rejectDelivery=false;
  const ctx={cwd:dir,isIdle:()=>idle,hasPendingMessages:()=>queued,sessionManager:{getBranch:()=>branch}};
  const api=createQualityReviewLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['quality_review','project_tests','subagent'],appendEntry:(customType,data)=>branch.push({type:'custom',customType,data:structuredClone(data)}),sendMessage:(m,o)=>{if(rejectDelivery)throw Error('queue unavailable');sent.push({m,o});}},
-  {refresh:async()=>api.observe(await projectTestFacts(dir),false),tests:()=>tests,runner:async(...args)=>{calls.push(args);return runner?runner(...args):args[0].aspects.map(a=>pass(a.id));},context:context??(async()=>({graph:'Checkout-scoped source graph; evidence may be incomplete.',history:[]}))});
+  {refresh:async()=>{await beforeRefresh?.();api.observe(await projectTestFacts(dir),false)},tests:()=>tests,runner:async(...args)=>{calls.push(args);return runner?runner(...args):args[0].aspects.map(a=>pass(a.id));},context:context??(async()=>({graph:'Checkout-scoped source graph; evidence may be incomplete.',history:[]}))});
  api.restore(ctx);await api.run(ctx);api.input({source:'interactive',text:'Implement the behavior and verify quality'});
  t.after(()=>{api.shutdown();fs.rmSync(dir,{recursive:true,force:true});});
  return {api,ctx,calls,sent,branch,tools,dir,tests:v=>tests=v,idle:v=>idle=v,queued:v=>queued=v,rejectDelivery:v=>rejectDelivery=v,
@@ -233,4 +233,31 @@ test('a review invalidated in flight retains its output as incomplete evidence i
  assert.match(result.details.previousReview.reports[0].gap,/changed during/i);
  assert.equal(result.details.previousReview.reports[0].evidence.length,1);
  assert.equal(result.details.rounds,1,'executed reviews still consume their bounded budget');
+});
+
+
+test('assessment waits for an in-flight source scan before accepting evidence',async t=>{
+ let release, scanning=false;
+ const f=await fixture(t,{beforeRefresh:()=>scanning?new Promise(r=>release=r):undefined});
+ await f.mutate();await f.tool({action:'review'});
+ scanning=true;
+ const inspecting=f.tool({action:'inspect'});
+ while(!release)await new Promise(r=>setImmediate(r));
+ fs.writeFileSync(path.join(f.dir,'src/value.js'),'export const value=999;');
+ const assessment=f.tool({action:'assess',disposition:'accepted',reason:'Previously reviewed source and its focused tests passed.'});
+ const rejected=assert.rejects(assessment,/Current independent/);
+ scanning=false;release();await inspecting;await rejected;
+ assert.notEqual(f.state().status,'accepted');
+});
+
+test('a tool waiting for discovery cannot assess a replacement user turn',async t=>{
+ let release, scanning=false;
+ const f=await fixture(t,{beforeRefresh:()=>scanning?new Promise(r=>release=r):undefined});
+ await f.mutate();scanning=true;
+ const assessment=f.tool({action:'assess',disposition:'blocked',reason:'Old turn has no independent evidence available.'});
+ while(!release)await new Promise(r=>setImmediate(r));
+ f.api.input({source:'interactive',text:'Fix a different issue'});
+ const rejected=assert.rejects(assessment,/cancelled/i);
+ scanning=false;release();await rejected;
+ assert.notEqual(f.state().status,'blocked');
 });

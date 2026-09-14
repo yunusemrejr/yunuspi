@@ -76,8 +76,9 @@ async function withinDeadline<T>(work: Promise<T>, signal: AbortSignal): Promise
 export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
-  let truncated = false, delivered = '', scanning = false, pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
+  let truncated = false, delivered = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
   let scopeOverflow = false;
+  let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
@@ -98,9 +99,18 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess them without rerunning this revision.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Maximum two review rounds; report unresolved gaps when exhausted.`;
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
-  const refresh = async (ctx: any) => { if (scanning) return; scanning = true; try { await options.refresh(ctx); } finally { scanning = false; } };
+  const refresh = async (ctx: any) => {
+    // Every caller must await discovery; skipping an active scan can approve
+    // evidence for source that the scan is about to invalidate.
+    if (scanning) return scanning;
+    const operation = Promise.resolve().then(() => options.refresh(ctx));
+    scanning = operation;
+    try { await operation; } finally { if (scanning === operation) scanning = undefined; }
+  };
   const run = async (ctx: any, signal?: AbortSignal) => {
+    const entryGeneration = generation;
     await refresh(ctx);
+    if (entryGeneration !== generation || signal?.aborted || ctx.signal?.aborted) return summary();
     if (!enabled() || !active || paused || !changed.length || disposition || reviewed === revision || rounds >= REVIEW_LIMITS.rounds) return summary();
     if (busy) return busy;
     const ticket = generation, rev = revision;
@@ -259,8 +269,13 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
     parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30}))}),
     async execute(_id: string, params: any, signal: any, _update: any, ctx: any) {
-      signal?.throwIfAborted(); await refresh(ctx);
-      if (params.action === 'review') await run(ctx,signal);
+      const ticket = generation;
+      const checkCurrent = () => {
+        signal?.throwIfAborted();
+        if (ticket !== generation || !active) throw Error('Quality review cancelled by user input, session change or shutdown.');
+      };
+      checkCurrent(); await refresh(ctx); checkCurrent();
+      if (params.action === 'review') { await run(ctx,signal); checkCurrent(); }
       if (params.action === 'assess') {
         if (!['accepted','blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 20) throw Error('Assessment requires a concrete rationale of at least 20 characters.');
         if (params.disposition === 'accepted') {

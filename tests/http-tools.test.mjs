@@ -49,3 +49,14 @@ const result = await tools.get('http_request').execute(
 assert.equal(result.isError, true);
 assert.equal(result.details.kind, 'validation');
 assert.equal(result.details.retryable, false);
+
+// DNS validation consumes the same wall-time budget as response transfer.
+const keepAlive = setTimeout(() => {}, 3000);
+try {
+  await assert.rejects(
+    performHttp({ url: 'http://localhost/', timeoutMs: 1000 }, undefined,
+      { lookup: () => new Promise(() => {}) }),
+    /Request timed out after 1000ms/,
+    'a DNS deadline is a retryable timeout, not user cancellation',
+  );
+} finally { clearTimeout(keepAlive); }

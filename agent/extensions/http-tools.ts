@@ -275,11 +275,16 @@ export async function performHttp(
     ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
 
-  const target = await validateHttpTarget(
-    url,
-    combined,
-    transportOptions.lookup ?? defaultLookup,
-  );
+  let target: Awaited<ReturnType<typeof validateHttpTarget>>;
+  try {
+    target = await validateHttpTarget(url, combined, transportOptions.lookup ?? defaultLookup);
+  } catch (error) {
+    // Localhost pinning uses lookupWithAbort, whose abort error does not
+    // distinguish the deadline from caller cancellation.
+    if (!signal?.aborted && timeoutSignal.aborted)
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    throw error;
+  }
   const dispatcher = new Agent({
     connect: { lookup: createPinnedLookup(target) },
   });

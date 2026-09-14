@@ -90,9 +90,16 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { registerHarnessActivity } from "./lib/harness-activity.ts";
-import { registerToolDiscovery, compactSkillCatalog } from "./lib/tool-discovery.ts";
+import {
+	registerToolDiscovery,
+	compactSkillCatalog,
+} from "./lib/tool-discovery.ts";
 import { createRelevantGuidance } from "./lib/relevant-guidance.ts";
-import { createLoopTracker, repeatedReasoningNotice, reduceRepeatedReasoningBudget } from "./lib/stall-core.ts";
+import {
+	createLoopTracker,
+	repeatedReasoningNotice,
+	reduceRepeatedReasoningBudget,
+} from "./lib/stall-core.ts";
 import { replayFromBranch } from "./rpiv-todo/state/replay.ts";
 import {
 	MANUAL_INTERVAL_MS,
@@ -313,22 +320,51 @@ export function reminderText(
 	fire: { todo: boolean; drift: boolean; caution?: boolean },
 	dueManual: ManualReminder[],
 	context?: string[],
-	todoTasks: Array<{id?: number; subject?: string; status?: string; blockedBy?: number[]}> = [],
+	todoTasks: Array<{
+		id?: number;
+		subject?: string;
+		status?: string;
+		blockedBy?: number[];
+	}> = [],
 ): string {
-	const lines: string[] = dueManual.length > 0
-		? [`[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~2 min until cleared with /reminder clear.`]
-		: [];
+	const lines: string[] =
+		dueManual.length > 0
+			? [
+					`[reminders] sid ${sid.slice(0, 6)} — ${dueManual.length} user-registered reminder(s) due. Comply with them in your current task now; they re-fire every ~2 min until cleared with /reminder clear.`,
+				]
+			: [];
 	if (context && context.length) lines.push(context.join("\n"));
 	if (fire.todo && st.hasPending) {
 		const parts: string[] = [];
 		if (st.inProgressCount > 0) parts.push(`${st.inProgressCount} in_progress`);
 		if (st.pendingCount > 0) parts.push(`${st.pendingCount} pending`);
-		const open = todoTasks.filter(t => (t.status === "pending" || t.status === "in_progress") && Number.isSafeInteger(t.id) && typeof t.subject === "string");
-		const items = open.slice(0,3).map(t => `#${t.id} [${t.status}] ${JSON.stringify(oneLine(t.subject!,160))}${t.blockedBy?.length ? ` (blocked by ${t.blockedBy.slice(0,5).map(id=>"#"+id).join(", ")})` : ""}`).join("; ");
-		lines.push(`Open todos: ${parts.join(", ")} — last todo checkpoint ${fmtAgo(now, st.lastTodoActionAt)} ago.` +
-			(items ? ` Recorded items: ${items}${open.length>3 ? `; ${open.length-3} more (todo list)` : ""}.` : ' Use todo list to inspect the current items.') +
-			` Reconcile the hierarchical plan with the user's latest scope; add missing executable children, use todo list view=frontier for ready work, and record evidence before completion. Concurrent steps need separate owners/scopes; keep your own session purpose.`);
-
+		const open = todoTasks.filter(
+			(t) =>
+				(t.status === "pending" || t.status === "in_progress") &&
+				Number.isSafeInteger(t.id) &&
+				typeof t.subject === "string",
+		);
+		const items = open
+			.slice(0, 3)
+			.map(
+				(t) =>
+					`#${t.id} [${t.status}] ${JSON.stringify(oneLine(t.subject!, 160))}${
+						t.blockedBy?.length
+							? ` (blocked by ${t.blockedBy
+									.slice(0, 5)
+									.map((id) => "#" + id)
+									.join(", ")})`
+							: ""
+					}`,
+			)
+			.join("; ");
+		lines.push(
+			`Open todos: ${parts.join(", ")} — last todo checkpoint ${fmtAgo(now, st.lastTodoActionAt)} ago.` +
+				(items
+					? ` Recorded items: ${items}${open.length > 3 ? `; ${open.length - 3} more (todo list)` : ""}.`
+					: " Use todo list to inspect the current items.") +
+				` Reconcile the hierarchical plan with the user's latest scope; add missing executable children, use todo list view=frontier for ready work, and record evidence before completion. Concurrent steps need separate owners/scopes; keep your own session purpose.`,
+		);
 	}
 	if (fire.caution) {
 		lines.push(
@@ -401,27 +437,51 @@ function logReminderErr(where: string, err: unknown): void {
 // ---------------------------------------------------------------- extension
 
 export default function remindersExtension(pi: ExtensionAPI) {
-  registerToolDiscovery(pi);
-  if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
+	registerToolDiscovery(pi);
+	if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
 	// Children share skill routing/read receipts without inheriting the parent's
 	// manual reminder timers, todo nudges or continuation messages.
 	if (process.env.PI_SUBAGENT_CHILD === "1") {
 		const guidance = createRelevantGuidance(pi);
-		for (const hook of ["session_start", "session_switch", "session_compact"] as const)
-			pi.on(hook, (_event, ctx) => { guidance.restore(ctx); });
-		pi.on("input", (event) => { if (event.source !== "extension") guidance.userInput(); });
-		pi.on("before_agent_start", (event, ctx) => { guidance.start(event, ctx); });
-		pi.on("tool_call", (event, ctx) => { if (!ctx.signal?.aborted) return guidance.beforeToolCall(event); });
-		pi.on("tool_result", (event) => { guidance.record(event); });
+		for (const hook of [
+			"session_start",
+			"session_switch",
+			"session_compact",
+		] as const)
+			pi.on(hook, (_event, ctx) => {
+				guidance.restore(ctx);
+			});
+		pi.on("input", (event) => {
+			if (event.source !== "extension") guidance.userInput();
+		});
+		pi.on("before_agent_start", (event, ctx) => {
+			guidance.start(event, ctx);
+		});
+		pi.on("tool_call", (event, ctx) => {
+			if (!ctx.signal?.aborted) return guidance.beforeToolCall(event);
+		});
+		pi.on("tool_result", (event) => {
+			guidance.record(event);
+		});
 		return;
 	}
 	// Per-session live state; sid "" (unknown) is tolerated.
 	const live = new Map<string, ReminderState>();
-	const todoSnapshots = new WeakMap<ReminderState, Array<{id?: number; subject?: string; status?: string; blockedBy?: number[]}>>();
+	const todoSnapshots = new WeakMap<
+		ReminderState,
+		Array<{
+			id?: number;
+			subject?: string;
+			status?: string;
+			blockedBy?: number[];
+		}>
+	>();
 	const guidance = createRelevantGuidance(pi);
 	let loop = createLoopTracker();
 	let recoveryRoute: { provider: string; model: string } | undefined;
-	let thinkingChars = 0, scannedChars = 0, streamingSteered = false;
+	let thinkingChars = 0,
+		scannedChars = 0,
+		streamingSteered = false;
 	const terminatingTools = new Set<string>();
 	// before_agent_start does not carry the input source. Track the real human
 	// input event so an extension wake before the first prompt cannot consume
@@ -440,8 +500,26 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		r.delivered += 1;
 		catchUp(r, now);
 	};
-	const updateTodoCounts = (st: ReminderState, tasks: Array<{ id?: number; subject?: string; status?: unknown; blockedBy?: number[] }>) => {
-		todoSnapshots.set(st, tasks.filter(t => t.status === "pending" || t.status === "in_progress").map(t=>({id:t.id,subject:t.subject,status:String(t.status),blockedBy:t.blockedBy})));
+	const updateTodoCounts = (
+		st: ReminderState,
+		tasks: Array<{
+			id?: number;
+			subject?: string;
+			status?: unknown;
+			blockedBy?: number[];
+		}>,
+	) => {
+		todoSnapshots.set(
+			st,
+			tasks
+				.filter((t) => t.status === "pending" || t.status === "in_progress")
+				.map((t) => ({
+					id: t.id,
+					subject: t.subject,
+					status: String(t.status),
+					blockedBy: t.blockedBy,
+				})),
+		);
 		st.pendingCount = tasks.filter((t) => t?.status === "pending").length;
 		st.inProgressCount = tasks.filter((t) => t?.status === "in_progress").length;
 		st.hasPending = st.pendingCount + st.inProgressCount > 0;
@@ -469,7 +547,11 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_compact", (_event, ctx) => { recoveryRoute = undefined; loop = createLoopTracker(); guidance.restore(ctx); });
+	pi.on("session_compact", (_event, ctx) => {
+		recoveryRoute = undefined;
+		loop = createLoopTracker();
+		guidance.restore(ctx);
+	});
 
 	pi.on("session_tree", (_event, ctx) => {
 		recoveryRoute = undefined;
@@ -480,8 +562,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const st = load(sid);
 			restoreTodos(ctx, st);
 			writeState(sid, st);
+		} catch (err) {
+			logReminderErr("session_tree", err);
 		}
-		catch (err) { logReminderErr("session_tree", err); }
 	});
 
 	// Shadow the todo tool's per-session state from its result details —
@@ -493,7 +576,11 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			guidance.record(event);
 			if (event.toolName === "todo" && !event.isError) {
 				const d = event.details as
-					| { action?: unknown; error?: unknown; tasks?: Array<{ status?: unknown }> }
+					| {
+							action?: unknown;
+							error?: unknown;
+							tasks?: Array<{ status?: unknown }>;
+					  }
 					| undefined;
 				if (Array.isArray(d?.tasks)) {
 					const sid = sidOf(ctx);
@@ -585,7 +672,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				],
 				todoSnapshots.get(st),
 			);
-			if (!content.trim()) { writeState(sid, st); return undefined; }
+			if (!content.trim()) {
+				writeState(sid, st);
+				return undefined;
+			}
 			// Advance schedules BEFORE returning: a delivered occurrence cannot
 			// re-fire from a later lifecycle event (structural dedup).
 			for (const r of dueManual) advanceDelivered(r, now);
@@ -624,7 +714,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		const result = await prepareReminderStart(event, ctx);
 		// Local guidance captures the full inventory before its wire projection.
 		const systemPrompt = compactSkillCatalog(event, pi.getActiveTools?.() ?? []);
-		return systemPrompt === undefined ? result : {...(result ?? {}), systemPrompt};
+		return systemPrompt === undefined
+			? result
+			: { ...(result ?? {}), systemPrompt };
 	});
 
 	// Only current-run observations are relevant; never blame the next task/model.
@@ -650,29 +742,49 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	// Streaming detection queues normal Pi steering; never abort/restart the
 	// transport or insert a synthetic user turn. User steering takes priority.
 	pi.on("message_update", (event, ctx) => {
-		if (loop.nudged || ctx.signal?.aborted || ctx.isIdle?.() !== false || ctx.hasPendingMessages?.()) return;
+		if (
+			loop.nudged ||
+			ctx.signal?.aborted ||
+			ctx.isIdle?.() !== false ||
+			ctx.hasPendingMessages?.()
+		)
+			return;
 		const delta = event.assistantMessageEvent;
-		if (delta?.type !== "thinking_delta" || typeof delta.delta !== "string") return;
+		if (delta?.type !== "thinking_delta" || typeof delta.delta !== "string")
+			return;
 		thinkingChars += delta.delta.length;
 		if (thinkingChars > 128_000 || thinkingChars - scannedChars < 2_048) return;
 		scannedChars = thinkingChars;
 		const m = event.message;
-		if (m.role !== "assistant" || m.content.some(b => b.type === "toolCall" || b.type === "text" && b.text.trim())) return;
+		if (
+			m.role !== "assistant" ||
+			m.content.some(
+				(b) => b.type === "toolCall" || (b.type === "text" && b.text.trim()),
+			)
+		)
+			return;
 		const sid = sidOf(ctx);
 		if (!sid) return;
-		const st = load(sid), now = Date.now();
+		const st = load(sid),
+			now = Date.now();
 		if (st.lastOverthinkAt && now - st.lastOverthinkAt < OT_GAP_MS) return;
 		const nudge = repeatedReasoningNotice(m);
 		if (!nudge) return;
 		try {
-			pi.sendMessage({ customType: "reminders", content: nudge, display: false }, { deliverAs: "steer" });
+			pi.sendMessage(
+				{ customType: "reminders", content: nudge, display: false },
+				{ deliverAs: "steer" },
+			);
 			loop.nudged = true;
 			streamingSteered = true;
-			if (ctx.model) recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
+			if (ctx.model)
+				recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
 			st.overthinkReminders++;
 			st.lastOverthinkAt = now;
 			writeState(sid, st);
-		} catch (err) { logReminderErr("reasoning steering", err); }
+		} catch (err) {
+			logReminderErr("reasoning steering", err);
+		}
 	});
 
 	pi.on("input", (event, ctx) => {
@@ -681,7 +793,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			try {
 				const sid = sidOf(ctx);
 				if (sid) pendingHumanPrompts.add(sid);
-			} catch { /* a closing session has no orientation opportunity */ }
+			} catch {
+				/* a closing session has no orientation opportunity */
+			}
 			loop = createLoopTracker();
 			guidance.userInput();
 		}
@@ -691,11 +805,16 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		const review = guidance.beforeToolCall(event);
 		if (review) return review;
 		const reason = loop.block(event);
-		if (reason) return {block: true, reason};
+		if (reason) return { block: true, reason };
 	});
 	pi.on("before_provider_request", (event, ctx) => {
 		if (!recoveryRoute || ctx.signal?.aborted) return;
-		if (ctx.model?.provider !== recoveryRoute.provider || ctx.model?.id !== recoveryRoute.model || event.payload?.model !== recoveryRoute.model) return;
+		if (
+			ctx.model?.provider !== recoveryRoute.provider ||
+			ctx.model?.id !== recoveryRoute.model ||
+			event.payload?.model !== recoveryRoute.model
+		)
+			return;
 		recoveryRoute = undefined;
 		const next = reduceRepeatedReasoningBudget(event.payload);
 		return next === event.payload ? undefined : next;
@@ -716,7 +835,13 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				const nudged = loop.nudged;
 				loop = createLoopTracker();
 				loop.nudged = nudged;
-				if (!streamingSteered || ctx.signal?.aborted || m.stopReason === "error" || m.stopReason === "aborted") recoveryRoute = undefined;
+				if (
+					!streamingSteered ||
+					ctx.signal?.aborted ||
+					m.stopReason === "error" ||
+					m.stopReason === "aborted"
+				)
+					recoveryRoute = undefined;
 				return;
 			}
 			const st = load(sid);
@@ -740,7 +865,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						now,
 						{ todo: false, drift: false },
 						dueManual,
-						[...(nudge ? [nudge] : []), ...hints.map((h) => `[capability hint] ${h.text}`)],
+						[
+							...(nudge ? [nudge] : []),
+							...hints.map((h) => `[capability hint] ${h.text}`),
+						],
 					),
 					display: dueManual.length > 0,
 				},
@@ -750,7 +878,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			guidance.commit(hints);
 			if (nudge) {
 				loop.nudged = true;
-				if (reasoning && ctx.model) recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
+				if (reasoning && ctx.model)
+					recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
 				st.overthinkReminders += 1;
 				st.lastOverthinkAt = now;
 			}
@@ -872,19 +1001,18 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				// before_agent_start/turn_end and cannot wake completed work.
 				const immediateMessage = {
 					customType: "reminders",
-					content: reminderText(
-						st,
-						sid,
-						now,
-						{ todo: false, drift: false },
-						[reminder],
-					),
+					content: reminderText(st, sid, now, { todo: false, drift: false }, [
+						reminder,
+					]),
 					display: true,
 				};
 				try {
 					if (typeof pi.sendMessage !== "function")
 						throw new Error("message delivery unavailable");
-					pi.sendMessage(immediateMessage, { deliverAs: "steer", triggerTurn: true });
+					pi.sendMessage(immediateMessage, {
+						deliverAs: "steer",
+						triggerTurn: true,
+					});
 				} catch {
 					// A rejected queue must be due at the next available boundary;
 					// leave delivered=0 and retain the original createdAt grid for
@@ -908,7 +1036,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 							`Reminder queued, but its delivery receipt could not be saved; it remains scheduled for ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min.`,
 							"warning",
 						);
-					} catch (err) { logReminderErr("reminder delivery notice", err); }
+					} catch (err) {
+						logReminderErr("reminder delivery notice", err);
+					}
 					return;
 				}
 				try {
@@ -916,7 +1046,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						`Reminder set and queued: "${oneLine(arg, 80)}" — it repeats every ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min for the rest of this session. Manage: /reminder list | clear <n|all>.`,
 						"info",
 					);
-				} catch (err) { logReminderErr("reminder delivery notice", err); }
+				} catch (err) {
+					logReminderErr("reminder delivery notice", err);
+				}
 			} catch {
 				ctx.ui.notify("reminder: failed to update state", "error");
 			}

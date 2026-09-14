@@ -17,11 +17,12 @@ export function parseSelection(args, tests) {
   return { selected: requested.length ? [...new Set(requested)] : tests, jobs, report };
 }
 
-export function runSuite(test, file, { signal, env = process.env, cwd } = {}) {
+export function runSuite(test, file, { signal, env = process.env, cwd, timeoutMs = 120000 } = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new Error('Invalid suite deadline');
   const started = performance.now();
   return new Promise((resolve) => {
     let stdout = "", stderr = "", bytes = 0, error, hardKill;
-    const child = spawn("timeout", ["--kill-after=5s", "120s", process.execPath,
+    const child = spawn("timeout", ["--kill-after=5s", `${timeoutMs / 1000}s`, process.execPath,
       "--no-warnings", "--experimental-strip-types", file], {
       env: { ...env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_MEMORY_EXIT_SUMMARY: "0", PI_MEMORY_QMD_UPDATE: "off" },
       stdio: ["ignore", "pipe", "pipe"], detached: true, cwd,
@@ -32,6 +33,9 @@ export function runSuite(test, file, { signal, env = process.env, cwd } = {}) {
       kill("SIGTERM"); hardKill ??= setTimeout(() => kill("SIGKILL"), 5000);
       hardKill.unref();
     };
+    // GNU timeout stops watching when the direct child exits. Descendants
+    // can still hold inherited stdout/stderr open, preventing close forever.
+    const deadline = setTimeout(() => { error ??= 'test exceeded suite deadline'; stop(); }, timeoutMs + 25);
     const abort = () => { error ??= "test run interrupted"; stop(); };
     const collect = (stream) => (data) => {
       const chunk = data.toString(); bytes += Buffer.byteLength(chunk);
@@ -45,7 +49,7 @@ export function runSuite(test, file, { signal, env = process.env, cwd } = {}) {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     child.on("close", (status, childSignal) => {
-      clearTimeout(hardKill); signal?.removeEventListener("abort", abort);
+      clearTimeout(deadline); clearTimeout(hardKill); signal?.removeEventListener("abort", abort);
       const ok = status === 0 && !error;
       resolve({ test, ok, status, signal: childSignal, ms: Math.round(performance.now() - started),
         error: error ?? null, failure: ok ? null : `${error ? error + "\n" : ""}${stdout}${stderr}`.slice(-6000) });
