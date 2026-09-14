@@ -890,14 +890,71 @@ function hasTerminalResult(result: Details["results"][number]): boolean {
 }
 
 function isResultRunning(result: Details["results"][number], status = result.progress?.status): boolean {
-	return status === "running" && !hasTerminalResultFlag(result);
+	return status === "running" && !isTerminalResult(result);
+}
+
+/** A result that can no longer change: it stopped, detached, was interrupted, or
+ * already carries a final status/exit code. A stale "running" progress row must
+ * not keep a failed child in the running count — that produced
+ * "3 agents running · 0/5 done · 2 failed" for a group that could never finish. */
+function isTerminalResult(result: Details["results"][number]): boolean {
+	if (hasTerminalResultFlag(result)) return true;
+	if (result.exitCode !== undefined) return true;
+	const status = result.progress?.status;
+	return status === "completed" || status === "failed" || status === "stopped" || status === "cancelled" || status === "timed_out";
+}
+
+function isFailedResult(result: Details["results"][number]): boolean {
+	if (result.interrupted || result.detached) return false;
+	const status = result.progress?.status;
+	if (status === "failed" || status === "stopped" || status === "cancelled" || status === "timed_out") return true;
+	return typeof result.exitCode === "number" && result.exitCode !== 0;
+}
+
+/** One owner for parallel-group counters. `done` counts *terminal* children —
+ * including failed ones — because a group finishes when every child is
+ * terminal, not when every child succeeded. */
+export function groupProgressCounts(details: Details, groupStart: number, groupSize: number): { running: number; done: number; failed: number; total: number } {
+	let running = 0;
+	let done = 0;
+	let failed = 0;
+	for (let index = groupStart; index < groupStart + groupSize; index++) {
+		const progressEntry = details.progress?.find((progress) => progress.index === index);
+		const resultEntry = details.results.find((result) => result.progress?.index === index) ?? details.results[index];
+		if (resultEntry && isTerminalResult(resultEntry)) {
+			done++;
+			if (isFailedResult(resultEntry)) failed++;
+			continue;
+		}
+		if (progressEntry?.status === "running") {
+			running++;
+			continue;
+		}
+		if (progressEntry?.status === "completed") {
+			done++;
+			continue;
+		}
+		if (resultEntry && isDoneResult(resultEntry)) {
+			done++;
+			continue;
+		}
+		if (resultEntry && isFailedResult(resultEntry)) {
+			failed++;
+			done++;
+			continue;
+		}
+		// No terminal evidence yet: the child has not finished. Counting it keeps
+		// `done + running === total`, so a group can never look quietly complete.
+		running++;
+	}
+	return { running, done, failed, total: groupSize };
 }
 
 function detailsHaveRunningResult(details: Details): boolean {
 	return details.progress?.some((progress) => {
 		if (progress.status !== "running") return false;
 		const result = details.results.find((entry) => entry.progress?.index === progress.index) ?? details.results[progress.index];
-		return !result || !hasTerminalResultFlag(result);
+		return !result || !isTerminalResult(result);
 	})
 		|| details.results.some((result) => isResultRunning(result))
 		|| workflowGraphHasStatus(details, ["running"]);
@@ -1642,27 +1699,14 @@ function buildMultiProgressLabel(details: Pick<Details, "mode" | "results" | "pr
 		const currentStepIndex = details.currentStepIndex!;
 		const span = stepSpans[currentStepIndex];
 		const groupSize = span?.count ?? 1;
-		const groupStart = span?.start ?? 0;
-		const groupEnd = groupStart + groupSize;
-		let running = 0;
-		let done = 0;
-		for (let index = groupStart; index < groupEnd; index++) {
-			const progressEntry = details.progress?.find((progress) => progress.index === index);
-			const resultEntry = details.results.find((result) => result.progress?.index === index) ?? details.results[index];
-			if (progressEntry?.status === "running" && (!resultEntry || !hasTerminalResultFlag(resultEntry))) {
-				running++;
-				continue;
-			}
-			if (progressEntry?.status === "completed") {
-				done++;
-				continue;
-			}
-			if (resultEntry && isDoneResult(resultEntry)) done++;
-		}
+		const counts = groupProgressCounts(details, groupStart, groupSize);
+		const running = counts.running;
+		const done = counts.done;
+		const failedSuffix = counts.failed ? ` · ${counts.failed} failed` : "";
 		const totalSteps = details.totalSteps ?? details.chainAgents?.length ?? 1;
 		const headerLabel = hasRunning
-			? `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${formatAgentRunningLabel(running)} · ${done}/${groupSize} done`
-			: `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${done}/${groupSize} done`;
+			? `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${formatAgentRunningLabel(running)} · ${done}/${groupSize} done${failedSuffix}`
+			: `step ${currentStepIndex + 1}/${totalSteps} · parallel group: ${done}/${groupSize} done${failedSuffix}`;
 		return { headerLabel, itemTitle, totalCount: groupSize, hasParallelInChain, activeParallelGroup, groupStartIndex: groupStart, groupEndIndex: groupEnd, showActiveGroupOnly: true, logicalStepCount: totalSteps };
 	}
 

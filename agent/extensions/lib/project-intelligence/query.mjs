@@ -141,6 +141,18 @@ function selectedProvenance(item, sources, includeInactive) {
   return provenance.slice(0, MAX_PROVENANCE);
 }
 
+// Self-generated copies are not project knowledge (discovery-parsers keeps the
+// same segment list). A complete scan withdraws them, but historical rows can
+// outlive it and then surface in the per-request brief as if they were current
+// dependencies.
+const GENERATED_SEGMENT_PATH = /(^|\/)(artifacts|backups|worktrees|renders|outputs)\//i;
+function isGeneratedNode(node) {
+  if (GENERATED_SEGMENT_PATH.test(String(node?.key ?? ''))) return true;
+  return asArray(node?.provenance).some(entry =>
+    GENERATED_SEGMENT_PATH.test(String(entry?.locator ?? '')),
+  );
+}
+
 function filteredGraph(snapshot, options) {
   const nodes = asArray(snapshot?.nodes).filter(Boolean);
   const edges = asArray(snapshot?.edges).filter(Boolean);
@@ -156,7 +168,7 @@ function filteredGraph(snapshot, options) {
     if (provenance.length === 0) return true;
     return provenance.some(entry => entry.scope === scope || entry.scope === 'shared');
   };
-  const filteredNodes = nodes.filter(node => !typeFilter.size || typeFilter.has(String(node.type ?? '').toLowerCase()));
+  const filteredNodes = nodes.filter(node => (!typeFilter.size || typeFilter.has(String(node.type ?? '').toLowerCase())) && !isGeneratedNode(node));
   const allowedNodeIds = new Set(filteredNodes.map(node => node.id));
   const filteredEdges = edges.filter(edge => {
     if (!allowedNodeIds.has(edge.source) || !allowedNodeIds.has(edge.target)) return false;
@@ -494,14 +506,32 @@ export function agentBrief(snapshot, options = {}) {
   const maxChars = clampInteger(options.maxChars, 1800, 400, 6000);
   const graph = queryGraph(snapshot, { ...options, maxChars: 200000, limit: Math.min(40, options.limit ?? 16) });
   const byId = new Map(graph.nodes.map(node => [node.id, node]));
-  const label = id => safeString(byId.get(id)?.key || byId.get(id)?.label || id, 160);
+  const label = id => {
+    const node = byId.get(id);
+    // A session-scoped container id is bookkeeping: show the meaningful tail
+    // (`crypto`, `PI_LOCAL_INTELLIGENCE`), never an anonymous uuid prefix the
+    // model cannot act on.
+    return safeString(node?.key || node?.label || id, 160)
+      .replace(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[a-z][a-z-]*:/i,
+        '',
+      )
+      .replace(
+        /^([0-9a-f]{8})[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        'session $1',
+      );
+  };
   const evidence = item => {
     const source = asArray(item.provenance)[0];
     return `[${safeString(item.status || 'unknown', 18)}${item.conflict ? ', conflict' : ''}]${source ? ` @${safeString(source.locator || source.sourceId, 140)}` : ' [source unavailable]'}`;
   };
   const focus = asArray(options.focus).filter(value => typeof value === 'string').slice(0, 2).map(value => safeString(value,120));
   const roots = graph.nodes.filter(node => node.distance === 0);
-  const header = `revision ${graph.revision}; ${focus.length ? `focus=${JSON.stringify(focus)}` : `query=${JSON.stringify(safeString(options.query, 180))}`}`;
+  // Bookkeeping must never reach the model-visible brief: `revision` bumps on
+  // every store write, so embedding it changes these bytes on requests where
+  // the evidence did not change and invalidates the provider cache prefix. It
+  // stays on the structured result for programmatic consumers.
+  const header = focus.length ? `focus=${JSON.stringify(focus)}` : `query=${JSON.stringify(safeString(options.query, 180))}`;
   const result = {revision:graph.revision, summary:'', truncated:Boolean(graph.truncated)};
   const lines = [header, 'Incoming links identify consumers; outgoing links identify dependencies. Verify inferred links in source.'];
   if (options.caveat) lines.push(safeString(options.caveat, 180));
@@ -530,9 +560,15 @@ export function agentBrief(snapshot, options = {}) {
     ...facts.filter((_,i) => !graph.facts[i].conflict && !intentFact(graph.facts[i])),
   ];
   const omitted = 'Additional evidence omitted; use project_intel with focus and direction to inspect more.';
+  // Identical evidence is one line, not five: distinct edge ids can render the
+  // same text (same relation, status and provenance), and repeating it spends the
+  // brief budget on nothing the model can act on.
+  const rendered = new Set(lines);
   for (const line of candidates) {
+    if (rendered.has(line)) continue;
     if (JSON.stringify({...result,summary:[...lines,line,omitted].join('\n')}).length > maxChars) { result.truncated=true; continue; }
     lines.push(line);
+    rendered.add(line);
   }
   if (result.truncated) lines.push(omitted);
   result.summary=lines.join('\n');

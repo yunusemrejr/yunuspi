@@ -51,6 +51,88 @@ test('agent briefs preserve directed dependencies, exact keys and provenance wit
   assert.match(small.summary,/omitted/);
 });
 
+test('model-visible briefs ignore bookkeeping revisions and anonymous container labels', () => {
+  const node = (id) => ({ id, key: `src/${id}.ts`, label: id, type: 'file' });
+  const edge = (id, source, target) => ({ id, source, target, type: 'imports', status: 'inferred', provenance: [{ sourceId: 'source', locator: `file:src/${source}.ts`, scope: 'checkout' }] });
+  const graph = (revision) => ({ revision, nodes: [node('target'), node('consumer')], edges: [edge('a', 'consumer', 'target')], facts: [] });
+  const options = { focus: 'src/target.ts', hops: 2, maxChars: 1800 };
+  const first = agentBrief(graph(7), options);
+  const later = agentBrief(graph(196), options);
+  // The brief is re-sent on every provider request, so a bookkeeping revision
+  // bump with unchanged evidence must not change its bytes.
+  assert.equal(later.summary, first.summary);
+  assert.doesNotMatch(first.summary, /revision/);
+  assert.equal(later.revision, 196, 'the structured revision stays available');
+  // Negative control: changed evidence still changes the brief.
+  const grown = graph(197);
+  grown.nodes.push(node('dependency'));
+  grown.edges.push(edge('b', 'target', 'dependency'));
+  assert.notEqual(agentBrief(grown, options).summary, first.summary);
+  // A session-scoped container id is bookkeeping: the label shows the usable
+  // tail (`crypto`), never the anonymous uuid the model cannot act on.
+  const anonymous = {
+    revision: 1,
+    nodes: [
+      node('target'),
+      {
+        id: 'other',
+        key: '9a85aae4-3775-4d67-a1c3-32fe9dfdd474:dependency:crypto',
+        label: 'crypto',
+        type: 'dependency',
+      },
+    ],
+    edges: [
+      { id: 'c', source: 'target', target: 'other', type: 'imports', status: 'inferred', provenance: [] },
+    ],
+    facts: [],
+  };
+  const anonymousBrief = agentBrief(anonymous, options);
+  assert.match(anonymousBrief.summary, /src\/target\.ts -imports-> crypto/);
+  assert.doesNotMatch(anonymousBrief.summary, /9a85aae4/);
+  // Historical rows for self-generated copies survive a scan exclusion, so the
+  // query path drops them too: they are not current dependencies.
+  const residue = {
+    revision: 2,
+    nodes: [
+      node('target'),
+      { id: 'residue', key: 'agent/artifacts/old-audit/README.md', label: 'old-audit', type: 'file' },
+      { id: 'backup', key: 'agent/backups/copy/src/helper.ts', label: 'helper', type: 'file' },
+    ],
+    edges: [
+      { id: 'r1', source: 'target', target: 'residue', type: 'imports', status: 'inferred', provenance: [{ sourceId: 's', locator: 'file:agent/artifacts/old-audit/README.md', scope: 'checkout' }] },
+      { id: 'r2', source: 'target', target: 'backup', type: 'imports', status: 'inferred', provenance: [{ sourceId: 's', locator: 'file:agent/backups/copy/src/helper.ts', scope: 'checkout' }] },
+    ],
+    facts: [],
+  };
+  const residueBrief = agentBrief(residue, options);
+  assert.doesNotMatch(residueBrief.summary, /artifacts|backups/);
+  // Negative control: the same graph without generated copies keeps its edges.
+  assert.match(
+    agentBrief(
+      { ...residue, nodes: [node('target'), node('dependency')], edges: [edge('b', 'target', 'dependency')] },
+      options,
+    ).summary,
+    /src\/target\.ts -imports-> src\/dependency\.ts/,
+  );
+  // Identical evidence must render once: distinct edge ids with the same
+  // relation/status/provenance are one line, not five.
+  const repeated = {
+    revision: 3,
+    nodes: [node('target'), node('consumer'), node('dependency')],
+    edges: [
+      edge('a1', 'consumer', 'target'),
+      edge('a2', 'consumer', 'target'),
+      edge('a3', 'consumer', 'target'),
+      edge('b', 'target', 'dependency'),
+    ],
+    facts: [],
+  };
+  const repeatedSummary = agentBrief(repeated, options).summary;
+  const occurrences = repeatedSummary.split('src/consumer.ts -imports-> src/target.ts').length - 1;
+  assert.equal(occurrences, 1);
+  assert.match(repeatedSummary, /src\/target\.ts -imports-> src\/dependency\.ts/);
+});
+
 async function fixture(run) {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "pi-public-intel-"));
   const cwd = path.join(temp, "project"),
