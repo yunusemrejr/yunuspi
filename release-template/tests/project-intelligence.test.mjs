@@ -30,59 +30,121 @@ const { queryGraph, simplifyGraph, agentBrief } = await import(
   pathToFileURL(modulePath("query.mjs"))
 );
 
-test('agent briefs preserve directed dependencies, exact keys and provenance within the context budget', () => {
-  const nodes = ['target', 'consumer', 'dependency', 'transitive'].map(id => ({id, key:`src/${id}.ts`, label:id, type:'file'}));
-  const edge = (id, source, target) => ({id, source, target, type:'imports', status:'inferred', provenance:[{sourceId:'source', locator:`file:src/${source}.ts`, scope:'checkout'}]});
-  const graph = {revision:7, nodes, edges:[edge('a','consumer','target'),edge('b','target','dependency'),edge('c','transitive','consumer')], facts:[]};
-  assert.equal(typeof agentBrief,'function');
-  const brief = agentBrief(graph,{focus:'src/target.ts',hops:2,maxChars:1800});
+test("agent briefs preserve directed dependencies, exact keys and provenance within the context budget", () => {
+  const nodes = ["target", "consumer", "dependency", "transitive"].map(
+    (id) => ({ id, key: `src/${id}.ts`, label: id, type: "file" }),
+  );
+  const edge = (id, source, target) => ({
+    id,
+    source,
+    target,
+    type: "imports",
+    status: "inferred",
+    provenance: [
+      {
+        sourceId: "source",
+        locator: `file:src/${source}.ts`,
+        scope: "checkout",
+      },
+    ],
+  });
+  const graph = {
+    revision: 7,
+    nodes,
+    edges: [
+      edge("a", "consumer", "target"),
+      edge("b", "target", "dependency"),
+      edge("c", "transitive", "consumer"),
+    ],
+    facts: [],
+  };
+  assert.equal(typeof agentBrief, "function");
+  const brief = agentBrief(graph, {
+    focus: "src/target.ts",
+    hops: 2,
+    maxChars: 1800,
+  });
   assert.ok(JSON.stringify(brief).length <= 1800);
-  assert.match(brief.summary,/src\/consumer.ts -imports-> src\/target.ts/);
-  assert.match(brief.summary,/src\/target.ts -imports-> src\/dependency.ts/);
-  assert.match(brief.summary,/src\/transitive.ts -imports-> src\/consumer.ts/);
-  assert.match(brief.summary,/inferred.*@file:src/);
-  assert.match(brief.summary,/incoming.*consumers.*outgoing.*dependencies/i);
-  assert.equal(brief.revision,7);
-  assert.match(agentBrief(graph,{focus:'missing.ts'}).summary,/No matching entities/);
-  const crowded={...graph,edges:Array.from({length:40},(_,i)=>({...edge(String(i),'consumer','target'),type:`relation-${i}`}))};
-  const small=agentBrief(crowded,{focus:'src/target.ts',maxChars:700});
-  assert.ok(JSON.stringify(small).length<=700);
-  assert.equal(small.truncated,true);
-  assert.match(small.summary,/omitted/);
+  assert.match(brief.summary, /src\/consumer.ts -imports-> src\/target.ts/);
+  assert.match(brief.summary, /src\/target.ts -imports-> src\/dependency.ts/);
+  assert.match(brief.summary, /src\/transitive.ts -imports-> src\/consumer.ts/);
+  assert.match(brief.summary, /inferred.*@file:src/);
+  assert.match(brief.summary, /incoming.*consumers.*outgoing.*dependencies/i);
+  assert.equal(brief.revision, 7);
+  assert.match(
+    agentBrief(graph, { focus: "missing.ts" }).summary,
+    /No matching entities/,
+  );
+  const crowded = {
+    ...graph,
+    edges: Array.from({ length: 40 }, (_, i) => ({
+      ...edge(String(i), "consumer", "target"),
+      type: `relation-${i}`,
+    })),
+  };
+  const small = agentBrief(crowded, { focus: "src/target.ts", maxChars: 700 });
+  assert.ok(JSON.stringify(small).length <= 700);
+  assert.equal(small.truncated, true);
+  assert.match(small.summary, /omitted/);
 });
 
-test('model-visible briefs ignore bookkeeping revisions and anonymous container labels', () => {
-  const node = (id) => ({ id, key: `src/${id}.ts`, label: id, type: 'file' });
-  const edge = (id, source, target) => ({ id, source, target, type: 'imports', status: 'inferred', provenance: [{ sourceId: 'source', locator: `file:src/${source}.ts`, scope: 'checkout' }] });
-  const graph = (revision) => ({ revision, nodes: [node('target'), node('consumer')], edges: [edge('a', 'consumer', 'target')], facts: [] });
-  const options = { focus: 'src/target.ts', hops: 2, maxChars: 1800 };
+test("model-visible briefs ignore bookkeeping revisions and anonymous container labels", () => {
+  const node = (id) => ({ id, key: `src/${id}.ts`, label: id, type: "file" });
+  const edge = (id, source, target) => ({
+    id,
+    source,
+    target,
+    type: "imports",
+    status: "inferred",
+    provenance: [
+      {
+        sourceId: "source",
+        locator: `file:src/${source}.ts`,
+        scope: "checkout",
+      },
+    ],
+  });
+  const graph = (revision) => ({
+    revision,
+    nodes: [node("target"), node("consumer")],
+    edges: [edge("a", "consumer", "target")],
+    facts: [],
+  });
+  const options = { focus: "src/target.ts", hops: 2, maxChars: 1800 };
   const first = agentBrief(graph(7), options);
   const later = agentBrief(graph(196), options);
   // The brief is re-sent on every provider request, so a bookkeeping revision
   // bump with unchanged evidence must not change its bytes.
   assert.equal(later.summary, first.summary);
   assert.doesNotMatch(first.summary, /revision/);
-  assert.equal(later.revision, 196, 'the structured revision stays available');
+  assert.equal(later.revision, 196, "the structured revision stays available");
   // Negative control: changed evidence still changes the brief.
   const grown = graph(197);
-  grown.nodes.push(node('dependency'));
-  grown.edges.push(edge('b', 'target', 'dependency'));
+  grown.nodes.push(node("dependency"));
+  grown.edges.push(edge("b", "target", "dependency"));
   assert.notEqual(agentBrief(grown, options).summary, first.summary);
   // A session-scoped container id is bookkeeping: the label shows the usable
   // tail (`crypto`), never the anonymous uuid the model cannot act on.
   const anonymous = {
     revision: 1,
     nodes: [
-      node('target'),
+      node("target"),
       {
-        id: 'other',
-        key: '9a85aae4-3775-4d67-a1c3-32fe9dfdd474:dependency:crypto',
-        label: 'crypto',
-        type: 'dependency',
+        id: "other",
+        key: "9a85aae4-3775-4d67-a1c3-32fe9dfdd474:dependency:crypto",
+        label: "crypto",
+        type: "dependency",
       },
     ],
     edges: [
-      { id: 'c', source: 'target', target: 'other', type: 'imports', status: 'inferred', provenance: [] },
+      {
+        id: "c",
+        source: "target",
+        target: "other",
+        type: "imports",
+        status: "inferred",
+        provenance: [],
+      },
     ],
     facts: [],
   };
@@ -94,13 +156,49 @@ test('model-visible briefs ignore bookkeeping revisions and anonymous container 
   const residue = {
     revision: 2,
     nodes: [
-      node('target'),
-      { id: 'residue', key: 'agent/artifacts/old-audit/README.md', label: 'old-audit', type: 'file' },
-      { id: 'backup', key: 'agent/backups/copy/src/helper.ts', label: 'helper', type: 'file' },
+      node("target"),
+      {
+        id: "residue",
+        key: "agent/artifacts/old-audit/README.md",
+        label: "old-audit",
+        type: "file",
+      },
+      {
+        id: "backup",
+        key: "agent/backups/copy/src/helper.ts",
+        label: "helper",
+        type: "file",
+      },
     ],
     edges: [
-      { id: 'r1', source: 'target', target: 'residue', type: 'imports', status: 'inferred', provenance: [{ sourceId: 's', locator: 'file:agent/artifacts/old-audit/README.md', scope: 'checkout' }] },
-      { id: 'r2', source: 'target', target: 'backup', type: 'imports', status: 'inferred', provenance: [{ sourceId: 's', locator: 'file:agent/backups/copy/src/helper.ts', scope: 'checkout' }] },
+      {
+        id: "r1",
+        source: "target",
+        target: "residue",
+        type: "imports",
+        status: "inferred",
+        provenance: [
+          {
+            sourceId: "s",
+            locator: "file:agent/artifacts/old-audit/README.md",
+            scope: "checkout",
+          },
+        ],
+      },
+      {
+        id: "r2",
+        source: "target",
+        target: "backup",
+        type: "imports",
+        status: "inferred",
+        provenance: [
+          {
+            sourceId: "s",
+            locator: "file:agent/backups/copy/src/helper.ts",
+            scope: "checkout",
+          },
+        ],
+      },
     ],
     facts: [],
   };
@@ -109,7 +207,11 @@ test('model-visible briefs ignore bookkeeping revisions and anonymous container 
   // Negative control: the same graph without generated copies keeps its edges.
   assert.match(
     agentBrief(
-      { ...residue, nodes: [node('target'), node('dependency')], edges: [edge('b', 'target', 'dependency')] },
+      {
+        ...residue,
+        nodes: [node("target"), node("dependency")],
+        edges: [edge("b", "target", "dependency")],
+      },
       options,
     ).summary,
     /src\/target\.ts -imports-> src\/dependency\.ts/,
@@ -118,19 +220,24 @@ test('model-visible briefs ignore bookkeeping revisions and anonymous container 
   // relation/status/provenance are one line, not five.
   const repeated = {
     revision: 3,
-    nodes: [node('target'), node('consumer'), node('dependency')],
+    nodes: [node("target"), node("consumer"), node("dependency")],
     edges: [
-      edge('a1', 'consumer', 'target'),
-      edge('a2', 'consumer', 'target'),
-      edge('a3', 'consumer', 'target'),
-      edge('b', 'target', 'dependency'),
+      edge("a1", "consumer", "target"),
+      edge("a2", "consumer", "target"),
+      edge("a3", "consumer", "target"),
+      edge("b", "target", "dependency"),
     ],
     facts: [],
   };
   const repeatedSummary = agentBrief(repeated, options).summary;
-  const occurrences = repeatedSummary.split('src/consumer.ts -imports-> src/target.ts').length - 1;
+  const occurrences =
+    repeatedSummary.split("src/consumer.ts -imports-> src/target.ts").length -
+    1;
   assert.equal(occurrences, 1);
-  assert.match(repeatedSummary, /src\/target\.ts -imports-> src\/dependency\.ts/);
+  assert.match(
+    repeatedSummary,
+    /src\/target\.ts -imports-> src\/dependency\.ts/,
+  );
 });
 
 async function fixture(run) {
@@ -566,41 +673,92 @@ test("automatic HTTP evidence retains known origins without path or query creden
 
 test("agents inspect and correct shared evidence across sessions without stale overwrites", () =>
   fixture(async ({ client }) => {
-    const author = client(), peer = client();
+    const author = client(),
+      peer = client();
     await Promise.all([author.ready, peer.ready]);
     const fact = (description, scope) => ({
-      entity: { type: "constraint", key: "durable-contract", label: "Storage contract" },
+      entity: {
+        type: "constraint",
+        key: "durable-contract",
+        label: "Storage contract",
+      },
       description,
       ...(scope ? { scope } : {}),
     });
-    const first = await author.request("record", { fact: fact("Original evidence", "shared") });
-    const inspection = await peer.request("inspect", { sourceId: first.sourceId });
+    const first = await author.request("record", {
+      fact: fact("Original evidence", "shared"),
+    });
+    const inspection = await peer.request("inspect", {
+      sourceId: first.sourceId,
+    });
     assert.equal(inspection.source.version, first.version);
-    assert.ok(inspection.source.nodes.some(node => node.key === "durable-contract"));
+    assert.ok(
+      inspection.source.nodes.some((node) => node.key === "durable-contract"),
+    );
     const corrected = await peer.request("update", {
       sourceId: first.sourceId,
       expectedVersion: inspection.source.version,
       fact: fact("Corrected evidence"),
     });
     assert.equal(corrected.sourceId, first.sourceId);
-    assert.equal((await author.request("inspect", { sourceId: first.sourceId })).source.scope, "shared");
-    await assert.rejects(author.request("update", {
-      sourceId: first.sourceId, expectedVersion: first.version, fact: fact("Stale evidence"),
-    }), error => error.code === "STALE_SOURCE" && error.currentVersion === corrected.version);
-    await assert.rejects(peer.request("update", {
-      sourceId: first.sourceId, fact: fact("Missing version"),
-    }), /expectedVersion/);
-    const focused = await author.request("inspect", { focus: "durable-contract", hops: 0 });
+    assert.equal(
+      (await author.request("inspect", { sourceId: first.sourceId })).source
+        .scope,
+      "shared",
+    );
+    await assert.rejects(
+      author.request("update", {
+        sourceId: first.sourceId,
+        expectedVersion: first.version,
+        fact: fact("Stale evidence"),
+      }),
+      (error) =>
+        error.code === "STALE_SOURCE" &&
+        error.currentVersion === corrected.version,
+    );
+    await assert.rejects(
+      peer.request("update", {
+        sourceId: first.sourceId,
+        fact: fact("Missing version"),
+      }),
+      /expectedVersion/,
+    );
+    const focused = await author.request("inspect", {
+      focus: "durable-contract",
+      hops: 0,
+    });
     assert.equal(focused.nodes.length, 1);
     assert.equal(focused.nodes[0].id, first.entityId);
     assert.match(JSON.stringify(focused), /Corrected evidence/);
-    assert.doesNotMatch(JSON.stringify(focused), /Original evidence|Stale evidence/);
-    const history = await author.request("history", { sourceId: first.sourceId });
-    assert.ok(history.length >= 2 && history.every(row => row.sourceId === first.sourceId));
-    await peer.request("retract", { sourceId: first.sourceId, expectedVersion: corrected.version });
-    assert.deepEqual((await author.request("query", { query: "durable-contract" })).nodes, []);
-    assert.equal((await author.request("inspect", { sourceId: first.sourceId })).source.active, false);
-    assert.ok((await author.request("history", { sourceId: first.sourceId })).some(row => row.event === "source-removed"));
+    assert.doesNotMatch(
+      JSON.stringify(focused),
+      /Original evidence|Stale evidence/,
+    );
+    const history = await author.request("history", {
+      sourceId: first.sourceId,
+    });
+    assert.ok(
+      history.length >= 2 &&
+        history.every((row) => row.sourceId === first.sourceId),
+    );
+    await peer.request("retract", {
+      sourceId: first.sourceId,
+      expectedVersion: corrected.version,
+    });
+    assert.deepEqual(
+      (await author.request("query", { query: "durable-contract" })).nodes,
+      [],
+    );
+    assert.equal(
+      (await author.request("inspect", { sourceId: first.sourceId })).source
+        .active,
+      false,
+    );
+    assert.ok(
+      (await author.request("history", { sourceId: first.sourceId })).some(
+        (row) => row.event === "source-removed",
+      ),
+    );
   }));
 
 test("retrieval distinguishes missing evidence, directed reachability and paged matches", () => {
@@ -608,14 +766,33 @@ test("retrieval distinguishes missing evidence, directed reachability and paged 
     revision: 1,
     project: { id: "fixture", rootNodeId: "root", name: "Fixture" },
     nodes: Array.from({ length: 80 }, (_, i) => ({
-      id: `n${i}`, key: `src/module-${i}.ts`, type: "file", label: `Module ${i}`,
-      status: "inferred", confidence: 0.7,
+      id: `n${i}`,
+      key: `src/module-${i}.ts`,
+      type: "file",
+      label: `Module ${i}`,
+      status: "inferred",
+      confidence: 0.7,
     })),
     edges: Array.from({ length: 79 }, (_, i) => ({
-      id: `e${i}`, source: `n${i + 1}`, target: `n${i}`, type: "imports", status: "inferred", confidence: 0.7,
+      id: `e${i}`,
+      source: `n${i + 1}`,
+      target: `n${i}`,
+      type: "imports",
+      status: "inferred",
+      confidence: 0.7,
     })),
-    facts: [{ id: "fact", subject: "n20", predicate: "route", object: "/billing", provenance: [{ sourceId: "routes", locator: "routes.ts", version: 1 }] }],
-    sources: [], health: { ok: true, conflicts: [], staleSources: 0 }, activity: [],
+    facts: [
+      {
+        id: "fact",
+        subject: "n20",
+        predicate: "route",
+        object: "/billing",
+        provenance: [{ sourceId: "routes", locator: "routes.ts", version: 1 }],
+      },
+    ],
+    sources: [],
+    health: { ok: true, conflicts: [], staleSources: 0 },
+    activity: [],
   };
   const before = JSON.stringify(snapshot);
   for (const options of [{ query: "does-not-exist" }, { focus: "missing" }]) {
@@ -624,18 +801,57 @@ test("retrieval distinguishes missing evidence, directed reachability and paged 
     assert.equal(result.truncated, false);
     assert.deepEqual(simplifyGraph(snapshot, options).nodes, []);
   }
-  assert.equal(queryGraph(snapshot, { focus: "src/module-20.ts", hops: 0 }).nodes[0].id, "n20");
-  assert.equal(queryGraph(snapshot, { query: "/billing", hops: 0 }).nodes[0].id, "n20");
-  const options = { focus: "n20", direction: "incoming", hops: 2, maxChars: 6000 };
-  assert.deepEqual(queryGraph(snapshot, options).nodes.map(n => [n.id, n.distance]), [["n20", 0], ["n21", 1], ["n22", 2]]);
-  assert.deepEqual(simplifyGraph(snapshot, options).nodes.map(n => n.id), ["n20", "n21", "n22"]);
-  assert.deepEqual(simplifyGraph(snapshot, { ...options, direction: "outgoing" }).nodes.map(n => n.id), ["n20", "n19", "n18"]);
+  assert.equal(
+    queryGraph(snapshot, { focus: "src/module-20.ts", hops: 0 }).nodes[0].id,
+    "n20",
+  );
+  assert.equal(
+    queryGraph(snapshot, { query: "/billing", hops: 0 }).nodes[0].id,
+    "n20",
+  );
+  const options = {
+    focus: "n20",
+    direction: "incoming",
+    hops: 2,
+    maxChars: 6000,
+  };
+  assert.deepEqual(
+    queryGraph(snapshot, options).nodes.map((n) => [n.id, n.distance]),
+    [
+      ["n20", 0],
+      ["n21", 1],
+      ["n22", 2],
+    ],
+  );
+  assert.deepEqual(
+    simplifyGraph(snapshot, options).nodes.map((n) => n.id),
+    ["n20", "n21", "n22"],
+  );
+  assert.deepEqual(
+    simplifyGraph(snapshot, { ...options, direction: "outgoing" }).nodes.map(
+      (n) => n.id,
+    ),
+    ["n20", "n19", "n18"],
+  );
   const first = simplifyGraph(snapshot, { types: ["file"], limit: 20 });
-  const second = simplifyGraph(snapshot, { types: ["file"], limit: 20, offset: first.page.size });
+  const second = simplifyGraph(snapshot, {
+    types: ["file"],
+    limit: 20,
+    offset: first.page.size,
+  });
   assert.equal(first.page.total, 80);
   assert.equal(first.page.hasMore, true);
-  const ids = new Set(first.nodes.filter(n => !n.aggregate).map(n => n.id));
-  assert.ok(second.nodes.filter(n => !n.aggregate).every(n => !ids.has(n.id)));
-  assert.ok(JSON.stringify(queryGraph(snapshot, { query: "/billing", maxChars: 400 })).length <= 400);
-  assert.equal(JSON.stringify(snapshot), before, "response budgets cannot mutate cached evidence");
+  const ids = new Set(first.nodes.filter((n) => !n.aggregate).map((n) => n.id));
+  assert.ok(
+    second.nodes.filter((n) => !n.aggregate).every((n) => !ids.has(n.id)),
+  );
+  assert.ok(
+    JSON.stringify(queryGraph(snapshot, { query: "/billing", maxChars: 400 }))
+      .length <= 400,
+  );
+  assert.equal(
+    JSON.stringify(snapshot),
+    before,
+    "response budgets cannot mutate cached evidence",
+  );
 });

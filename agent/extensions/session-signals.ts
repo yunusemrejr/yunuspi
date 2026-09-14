@@ -1,5 +1,9 @@
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
-import { collectContextTraffic, buildSessionReport, reportText } from "./lib/session-report.ts";
+import {
+  collectContextTraffic,
+  buildSessionReport,
+  reportText,
+} from "./lib/session-report.ts";
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
@@ -221,20 +225,31 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
 
 export default function (pi: any) {
   pi.registerCommand("cost", {
-    description: "Session cost by model, child runs and auxiliary usage, with pricing coverage",
+    description:
+      "Session cost by model, child runs and auxiliary usage, with pricing coverage",
     handler: async (_args: string, ctx: any) => {
       const cost = collectSessionCost(ctx.sessionManager.getEntries());
-      const money = (n: number) => n > 0 && n < 0.000001 ? `$${n.toExponential(3)}` : `$${n.toFixed(6)}`;
+      const money = (n: number) =>
+        n > 0 && n < 0.000001 ? `$${n.toExponential(3)}` : `$${n.toFixed(6)}`;
       const lines = [
         `${cost.formatted} total (USD)`,
         `Provider-reported: ${money(cost.reported)}; estimated: ${money(cost.estimated)}.`,
-        ...cost.rows.map((r: any) => `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? ' estimated' : ''}${r.unknown ? ' + unpriced usage' : ''}${r.subscription ? ' · subscription' : ''}`),
-        ...(cost.pending ? [`${cost.pending} child operation(s) awaiting final cost evidence.`] : []),
-        ...(cost.unknown ? ['Partial total: some recorded activity has missing prices or usage.'] : []),
-        'Main responses, child runs, retries, compactions and usage-bearing tools are included when recorded. Repeated child snapshots count once.',
-        'Estimates use the rates attached to each response. Provider-reported amounts take precedence. Unreported external tools, storage, taxes, credit purchases and subscription fees are outside this total.',
+        ...cost.rows.map(
+          (r: any) =>
+            `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? " estimated" : ""}${r.unknown ? " + unpriced usage" : ""}${r.subscription ? " · subscription" : ""}`,
+        ),
+        ...(cost.pending
+          ? [`${cost.pending} child operation(s) awaiting final cost evidence.`]
+          : []),
+        ...(cost.unknown
+          ? [
+              "Partial total: some recorded activity has missing prices or usage.",
+            ]
+          : []),
+        "Main responses, child runs, retries, compactions and usage-bearing tools are included when recorded. Repeated child snapshots count once.",
+        "Estimates use the rates attached to each response. Provider-reported amounts take precedence. Unreported external tools, storage, taxes, credit purchases and subscription fees are outside this total.",
       ];
-      ctx.ui.notify(lines.join('\n'), 'info');
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
   const toolJson = createToolJsonCompactor();
@@ -271,7 +286,7 @@ export default function (pi: any) {
           projectTrusted: ctx.isProjectTrusted?.() ?? false,
         }).getCompactionSettings(),
       requested,
-  );
+    );
   const notice = (ctx: any) => {
     const f = facts(ctx);
     const contextPercent = f.contextWindowPercent;
@@ -351,7 +366,10 @@ export default function (pi: any) {
             .filter(
               (line) =>
                 !line.startsWith("[runtime date]") &&
-                !(isPressureLine(line) && (!taggedPressure || staleTaggedPressure)),
+                !(
+                  isPressureLine(line) &&
+                  (!taggedPressure || staleTaggedPressure)
+                ),
             )
             .join("\n");
           return content ? [content === m.content ? m : { ...m, content }] : [];
@@ -440,9 +458,12 @@ export default function (pi: any) {
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.
-  const recentFailures = (ctx: any) => collectSessionDiagnostics(
-    ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [],
-  );
+  const recentFailures = (ctx: any) =>
+    collectSessionDiagnostics(
+      ctx.sessionManager?.getBranch?.() ??
+        ctx.sessionManager?.getEntries?.() ??
+        [],
+    );
   pi.registerCommand("self", {
     description: "Current-session token and failure diagnostics",
     handler: async (_a: any, ctx: any) =>
@@ -475,25 +496,33 @@ export default function (pi: any) {
       const details =
         p.view === "efficiency"
           ? (() => {
-            const traffic = collectContextTraffic(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries());
-            return { ...traffic, tools: traffic.tools.slice(0, 8), omittedTools: Math.max(0, traffic.tools.length - 8),
-              interpretation: "Last 2000 branch entries; raw returned characters before projection, not current occupancy or billed tokens. Exact repeated observations can be legitimate polling. Prefer focused source queries, retained evidence, and completion notifications when appropriate; do not skip necessary verification." };
-          })()
+              const traffic = collectContextTraffic(
+                ctx.sessionManager.getBranch?.() ??
+                  ctx.sessionManager.getEntries(),
+              );
+              return {
+                ...traffic,
+                tools: traffic.tools.slice(0, 8),
+                omittedTools: Math.max(0, traffic.tools.length - 8),
+                interpretation:
+                  "Last 2000 branch entries; raw returned characters before projection, not current occupancy or billed tokens. Exact repeated observations can be legitimate polling. Prefer focused source queries, retained evidence, and completion notifications when appropriate; do not skip necessary verification.",
+              };
+            })()
           : p.view === "failures"
-          ? recentFailures(ctx)
-          : p.view === "runtime"
-            ? runtimeFacts(pi, ctx)
-            : p.view === "messages"
-              ? sessionMessages(ctx)
-              : p.view === "children"
-                ? sessionChildren(ctx)
-                : p.view === "skills"
-                  ? sessionSkills(ctx)
-                  : p.view === "report"
-                    ? sessionReport(pi, ctx)
-                    : p.view === "context"
-                      ? facts(ctx)
-                      : self(ctx);
+            ? recentFailures(ctx)
+            : p.view === "runtime"
+              ? runtimeFacts(pi, ctx)
+              : p.view === "messages"
+                ? sessionMessages(ctx)
+                : p.view === "children"
+                  ? sessionChildren(ctx)
+                  : p.view === "skills"
+                    ? sessionSkills(ctx)
+                    : p.view === "report"
+                      ? sessionReport(pi, ctx)
+                      : p.view === "context"
+                        ? facts(ctx)
+                        : self(ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,

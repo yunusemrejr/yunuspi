@@ -49,6 +49,34 @@ const TOOLS = {
     indent: "                        ",
     occurrences: 1,
   },
+  // read.js truncates through truncateHead with its own continuation-notice
+  // branch, so it carries a custom anchor. The spill keeps the full selected
+  // slice (offset..EOF or the user limit) retrievable.
+  "read.js": {
+    name: "read",
+    prefix: "pi-read",
+    indent: "                                ",
+    occurrences: 1,
+    anchor: {
+      original: () => [
+        "                                else {",
+        "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
+        "                                }",
+        "                                details = { truncation };",
+        "                            }",
+      ].join("\n"),
+      patched: () => [
+        "                                else {",
+        "                                    outputText += `\\n\\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;",
+        "                                }",
+        "                                // Full raw output stays retrievable instead of vanishing at the byte cap.",
+        "                                const fullOutputPath = __piSpillOutput(\"pi-read\", selectedContent);",
+        "                                details = { truncation, fullOutputPath };",
+        "                                outputText += `\\n\\n[Full untruncated output: ${fullOutputPath}]`;",
+        "                            }",
+      ].join("\n"),
+    },
+  },
 };
 
 const originalBlock = (indent) =>
@@ -66,6 +94,18 @@ const patchedBlock = (indent, prefix) =>
   `${indent}    notices.push(\`\${formatSize(DEFAULT_MAX_BYTES)} limit reached. Full output: \${fullOutputPath}\`);\n` +
   `${indent}}\n`;
 
+// Tools either reuse the shared truncation block or carry a custom anchor.
+const blocksFor = (spec) =>
+  spec.anchor
+    ? {
+        original: spec.anchor.original(spec.indent),
+        patched: spec.anchor.patched(spec.indent, spec.prefix),
+      }
+    : {
+        original: originalBlock(spec.indent),
+        patched: patchedBlock(spec.indent, spec.prefix),
+      };
+
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const occurrencesOf = (source, needle) => source.split(needle).length - 1;
@@ -73,12 +113,12 @@ const occurrencesOf = (source, needle) => source.split(needle).length - 1;
 export function isAppliedSource(source, tool) {
   const spec = TOOLS[`${tool}.js`];
   if (!spec) throw new Error(`Unknown spill tool: ${tool}`);
+  const blocks = blocksFor(spec);
   return (
     source.split(MARKER).length === 2 &&
     source.split(HELPER).length === 2 &&
-    occurrencesOf(source, patchedBlock(spec.indent, spec.prefix)) ===
-      spec.occurrences &&
-    occurrencesOf(source, originalBlock(spec.indent)) === 0
+    occurrencesOf(source, blocks.patched) === spec.occurrences &&
+    occurrencesOf(source, blocks.original) === 0
   );
 }
 
@@ -88,15 +128,13 @@ export function patchSource(source, tool) {
   if (isAppliedSource(source, tool)) return source;
   if (source.includes(MARKER) || source.includes("__piSpillOutput"))
     throw new Error(`Search spill patch is partial/drifted for ${tool}`);
-  const count = occurrencesOf(source, originalBlock(spec.indent));
+  const blocks = blocksFor(spec);
+  const count = occurrencesOf(source, blocks.original);
   if (count !== spec.occurrences)
     throw new Error(
       `Search spill anchor drift for ${tool}: expected ${spec.occurrences} truncation block(s), found ${count}`,
     );
-  let next = source.replaceAll(
-    originalBlock(spec.indent),
-    patchedBlock(spec.indent, spec.prefix),
-  );
+  let next = source.replaceAll(blocks.original, blocks.patched);
   next = `${next}\n${HELPER}\n`;
   if (!isAppliedSource(next, tool))
     throw new Error(`Search spill postcondition failed for ${tool}`);
@@ -109,9 +147,10 @@ export function stripSource(source, tool) {
   if (!spec) throw new Error(`Unknown spill tool: ${tool}`);
   let next = source.split(`\n${HELPER}\n`).join("");
   next = next.split(HELPER).join("");
+  const blocks = blocksFor(spec);
   next = next.replaceAll(
-    new RegExp(escapeRegExp(patchedBlock(spec.indent, spec.prefix)), "g"),
-    originalBlock(spec.indent),
+    new RegExp(escapeRegExp(blocks.patched), "g"),
+    blocks.original,
   );
   return next;
 }
