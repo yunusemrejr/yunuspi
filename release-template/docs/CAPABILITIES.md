@@ -979,107 +979,107 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ### Extensions
 
-- `agent/agent-context-tools.ts` (missing from sanitized source) — missing from source tree
-- `agent/agentmail.ts` (missing from sanitized source) — missing from source tree
-- `agent/bash-router.ts` (missing from sanitized source) — missing from source tree
-- `agent/bulk-edit.ts` (missing from sanitized source) — missing from source tree
-- `agent/checkpoints.ts` (missing from sanitized source) — missing from source tree
-- `agent/context-profile.ts` (missing from sanitized source) — missing from source tree
-- `agent/continuation-notice.ts` (missing from sanitized source) — missing from source tree
-- `agent/filesystem-safety.ts` (missing from sanitized source) — missing from source tree
-- `agent/git-tools.ts` (missing from sanitized source) — missing from source tree
-- `agent/harness-backup.ts` (missing from sanitized source) — missing from source tree
-- `agent/health-log.ts` (missing from sanitized source) — missing from source tree
-- `agent/http-tools.ts` (missing from sanitized source) — missing from source tree
-- `agent/last-model.ts` (missing from sanitized source) — missing from source tree
-- `agent/live-models.ts` (missing from sanitized source) — missing from source tree
-- `agent/managed-bash.ts` (missing from sanitized source) — missing from source tree
-- `agent/media-tools.ts` (missing from sanitized source) — missing from source tree
-- `agent/pi-observations.ts` (missing from sanitized source) — missing from source tree
-- `agent/project-intelligence.ts` (missing from sanitized source) — missing from source tree
-- `agent/provider-cmd.ts` (missing from sanitized source) — missing from source tree
-- `agent/provider-gate.ts` (missing from sanitized source) — missing from source tree
-- `agent/reasoning-aids.ts` (missing from sanitized source) — missing from source tree
-- `agent/reminders.ts` (missing from sanitized source) — missing from source tree
-- `agent/render-and-wait.ts` (missing from sanitized source) — missing from source tree
-- `agent/sandbox.ts` (missing from sanitized source) — missing from source tree
-- `agent/scoped-snapshots.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-hooks.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-signals.ts` (missing from sanitized source) — missing from source tree
-- `agent/siblings.ts` (missing from sanitized source) — missing from source tree
-- `agent/sys-probe.ts` (missing from sanitized source) — missing from source tree
-- `agent/thinking.ts` (missing from sanitized source) — missing from source tree
-- `agent/timeout-guard.ts` (missing from sanitized source) — missing from source tree
-- `agent/utility-tools.ts` (missing from sanitized source) — missing from source tree
+- [`agent/extensions/agent-context-tools.ts`](../../agent/extensions/agent-context-tools.ts)
+- [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts)
+- [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts)
+- [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts)
+- [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts)
+- [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts)
+- [`agent/extensions/continuation-notice.ts`](../../agent/extensions/continuation-notice.ts)
+- [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts)
+- [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
+- [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts)
+- [`agent/extensions/health-log.ts`](../../agent/extensions/health-log.ts)
+- [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts)
+- [`agent/extensions/last-model.ts`](../../agent/extensions/last-model.ts)
+- [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts)
+- [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts)
+- [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts)
+- [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts)
+- [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts)
+- [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts)
+- [`agent/extensions/provider-gate.ts`](../../agent/extensions/provider-gate.ts)
+- [`agent/extensions/reasoning-aids.ts`](../../agent/extensions/reasoning-aids.ts)
+- [`agent/extensions/reminders.ts`](../../agent/extensions/reminders.ts)
+- [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts)
+- [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts)
+- [`agent/extensions/scoped-snapshots.ts`](../../agent/extensions/scoped-snapshots.ts)
+- [`agent/extensions/session-hooks.ts`](../../agent/extensions/session-hooks.ts)
+- [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts)
+- [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
+- [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts)
+- [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts)
+- [`agent/extensions/timeout-guard.ts`](../../agent/extensions/timeout-guard.ts)
+- [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts)
 
 ### Libraries
 
-- `agent/artifact-checks.ts` (missing from sanitized source) — missing from source tree
-- `agent/authored-review.ts` (missing from sanitized source) — missing from source tree
-- `agent/bash-routing.ts` (missing from sanitized source) — missing from source tree
-- `agent/browser-session.ts` (missing from sanitized source) — missing from source tree
-- `agent/bulk-edit.ts` (missing from sanitized source) — missing from source tree
-- `agent/capability-groups.ts` (missing from sanitized source) — missing from source tree
-- `agent/catalog-cache-lock.ts` (missing from sanitized source) — missing from source tree
-- `agent/checkpoint-files.ts` (missing from sanitized source) — missing from source tree
-- `agent/code-guidance-signals.ts` (missing from sanitized source) — missing from source tree
-- `agent/code-lexical-mask.ts` (missing from sanitized source) — missing from source tree
-- `agent/compact-tool-json.ts` (missing from sanitized source) — missing from source tree
-- `agent/context-anchor.ts` (missing from sanitized source) — missing from source tree
-- `agent/context-limits.ts` (missing from sanitized source) — missing from source tree
-- `agent/continuation-notice.ts` (missing from sanitized source) — missing from source tree
-- `agent/cost-evidence.ts` (missing from sanitized source) — missing from source tree
-- `agent/data-query.ts` (missing from sanitized source) — missing from source tree
-- `agent/guidance-topics-domains.ts` (missing from sanitized source) — missing from source tree
-- `agent/guidance-topics-systems.ts` (missing from sanitized source) — missing from source tree
-- `agent/guidance-topics.ts` (missing from sanitized source) — missing from source tree
-- `agent/harness-activity.ts` (missing from sanitized source) — missing from source tree
-- `agent/harness-capabilities.ts` (missing from sanitized source) — missing from source tree
-- `agent/harness-orientation.ts` (missing from sanitized source) — missing from source tree
-- `agent/health-log.ts` (missing from sanitized source) — missing from source tree
-- `agent/image-compaction.ts` (missing from sanitized source) — missing from source tree
-- `agent/intent-context.ts` (missing from sanitized source) — missing from source tree
-- `agent/local-models.ts` (missing from sanitized source) — missing from source tree
-- `agent/media-process.ts` (missing from sanitized source) — missing from source tree
-- `agent/metrics-panel.ts` (missing from sanitized source) — missing from source tree
-- `agent/mini-preprocessor.ts` (missing from sanitized source) — missing from source tree
-- `agent/model-facts.ts` (missing from sanitized source) — missing from source tree
-- `agent/music-score.ts` (missing from sanitized source) — missing from source tree
-- `agent/numeric-checks.ts` (missing from sanitized source) — missing from source tree
-- `agent/output-distiller.ts` (missing from sanitized source) — missing from source tree
-- `agent/project-tests.ts` (missing from sanitized source) — missing from source tree
-- `agent/quality-review-owner.ts` (missing from sanitized source) — missing from source tree
-- `agent/quality-review-signals.ts` (missing from sanitized source) — missing from source tree
-- `agent/quality-review.ts` (missing from sanitized source) — missing from source tree
-- `agent/reasoning-aids.ts` (missing from sanitized source) — missing from source tree
-- `agent/relevant-guidance.ts` (missing from sanitized source) — missing from source tree
-- `agent/reminders-state.ts` (missing from sanitized source) — missing from source tree
-- `agent/render-queue.ts` (missing from sanitized source) — missing from source tree
-- `agent/scope-deliberation.ts` (missing from sanitized source) — missing from source tree
-- `agent/scoped-snapshots.ts` (missing from sanitized source) — missing from source tree
-- `agent/self-mutation-guard.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-audit.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-cost.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-diagnostics.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-hooks.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-metrics.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-report.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-signals.ts` (missing from sanitized source) — missing from source tree
-- `agent/session-telemetry.ts` (missing from sanitized source) — missing from source tree
-- `agent/skill-discovery-controller.ts` (missing from sanitized source) — missing from source tree
-- `agent/skill-discovery.ts` (missing from sanitized source) — missing from source tree
-- `agent/skill-relevance.ts` (missing from sanitized source) — missing from source tree
-- `agent/skill-routing.ts` (missing from sanitized source) — missing from source tree
-- `agent/slop-guidance-signals.ts` (missing from sanitized source) — missing from source tree
-- `agent/small-tools.ts` (missing from sanitized source) — missing from source tree
-- `agent/smol-extraction.ts` (missing from sanitized source) — missing from source tree
-- `agent/smol-preprocessor.ts` (missing from sanitized source) — missing from source tree
-- `agent/source-check.ts` (missing from sanitized source) — missing from source tree
-- `agent/stable-tool-order.ts` (missing from sanitized source) — missing from source tree
-- `agent/stall-core.ts` (missing from sanitized source) — missing from source tree
-- `agent/sys-probe.ts` (missing from sanitized source) — missing from source tree
-- `agent/tool-discovery.ts` (missing from sanitized source) — missing from source tree
-- `agent/utility-client.ts` (missing from sanitized source) — missing from source tree
+- [`agent/extensions/lib/artifact-checks.ts`](../../agent/extensions/lib/artifact-checks.ts)
+- [`agent/extensions/lib/authored-review.ts`](../../agent/extensions/lib/authored-review.ts)
+- [`agent/extensions/lib/bash-routing.ts`](../../agent/extensions/lib/bash-routing.ts)
+- [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts)
+- [`agent/extensions/lib/bulk-edit.ts`](../../agent/extensions/lib/bulk-edit.ts)
+- [`agent/extensions/lib/capability-groups.ts`](../../agent/extensions/lib/capability-groups.ts)
+- [`agent/extensions/lib/catalog-cache-lock.ts`](../../agent/extensions/lib/catalog-cache-lock.ts)
+- [`agent/extensions/lib/checkpoint-files.ts`](../../agent/extensions/lib/checkpoint-files.ts)
+- [`agent/extensions/lib/code-guidance-signals.ts`](../../agent/extensions/lib/code-guidance-signals.ts)
+- [`agent/extensions/lib/code-lexical-mask.ts`](../../agent/extensions/lib/code-lexical-mask.ts)
+- [`agent/extensions/lib/compact-tool-json.ts`](../../agent/extensions/lib/compact-tool-json.ts)
+- [`agent/extensions/lib/context-anchor.ts`](../../agent/extensions/lib/context-anchor.ts)
+- [`agent/extensions/lib/context-limits.ts`](../../agent/extensions/lib/context-limits.ts)
+- [`agent/extensions/lib/continuation-notice.ts`](../../agent/extensions/lib/continuation-notice.ts)
+- [`agent/extensions/lib/cost-evidence.ts`](../../agent/extensions/lib/cost-evidence.ts)
+- [`agent/extensions/lib/data-query.ts`](../../agent/extensions/lib/data-query.ts)
+- [`agent/extensions/lib/guidance-topics-domains.ts`](../../agent/extensions/lib/guidance-topics-domains.ts)
+- [`agent/extensions/lib/guidance-topics-systems.ts`](../../agent/extensions/lib/guidance-topics-systems.ts)
+- [`agent/extensions/lib/guidance-topics.ts`](../../agent/extensions/lib/guidance-topics.ts)
+- [`agent/extensions/lib/harness-activity.ts`](../../agent/extensions/lib/harness-activity.ts)
+- [`agent/extensions/lib/harness-capabilities.ts`](../../agent/extensions/lib/harness-capabilities.ts)
+- [`agent/extensions/lib/harness-orientation.ts`](../../agent/extensions/lib/harness-orientation.ts)
+- [`agent/extensions/lib/health-log.ts`](../../agent/extensions/lib/health-log.ts)
+- [`agent/extensions/lib/image-compaction.ts`](../../agent/extensions/lib/image-compaction.ts)
+- [`agent/extensions/lib/intent-context.ts`](../../agent/extensions/lib/intent-context.ts)
+- [`agent/extensions/lib/local-models.ts`](../../agent/extensions/lib/local-models.ts)
+- [`agent/extensions/lib/media-process.ts`](../../agent/extensions/lib/media-process.ts)
+- [`agent/extensions/lib/metrics-panel.ts`](../../agent/extensions/lib/metrics-panel.ts)
+- [`agent/extensions/lib/mini-preprocessor.ts`](../../agent/extensions/lib/mini-preprocessor.ts)
+- [`agent/extensions/lib/model-facts.ts`](../../agent/extensions/lib/model-facts.ts)
+- [`agent/extensions/lib/music-score.ts`](../../agent/extensions/lib/music-score.ts)
+- [`agent/extensions/lib/numeric-checks.ts`](../../agent/extensions/lib/numeric-checks.ts)
+- [`agent/extensions/lib/output-distiller.ts`](../../agent/extensions/lib/output-distiller.ts)
+- [`agent/extensions/lib/project-tests.ts`](../../agent/extensions/lib/project-tests.ts)
+- [`agent/extensions/lib/quality-review-owner.ts`](../../agent/extensions/lib/quality-review-owner.ts)
+- [`agent/extensions/lib/quality-review-signals.ts`](../../agent/extensions/lib/quality-review-signals.ts)
+- [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts)
+- [`agent/extensions/lib/reasoning-aids.ts`](../../agent/extensions/lib/reasoning-aids.ts)
+- [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts)
+- [`agent/extensions/lib/reminders-state.ts`](../../agent/extensions/lib/reminders-state.ts)
+- [`agent/extensions/lib/render-queue.ts`](../../agent/extensions/lib/render-queue.ts)
+- [`agent/extensions/lib/scope-deliberation.ts`](../../agent/extensions/lib/scope-deliberation.ts)
+- [`agent/extensions/lib/scoped-snapshots.ts`](../../agent/extensions/lib/scoped-snapshots.ts)
+- [`agent/extensions/lib/self-mutation-guard.ts`](../../agent/extensions/lib/self-mutation-guard.ts)
+- [`agent/extensions/lib/session-audit.ts`](../../agent/extensions/lib/session-audit.ts)
+- [`agent/extensions/lib/session-cost.ts`](../../agent/extensions/lib/session-cost.ts)
+- [`agent/extensions/lib/session-diagnostics.ts`](../../agent/extensions/lib/session-diagnostics.ts)
+- [`agent/extensions/lib/session-hooks.ts`](../../agent/extensions/lib/session-hooks.ts)
+- [`agent/extensions/lib/session-metrics.ts`](../../agent/extensions/lib/session-metrics.ts)
+- [`agent/extensions/lib/session-report.ts`](../../agent/extensions/lib/session-report.ts)
+- [`agent/extensions/lib/session-signals.ts`](../../agent/extensions/lib/session-signals.ts)
+- [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts)
+- [`agent/extensions/lib/skill-discovery-controller.ts`](../../agent/extensions/lib/skill-discovery-controller.ts)
+- [`agent/extensions/lib/skill-discovery.ts`](../../agent/extensions/lib/skill-discovery.ts)
+- [`agent/extensions/lib/skill-relevance.ts`](../../agent/extensions/lib/skill-relevance.ts)
+- [`agent/extensions/lib/skill-routing.ts`](../../agent/extensions/lib/skill-routing.ts)
+- [`agent/extensions/lib/slop-guidance-signals.ts`](../../agent/extensions/lib/slop-guidance-signals.ts)
+- [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts)
+- [`agent/extensions/lib/smol-extraction.ts`](../../agent/extensions/lib/smol-extraction.ts)
+- [`agent/extensions/lib/smol-preprocessor.ts`](../../agent/extensions/lib/smol-preprocessor.ts)
+- [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts)
+- [`agent/extensions/lib/stable-tool-order.ts`](../../agent/extensions/lib/stable-tool-order.ts)
+- [`agent/extensions/lib/stall-core.ts`](../../agent/extensions/lib/stall-core.ts)
+- [`agent/extensions/lib/sys-probe.ts`](../../agent/extensions/lib/sys-probe.ts)
+- [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts)
+- [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts)
 
 ### Local forks
 

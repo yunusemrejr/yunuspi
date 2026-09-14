@@ -23,7 +23,7 @@ Start Pi in your project directory, choose an available model, and describe the 
 
 Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
 
-Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every two minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
+Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every five minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
 
 The footer keeps the harness counters to agents and failures, alongside current activity. Open `/metrics` for detailed tool, skill, hook and workflow counts.
 

@@ -285,8 +285,8 @@ export function dueManualReminders(
 	return selected;
 }
 
-/** Normal fire: advance exactly one 5-min interval (grid anchored at createdAt;
- * never `now + 2min`). */
+/** Normal fire: advance exactly one interval (`MANUAL_INTERVAL_MS`; grid anchored
+ * at createdAt; never `now + interval`). */
 export function advanceOne(r: ManualReminder): void {
 	r.nextFireAt += MANUAL_INTERVAL_MS;
 }
@@ -1054,7 +1054,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					);
 					return;
 				}
-				// Keep the repeat anchored at registration+2min; the immediate
+				// Keep the repeat anchored at registration+one interval; the immediate
 				// delivery only records that the text was queued once. Persistence
 				// and notification are outside the queue-failure boundary so a UI
 				// problem cannot re-arm an already accepted delivery.

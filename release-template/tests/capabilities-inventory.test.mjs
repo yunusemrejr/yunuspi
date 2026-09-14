@@ -46,6 +46,11 @@ test("capability inventory is deterministic, complete, and generated from public
 	assert.ok(metadata.tools.commandRegistrations.some((item) => item.name === "reminder"));
 	assert.ok(metadata.inventory.extensions.length >= 20);
 	assert.ok(metadata.inventory.libraries.length >= 50);
+	// Regression: manifest entries are relative to their own directory, so every
+	// registered extension/library must resolve and render as a link. Resolving
+	// them against the agent root mislabelled all 98 as "missing from source tree".
+	for (const item of [...metadata.inventory.extensions, ...metadata.inventory.libraries])
+		assert.equal(item.exists, true, `${item.path} must resolve from the manifest entry`);
 	assert.ok(metadata.inventory.forks.length >= 5);
 	assert.ok(metadata.inventory.skills.length >= 100);
 	assert.ok(metadata.inventory.patchModules.some((item) => item.path.endsWith("autonomous-recovery.mjs")));
@@ -55,6 +60,8 @@ test("capability inventory is deterministic, complete, and generated from public
 	for (const record of catalog.HARNESS_CAPABILITIES) assert.match(markdown, new RegExp(`#### ${record.id}\\n`));
 	assert.match(markdown, /Computed registration names are listed as owners/);
 	assert.match(markdown, /runtime availability still depends on the host/);
+	const inventorySection = markdown.slice(markdown.indexOf("## Extension source inventory"));
+	assert.doesNotMatch(inventorySection, /missing from source tree/, "registered source must not be reported missing");
 	for (const file of [output, ...(distributionOutput ? [distributionOutput] : [])]) {
 		const text = fs.readFileSync(file, "utf8");
 		for (const match of text.matchAll(/\]\(([^)#]+)\)/g)) assert.ok(fs.existsSync(path.resolve(path.dirname(file), match[1])), `${file}: ${match[1]}`);

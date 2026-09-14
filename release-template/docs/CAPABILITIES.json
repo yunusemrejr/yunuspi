@@ -3139,398 +3139,398 @@
   "inventory": {
     "extensions": [
       {
-        "path": "agent/agent-context-tools.ts",
-        "exists": false
+        "path": "agent/extensions/agent-context-tools.ts",
+        "exists": true
       },
       {
-        "path": "agent/agentmail.ts",
-        "exists": false
+        "path": "agent/extensions/agentmail.ts",
+        "exists": true
       },
       {
-        "path": "agent/bash-router.ts",
-        "exists": false
+        "path": "agent/extensions/bash-router.ts",
+        "exists": true
       },
       {
-        "path": "agent/bulk-edit.ts",
-        "exists": false
+        "path": "agent/extensions/bulk-edit.ts",
+        "exists": true
       },
       {
-        "path": "agent/checkpoints.ts",
-        "exists": false
+        "path": "agent/extensions/checkpoints.ts",
+        "exists": true
       },
       {
-        "path": "agent/context-profile.ts",
-        "exists": false
+        "path": "agent/extensions/context-profile.ts",
+        "exists": true
       },
       {
-        "path": "agent/continuation-notice.ts",
-        "exists": false
+        "path": "agent/extensions/continuation-notice.ts",
+        "exists": true
       },
       {
-        "path": "agent/filesystem-safety.ts",
-        "exists": false
+        "path": "agent/extensions/filesystem-safety.ts",
+        "exists": true
       },
       {
-        "path": "agent/git-tools.ts",
-        "exists": false
+        "path": "agent/extensions/git-tools.ts",
+        "exists": true
       },
       {
-        "path": "agent/harness-backup.ts",
-        "exists": false
+        "path": "agent/extensions/harness-backup.ts",
+        "exists": true
       },
       {
-        "path": "agent/health-log.ts",
-        "exists": false
+        "path": "agent/extensions/health-log.ts",
+        "exists": true
       },
       {
-        "path": "agent/http-tools.ts",
-        "exists": false
+        "path": "agent/extensions/http-tools.ts",
+        "exists": true
       },
       {
-        "path": "agent/last-model.ts",
-        "exists": false
+        "path": "agent/extensions/last-model.ts",
+        "exists": true
       },
       {
-        "path": "agent/live-models.ts",
-        "exists": false
+        "path": "agent/extensions/live-models.ts",
+        "exists": true
       },
       {
-        "path": "agent/managed-bash.ts",
-        "exists": false
+        "path": "agent/extensions/managed-bash.ts",
+        "exists": true
       },
       {
-        "path": "agent/media-tools.ts",
-        "exists": false
+        "path": "agent/extensions/media-tools.ts",
+        "exists": true
       },
       {
-        "path": "agent/pi-observations.ts",
-        "exists": false
+        "path": "agent/extensions/pi-observations.ts",
+        "exists": true
       },
       {
-        "path": "agent/project-intelligence.ts",
-        "exists": false
+        "path": "agent/extensions/project-intelligence.ts",
+        "exists": true
       },
       {
-        "path": "agent/provider-cmd.ts",
-        "exists": false
+        "path": "agent/extensions/provider-cmd.ts",
+        "exists": true
       },
       {
-        "path": "agent/provider-gate.ts",
-        "exists": false
+        "path": "agent/extensions/provider-gate.ts",
+        "exists": true
       },
       {
-        "path": "agent/reasoning-aids.ts",
-        "exists": false
+        "path": "agent/extensions/reasoning-aids.ts",
+        "exists": true
       },
       {
-        "path": "agent/reminders.ts",
-        "exists": false
+        "path": "agent/extensions/reminders.ts",
+        "exists": true
       },
       {
-        "path": "agent/render-and-wait.ts",
-        "exists": false
+        "path": "agent/extensions/render-and-wait.ts",
+        "exists": true
       },
       {
-        "path": "agent/sandbox.ts",
-        "exists": false
+        "path": "agent/extensions/sandbox.ts",
+        "exists": true
       },
       {
-        "path": "agent/scoped-snapshots.ts",
-        "exists": false
+        "path": "agent/extensions/scoped-snapshots.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-hooks.ts",
-        "exists": false
+        "path": "agent/extensions/session-hooks.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-signals.ts",
-        "exists": false
+        "path": "agent/extensions/session-signals.ts",
+        "exists": true
       },
       {
-        "path": "agent/siblings.ts",
-        "exists": false
+        "path": "agent/extensions/siblings.ts",
+        "exists": true
       },
       {
-        "path": "agent/sys-probe.ts",
-        "exists": false
+        "path": "agent/extensions/sys-probe.ts",
+        "exists": true
       },
       {
-        "path": "agent/thinking.ts",
-        "exists": false
+        "path": "agent/extensions/thinking.ts",
+        "exists": true
       },
       {
-        "path": "agent/timeout-guard.ts",
-        "exists": false
+        "path": "agent/extensions/timeout-guard.ts",
+        "exists": true
       },
       {
-        "path": "agent/utility-tools.ts",
-        "exists": false
+        "path": "agent/extensions/utility-tools.ts",
+        "exists": true
       }
     ],
     "libraries": [
       {
-        "path": "agent/artifact-checks.ts",
-        "exists": false
+        "path": "agent/extensions/lib/artifact-checks.ts",
+        "exists": true
       },
       {
-        "path": "agent/authored-review.ts",
-        "exists": false
+        "path": "agent/extensions/lib/authored-review.ts",
+        "exists": true
       },
       {
-        "path": "agent/bash-routing.ts",
-        "exists": false
+        "path": "agent/extensions/lib/bash-routing.ts",
+        "exists": true
       },
       {
-        "path": "agent/browser-session.ts",
-        "exists": false
+        "path": "agent/extensions/lib/browser-session.ts",
+        "exists": true
       },
       {
-        "path": "agent/bulk-edit.ts",
-        "exists": false
+        "path": "agent/extensions/lib/bulk-edit.ts",
+        "exists": true
       },
       {
-        "path": "agent/capability-groups.ts",
-        "exists": false
+        "path": "agent/extensions/lib/capability-groups.ts",
+        "exists": true
       },
       {
-        "path": "agent/catalog-cache-lock.ts",
-        "exists": false
+        "path": "agent/extensions/lib/catalog-cache-lock.ts",
+        "exists": true
       },
       {
-        "path": "agent/checkpoint-files.ts",
-        "exists": false
+        "path": "agent/extensions/lib/checkpoint-files.ts",
+        "exists": true
       },
       {
-        "path": "agent/code-guidance-signals.ts",
-        "exists": false
+        "path": "agent/extensions/lib/code-guidance-signals.ts",
+        "exists": true
       },
       {
-        "path": "agent/code-lexical-mask.ts",
-        "exists": false
+        "path": "agent/extensions/lib/code-lexical-mask.ts",
+        "exists": true
       },
       {
-        "path": "agent/compact-tool-json.ts",
-        "exists": false
+        "path": "agent/extensions/lib/compact-tool-json.ts",
+        "exists": true
       },
       {
-        "path": "agent/context-anchor.ts",
-        "exists": false
+        "path": "agent/extensions/lib/context-anchor.ts",
+        "exists": true
       },
       {
-        "path": "agent/context-limits.ts",
-        "exists": false
+        "path": "agent/extensions/lib/context-limits.ts",
+        "exists": true
       },
       {
-        "path": "agent/continuation-notice.ts",
-        "exists": false
+        "path": "agent/extensions/lib/continuation-notice.ts",
+        "exists": true
       },
       {
-        "path": "agent/cost-evidence.ts",
-        "exists": false
+        "path": "agent/extensions/lib/cost-evidence.ts",
+        "exists": true
       },
       {
-        "path": "agent/data-query.ts",
-        "exists": false
+        "path": "agent/extensions/lib/data-query.ts",
+        "exists": true
       },
       {
-        "path": "agent/guidance-topics-domains.ts",
-        "exists": false
+        "path": "agent/extensions/lib/guidance-topics-domains.ts",
+        "exists": true
       },
       {
-        "path": "agent/guidance-topics-systems.ts",
-        "exists": false
+        "path": "agent/extensions/lib/guidance-topics-systems.ts",
+        "exists": true
       },
       {
-        "path": "agent/guidance-topics.ts",
-        "exists": false
+        "path": "agent/extensions/lib/guidance-topics.ts",
+        "exists": true
       },
       {
-        "path": "agent/harness-activity.ts",
-        "exists": false
+        "path": "agent/extensions/lib/harness-activity.ts",
+        "exists": true
       },
       {
-        "path": "agent/harness-capabilities.ts",
-        "exists": false
+        "path": "agent/extensions/lib/harness-capabilities.ts",
+        "exists": true
       },
       {
-        "path": "agent/harness-orientation.ts",
-        "exists": false
+        "path": "agent/extensions/lib/harness-orientation.ts",
+        "exists": true
       },
       {
-        "path": "agent/health-log.ts",
-        "exists": false
+        "path": "agent/extensions/lib/health-log.ts",
+        "exists": true
       },
       {
-        "path": "agent/image-compaction.ts",
-        "exists": false
+        "path": "agent/extensions/lib/image-compaction.ts",
+        "exists": true
       },
       {
-        "path": "agent/intent-context.ts",
-        "exists": false
+        "path": "agent/extensions/lib/intent-context.ts",
+        "exists": true
       },
       {
-        "path": "agent/local-models.ts",
-        "exists": false
+        "path": "agent/extensions/lib/local-models.ts",
+        "exists": true
       },
       {
-        "path": "agent/media-process.ts",
-        "exists": false
+        "path": "agent/extensions/lib/media-process.ts",
+        "exists": true
       },
       {
-        "path": "agent/metrics-panel.ts",
-        "exists": false
+        "path": "agent/extensions/lib/metrics-panel.ts",
+        "exists": true
       },
       {
-        "path": "agent/mini-preprocessor.ts",
-        "exists": false
+        "path": "agent/extensions/lib/mini-preprocessor.ts",
+        "exists": true
       },
       {
-        "path": "agent/model-facts.ts",
-        "exists": false
+        "path": "agent/extensions/lib/model-facts.ts",
+        "exists": true
       },
       {
-        "path": "agent/music-score.ts",
-        "exists": false
+        "path": "agent/extensions/lib/music-score.ts",
+        "exists": true
       },
       {
-        "path": "agent/numeric-checks.ts",
-        "exists": false
+        "path": "agent/extensions/lib/numeric-checks.ts",
+        "exists": true
       },
       {
-        "path": "agent/output-distiller.ts",
-        "exists": false
+        "path": "agent/extensions/lib/output-distiller.ts",
+        "exists": true
       },
       {
-        "path": "agent/project-tests.ts",
-        "exists": false
+        "path": "agent/extensions/lib/project-tests.ts",
+        "exists": true
       },
       {
-        "path": "agent/quality-review-owner.ts",
-        "exists": false
+        "path": "agent/extensions/lib/quality-review-owner.ts",
+        "exists": true
       },
       {
-        "path": "agent/quality-review-signals.ts",
-        "exists": false
+        "path": "agent/extensions/lib/quality-review-signals.ts",
+        "exists": true
       },
       {
-        "path": "agent/quality-review.ts",
-        "exists": false
+        "path": "agent/extensions/lib/quality-review.ts",
+        "exists": true
       },
       {
-        "path": "agent/reasoning-aids.ts",
-        "exists": false
+        "path": "agent/extensions/lib/reasoning-aids.ts",
+        "exists": true
       },
       {
-        "path": "agent/relevant-guidance.ts",
-        "exists": false
+        "path": "agent/extensions/lib/relevant-guidance.ts",
+        "exists": true
       },
       {
-        "path": "agent/reminders-state.ts",
-        "exists": false
+        "path": "agent/extensions/lib/reminders-state.ts",
+        "exists": true
       },
       {
-        "path": "agent/render-queue.ts",
-        "exists": false
+        "path": "agent/extensions/lib/render-queue.ts",
+        "exists": true
       },
       {
-        "path": "agent/scope-deliberation.ts",
-        "exists": false
+        "path": "agent/extensions/lib/scope-deliberation.ts",
+        "exists": true
       },
       {
-        "path": "agent/scoped-snapshots.ts",
-        "exists": false
+        "path": "agent/extensions/lib/scoped-snapshots.ts",
+        "exists": true
       },
       {
-        "path": "agent/self-mutation-guard.ts",
-        "exists": false
+        "path": "agent/extensions/lib/self-mutation-guard.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-audit.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-audit.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-cost.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-cost.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-diagnostics.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-diagnostics.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-hooks.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-hooks.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-metrics.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-metrics.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-report.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-report.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-signals.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-signals.ts",
+        "exists": true
       },
       {
-        "path": "agent/session-telemetry.ts",
-        "exists": false
+        "path": "agent/extensions/lib/session-telemetry.ts",
+        "exists": true
       },
       {
-        "path": "agent/skill-discovery-controller.ts",
-        "exists": false
+        "path": "agent/extensions/lib/skill-discovery-controller.ts",
+        "exists": true
       },
       {
-        "path": "agent/skill-discovery.ts",
-        "exists": false
+        "path": "agent/extensions/lib/skill-discovery.ts",
+        "exists": true
       },
       {
-        "path": "agent/skill-relevance.ts",
-        "exists": false
+        "path": "agent/extensions/lib/skill-relevance.ts",
+        "exists": true
       },
       {
-        "path": "agent/skill-routing.ts",
-        "exists": false
+        "path": "agent/extensions/lib/skill-routing.ts",
+        "exists": true
       },
       {
-        "path": "agent/slop-guidance-signals.ts",
-        "exists": false
+        "path": "agent/extensions/lib/slop-guidance-signals.ts",
+        "exists": true
       },
       {
-        "path": "agent/small-tools.ts",
-        "exists": false
+        "path": "agent/extensions/lib/small-tools.ts",
+        "exists": true
       },
       {
-        "path": "agent/smol-extraction.ts",
-        "exists": false
+        "path": "agent/extensions/lib/smol-extraction.ts",
+        "exists": true
       },
       {
-        "path": "agent/smol-preprocessor.ts",
-        "exists": false
+        "path": "agent/extensions/lib/smol-preprocessor.ts",
+        "exists": true
       },
       {
-        "path": "agent/source-check.ts",
-        "exists": false
+        "path": "agent/extensions/lib/source-check.ts",
+        "exists": true
       },
       {
-        "path": "agent/stable-tool-order.ts",
-        "exists": false
+        "path": "agent/extensions/lib/stable-tool-order.ts",
+        "exists": true
       },
       {
-        "path": "agent/stall-core.ts",
-        "exists": false
+        "path": "agent/extensions/lib/stall-core.ts",
+        "exists": true
       },
       {
-        "path": "agent/sys-probe.ts",
-        "exists": false
+        "path": "agent/extensions/lib/sys-probe.ts",
+        "exists": true
       },
       {
-        "path": "agent/tool-discovery.ts",
-        "exists": false
+        "path": "agent/extensions/lib/tool-discovery.ts",
+        "exists": true
       },
       {
-        "path": "agent/utility-client.ts",
-        "exists": false
+        "path": "agent/extensions/lib/utility-client.ts",
+        "exists": true
       }
     ],
     "forks": [

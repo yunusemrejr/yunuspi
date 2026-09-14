@@ -170,15 +170,18 @@ function serviceOwners(agentRoot) {
 }
 
 function manifestInventory(agentRoot, manifest) {
-	const existing = (value) => {
+	// Manifest entries are relative to their own directory (`extensions/`, or
+	// `extensions/lib/` for libraries) and to the agent root for support files;
+	// resolving every list against the agent root mislabels them as missing.
+	const existing = (value, base = "") => {
 		const relative = String(value).replace(/^agent\//, "");
-		const absolute = path.join(agentRoot, relative);
+		const target = base ? path.join(base, relative) : relative;
 		return {
-			path: `agent/${relative.replaceAll(path.sep, "/")}`,
-			exists: fs.existsSync(absolute),
+			path: `agent/${target.replaceAll(path.sep, "/")}`,
+			exists: fs.existsSync(path.join(agentRoot, target)),
 		};
 	};
-	const list = (values) => (Array.isArray(values) ? values.map(existing).sort((a, b) => a.path.localeCompare(b.path)) : []);
+	const list = (values, base = "") => (Array.isArray(values) ? values.map((value) => existing(value, base)).sort((a, b) => a.path.localeCompare(b.path)) : []);
 	const forks = Object.entries(manifest.forks ?? {}).map(([key, packageName]) => ({
 		path: `agent/${key.replace(/^agent\//, "").replaceAll(path.sep, "/")}`,
 		package: packageName,
@@ -188,8 +191,8 @@ function manifestInventory(agentRoot, manifest) {
 		.map((file) => ({ path: canonicalAgentPath(agentRoot, file), kind: path.extname(file).slice(1) }))
 		.sort((a, b) => a.path.localeCompare(b.path));
 	return {
-		extensions: list(manifest.extensions),
-		libraries: list(manifest.lib),
+		extensions: list(manifest.extensions, "extensions"),
+		libraries: list(manifest.lib, "extensions/lib"),
 		forks,
 		supportFiles: list(manifest.supportFiles),
 		patchModules: patches,
