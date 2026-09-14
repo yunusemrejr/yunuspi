@@ -1675,7 +1675,10 @@ export function _resetMemorySnapshot() {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-	registerContextTools(pi, () => MEMORY_DIR);
+	// Subagent children own these tools through the explicitly declared
+	// extensions/agent-context-tools.ts provider. Registering them here as well
+	// makes the ambient fork and that provider conflict during child startup.
+	if (process.env.PI_SUBAGENT_CHILD !== "1") registerContextTools(pi, () => MEMORY_DIR);
 	registerPriming(pi, (cwd) => ({ global: MEMORY_FILE, project: path.join(PROJECTS_DIR, `${projectMemoryKey(cwd)}.md`), daily: path.join(DAILY_DIR, projectMemoryKey(cwd)) }));
 	// --- session_start: detect qmd, auto-setup collection ---
 	pi.on("session_start", async (_event, ctx) => {

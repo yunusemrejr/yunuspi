@@ -4,6 +4,7 @@ import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
 import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
+import { extractJsonEnvelope } from '../pi-subagents/src/shared/reviewer-envelope.ts';
 import { registerSharedQualityReview } from './quality-review-owner.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
@@ -46,7 +47,8 @@ export function parseReviewReport(text: string, aspect: string): ReviewReport {
   const unknown = (): ReviewReport => ({ aspect, outcome: 'unknown', evidence: [], findings: [], gap: 'Reviewer did not return a valid, evidence-backed assessment.' });
   try {
     if (text.length > 10000) return unknown();
-    const value = JSON.parse(text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1'));
+    const value: any = extractJsonEnvelope(text);
+    if (!value || typeof value !== 'object') return unknown();
     if (!['pass','changes','unknown'].includes(value.outcome) || !Array.isArray(value.evidence) || !value.evidence.length ||
       value.evidence.length > 6 || !value.evidence.every((s: any) => typeof s === 'string' && s.trim().length >= 12 && s.length <= 700) ||
       !Array.isArray(value.findings) || value.findings.length > 5) return unknown();

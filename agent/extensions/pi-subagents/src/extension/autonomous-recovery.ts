@@ -22,6 +22,7 @@ import { readJournalQuotaEvents } from "../runs/shared/quota-journal.ts";
 // (or child) has on cooldown is not a failover option.
 import { fetchEndpoints, rankRecoveryEndpoints, endpointRecoveryRouting, type Endpoint } from "../runs/shared/openrouter-endpoints.ts";
 import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, readHealth } from "../runs/shared/provider-health.ts";
+import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
@@ -275,8 +276,10 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				let parsed: any;
 				let parseFailed = false;
 				if (body && body.length <= 30000) {
-					try { parsed = JSON.parse(body.replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1')); }
-					catch { parseFailed = true; }
+					// Reviewer models often wrap the terminal JSON in prose or a fence.
+					// Extract one complete envelope without repairing truncated output.
+					parsed = extractJsonEnvelope(body);
+					parseFailed = parsed === undefined;
 				}
 				const assignedEnvelopeComplete = Boolean(parsed && Array.isArray(parsed.reviews) && assigned.every((a:any) => parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id).length === 1));
 				const budgetReportFinalized = budgetExhausted && !signal.aborted && children.length === 1 && Boolean(childResult) && Number.isInteger(childResult.exitCode) && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.processSignal && !childResult.detached && !childResult.protocolError && sourceReads >= 1 && assignedEnvelopeComplete;

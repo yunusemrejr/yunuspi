@@ -242,7 +242,13 @@ export function isProjectTestSource(file) {
   return !file.split(/[\\/]/).some(part => TEST_SKIP.test(part)) && TEST_SOURCE.test(file) && !/\.min\.[cm]?js$/i.test(file);
 }
 
-const reviewSkip = part => TEST_SKIP.test(part) && !/^(?:\.github|\.circleci|\.gitlab-ci\.yml)$/.test(part);
+const reviewSkip = part => (TEST_SKIP.test(part) || REVIEW_RUNTIME_DIR.test(part)) && !/^(?:\.github|\.circleci|\.gitlab-ci\.yml)$/.test(part);
+// Harness runtime state (reminder/checkpoint/catalog/health files) changes every
+// turn. It is not project source: counting it kept bumping the review revision
+// and invalidating otherwise-current reviews. Directory names are anchored so
+// `extensions/reminders.ts` stays a source file.
+const REVIEW_RUNTIME_DIR = /^(?:reminders?|checkpoints?|sibling-bridge|tasks?|memory|missions?|project-intelligence|npm|cache|inference-slots?)$/i;
+const REVIEW_RUNTIME_STATE = /^(?:provider-health|free-route-evidence|live-model-catalog|models-store|run-history|session-report|notification-state)\.(?:json|jsonl)$/i;
 const REVIEW_CONFIG = /\.(?:json|ya?ml|toml|xml|ini|cfg|conf|properties|txt|env)$/i;
 const PRIVATE_REVIEW_CONFIG = /(?:^|[._-])(?:auth|settings|models|secrets?|credentials?|passwords?|tokens?|api[._-]?keys?|private[._-]?keys?)(?:[._-]|$)/i;
 const DELIVERY_SOURCE = /^(?:(?:Dockerfile|Containerfile|Procfile)(?:\.[a-z0-9._-]+)?|[a-z0-9._-]+\.(?:Dockerfile|Containerfile)|Makefile|GNUmakefile|Jenkinsfile|Justfile)$/i;
@@ -252,6 +258,7 @@ export function isProjectReviewSource(file) {
   // them out of automatic model briefs; ordinary auth/settings source still
   // needs review. Filename filtering cannot detect secrets in arbitrary code.
   return !parts.some(reviewSkip) &&
+    !REVIEW_RUNTIME_STATE.test(basename) &&
     !(REVIEW_CONFIG.test(basename) && PRIVATE_REVIEW_CONFIG.test(basename)) &&
     !/\.(?:min|generated)\./i.test(file) &&
     (TEST_SOURCE.test(file) || DELIVERY_SOURCE.test(basename) || /\.(?:html?|css|scss|sass|less|mdx?|rst|txt|json|ya?ml|toml|xml|sql|tf|wat|wasm)$/i.test(file));

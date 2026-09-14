@@ -2378,37 +2378,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2387,
+        "line": 2390,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2256,
+        "line": 2259,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2530,
+        "line": 2533,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2629,
+        "line": 2632,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2773,
+        "line": 2776,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1921,
+        "line": 1924,
         "kind": "literal"
       },
       {
@@ -2456,7 +2456,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 287,
+        "line": 289,
         "kind": "literal"
       },
       {
@@ -2474,7 +2474,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2069,
+        "line": 2072,
         "kind": "literal"
       },
       {
@@ -2565,7 +2565,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 142,
+        "line": 149,
         "kind": "literal"
       },
       {
@@ -2688,37 +2688,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2387,
+        "line": 2390,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2256,
+        "line": 2259,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2530,
+        "line": 2533,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2629,
+        "line": 2632,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2773,
+        "line": 2776,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1921,
+        "line": 1924,
         "kind": "literal"
       },
       {
@@ -2742,7 +2742,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 287,
+        "line": 289,
         "kind": "literal"
       },
       {
@@ -2760,7 +2760,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2069,
+        "line": 2072,
         "kind": "literal"
       },
       {
@@ -2808,7 +2808,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 142,
+        "line": 149,
         "kind": "literal"
       },
       {
@@ -3010,7 +3010,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 510,
+      "sourceFiles": 512,
       "registrationSites": 53,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 71,
@@ -3025,6 +3025,10 @@
   },
   "inventory": {
     "extensions": [
+      {
+        "path": "agent/agent-context-tools.ts",
+        "exists": false
+      },
       {
         "path": "agent/bash-router.ts",
         "exists": false
@@ -3277,6 +3281,10 @@
       },
       {
         "path": "agent/project-tests.ts",
+        "exists": false
+      },
+      {
+        "path": "agent/quality-review-owner.ts",
         "exists": false
       },
       {

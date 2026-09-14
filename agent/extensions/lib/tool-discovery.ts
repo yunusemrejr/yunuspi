@@ -38,6 +38,13 @@ export const CORE_TOOLS = new Set([
   // These readers are dependencies of existing context/safety hook owners.
   'project_intel','project_tests','obs_read','checkpoint_read','todo',
   'project_report','module_report','symbol_search','context_slice',
+  // Local ML/statistical salience. The relevant-guidance owner only delivers a
+  // utility hint when the tool is already active, so leaving these to lazy
+  // discovery made their shipped guidance unreachable.
+  'context_score','handoff_capsule','evidence_cache',
+  // The bash tool description unconditionally points at explicit background
+  // work through bg_run/bg_status/bg_logs/bg_kill; keep the quartet with bg_wait.
+  'bg_run','bg_status','bg_logs','bg_kill',
 ]);
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
 const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
