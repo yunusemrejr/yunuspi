@@ -1819,7 +1819,7 @@ export default function (pi: ExtensionAPI) {
 
 		const headerLines = [
 			"\n\n## Memory (on-demand — file contents are NOT auto-injected)",
-			"Read these with the read tool only when context is needed; search with memory_search; persist with memory_write.",
+			"Read these with the read tool only when context is needed; search with memory_search when available; persist with memory_write when available, otherwise write directly with write/edit to the paths below.",
 			`- Long-term memory: ${MEMORY_FILE}`,
 			`- Scratchpad: ${SCRATCHPAD_FILE}`,
 			`- Daily logs (this project): ${projectDailyDir()}/<YYYY-MM-DD>.md`,

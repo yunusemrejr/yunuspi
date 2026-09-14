@@ -26,7 +26,7 @@ export function registerSessionTelemetry(pi:any) {
   (globalThis as any)[METRICS_VIEW]=(id:string)=>id===current?.id?snapshot():undefined;
  };
  pi.on('session_start',start);pi.on('session_switch',start);
- for(const hook of ['turn_end','agent_end','session_before_compact','session_before_switch'])pi.on(hook,flush);
+ for(const hook of ['agent_end','session_before_compact','session_before_switch'])pi.on(hook,flush);
  pi.on('session_shutdown',()=>{flush();owner++;current=undefined;});
  pi.registerCommand('metrics',{description:'Session tools, errors, agents, swarms, fusions, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{
   const entries=ctx.sessionManager.getEntries();

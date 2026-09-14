@@ -698,7 +698,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		if (ctx.model?.provider !== recoveryRoute.provider || ctx.model?.id !== recoveryRoute.model || event.payload?.model !== recoveryRoute.model) return;
 		recoveryRoute = undefined;
 		const next = reduceRepeatedReasoningBudget(event.payload);
-		return next !== event.payload ? next : undefined;
+		return next === event.payload ? undefined : next;
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
@@ -721,7 +721,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			}
 			const st = load(sid);
 			const now = Date.now();
-			const reasoning = !loop.nudged ? repeatedReasoningNotice(m) : undefined;
+			const reasoning = loop.nudged ? undefined : repeatedReasoningNotice(m);
 			const candidate = loop.finishTurn() ?? reasoning;
 			const nudge =
 				!loop.nudged &&
