@@ -1965,7 +1965,7 @@
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 59
+        "line": 223
       },
       {
         "name": "curator",
@@ -2110,7 +2110,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 282
+        "line": 446
       },
       {
         "name": "subagent-cost",
@@ -2563,7 +2563,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 321,
+        "line": 503,
         "kind": "literal"
       },
       {
@@ -2575,7 +2575,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 287,
+        "line": 451,
         "kind": "literal"
       },
       {
@@ -2879,7 +2879,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 321,
+        "line": 503,
         "kind": "literal"
       },
       {
@@ -2891,7 +2891,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 287,
+        "line": 451,
         "kind": "literal"
       },
       {

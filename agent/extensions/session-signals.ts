@@ -1,5 +1,6 @@
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
-import { collectContextTraffic } from "./lib/session-report.ts";
+import { collectContextTraffic, buildSessionReport, reportText } from "./lib/session-report.ts";
+import { collectSessionMetrics } from "./lib/session-metrics.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
@@ -22,6 +23,169 @@ import {
   dateAnchor,
   sessionFacts,
 } from "./lib/session-signals.ts";
+const MESSAGE_CHARS = 400;
+const MESSAGE_LIMIT = 50;
+const CHILD_ROW_LIMIT = 100;
+const REPORT_CHARS = 12000;
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part: any) =>
+      part?.type === "text" && typeof part.text === "string" ? part.text : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** This session's own user turns — the request list an agent otherwise has to
+ * reconstruct from a truncated branch. Bounded and sanitized for output. */
+function sessionMessages(ctx: any) {
+  const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+  const all = branch.filter(
+    (entry: any) => entry?.type === "message" && entry.message?.role === "user",
+  );
+  const selected = all.slice(-MESSAGE_LIMIT);
+  return {
+    view: "messages",
+    total: all.length,
+    omitted: all.length - selected.length,
+    items: selected.map((entry: any, index: number) => {
+      const text = reportText(messageText(entry.message?.content));
+      return {
+        ordinal: all.length - selected.length + index + 1,
+        timestamp: entry.timestamp ?? null,
+        chars: text.length,
+        text:
+          text.length > MESSAGE_CHARS
+            ? `${text.slice(0, MESSAGE_CHARS)}…`
+            : text,
+      };
+    }),
+  };
+}
+
+/** Per-child subagent usage from the transcript ledger. A row without usage is a
+ * non-terminal placeholder, not zero traffic; live runner totals can be higher
+ * until the run settles. */
+function sessionChildren(ctx: any) {
+  const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+  const rows = new Map<string, any>();
+  for (const entry of branch) {
+    if (entry?.type !== "custom" || entry.customType !== "subagent-cost-v1")
+      continue;
+    const data = entry.data ?? {};
+    for (const result of data.results ?? []) {
+      const key = `${data.runId ?? "unknown"}:${result?.index ?? rows.size}`;
+      const previous = rows.get(key);
+      const usage = result?.usage;
+      const total = usage
+        ? ["input", "output", "cacheRead", "cacheWrite"].reduce(
+            (sum: number, field: string) =>
+              sum + (Number.isFinite(usage[field]) ? usage[field] : 0),
+            0,
+          )
+        : 0;
+      rows.set(key, {
+        runId: data.runId ?? null,
+        index: result?.index ?? null,
+        mode: data.mode ?? null,
+        state: data.state ?? null,
+        status:
+          result?.status ??
+          result?.state ??
+          (result?.success === true
+            ? "completed"
+            : result?.success === false
+              ? "failed"
+              : null),
+        model: result?.model ?? previous?.model ?? null,
+        exitCode: Number.isInteger(result?.exitCode) ? result.exitCode : null,
+        turns: usage?.turns ?? previous?.turns ?? null,
+        tokens: Math.max(previous?.tokens ?? 0, total),
+        usage: usage
+          ? {
+              input: usage.input ?? 0,
+              output: usage.output ?? 0,
+              cacheRead: usage.cacheRead ?? 0,
+              cacheWrite: usage.cacheWrite ?? 0,
+            }
+          : (previous?.usage ?? null),
+        costUsd: usage?.cost?.total ?? previous?.costUsd ?? null,
+        sessionFile: result?.sessionFile
+          ? path.basename(result.sessionFile)
+          : (previous?.sessionFile ?? null),
+      });
+    }
+  }
+  const list = [...rows.values()];
+  return {
+    view: "children",
+    runs: new Set(list.map((row) => row.runId)).size,
+    total: list.length,
+    omitted: Math.max(0, list.length - CHILD_ROW_LIMIT),
+    rows: list.slice(-CHILD_ROW_LIMIT),
+    note: "Transcript ledger rows only; absence of usage means the row was recorded before the child settled, not that it used no tokens.",
+  };
+}
+
+/** Workflow usage: suggested vs actually read, plus capability call counts. */
+function sessionSkills(ctx: any) {
+  const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+  const metrics = collectSessionMetrics(entries);
+  const capabilityTools = [
+    "project_report",
+    "module_report",
+    "symbol_search",
+    "context_slice",
+    "context_score",
+    "handoff_capsule",
+    "evidence_cache",
+    "quality_review",
+    "skill_review",
+    "subagent",
+    "web_search",
+    "browser_session",
+  ];
+  return {
+    view: "skills",
+    suggested: metrics.skillsRouted,
+    read: metrics.skillsRead,
+    partial: metrics.skillsPartial,
+    suggestedWithoutRead: metrics.skillsRouted.filter(
+      (name: string) =>
+        !metrics.skillsRead.includes(name) &&
+        !metrics.skillsPartial.includes(name),
+    ),
+    capabilityUses: Object.fromEntries(
+      Object.entries(metrics.tools).filter(([name]) =>
+        capabilityTools.includes(name),
+      ),
+    ),
+    note: "Suggested means routed, not read; a read is not proof the workflow was applied.",
+  };
+}
+
+/** The full bounded session report (failures, traffic, capability gaps, hook
+ * health, review state) that the /metrics panel renders. */
+function sessionReport(pi: ExtensionAPI, ctx: any) {
+  const entries = ctx?.sessionManager?.getEntries?.() ?? [];
+  const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+  const activeTools =
+    typeof pi.getActiveTools === "function" ? pi.getActiveTools() : undefined;
+  const { lines } = buildSessionReport(entries, branch, undefined, activeTools);
+  const text = lines.join("\n");
+  return {
+    view: "report",
+    chars: text.length,
+    text:
+      text.length > REPORT_CHARS
+        ? `${text.slice(0, REPORT_CHARS)}\n[truncated; ${text.length} characters total]`
+        : text,
+  };
+}
+
 function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
   const activeTools = pi.getActiveTools().slice().sort();
   const backgroundHandles: Record<string, string> = {};
@@ -291,10 +455,20 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics: view:context for full-window occupancy, the automatic compaction threshold and separate output/safety headroom; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
+      "Current session diagnostics. view:context for full-window occupancy, the automatic compaction threshold and separate output/safety headroom; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners; view:messages to list this session's own user messages (bounded); view:children to list subagent usage per child and run (status, model, tokens, cache, cost, turns); view:skills to list suggested, read and partial skill usage plus capability call counts; view:report for the full bounded session report. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
     parameters: Type.Object({
       view: Type.Optional(
-        StringEnum(["session", "context", "runtime", "failures", "efficiency"]),
+        StringEnum([
+          "session",
+          "context",
+          "runtime",
+          "failures",
+          "efficiency",
+          "messages",
+          "children",
+          "skills",
+          "report",
+        ]),
       ),
     }),
     async execute(_id: any, p: any, _s: any, _u: any, ctx: any) {
@@ -309,9 +483,17 @@ export default function (pi: any) {
           ? recentFailures(ctx)
           : p.view === "runtime"
             ? runtimeFacts(pi, ctx)
-            : p.view === "context"
-              ? facts(ctx)
-              : self(ctx);
+            : p.view === "messages"
+              ? sessionMessages(ctx)
+              : p.view === "children"
+                ? sessionChildren(ctx)
+                : p.view === "skills"
+                  ? sessionSkills(ctx)
+                  : p.view === "report"
+                    ? sessionReport(pi, ctx)
+                    : p.view === "context"
+                      ? facts(ctx)
+                      : self(ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,

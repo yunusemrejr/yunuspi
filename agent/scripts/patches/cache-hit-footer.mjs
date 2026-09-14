@@ -56,17 +56,17 @@ export function transformActivity(source, bundled) {
       if (source.split(old).length === 2) source = source.replace(old,()=>code);
     }
   }
-  if(source.includes('PI_SESSION_ACTIVITY_V2')) { if(source.split(code).length!==2||source.includes('PI_SESSION_ACTIVITY_V1'))throw Error('session activity postcondition drift'); return source; }
+  if(source.includes('PI_SESSION_ACTIVITY_V2')) { if(source.split(code).length!==2||source.includes('PI_SESSION_ACTIVITY_V1'))throw new Error('session activity postcondition drift'); return source; }
   if(source.includes('PI_SESSION_ACTIVITY_V1')) {
     const start=source.indexOf(activityPrefix), end=source.indexOf(activitySuffix,start+activityPrefix.length);
-    if(start<0||end<0)throw Error('session activity V1 migration drift: missing helper boundary');
+    if(start<0||end<0)throw new Error('session activity V1 migration drift: missing helper boundary');
     const helper=source.slice(start+activityPrefix.length,end);
-    if(createHash('sha256').update(helper).digest('hex')!==legacyActivityHash)throw Error('session activity V1 migration drift: unknown helper payload');
+    if(createHash('sha256').update(helper).digest('hex')!==legacyActivityHash)throw new Error('session activity V1 migration drift: unknown helper payload');
     const previous=activityCode(helper,bundled,1);
-    if(source.split(previous).length!==2||source.split('PI_SESSION_ACTIVITY_V1').length!==2)throw Error('session activity V1 migration drift: insertion changed');
+    if(source.split(previous).length!==2||source.split('PI_SESSION_ACTIVITY_V1').length!==2)throw new Error('session activity V1 migration drift: insertion changed');
     return source.replace(previous,()=>code);
   }
-  if(source.split(old).length!==2)throw Error('session activity footer anchor drift');
+  if(source.split(old).length!==2)throw new Error('session activity footer anchor drift');
   return source.replace(old,()=>code);
 }
 const marker = "PI_CACHE_HIT_FOOTER_V1";
