@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { safeText } from './project-intelligence/privacy.mjs';
 import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
+import { isTrivialChangeRequest } from './review-coordinator.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
 export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 45000, contextChars: 6200 });
@@ -28,6 +29,7 @@ const globalNoChange = /\b(?:do not|don't|never|without)\s+(?:modify|change|edit
 export function shouldRunScopeCouncil(prompt: string): boolean {
   const source = prose(prompt);
   if (!source || globalNoChange.test(source)) return false;
+  if (isTrivialChangeRequest(source)) return false;
   // A scoped preservation clause ("don't change the font") must not cancel
   // an affirmative redesign request elsewhere in the same message.
   const text = source.replace(/\b(?:do not|don't|never)\s+(?:change|edit|modify|redesign|rework)\b/gi,'preserve');

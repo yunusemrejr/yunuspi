@@ -417,6 +417,24 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/MODEL-ROUTING.md",
 	}),
 	capability({
+		id: "model-preferences",
+		group: "models",
+		summary: "Prefer explicit per-role model/provider choices from llm_preferences.json, with the autonomous selector as fallback when preferences are absent or unusable.",
+		entrypoints: ["llm_preferences.json", "resolveLlmPreferenceChain", "selectAssistanceTeam"],
+		options: [
+			option("models", "Reusable alias registry of provider/model/thinking/provider_options entries."),
+			option("preferences.<role>.models", "Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, main_session_fallback."),
+			option("thinking", "Explicit level, auto for dynamic logic, or none for off.", ["auto", "none", "low", "medium", "high", "max"]),
+			option("provider_options.routing", "OpenRouter backend control; auto preserves normal selection.", ["auto", "pinned", "custom"]),
+		],
+		related: ["model-selection", "provider-routing", "agent-model-management"],
+		sourceFiles: [
+			"agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts",
+			"agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts",
+		],
+		doc: "agent/public-template/docs/LLM-PREFERENCES.md",
+	}),
+	capability({
 		id: "quality-review",
 		group: "review",
 		summary: "Run or inspect bounded read-only aspect reviews, then accept or block only with retained independent evidence and explicit rationale.",
@@ -434,6 +452,24 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"agent/extensions/lib/quality-review-signals.ts",
 		],
 		doc: "agent/public-template/docs/RECOVERY-AND-TESTING.md",
+	}),
+	capability({
+		id: "review-coordination",
+		group: "review",
+		summary: "Coordinate distinct review kinds (quality, project, error) with trivial-work suppression, stuck-signal gating and cooldowns; the main agent stays the invoker.",
+		entrypoints: ["review-coordinator", "quality_review", "prompt-workflow council", "subagent worker briefs"],
+		tools: ["quality_review", "subagent"],
+		options: [
+			option("kind", "Review kind with a distinct purpose and owner.", ["quality", "project", "error", "council", "swarm", "fusion"]),
+			option("isTrivialChangeRequest", "Formatting/lint/trivial-cleanup suppression for automatic checks."),
+			option("evaluateStuckSignal", "Strong stuck-pattern detection with transient exclusion."),
+			option("shouldSuggestReview", "Cooldown, session-cap and recent-run gating for suggestions."),
+		],
+		related: ["quality-review", "scope-council", "subagent-dispatch"],
+		sourceFiles: [
+			"agent/extensions/lib/review-coordinator.ts",
+		],
+		doc: "agent/public-template/docs/REVIEWS-AND-COUNCILS.md",
 	}),
 	capability({
 		id: "quick-commands",

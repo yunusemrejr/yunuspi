@@ -8,6 +8,7 @@ import { authoredReviewSnippets, authoredReviewSignals } from './authored-review
 import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
 import { extractJsonEnvelope } from '../pi-subagents/src/shared/reviewer-envelope.ts';
 import { registerSharedQualityReview } from './quality-review-owner.ts';
+import { isTrivialChangeRequest } from './review-coordinator.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
 
@@ -159,6 +160,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     // An explicit source review still works, but parallel automatic reviews
     // would spend their bounded rounds on source/tests that are still changing.
     if (automatic && testsPending()) return summary();
+    // Trivial formatting/lint/cleanup work never earns an automatic review.
+    // Deliberate quality_review({action:"review"}) always stays available.
+    if (automatic && isTrivialChangeRequest(task, changed)) return summary();
     if (!enabled() || !active || paused || !changed.length || disposition || reviewed === revision || rounds >= REVIEW_LIMITS.rounds) return summary();
     if (busy) return busy;
     const ticket = generation, rev = revision;

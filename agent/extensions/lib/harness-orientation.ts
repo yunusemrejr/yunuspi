@@ -102,7 +102,8 @@ export function buildHarnessOrientation(
 		"Quick orientation: briefly inspect relevant harness tools, skills, or workflows that may help; " +
 		"understand the options, then focus promptly on the user's request." +
 		discovery +
-		" No deep exploration or forced call is required; user and project instructions win."
+		" No deep exploration or forced call is required; user and project instructions win." +
+		" Prefer existing harness tools over shell reimplementation; bounded reviews, councils, swarms and fusion exist for genuinely hard or broad work."
 	);
 }
 

@@ -421,6 +421,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				freeOnly: constraints.freeOnly,
 				task: request.task,
 				minOutputTokens: 512,
+				role: "council",
 			});
 		} catch {
 			return unavailable("The economy and capability gate could not select permitted council routes safely.");

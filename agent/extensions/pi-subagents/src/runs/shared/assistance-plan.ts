@@ -2,6 +2,7 @@ import type { ModelInfo } from "../../shared/model-info.ts";
 import { catalogRouteCapabilities, isProvenFreeRoute } from "./free-route-evidence.ts";
 import { modelIdentity, taskQuality } from "./model-quality.ts";
 import { selectAffordableModel } from "./model-selection.ts";
+import { distributeLlmPreferredModels, withLlmThinkingSuffix } from "./model-fallback.ts";
 import type { ModelEconomyConfig } from "./model-economy.ts";
 
 export interface AssistancePlan {
@@ -34,7 +35,7 @@ export interface AssistanceMember {route:string;proof:string;role:string;free:bo
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a swarm. */
-export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean} = {}): AssistanceMember[] {
+export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  const cheap = {...config,subscriptionProviders:[],maxInputPerMillion:Math.min(config.maxInputPerMillion,.2),maxOutputPerMillion:Math.min(config.maxOutputPerMillion,.5),operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
@@ -42,7 +43,20 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
  const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && (!requiresTools || catalogRouteCapabilities(m)?.toolCalling===true));
  const team: AssistanceMember[] = [];
  const used = new Set<string>();
- for (const role of plan.roles.slice(0,3)) {
+ // Explicit preferences first: distribute viable configured routes across
+ // the team (distinct identities), then fill gaps with autonomous picks.
+ const slots = plan.roles.slice(0,3);
+ const distributed = distributeLlmPreferredModels(options.role ?? plan.mode, slots.length, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools}});
+ const distinct = distributed.filter((item,index,self)=>self.findIndex(other=>modelIdentity(other.route)===modelIdentity(item.route))===index);
+ slots.forEach((role,index)=>{
+  const pick = distinct[index];
+  if (!pick) return;
+  const model = pool.find(m=>m.fullId===pick.route);
+  if (!model) return;
+  used.add(modelIdentity(model.id));
+  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role,proof:"explicit llm_preferences",explanation:pick.explanation});
+ });
+ for (const role of slots.slice(team.length)) {
   const candidates = pool.filter(m=>!used.has(modelIdentity(m.id)));
   const available = (freeOnly:boolean, diverse:boolean) => selectAffordableModel(diverse ? candidates.filter(m=>!team.some(member=>member.route.startsWith(m.provider+"/"))) : candidates,cheap,
    {freeOnly,quality:{...taskQuality(options.task),level:"advisory"},requirements:{minContextWindow:16384,minOutputTokens,reasoning:false,inputModalities:["text"],toolCalling:requiresTools}});

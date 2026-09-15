@@ -12,6 +12,12 @@ export default function lastModel(pi: ExtensionAPI) {
       typeof model.id !== 'string' || !model.id.trim()) return;
   const key = JSON.stringify([model.provider, model.id]);
   if (key === remembered) return;
+  // State vs policy: an automatic-recovery route is a fallback, never a user
+  // selection. Persisting it would silently rewrite the default model.
+  try {
+    const automatic = (globalThis as Record<symbol, unknown>)[Symbol.for("yunus-pi.automatic-route.v1")];
+    if (typeof automatic === "function" && (automatic as () => unknown)() === `${model.provider}/${model.id}`) return;
+  } catch { /* marker unreadable: fall through to normal persistence */ }
   try {
    settings ??= SettingsManager.create(ctx.cwd, getAgentDir());
    remembered = key;

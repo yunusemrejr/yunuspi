@@ -14,6 +14,7 @@ import { fuseChildOutputs } from "../workflows/recovery-seam.ts";
 import { isAutonomousMeteredEligible, loadModelEconomyConfig, registerEconomyRequestHook } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
 import { selectAffordableModel, selectRecoveryModel, sameRecoveryModel } from "../runs/shared/model-selection.ts";
+import { selectLlmPreferredModel } from "../runs/shared/model-fallback.ts";
 import { evaluateQuotaHealth } from "../runs/shared/quota-health.ts";
 import { readJournalQuotaEvents } from "../runs/shared/quota-journal.ts";
 // Shared fleet-wide cooldown state (fix_provider_cooldown_enforcement): the
@@ -138,6 +139,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	// interpret that text as executable tool calls or change the parent's model.
 	const reviewProtocolFailures = new Map<unknown, Set<string>>();
 	if (!child) registerEconomyRequestHook(pi, { automaticRoute: () => automaticRoute });
+	if (!child) (globalThis as any)[Symbol.for("yunus-pi.automatic-route.v1")] = () => automaticRoute;
 	on("before_provider_request", (event, ctx) => {
 		const payload = event.payload;
 		if (!ctx.model || !primary || route(ctx.model) !== route(primary) || !payload || ![ctx.model.id, route(ctx.model)].includes(payload.model)) return;
@@ -232,7 +234,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		}
 		const models = available(ctx).filter(model => !rejectedRoutes!.has(route(model)));
 		const plan = { mode:'swarm' as const, roles:aspects.slice(0,REVIEW_LIMITS.reviewers).map((a:any)=>`Review ${a.id} quality`), reason:'bounded completion quality review', deadlineMs:REVIEW_LIMITS.deadlineMs, maxCostUsd:REVIEW_LIMITS.costUsd };
-		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:constraints.freeOnly,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens});
+		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:constraints.freeOnly,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens,role:"quality_review"});
 		if (!team.length) return unavailable(rejectedRoutes.size ? 'No permitted reviewer remains after a tool-protocol failure in this session; no automatic retry was made.' : 'No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.');
 		const sessionFile = ctx.sessionManager.getSessionFile(), epoch = generation;
 		const owns = () => epoch === generation && ctx.sessionManager.getSessionFile() === sessionFile;
@@ -551,10 +553,23 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			});
 			const pool = compatible;
 			const choice = selectRecoveryModel(pool.map(toModelInfo), toModelInfo(primary), now());
-			const alternate = pool.find(m => route(m) === choice?.model);
+			let alternate = pool.find(m => route(m) === choice?.model);
+			let alternateNote = choice ? choice.explanation.join(" ") : "";
+			// Explicit main-session fallbacks precede autonomous recovery
+			// selection. Main thinking stays the user's; only the route (and an
+			// OpenRouter backend pin, via the existing compat path) is configured.
+			const preferredMain = selectLlmPreferredModel("main_session_fallback", pool.map(toModelInfo));
+			const preferredAlternate = preferredMain ? pool.find(m => route(m) === preferredMain.route) : undefined;
+			let preferredCompat: Record<string, unknown> | undefined;
+			if (preferredAlternate && preferredMain) {
+				alternate = preferredAlternate;
+				alternateNote = preferredMain.explanation.join(" ");
+				if (preferredMain.providerRouting) preferredCompat = { ...((preferredAlternate as any).compat ?? {}), openRouterRouting: preferredMain.providerRouting };
+			}
 			if (alternate) {
 				visited.add(route(alternate));
-				if (await setModel(alternate, ctx)) { if (epoch !== generation || signal.aborted) return; restorePrimary = true; endpointSelected = false; automaticRoute = route(alternate); notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${choice!.explanation.join(" ")}; retained session and completed tool results.`); event.decision = "retry"; return; }
+				const target = preferredCompat ? { ...alternate, compat: preferredCompat } as typeof alternate : alternate;
+				if (await setModel(target, ctx)) { if (epoch !== generation || signal.aborted) return; restorePrimary = true; endpointSelected = false; automaticRoute = route(alternate); notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${alternateNote}; retained session and completed tool results.`); event.decision = "retry"; return; }
 			}
 			if (epoch !== generation || signal.aborted) return;
 			// Helpful only after repeated real failure, never as a default startup

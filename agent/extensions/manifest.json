@@ -104,7 +104,8 @@
     "capability-groups.ts",
     "harness-capabilities.ts",
     "git-authority.ts",
-    "effort-policy.mjs"
+    "effort-policy.mjs",
+    "review-coordinator.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

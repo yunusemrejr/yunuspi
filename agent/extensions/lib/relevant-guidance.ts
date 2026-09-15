@@ -14,6 +14,8 @@ import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
+import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
+import { failureCategory } from "./session-diagnostics.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -56,6 +58,7 @@ export function createRelevantGuidance(pi: any) {
   let skillOffers = new Map<string, { n: number; at: number }>();
   const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }> }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
+  let recentTools: string[] = [], errorRun = 0, recentErrorKinds: string[] = [], diagnosticCount = 0, trivialPrompt = false;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   const sourceReads = new Set<string>();
   let ordinarySteps = 0;
@@ -641,6 +644,7 @@ export function createRelevantGuidance(pi: any) {
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
+      recentTools = []; errorRun = 0; recentErrorKinds = []; diagnosticCount = 0; trivialPrompt = false;
       // Entries are local session metadata, not instructions or a new state file.
       const rawEntries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
       // A long-lived session can contain many thousands of tool events. Only
@@ -697,6 +701,8 @@ export function createRelevantGuidance(pi: any) {
       const previousReviews = JSON.stringify([...reviewTargets.values()]);
       lastFailure = ""; failures = urgentCount = 0;
       pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
+      recentTools = []; errorRun = 0; recentErrorKinds = [];
+      trivialPrompt = isTrivialChangeRequest(String(event.prompt ?? ""));
       matchingPrompt = false;
       advisoryDiscoveryDelivered.clear();
       requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
@@ -823,6 +829,7 @@ export function createRelevantGuidance(pi: any) {
       if (!enabled()) return;
       toolStep++;
       const name = event.toolName, input = event.input ?? {};
+      recentTools.push(name); if (recentTools.length > 8) recentTools.shift();
       if (observeAvailability(event)) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory only */ }
       if (event.isError) {
         if (name === 'edit') {
@@ -837,9 +844,26 @@ export function createRelevantGuidance(pi: any) {
           if (failures >= 3) signalHint('repeated-failure','debugging',
             'The same tool operation failed repeatedly. Reinspect its preconditions and the latest error, form a changed hypothesis, and make one discriminating check before repeating it. A failed operation is not verified progress.');
         }
+        // Stuck-pattern escalation (suggestion only, never a launch): several
+        // consecutive errors with multi-cause or loop evidence earn one
+        // bounded error-review suggestion. Transients and trivial work stay quiet.
+        errorRun++;
+        try {
+          const excerpt = (event.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => String(p.text ?? "").slice(0, 2000)).slice(0, 2).join("\n");
+          recentErrorKinds.push(failureCategory(excerpt).category);
+          if (recentErrorKinds.length > 4) recentErrorKinds.shift();
+        } catch { /* classification is advisory */ }
+        if (errorRun >= 4 && diagnosticCount < 2 && !trivialPrompt && (codeSeen || ordinarySteps >= 4)) {
+          const verdict = evaluateStuckSignal({ consecutiveErrors: errorRun, sameFixRepeats: failures, errorKinds: recentErrorKinds, meaningfulWork: true });
+          if (verdict.kind === "error") {
+            diagnosticCount++;
+            add({ key: "topic:diagnostic-error-review", priority: 74, text: "Stuck pattern: repeated errors without progress. Consider one bounded error review (subagent worker: root cause plus a discriminating check) before repeating the fix." });
+          }
+        }
         return;
       }
       lastFailure = ""; failures = 0;
+      errorRun = 0; recentErrorKinds = [];
       // A single cheap fallback after sustained basic-tool work. Specific
       // evidence-backed hints take priority; this never starts an inference,
       // loads a catalog, or becomes a repeating manual reminder.
@@ -850,6 +874,12 @@ export function createRelevantGuidance(pi: any) {
           .filter(tool => available.has(tool) && !used.has(tool) && !unavailable.has(tool)).slice(0,2);
         if (helpers.length) add({key:"harness:existing-capabilities", tool:helpers[0], priority:20,
           text:`Before adding another inspection script, consider the available ${helpers.join(" or ")} tool if it answers the current question more directly.${skills.length && !skillReviewDisabled && read.size === 0 ? " Use a relevant skill workflow when it saves work; skip unrelated sections." : ""} Keep using ordinary tools when they fit; no extra call is required.`});
+      }
+      // Shell-heavy stretch with no native inspection tool in the window: one
+      // tiny posture nudge, once per session, through the normal hint budget.
+      if (name === "bash" && recentTools.filter(t => t === "bash").length >= 6
+        && !recentTools.some(t => ["read", "grep", "find", "ls", "data_query", "git_info", "http_request", "sys_probe"].includes(t))) {
+        add({ key: "native:bash-heavy", priority: 30, text: "Shell-heavy stretch: which existing tool already does this reliably? One tool_search can name the native owner; keep Bash where it fits." });
       }
       discovery.observe(event);
       if (name === 'bulk_edit' && input.action === 'preview') {

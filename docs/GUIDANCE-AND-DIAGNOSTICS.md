@@ -59,6 +59,15 @@ bounded, stop after successful use of the suggested native tool, and abstain
 when the active tool catalogue fails. Explicit `PI_BASH_ROUTER=soft|hard`
 settings retain enforcement. Compound shell workflows remain available.
 
+Native tools stay the default posture: a shell-heavy stretch with no native
+inspection tool in the window earns one tiny once-per-session nudge through
+the normal hint budget, and the session-start orientation names tool
+preference once. A strong stuck pattern (same fix four or more times, or four
+or more consecutive errors with multi-cause or loop evidence) earns at most a
+single bounded error-review suggestion; transient failures and trivial work
+stay quiet. Trivial formatting, linting or cleanup requests never trigger
+automatic reviews or councils. See [Reviews and councils](REVIEWS-AND-COUNCILS.md).
+
 Skill matching can recover one typo in sufficiently long terms, but requires
 distinct concepts and discounts fuzzy matches. Restored guidance filters stale
 skill receipts and bounds history work. The local semantic index validates its

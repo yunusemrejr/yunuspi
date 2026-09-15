@@ -1,0 +1,69 @@
+{
+  "_comment": "Explicit model/provider preferences layered over autonomous selection. Copy to ~/.pi/settings/llm_preferences.json and adapt. Missing file, malformed JSON, unknown aliases and unusable entries all fall back to the existing autonomous logic — never a failure. See docs/LLM-PREFERENCES.md.",
+  "version": 1,
+  "models": {
+    "cheap_auto": {
+      "provider": "openrouter",
+      "model": "qwen/qwen3-235b-a22b:free",
+      "thinking": "low",
+      "provider_options": {
+        "routing": "auto"
+      }
+    },
+    "strong_pinned": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4",
+      "thinking": "high",
+      "provider_options": {
+        "routing": "pinned",
+        "order": ["deepinfra"],
+        "allow_fallbacks": false
+      }
+    },
+    "balanced_custom": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash",
+      "thinking": "medium",
+      "provider_options": {
+        "routing": "custom",
+        "order": ["deepinfra", "friendli"],
+        "allow_fallbacks": true
+      }
+    },
+    "direct_deepseek": {
+      "provider": "deepseek",
+      "model": "deepseek-chat",
+      "thinking": "auto"
+    }
+  },
+  "preferences": {
+    "main_session_fallback": {
+      "models": ["direct_deepseek", "balanced_custom"]
+    },
+    "subagents": {
+      "models": ["cheap_auto", "balanced_custom", "direct_deepseek"]
+    },
+    "council": {
+      "models": ["strong_pinned", "balanced_custom", "direct_deepseek"]
+    },
+    "swarm": {
+      "models": ["balanced_custom", "direct_deepseek", "cheap_auto"]
+    },
+    "fusion": {
+      "models": ["cheap_auto", "balanced_custom", "direct_deepseek"]
+    },
+    "quality_review": {
+      "models": ["cheap_auto", "balanced_custom"]
+    },
+    "project_review": {
+      "models": ["balanced_custom", "direct_deepseek"]
+    },
+    "error_review": {
+      "models": ["balanced_custom", "direct_deepseek", "cheap_auto"]
+    }
+  },
+  "metadata": {
+    "owner": "example — replace with your own notes",
+    "updated": "2026-01-01"
+  }
+}
