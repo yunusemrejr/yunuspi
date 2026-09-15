@@ -427,6 +427,25 @@ Inspect and persist OpenRouter provider selection pins for the selected model, w
 
 **Documentation:** [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 
+#### model-preferences
+
+Prefer explicit per-role model/provider choices from llm_preferences.json, with the autonomous selector as fallback when preferences are absent or unusable.
+
+**Entrypoints:** `llm_preferences.json`, `resolveLlmPreferenceChain`, `selectAssistanceTeam`
+
+**Options:**
+
+- `models`: Reusable alias registry of provider/model/thinking/provider_options entries.
+- `preferences.<role>.models`: Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, main_session_fallback.
+- `thinking`: Explicit level, auto for dynamic logic, or none for off. Values: `auto`, `none`, `low`, `medium`, `high`, `max`.
+- `provider_options.routing`: OpenRouter backend control; auto preserves normal selection. Values: `auto`, `pinned`, `custom`.
+
+**Related records:** `model-selection`, `provider-routing`, `agent-model-management`
+
+**Source:** [`agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts`](../../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts), [`agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts`](../../agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts)
+
+**Documentation:** [`docs/LLM-PREFERENCES.md`](LLM-PREFERENCES.md)
+
 #### local-intelligence
 
 Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.
@@ -690,6 +709,27 @@ Run or inspect bounded read-only aspect reviews, then accept or block only with 
 
 **Documentation:** [`docs/RECOVERY-AND-TESTING.md`](RECOVERY-AND-TESTING.md)
 
+#### review-coordination
+
+Coordinate distinct review kinds (quality, project, error) with trivial-work suppression, stuck-signal gating and cooldowns; the main agent stays the invoker.
+
+**Entrypoints:** `review-coordinator`, `quality_review`, `prompt-workflow council`, `subagent worker briefs`
+
+**Catalog tool pointers:** `quality_review`, `subagent`
+
+**Options:**
+
+- `kind`: Review kind with a distinct purpose and owner. Values: `quality`, `project`, `error`, `council`, `swarm`, `fusion`.
+- `isTrivialChangeRequest`: Formatting/lint/trivial-cleanup suppression for automatic checks.
+- `evaluateStuckSignal`: Strong stuck-pattern detection with transient exclusion.
+- `shouldSuggestReview`: Cooldown, session-cap and recent-run gating for suggestions.
+
+**Related records:** `quality-review`, `scope-council`, `subagent-dispatch`
+
+**Source:** [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
+
+**Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
+
 ### safety
 
 #### safety-bounds
@@ -830,7 +870,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 584; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 660; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 367; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../../agent/extensions/lib/quality-review.ts) (line 371; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 86; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 9; literal)
@@ -838,7 +878,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 590; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 572; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 530; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 539; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 542; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 829; literal)
@@ -885,6 +925,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 251)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3280)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 48)
+- /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 46)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3322)
 - /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 784)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)
@@ -1029,6 +1070,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts)
 - [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts)
 - [`agent/extensions/scoped-snapshots.ts`](../../agent/extensions/scoped-snapshots.ts)
+- [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts)
 - [`agent/extensions/session-hooks.ts`](../../agent/extensions/session-hooks.ts)
 - [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts)
 - [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
@@ -1083,12 +1125,14 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts)
 - [`agent/extensions/lib/reminders-state.ts`](../../agent/extensions/lib/reminders-state.ts)
 - [`agent/extensions/lib/render-queue.ts`](../../agent/extensions/lib/render-queue.ts)
+- [`agent/extensions/lib/review-coordinator.ts`](../../agent/extensions/lib/review-coordinator.ts)
 - [`agent/extensions/lib/scope-deliberation.ts`](../../agent/extensions/lib/scope-deliberation.ts)
 - [`agent/extensions/lib/scoped-snapshots.ts`](../../agent/extensions/lib/scoped-snapshots.ts)
 - [`agent/extensions/lib/self-mutation-guard.ts`](../../agent/extensions/lib/self-mutation-guard.ts)
 - [`agent/extensions/lib/session-audit.ts`](../../agent/extensions/lib/session-audit.ts)
 - [`agent/extensions/lib/session-cost.ts`](../../agent/extensions/lib/session-cost.ts)
 - [`agent/extensions/lib/session-diagnostics.ts`](../../agent/extensions/lib/session-diagnostics.ts)
+- [`agent/extensions/lib/session-export-json.ts`](../../agent/extensions/lib/session-export-json.ts)
 - [`agent/extensions/lib/session-hooks.ts`](../../agent/extensions/lib/session-hooks.ts)
 - [`agent/extensions/lib/session-metrics.ts`](../../agent/extensions/lib/session-metrics.ts)
 - [`agent/extensions/lib/session-report.ts`](../../agent/extensions/lib/session-report.ts)
@@ -1441,6 +1485,7 @@ These modules are present under `agent/scripts/patches` in the sanitized export.
 - [`docs/INSTALL.md`](INSTALL.md)
 - [`docs/INTENT.md`](INTENT.md)
 - [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
+- [`docs/LLM-PREFERENCES.md`](LLM-PREFERENCES.md)
 - [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
@@ -1448,11 +1493,13 @@ These modules are present under `agent/scripts/patches` in the sanitized export.
 - [`docs/PROJECT-INTELLIGENCE.md`](PROJECT-INTELLIGENCE.md)
 - [`docs/PUBLISHING.md`](PUBLISHING.md)
 - [`docs/RECOVERY-AND-TESTING.md`](RECOVERY-AND-TESTING.md)
+- [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 - [`docs/SANDBOXES.md`](SANDBOXES.md)
 - [`docs/SCREENSHOTS.md`](SCREENSHOTS.md)
 - [`docs/SECURITY.md`](SECURITY.md)
 - [`docs/SESSION-METRICS.md`](SESSION-METRICS.md)
 - [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
+- [`docs/STRUCTURE.md`](STRUCTURE.md)
 - [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
 ## Retired source markers

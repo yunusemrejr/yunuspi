@@ -802,6 +802,59 @@
       "tools": []
     },
     {
+      "id": "model-preferences",
+      "group": "models",
+      "summary": "Prefer explicit per-role model/provider choices from llm_preferences.json, with the autonomous selector as fallback when preferences are absent or unusable.",
+      "entrypoints": [
+        "llm_preferences.json",
+        "resolveLlmPreferenceChain",
+        "selectAssistanceTeam"
+      ],
+      "options": [
+        {
+          "name": "models",
+          "summary": "Reusable alias registry of provider/model/thinking/provider_options entries."
+        },
+        {
+          "name": "preferences.<role>.models",
+          "summary": "Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, main_session_fallback."
+        },
+        {
+          "name": "thinking",
+          "values": [
+            "auto",
+            "none",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ],
+          "summary": "Explicit level, auto for dynamic logic, or none for off."
+        },
+        {
+          "name": "provider_options.routing",
+          "values": [
+            "auto",
+            "pinned",
+            "custom"
+          ],
+          "summary": "OpenRouter backend control; auto preserves normal selection."
+        }
+      ],
+      "related": [
+        "model-selection",
+        "provider-routing",
+        "agent-model-management"
+      ],
+      "sourceFiles": [
+        "agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts"
+      ],
+      "doc": "docs/LLM-PREFERENCES.md",
+      "tools": [],
+      "commands": []
+    },
+    {
       "id": "quality-review",
       "group": "review",
       "summary": "Run or inspect bounded read-only aspect reviews, then accept or block only with retained independent evidence and explicit rationale.",
@@ -849,6 +902,57 @@
         "agent/extensions/lib/quality-review-signals.ts"
       ],
       "doc": "docs/RECOVERY-AND-TESTING.md",
+      "commands": []
+    },
+    {
+      "id": "review-coordination",
+      "group": "review",
+      "summary": "Coordinate distinct review kinds (quality, project, error) with trivial-work suppression, stuck-signal gating and cooldowns; the main agent stays the invoker.",
+      "entrypoints": [
+        "review-coordinator",
+        "quality_review",
+        "prompt-workflow council",
+        "subagent worker briefs"
+      ],
+      "tools": [
+        "quality_review",
+        "subagent"
+      ],
+      "options": [
+        {
+          "name": "kind",
+          "values": [
+            "quality",
+            "project",
+            "error",
+            "council",
+            "swarm",
+            "fusion"
+          ],
+          "summary": "Review kind with a distinct purpose and owner."
+        },
+        {
+          "name": "isTrivialChangeRequest",
+          "summary": "Formatting/lint/trivial-cleanup suppression for automatic checks."
+        },
+        {
+          "name": "evaluateStuckSignal",
+          "summary": "Strong stuck-pattern detection with transient exclusion."
+        },
+        {
+          "name": "shouldSuggestReview",
+          "summary": "Cooldown, session-cap and recent-run gating for suggestions."
+        }
+      ],
+      "related": [
+        "quality-review",
+        "scope-council",
+        "subagent-dispatch"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/review-coordinator.ts"
+      ],
+      "doc": "docs/REVIEWS-AND-COUNCILS.md",
       "commands": []
     },
     {
@@ -2027,6 +2131,11 @@
         "line": 48
       },
       {
+        "name": "export-json",
+        "source": "agent/extensions/session-export-json.ts",
+        "line": 46
+      },
+      {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 3322
@@ -2593,7 +2702,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 367,
+        "line": 371,
         "kind": "literal"
       },
       {
@@ -2641,7 +2750,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 539,
+        "line": 542,
         "kind": "literal"
       },
       {
@@ -2915,7 +3024,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 367,
+        "line": 371,
         "kind": "literal"
       },
       {
@@ -2963,7 +3072,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 539,
+        "line": 542,
         "kind": "literal"
       },
       {
@@ -3189,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 524,
+      "sourceFiles": 528,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3306,6 +3415,10 @@
       },
       {
         "path": "agent/extensions/scoped-snapshots.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/session-export-json.ts",
         "exists": true
       },
       {
@@ -3515,6 +3628,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/review-coordinator.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/scope-deliberation.ts",
         "exists": true
       },
@@ -3536,6 +3653,10 @@
       },
       {
         "path": "agent/extensions/lib/session-diagnostics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-export-json.ts",
         "exists": true
       },
       {
@@ -5351,6 +5472,10 @@
         "path": "docs/ISOLATION-AND-WEB.md"
       },
       {
+        "name": "LLM-PREFERENCES.md",
+        "path": "docs/LLM-PREFERENCES.md"
+      },
+      {
         "name": "LOCAL-INTELLIGENCE.md",
         "path": "docs/LOCAL-INTELLIGENCE.md"
       },
@@ -5379,6 +5504,10 @@
         "path": "docs/RECOVERY-AND-TESTING.md"
       },
       {
+        "name": "REVIEWS-AND-COUNCILS.md",
+        "path": "docs/REVIEWS-AND-COUNCILS.md"
+      },
+      {
         "name": "SANDBOXES.md",
         "path": "docs/SANDBOXES.md"
       },
@@ -5397,6 +5526,10 @@
       {
         "name": "SKILLS-AND-CHECKS.md",
         "path": "docs/SKILLS-AND-CHECKS.md"
+      },
+      {
+        "name": "STRUCTURE.md",
+        "path": "docs/STRUCTURE.md"
       },
       {
         "name": "SUBAGENT-CONTRACTS.md",

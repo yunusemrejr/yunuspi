@@ -10,7 +10,7 @@ YunusPi extends Pi with code inspection, browser and media tools, project memory
 
 The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
 
-[Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Model preferences](docs/LLM-PREFERENCES.md) · [Security](docs/SECURITY.md)
+[Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Security](docs/SECURITY.md)
 
 ## How a session works
 
@@ -72,7 +72,7 @@ Some capabilities need additional software or provider access. Browser rendering
 
 The harness uses bounded results, source selection, reusable evidence and recoverable compaction to reduce repeated or irrelevant material sent to the model. Automatic compaction starts only at or above 80% of the selected model's full context window. `session_self {view:"context"}` reports `contextWindowPercent` and `compactionTrigger`; output and safety reservations remain separate headroom diagnostics. A provider overflow below 80% is surfaced as an error without an automatic summary; manual compaction remains available. Compaction distinguishes old usage counters from the current retained context, avoiding repeated compaction caused by stale measurements. [Context selection and ranking](docs/LOCAL-INTELLIGENCE.md)
 
-The main session keeps your selected model. Child routing considers capability, quality evidence, availability and cost limits; a cheap price alone does not qualify a model for the task. Automatic helpers, change-scope councils and asynchronous skill discovery are enabled by default and run when their relevance, capacity and budget conditions are met. Discovery uses a compact metadata packet after distinct successful observations and shares the existing assistance budget. Optional per-role model preferences guide selection with autonomous fallback, and reviews, councils, swarms and fusion stay deliberately invocable with quiet automatic gates. [Routing controls](docs/MODEL-ROUTING.md) · [Model preferences](docs/LLM-PREFERENCES.md) · [Reviews and councils](docs/REVIEWS-AND-COUNCILS.md) · [Scope councils](docs/CHANGE-SCOPE.md)
+The main session keeps your selected model. Child routing considers capability, quality evidence, availability and cost limits; a cheap price alone does not qualify a model for the task. Automatic helpers, change-scope councils and asynchronous skill discovery are enabled by default and run when their relevance, capacity and budget conditions are met. Discovery uses a compact metadata packet after distinct successful observations and shares the existing assistance budget. [Routing controls](docs/MODEL-ROUTING.md) · [Scope councils](docs/CHANGE-SCOPE.md)
 
 Less context does not guarantee a particular bill. Providers differ in tokenization, caching and pricing, and retries or extra agents still cost resources. `/cost` shows recorded and estimated usage with coverage limits. [Cost accounting](docs/COST-ACCOUNTING.md)
 

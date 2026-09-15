@@ -33,7 +33,8 @@
     "project-intelligence.ts",
     "sandbox.ts",
     "utility-tools.ts",
-    "research-toolkit.ts"
+    "research-toolkit.ts",
+    "session-export-json.ts"
   ],
   "lib": [
     "media-process.ts",
@@ -105,7 +106,8 @@
     "harness-capabilities.ts",
     "git-authority.ts",
     "effort-policy.mjs",
-    "review-coordinator.ts"
+    "review-coordinator.ts",
+    "session-export-json.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
