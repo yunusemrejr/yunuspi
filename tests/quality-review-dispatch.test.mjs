@@ -15,6 +15,7 @@ const {compactForegroundResult}=await load('extensions/pi-subagents/src/shared/u
 const shared=pathToFileURL(path.join(agentRoot,'extensions/pi-subagents/src/runs/shared/')).href;
 const evidence=await import(shared+'free-route-evidence.ts');
 const {registerAutonomousRecovery}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
+const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {collectSessionMetrics}=await load('extensions/lib/session-metrics.ts');
 const {collectSessionDiagnostics}=await load('extensions/lib/session-diagnostics.ts');
 const prices={prompt:'0',completion:'0',image:'0',request:'0',input_cache_read:'0',input_cache_write:'0'};
@@ -23,6 +24,7 @@ const free=id=>({provider:'openrouter',id,api:'openai-completions',baseUrl:evide
 const aspects=['correctness','security','interface','content','runtime','delivery'].map(id=>({id,rubric:'Review actual relevant source; require evidence.'}));
 const request={task:'Implement this scoped change with quality review',revision:1,files:['src/value.js'],aspects,graph:'Current project source graph',history:[],tests:{need:null}};
 function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result,appendThrows=false}={}) {
+ resetSharedControl(); // step 21: isolate shared-control spend per scenario
  const hooks=new Map(),calls=[],entries=[];
  let session='parent';
  const ctx={cwd:root,model:{...free('parent'),provider:'parent'},modelRegistry:{getAvailable:()=>models},scopedModels:[],sessionManager:{getSessionFile:()=>session,getBranch:()=>branch},ui:{setStatus(){}}};
@@ -34,7 +36,7 @@ function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result
   return {details:{results:[compactForegroundResult({exitCode:0,messages:[{role:'assistant',content:[{type:'toolCall',id:'source-read',name:'read',arguments:{path:'src/value.js'}}]},{role:'toolResult',toolCallId:'source-read',toolName:'read',isError:false,content:[{type:'text',text:'source'}]}],output:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1: checked the stated input contract against source'],findings:[],gap:''}))})})]}};
  });
  const runner=globalThis[Symbol.for('yunus-pi.quality-review-runner.v1')];
- return {ctx,calls,entries,run:(req=request,signal=new AbortController().signal)=>runner(req,ctx,signal),switch:()=>session='other',emit:async(name,event)=>{for(const fn of hooks.get(name)??[])await fn(event,ctx);}};
+ return {ctx,calls,entries,run:(req=request,signal=new AbortController().signal)=>runner(req,ctx,signal),switch:()=>{session='other';resetSharedControl();},emit:async(name,event)=>{for(const fn of hooks.get(name)??[])await fn(event,ctx);}};
 }
 try {
  const start={role:'assistant',content:[{type:'toolCall',id:'read-1',name:'read',arguments:{path:'src/value.js'}}]};

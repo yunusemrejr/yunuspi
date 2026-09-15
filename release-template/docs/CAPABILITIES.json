@@ -2781,7 +2781,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 711,
+        "line": 712,
         "kind": "definition"
       },
       {
@@ -3201,7 +3201,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          761
+          762
         ],
         "knownNames": [
           "subagent"

@@ -56,6 +56,18 @@ export function noteUserInput(now: number = Date.now()): string {
   return cycle;
 }
 
+/** Forced turnover at session boundaries. Unlike noteUserInput this never
+ *  joins: a new session is always a fresh arbitration window, even within
+ *  the join window. Called from the pi-subagents session hooks. */
+export function noteSessionTurnover(label = "session"): string {
+  const session = getSharedSession();
+  const cycle = session.beginRequest(`shared-${label}`);
+  const g = store();
+  g[CYCLE_KEY] = { cycle, openedAt: Date.now() };
+  g[GRANTS_KEY] = { cycle, ids: new Set<string>() };
+  return cycle;
+}
+
 /** Binding consult against the shared control. The caller acts on the
  *  outcome (admitted → act, else skip with the receipt). Callers wrap in
  *  try/catch and fail OPEN (act) when the control is unreachable. */

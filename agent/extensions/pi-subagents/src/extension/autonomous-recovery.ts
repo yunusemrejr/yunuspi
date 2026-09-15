@@ -1,5 +1,6 @@
 import { registerSkillDiscoveryRunner } from "./skill-discovery-runner.ts";
 import { planAssistance, selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
+import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { AUTOMATIC_HELPER_LIMITS, REVIEW_LIMITS } from "../runs/shared/automatic-budgets.ts";
 import { routeSkills } from "../runs/shared/skill-routing.ts";
 import { persistSubagentCost } from "./session-cost.ts";
@@ -236,6 +237,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		const plan = { mode:'swarm' as const, roles:aspects.slice(0,REVIEW_LIMITS.reviewers).map((a:any)=>`Review ${a.id} quality`), reason:'bounded completion quality review', deadlineMs:REVIEW_LIMITS.deadlineMs, maxCostUsd:REVIEW_LIMITS.costUsd };
 		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:constraints.freeOnly,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens,role:"quality_review"});
 		if (!team.length) return unavailable(rejectedRoutes.size ? 'No permitted reviewer remains after a tool-protocol failure in this session; no automatic retry was made.' : 'No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.');
+		// Marked harness flow (step 21; D-010): one assistance unit per
+		// review fan-out per cycle, shared by all reviewers under the grant.
+		const recoveryFlowId = `recovery-review-${randomUUID()}`;
 		const sessionFile = ctx.sessionManager.getSessionFile(), epoch = generation;
 		const owns = () => epoch === generation && ctx.sessionManager.getSessionFile() === sessionFile;
 		const groups = team.map(()=>[] as any[]);
@@ -246,6 +250,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		const work = Promise.all(team.map(async (member,index) => {
 			const launchId = `quality-review-${randomUUID()}`, assigned = groups[index];
 			const pending = assigned.map((a:any)=>({aspect:a.id,ok:false,text:'',gap:'The native reviewer failed or returned no usable result.'}));
+			if (enforceAssistanceFlow(recoveryFlowId, { agent: 'automatic-free-assistant', task: `quality-review: ${request.task}`, model: member.route, runId: recoveryFlowId }) !== 'admitted') {
+				return pending.map(r=>({...r,gap:'Independent review skipped: the automatic assistance budget for this request is already spent.'}));
+			}
 			let status = 'failed';
 			let nativeRunId: string | undefined;
 			if (owns()) try { pi.appendEntry('subagent-cost-v1',{runId:launchId,results:[{index:0,status:'running'}]}); } catch {}
@@ -348,6 +355,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// This assignment remains before the first await, so concurrent callers
 		// still coalesce into one bounded group.
 		groupUsed = true;
+		// Marked harness flow (step 21; D-010): one assistance unit per
+		// auto-assist group per cycle, shared by all routes under the grant.
+		const autoAssistFlowId = `auto-assist-flow-${randomUUID()}`;
 		const metrics = (globalThis as any)[Symbol.for('yunus-pi.metrics.v1')];
 		if (routes.length > 1) try { metrics?.('swarms'); } catch {}
 
@@ -370,6 +380,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				if (!ownsSession()) return;
 				try { pi.appendEntry("subagent-lifecycle-v1", {runId:launchId,mode:"single",state:status,results:[{index:0,status}]}); } catch { /* instrumentation cannot replace the launch outcome */ }
 			};
+			if (enforceAssistanceFlow(autoAssistFlowId, { agent: "automatic-free-assistant", task: prompt, model: candidate.route, runId: autoAssistFlowId }) !== "admitted") {
+				return { key, ok: false, output: "" };
+			}
 			if (ownsSession()) try { pi.appendEntry("subagent-cost-v1",{runId:launchId,results:[{index:0,status:"running"}]}); } catch { /* accounting may remain unknown */ }
 			try {
 				const result = await launch(launchId, {

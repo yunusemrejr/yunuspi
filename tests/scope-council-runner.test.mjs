@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,10 @@ const shared=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/sha
 const {registerScopeCouncilRunner,SCOPE_COUNCIL_LIMITS,SCOPE_COUNCIL_RUNNER}=await import(extension+'scope-council-runner.ts');
 const {registerAutonomousRecovery}=await import(extension+'autonomous-recovery.ts');
 const {publishFreeEvidence,FREE_BASE_URL,FREE_CATALOG_URL}=await import(shared+'free-route-evidence.ts');
+const {resetSharedControl}=await import(pathToFileURL(path.join(agent,'extensions/lib/intervention-shared.ts')));
+// Step 21: marked flows spend from the shared control; each test models a
+// separate request, so isolate the singleton per test.
+beforeEach(()=>resetSharedControl());
 
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'scope-council-'));
 const environment={

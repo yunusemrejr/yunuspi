@@ -28,6 +28,9 @@ const evidence = await import(shared + "free-route-evidence.ts");
 const { registerAutonomousRecovery, assistanceWidth, automaticHelperBody } = await import(
  "../../extensions/pi-subagents/src/extension/autonomous-recovery.ts"
 );
+// Step 21: marked flows spend from the shared control; each scenario below
+// models a separate request, so isolate the singleton per fixture.
+const { resetSharedControl } = await import("../../extensions/lib/intervention-shared.ts");
 const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const free = (id) => ({
  provider: "openrouter",
@@ -115,6 +118,7 @@ function fixture({
  appendThrows = false,
  branch = [],
 } = {}) {
+ resetSharedControl();
  const handlers = new Map();
  const notices = [];
  const statuses = [];

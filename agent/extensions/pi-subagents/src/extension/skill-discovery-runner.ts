@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
+import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
 import { persistSubagentCost } from "./session-cost.ts";
@@ -70,6 +71,10 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
     let finishActivity: (() => void) | undefined;
     try {
       if (!owns() || signal.aborted) return;
+      // Marked harness flow (step 21; D-010): one assistance unit per
+      // discovery per cycle. Refused discovery stays silent like the
+      // budget pre-gates above; the refusal is journaled for audit.
+      if (enforceAssistanceFlow(runId, { agent: "automatic-skill-discovery", task: request.brief, model: member.route, runId }) !== "admitted") return;
       receipt("running");
       try {
         const finish = (globalThis as any)[Symbol.for("yunus-pi.activity.v1")]?.({ action: "start", id: runId, label: "skills" }, ctx);

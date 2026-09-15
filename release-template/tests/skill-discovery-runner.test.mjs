@@ -15,6 +15,7 @@ const free = await mod('runs/shared/free-route-evidence.ts');
 const economy = await mod('runs/shared/model-economy.ts');
 const { selectAssistanceTeam } = await mod('runs/shared/assistance-plan.ts');
 const { toModelInfo } = await mod('shared/model-info.ts');
+const { resetSharedControl } = await import(pathToFileURL(path.join(agent, 'extensions/lib/intervention-shared.ts')));
 const { parseFrontmatter, parseFrontmatterList } = await mod('agents/frontmatter.ts');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-discovery-'));
 const keys = ['PI_CODING_AGENT_DIR', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_AUTONOMOUS_FREE_ASSIST', 'PI_SUBAGENT_CHILD', 'PI_SUBAGENT_CHILD_AGENT', 'PI_OFFLINE'];
@@ -30,6 +31,8 @@ free.publishFreeEvidence([{ id: 'free/text-only', pricing: { prompt: '0', comple
 const model = { provider: 'openrouter', id: 'free/discovery', api: 'openai-completions', baseUrl: free.FREE_BASE_URL, contextWindow: 65536, maxTokens: 8192, input: ['text'], reasoning: false, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 const result = text => ({ details: { results: [{ exitCode: 0, output: text, usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 } }] } });
 function fixture(options = {}) {
+  // Step 21: marked flows spend from the shared control; isolate per scenario.
+  resetSharedControl();
   const calls = [], entries = []; let current = true, claimed = false;
   const ctx = { cwd: root, model, sessionManager: { getSessionId: () => 'fixture', getSessionFile: () => path.join(root, 'fixture-session') } };
   const pi = { getActiveTools: () => options.tools ?? ['subagent'], appendEntry: (type, data) => entries.push({ type, data }) };

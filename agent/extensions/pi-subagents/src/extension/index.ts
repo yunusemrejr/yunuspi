@@ -16,6 +16,7 @@ import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } fr
 
 import { randomUUID } from "node:crypto";
 import { registerAutonomousRecovery } from "./autonomous-recovery.ts";
+import { noteSessionTurnover } from "../../../lib/intervention-shared.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -1080,7 +1081,14 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		);
 	});
 
+	// Step 21: session boundaries always open a fresh shared-control cycle
+	// (never window-join): marked-flow budgets must not leak across sessions.
+	pi.on("session_switch", () => {
+		try { noteSessionTurnover("session-switch"); } catch { /* turnover never breaks the switch */ }
+	});
+
 	pi.on("session_start", (event, ctx) => {
+		try { noteSessionTurnover("session-start"); } catch { /* turnover never breaks startup */ }
 		installRuntime(ctx);
 		const recovering = event.reason === "startup" || event.reason === "reload" || event.reason === "resume";
 		resetSessionState(ctx, recovering, event.previousSessionFile);

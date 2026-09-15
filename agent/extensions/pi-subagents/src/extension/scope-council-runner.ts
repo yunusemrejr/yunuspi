@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
+import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
 import { persistSubagentCost } from "./session-cost.ts";
@@ -455,8 +456,14 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		const deadlineTimer = setTimeout(() => controller.abort(new Error("Scope council deadline reached.")), limits.deadlineMs);
 		deadlineTimer.unref?.();
 		const signal = parentSignal ? AbortSignal.any([parentSignal, controller.signal]) : controller.signal;
+		// Marked harness flow (step 21; D-010): one assistance unit per
+		// council execution per cycle, shared by all peers under the grant.
+		const councilFlowId = `scope-council-${randomUUID()}`;
 		const run = async (member: AssistanceMember, phase: "preservation" | "meaningful-change" | "peer-critique", evidence?: string): Promise<{ text: string; row?: any; gap?: string }> => {
 			if (!current() || now() >= deadlineAt) return { text: "", gap: "Scope council was cancelled or its shared deadline expired before this peer started." };
+			if (enforceAssistanceFlow(councilFlowId, { agent: "scope-council", task: `${phase}: ${request.task}`, model: member.route, runId: councilFlowId }) !== "admitted") {
+				return { text: "", gap: "Scope council peer skipped: the automatic assistance budget for this request is already spent." };
+			}
 			const runId = `scope-council-${phase}-${randomUUID()}`;
 			if (current()) appendCost(pi, sessionFile, runId, { index: 0, status: "running" }, "running");
 			let row: any;
