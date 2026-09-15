@@ -243,7 +243,10 @@ test("automatic settled review runs once; parent assessment and current tests ar
  await f.mutate("src/value.js", "export const value=2;");
  assert.equal(f.state().status, "pending");
  await f.settle();
- assert.equal(f.calls.length, 2);
+ // Step 19: same-request automatic re-review is budget-skipped.
+ assert.equal(f.calls.length, 1);
+ await f.tool({ action: "review" });
+ assert.equal(f.calls.length, 2, "explicit review still runs");
  await f.mutate("src/value.js", "export const value=3;");
  await f.settle();
  assert.equal(f.calls.length, 2);
@@ -810,8 +813,16 @@ test("exhausted rounds retain earlier reports as stale evidence without approvin
  const f = await fixture(t);
  await f.mutate();
  await f.settle();
+ assert.equal(f.calls.length, 1, "first automatic round admitted");
  await f.mutate("src/value.js", "export const value=2;");
  await f.settle();
+ // Step 19 (1/request automation budget): the same-request automatic
+ // re-review is skipped — no runner call, round not spent, earlier
+ // report retained. Explicit review below is never gated.
+ assert.equal(f.calls.length, 1, "second automatic round skipped by budget");
+ assert.equal(f.state().rounds, 1, "refused round spends nothing");
+ await f.tool({ action: "review" });
+ assert.equal(f.calls.length, 2, "explicit review always runs");
  const previous = f.state();
  assert.equal(previous.reports.length, 1);
  await f.mutate("src/value.js", "export const value=3;");

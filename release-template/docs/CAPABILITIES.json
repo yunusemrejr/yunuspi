@@ -2702,7 +2702,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 379,
+        "line": 391,
         "kind": "literal"
       },
       {
@@ -3024,7 +3024,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 379,
+        "line": 391,
         "kind": "literal"
       },
       {

@@ -127,7 +127,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let hashes: Record<string, string> = {};
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
-  // Control-plane shadow session (per-subsystem for the shadow phase).
+  // Control session (per-subsystem envelope per D-011).
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("review", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
@@ -174,8 +174,20 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     const ticket = generation, rev = revision;
     const own = new AbortController(); controller = own;
     const combined = AbortSignal.any([own.signal, AbortSignal.timeout(REVIEW_LIMITS.deadlineMs), ...(signal ? [signal] : []), ...(ctx.signal ? [ctx.signal] : [])]);
+    // Go-live (step 19): the escalation budget gates AUTOMATIC rounds only.
+    // Explicit quality_review tool calls shadow-observe and are never
+    // refused. A refused automatic round is skipped: summary returned,
+    // round NOT spent. Fail-open on control error.
+    if (automatic) {
+      let admitted = true;
+      try {
+        admitted = shadowPlane.enforce(reviewRoundIntent({ revision: rev, round: rounds + 1, automatic, files: changed.length, task })).outcome === "admitted";
+      } catch { admitted = true; }
+      if (!admitted) return summary();
+    } else {
+      try { shadowPlane.shadow(reviewRoundIntent({ revision: rev, round: rounds + 1, automatic, files: changed.length, task })); } catch { /* observation never affects review */ }
+    }
     rounds++; save();
-    try { shadowPlane.shadow(reviewRoundIntent({ revision: rev, round: rounds, automatic, files: changed.length, task })); } catch { /* shadow observation never affects review */ }
     const operation = (async () => {
       const context = options.context ?? (globalThis as any)[QUALITY_PROJECT_CONTEXT];
       try {
