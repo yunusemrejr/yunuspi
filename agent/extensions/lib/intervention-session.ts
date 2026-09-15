@@ -1,13 +1,13 @@
-// intervention-session — shadow-mode session binding for the control plane.
+// intervention-session — session binding for the control plane.
 //
 // One session owns one InterventionControl. Each user request begins a
-// request cycle; subsystems submit shadow intents (evaluate-only) as they
-// act, so the journal records what the control plane WOULD have decided
-// without changing any live behavior. Go-live (commit-based enforcement)
-// is a later phase; nothing here spends, claims, or blocks.
+// request cycle; subsystems shadow intents (evaluate-only) for observation
+// or enforce them (binding commit: spends, claims, dedups) at flipped
+// callsites, and the journal records every decision with its mode.
+// Per D-011 each subsystem owns its session and input-driven cycles.
 //
 // Pure and additive: no pi imports, no I/O. Callers in live paths wrap
-// calls in try/catch so observation can never break delivery.
+// calls in try/catch and fail open so the control can never break delivery.
 import {
   InterventionControl,
   type DecisionOutcome,
@@ -57,6 +57,11 @@ export interface InterventionSession {
   /** Binding submit: commit against the live cycle (spends, claims, dedups)
    *  and journal the enforced decision. Callers act on the outcome. */
   enforce(intent: Omit<InterventionIntent, "requestId"> & { requestId?: string }): InterventionDecision;
+  /** Forget dedup memory for one stability key (retract/expire/evict paths).
+   *  Never refunds spend. Idempotent; returns entries forgotten. */
+  release(stabilityKey: string, category?: InterventionDecision["category"]): number;
+  /** Forget all dedup memory (pending-set clears). Spend/slots untouched. */
+  releaseAll(): number;
   /** Chronological journal of shadow records, oldest dropped past the limit. */
   journal(): ShadowRecord[];
   /** Current-cycle rollup: would-admit vs would-suppress by outcome/source. */
@@ -109,6 +114,14 @@ export function createInterventionSession(options: InterventionSessionOptions = 
 
     enforce(intent): InterventionDecision {
       return submit(intent, "enforced");
+    },
+
+    release(stabilityKey, category): number {
+      return control.release(stabilityKey, category);
+    },
+
+    releaseAll(): number {
+      return control.releaseAll();
     },
 
     journal(): ShadowRecord[] {

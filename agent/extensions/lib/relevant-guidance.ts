@@ -72,11 +72,17 @@ export function createRelevantGuidance(pi: any) {
   // request. This local cooldown keeps different route keys from repeating
   // the same reminder after every tool result; userInput starts a new window.
   const advisoryDiscoveryDelivered = new Set<'capability' | 'workflow'>();
-  // Control-plane shadow session: every queued hint is submitted evaluate-only
-  // so the journal records what arbitration WOULD decide. Observation only —
-  // delivery decisions above and below are untouched.
+  // Control session: every userInput opens a fresh canonical request
+  // cycle; add() consults the per-subsystem envelope per queued hint
+  // (consult-then-act, fail-open on control failure).
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("guidance", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
+  // Control hygiene: dedup memory follows the pending set. Items removed
+  // WITHOUT delivery (expiry, eviction, retraction, task/restore clears)
+  // release their key so legitimate re-queue re-admits; commit() delivery
+  // never releases (spent stays spent; re-offer stays suppressed).
+  const releaseHint = (key: string) => { try { shadowPlane.release(key, "guidance"); } catch { /* hygiene never breaks delivery */ } };
+  const releaseAllHints = () => { try { shadowPlane.releaseAll(); } catch { /* hygiene never breaks delivery */ } };
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
   const bulkFiles = new Map<string, string[]>();
@@ -187,7 +193,7 @@ export function createRelevantGuidance(pi: any) {
     // Review obligations never pass through here, so compliance is unaffected;
     // reading the skill clears it through the receipt above.
     if (hint.skill && suppressed(hint.skill)) return;
-    for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
+    for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) { pending.delete(key); releaseHint(key); }
     const previous = pending.get(hint.key);
     if (previous && (previous.priority ?? 0) >= (hint.priority ?? 0)) {
       if (hint.sourceFile && (isTopic(hint.key) || previous.sourceFile) && (previous.priority ?? 0) === (hint.priority ?? 0)) pending.set(hint.key, hint);
@@ -200,18 +206,23 @@ export function createRelevantGuidance(pi: any) {
       const existing = [...pending.values()].find(value => value.discovery === hint.discovery);
       if (existing) {
         if ((existing.priority ?? 0) >= (hint.priority ?? 0)) return;
-        pending.delete(existing.key);
+        pending.delete(existing.key); releaseHint(existing.key);
       }
     }
     if (!previous && pending.size >= MAX_PENDING) {
       const weakest = [...pending.values()].sort((a,b)=>(a.priority ?? 0)-(b.priority ?? 0))[0];
       if ((weakest.priority ?? 0) >= (hint.priority ?? 0)) return;
-      pending.delete(weakest.key);
+      pending.delete(weakest.key); releaseHint(weakest.key);
     }
-    pending.set(hint.key, hint);
+    // Go-live (step 17): binding per-request automation budget. A refused
+    // hint is dropped with its receipt in the journal. Control failure
+    // fails OPEN (deliver) — enforcement must never break delivery itself.
+    let admitted = true;
     try {
-      shadowPlane.shadow(guidanceHintIntent(hint));
-    } catch { /* shadow observation never affects delivery */ }
+      admitted = shadowPlane.enforce(guidanceHintIntent(hint)).outcome === "admitted";
+    } catch { admitted = true; }
+    if (!admitted) return;
+    pending.set(hint.key, hint);
   };
   const discovery = createSkillDiscoveryController({
     catalog: () => skills,
@@ -673,7 +684,7 @@ export function createRelevantGuidance(pi: any) {
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
       advisoryDiscoveryDelivered.clear();
-      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); used.clear();
+      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear();
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
@@ -733,7 +744,7 @@ export function createRelevantGuidance(pi: any) {
       if ((ctx.cwd ?? "") !== cwd) this.restore(ctx);
       const previousReviews = JSON.stringify([...reviewTargets.values()]);
       lastFailure = ""; failures = urgentCount = 0;
-      pending.clear(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
+      pending.clear(); releaseAllHints(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
       recentTools = []; errorRun = 0; recentErrorKinds = [];
       trivialPrompt = isTrivialChangeRequest(String(event.prompt ?? ""));
       matchingPrompt = false;
@@ -932,7 +943,7 @@ export function createRelevantGuidance(pi: any) {
       if (['edit','write'].includes(name)) {
         const changedFile = typeof input.path === 'string' ? checkpointPath(input.path,cwd) : '';
         for (const hint of pending.values()) if (isTopic(hint.key) && hint.sourceFile &&
-          (hint.sourceFile !== changedFile || name === 'write')) pending.delete(hint.key);
+          (hint.sourceFile !== changedFile || name === 'write')) { pending.delete(hint.key); releaseHint(hint.key); }
         const content = name === 'write' ? input.content : input.newText;
         // Native edits carry independent replacements. Never concatenate them:
         // separate regions need not form a valid expression together. Bound the
@@ -946,7 +957,7 @@ export function createRelevantGuidance(pi: any) {
         // An edit of a different region is not evidence that the old issue disappeared.
         if (name === 'write' && typeof content === 'string' && content.length <= 24000) {
           const remaining = new Set(signals.map(s=>`signal:${s.key}`));
-          for (const hint of pending.values()) if (hint.key.startsWith("signal:") && hint.sourceFile === changedFile && !remaining.has(hint.key)) pending.delete(hint.key);
+          for (const hint of pending.values()) if (hint.key.startsWith("signal:") && hint.sourceFile === changedFile && !remaining.has(hint.key)) { pending.delete(hint.key); releaseHint(hint.key); }
         }
         for (const signal of signals) signalHint(signal.key,signal.skill,signal.check,changedFile);
       }

@@ -156,6 +156,8 @@ interface CycleRecord {
 interface DedupEntry {
   expiresAt: number;
   intentId: string;
+  category: InterventionCategory;
+  stabilityKey: string;
 }
 
 const CATEGORIES: InterventionCategory[] = ["context", "guidance", "assistance", "review", "checkpoint"];
@@ -223,7 +225,10 @@ export class InterventionControl {
     this.idSource = options.idSource ?? (() => `in-${++this.idSeq}`);
   }
 
-  /** Begin one canonical request cycle. Resets per-cycle spend. */
+  /** Begin one canonical request cycle. Resets per-cycle spend, slots,
+   *  and dedup: a new request is a new arbitration window (cross-request
+   *  spacing is the subsystem's own cooldown logic, not the control's).
+   *  Within-cycle repeats still dedup; TTL still bounds within-cycle memory. */
   beginCycle(label = ""): string {
     const id = `c${++this.seq}`;
     const now = this.clock();
@@ -236,7 +241,33 @@ export class InterventionControl {
     this.current = id;
     this.spent = { contextChars: 0, helperChildren: 0, helperCost: 0, reviewEscalations: 0, hookLatencyMs: 0 };
     this.claims.clear();
+    this.dedup.clear();
     return id;
+  }
+
+  /** Forget dedup memory for one stability key (any content hash) so a
+   *  retracted/expired/evicted — never delivered — item may be re-queued
+   *  mid-cycle. Never refunds spend: re-delivery re-spends honestly.
+   *  Idempotent; returns entries forgotten. */
+  release(stabilityKey: string, category?: InterventionCategory): number {
+    // Stored keys are always sliced to 160 chars by intent validation;
+    // normalize here so hygiene callers passing full keys still match.
+    const want = stabilityKey.slice(0, 160);
+    let forgotten = 0;
+    for (const [key, entry] of this.dedup) {
+      if (entry.stabilityKey !== want) continue;
+      if (category !== undefined && entry.category !== category) continue;
+      this.dedup.delete(key);
+      forgotten++;
+    }
+    return forgotten;
+  }
+
+  /** Forget all dedup memory (pending-set clears). Spend/slots untouched. */
+  releaseAll(): number {
+    const forgotten = this.dedup.size;
+    this.dedup.clear();
+    return forgotten;
   }
 
   currentCycle(): string | null {
@@ -374,7 +405,7 @@ export class InterventionControl {
     }
     if (!shadow) {
       this.spend(intent);
-      this.dedup.set(key, { expiresAt: now + Math.max(intent.ttlMs, 1000), intentId: intent.id! });
+      this.dedup.set(key, { expiresAt: now + Math.max(intent.ttlMs, 1000), intentId: intent.id!, category: intent.category, stabilityKey: intent.stabilityKey });
       while (this.dedup.size > MAX_DEDUP) this.dedup.delete(this.dedup.keys().next().value!);
       if (slot) {
         this.claims.set(slot, {
