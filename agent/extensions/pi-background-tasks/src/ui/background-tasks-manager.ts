@@ -166,8 +166,10 @@ function formatToolDetail(task: BgTask): string {
 }
 
 function shortModelName(model: string): string {
-  const slash = model.lastIndexOf("/");
-  return slash >= 0 ? model.slice(slash + 1) : model;
+  // ponytail: local first/last mirror of the shared short badge (no new
+  // cross-extension import for one strip); detail view keeps the raw route.
+  const parts = model.split("/").filter((part) => part.length > 0);
+  return parts.length > 1 ? `${parts[0]}/${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 
 function formatModel(task: BgTask): string {

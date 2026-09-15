@@ -37,14 +37,16 @@ export function formatContextUsage(usage: Pick<TokenUsage, "window" | "windowPea
 	return `context ${formatTokens(used)}/${formatTokens(contextLimit)} (${Math.round((used / contextLimit) * 100)}%)${peak > used ? `; peak ${formatTokens(peak)}` : ""}`;
 }
 
-export function formatModelThinking(model?: string, thinking?: string): string {
+export function formatModelThinking(model?: string, thinking?: string, style: "short" | "full" = "short"): string {
 	const parsed = model ? splitKnownThinkingSuffix(model) : undefined;
 	let displayModel = parsed?.baseModel ?? model;
 	const explicitThinking = THINKING_LEVELS.find((level) => level === thinking?.trim());
 	const displayThinking = parsed?.thinkingSuffix ? parsed.thinkingSuffix.slice(1) : explicitThinking;
-	if (displayModel) {
-		const slashIdx = displayModel.lastIndexOf("/");
-		if (slashIdx !== -1) displayModel = displayModel.slice(slashIdx + 1);
+	if (displayModel && style === "short") {
+		// ponytail: rows keep gateway + leaf only (nim/meta/llama → nim/llama); detail lines pass "full".
+		const parts = displayModel.split("/").filter((part) => part.length > 0);
+		if (parts.length > 1) displayModel = `${parts[0]}/${parts[parts.length - 1]}`;
+		else displayModel = parts[0];
 	}
 	return [displayModel, displayThinking ? `thinking ${displayThinking}` : undefined].filter(Boolean).join(" · ");
 }

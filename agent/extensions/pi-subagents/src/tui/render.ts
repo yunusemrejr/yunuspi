@@ -2854,8 +2854,9 @@ export function renderSubagentSummary(
 	const label = details?.mode === "single" && results.length === 1
 		? foregroundSingleDisplayName(results[0])
 		: details?.mode || "subagent";
+	const singleModel = results.length === 1 ? formatModelThinking(results[0]?.model) : "";
 	return new Text(
-		truncLine(`${glyph} ${theme.fg("toolTitle", theme.bold(label))} ${theme.fg("dim", "·")} ${theme.fg(state === "failed" ? "error" : state === "completed" ? "success" : state === "running" ? "accent" : "warning", state)}`, getTermWidth() - 4),
+		truncLine(`${glyph} ${theme.fg("toolTitle", theme.bold(label))}${singleModel ? ` (${singleModel})` : ""} ${theme.fg("dim", "·")} ${theme.fg(state === "failed" ? "error" : state === "completed" ? "success" : state === "running" ? "accent" : "warning", state)}`, getTermWidth() - 4),
 		0,
 		0,
 	);

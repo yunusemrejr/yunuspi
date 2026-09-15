@@ -5,6 +5,7 @@ import { selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
+import { formatModelThinking } from "../shared/formatters.ts";
 import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
@@ -428,6 +429,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return unavailable("The economy and capability gate could not select permitted council routes safely.");
 		}
 		if (team.length < 2) return unavailable("Fewer than two healthy, permitted, tool-capable council routes are available within the current economy policy.");
+	// Name the participants on the existing status channel (transient, one
+	// line): who is deliberating, how many models, council vs single route.
+	try { ctx.ui?.setStatus?.("scope-council", `Scope council: ${team.slice(0, 3).map((member) => formatModelThinking(member.route)).join(" + ")}`); } catch { /* UI is optional. */ }
 
 		let sessionFile: string | null | undefined;
 		let identity: string;

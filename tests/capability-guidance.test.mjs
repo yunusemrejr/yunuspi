@@ -150,6 +150,18 @@ test("request constraints, quoted instructions and new prompts do not leak sugge
   assert.equal(noDelegate.take().length,0);
 });
 
+test("vague actionable prompts with zero skill routes get the explore-first fallback", () => {
+  const f=fixture(toolNames,["evidence-first-engineering"]);
+  f.start("Fix the wobblewidget alignment, make it unique and less weird");
+  assert.ok(f.take().some(h=>h.key==="skill:/fixture/skills/evidence-first-engineering/SKILL.md"),"vague unmatched action routes explore-first guidance");
+  const plain=fixture(toolNames,["evidence-first-engineering"]);
+  plain.start("Fix the wobblewidget alignment");
+  assert.ok(plain.take().every(h=>h.key!=="skill:/fixture/skills/evidence-first-engineering/SKILL.md"),"specified unmatched action stays silent");
+  const q=fixture(toolNames,["evidence-first-engineering"]);
+  q.start("Explain JSON keys");
+  assert.ok(q.take().every(h=>h.key!=="skill:/fixture/skills/evidence-first-engineering/SKILL.md"),"read-only questions stay silent");
+});
+
 test("successful tool and skill reads suppress recommendations, failed reads do not", () => {
   const f=fixture(["data_query","read"],["sql-query-engineering"]);
   f.start("Inspect JSON keys. Review SQL queries");

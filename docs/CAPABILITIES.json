@@ -2750,7 +2750,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 577,
+        "line": 588,
         "kind": "literal"
       },
       {
@@ -3072,7 +3072,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 577,
+        "line": 588,
         "kind": "literal"
       },
       {

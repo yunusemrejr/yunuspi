@@ -391,7 +391,7 @@ function promptAuditViewLabel(view: PromptAuditView): string {
 function foregroundActiveDetail(item: Extract<FleetItem, { kind: "foreground-active" }>, state: SubagentState): string[] {
 	const { control } = item;
 	const live = item.activeChild ?? control;
-	const modelThinking = formatModelThinking(live.model, live.thinking);
+	const modelThinking = formatModelThinking(live.model, live.thinking, "full");
 	const promptAuditCount = foregroundPromptAuditCount(item, state);
 	const promptSummary = foregroundAuthoredPromptSummary(item, state);
 	const lines = [
@@ -475,7 +475,7 @@ function foregroundRecentOutputLines(item: Extract<FleetItem, { kind: "foregroun
 function foregroundRecentDetail(item: Extract<FleetItem, { kind: "foreground-recent" }>, state: SubagentState): string[] {
 	const { child, run } = item;
 	const outputPath = child.artifactPaths?.outputPath ?? child.savedOutputPath;
-	const modelThinking = formatModelThinking(child.model, child.thinking);
+	const modelThinking = formatModelThinking(child.model, child.thinking, "full");
 	const lines = [
 		`Run: ${item.runId}`,
 		"Source: foreground",
@@ -1253,7 +1253,7 @@ export class SubagentFleetComponent implements Component {
 			this.theme.fg("dim", "Retention: live memory only · no storage"),
 			selected?.kind === "foreground-active" ? `Run: ${selected.runId}${selected.index !== undefined ? ` · Child: ${selected.index}` : ""} · Agent: ${selected.agent}` : "Selected prompt unavailable",
 			live ? `Started: ${new Date(live.startedAt).toISOString()}` : undefined,
-			live ? `Model: ${formatModelThinking(live.model, live.thinking) || "default"}` : undefined,
+			live ? `Model: ${formatModelThinking(live.model, live.thinking, "full") || "default"}` : undefined,
 			prompt?.cwd ? `Cwd: ${prompt.cwd}` : undefined,
 			prompt?.outputPath ? `Output: ${prompt.outputPath}` : undefined,
 			this.theme.fg("dim", `Live children: ${items.map(({ item }) => item.agent).join(", ") || "none"}`),

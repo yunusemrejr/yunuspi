@@ -11,7 +11,7 @@ import { sourceCheckSupported } from "./source-check.ts";
 import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
-import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments } from "./skill-routing.ts";
+import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
@@ -242,22 +242,33 @@ export function createRelevantGuidance(pi: any) {
     if (skill) add({ key: `skill:${skill.file}`, skill: skill.file, priority,
       text: `${topic}: read the relevant workflow in ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} before applying it.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User instructions and project conventions take precedence.` });
   };
-  const practice = (key: string, topic: string, preferred: string[], text: string) => {
+  const practice = (key: string, topic: string, preferred: string[], text: string, priority?: number) => {
     const skill = preferred.map(n => skills.find(s => s.name === n)).find(Boolean);
     if (skill) {
       // A short operational check still helps models that overlook skill discovery.
-      if (!read.has(skill.file)) add({ key: `skill:${skill.file}`, skill: skill.file,
+      if (!read.has(skill.file)) add({ key: `skill:${skill.file}`, skill: skill.file, priority,
         text: `${topic}: ${text} Read ${JSON.stringify(skill.file)} for the relevant workflow.${sectionPointer(skill.file, [...skillTerms(topic, 8), ...context.slice(-16)])} User intent and project conventions win.` });
-    } else add({ key: `practice:${key}`, text: `${topic}: ${text}` });
+    } else add({ key: `practice:${key}`, priority, text: `${topic}: ${text}` });
   };
+  // Subjective/uncertain phrasing that signals unclear requirements rather
+  // than a specified task. Kept tight: every marker must read as vagueness
+  // in ordinary task prompts, since this is the only gate that spends a
+  // guidance slot on zero-route prompts.
+  const VAGUE_TASK_MARKERS = /\b(?:not sure|unsure|something|somehow|whatever|this and that|you know|sort of|kind of|weird|unique|better|nicer|prettier)\b/i;
   const routedSkills = (prompt = "", file = "") => {
     const previous = JSON.stringify([...reviewTargets.values()]);
-    for (const route of routeSkills(prompt, file)) {
+    const routes = routeSkills(prompt, file);
+    for (const route of routes) {
       const skill = skills.find(s => s.name === route.name);
       if (skill && file && route.priority >= 60) trackReview(skill, route.check, 'file');
       if (skill) add({key:`skill:${skill.file}`, skill:skill.file, priority:route.priority,
         text:`${route.check} Read ${JSON.stringify(skill.file)} for the applicable workflow and examples.${sectionPointer(skill.file, skillTerms(`${prompt} ${file}`, 24))} User intent and project conventions take precedence.`});
     }
+    // Vague-but-actionable and unmatched: subjective/uncertain language with
+    // action verbs but no skill route and no other evidence. Positive
+    // vagueness markers (not mere absence of a route) keep this precise:
+    // document prose, management prompts and negated requests stay silent.
+    if (prompt && !routes.length && skillActionSegments(prompt).length && VAGUE_TASK_MARKERS.test(prompt)) engineering(70);
     if (!matchingPrompt && previous !== JSON.stringify([...reviewTargets.values()]))
       try { pi.appendEntry?.(ENTRY,snapshot()); } catch { /* retain file workflows across compaction */ }
   };
@@ -471,8 +482,8 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('lens_diagnostics','Code review evidence: lens_diagnostics({mode:"delta",paths:[...]}) retrieves scoped cached lint, complexity, security and duplication findings. A cold cache is not a clean result. Preserve existing project checks; avoid broad full-project runner refresh unless the task needs it.');
     }
   };
-  const engineering = () => practice("engineering", "Engineering", ["evidence-first-engineering"],
-    "Locate the existing owner and a concrete success check before changing code. Reuse its state/contracts; avoid parallel implementations and unrelated abstractions. Resolve the uncertainty that changes the next action, then implement and verify; expand investigation only on new evidence or risk. Stop when the requested behavior and relevant checks pass.");
+  const engineering = (priority?: number) => practice("engineering", "Engineering", ["evidence-first-engineering"],
+    "Locate the existing owner and a concrete success check before changing code. Reuse its state/contracts; avoid parallel implementations and unrelated abstractions. Resolve the uncertainty that changes the next action, then implement and verify; expand investigation only on new evidence or risk. Stop when the requested behavior and relevant checks pass.", priority);
   const precision = () => practice("evidence", "Precision work", ["evidence-first-engineering"],
     "Inspect actual schema, units, nulls and installed API/version contracts. Compute consequential numbers with executable code and validate counts/joins. Separate measured facts, assumptions and unverified claims; a mock proves local behavior, not a live service. Never fabricate records, endpoints, citations or successful checks.");
   const orient = () => add({ key: "workspace", tool: "project_report",
