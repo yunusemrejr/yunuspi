@@ -836,7 +836,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../../agent/extensions/lib/browser-session.ts) (line 54; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts) (line 217; literal)
-- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 196; literal)
+- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 195; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 303; definition)
 - `context_profile` — [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) (line 339; literal)
 - `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)

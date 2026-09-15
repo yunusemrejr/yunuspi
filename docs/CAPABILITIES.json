@@ -2496,7 +2496,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 196,
+        "line": 195,
         "kind": "literal"
       },
       {
@@ -2928,7 +2928,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 196,
+        "line": 195,
         "kind": "literal"
       },
       {

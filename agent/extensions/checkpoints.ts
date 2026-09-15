@@ -44,9 +44,9 @@ import {
 } from "./lib/checkpoint-files.ts";
 import { createProjectTestLifecycle } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
-import { createInterventionSession } from "./lib/intervention-session.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
+import { enforceShared, getSharedSession, noteUserInput, sharedSourceAudit } from "./lib/intervention-shared.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -188,11 +188,10 @@ function registerHistory(
 	pi: ExtensionAPI,
 	takeNotice: (ctx: ExtensionContext) => string | undefined,
 ): void {
-	// Control-plane shadow session (per-subsystem for the shadow phase).
-	// History injections are rare and lack a request counter here, so the
-	// session keeps one implicit cycle; per-record timestamps order issues.
-	const shadowPlane = createInterventionSession();
-	try { registerShadowSource("checkpoint", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
+	// Control via the shared module (D-011 contingency: history injection
+	// has no input hooks, so it joins the canonical request cycle rather
+	// than keeping a session-long implicit one).
+	try { registerShadowSource("checkpoint", () => sharedSourceAudit("checkpoints.ts")); } catch { /* diagnostics only */ }
 	pi.registerTool({
 		name: "checkpoint_read",
 		label: "Read Original Instructions",
@@ -408,9 +407,17 @@ function registerHistory(
 				.join("\n") +
 			(fileState ? `\n${fileState}` : "");
 		// Append changing evidence at the tail, not inside the stable cached history prefix.
+		// Go-live (step 20): binding budget; a refused tail push returns the
+		// messages unchanged. Admitted pushes release immediately — each
+		// build serves its own inference call and re-spends honestly.
+		// Fail-open on control error.
+		let admitted = true;
 		try {
-			shadowPlane.shadow(checkpointHistoryIntent({ missing: missing.length, content }));
-		} catch { /* shadow observation never affects injection */ }
+			noteUserInput();
+			admitted = enforceShared(checkpointHistoryIntent({ missing: missing.length, content })).outcome === "admitted";
+			if (admitted) getSharedSession().release("checkpoint-history", "checkpoint");
+		} catch { admitted = true; }
+		if (!admitted) return changed ? { messages: clean } : undefined;
 		const messages = clean;
 		messages.push({
 			role: "custom",
