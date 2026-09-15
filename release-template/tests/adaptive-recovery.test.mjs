@@ -78,8 +78,42 @@ try {
  fx=await fixture({model:{...base,compat:{openRouterRouting:{order:['a'],allow_fallbacks:true}}}});await fx.fail();assert.deepEqual(fx.ctx.model.compat.openRouterRouting.only,['b']);await fx.emit('session_shutdown');
  fx=await fixture({prompt:'Do not switch provider. Continue the task'});await fx.fail();assert.equal(fx.lookups(),0);assert.equal(fx.ctx.model,base);await fx.emit('session_shutdown');
  fx=await fixture();await fx.fail('401 invalid api key');assert.equal(fx.lookups(),0);assert.equal(fx.ctx.model.provider,'direct');await fx.emit('session_shutdown');
- fx=await fixture();await fx.fail('429 account quota exceeded');assert.equal(fx.lookups(),0);assert.equal(fx.ctx.model.provider,'direct');await fx.emit('session_shutdown');
- fx=await fixture({getEndpoints:async()=>{throw Error('catalog unavailable');}});await fx.fail();assert.equal(fx.ctx.model.provider,'direct');await fx.emit('session_shutdown');
+ fx=await fixture();
+ await fx.fail('429 account quota exceeded');
+ assert.equal(fx.lookups(),0);assert.equal(fx.ctx.model,base,'first transient failure waits on the primary route');
+ await fx.fail('429 account quota exceeded');
+ assert.equal(fx.ctx.model,base,'second transient failure waits on the primary route');
+ assert.equal((await fx.fail('429 account quota exceeded')).decision,'retry');assert.equal(fx.ctx.model.provider,'direct','third consecutive failure switches routes');
+ await fx.emit('session_shutdown');
+ fx=await fixture({getEndpoints:async()=>{throw Error('catalog unavailable');}});
+ await fx.fail();assert.equal(fx.ctx.model,base,'endpoint outage without a catalog still waits twice');
+ await fx.fail();assert.equal(fx.ctx.model,base);
+ assert.equal((await fx.fail()).decision,'retry');assert.equal(fx.ctx.model.provider,'direct');
+ await fx.emit('session_shutdown');
+ // Gate denials wait out the shared cooldown; they never move the session.
+ fx=await fixture();
+ const denial='429 rate limit: provider-gate cannot safely attribute model lab/future-v2; candidate openrouter/lab/future-v2 is cooling (25s; state: provider-health.json)';
+ await fx.fail(denial);await fx.fail(denial);
+ assert.equal((await fx.fail(denial)).decision,'retry');assert.equal(fx.ctx.model,base,'gate denials never switch the session model');
+ assert.equal(fx.selected.length,0);
+ await fx.emit('session_shutdown');
+ // The automatic-route marker must be visible while model_select fires, or
+ // last-model.ts persists the recovery route as the user's default.
+ fx=await fixture();
+ const seenMarkers=[];
+ const nativeSetModel=fx.pi.setModel;
+ fx.pi.setModel=async model=>{const marker=(globalThis)[Symbol.for('yunus-pi.automatic-route.v1')];seenMarkers.push(typeof marker==='function'?marker():undefined);return nativeSetModel(model);};
+ await fx.fail('401 invalid api key');
+ assert.equal(fx.ctx.model.provider,'direct');
+ assert.deepEqual(seenMarkers,['direct/lab/future-v2'],'automatic route is marked before the switch fires model_select');
+ await fx.emit('session_shutdown');
+ // A thrown switch pauses recovery and must not leak the marker: a later
+ // manual choice of the same route has to persist as the user default.
+ fx=await fixture();
+ fx.pi.setModel=async()=>{throw Error('transcript unavailable');};
+ assert.equal((await fx.fail('401 invalid api key')).decision,'pause');
+ assert.equal((globalThis)[Symbol.for('yunus-pi.automatic-route.v1')](),undefined,'thrown switch clears the automatic marker');
+ await fx.emit('session_shutdown');
  fx=await fixture();assert.equal((await fx.fail('content filter: upstream unavailable')).decision,'pause');assert.equal(fx.selected.length,0);assert.equal(fx.lookups(),0);await fx.emit('session_shutdown');
  let waitStarted=false;
  const abortableWait=(_ms,signal)=>new Promise((resolve,reject)=>{

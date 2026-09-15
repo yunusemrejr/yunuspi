@@ -475,10 +475,13 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		if (!primary) return;
 		const errorText = event.message?.errorMessage ?? "";
 		const failure = classifyFailure(errorText);
-		// Share health classification; the gate's own denial is a wait, not a
-		// new provider failure. Never reroute a deterministic content rejection.
+		// The gate's own denial is unclassified by design (re-recording it
+		// would extend the cooldown it waits on). It stays a wait below and
+		// never authorizes a model change. Never reroute a deterministic
+		// content rejection.
+		const gateDenial = errorText.includes("provider-gate");
 		if (failure?.kind === "deterministic") { event.decision = "pause"; return; }
-		if (!failure && !errorText.includes("provider-gate")) return;
+		if (!failure && !gateDenial) return;
 		assistance?.abort(); assistance = undefined;
 		event.decision = "pause"; // Owned errors never fall back to another retry loop.
 		if (busy || paused || event.signal.aborted || event.message.content?.some((b: any) => b.type === "toolCall")) return;
@@ -537,12 +540,18 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
                     if (endpoint) {
                         visitedEndpoints.add(endpoint.tag); endpointAttempts++;
                         const replacement = {...primary,compat:{...(primary as any).compat,openRouterRouting:endpointRecoveryRouting(endpoint,routing,caps),recoveryEndpointName:endpoint.provider_name??endpoint.tag}};
+                        // Same-route backend pin: invisible in the session
+                        // model, so it stays immediate. Flags go up before
+                        // the switch so a racing generation change cannot
+                        // strand the pin without a settlement restore.
+                        const prevEndpoint = endpointSelected, prevRestore = restorePrimary;
+                        endpointSelected=true; restorePrimary=true;
                         if (await setModel(replacement,ctx)) {
                             if (epoch !== generation || signal.aborted) return;
-                            endpointSelected=true; restorePrimary=true;
                             notice(ctx, `Serving provider recovery: ${route(primary)} via ${endpoint.tag}; live capacity/parameter checks, selected-price ceiling and health ranking; retained pending continuation.`);
                             event.decision="retry"; return;
                         }
+                        endpointSelected=prevEndpoint; restorePrimary=prevRestore;
                     }
                 }
             }
@@ -579,10 +588,33 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				alternateNote = preferredMain.explanation.join(" ");
 				if (preferredMain.providerRouting) preferredCompat = { ...((preferredAlternate as any).compat ?? {}), openRouterRouting: preferredMain.providerRouting };
 			}
-			if (alternate) {
+			// A visible model/provider change needs a hopeless route (dead
+			// credentials can never succeed on retry) or three consecutive
+			// failures with no success between. Transient blips and gate
+			// denials wait out the cooldown and retry the same route below;
+			// the main session never flips to another model on a first failure.
+			const switchAllowed = !gateDenial && (failure?.kind === "provider-auth" || attempts >= 3);
+			const gatedAlternate = alternate && !switchAllowed ? alternate : undefined;
+			if (alternate && switchAllowed) {
 				visited.add(route(alternate));
 				const target = preferredCompat ? { ...alternate, compat: preferredCompat } as typeof alternate : alternate;
-				if (await setModel(target, ctx)) { if (epoch !== generation || signal.aborted) return; restorePrimary = true; endpointSelected = false; automaticRoute = route(alternate); notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${alternateNote}; retained session and completed tool results.`); event.decision = "retry"; return; }
+				// Mark the automatic route BEFORE the switch: model_select fires
+				// inside setModel, and last-model.ts must see this marker at that
+				// moment — otherwise the recovery route is persisted as the
+				// user's default model. Rolled back when the switch fails.
+				automaticRoute = route(alternate);
+				restorePrimary = true;
+				endpointSelected = false;
+				// A throw leaves the switch half-applied at worst: settlement
+				// still reconciles through restorePrimary, but the marker must
+				// not outlive the attempt — otherwise a later manual choice of
+				// the same route would skip default persistence.
+				let switched = false;
+				try { switched = await setModel(target, ctx); }
+				catch (error) { automaticRoute = undefined; throw error; }
+				if (switched) { if (epoch !== generation || signal.aborted) return; notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${alternateNote}; retained session and completed tool results.`); event.decision = "retry"; return; }
+				automaticRoute = undefined;
+				restorePrimary = false;
 			}
 			if (epoch !== generation || signal.aborted) return;
 			// Helpful only after repeated real failure, never as a default startup
@@ -597,14 +629,25 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			}
 			const primaryDecision = evaluateRoute({ provider: primary.provider, model: primary.id, now: now() });
 			const retryDelayMs = primaryDecision.allowed ? COOLDOWN_MS : Math.max(0, primaryDecision.waitMs);
-			notice(ctx, `Recovery check ${attempts}: no unvisited compatible route with proven price/capabilities within current constraints; wait ${Math.ceil(retryDelayMs / 1000)}s before retrying the pending continuation. No separate probes or tool replay.`);
+			const waitSecs = Math.ceil(retryDelayMs / 1000);
+			if (gateDenial) notice(ctx, `Recovery check ${attempts}: provider-gate denial on ${route(primary)}; wait ${waitSecs}s for the shared cooldown, then retry the same route. Denials never change the session model. No separate probes or tool replay.`);
+			else if (gatedAlternate) notice(ctx, `Recovery check ${attempts}: transient ${failure?.kind ?? "failure"} on ${route(primary)}; wait ${waitSecs}s and retry the same route — the session model changes only after 3 consecutive failures. ${route(gatedAlternate)} is ready if failures persist. No separate probes or tool replay.`);
+			else notice(ctx, `Recovery check ${attempts}: no unvisited compatible route with proven price/capabilities within current constraints; wait ${waitSecs}s before retrying the pending continuation. No separate probes or tool replay.`);
 			// Wait out the SHARED executable cooldown of the primary route (not
 			// just the fixed fallback): the store is fleet-visible, so the recheck
 			// cannot fire into a provider another session just saw fail. Bounded by
 			// the recovery deadline via the signal.
 			await sleep(Math.min(retryDelayMs, RECOVERY_DEADLINE_MS - (now() - recoveryStart!)), signal);
 			if (epoch !== generation || signal.aborted || now() - recoveryStart! >= RECOVERY_DEADLINE_MS) return;
-			if (await setModel(primary, ctx)) { if (epoch !== generation || signal.aborted) return; automaticRoute = undefined; endpointSelected = false; notice(ctx, `Primary recheck/resumption: ${route(primary)}; retained conversation and completed tool results.`); event.decision = "retry"; }
+			// Already on the primary route: resuming needs no switch. Calling
+			// setModel anyway would append a redundant model_change and reset
+			// the user's thinking level to the stored default on every wait.
+			const onPrimary = !endpointSelected && primary && ctx.model && selectionKey(ctx.model) === selectionKey(primary);
+			if (onPrimary) {
+				automaticRoute = undefined;
+				notice(ctx, `Primary recheck/resumption: ${route(primary)}; retained conversation and completed tool results.`);
+				event.decision = "retry";
+			} else if (await setModel(primary, ctx)) { if (epoch !== generation || signal.aborted) return; automaticRoute = undefined; endpointSelected = false; notice(ctx, `Primary recheck/resumption: ${route(primary)}; retained conversation and completed tool results.`); event.decision = "retry"; }
 		} catch { if (epoch === generation) {
 			paused = true;
 			if (deadlineTimer) clearTimeout(deadlineTimer);
@@ -621,7 +664,11 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// settled, leaving stale recovery state visible in the next turn.
 		const settling = active;
 		if (settling) { generation++; settling.abort(); }
-		if (restorePrimary && primary && ctx.model && (route(ctx.model) !== route(primary) || endpointSelected)) await setModel(primary, ctx);
+		if (restorePrimary && primary && ctx.model && (route(ctx.model) !== route(primary) || endpointSelected)) {
+			// A failed restore must stay visible: the session would otherwise
+			// keep running on the recovery route with no notice.
+			if (!await setModel(primary, ctx)) notice(ctx, `Recovery restore failed: no provider access for ${route(primary)}; the session stays on ${route(ctx.model)} until the next manual model selection.`);
+		}
 		restorePrimary = false;
 		endpointSelected = false;
 		automaticRoute = undefined;

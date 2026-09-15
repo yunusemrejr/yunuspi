@@ -83,7 +83,7 @@ export interface SessionJsonExportInput {
   branch: any[];
   /** All retained entries (metrics/diagnostics denominator + `--all` window). */
   retained: any[];
-  model?: { provider?: string; id?: string } | null;
+  model?: { provider?: string; id?: string; routing?: unknown; endpoint?: string } | null;
   thinkingLevel?: string | null;
   exportedAt?: string;
   includeRaw?: boolean;
@@ -181,11 +181,28 @@ function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
   }
   if (entry?.type === "custom") {
     const data = entry.data;
-    return {
+    const event: any = {
       ...base, kind: "harness", customType: entry.customType ?? null,
       dataKeys: data && typeof data === "object" ? Object.keys(data).slice(0, 64) : [],
       ...(includeRaw ? { raw: entry } : {}),
     };
+    // Selection-boundary records pair each used route with its thinking
+    // level and OpenRouter backend routing. Parsed here so route analytics
+    // below can attribute configuration without re-reading raw entries.
+    if (entry.customType === "model-config-v1" && data && typeof data === "object") {
+      if (typeof data.route === "string" && data.route.trim()) event.route = data.route.trim().slice(0, 160);
+      if (typeof data.thinking === "string" && data.thinking.trim()) event.thinking = data.thinking.trim().slice(0, 16);
+      if (data.openRouterRouting && typeof data.openRouterRouting === "object" && !Array.isArray(data.openRouterRouting)) {
+        try {
+          const text = JSON.stringify(data.openRouterRouting);
+          if (text.length <= 1024) event.routing = JSON.parse(text);
+        } catch { /* unserializable routing stays on raw */ }
+      }
+      if (typeof data.recoveryEndpointName === "string" && data.recoveryEndpointName.trim()) {
+        event.endpoint = data.recoveryEndpointName.trim().slice(0, 160);
+      }
+    }
+    return event;
   }
   if (entry?.type === "model_change") {
     return {
@@ -237,6 +254,8 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     const row = routes.get(route) ?? {
       route, turns: 0, input: 0, output: 0, cacheRead: 0,
       cacheWrite: 0, reasoning: 0, errors: 0,
+      thinkingLevels: [] as string[], routingPins: [] as unknown[], endpoints: [] as string[],
+      firstSeq: null as number | null, lastSeq: null as number | null,
     };
     routes.set(route, row);
     return row;
@@ -273,6 +292,8 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
         }
         const row = ensureRoute(event.route);
         row.turns++;
+        if (row.firstSeq === null) row.firstSeq = event.seq;
+        row.lastSeq = event.seq;
         for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const) {
           if (isFiniteNumber(usage[key]) && usage[key] >= 0) row[key] += usage[key];
         }
@@ -323,6 +344,19 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     } else if (event.kind === "harness") {
       const key = event.customType ?? "unknown";
       harnessRecords[key] = (harnessRecords[key] ?? 0) + 1;
+      if (key === "model-config-v1" && typeof event.route === "string" && event.route) {
+        const row = ensureRoute(event.route);
+        if (typeof event.thinking === "string" && event.thinking && !row.thinkingLevels.includes(event.thinking)) {
+          row.thinkingLevels.push(event.thinking);
+        }
+        if (event.routing && typeof event.routing === "object") {
+          const text = JSON.stringify(event.routing);
+          if (!row.routingPins.some((pin: unknown) => JSON.stringify(pin) === text)) row.routingPins.push(event.routing);
+        }
+        if (typeof event.endpoint === "string" && event.endpoint && !row.endpoints.includes(event.endpoint)) {
+          row.endpoints.push(event.endpoint);
+        }
+      }
     } else if (event.kind === "model_change") {
       modelChanges++;
       modelTrail.push({
@@ -397,7 +431,11 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       branchEntries: branch.length,
       retainedEntries: retained.length,
       exportedEntries: entries.length,
-      currentModel: input.model ? { provider: input.model.provider ?? null, id: input.model.id ?? null } : null,
+      currentModel: input.model ? {
+        provider: input.model.provider ?? null, id: input.model.id ?? null,
+        ...(input.model.routing && typeof input.model.routing === "object" ? { routing: input.model.routing } : {}),
+        ...(typeof input.model.endpoint === "string" && input.model.endpoint ? { endpoint: input.model.endpoint.slice(0, 160) } : {}),
+      } : null,
       currentThinkingLevel: input.thinkingLevel ?? null,
     },
     summary: {
@@ -412,6 +450,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       modelChanges,
       thinkingChanges,
       compactions,
+      modelsUsed: routeRows.length,
       tokens,
       cost: costSummary,
       stopReasons,

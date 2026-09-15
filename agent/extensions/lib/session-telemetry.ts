@@ -46,7 +46,17 @@ export function registerSessionTelemetry(pi:any) {
  pi.on('session_shutdown',()=>{flush();owner++;current=undefined;});
  pi.registerCommand('metrics',{description:'Session tools, errors, agents, swarms, fusions, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{
   const entries=ctx.sessionManager.getEntries();
-  const report=buildSessionReport(entries,ctx.sessionManager.getBranch?.()??entries,snapshot(),pi.getActiveTools?.());
+  const model=ctx?.model;
+  let current;
+  if(model&&typeof model.provider==='string'&&model.provider&&typeof model.id==='string'&&model.id){
+   let routing;
+   try{const text=JSON.stringify(model.compat?.openRouterRouting);routing=text&&text!=='{}'&&text.length<=256?text:undefined;}catch{routing=undefined;}
+   current={route:`${model.provider}/${model.id}`.slice(0,160),
+    ...(typeof pi.getThinkingLevel?.()==='string'?{thinking:pi.getThinkingLevel()}:{}),
+    ...(routing?{routing}:{}),
+    ...(typeof model.compat?.recoveryEndpointName==='string'&&model.compat.recoveryEndpointName?{endpoint:model.compat.recoveryEndpointName.slice(0,160)}:{})};
+  }
+  const report=buildSessionReport(entries,ctx.sessionManager.getBranch?.()??entries,snapshot(),pi.getActiveTools?.(),current);
   if(!ctx.hasUI)return;
   await ctx.ui.custom((tui:any,theme:any,_keys:any,done:any)=>{
    return createMetricsPanel(report.lines,tui,theme,done);

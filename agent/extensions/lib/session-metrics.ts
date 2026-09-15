@@ -8,6 +8,33 @@ export function collectSessionMetrics(entries, live) {
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
  const text=c=>typeof c==='string'?c:Array.isArray(c)?c.filter(p=>p?.type==='text').map(p=>p.text).join('\n'):'';
  const usage=u=>{if(u)for(const k of ['input','output','cacheRead','cacheWrite','reasoning'])m[k]+=number(u[k]);};
+ // Per-route usage keys off the assistant message's own provider/model (usage
+ // objects do not carry a route). Compaction/summary usage names no route and
+ // stays explicitly unattributed — never guessed from neighbors.
+ const rowFor=route=>{
+  if(typeof route!=='string'||!route)return undefined;
+  if(!m.perModel[route]){
+   if(Object.keys(m.perModel).length>=256)return undefined;
+   m.perModel[route]={turns:0,input:0,cacheRead:0,cacheWrite:0,output:0,reasoning:0,errors:0,thinking:[],routing:[],endpoints:[]};
+  }
+  return m.perModel[route];
+ };
+ const routeOf=(msg,u)=>{
+  if(u&&typeof u.route==='string'&&u.route.trim())return u.route.trim().slice(0,160);
+  const p=msg?.provider,id=msg?.model;
+  if(typeof p==='string'&&p.trim()&&typeof id==='string'&&id.trim())return `${p.trim()}/${id.trim()}`.slice(0,160);
+  return null;
+ };
+ const noteModel=(route,u,isError)=>{
+  const r=rowFor(route);
+  if(!r||!u||typeof u!=='object')return;
+  r.turns++;if(isError)r.errors++;
+  for(const k of ['input','cacheRead','cacheWrite','output','reasoning'])r[k]+=number(u[k]);
+ };
+ const pinText=value=>{
+  if(!value||typeof value!=='object'||Array.isArray(value))return '';
+  try{const text=JSON.stringify(value);return text.length>256?'':text;}catch{return '';}
+ };
  // Turn-level cache accounting needs new-content context: characters appended
  // since the previous assistant message plus that message's output. This
  // mirrors scripts/lib/token-cost-diagnostics.mjs at transcript scale: it is
@@ -15,14 +42,13 @@ export function collectSessionMetrics(entries, live) {
  // cached reuse, no-cache routes and prefix-invalidation excess explicitly.
  let pendingChars=0, prevOutput=0;
  const visibleChars=c=>typeof c==='string'?c.length:Array.isArray(c)?c.filter(p=>p?.type==='text'&&typeof p.text==='string').reduce((s,p)=>s+p.text.length,0)+c.filter(p=>p?.type==='toolCall').reduce((s,p)=>s+String(p.name??'').length,0):0;
- const noteAssistant=u=>{
+ const noteAssistant=(u,msg,isError=false,unattributed=false)=>{
   if(!u||typeof u!=='object')return;
   const input=number(u.input),cacheRead=number(u.cacheRead),cacheWrite=number(u.cacheWrite),output=number(u.output);
   const prompt=input+cacheRead+cacheWrite;
   m.assistantTurns++;
   m.uncachedInput+=input;m.cachedReuse+=cacheRead;
-  const route=typeof u.route==='string'?u.route.slice(0,160):null;
-  if(route){const r=m.perModel[route]??={turns:0,input:0,cacheRead:0,output:0};r.turns++;r.input+=input;r.cacheRead+=cacheRead;r.output+=output;}
+  noteModel(unattributed?'(unattributed compaction/summary)':routeOf(msg,u),u,isError);
   if(cacheRead===0&&cacheWrite===0&&prompt>=3000){m.noCacheTurns++;m.noCacheInput+=input;}
   const newContent=Math.round(pendingChars/4)+prevOutput;
   const excess=input-newContent;
@@ -99,7 +125,7 @@ export function collectSessionMetrics(entries, live) {
  for(const [i,e] of entries.entries()) {
   const msg=e.type==='message'?e.message:undefined;
   if(msg?.role==='assistant') {
-   m.responses++;usage(msg.usage);noteAssistant(msg.usage);if(msg.stopReason==='error')m.modelErrors++;
+   m.responses++;usage(msg.usage);noteAssistant(msg.usage,msg,msg.stopReason==='error');if(msg.stopReason==='error')m.modelErrors++;
    // Aborted/zero-content attempts are telemetry, never model-visible
    // evidence: counted here so the footer can report them without
    // projecting their empty body back into context.
@@ -121,8 +147,8 @@ export function collectSessionMetrics(entries, live) {
    }
   }
   if(msg?.role==='user')pendingChars+=visibleChars(msg.content);
-  if(e.type==='compaction'){m.compactions++;usage(e.usage);noteAssistant(e.usage);pendingChars=0;}
-  if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage);}
+  if(e.type==='compaction'){m.compactions++;usage(e.usage);noteAssistant(e.usage,undefined,false,true);pendingChars=0;}
+  if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage,undefined,false,true);}
   if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType))record(e.data,e.id,e.customType==='subagent-cost-v1');
   if(e.type==='custom'&&e.customType==='relevant-guidance'){
    for(const p of e.data?.read??[])read.add(name(p));
@@ -132,6 +158,25 @@ export function collectSessionMetrics(entries, live) {
 
   if(e.type==='custom_message'&&e.customType==='autonomous-free-fusion')legacyFusions.push({id:e.id??`fusion:${i}`,time:Date.parse(e.timestamp)||0});
   if(e.type==='custom'&&e.customType==='session-metrics-v1'&&typeof e.data?.segment==='string')segments.set(e.data.segment,e.data);
+  // Selection-boundary records pair each used route with the thinking level
+  // and OpenRouter backend routing it ran with. Thinking/routing for routes
+  // without a record stays empty — never reconstructed by guessing.
+  if(e.type==='custom'&&e.customType==='model-config-v1'&&e.data&&typeof e.data==='object'){
+   const route=typeof e.data.route==='string'&&e.data.route.trim()?e.data.route.trim().slice(0,160):null;
+   const r=rowFor(route);
+   if(r){
+    if(typeof e.data.thinking==='string'&&e.data.thinking.trim()){
+     const level=e.data.thinking.trim().slice(0,16);
+     if(!r.thinking.includes(level))r.thinking.push(level);
+    }
+    const pin=pinText(e.data.openRouterRouting);
+    if(pin&&!r.routing.includes(pin))r.routing.push(pin);
+    if(typeof e.data.recoveryEndpointName==='string'&&e.data.recoveryEndpointName.trim()){
+     const name=e.data.recoveryEndpointName.trim().slice(0,160);
+     if(!r.endpoints.includes(name))r.endpoints.push(name);
+    }
+   }
+  }
  }
  if(live?.segment)segments.set(live.segment,live);
  for(const s of segments.values()){
@@ -203,5 +248,7 @@ export function collectSessionMetrics(entries, live) {
   m.telemetry?`Hook checks: ${m.hookCalls} intervention-handler calls; ${m.hookChanged} returned results (not proof of useful changes). Excluded ${m.hookExcluded} streaming/lifecycle-observer notifications from legacy telemetry.`:'Extension hook invocations before instrumentation: unknown. Health logs contain lifecycle events only.',
   ...Object.entries(m.hooks).sort((a,b)=>b[1].calls-a[1].calls).map(([k,v])=>`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.ms)} ms, ${v.changed} returned results`),
  ];
+ // Ordered route table for /metrics and export. perModel stays the keyed form.
+ m.modelsUsed=Object.entries(m.perModel).map(([route,r])=>({route,...r})).sort((a,b)=>b.input-a.input||b.turns-a.turns);
  return m;
 }

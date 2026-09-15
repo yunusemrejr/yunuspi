@@ -15,6 +15,10 @@ delete process.env.PI_SUBAGENT_CHILD;
 // earlier run (e.g. a leaked 401) must not refuse this run's synthetic routes.
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "model-exclusions.json");
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, "provider-health.json");
+// The offline guard below forbids non-loopback sockets. Proxy variables would
+// tunnel those requests through the proxy host instead, so the suite that
+// asserts hermetic offline behavior must not inherit them.
+for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NODE_USE_ENV_PROXY"]) delete process.env[key];
 delete process.env.PI_SUBAGENT_CHILD;
 // Proactive free assistance is opt-in since 2026-09-07; the default-off check
 // below runs first, then the fixtures opt in.
@@ -244,9 +248,13 @@ const recovery = {
  },
  signal: new AbortController().signal,
 };
+await f.emit("pi_provider_recovery", { ...recovery, decision: undefined });
+check("first transient failure waits on the primary route", f.selected.length === 0);
+await f.emit("pi_provider_recovery", { ...recovery, decision: undefined });
+check("second transient failure waits on the primary route", f.selected.length === 0);
 await f.emit("pi_provider_recovery", recovery);
 check(
- "primary failure bounded automatic resumption on a proven-free compatible route",
+ "third consecutive failure bounded automatic resumption on a proven-free compatible route",
  recovery.decision === "retry" && f.selected.at(-1).id === "free/a",
 );
 await f.emit("agent_settled", {});
@@ -468,9 +476,12 @@ const server = http.createServer((req, res) => {
    res.writeHead(200,{"Content-Type":"text/event-stream"});
    res.end("data: "+JSON.stringify({id:"worker",object:"chat.completion.chunk",model:b.model,choices:[{index:0,delta,finish_reason:null}]})+"\n\ndata: "+JSON.stringify({id:"worker",object:"chat.completion.chunk",model:b.model,choices:[{index:0,delta:{},finish_reason:hasEvidence?"stop":"tool_calls"}],usage:{prompt_tokens:100,completion_tokens:10,total_tokens:110}})+"\n\ndata: [DONE]\n\n");return;
   }
+  // The session model changes only after three consecutive failures: the
+  // first two parent attempts fail and wait on the primary route, the third
+  // failure authorizes the switch, and the rerouted fourth attempt succeeds.
   if (
    isParent(b) &&
-   parentRequests++ === 0
+   parentRequests++ < 3
   ) {
    res.writeHead(503, { "Content-Type": "application/json" });
    res.end(JSON.stringify({ error: { message: "503 unavailable" } }));
@@ -641,7 +652,7 @@ const timer = setTimeout(() => {
  try {
   process.kill(-child.pid, "SIGKILL");
  } catch {}
-}, 80000);
+}, 150000);
 try {
  const exit = await new Promise((r) => child.on("close", r));
  clearTimeout(timer);
@@ -673,11 +684,11 @@ try {
      r.provider?.max_price?.completion === 0,
    ),
  );
- if (!(stdout.includes("PARENT-RESUMED") && parentRequests === 2 && requests.some(r => isParent(r) && r.model === "free/a"))) console.log("RECOVERY DIAGNOSTIC", JSON.stringify(requests.map(r => ({ model: r.model, parent: isParent(r), max_tokens: r.max_tokens, max_completion_tokens: r.max_completion_tokens }))), stdout.split("\n").filter(line => line.includes("provider-recovery") || line.includes("PARENT-RESUMED")).join("\n").slice(0, 8000));
+ if (!(stdout.includes("PARENT-RESUMED") && parentRequests === 4 && requests.some(r => isParent(r) && r.model === "free/a"))) console.log("RECOVERY DIAGNOSTIC", JSON.stringify(requests.map(r => ({ model: r.model, parent: isParent(r), max_tokens: r.max_tokens, max_completion_tokens: r.max_completion_tokens }))), stdout.split("\n").filter(line => line.includes("provider-recovery") || line.includes("PARENT-RESUMED")).join("\n").slice(0, 8000));
  check(
   "REAL failed parent resumes on a compatible affordable alternative without waiting for helpers",
   stdout.includes("PARENT-RESUMED") &&
-   parentRequests === 2 && requests.some(r => isParent(r) && r.model === "free/a"),
+   parentRequests === 4 && requests.some(r => isParent(r) && r.model === "free/a"),
  );
  check(
   "REAL failed assistant evidence retained",
@@ -688,7 +699,7 @@ try {
  const workerEnv={...env,PI_SUBAGENT_CHILD:"1",PI_AUTONOMOUS_FREE_ASSIST:"0",PI_SUBAGENT_RECOVERY_ROUTES:JSON.stringify(["openrouter/free/a","openrouter/free/b"]),PI_PROVIDER_STATE_FILE:path.join(root,"worker-health.json")};
  const worker=spawn(wrapper,["-p","--offline","--mode","json","--provider","openrouter","--model","free/a","--thinking","off","--tools","read","--no-extensions","-e",path.join(agent,"extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts"),"--session",path.join(root,"worker-session.jsonl"),`${workerMarker}: Read ${workerDataPath} once, then report its evidence.`],{cwd:root,env:workerEnv,stdio:["ignore","pipe","pipe"],detached:true});
  let workerOut="",workerErr="";worker.stdout.on("data",b=>workerOut+=b);worker.stderr.on("data",b=>workerErr+=b);
- const workerTimer=setTimeout(()=>{try{process.kill(-worker.pid,"SIGKILL");}catch{}},30000);
+ const workerTimer=setTimeout(()=>{try{process.kill(-worker.pid,"SIGKILL");}catch{}},120000);
  const workerExit=await new Promise(resolve=>worker.on("close",resolve));clearTimeout(workerTimer);
  if(workerExit!==0||!workerOut.includes("WORKER-RESUMED"))console.log("WORKER DIAGNOSTIC",workerExit,workerErr.slice(-3000),workerOut.slice(-5000));
  const workerRequests=requests.filter(b=>JSON.stringify(b.messages??[]).includes(workerMarker));

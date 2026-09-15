@@ -27,7 +27,8 @@ fallbacks. The JSON never silently becomes the source of truth for the
 normal main-session model:
 
 - Main session: your last harness-selected configuration stays active while
-  healthy. Only if it fails or becomes unavailable does recovery consult
+  healthy. Only after repeated failure (three consecutive failures, or
+  immediately for dead credentials) does recovery consult
   `main_session_fallback`, and only then the autonomous fallback logic.
 - Automatic-recovery routes are never persisted as your default model.
 - Main-session thinking always stays yours; preference thinking levels apply

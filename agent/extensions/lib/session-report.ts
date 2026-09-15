@@ -56,8 +56,15 @@ export function collectContextTraffic(entries: any[]) {
 
 }
 
+export interface CurrentModelConfig {
+  route: string;
+  thinking?: string;
+  routing?: string;
+  endpoint?: string;
+}
+
 /** Local-only panel: cumulative activity and explicitly scoped branch evidence. */
-export function buildSessionReport(entries: any[], branch: any[], live?: any, activeTools?: string[]) {
+export function buildSessionReport(entries: any[], branch: any[], live?: any, activeTools?: string[], current?: CurrentModelConfig) {
   const metrics = collectSessionMetrics(entries, live);
   const diagnostics = collectSessionDiagnostics(branch);
   const traffic = collectContextTraffic(branch);
@@ -109,8 +116,31 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
   lines.push(`Prompt cache: reuse ${number(metrics.cachedReuse ?? metrics.cacheRead)} tokens (${metrics.cacheRate === null ? 'unknown' : metrics.cacheRate.toFixed(2) + '%'} of prompt); uncached input ${number(metrics.uncachedInput ?? metrics.input)} tokens in ${metrics.assistantTurns ?? metrics.responses} assistant turns; no-cache turns ${metrics.noCacheTurns ?? 0} (${number(metrics.noCacheInput ?? 0)} tokens on routes without caching); invalidation turns ${metrics.invalidationTurns ?? 0} with ~${number(metrics.invalidationExcessTokens ?? 0)} excess tokens (prefix stopped matching, rebilled at full price).`);
   lines.push('Reuse avoids full-price rebill of the matched prefix; it is not a billed-amount saving. Repeated churn must never be counted as savings. Actual billed amounts: /cost (provider-reported vs estimated, per scope and route).');
   lines.push(`Reasoning usage: ${number(metrics.reasoning)} tokens (subset of output, not additional traffic). Child traffic: ${number(metrics.childTokens)} tokens from ${metrics.childRowsWithUsage} of ${metrics.childRows} usage-bearing child rows. Raw returned chars: ${number(traffic.totalChars)} pre-projection bytes, not occupancy or billed tokens.`);
-  const modelRows = Object.entries(metrics.perModel ?? {}).sort(([, a]: any, [, b]: any) => b.input - a.input).slice(0, 8) as [string, any][];
-  lines.push(modelRows.length ? `Models: ${modelRows.map(([route, row]) => `${route} ${row.turns}t in${number(row.input)} reuse${number(row.cacheRead)} out${number(row.output)}`).join('; ')}.` : 'Models: no per-route usage recorded; cache stability by route is unknown.');
+  const used = (metrics.modelsUsed ?? []).map((row: any) => ({ ...row, thinking: [...(row.thinking ?? [])], routing: [...(row.routing ?? [])], endpoints: [...(row.endpoints ?? [])] }));
+  if (current && typeof current.route === 'string' && current.route) {
+    let row = used.find((r: any) => r.route === current.route);
+    if (!row) {
+      row = { route: current.route, turns: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0, errors: 0, thinking: [], routing: [], endpoints: [] };
+      used.push(row);
+    }
+    if (current.thinking && !row.thinking.includes(current.thinking)) row.thinking.push(current.thinking);
+    if (current.routing && !row.routing.includes(current.routing)) row.routing.push(current.routing);
+    if (current.endpoint && !row.endpoints.includes(current.endpoint)) row.endpoints.push(current.endpoint);
+    row.current = true;
+  }
+  if (!used.length) lines.push('Models: no per-route usage recorded; cache stability by route is unknown.');
+  else {
+    lines.push(`Models (${used.length} route${used.length === 1 ? '' : 's'} · all retained entries):`);
+    for (const row of used.slice(0, 8)) {
+      const parts = [`${row.turns}t`, `in${number(row.input)}`, `reuse${number(row.cacheRead)}`, `out${number(row.output)}`];
+      if (row.errors) parts.push(`${row.errors} err`);
+      if (row.thinking?.length) parts.push(`thinking: ${row.thinking.join(' → ')}`);
+      if (row.routing?.length) parts.push(`OR: ${row.routing.join(' | ')}`);
+      if (row.endpoints?.length) parts.push(`endpoint: ${row.endpoints.join(', ')}`);
+      lines.push(`  ${row.route} ${parts.join(' ')}${row.current ? ' ● current' : ''}.`);
+    }
+    if (used.length > 8) lines.push(`  ${used.length - 8} further route(s) omitted; /export-json carries the full table.`);
+  }
   if (metrics.abortedTelemetry) lines.push(`Aborted/zero-content assistant attempts held as telemetry (not projected context): ${metrics.abortedTelemetry}.`);
   lines.push('', ...metrics.detail);
   return { lines: lines.map(reportText), diagnostics, traffic };

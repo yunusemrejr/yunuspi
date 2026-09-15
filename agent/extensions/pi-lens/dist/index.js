@@ -81621,8 +81621,10 @@ var init_integration = __esm({
 // dist/clients/dispatch/indent-detect.js
 function detectIndentation(content) {
   const lines = content.split(/\r?\n/);
-  const tabs = lines.filter((line) => /^\t+\S/.test(line)).length;
-  const spaceCounts = lines.map((line) => line.match(/^ +(?=\S)/)?.[0].length ?? 0).filter((count) => count > 0);
+  // PI_LENS_INDENT_COMMENTS_V1: comment-only lines never establish code indentation.
+  const codeLines = lines.filter((line) => !/^[ \t]*(?:\*|\/\/|#)/.test(line));
+  const tabs = codeLines.filter((line) => /^\t+\S/.test(line)).length;
+  const spaceCounts = codeLines.map((line) => line.match(/^ +(?=\S)/)?.[0].length ?? 0).filter((count) => count > 0);
   if (tabs === 0 && spaceCounts.length === 0)
     return DEFAULT_INDENTATION;
   if (tabs > spaceCounts.length)

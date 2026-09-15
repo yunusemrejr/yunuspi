@@ -84,6 +84,13 @@ export default function (pi: ExtensionAPI) {
       try {
         controlPlaneShadow = shadowReport();
       } catch { /* live rollup is best-effort diagnostics */ }
+      let currentRouting: unknown;
+      try {
+        const text = JSON.stringify(ctx.model?.compat?.openRouterRouting);
+        if (text && text !== "{}" && text.length <= 1024) currentRouting = JSON.parse(text);
+      } catch { currentRouting = undefined; }
+      const currentEndpoint = typeof ctx.model?.compat?.recoveryEndpointName === "string" && ctx.model.compat.recoveryEndpointName.trim()
+        ? ctx.model.compat.recoveryEndpointName.trim().slice(0, 160) : undefined;
       const report = buildSessionJsonExport({
         header,
         sessionFile,
@@ -92,7 +99,11 @@ export default function (pi: ExtensionAPI) {
         scope,
         branch,
         retained,
-        model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null,
+        model: ctx.model ? {
+          provider: ctx.model.provider, id: ctx.model.id,
+          ...(currentRouting ? { routing: currentRouting } : {}),
+          ...(currentEndpoint ? { endpoint: currentEndpoint } : {}),
+        } : null,
         thinkingLevel: ctx.thinkingLevel ?? null,
         includeRaw: options.includeRaw,
         controlPlaneShadow,

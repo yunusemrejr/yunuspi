@@ -362,3 +362,39 @@ test("SDK and CLI hook patches are idempotent and reject changed anchors or payl
     );
   }
 });
+
+test("per-route usage keys off message provider/model with config records and honest unattributed rows", () => {
+  const assistant = (provider, model, usage, stopReason = "stop") =>
+    message("assistant", { provider, model, usage, stopReason, content: [{ type: "text", text: "ok" }] });
+  const config = (data) => ({ type: "custom", customType: "model-config-v1", data });
+  const m = collectSessionMetrics([
+    config({ route: "deepseek/deepseek-flash", thinking: "max", source: "session_start" }),
+    assistant("deepseek", "deepseek-flash", { input: 100, output: 20, cacheRead: 50, cacheWrite: 0, reasoning: 5 }),
+    assistant("deepseek", "deepseek-flash", { input: 50, output: 10, cacheRead: 0, cacheWrite: 0, reasoning: 0 }),
+    config({ route: "openrouter/x/y", thinking: "high", openRouterRouting: { only: ["z-ai/fp8"] }, recoveryEndpointName: "Z.AI", source: "model_select:user" }),
+    assistant("openrouter", "x/y", { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, "error"),
+    { type: "compaction", usage: { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: 0 } },
+  ]);
+  assert.equal(m.modelsUsed.length, 3);
+  const deepseek = m.modelsUsed.find((row) => row.route === "deepseek/deepseek-flash");
+  assert.equal(deepseek.turns, 2);
+  assert.equal(deepseek.input, 150);
+  assert.equal(deepseek.cacheRead, 50);
+  assert.deepEqual(deepseek.thinking, ["max"]);
+  const nested = m.modelsUsed.find((row) => row.route === "openrouter/x/y");
+  assert.equal(nested.errors, 1);
+  assert.deepEqual(nested.thinking, ["high"]);
+  assert.deepEqual(nested.routing, ['{"only":["z-ai/fp8"]}']);
+  assert.deepEqual(nested.endpoints, ["Z.AI"]);
+  const unattributed = m.modelsUsed.find((row) => row.route === "(unattributed compaction/summary)");
+  assert.equal(unattributed.turns, 1);
+  assert.equal(unattributed.input, 1000);
+  // The keyed form stays for existing consumers.
+  assert.equal(m.perModel["deepseek/deepseek-flash"].turns, 2);
+  // Legacy usage.route still wins when present; empty thinking stays empty.
+  const legacy = collectSessionMetrics([
+    assistant("deepseek", "deepseek-flash", { route: "custom/pinned", input: 7, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0 }),
+  ]);
+  assert.deepEqual(Object.keys(legacy.perModel), ["custom/pinned"]);
+  assert.deepEqual(legacy.modelsUsed[0].thinking, []);
+});

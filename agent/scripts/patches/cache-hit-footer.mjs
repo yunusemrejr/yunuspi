@@ -93,6 +93,9 @@ export function transformActivity(source, bundled) {
     // 66470b24… is the body the previous source revision produced (installed by the
     // last --fix); without it the repair path could not migrate its own output and
     // the postcondition below failed as drift (caught by cache-hit-footer-test).
+    // 19a05ee1… is the usage.route-keyed revision installed by the last --fix
+    // (before per-route provider/model keying, model-config attribution and
+    // the unattributed compaction row); same migration rule as above.
     if (
       [
         "69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47",
@@ -103,6 +106,7 @@ export function transformActivity(source, bundled) {
         "ade04f0c3f0b5b8818b1ce65d2ffe5e043c62752f10b31ec160bd14be7213963",
         "585b245cd4e1b332f3a6214bf5cee637ac80606e59378f76a7dba3b6172b5a00",
         "bb5072766b8b162ef5249af5aac00e43ca61fdab98595220a9a413b3b1f493fa",
+        "19a05ee1cc56300a4936ea25f208aaeb912c4f74a926ca48fe8be4135760721f",
       ].includes(createHash("sha256").update(helper).digest("hex"))
     ) {
       const old = activityCode(helper, bundled, 2);

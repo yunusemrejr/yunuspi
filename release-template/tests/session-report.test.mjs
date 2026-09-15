@@ -144,3 +144,22 @@ test('common observed failures give specific recovery instead of unclassified',(
  ['{"status":"failed","failure":{"stage":"navigation","kind":"unreachable","codes":["ECONNREFUSED"]}}','navigation'],
  ]) assert.equal(failureCategory(text).category,category);
 });
+
+test('models section lists every used route with thinking, routing and the live current marker',()=>{
+  const assistant=(provider,model,usage)=>message('assistant',{provider,model,usage,stopReason:'stop',content:[{type:'text',text:'ok'}]});
+  const entries=[
+    {type:'custom',customType:'model-config-v1',data:{route:'deepseek/deepseek-flash',thinking:'max',source:'session_start'}},
+    assistant('deepseek','deepseek-flash',{input:100,output:20,cacheRead:50,cacheWrite:0,reasoning:5}),
+    {type:'custom',customType:'model-config-v1',data:{route:'openrouter/x/y',thinking:'high',openRouterRouting:{only:['z-ai/fp8']},recoveryEndpointName:'Z.AI',source:'model_select:user'}},
+    assistant('openrouter','x/y',{input:10,output:5,cacheRead:0,cacheWrite:0,reasoning:0}),
+    {type:'compaction',usage:{input:1000,output:100,cacheRead:0,cacheWrite:0,reasoning:0}},
+  ];
+  const report=buildSessionReport(entries,entries,undefined,undefined,{route:'openrouter/x/y',thinking:'high',routing:'{"only":["z-ai/fp8"]}',endpoint:'Z.AI'});
+  const models=report.lines.filter(line=>/deepseek|openrouter|unattributed/.test(line));
+  assert.equal(models.length,3);
+  assert.ok(models.some(line=>line.includes('deepseek/deepseek-flash')&&line.includes('thinking: max')&&!line.includes('current')));
+  assert.ok(models.some(line=>line.includes('openrouter/x/y')&&line.includes('OR: {"only":["z-ai/fp8"]}')&&line.includes('endpoint: Z.AI')&&line.includes('● current')));
+  assert.ok(models.some(line=>line.includes('(unattributed compaction/summary)')));
+  const bare=buildSessionReport([],[]);
+  assert.ok(bare.lines.some(line=>line.includes('Models: no per-route usage recorded')));
+});

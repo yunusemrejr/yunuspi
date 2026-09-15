@@ -2,7 +2,7 @@
 
 The main session keeps the model you selected. Inherited children are selected from the available registry using task requirements, cached quality evidence, current route health, and the existing cost limits. Explicit/configured model choices retain their identity and the existing authorization rules. A model argument supplied by an agent does not authorize higher spending.
 
-Optional `~/.pi/settings/llm_preferences.json` preferences guide selection per role (subagents, councils, swarms, fusion, quality/project/error reviews, main-session fallback) with explicit thinking levels and OpenRouter backend control. Preferences are validated against the live registry, exclusions, cooldowns and capabilities, tried in order, and skipped when unusable; missing or exhausted preferences fall back to the autonomous logic below. The main session keeps your last harness-selected configuration while healthy and consults JSON fallbacks only after it fails. See [Model preferences](LLM-PREFERENCES.md).
+Optional `~/.pi/settings/llm_preferences.json` preferences guide selection per role (subagents, councils, swarms, fusion, quality/project/error reviews, main-session fallback) with explicit thinking levels and OpenRouter backend control. Preferences are validated against the live registry, exclusions, cooldowns and capabilities, tried in order, and skipped when unusable; missing or exhausted preferences fall back to the autonomous logic below. The main session keeps your last harness-selected configuration while healthy and consults JSON fallbacks only after repeated failure (three consecutive failures, or immediately for dead credentials). See [Model preferences](LLM-PREFERENCES.md) and [Session recovery](RECOVERY-AND-TESTING.md).
 
 ## Quality before price
 

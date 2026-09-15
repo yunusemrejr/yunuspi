@@ -34,7 +34,8 @@
     "sandbox.ts",
     "utility-tools.ts",
     "research-toolkit.ts",
-    "session-export-json.ts"
+    "session-export-json.ts",
+    "model-config.ts"
   ],
   "lib": [
     "media-process.ts",
