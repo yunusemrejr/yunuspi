@@ -2233,7 +2233,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 650
+        "line": 697
       },
       {
         "name": "or-provider",
@@ -2672,7 +2672,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 597,
+        "line": 644,
         "kind": "literal"
       },
       {
@@ -2750,7 +2750,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 542,
+        "line": 555,
         "kind": "literal"
       },
       {
@@ -3006,7 +3006,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 597,
+        "line": 644,
         "kind": "literal"
       },
       {
@@ -3072,7 +3072,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 542,
+        "line": 555,
         "kind": "literal"
       },
       {
@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 529,
+      "sourceFiles": 531,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3472,7 +3472,15 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/capability-audit.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/capability-groups.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/capability-health.ts",
         "exists": true
       },
       {

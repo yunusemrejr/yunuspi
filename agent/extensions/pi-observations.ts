@@ -48,6 +48,16 @@ const MAX_ENTRIES = 64;
 const MAX_SEALED = 2048;
 const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
+// Best-effort capability telemetry: selection rendered into model context is
+// the honest usefulness signal (stronger than inference accepted, weaker than
+// proven downstream use, which no observer can see).
+const noteHealth = (kind: string, data: Record<string, unknown>): void => {
+	try {
+		(globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.(kind, data);
+	} catch {
+		/* telemetry is optional */
+	}
+};
 // Whole-paragraph prose from local documentation also benefits from Kompress.
 // Structured code, status, errors and source qualifications remain protected.
 const isSkillRead = (tool: string, input: any) =>
@@ -190,8 +200,11 @@ export default function piObservationsExtension(
 		smol.reset();
 	});
 	pi.on("agent_end", () => {
-		mini.reset();
-		smol.reset();
+		// Turn boundary keeps validated caches and live inference: an observation
+		// offered late in this turn is usually first rendered next turn. Full
+		// reset stays on session/branch/compaction boundaries via restore().
+		mini.endTurn();
+		smol.endTurn();
 	});
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
@@ -372,7 +385,7 @@ export default function piObservationsExtension(
 	// unchanged and obs_read can recover every character, including old branches'
 	// active ancestry. Recomputing in source order keeps an append-only prefix
 	// stable: later calls cannot alter how an earlier result was represented.
-	pi.on("context", (event) => {
+	pi.on("context", async (event) => {
 		if (
 			process.env.PI_OUTPUT_DISTILLER === "off" ||
 			!pi.getActiveTools().includes("obs_read")
@@ -422,7 +435,40 @@ export default function piObservationsExtension(
 			const visible = entry?.details?.piObservation?.id;
 			if (Number.isSafeInteger(visible)) presentIds.add(visible);
 		}
-		const messages = event.messages.map((message) => {
+		// Resolve local line selections up front, in parallel under one bounded
+		// budget: inference offered at tool_result time usually finished during
+		// the agent's reasoning gap, and a nearly-done request is worth a short
+		// wait. The sequential map below keeps source-order seals untouched.
+		// Take coverage is a superset of rendered messages (late status checks
+		// still apply in the map); ml.smol.used, not take transitions, is the
+		// rendered-usefulness signal, and frozen selections stay re-readable.
+		const smolReady = new Map<number, string | undefined>();
+		if (process.env.PI_SMOL_PREPROCESSOR !== "off") {
+			const pending: Array<Promise<void>> = [];
+			event.messages.forEach((message, index) => {
+				const ref = message.details?.piObservation as Reference | undefined;
+				if (
+					message.role !== "toolResult" ||
+					!message.content.every((part) => part.type === "text") ||
+					skillCalls.has(message.toolCallId) ||
+					ref?.version !== 1 ||
+					!ref.operation ||
+					!TOOLS.has(message.toolName)
+				)
+					return;
+				const raw = textOf(message.content);
+				if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return;
+				pending.push(
+					smol
+						.takeAsync(`${ref.id}:${ref.signature}`, raw)
+						.then((value) => {
+							smolReady.set(index, value);
+						}),
+				);
+			});
+			if (pending.length) await Promise.all(pending);
+		}
+		const messages = event.messages.map((message, index) => {
 			if (
 				message.role !== "toolResult" ||
 				message.content.some((part) => part.type !== "text")
@@ -529,16 +575,17 @@ export default function piObservationsExtension(
 						raw,
 						ref.searchOutput || searchCalls.has(message.toolCallId),
 					);
-			const localLines =
-				process.env.PI_SMOL_PREPROCESSOR === "off"
-					? undefined
-					: smol.take(`${ref.id}:${ref.signature}`, raw);
+			const localLines = smolReady.get(index);
+			const miniRendered =
+				!delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off"
+					? miniProjection(raw, selection)
+					: undefined;
+			if (miniRendered) noteHealth("ml.mini.used", { count: 1 });
 			const selected =
 				!delta && !summary && !message.isError
-					? ((process.env.PI_MINI_PREPROCESSOR === "off"
-							? undefined
-							: miniProjection(raw, selection)) ?? localLines)
+					? (miniRendered ?? localLines)
 					: undefined;
+			if (selected && !miniRendered && localLines) noteHealth("ml.smol.used", { count: 1 });
 			if (!delta && !summary && !selected) {
 				if (
 					!message.isError &&

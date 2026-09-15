@@ -15,16 +15,36 @@ export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
 const FUZZY_MIN_TERM = 6;
 // Common prose that would otherwise let a generic description match any task.
-const STOP = new Set(("with this that from work task tasks when into your using used user users code files file skill skills workflow checks check verify ensure keep kept only before after other more most less than then them they must does each example examples actual current project projects relevant preserve existing avoid without within between during possible apply applies report reports about which where while there their these those have has been being will would should could would state states visible local needed needs need make makes made take takes gives given each other same different only also just like such very well over under more most much many some any all not use used uses using do don't doesn't did doing done also into onto off out up down here when whenever whether either neither because since until unless though although even still yet already always never often sometimes usually rarely truly simply really quite rather about above below across along among around behind beyond despite except inside outside through toward towards upon versus via per plus minus okay fine good better best great hard easy simple simply own hands hand thing things part parts area areas case cases time times day days week weeks month months year years first second third last next new old start starts started begin begins began end ends ended stop stops stopped run runs ran running step steps phase phases stage stages level levels type types kind kinds form forms mode modes way ways point points item items unit units value values number numbers set sets list lists page pages line lines word words text texts name names path paths file files data info information note notes result results output outputs input inputs cause causes effect effects issue issues problem problems error errors change changes changed update updates updated add adds added remove removes removed fix fixes fixed build builds built make makes create creates created write writes wrote read reads review review inspected inspect look looks look at see sees seen show shows shown tell tells told ask asks asked need needs needed want wants wanted give gives given get gets got take takes took put puts plus also item number part thing side top bottom front back left right open closes close closed full empty high low long short big small fast slow early late hard soft sure certain likely probably maybe perhaps almost nearly roughly approx also etc eg ie vs ok").split(/\s+/).filter(Boolean));
-/** Lowercased discriminating terms from text. Bounded, deduplicated, no stemming. */
+// The trailing methodology words are mindset boilerplate, not domain signal: a
+// website palette session matched "evaluation workflows focused" strongly enough
+// to recommend a small-model skill ten times while the palette terms lost.
+const STOP = new Set(("with this that from work task tasks when into your using used user users code files file skill skills workflow checks check verify ensure keep kept only before after other more most less than then them they must does each example examples actual current project projects relevant preserve existing avoid without within between during possible apply applies report reports about which where while there their these those have has been being will would should could would state states visible local needed needs need make makes made take takes gives given each other same different only also just like such very well over under more most much many some any all not use used uses using do don't doesn't did doing done also into onto off out up down here when whenever whether either neither because since until unless though although even still yet already always never often sometimes usually rarely truly simply really quite rather about above below across along among around behind beyond despite except inside outside through toward towards upon versus via per plus minus okay fine good better best great hard easy simple simply own hands hand thing things part parts area areas case cases time times day days week weeks month months year years first second third last next new old start starts started begin begins began end ends ended stop stops stopped run runs ran running step steps phase phases stage stages level levels type types kind kinds form forms mode modes way ways point points item items unit units value values number numbers set sets list lists page pages line lines word words text texts name names path paths file files data info information note notes result results output outputs input inputs cause causes effect effects issue issues problem problems error errors change changes changed update updates updated add adds added remove removes removed fix fixes fixed build builds built make makes create creates created write writes wrote read reads review review inspected inspect look looks look at see sees seen show shows shown tell tells told ask asks asked need needs needed want wants wanted give gives given get gets got take takes took put puts plus also item number part thing side top bottom front back left right open closes close closed full empty high low long short big small fast slow early late hard soft sure certain likely probably maybe perhaps almost nearly roughly approx also etc eg ie vs ok focused workflows evaluation evaluate adapt").split(/\s+/).filter(Boolean));
+/** Lowercased discriminating terms from text. Bounded, deduplicated, no stemming.
+ * Hyphen/underscore compounds also contribute their parts, so "design-token"
+ * matches token vocabularies and "colour-only" can meet "color" through the
+ * bounded fuzzy match. Dots stay whole: "node.js" must not become "node". */
 export function skillTerms(text: string, limit = MAX_TERMS): string[] {
   const out = new Set<string>();
   if (!Number.isFinite(limit) || limit <= 0) return [];
   limit = Math.min(MAX_TERMS, Math.floor(limit));
+  const add = (term: string) => {
+    if (term.length < MIN_TERM || term.length > MAX_TERM || STOP.has(term)) return;
+    out.add(term);
+  };
+  const wholes: string[] = [];
   for (const match of String(text ?? "").slice(0, MAX_CONTEXT_CHARS).toLowerCase().matchAll(/[a-z][a-z0-9+#._-]{3,50}/g)) {
     const term = match[0].replace(/[._]+$/, "");
     if (term.length < MIN_TERM || term.length > MAX_TERM || STOP.has(term)) continue;
     out.add(term);
+    wholes.push(term);
+    if (out.size >= limit) break;
+  }
+  for (const whole of wholes) {
+    if (!/[-_]/.test(whole)) continue;
+    for (const part of whole.split(/[-_]+/)) {
+      add(part);
+      if (out.size >= limit) break;
+    }
     if (out.size >= limit) break;
   }
   return [...out];

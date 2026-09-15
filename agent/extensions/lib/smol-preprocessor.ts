@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { relevanceScores, taskTerms } from './local-intelligence.mjs';
+import { protectedEvidence, relevanceScores, taskTerms } from './local-intelligence.mjs';
+
+/** Best-effort capability telemetry. Failures here never affect selection. */
+function noteHealth(kind: string, data: Record<string, unknown>): void {
+  try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
+}
 import { prepareSmolExtraction, smolExtractionSchema, validateSmolExtraction, renderSmolExtraction } from './smol-extraction.ts';
 
 interface LegacySmolRuntime {
@@ -122,17 +127,46 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     cache.clear();
     // Keep the rate limit across compaction/branch switches.
   }
+  /** Turn boundary: keep validated cache and live slots so inference that
+   * completes after the turn still serves the next turn's first render.
+   * Prune settled slots to bound memory; pending slots are never dropped. */
+  function endTurn() {
+    for (const [key, slot] of slots) {
+      if (slots.size <= 32) break;
+      if (slot.state !== 'pending') slots.delete(key);
+    }
+  }
+  /** Shared seal: whatever is taken first is frozen. Late inference can only
+   * warm the cache for identical future observations, never rewrite a seal. */
+  function sealTake(slot: Slot): string | undefined {
+    if (slot.state === 'pending') { if (runtime?.version !== 2) slot.abort?.abort(); slot.state = 'raw'; noteHealth('ml.smol.take', {decision:'raw'}); }
+    if (slot.state === 'ready') { slot.state = 'frozen'; noteHealth('ml.smol.take', {decision:'selected',count:1}); return slot.value; }
+    return slot.state === 'frozen' ? slot.value : undefined;
+  }
+  function sourceMatches(slot: Slot, raw: string | undefined): boolean {
+    if (raw === undefined || !slot.value) return true;
+    let hash: unknown;
+    try { hash = (JSON.parse(slot.value) as {sourceHash?: unknown}).sourceHash; } catch { hash = undefined; }
+    const match = hash === createHash('sha256').update(raw).digest('hex');
+    if (!match) noteHealth('ml.smol.take', {decision:'hash-mismatch'});
+    return match;
+  }
   return {
     reset,
+    endTurn,
     inspect() { return {...stats,busy,cached:cache.size}; },
     offer(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '') {
-      if (!safeSmolOutput('bash', raw, false, undefined) || !validSmolRuntime(runtime) || process.env.PI_SMOL_PREPROCESSOR === 'off' || slots.has(key) || slots.size >= 64) return;
+      if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
+      if (!safeSmolOutput('bash', raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!validSmolRuntime(runtime)) { noteHealth('ml.smol.offer', {decision:'no-runtime'}); return; }
+      if (slots.has(key) || slots.size >= 64) return;
       const background = runtime.version === 2;
       const signal = process.env.PI_LOCAL_INTELLIGENCE === 'off' ? '' : taskTerms(task).sort().join(' ');
       const cacheKey = createHash('sha256').update(raw).update('\0').update(signal).digest('hex');
       const cached = background ? cache.get(cacheKey) : undefined;
-      if (cached) { stats.cacheHits++; slots.set(key,{state:'ready',value:cached}); return; }
-      if (busy || now() - lastCall < 60_000 || !background && raw.length < runtime.calibrated.minInputChars) return;
+      if (cached) { stats.cacheHits++; slots.set(key,{state:'ready',value:cached}); noteHealth('ml.smol.offer', {decision:'cache-hit',count:1}); return; }
+      if (busy || now() - lastCall < 60_000) { noteHealth('ml.smol.offer', {decision:busy?'busy':'cooldown'}); return; }
+      if (!background && raw.length < runtime.calibrated.minInputChars) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       // Background mode uses a context-saving floor even on zero/unknown-price
       // routes; its CPU bound is one five-second request per minute fleet-wide.
       if (!background && (typeof mainInputUsdPerMillion !== 'number' || !Number.isFinite(mainInputUsdPerMillion) || mainInputUsdPerMillion <= 0)) return;
@@ -141,13 +175,16 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const savings = (projectedChars: number) => Math.max(0, raw.length - projectedChars - 800) / 6 * price / 1e6;
       if (!background && savings(Math.floor(raw.length / 4)) < budget) return;
       const source = prepareSmolExtraction(raw);
-      if (!source) return;
+      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       // The model cannot delete boundary context or explicit status/negation evidence.
+      // The protected-evidence union adds numbers, paths, decisions, failures and
+      // unresolved work; outputs with too many required lines abstain below.
       const relevance = background ? relevanceScores(source.lines.map(line=>line.text),signal) : [];
-      const required = source.lines.filter((line, index) => index === 0 || index === source.lines.length - 1 || relevance[index] > 0
+      const required = source.lines.filter((line, index) => index === 0 || index === source.lines.length - 1 || relevance[index] > 0 || protectedEvidence.test(line.text)
         || /\b(?:status|exit[ _-]?code|result|summary|completed|not|no|never|none|neither|without|cannot|denied|blocked|invalid|unavailable|incomplete|partial|cancelled|aborted|skipped|unless|except|however|only|possibly|maybe|uncertain|unverified|pending|but)\b|n't\b/i.test(line.text)).map(line => line.id);
       const prepared = prepareSmolExtraction(raw, required);
-      if (!prepared) return;
+      if (!prepared) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      noteHealth('ml.smol.offer', {decision:'accepted',count:1});
       const config = runtime;
       const timeoutMs = config.version === 2 ? config.timeoutMs : Math.min(500, Math.ceil(config.calibrated.p95LatencyMs * 1.5));
       const abort = new AbortController();
@@ -209,6 +246,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
         } catch { /* Unsupported/malformed/cancelled results preserve the exact original. */ }
         finally {
           clearTimeout(timer);
+          noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});
           if (!accepted && epoch === generation) stats.fallbacks++;
           busy = false;
           if (slot.state === 'pending') slot.state = 'raw';
@@ -220,10 +258,27 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     take(key: string, raw?: string): string | undefined {
       const slot = slots.get(key);
       if (!slot) return;
-      if (raw !== undefined && slot.value && JSON.parse(slot.value).sourceHash !== createHash('sha256').update(raw).digest('hex')) return;
-      if (slot.state === 'pending') { if(runtime?.version !== 2) slot.abort?.abort(); slot.state = 'raw'; }
-      if (slot.state === 'ready') slot.state = 'frozen';
-      return slot.state === 'frozen' ? slot.value : undefined;
+      if (!sourceMatches(slot, raw)) return;
+      return sealTake(slot);
+    },
+    /** Bounded first use: await in-flight inference up to waitMs before sealing.
+     * Default 250ms on background runtimes, 0 on legacy (legacy keeps the exact
+     * synchronous contract). Deterministic callers seal the same selection for
+     * the same source and task; a timeout seals raw and leaves inference running
+     * to warm the cache. */
+    async takeAsync(key: string, raw?: string, waitMs?: number): Promise<string | undefined> {
+      const slot = slots.get(key);
+      if (!slot) return;
+      const budget = waitMs ?? (runtime?.version === 2 ? 250 : 0);
+      if (slot.state === 'pending' && budget > 0) {
+        const started = Date.now();
+        while (slot.state === 'pending' && Date.now() - started < budget) {
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        noteHealth('ml.smol.take', {decision:slot.state === 'pending' ? 'pending-timeout' : 'waited', durationMs:Date.now() - started});
+      }
+      if (!sourceMatches(slot, raw)) return;
+      return sealTake(slot);
     },
     discard(key: string) {
       const slot = slots.get(key);

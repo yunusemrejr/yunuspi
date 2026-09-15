@@ -121,7 +121,7 @@ test('online reliability decays evidence and reports uncertainty instead of trea
 test('observation hook proposes near predecessors but exposes exact changes and branch-scoped originals',async()=>{
   const handlers={},tools={},branch=[];
   const pi={on:(name,fn)=>handlers[name]=fn,registerTool:tool=>tools[tool.name]=tool,registerCommand(){},getActiveTools:()=>['read','bash','obs_read']};
-  observations(pi,{reset(){},select:async()=>undefined});
+  observations(pi,{reset(){},endTurn(){},select:async()=>undefined});
   const ctx={sessionManager:{getEntries:()=>branch,getBranch:()=>branch}};
   handlers.session_start({},ctx);handlers.before_agent_start({prompt:'Investigate authentication timeout'});
   const before=Array.from({length:100},(_,i)=>`record ${i}: ordinary background monitoring server process counters resources input output memory network storage capacity endpoint cache snapshot request duration`).join('\n');
@@ -132,7 +132,7 @@ test('observation hook proposes near predecessors but exposes exact changes and 
     branch.push({type:'message',id:String(branch.length),message});handlers.message_end({message});return message;
   };
   const first=await add(before,'/tmp/old-status.txt'),second=await add(after,'/tmp/new-status.txt');
-  const projected=handlers.context({messages:[first,second]},ctx).messages;
+  const projected=(await handlers.context({messages:[first,second]},ctx)).messages;
   assert.equal(projected[0],first);assert(projected[1].content[0].text.includes('"baselineObservation":1'));
   const delta=JSON.parse(projected[1].content[0].text.split('\n').at(-1));
   let restored=before;
@@ -141,14 +141,14 @@ test('observation hook proposes near predecessors but exposes exact changes and 
   assert.equal((await tools.obs_read.execute('id',{id:2},undefined,undefined,ctx)).content[0].text,after);
   const failed=await add(`TypeError: request_id=abc failed at /tmp/build-a/src.js:42:3. ${filler.repeat(3)}`,'/tmp/a',true);
   const again=await add(`TypeError: request_id=xyz failed at /tmp/build-b/src.js:91:8. ${filler.repeat(3)}`,'/tmp/b',true);
-  const failures=handlers.context({messages:[failed,again]},ctx).messages;
+  const failures=(await handlers.context({messages:[failed,again]},ctx)).messages;
   assert.equal(failures[1].content[0].text,again.content[0].text);assert(failures[1].content[1].text.includes('Related historical failure'));
   branch.splice(0,branch.length,branch.at(-1));handlers.session_tree({},ctx);
   await assert.rejects(tools.obs_read.execute('id',{id:3},undefined,undefined,ctx),/unavailable/);
-  assert.equal(handlers.context({messages:[again]},ctx),undefined,'a hidden branch failure cannot become a match');
+  assert.equal(await handlers.context({messages:[again]},ctx),undefined,'a hidden branch failure cannot become a match');
 });
 
-test('skill instructions remain full reads rather than dedup pointers after compaction', () => {
+test('skill instructions remain full reads rather than dedup pointers after compaction', async () => {
   const handlers={},branch=[];
   observations({on:(name,fn)=>handlers[name]=fn,registerTool(){},registerCommand(){},getActiveTools:()=>['read','obs_read']},{reset(){},select:async()=>undefined});
   const ctx={sessionManager:{getEntries:()=>branch,getBranch:()=>branch}};
@@ -163,5 +163,5 @@ test('skill instructions remain full reads rather than dedup pointers after comp
   const legacy={role:'toolResult',toolName:'read',toolCallId:'skill-read',content:event.content,details:{piObservation:{version:1,id:1,signature:'legacy',operation:'legacy'}}};
   const call={role:'assistant',content:[{type:'toolCall',id:'skill-read',name:'read',arguments:event.input}]};
   const messages=[call,legacy];
-  assert.equal(handlers.context({messages},ctx),undefined,'legacy full skill bodies are not distilled');
+  assert.equal(await handlers.context({messages},ctx),undefined,'legacy full skill bodies are not distilled');
 });

@@ -108,7 +108,9 @@
     "effort-policy.mjs",
     "review-coordinator.ts",
     "session-export-json.ts",
-    "intervention-control.ts"
+    "intervention-control.ts",
+    "capability-health.ts",
+    "capability-audit.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

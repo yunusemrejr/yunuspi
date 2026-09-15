@@ -58,8 +58,8 @@ function session() {
   };
   register(
     pi,
-    { reset: () => {}, select: async () => undefined },
-    { reset: () => {}, offer: () => {}, take: () => local.value },
+    { reset: () => {}, endTurn: () => {}, select: async () => undefined },
+    { reset: () => {}, endTurn: () => {}, offer: () => {}, take: () => local.value, takeAsync: async () => local.value },
   );
   return {
     local,
@@ -89,17 +89,17 @@ function toolResult(id, raw) {
 
 const incompressible = "plain unstructured output line\n".repeat(40);
 
-test("a sealed projection keeps its first bytes when local state changes", () => {
+test("a sealed projection keeps its first bytes when local state changes", async () => {
   const s = session();
   s.local.value = '{"kind":"local-projection","v":1}';
-  const first = s.request([toolResult(1, incompressible)]);
+  const first = await s.request([toolResult(1, incompressible)]);
   assert.ok(first, "the first exposure must be projected");
   const text = first.messages[0].content[0].text;
   assert.match(text, /^\[observation #1;/);
   assert.ok(text.includes('{"kind":"local-projection","v":1}'));
 
   s.local.value = '{"kind":"local-projection","v":2}';
-  const again = s.request([toolResult(1, incompressible)]);
+  const again = await s.request([toolResult(1, incompressible)]);
   assert.ok(again, "the sealed projection is re-applied");
   assert.equal(
     again.messages[0].content[0].text,
@@ -108,22 +108,22 @@ test("a sealed projection keeps its first bytes when local state changes", () =>
   );
 });
 
-test("a message left raw is sealed as a decision, not upgraded later", () => {
+test("a message left raw is sealed as a decision, not upgraded later", async () => {
   const s = session();
-  assert.equal(s.request([toolResult(2, incompressible)]), undefined);
+  assert.equal(await s.request([toolResult(2, incompressible)]), undefined);
   s.local.value = '{"kind":"local-projection","appeared":"after the fact"}';
   assert.equal(
-    s.request([toolResult(2, incompressible)]),
+    await s.request([toolResult(2, incompressible)]),
     undefined,
     "a sealed raw rendering must not be rewritten once a cache entry exists",
   );
 });
 
-test("sealing is per observation: a new result is still projected", () => {
+test("sealing is per observation: a new result is still projected", async () => {
   const s = session();
-  assert.equal(s.request([toolResult(3, incompressible)]), undefined);
+  assert.equal(await s.request([toolResult(3, incompressible)]), undefined);
   s.local.value = '{"kind":"local-projection","from":"cache"}';
-  const second = s.request([
+  const second = await s.request([
     toolResult(3, incompressible),
     toolResult(4, incompressible),
   ]);

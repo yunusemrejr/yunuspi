@@ -64,8 +64,12 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  let failures=0;
  const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,projectedSavedChars:0};
  if(!runtime)void loadRuntime().then(v=>{runtime=v;});
+ // Turn boundary: validated cache and in-flight selections stay valid (keyed by
+ // source+task hash), so unlike reset this neither aborts nor clears.
+ const endTurn=()=>{};
  return {
   reset(){generation++;current?.abort();cache.clear();},
+  endTurn,
   inspect(){return {...stats,cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
   async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
    if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0)return;

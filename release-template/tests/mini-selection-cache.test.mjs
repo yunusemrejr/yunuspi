@@ -281,6 +281,7 @@ test("native observation consumer uses background SLM alongside Kompress without
   pi,
   {
    reset() {},
+   endTurn() {},
    select() {
     miniCalls++;
     throw Error("structured lines must not run Kompress");
@@ -318,7 +319,7 @@ test("native observation consumer uses background SLM alongside Kompress without
  const first = await observe("synthetic-first");
  await flush();
  assert.equal(
-  (handlers.context({ messages: [first] }, ctx)?.messages ?? [first])[0]
+  ((await handlers.context({ messages: [first] }, ctx))?.messages ?? [first])[0]
    .content[0].text,
   lineRaw,
   "native first exposure is immediate raw",
@@ -330,12 +331,12 @@ test("native observation consumer uses background SLM alongside Kompress without
  );
  await flush();
  const later = await observe("synthetic-later");
- const projected = handlers.context({ messages: [later] }, ctx).messages[0]
+ const projected = (await handlers.context({ messages: [later] }, ctx)).messages[0]
   .content[0].text;
  assert.ok(projected.length < lineRaw.length - 1000);
  assert.match(projected, /deployment remains pending/);
  assert.equal(
-  (handlers.context({ messages: [first] }, ctx)?.messages ?? [first])[0]
+  ((await handlers.context({ messages: [first] }, ctx))?.messages ?? [first])[0]
    .content[0].text,
   lineRaw,
   "original provider prefix stays raw",

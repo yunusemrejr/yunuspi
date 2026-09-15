@@ -176,6 +176,9 @@ export function createRelevantGuidance(pi: any) {
     if (!enabled() || wasShown(hint.key)) return;
     if (hint.tool && (!tools().has(hint.tool) || used.has(hint.tool) || unavailable.has(hint.tool))) return;
     if (hint.skill && (skillReviewDisabled || read.has(hint.skill))) return;
+    // Review obligations never pass through here, so compliance is unaffected;
+    // reading the skill clears it through the receipt above.
+    if (hint.skill && suppressed(hint.skill)) return;
     for (const [key, value] of pending) if (value.expiresAt !== undefined && toolStep > value.expiresAt) pending.delete(key);
     const previous = pending.get(hint.key);
     if (previous && (previous.priority ?? 0) >= (hint.priority ?? 0)) {
@@ -246,6 +249,10 @@ export function createRelevantGuidance(pi: any) {
   // single earlier mention never demotes anything.
   const offeredBefore = (file: string) => Math.max(skillOffers.get(`skill:${file}`)?.n ?? 0, skillOffers.get(`skillctx:${file}`)?.n ?? 0);
   const fatigue = (file: string) => offeredBefore(file) >= 2 ? 40 : 0;
+  // Advisory skill hints suppress after three ignored re-offers (fourth
+  // delivery). Fatigue demotes at two, but demotion alone re-filled the slot
+  // forever — one workflow was recommended ten times in a single session.
+  const suppressed = (file: string) => offeredBefore(file) >= 4;
   // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
   const remember = (text: string) => {
     const current = skillTerms(text);
@@ -276,6 +283,10 @@ export function createRelevantGuidance(pi: any) {
     const coveredTerms = new Set<string>();
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
       if (skillCovered(ranked.skill.file)) continue;
+      // Suppressed workflows consume no offer slot and no covered terms: the
+      // scarce slot passes fully to a fresh candidate instead of demoting in
+      // place. Central add() suppression still guards every other producer.
+      if (suppressed(ranked.skill.file)) continue;
       const terms = ranked.matched.map(term => term.split('~').at(-1)!);
       // One naming token is decisive only while no other workflow's explicit
       // route already owns that token. "python" routes to the language
@@ -293,6 +304,8 @@ export function createRelevantGuidance(pi: any) {
       // Advisory context hints yield one bounded step to a fresh candidate once
       // the same workflow has already been offered and ignored; explicit task
       // and file routes keep their full priority and their review obligation.
+      // Calibration telemetry: score joins read receipts in ranking audits.
+      try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("skill.rank", {skill: ranked.skill.name, score: ranked.score, matched: ranked.matched.length}); } catch {}
       add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file,
         priority: Math.max(1, priority - fatigue(ranked.skill.file)),
         text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
@@ -626,7 +639,9 @@ export function createRelevantGuidance(pi: any) {
         if (file) {
           const offer = skillOffers.get(key) ?? { n: 0, at: -2 };
           if (requestNumber - offer.at < 2) continue;
-          skillOffers.set(key, { n: Math.min(3,offer.n + 1), at: requestNumber });
+          // The count must survive past the suppression threshold; snapshots
+          // stay bounded through the sliced offers list, not this number.
+          skillOffers.set(key, { n: Math.min(99,offer.n + 1), at: requestNumber });
         }
         shown.delete(key);
       }
@@ -692,7 +707,7 @@ export function createRelevantGuidance(pi: any) {
         extensions = new Set((Array.isArray(d.extensions) ? d.extensions : []).filter((x: any) => typeof x === "string" && /^[a-z0-9]{1,8}$/.test(x)).slice(0,12));
         skillOffers = new Map((Array.isArray(d.offers) ? d.offers : []).slice(-48).filter((pair: any) =>
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^(?:skill|skillctx):\S{1,200}$/.test(pair[0]) &&
-          Number.isSafeInteger(pair[1]?.n) && pair[1].n >= 0 && pair[1].n <= 3 && Number.isSafeInteger(pair[1]?.at) && pair[1].at >= -2));
+          Number.isSafeInteger(pair[1]?.n) && pair[1].n >= 0 && pair[1].n <= 99 && Number.isSafeInteger(pair[1]?.at) && pair[1].at >= -2));
         break;
       }
     },

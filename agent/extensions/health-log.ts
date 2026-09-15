@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createHealthLog,HEALTH_SINK} from './lib/health-log.ts';
+import {sharedCapabilityHealth} from './lib/capability-health.ts';
 export default function healthLog(pi:any) {
  registerSessionTelemetry(pi);
  let log:ReturnType<typeof createHealthLog>|undefined;
@@ -22,7 +23,9 @@ export default function healthLog(pi:any) {
  pi.on('tool_result',(e:any)=>{
   const began=calls.get(e.toolCallId);calls.delete(e.toolCallId);
   emit('tool.result',{tool:e.toolName,isError:!!e.isError,durationMs:began===undefined?undefined:Date.now()-began});
-  if(e.toolName==='read'&&typeof e.input?.path==='string'&&/SKILL\.md$/.test(e.input.path))emit('skill.read',{skill:createHash('sha256').update(e.input.path).digest('hex').slice(0,16),isError:!!e.isError,partial:!!e.input.limit||e.input.offset>1||!!e.details?.truncation?.truncated});
+  // Shadow capability health: observations accumulate for audits; nothing gates yet.
+  if(typeof e.toolName==='string'&&e.toolName)sharedCapabilityHealth().observe(`tool:${e.toolName}`,{ok:e.isError!==true});
+  if(e.toolName==='read'&&typeof e.input?.path==='string'&&/SKILL\.md$/.test(e.input.path)){const skill=createHash('sha256').update(e.input.path).digest('hex').slice(0,16),partial=!!e.input.limit||e.input.offset>1||!!e.details?.truncation?.truncated;emit('skill.read',{skill,isError:!!e.isError,partial});sharedCapabilityHealth().observe(`skill:${skill}`,{ok:e.isError!==true,useful:e.isError!==true&&!partial});}
   if(e.toolName==='subagent')emit('subagent.result',{isError:!!e.isError,count:e.details?.results?.length??0});
  });
  pi.on('message_end',(e:any)=>{if(e.message?.role==='assistant')emit('inference.end',{outcome:e.message.stopReason,inputTokens:e.message.usage?.input,outputTokens:e.message.usage?.output});});
