@@ -70,9 +70,8 @@ export default function projectIntelligence(pi: any) {
       captureWorkflowContext(identity, conversationContext(ctx), signal),
   });
   const anchorContext = createContextAnchor();
-  // Control-plane shadow session (per-subsystem for the shadow phase; a
-  // shared control with canonical cycles arrives with go-live). One cycle
-  // per input generation: continuations share their request's cycle.
+  // Control session (per-subsystem envelope per D-011). One cycle per
+  // input generation: continuations share their request's cycle.
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("context", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   let shadowGeneration = -1;
@@ -485,10 +484,17 @@ export default function projectIntelligence(pi: any) {
       // Keep the system prompt byte-identical for unchanged state; volatile
       // scope guidance rides the bounded tail injection instead. A changing
       // system prompt invalidates the provider cache prefix for every turn.
+      // Go-live (step 18): binding per-request automation budget. Refused
+      // guidance leaves the prompt unchanged; admitted injections release
+      // immediately — context retains nothing, so each render re-spends
+      // honestly for its own inference call. Fail-open on control error.
+      let admitted = true;
       try {
         shadowCycle();
-        shadowPlane.shadow(intelSystemGuidanceIntent(guidance));
-      } catch { /* shadow observation never affects injection */ }
+        admitted = shadowPlane.enforce(intelSystemGuidanceIntent(guidance)).outcome === "admitted";
+        if (admitted) shadowPlane.release("intel-system-guidance", "context");
+      } catch { admitted = true; }
+      if (!admitted) return { systemPrompt: event.systemPrompt };
       return { systemPrompt: event.systemPrompt + "\n\n" + guidance };
     } catch (error) {
       reportError(error, ctx);
@@ -503,10 +509,16 @@ export default function projectIntelligence(pi: any) {
           ? { messages }
           : undefined;
       // Ephemeral wire context; neither graph dumps nor growing session messages.
+      // Go-live (step 18): binding budget; a refused capsule returns the
+      // messages unchanged (same shape as the disabled path). Admitted
+      // injections release immediately (see the guidance seam above).
+      let admitted = true;
       try {
         shadowCycle();
-        shadowPlane.shadow(intelContextCapsuleIntent(capsule, scopeBrief));
-      } catch { /* shadow observation never affects injection */ }
+        admitted = shadowPlane.enforce(intelContextCapsuleIntent(capsule, scopeBrief)).outcome === "admitted";
+        if (admitted) shadowPlane.release("intel-context-capsule", "context");
+      } catch { admitted = true; }
+      if (!admitted) return messages.length !== event.messages.length ? { messages } : undefined;
       return {
         messages: anchorContext(
           messages,
