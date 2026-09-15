@@ -107,7 +107,8 @@
     "git-authority.ts",
     "effort-policy.mjs",
     "review-coordinator.ts",
-    "session-export-json.ts"
+    "session-export-json.ts",
+    "intervention-control.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

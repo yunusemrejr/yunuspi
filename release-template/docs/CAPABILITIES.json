@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 528,
+      "sourceFiles": 529,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3561,6 +3561,10 @@
       },
       {
         "path": "agent/extensions/lib/intent-context.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/intervention-control.ts",
         "exists": true
       },
       {
