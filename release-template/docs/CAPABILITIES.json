@@ -2750,7 +2750,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 555,
+        "line": 575,
         "kind": "literal"
       },
       {
@@ -3072,7 +3072,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 555,
+        "line": 575,
         "kind": "literal"
       },
       {
@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 531,
+      "sourceFiles": 532,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3573,6 +3573,10 @@
       },
       {
         "path": "agent/extensions/lib/intervention-control.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/intervention-session.ts",
         "exists": true
       },
       {

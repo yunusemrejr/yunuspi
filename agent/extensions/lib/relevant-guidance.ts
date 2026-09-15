@@ -16,6 +16,7 @@ import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingO
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
 import { failureCategory } from "./session-diagnostics.ts";
+import { createInterventionSession } from "./intervention-session.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -69,6 +70,10 @@ export function createRelevantGuidance(pi: any) {
   // request. This local cooldown keeps different route keys from repeating
   // the same reminder after every tool result; userInput starts a new window.
   const advisoryDiscoveryDelivered = new Set<'capability' | 'workflow'>();
+  // Control-plane shadow session: every queued hint is submitted evaluate-only
+  // so the journal records what arbitration WOULD decide. Observation only —
+  // delivery decisions above and below are untouched.
+  const shadowPlane = createInterventionSession();
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
   const bulkFiles = new Map<string, string[]>();
@@ -201,6 +206,21 @@ export function createRelevantGuidance(pi: any) {
       pending.delete(weakest.key);
     }
     pending.set(hint.key, hint);
+    try {
+      shadowPlane.shadow({
+        source: "relevant-guidance.ts",
+        category: "guidance",
+        priority: Math.max(0, Math.min(100, hint.priority ?? 0)),
+        reason: `guidance hint queued: ${hint.key}`.slice(0, 500),
+        stabilityKey: String(hint.key || "hint").slice(0, 160),
+        contentHash: createHash("sha256").update(String(hint.text ?? hint.key)).digest("hex").slice(0, 64),
+        ttlMs: 60_000,
+        estimatedChars: String(hint.text ?? "").length,
+        estimatedCost: 0,
+        blocking: false,
+        evidence: [],
+      });
+    } catch { /* shadow observation never affects delivery */ }
   };
   const discovery = createSkillDiscoveryController({
     catalog: () => skills,
@@ -629,6 +649,7 @@ export function createRelevantGuidance(pi: any) {
       deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
+      try { shadowPlane.beginRequest(`request-${requestNumber}`); } catch { /* shadow only */ }
       advisoryDiscoveryDelivered.clear();
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
       // Space renewed offers across requests; never treat ignored suggestions
@@ -646,6 +667,12 @@ export function createRelevantGuidance(pi: any) {
         shown.delete(key);
       }
       if (hadTopics || hadDeferrals) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
+    },
+    shadowAudit() {
+      try { return shadowPlane.audit(); } catch { return null; }
+    },
+    shadowJournal() {
+      try { return shadowPlane.journal(); } catch { return []; }
     },
     restore(ctx: any) {
       discovery.cancel(true);

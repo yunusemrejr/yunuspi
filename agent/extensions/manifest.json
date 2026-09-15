@@ -109,6 +109,7 @@
     "review-coordinator.ts",
     "session-export-json.ts",
     "intervention-control.ts",
+    "intervention-session.ts",
     "capability-health.ts",
     "capability-audit.ts"
   ],
