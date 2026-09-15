@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 535,
+      "sourceFiles": 536,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3585,6 +3585,10 @@
       },
       {
         "path": "agent/extensions/lib/intervention-session.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/intervention-shared.ts",
         "exists": true
       },
       {

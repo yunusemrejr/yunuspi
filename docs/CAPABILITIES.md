@@ -1115,6 +1115,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/intervention-intents.ts`](../agent/extensions/lib/intervention-intents.ts)
 - [`agent/extensions/lib/intervention-registry.ts`](../agent/extensions/lib/intervention-registry.ts)
 - [`agent/extensions/lib/intervention-session.ts`](../agent/extensions/lib/intervention-session.ts)
+- [`agent/extensions/lib/intervention-shared.ts`](../agent/extensions/lib/intervention-shared.ts)
 - [`agent/extensions/lib/local-models.ts`](../agent/extensions/lib/local-models.ts)
 - [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
 - [`agent/extensions/lib/metrics-panel.ts`](../agent/extensions/lib/metrics-panel.ts)

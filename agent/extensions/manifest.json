@@ -112,6 +112,7 @@
     "intervention-session.ts",
     "intervention-intents.ts",
     "intervention-registry.ts",
+    "intervention-shared.ts",
     "capability-health.ts",
     "capability-audit.ts"
   ],

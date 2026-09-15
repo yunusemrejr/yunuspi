@@ -24,6 +24,8 @@ export interface ShadowRecord {
   category: InterventionDecision["category"];
   source: string;
   reason: string;
+  /** How the decision was produced: observed (shadow) or binding (go-live). */
+  mode: "shadow" | "enforced";
 }
 
 export interface ShadowAudit {
@@ -32,6 +34,8 @@ export interface ShadowAudit {
   admitted: number;
   suppressed: Record<string, number>;
   sources: Record<string, number>;
+  /** Records produced by binding enforcement (vs shadow observation). */
+  enforced: number;
 }
 
 export interface InterventionSessionOptions {
@@ -50,6 +54,9 @@ export interface InterventionSession {
    *  would-be decision. Auto-begins an implicit cycle when none is open so
    *  pre-input activity is observed rather than dropped. */
   shadow(intent: Omit<InterventionIntent, "requestId"> & { requestId?: string }): InterventionDecision;
+  /** Binding submit: commit against the live cycle (spends, claims, dedups)
+   *  and journal the enforced decision. Callers act on the outcome. */
+  enforce(intent: Omit<InterventionIntent, "requestId"> & { requestId?: string }): InterventionDecision;
   /** Chronological journal of shadow records, oldest dropped past the limit. */
   journal(): ShadowRecord[];
   /** Current-cycle rollup: would-admit vs would-suppress by outcome/source. */
@@ -67,27 +74,41 @@ export function createInterventionSession(options: InterventionSessionOptions = 
   const limit = options.journalLimit ?? DEFAULT_JOURNAL_LIMIT;
   const records: ShadowRecord[] = [];
 
+  const submit = (
+    intent: Omit<InterventionIntent, "requestId"> & { requestId?: string },
+    mode: "shadow" | "enforced",
+  ): InterventionDecision => {
+    const requestId = intent.requestId ?? control.currentCycle() ?? control.beginCycle("implicit");
+    const decision = mode === "shadow"
+      ? control.evaluate({ ...intent, requestId })
+      : control.commit({ ...intent, requestId });
+    records.push({
+      at: decision.at,
+      // Submission cycle, not the echoed id: rejected-invalid decisions
+      // carry requestId "none", but the attempt still belongs to this cycle.
+      cycle: requestId,
+      outcome: decision.outcome,
+      intentId: decision.intentId,
+      category: decision.category,
+      source: (intent.source ?? "unknown").slice(0, 160),
+      reason: decision.reason,
+      mode,
+    });
+    while (records.length > limit) records.shift();
+    return decision;
+  };
+
   return {
     beginRequest(label = ""): string {
       return control.beginCycle(label);
     },
 
     shadow(intent): InterventionDecision {
-      const requestId = intent.requestId ?? control.currentCycle() ?? control.beginCycle("implicit");
-      const decision = control.evaluate({ ...intent, requestId });
-      records.push({
-        at: decision.at,
-        // Submission cycle, not the echoed id: rejected-invalid decisions
-        // carry requestId "none", but the attempt still belongs to this cycle.
-        cycle: requestId,
-        outcome: decision.outcome,
-        intentId: decision.intentId,
-        category: decision.category,
-        source: (intent.source ?? "unknown").slice(0, 160),
-        reason: decision.reason,
-      });
-      while (records.length > limit) records.shift();
-      return decision;
+      return submit(intent, "shadow");
+    },
+
+    enforce(intent): InterventionDecision {
+      return submit(intent, "enforced");
     },
 
     journal(): ShadowRecord[] {
@@ -100,14 +121,16 @@ export function createInterventionSession(options: InterventionSessionOptions = 
       const sources: Record<string, number> = {};
       let evaluated = 0;
       let admitted = 0;
+      let enforced = 0;
       for (const record of records) {
         if (record.cycle !== cycle) continue;
         evaluated++;
         if (record.outcome === "admitted") admitted++;
         else suppressed[record.outcome] = (suppressed[record.outcome] ?? 0) + 1;
         sources[record.source] = (sources[record.source] ?? 0) + 1;
+        if (record.mode === "enforced") enforced++;
       }
-      return { cycle, evaluated, admitted, suppressed, sources };
+      return { cycle, evaluated, admitted, suppressed, sources, enforced };
     },
 
     control(): InterventionControl {
