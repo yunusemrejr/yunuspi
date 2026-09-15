@@ -9,7 +9,8 @@
 // Pure and additive: no pi imports, no I/O, no behavior change on its own.
 // Wiring (session binding, shadow mode, live arbitration) lands with the
 // rollout phases; this file owns only the schema, the request-cycle
-// identity, budget envelopes, dedup semantics, and the decision audit log.
+// identity, budget envelopes, dedup semantics, named-slot arbitration,
+// no-op semantics, the composition reader, and the decision audit log.
 //
 // Budgets are PER REQUEST CYCLE: each user input begins a cycle, and all
 // continuations, tool results, helpers, reviews, checkpoints and guidance
@@ -56,7 +57,9 @@ export interface InterventionIntent {
   estimatedCost: number;
   /** Sync-critical (blocking) vs deferrable. Recorded; same budget rules. */
   blocking: boolean;
-  /** Target stable context slot (slots land with composition ownership). */
+  /** Target stable composition slot. One admitted owner per slot per cycle;
+   *  further commits to a claimed slot are suppressed (first wins, no
+   *  preemption). Unset (or empty) means unslotted: no arbitration. */
   slot?: string;
   evidence: InterventionEvidenceRef[];
   /** Epoch ms; defaults to the control clock at evaluate/commit time. */
@@ -90,9 +93,46 @@ export type DecisionOutcome =
   | "admitted"
   | "suppressed-duplicate"
   | "suppressed-budget"
+  | "suppressed-slot"
   | "suppressed-stale"
   | "suppressed-expired"
   | "rejected-invalid";
+
+/** Zero-effect declaration: context-family intent injecting zero chars.
+ *  Assistance always launches a child and review always escalates, so those
+ *  categories are never no-ops regardless of declared cost. */
+export function isNoOpIntent(intent: Pick<InterventionIntent, "category" | "estimatedChars">): boolean {
+  return (intent.category === "context" || intent.category === "guidance" || intent.category === "checkpoint") &&
+    intent.estimatedChars === 0;
+}
+
+/** Only admitted decisions authorize downstream effect. */
+export function isActionable(decision: Pick<InterventionDecision, "outcome">): boolean {
+  return decision.outcome === "admitted";
+}
+
+/** Canonical no-op receipt for any non-admitted decision, so downstream
+ *  composition handles every decision uniformly: admitted injects, anything
+ *  else carries this receipt into the audit trail. Returns null for admitted
+ *  decisions (nothing to excuse). */
+export function noopReceipt(decision: InterventionDecision): {
+  intentId: string; outcome: DecisionOutcome; reason: string; at: number;
+} | null {
+  if (decision.outcome === "admitted") return null;
+  return { intentId: decision.intentId, outcome: decision.outcome, reason: decision.reason, at: decision.at };
+}
+
+/** One claimed composition slot: the winning intent's render identity. */
+export interface SlotClaim {
+  slot: string;
+  intentId: string;
+  category: InterventionCategory;
+  priority: number;
+  source: string;
+  /** Declared chars (0 for no-op owners: seat held, nothing renders). */
+  chars: number;
+  at: number;
+}
 
 export interface InterventionDecision {
   outcome: DecisionOutcome;
@@ -122,6 +162,7 @@ const CATEGORIES: InterventionCategory[] = ["context", "guidance", "assistance",
 const MAX_LOG = 512;
 const MAX_DEDUP = 1024;
 const MAX_CYCLES = 32;
+const MAX_SLOTS = 256;
 const boundedString = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length >= 1 && value.length <= max;
 const finiteNumber = (value: unknown): value is number =>
@@ -171,7 +212,8 @@ export class InterventionControl {
   private spent = { contextChars: 0, helperChildren: 0, helperCost: 0, reviewEscalations: 0, hookLatencyMs: 0 };
   private dedup = new Map<string, DedupEntry>();
   private committed = new Map<string, InterventionDecision>();
-  private log: { at: number; outcome: DecisionOutcome; intentId: string; category: InterventionCategory; source: string; requestId: string; shadow: boolean }[] = [];
+  private claims = new Map<string, SlotClaim>();
+  private log: { at: number; outcome: DecisionOutcome; intentId: string; category: InterventionCategory; source: string; requestId: string; shadow: boolean; slot?: string }[] = [];
   private admittedCount = 0;
   private suppressedCount = 0;
 
@@ -193,6 +235,7 @@ export class InterventionControl {
     while (this.cycles.size > MAX_CYCLES) this.cycles.delete(this.cycles.keys().next().value!);
     this.current = id;
     this.spent = { contextChars: 0, helperChildren: 0, helperCost: 0, reviewEscalations: 0, hookLatencyMs: 0 };
+    this.claims.clear();
     return id;
   }
 
@@ -245,11 +288,21 @@ export class InterventionControl {
     };
   }
 
+  /** Claimed composition slots for a cycle: admitted slotted owners in
+   *  deterministic (slot-name) order. Live-cycle view only: ended or unknown
+   *  cycles compose to []. */
+  composition(cycleId?: string): SlotClaim[] {
+    const id = cycleId ?? this.current;
+    if (!id || id !== this.current) return [];
+    return [...this.claims.values()].sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+  }
+
   /** Compact state for diagnostics surfaces (never model-visible). */
   snapshot(): {
     cycle: string | null; cycles: number; budgets: InterventionBudgets; spent: InterventionBudgets;
     remaining: InterventionBudgets; latencyExceeded: boolean; admitted: number; suppressed: number;
-    recent: { at: number; outcome: DecisionOutcome; intentId: string; category: InterventionCategory; source: string; requestId: string; shadow: boolean }[];
+    slots: string[];
+    recent: { at: number; outcome: DecisionOutcome; intentId: string; category: InterventionCategory; source: string; requestId: string; shadow: boolean; slot?: string }[];
   } {
     return {
       cycle: this.current,
@@ -260,6 +313,7 @@ export class InterventionControl {
       latencyExceeded: this.latencyExceeded(),
       admitted: this.admittedCount,
       suppressed: this.suppressedCount,
+      slots: this.composition().map((claim) => claim.slot),
       recent: this.log.slice(-20),
     };
   }
@@ -311,15 +365,29 @@ export class InterventionControl {
         category: intent.category, priority: intent.priority, reason: `budget:${over}`, at: now,
       }, intent.source, shadow);
     }
+    const slot = intent.slot || undefined;
+    if (slot && this.claims.has(slot)) {
+      return this.record({
+        outcome: "suppressed-slot", intentId: intent.id, requestId: intent.requestId,
+        category: intent.category, priority: intent.priority, reason: `slot:taken:${slot}`, at: now,
+      }, intent.source, shadow, slot);
+    }
     if (!shadow) {
       this.spend(intent);
       this.dedup.set(key, { expiresAt: now + Math.max(intent.ttlMs, 1000), intentId: intent.id! });
       while (this.dedup.size > MAX_DEDUP) this.dedup.delete(this.dedup.keys().next().value!);
+      if (slot) {
+        this.claims.set(slot, {
+          slot, intentId: intent.id!, category: intent.category, priority: intent.priority,
+          source: intent.source, chars: intent.estimatedChars, at: now,
+        });
+        while (this.claims.size > MAX_SLOTS) this.claims.delete(this.claims.keys().next().value!);
+      }
     }
     return this.record({
       outcome: "admitted", intentId: intent.id!, requestId: intent.requestId,
       category: intent.category, priority: intent.priority, reason: "admitted", at: now,
-    }, intent.source, shadow);
+    }, intent.source, shadow, slot);
   }
 
   private overBudget(intent: InterventionIntent): string | null {
@@ -338,7 +406,10 @@ export class InterventionControl {
 
   private spend(intent: InterventionIntent): void {
     if (intent.category === "context" || intent.category === "guidance" || intent.category === "checkpoint") {
-      this.spent.contextChars += intent.estimatedChars;
+      // No-op intents declare zero effect: admitted and tracked (dedup, slot)
+      // but spend nothing. Assistance/review always spend (launch/escalation
+      // are effects even at zero declared cost).
+      if (!isNoOpIntent(intent)) this.spent.contextChars += intent.estimatedChars;
     } else if (intent.category === "assistance") {
       this.spent.helperChildren += 1;
       this.spent.helperCost += intent.estimatedCost;
@@ -354,9 +425,10 @@ export class InterventionControl {
     }
   }
 
-  private record(decision: InterventionDecision, source: string, shadow: boolean): InterventionDecision {
-    // Shadow evaluations are observation only: they leave counters, spend and
-    // dedup untouched and appear solely in the audit log with shadow:true.
+  private record(decision: InterventionDecision, source: string, shadow: boolean, slot?: string): InterventionDecision {
+    // Shadow evaluations are observation only: they leave counters, spend,
+    // dedup and slot claims untouched and appear solely in the audit log
+    // with shadow:true.
     if (!shadow) {
       if (decision.outcome === "admitted") this.admittedCount++;
       else this.suppressedCount++;
@@ -364,6 +436,7 @@ export class InterventionControl {
     this.log.push({
       at: decision.at, outcome: decision.outcome, intentId: decision.intentId,
       category: decision.category, source, requestId: decision.requestId, shadow,
+      ...(slot ? { slot } : {}),
     });
     while (this.log.length > MAX_LOG) this.log.shift();
     return decision;
