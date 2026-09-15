@@ -1,5 +1,6 @@
 import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
+import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 /**
  * Core execution logic for running subagents
@@ -2084,6 +2085,9 @@ async function runSyncCompletionInner(
 			const attemptTask = nextAttemptTask;
 			const verifyModel = Boolean(candidate) && !(options.modelOverrideFromParent && modelIndex === 0);
 			const outputSnapshot = captureSingleOutputSnapshot(options.outputPath);
+			try {
+				shadowAssistanceLaunch({ agent: agent.name, task: attemptTask, model: candidate, runId: options.runId, stepIndex: options.index, mode: "foreground" });
+			} catch { /* shadow observation never affects launch */ }
 			const result = await runSingleAttempt(runtimeCwd, agent, attemptTask, candidate, attemptOptions, {
 				sessionEnabled,
 				systemPrompt,

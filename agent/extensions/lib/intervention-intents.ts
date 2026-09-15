@@ -100,6 +100,35 @@ export function checkpointHistoryIntent(input: { missing?: unknown; content?: un
   };
 }
 
+/** Subagent child launch (foreground + background runners). Every launch is
+ *  a distinct effect, so the stability key is per-launch (run + step), never
+ *  content-based: two identical fans must not dedup each other at go-live. */
+export function assistanceLaunchIntent(input: {
+  agent?: unknown; task?: unknown; model?: unknown; runId?: unknown; stepIndex?: unknown; mode?: unknown;
+}): ShadowIntentInput {
+  const agent = typeof input.agent === "string" && input.agent ? input.agent.slice(0, 80) : "child";
+  const task = typeof input.task === "string" ? input.task.slice(0, 500) : "";
+  const model = typeof input.model === "string" && input.model ? input.model.slice(0, 160) : "default";
+  const runId = typeof input.runId === "string" && input.runId ? input.runId.slice(0, 80) : "run";
+  const step = typeof input.stepIndex === "number" && Number.isFinite(input.stepIndex) ? Math.max(0, Math.floor(input.stepIndex)) : 0;
+  const mode = input.mode === "async" ? "async" : "foreground";
+  return {
+    source: "pi-subagents.ts",
+    category: "assistance",
+    priority: 50,
+    reason: `subagent launch: ${agent} on ${model} (${mode})`.slice(0, 500),
+    stabilityKey: `assist:${runId}:${step}`.slice(0, 160),
+    contentHash: contentHash(`${agent}\n${task}\n${model}`),
+    ttlMs: SHADOW_TTL_MS,
+    estimatedChars: 0,
+    // Launch cost is unknown before inference; the helper-count envelope
+    // is the binding one. Zero here is honest, not free.
+    estimatedCost: 0,
+    blocking: false,
+    evidence: [{ kind: "run", id: runId }],
+  };
+}
+
 /** Project-intelligence context-capsule injection (context event). */
 export function intelContextCapsuleIntent(capsule: unknown, scopeBrief: unknown): ShadowIntentInput {
   const capsuleText = typeof capsule === "string" ? capsule : "";

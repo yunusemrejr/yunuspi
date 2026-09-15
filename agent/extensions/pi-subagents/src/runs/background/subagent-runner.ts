@@ -1,5 +1,6 @@
 import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
+import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { spawn, spawnSync } from "node:child_process";
@@ -1879,6 +1880,9 @@ async function runSingleStepInner(
 			}));
 		}
 		capabilityAudit = attemptCapabilityAudit;
+		try {
+			shadowAssistanceLaunch({ agent: step.agent, task: step.launchBindingTask ?? task, model: candidate ?? step.model, runId: ctx.id, stepIndex: ctx.flatIndex, mode: "async" });
+		} catch { /* shadow observation never affects launch */ }
 		writerAttemptCount += 1;
 		const run = await runPiStreaming(
 			args,
