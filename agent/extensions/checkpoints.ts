@@ -46,6 +46,7 @@ import { createProjectTestLifecycle } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { createInterventionSession } from "./lib/intervention-session.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
+import { registerShadowSource } from "./lib/intervention-registry.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -191,6 +192,7 @@ function registerHistory(
 	// History injections are rare and lack a request counter here, so the
 	// session keeps one implicit cycle; per-record timestamps order issues.
 	const shadowPlane = createInterventionSession();
+	try { registerShadowSource("checkpoint", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
 	pi.registerTool({
 		name: "checkpoint_read",
 		label: "Read Original Instructions",

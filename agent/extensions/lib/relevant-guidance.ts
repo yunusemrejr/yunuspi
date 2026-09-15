@@ -18,6 +18,7 @@ import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinato
 import { failureCategory } from "./session-diagnostics.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
+import { registerShadowSource } from "./intervention-registry.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -75,6 +76,7 @@ export function createRelevantGuidance(pi: any) {
   // so the journal records what arbitration WOULD decide. Observation only —
   // delivery decisions above and below are untouched.
   const shadowPlane = createInterventionSession();
+  try { registerShadowSource("guidance", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const reviewTargets = new Map<string, { skill: Skill; reason: string; origin: 'task' | 'file' }>();
   const deferredSkills = new Map<string, string>();
   const bulkFiles = new Map<string, string[]>();

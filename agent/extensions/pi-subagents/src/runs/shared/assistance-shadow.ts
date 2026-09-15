@@ -7,11 +7,15 @@
 // a launch is journaled, never gated.
 import { createInterventionSession } from "../../../../lib/intervention-session.ts";
 import { assistanceLaunchIntent } from "../../../../lib/intervention-intents.ts";
+import { registerShadowSource } from "../../../../lib/intervention-registry.ts";
 
 let session: ReturnType<typeof createInterventionSession> | null = null;
 
 function getSession(): ReturnType<typeof createInterventionSession> {
-  if (!session) session = createInterventionSession();
+  if (!session) {
+    session = createInterventionSession();
+    try { registerShadowSource("assistance", () => session!.audit()); } catch { /* diagnostics only */ }
+  }
   return session;
 }
 

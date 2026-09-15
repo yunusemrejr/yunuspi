@@ -17,6 +17,7 @@ import {
 import { heartbeatPlan } from "./lib/project-intelligence/heartbeat.mjs";
 import { createInterventionSession } from "./lib/intervention-session.ts";
 import { intelContextCapsuleIntent, intelSystemGuidanceIntent } from "./lib/intervention-intents.ts";
+import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { collectScopeHistory } from "./lib/project-intelligence/scope-history.mjs";
 import {
   captureWorkflowContext,
@@ -73,6 +74,7 @@ export default function projectIntelligence(pi: any) {
   // shared control with canonical cycles arrives with go-live). One cycle
   // per input generation: continuations share their request's cycle.
   const shadowPlane = createInterventionSession();
+  try { registerShadowSource("context", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   let shadowGeneration = -1;
   const shadowCycle = () => {
     try {

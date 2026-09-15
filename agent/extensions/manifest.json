@@ -111,6 +111,7 @@
     "intervention-control.ts",
     "intervention-session.ts",
     "intervention-intents.ts",
+    "intervention-registry.ts",
     "capability-health.ts",
     "capability-audit.ts"
   ],

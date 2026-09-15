@@ -1,4 +1,5 @@
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
+import { shadowReport } from "./lib/intervention-registry.ts";
 import {
   collectContextTraffic,
   buildSessionReport,
@@ -534,7 +535,7 @@ export default function (pi: any) {
     ],
     label: "Session self",
     description:
-      "Current session diagnostics. view:context for full-window occupancy, the automatic compaction threshold and separate output/safety headroom; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners; view:messages to list this session's own user messages (bounded); view:children to list subagent usage per child and run (status, model, tokens, cache, cost, turns); view:skills to list suggested, read and partial skill usage plus capability call counts; view:report for the full bounded session report. Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
+      "Current session diagnostics. view:context for full-window occupancy, the automatic compaction threshold and separate output/safety headroom; view:failures for grouped tool/model/child/workflow evidence and recovery clues; view:efficiency for the largest returned text and exact repeated request/result pairs; view:runtime for live cwd, model, active tools and background-handle owners; view:messages to list this session's own user messages (bounded); view:children to list subagent usage per child and run (status, model, tokens, cache, cost, turns); view:skills to list suggested, read and partial skill usage plus capability call counts; view:report for the full bounded session report; view:shadow for the control-plane shadow rollup (per-subsystem would-admit/suppress audits, observation only). Use efficiency after repeated inspection or large output to choose focused native tools and evidence reuse. Runtime facts do not authorize new work. session_audit provides aggregate counts from past sessions.",
     parameters: Type.Object({
       view: Type.Optional(
         StringEnum([
@@ -547,6 +548,7 @@ export default function (pi: any) {
           "children",
           "skills",
           "report",
+          "shadow",
         ]),
       ),
     }),
@@ -578,9 +580,11 @@ export default function (pi: any) {
                     ? sessionSkills(ctx)
                     : p.view === "report"
                       ? sessionReport(pi, ctx)
-                      : p.view === "context"
-                        ? facts(ctx)
-                        : self(ctx);
+                      : p.view === "shadow"
+                        ? shadowReport()
+                        : p.view === "context"
+                          ? facts(ctx)
+                          : self(ctx);
       return {
         content: [{ type: "text", text: JSON.stringify(details) }],
         details,

@@ -11,6 +11,7 @@ import { registerSharedQualityReview } from './quality-review-owner.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
+import { registerShadowSource } from './intervention-registry.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
 
@@ -128,6 +129,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const capable = () => pi.getActiveTools?.().includes('quality_review');
   // Control-plane shadow session (per-subsystem for the shadow phase).
   const shadowPlane = createInterventionSession();
+  try { registerShadowSource("review", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
   const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
