@@ -23,6 +23,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildSessionJsonExport } from "./lib/session-export-json.ts";
+import { shadowReport } from "./lib/intervention-registry.ts";
 
 const USAGE =
   "Usage: /export-json [path] [--all] [--no-raw] [--min]\n" +
@@ -79,6 +80,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const scope = options.all ? "all" : "branch";
+      let controlPlaneShadow = null;
+      try {
+        controlPlaneShadow = shadowReport();
+      } catch { /* live rollup is best-effort diagnostics */ }
       const report = buildSessionJsonExport({
         header,
         sessionFile,
@@ -90,6 +95,7 @@ export default function (pi: ExtensionAPI) {
         model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : null,
         thinkingLevel: ctx.thinkingLevel ?? null,
         includeRaw: options.includeRaw,
+        controlPlaneShadow,
       });
       const sessionTag = typeof header?.id === "string" && header.id
         ? header.id.slice(0, 8)

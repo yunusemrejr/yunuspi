@@ -925,7 +925,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 252)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3280)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 48)
-- /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 46)
+- /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 47)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3322)
 - /graph — [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) (line 809)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../../agent/extensions/harness-backup.ts) (line 37)

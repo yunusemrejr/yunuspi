@@ -87,6 +87,8 @@ export interface SessionJsonExportInput {
   thinkingLevel?: string | null;
   exportedAt?: string;
   includeRaw?: boolean;
+  /** Live control-plane shadow rollup at export time (null when unavailable). */
+  controlPlaneShadow?: { at: number; sources: Record<string, unknown> } | null;
 }
 
 function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
@@ -435,6 +437,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     userTurns,
     diagnostics,
     metrics,
+    controlPlaneShadow: input.controlPlaneShadow ?? null,
     events,
   };
 }
