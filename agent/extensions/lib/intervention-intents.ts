@@ -59,6 +59,47 @@ export function intelSystemGuidanceIntent(guidance: unknown): ShadowIntentInput 
   };
 }
 
+/** Quality-review round launch (explicit or automatic). */
+export function reviewRoundIntent(input: {
+  revision?: unknown; round?: unknown; automatic?: unknown; files?: unknown; task?: unknown;
+}): ShadowIntentInput {
+  const revision = typeof input.revision === "number" && Number.isFinite(input.revision) ? Math.max(0, Math.floor(input.revision)) : 0;
+  const round = typeof input.round === "number" && Number.isFinite(input.round) ? Math.max(0, Math.floor(input.round)) : 0;
+  const task = typeof input.task === "string" ? input.task.slice(0, 500) : "";
+  return {
+    source: "quality-review.ts",
+    category: "review",
+    priority: input.automatic === true ? 40 : 60,
+    reason: `quality-review round ${round} on revision ${revision}${input.automatic === true ? " (automatic)" : ""}`,
+    stabilityKey: `review:rev${revision}:round${round}`,
+    contentHash: contentHash(`${revision}:${round}:${task}`),
+    ttlMs: SHADOW_TTL_MS,
+    estimatedChars: 0,
+    estimatedCost: 0,
+    blocking: false,
+    evidence: [],
+  };
+}
+
+/** Checkpoint-history context injection (post-compaction navigation). */
+export function checkpointHistoryIntent(input: { missing?: unknown; content?: unknown }): ShadowIntentInput {
+  const missing = typeof input.missing === "number" && Number.isFinite(input.missing) ? Math.max(0, Math.floor(input.missing)) : 0;
+  const content = typeof input.content === "string" ? input.content : "";
+  return {
+    source: "checkpoints.ts",
+    category: "checkpoint",
+    priority: 50,
+    reason: `checkpoint history navigation for ${missing} missing message(s)`,
+    stabilityKey: "checkpoint-history",
+    contentHash: contentHash(content || String(missing)),
+    ttlMs: SHADOW_TTL_MS,
+    estimatedChars: content.length,
+    estimatedCost: 0,
+    blocking: false,
+    evidence: [],
+  };
+}
+
 /** Project-intelligence context-capsule injection (context event). */
 export function intelContextCapsuleIntent(capsule: unknown, scopeBrief: unknown): ShadowIntentInput {
   const capsuleText = typeof capsule === "string" ? capsule : "";

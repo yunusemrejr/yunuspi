@@ -2496,7 +2496,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 188,
+        "line": 194,
         "kind": "literal"
       },
       {
@@ -2702,7 +2702,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 371,
+        "line": 377,
         "kind": "literal"
       },
       {
@@ -2928,7 +2928,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 188,
+        "line": 194,
         "kind": "literal"
       },
       {
@@ -3024,7 +3024,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 371,
+        "line": 377,
         "kind": "literal"
       },
       {

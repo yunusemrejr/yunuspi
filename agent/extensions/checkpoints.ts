@@ -44,6 +44,8 @@ import {
 } from "./lib/checkpoint-files.ts";
 import { createProjectTestLifecycle } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
+import { createInterventionSession } from "./lib/intervention-session.ts";
+import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -185,6 +187,10 @@ function registerHistory(
 	pi: ExtensionAPI,
 	takeNotice: (ctx: ExtensionContext) => string | undefined,
 ): void {
+	// Control-plane shadow session (per-subsystem for the shadow phase).
+	// History injections are rare and lack a request counter here, so the
+	// session keeps one implicit cycle; per-record timestamps order issues.
+	const shadowPlane = createInterventionSession();
 	pi.registerTool({
 		name: "checkpoint_read",
 		label: "Read Original Instructions",
@@ -400,6 +406,9 @@ function registerHistory(
 				.join("\n") +
 			(fileState ? `\n${fileState}` : "");
 		// Append changing evidence at the tail, not inside the stable cached history prefix.
+		try {
+			shadowPlane.shadow(checkpointHistoryIntent({ missing: missing.length, content }));
+		} catch { /* shadow observation never affects injection */ }
 		const messages = clean;
 		messages.push({
 			role: "custom",

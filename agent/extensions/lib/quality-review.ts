@@ -9,6 +9,8 @@ import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets
 import { extractJsonEnvelope } from '../pi-subagents/src/shared/reviewer-envelope.ts';
 import { registerSharedQualityReview } from './quality-review-owner.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
+import { createInterventionSession } from './intervention-session.ts';
+import { reviewRoundIntent } from './intervention-intents.ts';
 export { REVIEW_LIMITS };
 export { settleSharedQualityReview } from './quality-review-owner.ts';
 
@@ -124,6 +126,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let hashes: Record<string, string> = {};
   const enabled = () => !options.shadow && process.env.PI_SUBAGENT_CHILD !== '1' && !['off','0'].includes(process.env.PI_QUALITY_REVIEWS ?? 'on');
   const capable = () => pi.getActiveTools?.().includes('quality_review');
+  // Control-plane shadow session (per-subsystem for the shadow phase).
+  const shadowPlane = createInterventionSession();
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
   const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
@@ -169,6 +173,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     const own = new AbortController(); controller = own;
     const combined = AbortSignal.any([own.signal, AbortSignal.timeout(REVIEW_LIMITS.deadlineMs), ...(signal ? [signal] : []), ...(ctx.signal ? [ctx.signal] : [])]);
     rounds++; save();
+    try { shadowPlane.shadow(reviewRoundIntent({ revision: rev, round: rounds, automatic, files: changed.length, task })); } catch { /* shadow observation never affects review */ }
     const operation = (async () => {
       const context = options.context ?? (globalThis as any)[QUALITY_PROJECT_CONTEXT];
       try {
@@ -295,6 +300,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     },
     input(event: any) {
       if (event.source === 'extension') return;
+      try { shadowPlane.beginRequest('review-input'); } catch { /* shadow only */ }
       cancel(); paused = false; pauseReason = ''; rounds = 0; followups = 0; delivered = ''; noted = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));
       if (disposition && !(disposition === 'blocked' && resume)) { changed = []; scopeOverflow = false; patterns.clear(); }
