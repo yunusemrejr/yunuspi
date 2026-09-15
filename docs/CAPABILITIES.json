@@ -2143,7 +2143,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 784
+        "line": 807
       },
       {
         "name": "harness-backup",
@@ -2696,7 +2696,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 660,
+        "line": 683,
         "kind": "literal"
       },
       {
@@ -2750,7 +2750,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 575,
+        "line": 564,
         "kind": "literal"
       },
       {
@@ -3018,7 +3018,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 660,
+        "line": 683,
         "kind": "literal"
       },
       {
@@ -3072,7 +3072,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 575,
+        "line": 564,
         "kind": "literal"
       },
       {
@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 532,
+      "sourceFiles": 533,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3573,6 +3573,10 @@
       },
       {
         "path": "agent/extensions/lib/intervention-control.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/intervention-intents.ts",
         "exists": true
       },
       {

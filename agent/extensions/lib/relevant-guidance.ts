@@ -17,6 +17,7 @@ import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMeta
 import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
 import { failureCategory } from "./session-diagnostics.ts";
 import { createInterventionSession } from "./intervention-session.ts";
+import { guidanceHintIntent } from "./intervention-intents.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -207,19 +208,7 @@ export function createRelevantGuidance(pi: any) {
     }
     pending.set(hint.key, hint);
     try {
-      shadowPlane.shadow({
-        source: "relevant-guidance.ts",
-        category: "guidance",
-        priority: Math.max(0, Math.min(100, hint.priority ?? 0)),
-        reason: `guidance hint queued: ${hint.key}`.slice(0, 500),
-        stabilityKey: String(hint.key || "hint").slice(0, 160),
-        contentHash: createHash("sha256").update(String(hint.text ?? hint.key)).digest("hex").slice(0, 64),
-        ttlMs: 60_000,
-        estimatedChars: String(hint.text ?? "").length,
-        estimatedCost: 0,
-        blocking: false,
-        evidence: [],
-      });
+      shadowPlane.shadow(guidanceHintIntent(hint));
     } catch { /* shadow observation never affects delivery */ }
   };
   const discovery = createSkillDiscoveryController({

@@ -15,6 +15,8 @@ import {
   SCOPE_GUIDANCE,
 } from "./lib/scope-deliberation.ts";
 import { heartbeatPlan } from "./lib/project-intelligence/heartbeat.mjs";
+import { createInterventionSession } from "./lib/intervention-session.ts";
+import { intelContextCapsuleIntent, intelSystemGuidanceIntent } from "./lib/intervention-intents.ts";
 import { collectScopeHistory } from "./lib/project-intelligence/scope-history.mjs";
 import {
   captureWorkflowContext,
@@ -67,6 +69,19 @@ export default function projectIntelligence(pi: any) {
       captureWorkflowContext(identity, conversationContext(ctx), signal),
   });
   const anchorContext = createContextAnchor();
+  // Control-plane shadow session (per-subsystem for the shadow phase; a
+  // shared control with canonical cycles arrives with go-live). One cycle
+  // per input generation: continuations share their request's cycle.
+  const shadowPlane = createInterventionSession();
+  let shadowGeneration = -1;
+  const shadowCycle = () => {
+    try {
+      if (shadowGeneration !== inputGeneration) {
+        shadowGeneration = inputGeneration;
+        shadowPlane.beginRequest(`input-${inputGeneration}`);
+      }
+    } catch { /* shadow only */ }
+  };
   let inputGeneration = 0;
   pi.on("input", (event: any) => {
     if (event.source !== "extension") inputGeneration++;
@@ -468,6 +483,10 @@ export default function projectIntelligence(pi: any) {
       // Keep the system prompt byte-identical for unchanged state; volatile
       // scope guidance rides the bounded tail injection instead. A changing
       // system prompt invalidates the provider cache prefix for every turn.
+      try {
+        shadowCycle();
+        shadowPlane.shadow(intelSystemGuidanceIntent(guidance));
+      } catch { /* shadow observation never affects injection */ }
       return { systemPrompt: event.systemPrompt + "\n\n" + guidance };
     } catch (error) {
       reportError(error, ctx);
@@ -482,6 +501,10 @@ export default function projectIntelligence(pi: any) {
           ? { messages }
           : undefined;
       // Ephemeral wire context; neither graph dumps nor growing session messages.
+      try {
+        shadowCycle();
+        shadowPlane.shadow(intelContextCapsuleIntent(capsule, scopeBrief));
+      } catch { /* shadow observation never affects injection */ }
       return {
         messages: anchorContext(
           messages,

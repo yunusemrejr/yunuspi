@@ -110,6 +110,7 @@
     "session-export-json.ts",
     "intervention-control.ts",
     "intervention-session.ts",
+    "intervention-intents.ts",
     "capability-health.ts",
     "capability-audit.ts"
   ],
