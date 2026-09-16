@@ -3,10 +3,11 @@
  * Tools already render as native single lines in the transcript; this module
  * covers what the transcript otherwise hides: skill routing/reads, local
  * ML-ish helpers (intent, mini/smol selection), the preferred/free model
- * mixer (picks + skip reasons), local-provider refreshes and reminder
- * compliance. Every tapped health event lands in the bounded ring and the
- * counters; only notable kinds become transcript lines, deduplicated and
- * budgeted so indicators stay tiny and never disturb the turn.
+ * mixer (picks as lines; per-route skip reasons in ring/metrics/report),
+ * local-provider refreshes and reminder compliance. Every tapped health
+ * event lands in the bounded ring and the counters; only notable kinds
+ * become transcript lines, deduplicated and budgeted so indicators stay
+ * tiny and never disturb the turn.
  *
  * Context cost is deliberate: `content` stays under ~64 chars (details carry
  * display data and never enter LLM context). Sends always use
@@ -55,7 +56,11 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "ml.smol.take": "all",
   "ml.smol.offer": "error",
   "model.mix": "all",
-  "model.skip": "all",
+  // Routine preference-chain skips (excluded/cooling/unresolved) fire per
+  // dispatch and would spam a line per skipped route; they stay in the
+  // ring, counters, /metrics and the session report. Only an unexpected
+  // skip outcome earns a transcript line.
+  "model.skip": "error",
   "local.refresh": "all",
   "reminder.ack": "error",
   "reminder.follow": "error",
