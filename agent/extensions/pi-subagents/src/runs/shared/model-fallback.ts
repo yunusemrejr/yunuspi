@@ -13,6 +13,7 @@ import {
 	loadModelEconomyConfig,
 } from "./model-economy.ts";
 import { isProvenFreeRoute, catalogRouteCapabilities, readFreeEvidence } from "./free-route-evidence.ts";
+import { taskQuality } from "./model-quality.ts";
 import { isAutonomousMeteredEligible } from "./model-economy.ts";
 import { selectAffordableModel } from "./model-selection.ts";
 import { evaluateQuotaHealth, type QuotaEvent } from "./quota-health.ts";
@@ -24,6 +25,11 @@ import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceE
 export type { AvailableModelInfo };
 
 const economyWarnedRoutes = new Set<string>();
+
+/** Best-effort selection telemetry. Failures here never affect selection. */
+function noteHealth(kind: string, data: Record<string, unknown>): void {
+	try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
+}
 
 function taskRouteConstraints(task = ""): { fixed: boolean; freeOnly: boolean } {
  const text=task.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
@@ -342,16 +348,30 @@ export function resolveLlmPreferenceChain(
 		if (!query) continue;
 		const suffix = splitThinkingSuffix(query);
 		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, entry.provider);
-		if (!resolved) continue;
+		if (!resolved) {
+			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): no live registry match for ${JSON.stringify(query)}; continuing chain`);
+			noteHealth("model.skip", { route: query, outcome: "unresolved" });
+			continue;
+		}
 		const base = splitThinkingSuffix(resolved).baseModel;
 		const identity = base.toLowerCase();
 		if (seen.has(identity)) continue;
-		if (findModelExclusion(base)) continue;
+		const exclusion = findModelExclusion(base);
+		if (exclusion) {
+			warnOnceEconomy(base, "preference-excluded", `[pi-subagents] llm_preferences (${role}): skipping ${base} (excluded until ${new Date(exclusion.expiresAt).toISOString()}: ${exclusion.reason ?? "no reason"}); continuing chain`);
+			noteHealth("model.skip", { route: base, outcome: "excluded" });
+			continue;
+		}
 		const info = availableModels.find((entry) => entry.fullId === base);
 		if (!info) continue;
 		if (!health) health = readHealth();
 		try {
-			if (!evaluateRoute({ provider: info.provider, model: info.id, now }, health).allowed) continue;
+			const decision = evaluateRoute({ provider: info.provider, model: info.id, now }, health);
+			if (!decision.allowed) {
+				warnOnceEconomy(base, "preference-cooling", `[pi-subagents] llm_preferences (${role}): skipping ${base} (route cooling until ${new Date(decision.cooldownUntil).toISOString()}); continuing chain`);
+				noteHealth("model.skip", { route: base, outcome: "cooling" });
+				continue;
+			}
 		} catch { continue; }
 		const req = options?.requirements;
 		if (req?.minContextWindow !== undefined && !(typeof info.contextWindow === "number" && info.contextWindow >= req.minContextWindow)) continue;
@@ -446,6 +466,9 @@ export interface ResolveSubagentModelOverrideOptions {
 	source?: ModelSource;
 	/** Called for warn-severity violations instead of `console.warn`. */
 	onWarn?: (violation: ModelScopeViolation) => void;
+	/** Session id enabling the preferred/free session mixer (rotation +
+	 * seeded variety). Omitted callers keep deterministic legacy order. */
+	sessionId?: string;
 }
 
 function defaultScopeWarn(violation: ModelScopeViolation): void {
@@ -504,6 +527,87 @@ function throwForExplicitModelExclusion(model: string): void {
  * an explicit (`source: "explicit"`) request and warns for an inherited one,
  * unless strict scope enforcement makes inherited violations hard errors.
  */
+export interface MixCandidate {
+	route: string;
+	preferred: boolean;
+	free: boolean;
+}
+
+const mixSession: { id: string | undefined; uses: Map<string, number>; draws: number } = { id: undefined, uses: new Map(), draws: 0 };
+
+/** Deterministic per-session stream (FNV-1a + mulberry32): varied across
+ * sessions, reproducible within one for tests and debugging. */
+function mixRandom(): number {
+	let h = (2166136261 ^ mixSession.draws++) | 0;
+	const s = mixSession.id ?? "";
+	for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+	h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909);
+	return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Session-aware preferred/free mixer. Live sessions (sessionId set) rotate
+ * by frequency, bias critical tasks to preferred routes, respect health via
+ * the already-gated pool, and add seeded variety. Without a sessionId the
+ * scoring collapses to deterministic legacy order (preferred chain first,
+ * then the affordable pick), so offline suites observe zero behavior change. */
+export function mixSubagentModel(pool: MixCandidate[], task = "", sessionId?: string): MixCandidate | undefined {
+	if (!pool.length) return undefined;
+	if (mixSession.id !== sessionId) { mixSession.id = sessionId; mixSession.uses.clear(); mixSession.draws = 0; }
+	const live = sessionId !== undefined;
+	const critical = taskQuality(task).level === "critical";
+	// Critical work stays on explicit preferences whenever any survived
+	// gating (the pool is already freeOnly-filtered when constrained, so
+	// this never violates an explicit free-only request).
+	const ranked = live && critical && pool.some((c) => c.preferred) ? pool.filter((c) => c.preferred) : pool;
+	let best: MixCandidate | undefined;
+	let bestScore = -Infinity;
+	for (const c of ranked) {
+		const uses = live ? (mixSession.uses.get(c.route) ?? 0) : 0;
+		const score = live
+			? (c.preferred ? 4 : 0) + (c.free ? 3 : 0) + (critical && c.preferred ? 4 : 0) - 2.5 * uses + mixRandom()
+			: (c.preferred ? 10 : 0);
+		if (score > bestScore) { bestScore = score; best = c; }
+	}
+	if (best && live) {
+		mixSession.uses.set(best.route, (mixSession.uses.get(best.route) ?? 0) + 1);
+		noteHealth("model.mix", { route: best.route, decision: best.preferred && best.free ? "preferred-free" : best.preferred ? "preferred" : best.free ? "free" : "affordable" });
+	}
+	return best;
+}
+
+/** Gather the viable preferred chain plus up to 3 affordable candidates and
+ * mix one route. Returns undefined when the pool is empty so callers keep
+ * their existing fallback behavior. */
+export function selectMixedSubagentModel(
+	availableModels: AvailableModelInfo[] | undefined,
+	cfg: ReturnType<typeof loadModelEconomyConfig>,
+	task: string,
+	opts: { freeOnly?: boolean; sessionId?: string; preferredModel?: string; exhaustedProviders?: string[] },
+): string | undefined {
+	const chain = resolveLlmPreferenceChain(inferPreferenceRole(task), availableModels, { freeOnly: opts.freeOnly });
+	const seen = new Set<string>();
+	const pool: MixCandidate[] = [];
+	for (const c of chain) {
+		const key = c.route.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const info = availableModels?.find((m) => m.fullId === c.route);
+		pool.push({ route: withLlmThinkingSuffix(c), preferred: true, free: info ? isProvenFreeRoute(info) : false });
+	}
+	const exclude = pool.map((p) => splitThinkingSuffix(p.route).baseModel);
+	for (let i = 0; i < 3; i++) {
+		const pick = selectAffordableModel(availableModels, cfg, { task, freeOnly: opts.freeOnly, preferredModel: opts.preferredModel, exclude, exhaustedProviders: opts.exhaustedProviders });
+		if (!pick) break;
+		exclude.push(splitThinkingSuffix(pick.model).baseModel);
+		const key = pick.model.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const info = availableModels?.find((m) => m.fullId === splitThinkingSuffix(pick.model).baseModel);
+		pool.push({ route: pick.model, preferred: false, free: info ? isProvenFreeRoute(info) : false });
+	}
+	return mixSubagentModel(pool, task, opts.sessionId)?.route;
+}
+
 export function resolveSubagentModelOverride(
 	requestedModel: string | boolean | undefined,
 	parentModel: ParentModel | undefined,
@@ -544,6 +648,8 @@ export function resolveSubagentModelOverride(
 				if (explicit === undefined && options?.task) {
      const constraints=taskRouteConstraints(options.task);
      if (!constraints.fixed) {
+      const mixed = selectMixedSubagentModel(availableModels, cfg, options.task, { freeOnly: constraints.freeOnly, sessionId: options.sessionId, preferredModel: resolved, exhaustedProviders: exhaustedProvidersOf(availableModels) });
+      if (mixed) { enforceModelScopes(mixed, options?.scope, "inherited", options?.onWarn); return mixed; }
       const preferred = selectLlmPreferredModel(inferPreferenceRole(options.task), availableModels, { freeOnly: constraints.freeOnly });
       if (preferred) { const preferredRoute = withLlmThinkingSuffix(preferred); enforceModelScopes(preferredRoute, options?.scope, "inherited", options?.onWarn); return preferredRoute; }
      }

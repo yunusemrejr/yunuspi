@@ -379,13 +379,27 @@ function sourceMetadataEqual(row, source) {
     && Number(row.complete) === (source.complete ? 1 : 0);
 }
 
+const BUSY_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
 function setupSchema(db) {
   // Connection pragmas must be set before the WAL switch. DDL itself is
   // guarded by one immediate transaction so a killed first opener leaves a
   // clean, retryable schema rather than a half-created set of tables.
   db.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA synchronous = NORMAL');
+  // journal_mode transitions can return SQLITE_BUSY before busy_timeout is
+  // honored (16-way cold opens lose ~1/16 without this). Retry init only,
+  // mirroring identity.mjs; the pragmas are idempotent so a partial
+  // success is safe to replay. Sync sleep: this module has no async surface.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = NORMAL');
+      break;
+    } catch (error) {
+      if (attempt >= 4 || !/(?:busy|locked)/i.test(error?.message ?? '')) throw error;
+      Atomics.wait(BUSY_WAIT, 0, 0, 20 * (attempt + 1));
+    }
+  }
   withImmediate(db, () => db.exec(`
     CREATE TABLE IF NOT EXISTS store_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),

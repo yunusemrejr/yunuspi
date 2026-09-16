@@ -115,7 +115,9 @@
     "intervention-registry.ts",
     "intervention-shared.ts",
     "capability-health.ts",
-    "capability-audit.ts"
+    "capability-audit.ts",
+    "activity-indicators.ts",
+    "prompt-interpretation.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

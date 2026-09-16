@@ -3260,6 +3260,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 				...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
 				task: typeof params.task === "string" ? params.task : undefined,
 				source: modelOrigin === "explicit" ? "explicit" : "inherited",
+				...(data.parentSessionId ? { sessionId: data.parentSessionId } : {}),
 			});
 		const modelOverrideFromParent = modelOrigin === "inherited";
 		const asyncResult = executeAsyncSingle(id, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
@@ -3685,6 +3686,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			...(modelScopes.length === 0 ? {} : { scope: modelScopes }),
 			task: typeof params.task === "string" ? params.task : undefined,
 				source: modelOrigin === "explicit" ? "explicit" : "inherited",
+			...(data.parentSessionId ? { sessionId: data.parentSessionId } : {}),
 		},
 	);
 	const modelOverrideFromParent = modelOrigin === "inherited";

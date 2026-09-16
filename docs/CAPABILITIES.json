@@ -2133,7 +2133,7 @@
       {
         "name": "export-json",
         "source": "agent/extensions/session-export-json.ts",
-        "line": 47
+        "line": 48
       },
       {
         "name": "google-account",
@@ -2258,7 +2258,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 936
+        "line": 1086
       },
       {
         "name": "run",
@@ -2702,7 +2702,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 391,
+        "line": 423,
         "kind": "literal"
       },
       {
@@ -2781,7 +2781,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 712,
+        "line": 730,
         "kind": "definition"
       },
       {
@@ -3024,7 +3024,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 391,
+        "line": 423,
         "kind": "literal"
       },
       {
@@ -3201,7 +3201,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          762
+          780
         ],
         "knownNames": [
           "subagent"
@@ -3298,7 +3298,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 537,
+      "sourceFiles": 539,
       "registrationSites": 59,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 77,
@@ -3455,6 +3455,10 @@
       }
     ],
     "libraries": [
+      {
+        "path": "agent/extensions/lib/activity-indicators.ts",
+        "exists": true
+      },
       {
         "path": "agent/extensions/lib/artifact-checks.ts",
         "exists": true
@@ -3629,6 +3633,10 @@
       },
       {
         "path": "agent/extensions/lib/project-tests.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/prompt-interpretation.ts",
         "exists": true
       },
       {
@@ -5456,6 +5464,14 @@
       {
         "name": "web-ui-stack-selection",
         "path": "agent/skills/web-ui-stack-selection/SKILL.md"
+      },
+      {
+        "name": "windows-on-linux-engineering",
+        "path": "agent/skills/windows-on-linux-engineering/SKILL.md"
+      },
+      {
+        "name": "winecharm",
+        "path": "agent/skills/winecharm/SKILL.md"
       },
       {
         "name": "wireless-signal-analysis",

@@ -38,7 +38,7 @@ delete process.env.PI_SUBAGENT_CHILD;
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG,'{}');
 
 const ids=['free/preservation','free/change','free/synthesis'];
-publishFreeEvidence(ids.map(id=>({id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true,contextWindow:65536,maxTokens:8192}})),FREE_CATALOG_URL);
+publishFreeEvidence([...ids.map(id=>({id,pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true,contextWindow:65536,maxTokens:8192}})),{id:'paid/model-0',pricing:{prompt:'0.1',completion:'0.2'},capabilities:{toolCalling:true,contextWindow:65536,maxTokens:8192}},{id:'paid/model-1',pricing:{prompt:'0.1',completion:'0.2'},capabilities:{toolCalling:true,contextWindow:65536,maxTokens:8192}}],FREE_CATALOG_URL);
 const model=id=>({provider:'openrouter',id,api:'openai-completions',baseUrl:FREE_BASE_URL,contextWindow:65536,maxTokens:8192,input:['text'],reasoning:false,cost:{input:0,output:0,cacheRead:0,cacheWrite:0}});
 const models=ids.map(model);
 const task='Rework src/widget.ts?mode=wide while preserving the exact title "Keep title" and reconsider the assistant-selected easing.';
@@ -85,7 +85,7 @@ test('dispatches two independent scope opinions and a synthesis peer under read-
     assert.equal(params.toolBudget.hard,4);
     assert.equal(params.toolBudget.soft,3);
     assert.equal(params.toolBudget.block,'*');
-    assert.ok(params.timeoutMs<=45000);
+    assert.ok(params.timeoutMs<=240000);
     assert.ok(params.capabilityCeiling.allowedTools.includes('read'));
     for(const forbidden of ['write','edit','delete','bash','subagent','project_intel','sandbox_run','net_probe']) assert.ok(!params.capabilityCeiling.allowedTools.includes(forbidden),forbidden);
     assert.equal(params.capabilityCeiling.denyExtensions,false);
@@ -129,8 +129,8 @@ test('current route restrictions and cancellation fail closed without late publi
 });
 
 test('scope council stays bounded to the shared public limits',()=>{
-  assert.equal(SCOPE_COUNCIL_LIMITS.deadlineMs,45000);
-  assert.equal(SCOPE_COUNCIL_LIMITS.costUsd,0.01);
+  assert.equal(SCOPE_COUNCIL_LIMITS.deadlineMs,240000);
+  assert.equal(SCOPE_COUNCIL_LIMITS.costUsd,0.03);
   assert.equal(SCOPE_COUNCIL_LIMITS.tools,12);
   assert.equal(SCOPE_COUNCIL_LIMITS.tokens,144000);
   assert.equal(SCOPE_COUNCIL_LIMITS.proposalChars,1200);
@@ -143,7 +143,7 @@ test('the registered runner publishes its limits for the deliberation owner',()=
   const runner=globalThis[SCOPE_COUNCIL_RUNNER];
   assert.equal(typeof runner,'function');
   assert.equal(runner.limits,SCOPE_COUNCIL_LIMITS,'the lifecycle reads the shared deadline from here instead of a second copy');
-  assert.equal(runner.limits.deadlineMs,45000);
+  assert.equal(runner.limits.deadlineMs,240000);
 });
 
 test('a two-route council still critiques both perspectives and labels the reduced independence',async()=>{
@@ -163,6 +163,16 @@ test('a two-route council still critiques both perspectives and labels the reduc
   assert.equal(output.independence,'self-critique','a two-member council has no third route for an independent critique');
   assert.equal(output.proposals.length,2);
   assert.match(output.discussion,/decisive source check/);
+});
+
+test('paid-only capacity stays unavailable: councils never spend autonomously',async()=>{
+  const calls=[],pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+  const paid=[0,1].map(i=>({...model(`paid/model-${i}`),cost:{input:0.1,output:0.2,cacheRead:0,cacheWrite:0}}));
+  registerScopeCouncilRunner(pi,{launch:async(id,params)=>{calls.push({id,params});return result('unexpected');},available:()=>paid,constraints:()=>({})});
+  const runner=globalThis[SCOPE_COUNCIL_RUNNER];
+  const output=await runner({task,graph:'src/widget.ts owns the widget behavior.',history:{evidence:[]}},context(),new AbortController().signal);
+  assert.equal(output.status,'unavailable');
+  assert.equal(calls.length,0);
 });
 
 test('one surviving perspective is still challenged instead of returning an empty partial',async()=>{

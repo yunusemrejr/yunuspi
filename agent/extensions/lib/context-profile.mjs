@@ -291,7 +291,22 @@ export function compareEnvelope(
 
 export function appendRecord(records, record, cap = DEFAULT_RING) {
   const bounded = Math.max(1, Math.floor(cap));
-  return [...records.slice(-(bounded - 1)), record];
+  const next = [...records, record];
+  if (next.length <= bounded) return next;
+  // Evict oldest append-only records first: true prefix breaks are the
+  // diagnostic signal, and a 30-ring otherwise loses a monster invalidation
+  // within minutes in a busy session. Break-saturated rings keep recency.
+  const overflow = next.length - bounded;
+  const keep = [];
+  let dropped = 0;
+  for (const entry of next) {
+    if (dropped < overflow && entry.appendedOnly && !entry.envelopeChanged) {
+      dropped++;
+      continue;
+    }
+    keep.push(entry);
+  }
+  return keep.slice(-bounded);
 }
 
 export function changeKey(change) {

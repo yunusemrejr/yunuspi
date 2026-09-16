@@ -17,6 +17,16 @@ const terms = (text: string) => [...new Set((text.toLowerCase().match(/[\p{L}\p{
   .filter(t => !/^(the|and|for|this|that|with|please|make|more|less|improve|keep|from|have|want|need)$/.test(t)))].slice(0,48);
 const intentText = (text: string) => text.replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/^\s*>.*$/gm, ' ');
 
+/** Explicit course-change / stop cues. Exported for the interpretation layer;
+ * still evidence only — the main agent owns the decision. */
+export function isPromptPivot(prompt: string): boolean {
+  return pivot.test(intentText(prompt.slice(0, 1024)));
+}
+
+export function isPromptRefusal(prompt: string): boolean {
+  return refusal.test(intentText(prompt.slice(0, 1024)));
+}
+
 /** Only a retrieval cue, never a claim that a task or authorization continues. */
 export function isReferentialFollowup(prompt: string): boolean {
   const text = intentText(prompt.slice(0,1024)).trim();

@@ -24,6 +24,8 @@ const cases=[
  ['x86-assembly-engineering','Optimize the x86-64 SIMD kernel'],
  ['fortran-scientific-computing','Review Fortran array handling'],
  ['dotnet-linux-engineering','Build a C# Linux application'],
+ ['winecharm','Install WineCharm via flatpak'],
+ ['windows-on-linux-engineering','Debug exe load failure under Proton'],
  ['sql-query-engineering','Review SQL joins'],
  ['typescript-contract-engineering','Write TypeScript contracts'],
  ['wasm-runtime-engineering','Debug WebAssembly memory growth'],
@@ -47,7 +49,7 @@ const cases=[
  ['github-release-notes','Write release notes for v1.2.0'],
  ['github-actions-workflows','Add a GitHub Actions workflow that runs the tests'],
 ];
-assert.equal(cases.length,39);
+assert.equal(cases.length,41);
 for(const prompt of ['Inspect the user interface design and marketing security, then publish these changes to the hosting server','Review website security on a shared hosting server'])
  assert.ok(!routeSkills(prompt).some(r=>r.name==='linux-host-defense'),'generic site security/hosting does not imply Linux host administration');
 for(const prompt of ['Inspect and improve the user interface and landing page','Review the website layout and screenshots'])

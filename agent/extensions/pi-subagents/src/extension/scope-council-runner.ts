@@ -17,13 +17,16 @@ import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
 export const SCOPE_COUNCIL_RUNNER = Symbol.for("yunus-pi.scope-council-runner.v1");
 
 export const SCOPE_COUNCIL_LIMITS = Object.freeze({
-	deadlineMs: 45_000,
+	// 2026-09-16: all-sessions audit showed 48/48 councils unavailable — a
+	// 45s shared deadline with 25s first-wave timeouts cannot cover free-tier
+	// turn latency (measured ~21s/turn). Two waves × ~4 slow turns + synthesis.
+	deadlineMs: 240_000,
 	/** Aggregate token and tool ceilings. Each of three possible launches gets
 	 * one equal reservation. Fresh children need enough room for their system
 	 * and tool context before producing a useful opinion. */
 	tokens: 144_000,
 	tools: 12,
-	costUsd: 0.01,
+	costUsd: 0.03,
 	proposalChars: 1_200,
 	discussionChars: 2_500,
 	maxTaskChars: 16_000,
@@ -419,8 +422,11 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		};
 		let team: AssistanceMember[];
 		try {
+			// Councils are automatic-only (no user-facing tool): fill free-only
+			// like automatic review rounds. Explicit llm_preferences council
+			// routes are still honored; autonomous paid spend is not.
 			team = selectAssistanceTeam(models.map(toModelInfo), loadModelEconomyConfig(), plan, {
-				freeOnly: constraints.freeOnly,
+				freeOnly: true,
 				task: request.task,
 				minOutputTokens: 512,
 				role: "council",
@@ -478,7 +484,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				// the full remaining deadline; no child can outlive the shared signal.
 				const timeoutMs = phase === "peer-critique"
 					? remaining
-					: Math.min(25_000, Math.max(1, remaining - 5_000));
+					: Math.min(120_000, Math.max(1, remaining - 30_000));
 				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				row = resultRow(result);

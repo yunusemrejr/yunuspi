@@ -255,9 +255,9 @@ export function createRelevantGuidance(pi: any) {
   // in ordinary task prompts, since this is the only gate that spends a
   // guidance slot on zero-route prompts.
   const VAGUE_TASK_MARKERS = /\b(?:not sure|unsure|something|somehow|whatever|this and that|you know|sort of|kind of|weird|unique|better|nicer|prettier)\b/i;
-  const routedSkills = (prompt = "", file = "") => {
+  const routedSkills = (prompt = "", file = "", precomputed?: ReturnType<typeof routeSkills>) => {
     const previous = JSON.stringify([...reviewTargets.values()]);
-    const routes = routeSkills(prompt, file);
+    const routes = precomputed ?? routeSkills(prompt, file);
     for (const route of routes) {
       const skill = skills.find(s => s.name === route.name);
       if (skill && file && route.priority >= 60) trackReview(skill, route.check, 'file');
@@ -806,14 +806,17 @@ export function createRelevantGuidance(pi: any) {
         add({key:"git-scope",tool:"project_report",priority:65,text:'Git work: project_report({view:"workspace"}) reports HEAD, branch, shared Git directory, local upstream divergence and operation markers. Session checkpoints are not commits. Inspect peer scope with session_coordinate when available; stage only task-owned changes and inspect the staged diff. A file may contain pre-existing changes: sharing its path does not make those changes yours. Preserve unrelated hunks and formatting; never sweep them into a commit. Preserve existing index/branch operations. For GitHub/CI, verify the exact tested/pushed commit and fresh remote evidence; cached tracking refs do not prove current remote state.'});
       }
       topicHints({prompt: prompt.length > 24000 ? prompt.slice(0,12000) + "\n" + prompt.slice(-12000) : prompt});
-      routedSkills(prompt);
+      // One routing evaluation per pass: routeSkills is pure for (prompt,
+      // file), and re-evaluating also triple-emits skill.route telemetry.
+      const promptRoutes = routeSkills(prompt);
+      routedSkills(prompt, "", promptRoutes);
       const currentIntent = skillIntentSegments(prompt).join(' ');
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
-      const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !routeSkills(prompt).some(route => route.priority >= 60);
+      const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
       if (!continuation) { context = []; reviewTargets.clear(); }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
-      for (const route of routeSkills(prompt).filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).sort((a,b) => b.priority-a.priority || a.name.localeCompare(b.name)).slice(0,3)) {
+      for (const route of promptRoutes.filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).sort((a,b) => b.priority-a.priority || a.name.localeCompare(b.name)).slice(0,3)) {
         const skill = skills.find(s => s.name === route.name);
         if (skill) trackReview(skill,route.check,'task');
       }

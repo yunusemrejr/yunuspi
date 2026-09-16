@@ -17,6 +17,7 @@ import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } fr
 import { randomUUID } from "node:crypto";
 import { registerAutonomousRecovery } from "./autonomous-recovery.ts";
 import { noteSessionTurnover } from "../../../lib/intervention-shared.ts";
+import { ACTIVITY_MESSAGE_TYPE, ACTIVITY_TAGS, type ActivityDetails } from "../../../lib/activity-indicators.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -674,6 +675,23 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		if (!details?.event) return undefined;
 		const content = typeof message.content === "string" ? message.content : undefined;
 		return new SubagentControlNoticeComponent({ ...details, noticeText: formatSubagentControlNotice(details, content) }, theme);
+	});
+
+	pi.registerMessageRenderer<ActivityDetails>(ACTIVITY_MESSAGE_TYPE, (message, options, theme) => {
+		const details = message.details as ActivityDetails | undefined;
+		if (!details || typeof details.kind !== "string" || typeof details.label !== "string") return undefined;
+		const icon = details.status === "error"
+			? theme.fg("error", "✗")
+			: details.status === "skip"
+				? theme.fg("dim", "○")
+				: theme.fg("success", "✓");
+		const parts: string[] = [];
+		if (details.ms !== undefined) parts.push(`${details.ms}ms`);
+		if (details.detail) parts.push(details.detail);
+		let text = `${icon} ${theme.bold(ACTIVITY_TAGS[details.kind] ?? details.kind)} ${details.label}`;
+		if (parts.length > 0) text += ` ${theme.fg("dim", "·")} ${parts.map((part) => theme.fg("dim", part)).join(` ${theme.fg("dim", "·")} `)}`;
+		if (options.expanded) text += `\n  ${theme.fg("muted", details.kind)}`;
+		return new Text(text, 0, 0);
 	});
 
 	const executeSubagentCollapsed = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((result: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => {

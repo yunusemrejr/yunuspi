@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { collectSessionMetrics } from "./session-metrics.ts";
 import { collectSessionDiagnostics, failureCategory } from "./session-diagnostics.ts";
 import { collectSessionCost } from "./session-cost.ts";
+import type { ActivityCounters } from "./activity-indicators.ts";
 
 export const SESSION_EXPORT_JSON_VERSION = 1;
 export const SESSION_EXPORT_JSON_FORMAT = "yunuspi-session-export-json";
@@ -89,6 +90,8 @@ export interface SessionJsonExportInput {
   includeRaw?: boolean;
   /** Live control-plane shadow rollup at export time (null when unavailable). */
   controlPlaneShadow?: { at: number; sources: Record<string, unknown> } | null;
+  /** Live harness-activity counters at export time (null when unavailable). */
+  activity?: ActivityCounters | null;
 }
 
 function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
@@ -477,6 +480,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     diagnostics,
     metrics,
     controlPlaneShadow: input.controlPlaneShadow ?? null,
+    activity: input.activity ?? null,
     events,
   };
 }

@@ -204,6 +204,22 @@ export function selfMutationDenial(
       cwd,
       followLeaf,
     );
+    // Agent-facing memory data stays writable from project sessions: the
+    // memory_write tool is the preferred path (locked, stamped), and direct
+    // writes are its documented fallback. Memory is runtime data, not harness
+    // code/config — everything else under the harness root stays
+    // maintenance-only.
+    if (containsPath(path.join(HARNESS_ROOT, "agent", "memory"), resolved))
+      return;
+    const memoryOverride = process.env.PI_MEMORY_DIR?.trim();
+    if (memoryOverride) {
+      try {
+        if (containsPath(canonicalMutationPath(memoryOverride), resolved))
+          return;
+      } catch {
+        // Unresolvable override falls through to the protected check.
+      }
+    }
     if (
       PROTECTED_MUTATION_ROOTS.some(
         (root) => containsPath(root, resolved) || containsPath(resolved, root),

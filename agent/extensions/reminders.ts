@@ -81,6 +81,15 @@
  * metadata-only first-prompt orientation receipt; ambient-only injections are
  * display:false; manual-bearing ones are also shown in the TUI/export. Delete
  * the state file to remove scheduled reminders.
+ *
+ * 2026-09-16 compliance evidence: two recent sessions showed 19/20 manual
+ * deliveries acked with the identical ritual phrase and almost no visible
+ * trajectory check. Manual deliveries now append one rotating harness
+ * trajectory probe (~20 tokens, after the user's exact text) and arm a
+ * bounded compliance watch (2 assistant messages / 8 tool calls / next
+ * input / agent end). The watch emits reminder.delivery/ack/follow health
+ * events — /metrics shows ack and follow-through rates, and an ignored
+ * reminder surfaces as an activity indicator. No inference, no timers.
  */
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -316,6 +325,41 @@ function manualLine(r: ManualReminder): string {
 	return `[custom-reminder] ${r.text}`;
 }
 
+/** Rotating harness trajectory probes, appended AFTER the user's exact text on
+ * manual deliveries. Session evidence (2026-09-16) showed 19/20 manual
+ * deliveries acked with the identical ritual phrase and almost no visible
+ * trajectory check; a varying bounded question forces a brief fresh thought
+ * without becoming a second ritual. Each is ~20 tokens: cheap by design. */
+export const TRAJECTORY_CHECKS = [
+	"In ≤15 words: what is the single riskiest open item right now?",
+	"What finished since the last reminder, and what is the next verifiable step?",
+	"What are you postponing delegating, verifying, or writing down?",
+	"If remaining time halved, what would you drop first?",
+] as const;
+
+export function trajectoryLine(seq: number): string {
+	const q = TRAJECTORY_CHECKS[((seq % TRAJECTORY_CHECKS.length) + TRAJECTORY_CHECKS.length) % TRAJECTORY_CHECKS.length];
+	return `[harness trajectory check] ${q} Reply in ≤2 sentences inside your next thinking block; no extra tool calls for this alone.`;
+}
+
+/** Ack scan over bounded assistant text (text + thinking, ≤2k chars). */
+export function scanReminderAck(sample: string): { acked: boolean; words: number } {
+	const text = sample.slice(0, 2000);
+	const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+	return { acked: /saw the reminder|continuing my session/i.test(text), words };
+}
+
+export type FollowMarker = "discovery" | "todo" | "delegate";
+
+/** Reminder-relevant tool classes: discovery, todo upkeep, delegation. */
+export function classifyFollowTool(name: unknown): FollowMarker | undefined {
+	if (typeof name !== "string") return undefined;
+	if (/tool_search|skill_review/.test(name)) return "discovery";
+	if (/subagent|swarm|fusion|council|quality_review|project_review|error_review|bug_hunter|bg_run|bg_kill/.test(name)) return "delegate";
+	if (/todo/.test(name)) return "todo";
+	return undefined;
+}
+
 export function reminderText(
 	st: ReminderState,
 	sid: string,
@@ -329,6 +373,7 @@ export function reminderText(
 		status?: string;
 		blockedBy?: number[];
 	}> = [],
+	trajectory?: string,
 ): string {
 	const lines: string[] =
 		dueManual.length > 0
@@ -383,6 +428,7 @@ export function reminderText(
 		);
 	}
 	for (const r of dueManual) lines.push(manualLine(r));
+	if (dueManual.length > 0 && trajectory) lines.push(trajectory);
 	const deferred =
 		st.manual.filter((r) => r.active && r.nextFireAt <= now).length -
 		dueManual.length;
@@ -490,6 +536,58 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	// input event so an extension wake before the first prompt cannot consume
 	// the one orientation opportunity, while continuation wakes stay silent.
 	const pendingHumanPrompts = new Set<string>();
+	// Manual-reminder compliance watch: armed per delivery, finalized after 2
+	// assistant messages, 8 tool calls, a new human prompt, or agent end —
+	// whichever comes first. Bounded scans only; evidence goes to the health
+	// log as reminder.delivery/ack/follow so /metrics can show compliance.
+	const trajSeq = new Map<string, number>();
+	interface ComplianceWatch {
+		assistant: number;
+		tools: number;
+		ack: boolean;
+		ackWords: number;
+		markers: Set<FollowMarker>;
+	}
+	const pendingCompliance = new Map<string, ComplianceWatch>();
+	const healthSink = () => {
+		try {
+			const sink = (globalThis as any)[Symbol.for("yunus-pi.health.v1")];
+			return typeof sink === "function" ? sink : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	// Split so a failed send never arms a bogus watch: the trajectory line is
+	// needed before content is built, but the watch arms only after delivery.
+	const nextTrajectory = (sid: string): string => {
+		const seq = (trajSeq.get(sid) ?? 0) + 1;
+		trajSeq.set(sid, seq);
+		return trajectoryLine(seq);
+	};
+	const armCompliance = (sid: string, count: number): void => {
+		pendingCompliance.set(sid, { assistant: 0, tools: 0, ack: false, ackWords: 0, markers: new Set() });
+		try {
+			healthSink()?.("reminder.delivery", { decision: "manual", count });
+		} catch { /* telemetry is optional */ }
+	};
+	const finalizeCompliance = (sid: string): void => {
+		const watch = pendingCompliance.get(sid);
+		if (!watch) return;
+		pendingCompliance.delete(sid);
+		try {
+			const sink = healthSink();
+			if (!sink) return;
+			sink("reminder.ack", { decision: watch.ack ? "acked" : "ignored", count: watch.ackWords });
+			const follow = watch.markers.has("discovery")
+				? "discovery"
+				: watch.markers.has("delegate")
+					? "delegate"
+					: watch.markers.has("todo")
+						? "todo"
+						: "none";
+			sink("reminder.follow", { decision: follow, count: watch.tools });
+		} catch { /* telemetry is optional */ }
+	};
 	const load = (sid: string): ReminderState => {
 		let st = live.get(sid);
 		if (!st) {
@@ -662,6 +760,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				writeState(sid, st);
 				return undefined;
 			}
+			const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
 			const content = reminderText(
 				st,
 				sid,
@@ -674,11 +773,13 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					...hints.map((h) => `[capability hint] ${h.text}`),
 				],
 				todoSnapshots.get(st),
+				traj,
 			);
 			if (!content.trim()) {
 				writeState(sid, st);
 				return undefined;
 			}
+			if (dueManual.length > 0) armCompliance(sid, dueManual.length);
 			// Advance schedules BEFORE returning: a delivered occurrence cannot
 			// re-fire from a later lifecycle event (structural dedup).
 			for (const r of dueManual) advanceDelivered(r, now);
@@ -819,6 +920,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			try {
 				const sid = sidOf(ctx);
 				if (sid) pendingHumanPrompts.add(sid);
+				if (sid) finalizeCompliance(sid);
 			} catch {
 				/* a closing session has no orientation opportunity */
 			}
@@ -828,10 +930,54 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	});
 	pi.on("tool_call", (event, ctx) => {
 		if (ctx.signal?.aborted) return;
+		try {
+			const sid = sidOf(ctx);
+			const watch = sid && pendingCompliance.get(sid);
+			if (watch) {
+				watch.tools += 1;
+				const marker = classifyFollowTool(event.toolName);
+				if (marker) watch.markers.add(marker);
+				if (watch.tools >= 8) finalizeCompliance(sid);
+			}
+		} catch { /* telemetry never breaks tool calls */ }
 		const review = guidance.beforeToolCall(event);
 		if (review) return review;
 		const reason = loop.block(event);
 		if (reason) return { block: true, reason };
+	});
+	pi.on("message_end", (event, ctx) => {
+		try {
+			const m = event.message;
+			if (!m || m.role !== "assistant") return;
+			const sid = sidOf(ctx);
+			const watch = sid && pendingCompliance.get(sid);
+			if (!watch) return;
+			let sample = "";
+			const content = m.content;
+			if (typeof content === "string") sample = content.slice(0, 2000);
+			else if (Array.isArray(content)) {
+				for (const part of content) {
+					if (sample.length >= 2000) break;
+					if (part?.type === "text" && typeof part.text === "string")
+						sample += ` ${part.text.slice(0, 2000 - sample.length)}`;
+					else if (part?.type === "thinking" && typeof part.thinking === "string")
+						sample += ` ${part.thinking.slice(0, 2000 - sample.length)}`;
+				}
+			}
+			const { acked, words } = scanReminderAck(sample);
+			if (acked && !watch.ack) {
+				watch.ack = true;
+				watch.ackWords = words;
+			}
+			watch.assistant += 1;
+			if (watch.assistant >= 2) finalizeCompliance(sid);
+		} catch { /* telemetry never breaks messaging */ }
+	});
+	pi.on("agent_end", (_event, ctx) => {
+		try {
+			const sid = sidOf(ctx);
+			if (sid) finalizeCompliance(sid);
+		} catch { /*best-effort closeout */ }
 	});
 	pi.on("before_provider_request", (event, ctx) => {
 		if (!recoveryRoute || ctx.signal?.aborted) return;
@@ -882,6 +1028,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const dueManual = dueManualReminders(st, now);
 			const hints = guidance.candidates();
 			if (!nudge && !hints.length && dueManual.length === 0) return;
+			const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
 			pi.sendMessage(
 				{
 					customType: "reminders",
@@ -895,11 +1042,14 @@ export default function remindersExtension(pi: ExtensionAPI) {
 							...(nudge ? [nudge] : []),
 							...hints.map((h) => `[capability hint] ${h.text}`),
 						],
+						[],
+						traj,
 					),
 					display: dueManual.length > 0,
 				},
 				{ deliverAs: "steer" },
 			);
+			if (dueManual.length > 0) armCompliance(sid, dueManual.length);
 			// A rejected queue operation must not consume the reminder or nudge.
 			// Once the queue accepts the steer, consume the delivered manual
 			// occurrences immediately: a later step throwing must not leave a
@@ -1032,7 +1182,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					customType: "reminders",
 					content: reminderText(st, sid, now, { todo: false, drift: false }, [
 						reminder,
-					]),
+					], undefined, [], nextTrajectory(sid)),
 					display: true,
 				};
 				try {
@@ -1042,6 +1192,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						deliverAs: "steer",
 						triggerTurn: true,
 					});
+					armCompliance(sid, 1);
 				} catch {
 					// A rejected queue must be due at the next available boundary;
 					// leave delivered=0 and retain the original createdAt grid for

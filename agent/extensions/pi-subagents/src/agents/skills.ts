@@ -658,6 +658,13 @@ export function resolveSkills(
 		if (skill) resolved.push(skill);
 		else missing.push(trimmed);
 	}
+	try {
+		const sink = (globalThis as any)[Symbol.for("yunus-pi.health.v1")];
+		if (typeof sink === "function") {
+			for (const skill of resolved) sink("skill.resolve", { skill: skill.name, decision: "resolved", count: 1 });
+			for (const name of missing) sink("skill.resolve", { skill: name, decision: "missing", isError: true });
+		}
+	} catch { /* telemetry is optional */ }
 
 	return { resolved, missing };
 }

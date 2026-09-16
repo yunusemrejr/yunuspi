@@ -888,7 +888,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			ctx.currentModel,
 			availableModels,
 			a.modelProvider ?? ctx.currentModelProvider,
-			{ scope: modelScopes, task: s.task, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
+			{ scope: modelScopes, task: s.task, source: modelOrigin === "explicit" ? "explicit" : "inherited", sessionId: ctx.currentSessionId },
 		);
 		const thinkingOverride = flatIndex === undefined ? undefined : thinkingOverridesByFlatIndex?.[flatIndex];
 		const effectiveThinking = externalRunner ? undefined : thinkingOverride ?? a.thinking;
@@ -1636,7 +1636,7 @@ export function executeAsyncSingle(
 				ctx.currentModel,
 				availableModels,
 				ctx.currentModelProvider,
-				{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited" },
+				{ scope: modelScopes, source: modelOrigin === "explicit" ? "explicit" : "inherited", sessionId: ctx.currentSessionId },
 			);
 	} catch (error) {
 		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));

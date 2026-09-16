@@ -29,6 +29,7 @@ const {
  parseReviewReport,
  REVIEW_LIMITS,
  settleSharedQualityReview,
+ validReviewEvidence,
 } = await import(
  pathToFileURL(path.join(agent, "extensions/lib/quality-review.ts"))
 );
@@ -998,4 +999,62 @@ test("a tool waiting for discovery cannot assess a replacement user turn", async
  release();
  await rejected;
  assert.notEqual(f.state().status, "blocked");
+});
+
+test("review evidence paths validate like findings: relative, bounded, no traversal", () => {
+ assert.deepEqual(validReviewEvidence(["shots/a.png", "logs/out.log"]), ["shots/a.png", "logs/out.log"]);
+ assert.deepEqual(validReviewEvidence(["/abs/x.png", "../evil", "", "ok.log", "ok.log", 42, "x".repeat(300)]), ["ok.log"]);
+ assert.deepEqual(validReviewEvidence("nope"), []);
+ assert.deepEqual(validReviewEvidence(undefined), []);
+ assert.equal(validReviewEvidence(Array.from({ length: 12 }, (_, i) => `f${i}.log`)).length, 8);
+});
+
+test("review evidence reaches the runner brief", async (t) => {
+ let seen;
+ const f = await fixture(t, {
+  runner: async (req) => {
+   seen = req.evidence;
+   return req.aspects.map((a) => pass(a.id));
+  },
+ });
+ await f.mutate();
+ await f.tool({ action: "review", evidence: ["shots/a.png", "/abs/x", "../evil"] });
+ assert.deepEqual(seen, ["shots/a.png"]);
+});
+
+test("rounds with no dispatched reviewer are refunded, not charged", async (t) => {
+ const f = await fixture(t, {
+  runner: async (req) =>
+   req.aspects.map((a) => ({ aspect: a.id, ok: false, text: "", gap: "No healthy permitted reviewer.", unattempted: true })),
+ });
+ await f.mutate();
+ await f.tool({ action: "review" });
+ await f.tool({ action: "review" });
+ assert.equal(f.state().rounds, 0);
+ assert.equal(f.state().status, "pending");
+});
+
+test("disposition changes emit review.disposition telemetry", async (t) => {
+ const events = [];
+ const key = Symbol.for("yunus-pi.health.v1");
+ const prev = globalThis[key];
+ globalThis[key] = (kind, data) => events.push({ kind, data });
+ try {
+  const blocked = await fixture(t, { runner: async () => [] });
+  await blocked.mutate();
+  await blocked.tool({ action: "review" });
+  assert.ok(events.some((e) => e.kind === "review.disposition" && e.data.decision === "blocked"));
+  const f = await fixture(t);
+  await f.mutate();
+  await f.tool({ action: "review" });
+  await f.tool({
+   action: "assess",
+   disposition: "accepted",
+   reason: "Reviewed current source and relevant test results; no blocking defects.",
+  });
+  assert.ok(events.some((e) => e.kind === "review.disposition" && e.data.decision === "accepted"));
+ } finally {
+  if (prev === undefined) delete globalThis[key];
+  else globalThis[key] = prev;
+ }
 });

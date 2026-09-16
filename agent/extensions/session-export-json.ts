@@ -24,6 +24,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildSessionJsonExport } from "./lib/session-export-json.ts";
 import { shadowReport } from "./lib/intervention-registry.ts";
+import { activityView } from "./lib/activity-indicators.ts";
 
 const USAGE =
   "Usage: /export-json [path] [--all] [--no-raw] [--min]\n" +
@@ -84,6 +85,10 @@ export default function (pi: ExtensionAPI) {
       try {
         controlPlaneShadow = shadowReport();
       } catch { /* live rollup is best-effort diagnostics */ }
+      let activity = null;
+      try {
+        activity = activityView() ?? null;
+      } catch { /* live rollup is best-effort diagnostics */ }
       let currentRouting: unknown;
       try {
         const text = JSON.stringify(ctx.model?.compat?.openRouterRouting);
@@ -107,6 +112,7 @@ export default function (pi: ExtensionAPI) {
         thinkingLevel: ctx.thinkingLevel ?? null,
         includeRaw: options.includeRaw,
         controlPlaneShadow,
+        activity,
       });
       const sessionTag = typeof header?.id === "string" && header.id
         ? header.id.slice(0, 8)

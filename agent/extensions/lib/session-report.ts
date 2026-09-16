@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { collectSessionMetrics } from './session-metrics.ts';
 import { collectSessionDiagnostics } from './session-diagnostics.ts';
+import { activityView } from './activity-indicators.ts';
 
 const number = (value: number) => value.toLocaleString('en-US');
 // Excerpts are private UI text, never terminal instructions or persisted telemetry.
@@ -99,13 +100,32 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
     const observed = names.filter(name => metrics.tools[name]);
     lines.push(`${label}: ${enabled ? `active ${enabled.join(', ') || 'none'}` : 'active inventory unavailable'}; observed ${observed.map(name => `${name} ${metrics.tools[name]}`).join(', ') || 'none'}.`);
   }
-  lines.push('Use capabilities when they fit the task; activity counts do not prove useful execution. Local model inference availability is unknown without its own health/runtime evidence.');
+  lines.push('Use capabilities when they fit the task; activity counts do not prove useful execution. Local provider refresh evidence, when this process observed any, is under Local intelligence & activity below.');
   const review = branch.findLast(entry => entry?.type === 'custom' && entry.customType === 'quality-review-v1')?.data;
   if (review) {
     const current = review.reviewed === review.revision;
     const reports = current && Array.isArray(review.reports) ? review.reports : [];
     lines.push(`Latest quality review: revision ${review.revision}; disposition ${review.disposition || 'unassessed'}; ${current ? 'current' : 'stale or missing'} reports; ${reports.filter((r: any) => r.outcome === 'unknown' || r.gap?.trim()).length} evidence gaps; ${reports.flatMap((r: any) => r.findings ?? []).filter((f: any) => f.severity === 'blocking').length} blocking findings. Inspect quality_review status before deciding completion.`);
   } else lines.push('Quality review: no lifecycle record on this branch; this is unavailable evidence, not a pass.');
+  lines.push('', 'Local intelligence & activity · this process');
+  {
+    const activity = activityView();
+    if (!activity) {
+      lines.push('Activity tap unavailable in this process; counts below come from retained entries only. Offline detail: scripts/read-health-log.mjs over ~/.pi/agent/logs/health.');
+    } else {
+      const ev = activity.events, dec = activity.decisions;
+      const split = (kind: string) => Object.entries(dec[kind] ?? {}).map(([k, v]) => `${k} ${v}`).join(', ');
+      const routed = ev['skill.route'] ?? 0, resolved = ev['skill.resolve'] ?? 0;
+      lines.push(`Skills: routed ${number(routed)} suggestion${routed === 1 ? '' : 's'} (${metrics.skillsRouted.slice(0, 8).join(', ') || 'none recorded'}); fully read ${metrics.skillsRead.length} (${metrics.skillsRead.slice(0, 8).join(', ') || 'none recorded'}); spawn-resolved ${number(resolved)}${split('skill.resolve') ? ` (${split('skill.resolve')})` : ''}.`);
+      lines.push(`Local helpers: intent ${number(ev['ml.intent'] ?? 0)} · mini select ${number(ev['ml.mini.select'] ?? 0)}${split('ml.mini.select') ? ` (${split('ml.mini.select')})` : ''} · smol take ${number(ev['ml.smol.take'] ?? 0)}${split('ml.smol.take') ? ` (${split('ml.smol.take')})` : ''} · guidance delivered ${number(ev['guidance.delivered'] ?? 0)}.`);
+      const localRows = Object.entries(activity.local).map(([k, v]) => `${k}: ${v.outcome} ×${v.count}`);
+      const picks = ev['model.mix'] ?? 0, skipped = ev['model.skip'] ?? 0;
+      lines.push(`Local providers: ${localRows.join(' · ') || 'no refresh observed yet'}. Mixer: ${number(picks)} mixed pick${picks === 1 ? '' : 's'}${split('model.mix') ? ` (${split('model.mix')})` : ''}; ${number(skipped)} preferred skip${skipped === 1 ? '' : 's'}${Object.entries(activity.skips).map(([k, v]) => ` ${k} ${v}`).join(',') || ''}.`);
+      const delivered = ev['reminder.delivery'] ?? 0;
+      lines.push(`Reminders: ${number(delivered)} manual deliver${delivered === 1 ? 'y' : 'ies'}${delivered && dec['reminder.ack'] ? ` · acked ${dec['reminder.ack']['acked'] ?? 0} / ignored ${dec['reminder.ack']['ignored'] ?? 0}` : ''}${dec['reminder.follow'] ? ` · follow-through: ${split('reminder.follow')}` : ''}. Indicator lines shown: ${number(activity.lines)}${activity.dropped ? ` (${number(activity.dropped)} deduped/over budget)` : ''}.`);
+      if (activity.errors.length) lines.push(`Recent activity errors: ${activity.errors.slice(-4).map(e => `${e.kind} ${e.label}${e.detail ? ` (${e.detail})` : ''}`).join(' · ')}.`);
+    }
+  }
   lines.push('', 'Hook health · all retained entries');
   if (metrics.telemetry) {
     const hooks = Object.entries(metrics.hooks).sort(([, a]: any, [, b]: any) => b.errors - a.errors || b.ms - a.ms);

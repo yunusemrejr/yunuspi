@@ -69,8 +69,10 @@ export function registerLocalModels(pi:any,agentDir:string):string[] {
             catch(error:any){if(error.status!==404)throw error;data=await get('/api/v0/models');}
           } else data=await get('/api/ps');
           const next=mapLocalModels(id,data,config);if(ctx.signal?.aborted)return cache;
-          cache=next;last=Date.now();return cache;
-        } catch { if(!ctx.signal?.aborted){cache=[];last=Date.now();}return cache; }
+          cache=next;last=Date.now();
+          try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'ok',count:next.length});}catch{}
+          return cache;
+        } catch { if(!ctx.signal?.aborted){cache=[];last=Date.now();try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
       };
       pending=work();try{return await pending;}finally{pending=undefined;}
     };
