@@ -11,7 +11,7 @@ sudo apt-get update
 sudo apt-get install -y git curl ca-certificates bash tar gzip util-linux ripgrep python3 build-essential bubblewrap
 ```
 
-Install Node.js 24 or later and its matching npm from a trusted Node distribution or version manager. Check `node --version` and `npm --version`. Use a user-writable npm installation; avoid running the harness or installer with sudo.
+Install Node.js 22.19 or later and its matching npm from a trusted Node distribution or version manager. Node.js 24 or later is recommended and is the version used by public CI. Check `node --version` and `npm --version`. Use a user-writable npm installation; avoid running the harness or installer with sudo.
 
 ## Review and install
 
@@ -51,7 +51,7 @@ Select a model actually available to your account before starting work. Catalog 
 
 ## Harness maintenance authority
 
-Start ordinary tasks in their project directory. Those sessions cannot use guarded write/edit or executable tools to modify the active harness. Maintenance requires a new human-started Pi session in `~/.pi` or an ancestor. Child agents and later directory changes do not grant maintenance authority. Keep ordinary projects outside `~/.pi`; launching from your home directory intentionally grants broad maintenance authority.
+Start ordinary tasks in their project directory. Those sessions cannot use guarded write/edit or executable tools to modify the active harness. Maintenance requires a new human-started Pi session whose process starts inside the active harness root (`~/.pi` in the standard installation) or one of its descendants. Starting Pi from the home directory, `/`, or another parent/sibling directory does not grant maintenance authority. Child agents and later directory changes do not grant it either. Keep ordinary projects outside `~/.pi` so project sessions remain outside the maintenance boundary.
 
 The eight utility inspection tools start automatically in one local
 `yunuspi-utility-mcp` process per session, including built-in helper sessions.

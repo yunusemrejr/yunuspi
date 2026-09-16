@@ -4,6 +4,16 @@ Never initialize Git in the live `~/.pi` directory. Never publish a private back
 
 The public exporter reads only reusable extensions, skills, runtime scripts, explicitly listed synthetic core compatibility checks and dependency manifests. It excludes live settings/authentication, provider caches, histories, memories, logs, sessions, experiments, private benchmark fixtures, backups, node_modules, model weights and environments. It substitutes the source fallback credential with an environment lookup and normalizes personal home-path examples. The working local installation is not modified.
 
+## Release identity
+
+YunusPi is distributed as source rather than as a published npm package, so Git history and package metadata serve different purposes. The full Git commit SHA is the authoritative identity of a development build; `main`, branch names, dates and words such as "latest" are moving references. The root `package.json` version describes the current compatibility/release line and does not by itself mean a GitHub Release exists. Keep its `package-lock.json` and `release-template` copies synchronized.
+
+The Pi core has an independent version and compatibility lifecycle. A YunusPi source revision may require a particular `@earendil-works/pi-coding-agent` version; compatibility is established by the patch verifier and isolated update gate, not by the YunusPi version number. Locally maintained extension forks likewise retain upstream lineage versions, which are not YunusPi release identifiers.
+
+Normal publication to `main` does not create a formal release. When a release is intentionally cut, update the root package version and lockfile plus their synchronized `release-template` copies in the same reviewed change, place an immutable `vMAJOR.MINOR.PATCH` tag on the exact tested commit, and create the matching GitHub Release with release notes. Never move an existing release tag to different source bytes. Commits after a release remain development revisions until another release is deliberately cut.
+
+Use Semantic Versioning according to intended public behavior, not commit count or calendar age: patch for compatible fixes, documentation/test corrections and internal reliability work with no intentional public-contract change; minor for new user-visible capabilities or meaningful behavior/compatibility changes while the project remains pre-1.0; major only when an explicitly stabilized public contract later receives an incompatible change. Feature branches, PR numbers, CI run numbers, private installation state and generated capability counts are not versions. Mutable counts should remain code-owned rather than copied into prose.
+
 ## Export changes
 
 Use a fresh staging directory:

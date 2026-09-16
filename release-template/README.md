@@ -10,7 +10,7 @@ YunusPi extends Pi with code inspection, browser and media tools, project memory
 
 The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
 
-[Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Security](docs/SECURITY.md)
+[Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
 ## How a session works
 
@@ -97,6 +97,8 @@ Both screenshots use synthetic fixtures. [Screenshot provenance](docs/SCREENSHOT
 Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installer preview, dependency setup, the pinned Pi core, patch verification and provider login. The full harness targets Linux. Windows uses WSL2; macOS can use a Linux VM. Native macOS limitations are documented, and native Windows support is not claimed.
 
 This is a source distribution with maintained extensions and version-sensitive core patches. Stop active Pi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
+
+For development snapshots, the exact source identity is the Git commit SHA; package metadata identifies the compatibility/release line rather than every commit. Formal tags, GitHub Releases and package metadata move together only when a release is intentionally cut. [Release and versioning policy](docs/PUBLISHING.md#release-identity)
 
 The public repository contains reusable code and clean configuration examples. Accounts, sessions, memories, private settings and local model environments stay on your machine. Private harness backups can contain credentials; never publish them or conversation exports. [Public release procedure](docs/PUBLISHING.md)
 

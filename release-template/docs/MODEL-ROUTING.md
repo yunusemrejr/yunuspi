@@ -43,6 +43,8 @@ planning respawns. An exhausted budget cannot become a fresh attempt merely
 because the child also returned `ok:false`; ordinary retryable failures retain
 their existing bounded recovery policy.
 
+Terminal `length` stops caused by a child output limit are treated as budget/output-limit faults, not evidence that the underlying model or serving route is unhealthy, so that stop alone does not add a model exclusion or provider cooldown. Likewise, a `not found` response for a harness-composed thinking-suffixed model ID is attributed to the composed ID rather than the healthy base route; a bare-model `not found` response can still be route-health evidence.
+
 Provider errors that identify an invalid request, invalid parameters or an
 unsupported parameter fail without resending the same payload, including router
 wrappers that say “Provider returned error.” Both the installed SDK and CLI use

@@ -9,10 +9,12 @@ the normal configuration contains no third-party extension packages to update.
 The updater installs a candidate with npm lifecycle scripts disabled. Bubblewrap
 exposes it at the expected core path in a private filesystem, process and network
 namespace. The existing core, harness files and configured skills remain
-read-only there. Patch repair, full extension loading and eleven synthetic
-offline compatibility suites must pass before activation. These checks ship in
-`agent/scripts/compatibility`; private benchmarks and sessions are excluded.
-No paid inference is used. Missing checks or unavailable isolation fail the update.
+read-only there. Patch repair, full extension loading and every synthetic offline
+compatibility suite listed by `agent/scripts/lib/core-compatibility.mjs` must pass
+before activation. The suite list is code-owned so documentation does not drift
+when checks are added or retired. These checks ship in `agent/scripts/compatibility`;
+private benchmarks and sessions are excluded. No paid inference is used. Missing
+checks or unavailable isolation fail the update.
 
 The launcher holds a shared session lock for the process lifetime. Updates and
 patch repair require the exclusive lock: maintenance defers during sessions,

@@ -1,6 +1,6 @@
 # Native delegation and independent file checks
 
-Project sessions use native children, parallel `tasks`, or sequential `chain`. The JavaScript `workflowScript` host remains limited to harness maintenance sessions. A denied workflow creates no mission or child and explains the native fallback. Native composites require `async:true`; foreground execution supports one child.
+Project sessions use native children, parallel `tasks`, or sequential `chain`. The JavaScript `workflowScript` host remains limited to harness maintenance sessions. A denied workflow creates no mission or child and explains the native fallback. Native composites require `async:true`; foreground execution supports one child. If a foreground child reaches launch with its parent cancellation signal already aborted, the executor records a stopped result before context assembly and does not spawn the child, avoiding work that cannot be consumed.
 
 Send the common requirements once, with short assignments per child:
 
