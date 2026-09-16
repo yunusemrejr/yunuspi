@@ -141,7 +141,11 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
     || executable === 'npx' && /^(?:--no-install )?(?:vitest|jest|mocha)(?: |$)/.test(body)
     || /^(?:python\d?(?:\.\d+)?)$/.test(executable) && /^-m (?:pytest|unittest)(?: |$)/.test(body)
     || /^(?:cargo|go|dotnet|mvn|gradle|gradlew|swift)$/.test(executable) && /^test(?: |$)/.test(body)
-    || /^node(?:js)?$/.test(executable) && (tokens.includes('--test') || tokens.slice(1).some(t => /(?:^|\/)[^/]*(?:test|spec)[^/]*\.[cm]?[jt]s$/.test(t))) && !tokens.some(t => ['-e', '--eval', '-p', '--print', '--check', '-c'].includes(t));
+    || /^node(?:js)?$/.test(executable) && (tokens.includes('--test') || tokens.slice(1).some(t => /(?:^|\/)[^/]*(?:test|spec)[^/]*\.[cm]?[jt]s$/.test(t))) && !tokens.some(t => ['-e', '--eval', '-p', '--print', '--check', '-c'].includes(t))
+    // `php -l <file>` is the PHP analogue of the admitted `bash -n` syntax
+    // check: without it, PHP-site sessions can never produce check receipts,
+    // the need stays unresolved forever, and automatic reviews stay off.
+    || /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && tokens[1] === '-l' && tokens.length > 2 && tokens.slice(2).every(t => !t.startsWith('-'));
   if (!runner && !declared) return { reason: 'not a recognized test runner; declare it explicitly in an assessment plan to use it' };
   return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: `${executable} check` } };
 }

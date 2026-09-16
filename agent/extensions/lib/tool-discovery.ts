@@ -172,6 +172,7 @@ export function registerToolDiscovery(pi: any) {
     description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
     promptGuidelines:[
       'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
+      'Before browser/screenshot/DOM work, web research, jq/python data reads, or past-session/memory questions, call tool_search first with enable:true: the right tool is usually already installed but off-wire.',
     ],
     parameters:Type.Object({
       kind:Type.Optional(Type.Union([

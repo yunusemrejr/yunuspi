@@ -47,7 +47,9 @@ export function miniPotentialSavings(raw:string,task=""):number {
 }
 // Context capacity still matters on cheap/free main routes. At this threshold
 // the existing ten-second single-flight worker limit bounds local CPU use.
-const usefulContextSaving = (saved:number, total:number) => saved >= 1024 && saved / total >= .35;
+// .25 (was .35): on cheap/free routes the dollar gate can never pass, so the
+// ratio floor is the only path — and 35% admitted nothing all day (0 hits).
+const usefulContextSaving = (saved:number, total:number) => saved >= 1024 && saved / total >= .25;
 async function loadRuntime():Promise<Runtime|undefined>{
  if(process.env.PI_MINI_PREPROCESSOR==='off')return;
  let handle;try{

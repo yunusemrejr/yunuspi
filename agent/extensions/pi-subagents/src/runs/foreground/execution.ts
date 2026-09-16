@@ -2426,6 +2426,13 @@ export async function runSync(
 	const lifecycle=(status: "running" | "completed" | "failed" | "stopped" | "paused")=>{
 		try { options.onLifecycle?.(status); } catch { /* Telemetry must not change execution. */ }
 	};
+	if (options.signal?.aborted) {
+		// Dead-on-arrival launches must not spawn: the child would load full
+		// context and then be killed (observed: most signaled-run spend buys
+		// nothing). Skip before context assembly with an honest stopped row.
+		lifecycle("stopped");
+		return { index: 0, agent: agentName, task, exitCode: 0, stopped: true, error: "Subagent launch skipped: parent signal was already aborted.", usage: emptyUsage(), messages: [], modelAttempts: [], attemptedModels: [] };
+	}
 	let detachedReason: string | undefined;
 	let publishedReceipt: SingleResult | undefined;
 	let activeDetachAttempt: ((reason?: string) => boolean) | undefined;

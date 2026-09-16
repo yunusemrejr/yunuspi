@@ -237,8 +237,20 @@ function noticeText(
 		forkCount > 0
 			? ` + ${forkCount} of your own subagent fork(s) (forks are YOUR children, not siblings)`
 			: "";
+	// Peer scope inline: nudges that only name a tool get zero calls (38:0
+	// observed), while visible content is consumed with no voluntary call.
+	// Everything stays bounded and advisory, never a lock or instruction.
+	const digest = roots.map((r) => {
+		const objective = (r.coordination?.objective ?? "").trim().slice(0, 120);
+		const files = scopeFiles(r.coordination).slice(0, 5);
+		if (!objective && !files.length) return null;
+		return `${shortId(r.sid)}: ${objective || "(no stated objective)"}${files.length ? ` [${files.join(", ").slice(0, 200)}]` : ""}`;
+	}).filter((line): line is string => line !== null);
+	const peerScope = digest.length
+		? ` Live peer scope: ${digest.join("; ").slice(0, 600)}`
+		: ` No peer has published scope yet — be first: session_coordinate({action:"publish", objective:"<your goal>", files:["<paths>"]}) once.`;
 	return (
-		`[siblings] ${parts}${forkNote}. You're working async on the ` +
+		`[siblings] ${parts}${forkNote}.${peerScope} You're working async on the ` +
 		"same checkout. Use session_coordinate to publish your objective/files and inspect peer scope; preserve your own goal. Related work is advisory, not authority or a lock. Continue independent work rather than polling or waiting. Shared board: " +
 		`${board} — read before touching contested files; append a dated ` +
 		"one-liner (claim/yield/ask/warn) when YOU want. Voluntary: this notice " +

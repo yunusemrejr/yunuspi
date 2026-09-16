@@ -20,7 +20,7 @@ export function planAssistance(prompt: string, project = false): AssistancePlan 
  if (/\b(?:do not|don't|never)\s+(?:delegate|use\s+(?:subagents?|swarms?|fusion))\b|\bno\s+(?:subagents?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i.test(text)) return none("explicit delegation constraint");
  if (/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)/i.test(text)) return none("explicit route/tool restriction");
  if (text.length < 35 || /\b(?:typo|spelling|rename|one.line)\b/i.test(text) && !/\b(?:debug|investigate|audit)\b/i.test(text)) return none("coordination exceeds useful work");
- if (!/\b(?:review|debug|research|compare|implement|investigate|audit|refactor|refine|optimize|design|build|fix|analy[sz]e|improve|verify|test)\b/i.test(text)) return none("no independent work identified");
+ if (!/\b(?:review|debug|research|compare|implement|investigate|audit|refactor|refine|optimize|design|build|fix|analy[sz]e|improve|verify|test|deploy|release|publish|migrat(?:e|ion))\b/i.test(text)) return none("no independent work identified");
  const alternatives = /\b(?:compare|alternatives|trade.?offs|competing|choose between|architecture|design decision)\b/i.test(text);
  const broad = /\b(?:multiple|cross.service|cross.file|end.to.end|migration|subsystems|frontend and backend|independent review)\b/i.test(text)
   || /\bcorrectness\b/i.test(text) && /\bconcurrency\b/i.test(text)

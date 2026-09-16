@@ -13,7 +13,12 @@ const {projectCheckCommand,createProjectTestLifecycle}=await import(pathToFileUR
 
 test('PHP test scripts are recognized without treating lint, application scripts or masked exits as tests',()=>{
  for(const command of ['php tests/run-tests.php','php -f tests/run-tests.php','php8.3 tests/regression.php']) assert.ok(projectCheckCommand(command,'/project'),command);
- for(const command of ['php -l tests/run-tests.php','php -r "echo 1;"','php index.php','php tests/run-tests.php || true','php tests/run-tests.php; echo done']) assert.equal(projectCheckCommand(command,'/project'),null,command);
+ // Contract change 2026-09-16: `php -l <file>` admitted as an auto-observed
+ // syntax check (the PHP analogue of declared `bash -n`; its argv cannot hide
+ // composition the way shell argv can). Without it, PHP-site sessions can
+ // never produce check receipts and the checkpoint need never resolves.
+ assert.ok(projectCheckCommand('php -l tests/run-tests.php','/project'),'php -l tests/run-tests.php');
+ for(const command of ['php -r "echo 1;"','php index.php','php tests/run-tests.php || true','php tests/run-tests.php; echo done']) assert.equal(projectCheckCommand(command,'/project'),null,command);
 });
 
 test('a PHP check observed before its coverage assessment does not cause a redundant completion follow-up',async t=>{

@@ -2702,13 +2702,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 449,
+        "line": 453,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 423,
+        "line": 428,
         "kind": "literal"
       },
       {
@@ -2744,7 +2744,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 572,
+        "line": 584,
         "kind": "literal"
       },
       {
@@ -2756,7 +2756,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 600,
+        "line": 606,
         "kind": "literal"
       },
       {
@@ -3030,13 +3030,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 449,
+        "line": 453,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 423,
+        "line": 428,
         "kind": "literal"
       },
       {
@@ -3072,7 +3072,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 572,
+        "line": 584,
         "kind": "literal"
       },
       {
@@ -3084,7 +3084,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 600,
+        "line": 606,
         "kind": "literal"
       },
       {

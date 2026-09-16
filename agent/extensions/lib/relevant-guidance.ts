@@ -142,6 +142,11 @@ export function createRelevantGuidance(pi: any) {
     if (reviewMode() !== 'advisory' || skillReviewDisabled || hint.key.startsWith('signal:') || operationalGuidance.has(hint.key)) return hint;
     const kind = hint.skill ? 'workflow' : hint.tool ? 'capability' : undefined;
     if (!kind) return hint;
+    // Rank-derived and async-discovery skill hints keep their concrete
+    // identity: rewriting them into the shared one-shot discovery topic
+    // silently dropped every computed rank (600 ranks → 0 delivered). The
+    // discovery marker is preserved so delivery accounting still applies.
+    if (hint.key.startsWith('skillctx:')) return {...hint, discovery: kind};
     if (advisoryDiscoveryDelivered.has(kind)) return undefined;
     const tool = kind === 'workflow' ? 'skill_review' : 'tool_search';
     // A limited child/session may not expose the discovery surface. Preserve
@@ -158,8 +163,9 @@ export function createRelevantGuidance(pi: any) {
     }
     const skill = kind === 'workflow' ? skills.find(skill => skill.file === hint.skill) : undefined;
     const summary = (text: string, limit: number) => text.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+    const tracked = skill && reviewTargets.has(skill.file);
     const text = skill
-      ? `Optional workflow: ${JSON.stringify(skill.name)} — ${JSON.stringify(summary(hint.reason ?? skill.description, 180))}. Read ${JSON.stringify(skill.file)} if useful; no review step is required.`
+      ? `Optional workflow: ${JSON.stringify(skill.name)} — ${JSON.stringify(summary(hint.reason ?? skill.description, 180))}. Read ${JSON.stringify(skill.file)} if useful; ${tracked ? 'skill_review({action:"inspect"}) lists its tracked checks.' : 'no review step is required.'}`
       : kind === 'workflow'
         ? 'Optional workflow discovery: skill_review can search installed workflows if useful for the current step.'
         : `Optional capability (${JSON.stringify(hint.tool)}): ${summary(hint.text, 420)} ${active.has(hint.tool!) ? 'Use only if useful; no extra call is required.' : `If useful, preview tool_search({query:${JSON.stringify(hint.tool)}}) to check this session's availability.`}`;

@@ -519,10 +519,12 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			try { if (scopeRequest(prompt, branch)) return; } catch { /* existing helper gates remain authoritative */ }
 		}
 		// Prefer the smaller observation-driven skill scout over a generic single
-    // investigator when a skill catalog exists. Broad teams keep their role;
-    // the shared group budget still prevents stacking automatic helpers.
+    // investigator when a skill actually claims the prompt. Catalog existence
+    // alone vetoed every single-role plan (the catalog is always present),
+    // silently dropping fix/debug tasks no skill matches. Broad teams keep
+    // their role; the shared group budget still prevents stacking helpers.
     if (!['off','0'].includes(process.env.PI_SKILL_DISCOVERY ?? 'on')
-      && /<available_skills>[\s\S]*?<skill>/.test(String(event.systemPrompt ?? ''))
+      && routeSkills(prompt).length > 0
       && !/\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(prompt)
       && planAssistance(prompt).roles.length === 1) return;
 		// Follow-up interpretation sidecar (main-agent first): an unclear

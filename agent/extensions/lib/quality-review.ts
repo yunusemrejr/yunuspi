@@ -192,7 +192,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     // Trivial formatting/lint/cleanup work never earns an automatic review.
     // Deliberate quality_review({action:"review"}) always stays available.
     if (automatic && isTrivialChangeRequest(task, changed)) return summary();
-    if (!enabled() || !active || paused || !changed.length || disposition || reviewed === revision || rounds >= REVIEW_LIMITS.rounds) return summary();
+    // An infra-blocked round (no assessment returned) must not poison later
+    // revisions: only a real assessment settles the turn. Same-revision
+    // settle-once is preserved (reviewed gate untouched); the rounds cap
+    // still bounds total attempts.
+    const infraBlocked = disposition === 'blocked' && reason.startsWith('Independent review unavailable:');
+    if (!enabled() || !active || paused || !changed.length || (disposition && !infraBlocked) || reviewed === revision || rounds >= REVIEW_LIMITS.rounds) return summary();
     if (busy) return busy;
     const ticket = generation, rev = revision;
     const own = new AbortController(); controller = own;
