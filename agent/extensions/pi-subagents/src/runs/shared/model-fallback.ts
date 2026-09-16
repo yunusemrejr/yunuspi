@@ -903,8 +903,28 @@ export function isRetryableModelFailureAttempt(input: { error: string | undefine
 
 export function recordRetryableModelFailure(model: string | undefined, error: string | undefined): void {
 	if (!model || !isRetryableModelFailure(error)) return;
+	// A "not found" failure for a thinking-suffixed ID indicts the harness
+	// composition, not the provider: the base model was selected from the
+	// live registry, so only our appended suffix can be unknown. Excluding
+	// the healthy base model for our bad ID is never correct — warn loudly
+	// instead. Bare-ID 404s still record (stale catalog entries must cool
+	// off so dispatch stops proposing them).
+	if (isHarnessComposedIdFailure(model, error)) {
+		warnOnceEconomy(model, "harness-composed-id", `[pi-subagents] NOT excluding ${model}: "not found" for a thinking-suffixed ID is a harness composition failure, not a provider failure (${(error ?? "").slice(0, 160)})`);
+		noteHealth("model.skip", { route: splitThinkingSuffix(model).baseModel || model, outcome: "suffix-404" });
+		return;
+	}
 	const { provider, modelId } = parseModelKey(model);
 	recordModelFailure({ modelId, reason: error, ...(provider ? { provider } : {}) });
+}
+
+const NOT_FOUND_FAILURE = /not found|unknown model/i;
+
+function isHarnessComposedIdFailure(model: string, error: string | undefined): boolean {
+	if (!NOT_FOUND_FAILURE.test(error ?? "")) return false;
+	if (splitThinkingSuffix(model).thinkingSuffix) return true;
+	const quoted = /"([^"]+)" not found/i.exec(error ?? "")?.[1] ?? /unknown model[:\s]+(\S+)/i.exec(error ?? "")?.[1];
+	return quoted ? splitThinkingSuffix(quoted).thinkingSuffix !== "" : false;
 }
 
 /**

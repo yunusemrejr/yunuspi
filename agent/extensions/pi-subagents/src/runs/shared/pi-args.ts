@@ -270,6 +270,12 @@ export function applyThinkingSuffix(
 	replaceExisting = false,
 ): string | undefined {
 	if (!model || !thinking) return model;
+	// "off" (and its "none" alias) is the absence of thinking: the
+	// thinkingLevelMap maps it to null = no suffix. Emitting a literal
+	// ":off" produces model IDs the child resolver rejects ("Model X:off
+	// not found") on several providers, which then wrongly excludes the
+	// healthy base model. Strip instead of appending.
+	if (thinking === "off" || thinking === "none") return replaceExisting ? stripThinkingSuffix(model) : model;
 	const colonIdx = model.lastIndexOf(":");
 	if (
 		colonIdx !== -1 &&
