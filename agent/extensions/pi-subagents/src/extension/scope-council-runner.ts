@@ -289,6 +289,27 @@ function resultRow(result: any): any | undefined {
 	return rows[0];
 }
 
+/** The raw single executor row regardless of outcome, for accounting. The
+ * strict row above is undefined for any imperfect run, which used to discard
+ * the categorized failure (exit code, signal, usage) into "unknown". */
+function rawResultRow(result: any): any | undefined {
+	const rows = Array.isArray(result?.details?.results) ? result.details.results : [];
+	return rows.length === 1 ? rows[0] : undefined;
+}
+
+/** Bounded excerpt of the underlying launch failure for gap text. Executor
+ * failures surface as content text or row error strings; without this the
+ * gap only says a peer "failed", which is undiagnosable. */
+function failureSuffix(result: any, row: any): string {
+	const contentText = Array.isArray(result?.content)
+		? result.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n")
+		: undefined;
+	const excerpt = [result?.error, result?.message, result?.details?.error, contentText, typeof row?.error === "string" ? row.error : undefined]
+		.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+		.map(value => value.replace(/\s+/g, " ").trim().slice(0, 180))[0];
+	return excerpt ? ` Underlying failure: ${excerpt}` : "";
+}
+
 async function boundedAwait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 	let abort: (() => void) | undefined;
 	try {
@@ -488,13 +509,14 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				row = resultRow(result);
+				const rawRow = rawResultRow(result);
 				const text = row ? cleanBody(row, phase === "peer-critique" ? limits.discussionChars : limits.proposalChars) : "";
 				if (!row || !text) {
 					if (current()) {
 						appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", row);
-						appendCost(pi, sessionFile, runId, row, signal.aborted ? "stopped" : "failed");
+						appendCost(pi, sessionFile, runId, rawRow ?? row, signal.aborted ? "stopped" : "failed");
 					}
-					return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : "This council peer failed or returned no usable advisory text." };
+					return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `This council peer failed or returned no usable advisory text.${failureSuffix(result, rawRow)}` };
 				}
 				if (current()) {
 					appendLifecycle(pi, runId, "completed", row);

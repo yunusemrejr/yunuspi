@@ -903,6 +903,16 @@ export function isRetryableModelFailureAttempt(input: { error: string | undefine
 
 export function recordRetryableModelFailure(model: string | undefined, error: string | undefined): void {
 	if (!model || !isRetryableModelFailure(error)) return;
+	// A terminal "length" stop means the harness output budget was exhausted
+	// before the model emitted text — a budget fault, never a model defect.
+	// Excluding the healthy route for 24h is never correct (2026-09-16: this
+	// removed the preferred subagent route for a full day and forced
+	// automatic assistance onto dead providers). Warn loudly instead.
+	if (/stopReason "length"/.test(error ?? "")) {
+		warnOnceEconomy(model, "length-stop", `[pi-subagents] NOT excluding ${model}: terminal "length" stop exhausts the harness output budget, not a model failure (${(error ?? "").slice(0, 160)})`);
+		noteHealth("model.skip", { route: splitThinkingSuffix(model).baseModel || model, outcome: "length-stop" });
+		return;
+	}
 	// A "not found" failure for a thinking-suffixed ID indicts the harness
 	// composition, not the provider: the base model was selected from the
 	// live registry, so only our appended suffix can be unknown. Excluding

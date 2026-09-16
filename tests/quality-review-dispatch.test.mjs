@@ -96,6 +96,13 @@ try {
   return {isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'tokens'},results:[compactForegroundResult({exitCode:1,processSignal:'SIGTERM',messages:[start,receipt],finalOutput:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 report followed a source read'],findings:[],gap:''}))})})]}};
  }});
  assert.ok((await budgetSignal.run()).every(r=>!r.ok),'a signalled child is never salvaged as a budgeted review');
+ const drainKill=fixture({models:[free('free/a')],result:async params=>{
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0] + ']');
+  return {details:{results:[compactForegroundResult({exitCode:0,processSignal:'SIGTERM',messages:[start,receipt],output:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 report preceded the post-success drain kill'],findings:[],gap:''}))})})]}};
+ }});
+ const drainResults=await drainKill.run();
+ assert.ok(drainResults.every(r=>r.ok),'post-success final-drain SIGTERM keeps the validated report');
+ assert.equal(drainKill.entries.at(-1).data.state,'completed','drain-after-success records completed lifecycle');
  for(const text of ['No subagents.','Do not delegate.','Use only this model.','Do not change the provider.']){const restricted=fixture({branch:[{type:'message',message:{role:'user',content:text}}]});const denied=await restricted.run();assert.equal(denied.length,6);assert.ok(denied.every(r=>!r.ok && /restriction/.test(r.gap)));assert.equal(restricted.calls.length,0);}
  const costly=fixture({models:[{...free('expensive'),cost:{input:5,output:20,cacheRead:0,cacheWrite:0}}]});assert.ok((await costly.run()).every(r=>!r.ok && /economy policy/.test(r.gap)));assert.equal(costly.calls.length,0);
  const tooSmall=fixture({models:[{...free('free/a'),maxTokens:1024}]});assert.ok((await tooSmall.run()).every(r=>!r.ok && /output capacity/.test(r.gap)));assert.equal(tooSmall.calls.length,0,'do not admit reviewers unable to fit the report budget');

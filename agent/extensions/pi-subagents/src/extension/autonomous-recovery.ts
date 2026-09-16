@@ -287,7 +287,12 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				// terminal JSON. Keep that evidence available, but only through the
 				// strict source-read + assigned-envelope checks below. Ordinary wrapper
 				// errors, aborts and timeouts remain failures.
-				const childCompletedCleanly = Boolean(childResult && childResult.exitCode === 0 && !childResult.error && !childResult.processSignal && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.detached);
+				// processSignal is NOT consulted here: the executor's final-drain
+				// timer SIGTERMs children whose process lingers after a clean
+				// terminal stop, then settles them exit 0 with no error. That
+				// post-success drain kill must not fail the review; a genuine
+				// mid-run kill always carries a non-zero exit or an error.
+				const childCompletedCleanly = Boolean(childResult && childResult.exitCode === 0 && !childResult.error && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.detached);
 				const sourceReads = Number.isSafeInteger(childResult?.reviewEvidence?.sourceReads) ? childResult.reviewEvidence.sourceReads : 0;
 				const body = childResult ? automaticHelperBody(childResult, {maxChars:30001}) : '';
 				let parsed: any;
@@ -300,8 +305,8 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				}
 				const assignedEnvelopeComplete = Boolean(parsed && Array.isArray(parsed.reviews) && assigned.every((a:any) => parsed.reviews.filter((r:any)=>r && typeof r === 'object' && r.aspect === a.id).length === 1));
 				const budgetReportFinalized = budgetExhausted && !signal.aborted && children.length === 1 && Boolean(childResult) && Number.isInteger(childResult.exitCode) && !childResult.stopped && !childResult.timedOut && !childResult.interrupted && !childResult.processSignal && !childResult.detached && !childResult.protocolError && sourceReads >= 1 && assignedEnvelopeComplete;
-				const hardFailure = !owns() || signal.aborted || children.length !== 1 || !childResult || childResult.stopped || childResult.timedOut || childResult.interrupted || childResult.processSignal || childResult.detached;
-				const childFailure = Boolean(result?.isError || childResult?.exitCode !== 0 || childResult?.error || childResult?.processSignal);
+				const hardFailure = !owns() || signal.aborted || children.length !== 1 || !childResult || childResult.stopped || childResult.timedOut || childResult.interrupted || childResult.detached;
+				const childFailure = Boolean(result?.isError || childResult?.exitCode !== 0 || childResult?.error);
 				if (hardFailure || (childFailure && !budgetReportFinalized)) {
 					const gap = signal.aborted || childResult?.timedOut ? 'The reviewer reached its deadline or was cancelled.' : budgetExhausted ? `The reviewer exhausted its ${usageBudget?.reason ?? 'usage'} budget.` : 'The native reviewer failed or was unable to start; no independent assessment was returned.';
 					return pending.map(r=>({...r,gap}));

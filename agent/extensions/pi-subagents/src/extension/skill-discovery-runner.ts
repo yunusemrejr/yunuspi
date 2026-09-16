@@ -9,7 +9,7 @@ import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 
 export const SKILL_DISCOVERY_RUNNER = Symbol.for("yunus-pi.skill-discovery-runner.v1");
-export const SKILL_DISCOVERY_LIMITS = Object.freeze({ deadlineMs: 25000, tokens: 16000, costUsd: .001, briefChars: 16000, outputChars: 4000 });
+export const SKILL_DISCOVERY_LIMITS = Object.freeze({ deadlineMs: 25000, tokens: 16000, costUsd: .001, briefChars: 16000, outputChars: 4000, attempts: 3 });
 type Model = NonNullable<ExtensionContext["model"]>;
 export interface SkillDiscoveryRunnerDeps {
   launch: (id: string, params: SubagentParamsLike, signal: AbortSignal, update: undefined, ctx: ExtensionContext) => Promise<any>;
@@ -33,7 +33,7 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
     let sessionFile: string | undefined | null;
     let identity: string;
     let member: ReturnType<typeof selectAssistanceTeam>[number] | undefined;
-    let selectBackup: ((excludeRoute: string) => typeof member) | undefined;
+    let selectBackup: ((tried: ReadonlySet<string>) => typeof member) | undefined;
     try {
       if (!pi.getActiveTools?.().includes("subagent")) return;
       // Catalog descriptions and observations are evidence, not user policy.
@@ -44,13 +44,19 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       identity = JSON.stringify([ctx.cwd, ctx.sessionManager.getSessionId?.(), sessionFile]);
       if (!currentSnapshot()) return;
       const plan = { mode: "subagent" as const, roles: ["Select useful installed skills from supplied evidence"], reason: "bounded skill discovery", deadlineMs: SKILL_DISCOVERY_LIMITS.deadlineMs, maxCostUsd: SKILL_DISCOVERY_LIMITS.costUsd };
-      const selectTeam = (exclude?: string) => {
-        const base = exclude?.split(":")[0];
-        const pool = deps.available(ctx).map(toModelInfo).filter(m => m.fullId !== exclude && m.fullId !== base);
+      const selectTeam = (exclude?: ReadonlySet<string>) => {
+        const pool = deps.available(ctx).map(toModelInfo).filter(m => {
+          if (!exclude) return true;
+          for (const route of exclude) {
+            const base = route.split(":")[0];
+            if (m.fullId === route || m.fullId === base) return false;
+          }
+          return true;
+        });
         return selectAssistanceTeam(pool, loadModelEconomyConfig(), plan, { freeOnly: constraints.freeOnly, task: request.brief, minOutputTokens: 512, requiresTools: false });
       };
       [member] = selectTeam();
-      selectBackup = (excludeRoute: string) => { try { return selectTeam(excludeRoute)[0]; } catch { return undefined; } };
+      selectBackup = (tried: ReadonlySet<string>) => { try { return selectTeam(tried)[0]; } catch { return undefined; } };
       if (!member || !deps.claimBudget()) return;
     } catch { return; }
     const controller = new AbortController();
@@ -64,12 +70,18 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
     // activity indicator, completions stay in metrics, and a superseded
     // first attempt reports as "retried" (metrics only). Gate refusals
     // above stay silent by design; only a launched child reports back.
-    const note = (decision: string, info?: { result?: any; row?: any }) => {
+    const note = (decision: string, info?: { result?: any; row?: any; thrown?: unknown }) => {
       // Instant launch failures ("unknown" reason, no turns) are otherwise
       // undiagnosable: keep a bounded excerpt of the first informative
       // field so the health ring and the indicator line name the cause.
+      // Executor failures surface as content text (not .message), and launch
+      // throws (unresolvable route, cached exclusion) carry no result at all.
+      const contentText = Array.isArray(info?.result?.content)
+        ? info.result.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n")
+        : undefined;
+      const thrownMessage = info?.thrown instanceof Error ? info.thrown.message : typeof info?.thrown === "string" ? info.thrown : undefined;
       const excerpt = decision === "failed" || decision === "retried"
-        ? [info?.result?.message, info?.result?.details?.error, info?.row?.output, info?.row?.error]
+        ? [thrownMessage, info?.result?.message, info?.result?.details?.error, contentText, info?.row?.output, info?.row?.error]
           .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
           .map(value => value.replace(/\s+/g, " ").trim().slice(0, 200))[0]
         : undefined;
@@ -124,26 +136,41 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
         const ok = !signal.aborted && !result?.isError && row && row.exitCode === 0 && !row.error && !row.stopped && !row.timedOut;
         return { stale: false as const, result, row, ok, body: bodyText(row) };
       };
-      let current = await attempt();
-      if (current.stale) return;
-      // One retry on instant failure only: no output text means the child
-      // never really ran (provider hiccup), so a different member is a new
-      // attempt at the SAME unit — same runId/grant, same budget claim,
-      // same deadline — never a new flow. A child that produced text made
-      // a genuine attempt and is never retried. The superseded attempt is
-      // journaled as "retried" telemetry (metrics only, no indicator line);
-      // the final outcome alone decides the receipt and any indicator.
-      if (!current.ok && !current.body && !signal.aborted && owns()) {
-        const backup = selectBackup?.(member!.route);
-        if (backup && backup.route !== member!.route) {
-          note("retried", { result: current.result, row: current.row });
-          member = backup;
-          current = await attempt();
-          if (current.stale) return;
+      // A launch throw (unresolvable route, cached exclusion at dispatch) is
+      // the most instant failure: the child never started. Convert it into
+      // an ordinary failed attempt so the retry loop below can move to the
+      // next untried route instead of failing the whole discovery.
+      const runAttempt = async () => {
+        try { return await attempt(); }
+        catch (thrown: unknown) {
+          if (signal.aborted || !owns()) return { stale: true as const };
+          return { stale: false as const, result: undefined, row: undefined, ok: false, body: undefined, thrown };
         }
+      };
+      let current = await runAttempt();
+      if (current.stale) return;
+      // Bounded retries on instant failure only: no output text means the
+      // child never really ran (provider outage, dead credits, unresolvable
+      // route), so each untried member is a new attempt at the SAME unit —
+      // same runId/grant, same budget claim, same deadline — never a new
+      // flow. A child that produced text made a genuine attempt and is never
+      // retried. Each superseded attempt is journaled as "retried" telemetry
+      // (metrics only, no indicator line); the final outcome alone decides
+      // the receipt and any indicator.
+      const tried = new Set<string>([member!.route.split(":")[0]]);
+      let attempts = 1;
+      while (!current.ok && !current.body && !signal.aborted && owns() && attempts < SKILL_DISCOVERY_LIMITS.attempts) {
+        const backup = selectBackup?.(tried);
+        if (!backup || tried.has(backup.route.split(":")[0])) break;
+        note("retried", { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
+        member = backup;
+        tried.add(member.route.split(":")[0]);
+        attempts++;
+        current = await runAttempt();
+        if (current.stale) return;
       }
       const terminal = signal.aborted ? "stopped" : current.ok ? "completed" : "failed";
-      receipt(terminal, current.row); note(terminal, { result: current.result, row: current.row });
+      receipt(terminal, current.row); note(terminal, { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
       if (!current.ok) return;
       const body = current.body;
       // Never truncate a JSON value into a different or malformed selection.

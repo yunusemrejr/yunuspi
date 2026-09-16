@@ -198,4 +198,32 @@ test('instant failure retries once on a different member; genuine attempts and l
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
 });
 
+test('consecutive instant failures walk distinct routes up to the attempt bound', async () => {
+  const key = Symbol.for('yunus-pi.health.v1');
+  const prior = globalThis[key]; const seen = [];
+  globalThis[key] = (kind, data) => seen.push({ kind, data });
+  try {
+    free.publishFreeEvidence([{ id: 'free/text-only', pricing: { prompt: '0', completion: '0' }, capabilities: { toolCalling: false, contextWindow: 65536, maxTokens: 8192 } }, { id: 'free/discovery', pricing: { prompt: '0', completion: '0' }, capabilities: { toolCalling: true, contextWindow: 65536, maxTokens: 8192 } }, { id: 'free/third', pricing: { prompt: '0', completion: '0' }, capabilities: { toolCalling: false, contextWindow: 65536, maxTokens: 8192 } }], free.FREE_CATALOG_URL);
+    const modelB = { ...model, id: 'free/text-only' };
+    const modelC = { ...model, id: 'free/third' };
+    let n = 0;
+    const f = fixture({ models: [model, modelB, modelC], launch: async () => (++n <= 2 ? { isError: true, message: `instant failure ${n}` } : result('{"skills":["x"]}')) });
+    assert.equal(await f.runner({ brief: 'Select a supplied skill from the observed evidence.' }, f.ctx), '{"skills":["x"]}');
+    assert.equal(f.calls.length, 3, 'two instant failures then success on the third route');
+    assert.equal(new Set(f.calls.map(c => c[1].model)).size, 3, 'every attempt uses a distinct route');
+    assert.equal(seen.filter(e => e.kind === 'skill.discovery' && e.data.decision === 'retried').length, 2);
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'completed'));
+    let m = 0;
+    const g = fixture({ models: [model, modelB, modelC], launch: async () => ({ isError: true, message: `dead ${++m}` }) });
+    assert.equal(await g.runner({ brief: 'Select a supplied skill from the observed evidence.' }, g.ctx), undefined);
+    assert.equal(g.calls.length, 3, 'bounded by the attempt limit when every route fails');
+    assert.equal(seen.filter(e => e.kind === 'skill.discovery' && e.data.decision === 'failed').at(-1).data.error, 'dead 3', 'final failure names the last cause');
+    let t = 0;
+    const h = fixture({ models: [model, modelB], launch: async () => { if (++t === 1) throw new Error('route unresolvable at dispatch'); return result('{"skills":[]}'); } });
+    assert.equal(await h.runner({ brief: 'Select a supplied skill from the observed evidence.' }, h.ctx), '{"skills":[]}');
+    assert.equal(h.calls.length, 2, 'a launch throw retries instead of abandoning discovery');
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'retried' && e.data.error === 'route unresolvable at dispatch'));
+  } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
 after(() => { delete globalThis[SKILL_DISCOVERY_RUNNER]; for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } fs.rmSync(root, { recursive: true, force: true }); });

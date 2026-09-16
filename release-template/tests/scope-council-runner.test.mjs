@@ -213,6 +213,20 @@ test('the generic proactive helper yields to the automatic scope council trigger
   assert.equal(launches.length,0);
 });
 
+test('failed peers keep the categorized row and name the underlying failure',async()=>{
+  const entries=[];
+  const pi={getActiveTools:()=>['subagent'],appendEntry:(customType,data)=>entries.push({customType,data})};
+  registerScopeCouncilRunner(pi,{launch:async()=>({isError:true,message:'402: credit limit exceeded',details:{results:[{exitCode:1,error:true,usage:{input:5,output:0,cacheRead:0,cacheWrite:0,cost:0,turns:1}}]}}),available:()=>models,constraints:()=>({})});
+  const runner=globalThis[SCOPE_COUNCIL_RUNNER];
+  const output=await runner({task,graph:'src/widget.ts owns the widget behavior.',history:{evidence:[]}},context(),new AbortController().signal);
+  assert.equal(output.status,'unavailable');
+  assert.match(output.gap,/Underlying failure: 402: credit limit exceeded/,'gap names the cause instead of only "failed"');
+  const costs=entries.filter(e=>e.customType==='subagent-cost-v1'&&e.data.state==='failed');
+  assert.ok(costs.length>=1,'failed peers persist cost rows');
+  assert.equal(costs[0].data.results[0].exitCode,1,'raw executor row survives instead of a generic placeholder');
+  assert.equal(costs[0].data.results[0].usage.input,5,'usage survives for accounting');
+});
+
 process.on('exit',()=>{
   for(const [key,value] of Object.entries(environment)){if(value===undefined) delete process.env[key]; else process.env[key]=value;}
   fs.rmSync(root,{recursive:true,force:true});
