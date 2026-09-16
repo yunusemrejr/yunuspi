@@ -945,9 +945,11 @@ export function searchCapabilities(input: CapabilityQuery = {}): CapabilityPage 
 				if (record.summary.toLowerCase().includes(term)) score += 40;
 			}
 			// Natural-language searches often include a qualifier that is not
-			// present in a concise record.  Return useful lexical matches when at
-			// least one term is grounded; an entirely unknown query stays empty.
-			if (terms.length && matchedTerms === 0) return undefined;
+			// present in a concise record. Multi-term queries must still ground
+			// at least two terms: a single generic match (update/system/install)
+			// otherwise returns junk with confidence. Single-term lookups and
+			// entirely unknown queries keep the one-match and empty rules.
+			if (terms.length && matchedTerms < (terms.length > 1 ? 2 : 1)) return undefined;
 			if (terms.length) score += matchedTerms * 100;
 			return { record, score, index };
 		})

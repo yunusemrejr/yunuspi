@@ -1031,6 +1031,7 @@ test("rounds with no dispatched reviewer are refunded, not charged", async (t) =
  await f.tool({ action: "review" });
  await f.tool({ action: "review" });
  assert.equal(f.state().rounds, 0);
+ assert.equal(f.state().refunded, 2);
  assert.equal(f.state().status, "pending");
 });
 

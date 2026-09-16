@@ -114,10 +114,12 @@ function reduceTaskMutation(
 						return errorResult(state, `blockedBy: #${dep} is deleted`);
 				}
 			}
+			if (params.status !== undefined && !isTransitionValid("pending", params.status))
+				return errorResult(state, `illegal initial status ${params.status}`);
 			const newTask: Task = {
 				id: state.nextId,
 				subject: params.subject,
-				status: "pending",
+				status: params.status ?? "pending",
 			};
 			if (params.description) newTask.description = params.description;
 			if (params.activeForm) newTask.activeForm = params.activeForm;
@@ -279,16 +281,36 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
  if (action === "batch") {
   if (!Array.isArray(params.operations) || !params.operations.length || params.operations.length > 32) return errorResult(state, "batch requires 1..32 operations");
   let next = state; const ids: Record<string, number> = {};
-  const resolve = (id: number) => id < 0 ? ids[String(id)] ?? id : id;
+  // A negative id that matches no alias declared earlier in this batch is a
+  // caller error, not a positive-id violation: say which alias is missing and
+  // how to declare it instead of failing later with a contradictory message.
+  const resolveRef = (id: number): number | undefined => id < 0 ? ids[String(id)] : id;
+  const aliasError = (field: string, id: number, index: number) => errorResult(state, `batch operation ${index+1}: ${field} ${id} matches no earlier batch alias; add "id": ${id} to the referenced create in this batch`);
   for (const [index, input] of params.operations.entries()) {
    if (!input || !["create", "update", "delete"].includes(input.action)) return errorResult(state, `batch operation ${index+1}: unsupported action`);
    const item = {...input};
    if (item.action === "create" && item.id !== undefined) {
     if (!Number.isSafeInteger(item.id) || item.id >= 0 || ids[String(item.id)] !== undefined) return errorResult(state, "Batch create aliases must be unique negative integers");
     ids[String(item.id)] = next.nextId; delete item.id;
-   } else if (item.id !== undefined) item.id = resolve(item.id);
-   if (item.parentId != null) item.parentId = resolve(item.parentId);
-   for (const key of ["blockedBy", "addBlockedBy", "removeBlockedBy"] as const) if (item[key]) item[key] = item[key]!.map(resolve);
+   } else if (item.id !== undefined) {
+    const resolved = resolveRef(item.id);
+    if (resolved === undefined) return aliasError("id", item.id, index);
+    item.id = resolved;
+   }
+   if (item.parentId != null) {
+    const resolved = resolveRef(item.parentId);
+    if (resolved === undefined) return aliasError("parentId", item.parentId, index);
+    item.parentId = resolved;
+   }
+   for (const key of ["blockedBy", "addBlockedBy", "removeBlockedBy"] as const) if (item[key]) {
+    const deps: number[] = [];
+    for (const dep of item[key]!) {
+      const resolved = resolveRef(dep);
+      if (resolved === undefined) return aliasError(key, dep, index);
+      deps.push(resolved);
+    }
+    item[key] = deps;
+   }
    const result = applyTaskMutation(next, item.action, item);
    if (result.op.kind === "error") return errorResult(state, `batch operation ${index+1}: ${result.op.message}`);
    next = result.state;
@@ -299,8 +321,12 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
  const result = reduceTaskMutation(state, action, params);
  if (result.op.kind === "error" || result.state === state) return result;
  const graphError = planGraphError(result.state.tasks); if (graphError) return errorResult(state, graphError);
- const task = result.state.tasks.find(t => t.id === params.id);
- if (action === "update" && task && ["in_progress", "completed"].includes(task.status)) {
+ // Creates land appended, so the new task is last; updates resolve by id.
+ // Starting/completing gates (dependencies, unfinished children, acceptance
+ // evidence) apply to an initial status exactly as to a transition — a
+ // create must not bypass what an update would refuse.
+ const task = action === "create" ? result.state.tasks[result.state.tasks.length - 1] : result.state.tasks.find(t => t.id === params.id);
+ if ((action === "update" || action === "create") && task && ["in_progress", "completed"].includes(task.status)) {
   if (blockers(task, result.state.tasks).length) return errorResult(state, "Complete dependencies before starting or completing this task");
   if (task.status === "completed") {
    if (result.state.tasks.some(t => t.parentId === task.id && !["completed", "deleted"].includes(t.status))) return errorResult(state, "Complete or explicitly remove unfinished children first");

@@ -53,6 +53,20 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       catch { return false; }
     };
     const runId = `skill-discovery-${randomUUID()}`;
+    // Terminal outcomes are health-telemetry (a failed discovery surfaces as
+    // an activity indicator; completions stay in metrics). Gate refusals above
+    // stay silent by design; only a launched child reports back.
+    const note = (decision: string, info?: { result?: any; row?: any }) => {
+      // Instant launch failures ("unknown" reason, no turns) are otherwise
+      // undiagnosable: keep a bounded excerpt of the first informative
+      // field so the health ring and the indicator line name the cause.
+      const excerpt = decision === "failed"
+        ? [info?.result?.message, info?.result?.details?.error, info?.row?.output, info?.row?.error]
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .map(value => value.replace(/\s+/g, " ").trim().slice(0, 200))[0]
+        : undefined;
+      try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("skill.discovery", { decision, route: member?.route, ...(excerpt ? { error: excerpt } : {}) }); } catch { /* telemetry is optional */ }
+    };
     const receipt = (status: string, row?: any) => {
       if (!owns()) return;
       try { pi.appendEntry("subagent-lifecycle-v1", { runId, mode: "single", state: status, results: [{ index: 0, status }] }); } catch {}
@@ -94,13 +108,14 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       const rows = result?.details?.results;
       const row = Array.isArray(rows) && rows.length === 1 ? rows[0] : undefined;
       const ok = !signal.aborted && !result?.isError && row && row.exitCode === 0 && !row.error && !row.stopped && !row.timedOut;
-      receipt(signal.aborted ? "stopped" : ok ? "completed" : "failed", row);
+      const terminal = signal.aborted ? "stopped" : ok ? "completed" : "failed";
+      receipt(terminal, row); note(terminal, { result, row });
       if (!ok) return;
       const candidates = [row.finalOutput, row.output, ...(Array.isArray(row.messages) ? row.messages.slice().reverse().filter((m: any) => m?.role === "assistant").map((m: any) => Array.isArray(m.content) ? m.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("\n") : "") : [])];
       const body = candidates.filter((text: unknown) => typeof text === "string").map((text: string) => stripAcceptanceReport(text).trim()).find(Boolean);
       // Never truncate a JSON value into a different or malformed selection.
       return body && body.length <= SKILL_DISCOVERY_LIMITS.outputChars ? body : undefined;
-    } catch { receipt(signal.aborted ? "stopped" : "failed"); return; }
+    } catch { const terminal = signal.aborted ? "stopped" : "failed"; receipt(terminal); note(terminal); return; }
     finally {
       clearTimeout(timer); signal.removeEventListener("abort", abort); controller.abort();
       try { finishActivity?.(); } catch { /* UI teardown is best effort. */ }

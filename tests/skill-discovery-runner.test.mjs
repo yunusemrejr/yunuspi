@@ -158,4 +158,22 @@ test('dedicated agent omits inherited context and native request caps discovery 
   }
 });
 
+test('terminal discovery outcomes emit health telemetry; gate refusals stay silent', async () => {
+  const key = Symbol.for('yunus-pi.health.v1');
+  const prior = globalThis[key]; const seen = [];
+  globalThis[key] = (kind, data) => seen.push({ kind, data });
+  try {
+    const f = fixture({ launch: async () => ({ isError: true, message: 'provider timeout after 900ms', details: { results: [{ exitCode: 1, error: 'child-error' }] } }) });
+    assert.equal(await f.runner({ brief: 'Select a supplied skill from the observed evidence.' }, f.ctx), undefined);
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'failed'), 'failed child reports');
+    assert.equal(seen.find(e => e.kind === 'skill.discovery' && e.data.decision === 'failed').data.error, 'provider timeout after 900ms', 'launch message preserved');
+    const g = fixture();
+    assert.equal(await g.runner({ brief: 'Select a supplied skill from the observed evidence.' }, g.ctx), '{"skills":[]}');
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'completed'), 'completed child reports');
+    const refused = fixture({ denyBudget: true });
+    assert.equal(await refused.runner({ brief: 'Select a supplied skill from the observed evidence.' }, refused.ctx), undefined);
+    assert.equal(seen.filter(e => e.kind === 'skill.discovery').length, 2, 'budget refusal stays silent');
+  } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
 after(() => { delete globalThis[SKILL_DISCOVERY_RUNNER]; for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } fs.rmSync(root, { recursive: true, force: true }); });

@@ -50,6 +50,7 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "skill.read": "all",
   "skill.resolve": "all",
   "skill.rank": "all",
+  "skill.discovery": "error",
   "guidance.delivered": "all",
   "ml.intent": "all",
   "ml.mini.select": "all",
@@ -133,6 +134,14 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     if (kind === "skill.rank") {
       const score = typeof data.score === "number" && Number.isFinite(data.score) ? `score ${data.score.toFixed(2)}` : undefined;
       return { label: clean(skill || "?", 60), status: "ok", detail: score };
+    }
+    if (kind === "skill.discovery") {
+      const failure = typeof data.error === "string" ? data.error : "";
+      return {
+        label: "skill discovery",
+        status: decision === "failed" || isError ? "error" : decision === "completed" ? "ok" : "skip",
+        detail: clean(failure || route || decision || "", 60) || undefined,
+      };
     }
     if (kind === "guidance.delivered") {
       return { label: clean(decision || "hint", 60), status: "ok" };
@@ -346,6 +355,7 @@ export const ACTIVITY_TAGS: Record<string, string> = {
   "skill.read": "skill",
   "skill.resolve": "skill",
   "skill.rank": "skill",
+  "skill.discovery": "skill",
   "guidance.delivered": "hint",
   "ml.intent": "intent",
   "ml.mini.select": "mini",

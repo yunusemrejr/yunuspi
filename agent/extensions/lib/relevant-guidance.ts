@@ -59,6 +59,18 @@ export function createRelevantGuidance(pi: any) {
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
   let skillOffers = new Map<string, { n: number; at: number }>();
+  // Delivery counts for re-offerable utility/topic hints, mirroring skill
+  // fatigue: an ignored advisory hint demotes after 2 deliveries and stops
+  // after 4, so an off-target nudge cannot refill its slot forever. Using
+  // the tool already filters via `used`, so only ignored hints fatigue.
+  // Urgent signal: cues and skill hints (own counters) never fatigue here.
+  // Discovery invitations share one topic key across tools, so they count
+  // per key+tool: ignoring project_report must not silence a later
+  // different-tool invitation.
+  let topicOffers = new Map<string, number>();
+  const fatigueKey = (h: Hint) => isTopic(h.key) && !h.key.startsWith("signal:") && !h.skill
+    ? (h.tool ? `${h.key}\0${h.tool}` : h.key) : null;
+  const topicIgnored = (h: Hint) => { const key = fatigueKey(h); return key ? topicOffers.get(key) ?? 0 : 0; };
   const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }> }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let recentTools: string[] = [], errorRun = 0, recentErrorKinds: string[] = [], diagnosticCount = 0, trivialPrompt = false;
@@ -493,7 +505,7 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
-  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills] });
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), topicOffers: [...topicOffers].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills] });
   // A workflow checkpoint, not a correctness verdict or a security boundary.
   // Deterministic task/file routes qualify; weak lexical suggestions never gate.
   // Reading remains the native tool's job so delivery cannot masquerade as use.
@@ -696,7 +708,7 @@ export function createRelevantGuidance(pi: any) {
       matchingPrompt = requestDisabled = false;
       advisoryDiscoveryDelivered.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear();
-      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); outlines.clear();
+      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
       recentTools = []; errorRun = 0; recentErrorKinds = []; diagnosticCount = 0; trivialPrompt = false;
@@ -748,6 +760,9 @@ export function createRelevantGuidance(pi: any) {
         skillOffers = new Map((Array.isArray(d.offers) ? d.offers : []).slice(-48).filter((pair: any) =>
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^(?:skill|skillctx):\S{1,200}$/.test(pair[0]) &&
           Number.isSafeInteger(pair[1]?.n) && pair[1].n >= 0 && pair[1].n <= 99 && Number.isSafeInteger(pair[1]?.at) && pair[1].at >= -2));
+        topicOffers = new Map((Array.isArray(d.topicOffers) ? d.topicOffers : []).slice(-64).filter((pair: any) =>
+          Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^topic:\S{1,200}(?:\0[a-z0-9_-]{1,64})?$/.test(pair[0]) &&
+          Number.isSafeInteger(pair[1]) && pair[1] >= 0 && pair[1] <= 99).map((pair: any) => [pair[0], pair[1]] as [string, number]));
         break;
       }
     },
@@ -1047,15 +1062,18 @@ export function createRelevantGuidance(pi: any) {
       let remaining = Math.max(0, runAllowance() - (runCount - urgentCount));
       let emergency = urgentCount === 0;
       const active = tools();
-      const eligible = [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (!h.tool || active.has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)))
-        .sort((a,b)=>(b.priority ?? 0)-(a.priority ?? 0));
+      const effective = (h: Hint) => (h.priority ?? 0) - (topicIgnored(h) >= 2 ? 40 : 0);
+      const eligible = [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (!h.tool || active.has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)) && topicIgnored(h) < 4)
+        .sort((a,b)=>effective(b)-effective(a));
       const selected: Hint[] = [];
       for (const hint of eligible) {
         if (isTopic(hint.key) && topicCount + selected.filter(h=>isTopic(h.key)).length >= 2) continue;
         if (remaining > 0) remaining--;
         else if (hint.key.startsWith("signal:") && emergency) emergency = false;
         else continue;
-        selected.push(hint);
+        // Demotion is visible on the delivered hint, like skill fatigue: an
+        // ignored advisory topic yields one bounded priority step.
+        selected.push(topicIgnored(hint) >= 2 ? { ...hint, priority: effective(hint) } : hint);
         if (selected.length === 2) break;
       }
       return selected;
@@ -1063,6 +1081,11 @@ export function createRelevantGuidance(pi: any) {
     commit(hints: Hint[]) {
       for (const h of hints) { if (wasShown(h.key)) continue;
         if (isTopic(h.key)) { topicSeen.set(h.key, requestNumber); topicCount++; if (topicSeen.size > 64) topicSeen.delete(topicSeen.keys().next().value!); }
+        const fatigue = fatigueKey(h);
+        if (fatigue) {
+          topicOffers.set(fatigue, Math.min(99, (topicOffers.get(fatigue) ?? 0) + 1));
+          if (topicOffers.size > 64) topicOffers.delete(topicOffers.keys().next().value!);
+        }
         else { shown.add(h.key); if (shown.size > LIMIT) shown.delete(shown.values().next().value!); }
         pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
         if (h.discovery) advisoryDiscoveryDelivered.add(h.discovery);

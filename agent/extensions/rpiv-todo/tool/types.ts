@@ -112,7 +112,7 @@ const MutationSchema = Type.Object({
 		"delete",
 		"clear",
 	] as const),
-	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent outcome id; null detaches. Negative ids refer to earlier batch creates."})),
+	parentId: Type.Optional(Type.Union([Type.Integer(), Type.Null()], {description: "Parent outcome id; null detaches. Negative ids must be declared as \"id\" on an earlier create in the same batch."})),
 	execution: Type.Optional(StringEnum(["self", "subagent", "swarm", "fusion"] as const)),
 	files: Type.Optional(Type.Array(Type.String({minLength:1,maxLength:512}), {maxItems:32})),
 	acceptance: Type.Optional(Type.String({maxLength:2000,description:"Concrete completion check"})),
@@ -134,7 +134,7 @@ const MutationSchema = Type.Object({
 	status: Type.Optional(
 		StringEnum(["pending", "in_progress", "completed", "deleted"] as const, {
 			description:
-				"Set this task's status (update): one of pending, in_progress, completed, deleted. When action is list, filters returned tasks by this status.",
+				"Set this task's status: one of pending, in_progress, completed, deleted. Create honors it as the initial status; update transitions it. When action is list, filters returned tasks by this status.",
 		}),
 	),
 	blockedBy: Type.Optional(

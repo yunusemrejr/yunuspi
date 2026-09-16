@@ -2700,6 +2700,12 @@
         "kind": "literal"
       },
       {
+        "name": "project_tests",
+        "source": "agent/extensions/lib/project-tests.ts",
+        "line": 449,
+        "kind": "literal"
+      },
+      {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
         "line": 423,
@@ -2750,7 +2756,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 588,
+        "line": 600,
         "kind": "literal"
       },
       {
@@ -3022,6 +3028,12 @@
         "kind": "literal"
       },
       {
+        "name": "project_tests",
+        "source": "agent/extensions/lib/project-tests.ts",
+        "line": 449,
+        "kind": "literal"
+      },
+      {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
         "line": 423,
@@ -3072,7 +3084,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 588,
+        "line": 600,
         "kind": "literal"
       },
       {
@@ -3299,10 +3311,10 @@
     ],
     "coverage": {
       "sourceFiles": 539,
-      "registrationSites": 59,
+      "registrationSites": 60,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 77,
-      "uniqueStableTools": 76,
+      "stableRegistrationRows": 78,
+      "uniqueStableTools": 77,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",

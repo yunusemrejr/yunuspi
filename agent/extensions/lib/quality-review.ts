@@ -136,7 +136,7 @@ function verifyReviewTree(root: string, changed: string[], persisted: unknown): 
 
 export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
   let releaseShared = () => {};
-  let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0;
+  let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
   let truncated = false, delivered = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
   let scopeOverflow = false;
@@ -151,7 +151,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("review", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
-  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, followups, reports, reviewed, disposition, reason, scopeOverflow,
+  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
   const invalidate = (files: string[]) => {
     if (!files.length) return;
@@ -161,7 +161,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   const status = () => !changed.length ? 'not_needed' : disposition || (reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file}))).slice(0,12);
-  const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
+  const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
     ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
     reason: reason || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''), truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history), historicalSamples: history.length,
@@ -250,7 +250,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // No reviewer was dispatched (no capacity, disabled assistance,
         // delegation block): refund the round so the 2-round budget is spent
         // on real attempts. Reports/reviewed/disposition stay untouched.
-        rounds--; save(); return summary();
+        rounds--; refunded++; save(); return summary();
       }
       if (rev !== revision) {
         reports = received.map(report => ({...report,outcome:'unknown',gap:`Source changed during this review; evidence may span revisions and cannot approve current source. ${report.gap}`.slice(0,900)}));
@@ -273,7 +273,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const api = {
     observe(facts: any, observeChanges: boolean) {
       if (!active || !enabled()) return;
-      if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; history = []; scopeOverflow = false; patterns.clear(); hashes = {}; }
+      if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; refunded = 0; history = []; scopeOverflow = false; patterns.clear(); hashes = {}; }
       root = facts.root; truncated = facts.truncated === true;
       if (truncated && disposition === 'accepted') { disposition = ''; reviewed = -1; reason = 'Current source discovery is incomplete; earlier acceptance cannot establish the current scope.'; }
       const next = facts.reviewSources ?? {};
@@ -302,7 +302,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       releaseShared();
       hashes = {};
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
-      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
+      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; refunded = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
       scopeOverflow = false;
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
@@ -317,7 +317,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         revision = verified ? data.revision : data.revision + 1;
         changed = restoredChanged;
         if (verified) hashes = verified;
-        rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
+        rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); refunded = Math.max(0,Math.min(99,Number(data.refunded)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
         scopeOverflow = data.scopeOverflow === true;
         if (verified && (data.disposition === 'accepted' || data.disposition === 'blocked')) {
           // An acceptance replays only alongside its own reports; a recorded
@@ -347,7 +347,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     input(event: any) {
       if (event.source === 'extension') return;
       try { shadowPlane.beginRequest('review-input'); } catch { /* shadow only */ }
-      cancel(); paused = false; pauseReason = ''; rounds = 0; followups = 0; delivered = ''; noted = '';
+      cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; followups = 0; delivered = ''; noted = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));
       if (disposition && !(disposition === 'blocked' && resume)) { changed = []; scopeOverflow = false; patterns.clear(); }
       // Explicit input grants a fresh bounded attempt, including recovery from

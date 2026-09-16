@@ -86,28 +86,49 @@ function sanitizeRestoredChecks(checks: unknown, revision: number): Check[] {
 
 /** A check receipt must describe the command that actually ran. Reject shell
  * composition, expansion and status masking; an echo of a runner is not a run.
- * Explicit plans support arbitrary project runners, still as simple commands. */
-export function projectCheckCommand(command: unknown, cwd: string, declared = false) {
-  if (typeof command !== 'string' || !command.trim() || command.length > 2000 || /[$`\r\n]/.test(command)) return null;
+ * Explicit plans support arbitrary project runners, still as simple commands.
+ * Every rejection carries a specific reason so the caller learns the rule in
+ * one round trip instead of guessing across retries. */
+type CheckVerdict = { check: { key: string; label: string } } | { reason: string };
+function checkCommandInner(command: unknown, cwd: string, declared: boolean): CheckVerdict {
+  if (typeof command !== 'string' || !command.trim()) return { reason: 'empty command' };
+  if (command.length > 2000) return { reason: 'over 2000 characters' };
+  if (/[$`\r\n]/.test(command)) return { reason: 'uses $expansion, backticks or newlines; pass literal values' };
   let directory = path.resolve(cwd), bodyCommand = command.trim();
   const parts = command.split('&&');
   if (parts.length === 2) {
     const prefix = tokenizeSimple(parts[0].trim());
-    if (prefix?.length !== 2 || prefix[0] !== 'cd') return null;
+    if (prefix?.length !== 2 || prefix[0] !== 'cd') return { reason: 'only `cd <dir> && <command>` composition is supported (no pipes, ;, || or trailing echo)' };
     directory = path.resolve(cwd, prefix[1]); bodyCommand = parts[1].trim();
-    if (path.relative(cwd, directory).startsWith('..')) return null;
+    if (path.relative(cwd, directory).startsWith('..')) return { reason: 'cd escapes the project working directory' };
   }
   const commandTokens = tokenizeSimple(bodyCommand);
-  if (!commandTokens?.length) return null;
+  if (!commandTokens?.length) return { reason: 'shell operators (| ; > < ( ) &) are not allowed; declare one simple command' };
   // Literal leading environment assignments do not mask the runner's exit.
   // Retain them in the receipt key: a pass with different environment values
   // is not evidence for the declared command. Shell expansion stays rejected.
   const firstCommand = commandTokens.findIndex(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
-  if (firstCommand < 0) return null;
+  if (firstCommand < 0) return { reason: 'only environment assignments, no command' };
   const tokens = commandTokens.slice(firstCommand);
-  if (tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return null;
+  if (tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return { reason: 'watch/list/help/dry-run/skip-test flags do not verify behavior' };
   const executable = path.basename(tokens[0]);
-  if (/^(?:echo|printf|true|false|cat|sh|bash|zsh|eval|env|sudo)$/.test(executable)) return null;
+  if (/^(?:sh|bash|zsh|dash|ksh|fish)$/.test(executable)) {
+    // A shell argv can hide composition (-c/-s), so shells are banned as
+    // general runners — except two honest shapes whose exit IS the check:
+    // `bash -n <file>` (syntax) and `bash <script> [args]` (run it; flags
+    // after the script name are script arguments, not shell options).
+    // dash/ksh/fish ride the same rule: an unbanned shell name must not
+    // smuggle -c through.
+    const args = tokens.slice(1);
+    const syntaxCheck = args[0] === '-n' && args.length > 1 && args.slice(1).every(t => !t.startsWith('-'));
+    const runScript = args.length > 0 && !args[0].startsWith('-');
+    if (!syntaxCheck && !runScript)
+      return { reason: '`bash` only as `bash -n <file>` (syntax check) or `bash <script> [args]`; -c/-s and shell flags can hide the real command' };
+  } else if (/^(?:echo|printf|true|false|cat|eval|env|sudo)$/.test(executable)) {
+    return { reason: executable === 'sudo'
+      ? '`sudo` cannot be a check; declare the underlying command and record privilege limits in a blocked reason'
+      : `\`${executable}\` output is not a test run` };
+  }
   const body = tokens.slice(1).join(' ');
   const phpScript = tokens[tokens[1] === '-f' ? 2 : 1] ?? '';
   const phpTests = /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && !phpScript.startsWith('-')
@@ -121,8 +142,20 @@ export function projectCheckCommand(command: unknown, cwd: string, declared = fa
     || /^(?:python\d?(?:\.\d+)?)$/.test(executable) && /^-m (?:pytest|unittest)(?: |$)/.test(body)
     || /^(?:cargo|go|dotnet|mvn|gradle|gradlew|swift)$/.test(executable) && /^test(?: |$)/.test(body)
     || /^node(?:js)?$/.test(executable) && (tokens.includes('--test') || tokens.slice(1).some(t => /(?:^|\/)[^/]*(?:test|spec)[^/]*\.[cm]?[jt]s$/.test(t))) && !tokens.some(t => ['-e', '--eval', '-p', '--print', '--check', '-c'].includes(t));
-  if (!runner && !declared) return null;
-  return { key: digest(JSON.stringify([directory, commandTokens])), label: `${executable} check` };
+  if (!runner && !declared) return { reason: 'not a recognized test runner; declare it explicitly in an assessment plan to use it' };
+  return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: `${executable} check` } };
+}
+
+export function projectCheckCommand(command: unknown, cwd: string, declared = false) {
+  const verdict = checkCommandInner(command, cwd, declared);
+  return 'check' in verdict ? verdict.check : null;
+}
+
+/** Specific rejection reason for a declare attempt, or null when accepted.
+ * Used by assess so the error names the rule instead of restating it. */
+export function projectCheckCommandReason(command: unknown, cwd: string): string | null {
+  const verdict = checkCommandInner(command, cwd, true);
+  return 'reason' in verdict ? verdict.reason : null;
 }
 
 export function projectTestNeed(state: State): string | null {
@@ -166,6 +199,17 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   let hashes: Record<string, string> = {};
   const starts = new Map<string, { revision: number; check: { key: string; label: string }; epoch: number }>();
   const earlyTerminals = new Map<string, any>();
+  // Recent commands that LOOK like a planned check (same executable) but did
+  // not match any receipt key: the usual cause is composition (trailing echo,
+  // pipes) that changes the key. Surfaced in the missing-need advice so a run
+  // is never silently "missing". Bounded: 3 commands × 160 chars, one revision.
+  let unmatched = { revision: -1, commands: [] as string[] };
+  const firstExe = (command: string) => {
+    const segments = command.split('&&');
+    const body = segments.length === 2 && segments[0].trim().startsWith('cd ') ? segments[1] : command;
+    const first = body.trim().split(/\s+/).find(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) ?? '';
+    return path.basename(first);
+  };
   const discover = options.discover ?? projectTestFacts;
   const enabled = () => (process.env.PI_PROJECT_TESTS ?? 'on').toLowerCase() !== 'off';
   const capable = () => pi.getActiveTools?.().includes('project_tests') && pi.getActiveTools?.().some((t: string) => ['bash', 'bg_run'].includes(t));
@@ -233,7 +277,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       ? 'Choose verification proportional to the changed behavior with project_tests({action:"inspect"}). Reuse focused existing checks and their current receipts; add or update regression coverage when it tests a changed contract or demonstrated defect. Avoid redundant runs and tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
       : need === 'failed'
         ? 'A planned check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
-        : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.';
+        : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.'
+          + (unmatched.revision === state.revision && unmatched.commands.length
+            ? ` These ran but matched no planned check (composition such as trailing echo or pipes changes the receipt key; run the planned command exactly): ${unmatched.commands.map(c => JSON.stringify(c)).join('; ')}.`
+            : '');
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
   const receipt = (start: { revision: number; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
@@ -257,7 +304,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const api = {
     async restore(ctx: any) {
-      epoch++; active = true; state = fresh(); pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear();
+      epoch++; active = true; state = fresh(); pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
       // The session branch remains the only durable owner, and a reload
       // never wakes work on its own. Restored receipts never resume as live
       // checks, but passed tree-bound evidence survives: the next scan
@@ -322,6 +369,13 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if (check) {
         if (starts.size >= 64) starts.delete(starts.keys().next().value!);
         starts.set(event.toolCallId, { revision: state.revision, check, epoch });
+      } else if (state.assessment?.revision === state.revision && state.assessment.disposition === 'required' && typeof event.input?.command === 'string') {
+        const planned = new Set(state.assessment.checks.map(c => c.label.split(' ', 1)[0]));
+        if (planned.has(firstExe(event.input.command))) {
+          if (unmatched.revision !== state.revision) unmatched = { revision: state.revision, commands: [] };
+          const raw = event.input.command.trim().slice(0, 160);
+          if (raw && !unmatched.commands.includes(raw) && unmatched.commands.length < 3) unmatched.commands.push(raw);
+        }
       }
     },
     async result(event: any, ctx: any) {
@@ -388,7 +442,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       try { pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true }); state.followups++; delivered = key; save(); }
       catch { /* failed delivery may retry at the next native settled event */ }
     },
-    shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); },
+    shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
     snapshot: summary,
   };
   registerContinuationSource({ name: 'project tests', pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
@@ -405,9 +459,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if (ticket !== epoch || !active) throw Error('Project test checkpoint cancelled by session change or shutdown.');
       if (params.action === 'assess') {
         if (!['required', 'not_needed', 'blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 12) throw Error('Assessment needs a disposition and concrete coverage/exception reason (at least 12 characters).');
-        const checks = (params.commands ?? []).map((command: unknown) => {
+        const commands = params.commands ?? [];
+        const checks = commands.map((command: unknown, index: number) => {
           const check = projectCheckCommand(command, ctx.cwd, true);
-          if (!check) throw Error('Declare a simple test command without shell composition, expansion, watch/list/help modes or status masking. Use the project working directory. No command was executed.');
+          if (!check) throw Error(`Command ${index + 1}/${commands.length} rejected (${projectCheckCommandReason(command, ctx.cwd) ?? 'invalid'}): ${JSON.stringify(String(command)).slice(0, 200)}. Declare a simple test command without shell composition, expansion, watch/list/help modes or status masking. Use the project working directory. No command was executed.`);
           return check;
         });
         state.assessment = { revision: state.revision, disposition: params.disposition, reason: params.reason.trim().slice(0, 1200), checks };

@@ -89,4 +89,6 @@ test("invalid paging inputs fail closed and do not expand the result page", () =
   const noMatch = searchCapabilities({ query: "\u0000\u0001" });
   assert.equal(noMatch.results.length, 0);
   assert.equal(noMatch.total, 0);
+  assert.equal(searchCapabilities({ query: "memory xyzzy" }).total, 0, "one grounded term of two is not enough");
+  assert.ok(searchCapabilities({ query: "prior memory" }).total >= 1, "two grounded terms still match");
 });
