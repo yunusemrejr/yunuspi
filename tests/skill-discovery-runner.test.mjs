@@ -176,4 +176,26 @@ test('terminal discovery outcomes emit health telemetry; gate refusals stay sile
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
 });
 
+test('instant failure retries once on a different member; genuine attempts and lone members do not retry', async () => {
+  const key = Symbol.for('yunus-pi.health.v1');
+  const prior = globalThis[key]; const seen = [];
+  globalThis[key] = (kind, data) => seen.push({ kind, data });
+  try {
+    const modelB = { ...model, id: 'free/text-only' };
+    let n = 0;
+    const f = fixture({ models: [model, modelB], launch: async () => (++n === 1 ? { isError: true, message: 'provider hiccup' } : result('{"skills":["x"]}')) });
+    assert.equal(await f.runner({ brief: 'Select a supplied skill from the observed evidence.' }, f.ctx), '{"skills":["x"]}');
+    assert.equal(f.calls.length, 2);
+    assert.notEqual(f.calls[0][1].model, f.calls[1][1].model, 'retry uses a different member');
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'retried' && e.data.error === 'provider hiccup'), 'superseded attempt journaled');
+    assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'completed'), 'final outcome reported');
+    const g = fixture({ models: [model, modelB], launch: async () => ({ details: { results: [{ exitCode: 1, output: 'partial {broken' }] } }) });
+    assert.equal(await g.runner({ brief: 'Select a supplied skill from the observed evidence.' }, g.ctx), undefined);
+    assert.equal(g.calls.length, 1, 'no retry after a genuine attempt');
+    const h = fixture({ launch: async () => ({ isError: true }) });
+    assert.equal(await h.runner({ brief: 'Select a supplied skill from the observed evidence.' }, h.ctx), undefined);
+    assert.equal(h.calls.length, 1, 'no retry without a backup member');
+  } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
 after(() => { delete globalThis[SKILL_DISCOVERY_RUNNER]; for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } fs.rmSync(root, { recursive: true, force: true }); });
