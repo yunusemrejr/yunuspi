@@ -1291,7 +1291,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 145 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 154 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
@@ -1307,6 +1307,7 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `browser-javascript-engineering` — [`agent/skills/browser-javascript-engineering/SKILL.md`](../agent/skills/browser-javascript-engineering/SKILL.md)
 - `browser-ml` — [`agent/skills/browser-ml/SKILL.md`](../agent/skills/browser-ml/SKILL.md)
 - `browser-task-recovery` — [`agent/skills/browser-task-recovery/SKILL.md`](../agent/skills/browser-task-recovery/SKILL.md)
+- `c-cpp-multiplatform` — [`agent/skills/c-cpp-multiplatform/SKILL.md`](../agent/skills/c-cpp-multiplatform/SKILL.md)
 - `c-systems-engineering` — [`agent/skills/c-systems-engineering/SKILL.md`](../agent/skills/c-systems-engineering/SKILL.md)
 - `cad-engineering` — [`agent/skills/cad-engineering/SKILL.md`](../agent/skills/cad-engineering/SKILL.md)
 - `classical-ml-modeling` — [`agent/skills/classical-ml-modeling/SKILL.md`](../agent/skills/classical-ml-modeling/SKILL.md)
@@ -1340,6 +1341,7 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `fortran-scientific-computing` — [`agent/skills/fortran-scientific-computing/SKILL.md`](../agent/skills/fortran-scientific-computing/SKILL.md)
 - `frontend-design` — [`agent/skills/frontend-design/SKILL.md`](../agent/skills/frontend-design/SKILL.md)
 - `frontend-js` — [`agent/skills/frontend-js/SKILL.md`](../agent/skills/frontend-js/SKILL.md)
+- `gif-animation-editing` — [`agent/skills/gif-animation-editing/SKILL.md`](../agent/skills/gif-animation-editing/SKILL.md)
 - `git-github` — [`agent/skills/git-github/SKILL.md`](../agent/skills/git-github/SKILL.md)
 - `github-actions-workflows` — [`agent/skills/github-actions-workflows/SKILL.md`](../agent/skills/github-actions-workflows/SKILL.md)
 - `github-identity-integration` — [`agent/skills/github-identity-integration/SKILL.md`](../agent/skills/github-identity-integration/SKILL.md)
@@ -1357,10 +1359,13 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `industrial-device-protocols` — [`agent/skills/industrial-device-protocols/SKILL.md`](../agent/skills/industrial-device-protocols/SKILL.md)
 - `inference-serving` — [`agent/skills/inference-serving/SKILL.md`](../agent/skills/inference-serving/SKILL.md)
 - `investment-risk-analysis` — [`agent/skills/investment-risk-analysis/SKILL.md`](../agent/skills/investment-risk-analysis/SKILL.md)
+- `java-cross-platform` — [`agent/skills/java-cross-platform/SKILL.md`](../agent/skills/java-cross-platform/SKILL.md)
 - `java-platform-engineering` — [`agent/skills/java-platform-engineering/SKILL.md`](../agent/skills/java-platform-engineering/SKILL.md)
 - `libreoffice-automation` — [`agent/skills/libreoffice-automation/SKILL.md`](../agent/skills/libreoffice-automation/SKILL.md)
 - `linux` — [`agent/skills/linux/SKILL.md`](../agent/skills/linux/SKILL.md)
+- `linux-desktop-ui-ux` — [`agent/skills/linux-desktop-ui-ux/SKILL.md`](../agent/skills/linux-desktop-ui-ux/SKILL.md)
 - `linux-host-defense` — [`agent/skills/linux-host-defense/SKILL.md`](../agent/skills/linux-host-defense/SKILL.md)
+- `linux-network-engineering` — [`agent/skills/linux-network-engineering/SKILL.md`](../agent/skills/linux-network-engineering/SKILL.md)
 - `llm-dataset-preparation` — [`agent/skills/llm-dataset-preparation/SKILL.md`](../agent/skills/llm-dataset-preparation/SKILL.md)
 - `llm-fine-tuning` — [`agent/skills/llm-fine-tuning/SKILL.md`](../agent/skills/llm-fine-tuning/SKILL.md)
 - `llm-systems-engineering` — [`agent/skills/llm-systems-engineering/SKILL.md`](../agent/skills/llm-systems-engineering/SKILL.md)
@@ -1369,8 +1374,10 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `memory-resource-ownership` — [`agent/skills/memory-resource-ownership/SKILL.md`](../agent/skills/memory-resource-ownership/SKILL.md)
 - `ml-engineering` — [`agent/skills/ml-engineering/SKILL.md`](../agent/skills/ml-engineering/SKILL.md)
 - `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../agent/skills/model-evaluation/SKILL.md)
+- `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../agent/skills/modern-frontend-frameworks/SKILL.md)
 - `motion` — [`agent/skills/motion/SKILL.md`](../agent/skills/motion/SKILL.md)
 - `motion-graphics-production` — [`agent/skills/motion-graphics-production/SKILL.md`](../agent/skills/motion-graphics-production/SKILL.md)
+- `multi-developer-pipelines` — [`agent/skills/multi-developer-pipelines/SKILL.md`](../agent/skills/multi-developer-pipelines/SKILL.md)
 - `music-composition` — [`agent/skills/music-composition/SKILL.md`](../agent/skills/music-composition/SKILL.md)
 - `natural-editorial-writing` — [`agent/skills/natural-editorial-writing/SKILL.md`](../agent/skills/natural-editorial-writing/SKILL.md)
 - `network-iso-compliance` — [`agent/skills/network-iso-compliance/SKILL.md`](../agent/skills/network-iso-compliance/SKILL.md)
@@ -1380,6 +1387,7 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `numerical-computing` — [`agent/skills/numerical-computing/SKILL.md`](../agent/skills/numerical-computing/SKILL.md)
 - `optimization-modeling` — [`agent/skills/optimization-modeling/SKILL.md`](../agent/skills/optimization-modeling/SKILL.md)
 - `organic-growth-engineering` — [`agent/skills/organic-growth-engineering/SKILL.md`](../agent/skills/organic-growth-engineering/SKILL.md)
+- `packet-trace-analysis` — [`agent/skills/packet-trace-analysis/SKILL.md`](../agent/skills/packet-trace-analysis/SKILL.md)
 - `performance-experiments` — [`agent/skills/performance-experiments/SKILL.md`](../agent/skills/performance-experiments/SKILL.md)
 - `php-application-engineering` — [`agent/skills/php-application-engineering/SKILL.md`](../agent/skills/php-application-engineering/SKILL.md)
 - `physical-animation-systems` — [`agent/skills/physical-animation-systems/SKILL.md`](../agent/skills/physical-animation-systems/SKILL.md)
@@ -1389,6 +1397,7 @@ The exporter includes 145 public skill directories. This list is a path inventor
 - `procedural-animation-math` — [`agent/skills/procedural-animation-math/SKILL.md`](../agent/skills/procedural-animation-math/SKILL.md)
 - `product-ui-verification` — [`agent/skills/product-ui-verification/SKILL.md`](../agent/skills/product-ui-verification/SKILL.md)
 - `property-based-testing` — [`agent/skills/property-based-testing/SKILL.md`](../agent/skills/property-based-testing/SKILL.md)
+- `proxy-analysis` — [`agent/skills/proxy-analysis/SKILL.md`](../agent/skills/proxy-analysis/SKILL.md)
 - `proxy-operations` — [`agent/skills/proxy-operations/SKILL.md`](../agent/skills/proxy-operations/SKILL.md)
 - `python-software-engineering` — [`agent/skills/python-software-engineering/SKILL.md`](../agent/skills/python-software-engineering/SKILL.md)
 - `rag-engineering` — [`agent/skills/rag-engineering/SKILL.md`](../agent/skills/rag-engineering/SKILL.md)

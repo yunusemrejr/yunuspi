@@ -4996,6 +4996,10 @@
         "path": "agent/skills/browser-task-recovery/SKILL.md"
       },
       {
+        "name": "c-cpp-multiplatform",
+        "path": "agent/skills/c-cpp-multiplatform/SKILL.md"
+      },
+      {
         "name": "c-systems-engineering",
         "path": "agent/skills/c-systems-engineering/SKILL.md"
       },
@@ -5128,6 +5132,10 @@
         "path": "agent/skills/frontend-js/SKILL.md"
       },
       {
+        "name": "gif-animation-editing",
+        "path": "agent/skills/gif-animation-editing/SKILL.md"
+      },
+      {
         "name": "git-github",
         "path": "agent/skills/git-github/SKILL.md"
       },
@@ -5196,6 +5204,10 @@
         "path": "agent/skills/investment-risk-analysis/SKILL.md"
       },
       {
+        "name": "java-cross-platform",
+        "path": "agent/skills/java-cross-platform/SKILL.md"
+      },
+      {
         "name": "java-platform-engineering",
         "path": "agent/skills/java-platform-engineering/SKILL.md"
       },
@@ -5208,8 +5220,16 @@
         "path": "agent/skills/linux/SKILL.md"
       },
       {
+        "name": "linux-desktop-ui-ux",
+        "path": "agent/skills/linux-desktop-ui-ux/SKILL.md"
+      },
+      {
         "name": "linux-host-defense",
         "path": "agent/skills/linux-host-defense/SKILL.md"
+      },
+      {
+        "name": "linux-network-engineering",
+        "path": "agent/skills/linux-network-engineering/SKILL.md"
       },
       {
         "name": "llm-dataset-preparation",
@@ -5244,12 +5264,20 @@
         "path": "agent/skills/model-evaluation/SKILL.md"
       },
       {
+        "name": "modern-frontend-frameworks",
+        "path": "agent/skills/modern-frontend-frameworks/SKILL.md"
+      },
+      {
         "name": "motion",
         "path": "agent/skills/motion/SKILL.md"
       },
       {
         "name": "motion-graphics-production",
         "path": "agent/skills/motion-graphics-production/SKILL.md"
+      },
+      {
+        "name": "multi-developer-pipelines",
+        "path": "agent/skills/multi-developer-pipelines/SKILL.md"
       },
       {
         "name": "music-composition",
@@ -5288,6 +5316,10 @@
         "path": "agent/skills/organic-growth-engineering/SKILL.md"
       },
       {
+        "name": "packet-trace-analysis",
+        "path": "agent/skills/packet-trace-analysis/SKILL.md"
+      },
+      {
         "name": "performance-experiments",
         "path": "agent/skills/performance-experiments/SKILL.md"
       },
@@ -5322,6 +5354,10 @@
       {
         "name": "property-based-testing",
         "path": "agent/skills/property-based-testing/SKILL.md"
+      },
+      {
+        "name": "proxy-analysis",
+        "path": "agent/skills/proxy-analysis/SKILL.md"
       },
       {
         "name": "proxy-operations",
