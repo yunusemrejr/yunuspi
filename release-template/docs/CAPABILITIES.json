@@ -1000,7 +1000,10 @@
         "subagents-check-profile",
         "subagents-watchdog",
         "prompt-workflow",
-        "google-account"
+        "google-account",
+        "sys-prompt",
+        "used",
+        "commands"
       ],
       "options": [
         {
@@ -1014,6 +1017,10 @@
         {
           "name": "/cost|/metrics|/obs",
           "summary": "Session accounting, metrics and observations."
+        },
+        {
+          "name": "/sys-prompt|/used|/commands",
+          "summary": "Separate-window popups: opening system prompt, session usage, command list."
         },
         {
           "name": "/effort",
@@ -1689,7 +1696,10 @@
         "session_audit",
         "self",
         "cost",
-        "metrics"
+        "metrics",
+        "sys-prompt",
+        "used",
+        "commands"
       ],
       "tools": [
         "session_self",
@@ -1698,7 +1708,10 @@
       "commands": [
         "self",
         "cost",
-        "metrics"
+        "metrics",
+        "sys-prompt",
+        "used",
+        "commands"
       ],
       "options": [
         {
@@ -2122,9 +2135,14 @@
         "line": 2161
       },
       {
+        "name": "commands",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 998
+      },
+      {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 253
+        "line": 681
       },
       {
         "name": "curator",
@@ -2279,7 +2297,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 527
+        "line": 956
       },
       {
         "name": "subagent-cost",
@@ -2362,9 +2380,19 @@
         "line": 405
       },
       {
+        "name": "sys-prompt",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 961
+      },
+      {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 528
+      },
+      {
+        "name": "used",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 980
       },
       {
         "name": "websearch",
@@ -2508,7 +2536,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 195,
+        "line": 206,
         "kind": "literal"
       },
       {
@@ -2750,7 +2778,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 595,
+        "line": 1090,
         "kind": "literal"
       },
       {
@@ -2762,7 +2790,13 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 532,
+        "line": 1027,
+        "kind": "literal"
+      },
+      {
+        "name": "session_stop",
+        "source": "agent/extensions/checkpoints.ts",
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -2799,7 +2833,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 730,
+        "line": 740,
         "kind": "definition"
       },
       {
@@ -2952,7 +2986,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 195,
+        "line": 206,
         "kind": "literal"
       },
       {
@@ -3084,7 +3118,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 595,
+        "line": 1090,
         "kind": "literal"
       },
       {
@@ -3096,7 +3130,13 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 532,
+        "line": 1027,
+        "kind": "literal"
+      },
+      {
+        "name": "session_stop",
+        "source": "agent/extensions/checkpoints.ts",
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -3231,7 +3271,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          780
+          790
         ],
         "knownNames": [
           "subagent"
@@ -3328,11 +3368,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 539,
-      "registrationSites": 61,
+      "sourceFiles": 540,
+      "registrationSites": 62,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 79,
-      "uniqueStableTools": 78,
+      "stableRegistrationRows": 80,
+      "uniqueStableTools": 79,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -3743,6 +3783,10 @@
       },
       {
         "path": "agent/extensions/lib/session-signals.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-stop.ts",
         "exists": true
       },
       {

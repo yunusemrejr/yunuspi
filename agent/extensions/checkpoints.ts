@@ -47,6 +47,17 @@ import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { enforceShared, getSharedSession, noteUserInput, sharedSourceAudit } from "./lib/intervention-shared.ts";
+import {
+	SESSION_STOP_ENTRY,
+	STOP_ALL_RUNS,
+	isSessionStopped,
+	markStopUnlockAnnounced,
+	noteSessionStopped,
+	shouldAnnounceStopUnlock,
+	stopGates,
+	stopInputUnlocks,
+	unlockSessionStop,
+} from "./lib/session-stop.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "checkpoints");
 const MODE = process.env.PI_CHECKPOINTS; // undefined | "0" | "shadow"
@@ -347,6 +358,90 @@ function registerHistory(
 		},
 	});
 
+	pi.registerTool({
+		name: "session_stop",
+		label: "Stop Session",
+		promptGuidelines: [
+			"Completion stop: when ALL requested work is done and verified with nothing remaining, session_stop({action:\"stop\", reason:\"...\"}) ends the session cleanly — active subagent runs stop and automatic quality/test follow-ups stay silent. Locked until BOTH hold: (1) at least one completed quality review with reviewer evidence, (2) at least one completed subagent run. session_stop({action:\"status\"}) shows the gates; any new user message unlocks a stopped session as a normal continuation.",
+		],
+		description:
+			"End the main session once all work is done and verified. action:status reports the stop gates and current state; action:stop (with a concrete 20+ character reason) stops this session's active subagent runs, records the stop, silences automatic quality/test follow-ups and ends the turn. Locked until at least one quality review completed with reviewer evidence AND at least one subagent run completed — failed, stopped or never-attempted work satisfies neither gate. Main session only. Any new user message unlocks a stop as a standard continuation.",
+		parameters: Type.Object({
+			action: StringEnum(["status", "stop"]),
+			reason: Type.Optional(
+				Type.String({
+					minLength: 20,
+					maxLength: 1200,
+					description: "Required for stop: what is done and verified, 20–1200 characters.",
+				}),
+			),
+		}),
+		async execute(_id, params, signal, _update, ctx) {
+			signal?.throwIfAborted();
+			if (process.env.PI_SUBAGENT_CHILD === "1")
+				throw new Error("session_stop is main-session only; children cannot stop the parent session.");
+			if (SHADOW)
+				throw new Error("Session stop is unavailable while checkpoints run in shadow mode.");
+			let branch: unknown;
+			try {
+				branch = ctx.sessionManager.getBranch();
+			} catch {
+				throw new Error("Cannot verify stop gates: the session branch is unavailable.");
+			}
+			const gates = stopGates(branch);
+			if (params.action === "status") {
+				const data = { stopped: isSessionStopped(ctx), gates };
+				return {
+					content: [{ type: "text" as const, text: JSON.stringify(data) }],
+					details: data,
+				};
+			}
+			const reason = typeof params.reason === "string" ? params.reason.trim() : "";
+			if (reason.length < 20)
+				throw new Error("Stopping requires a concrete reason of at least 20 characters: what is done and verified.");
+			if (!gates.met)
+				throw new Error(
+					`Session stop is locked: quality [${gates.quality.detail}], subagent [${gates.subagent.detail}]. Complete a quality review with reviewer evidence and a subagent run first.`,
+				);
+			const sessionId = ctx.sessionManager.getSessionId?.();
+			const runs: { stopped: string[]; failed: { id: string; error: string }[]; bridge: string } = {
+				stopped: [],
+				failed: [],
+				bridge: "unavailable",
+			};
+			const bridge = (globalThis as any)[STOP_ALL_RUNS];
+			if (typeof sessionId === "string" && sessionId && typeof bridge === "function") {
+				try {
+					const result = bridge(sessionId) ?? {};
+					runs.stopped = Array.isArray(result.stopped) ? result.stopped : [];
+					runs.failed = Array.isArray(result.failed) ? result.failed : [];
+					runs.bridge = "ok";
+				} catch (error) {
+					runs.bridge = `error: ${error instanceof Error ? error.message : String(error)}`.slice(0, 200);
+				}
+			}
+			const stopId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+			if (!noteSessionStopped(ctx, stopId))
+				throw new Error("Cannot identify the session scope; stop refused.");
+			try {
+				pi.appendEntry?.(SESSION_STOP_ENTRY, {
+					stopId,
+					reason: reason.slice(0, 1200),
+					gates,
+					runs: { stopped: runs.stopped.slice(0, 64), failed: runs.failed.slice(0, 16) },
+				});
+			} catch {
+				// The stop holds process-locally; a ledger write failure must not revive the session.
+			}
+			const data = { stopped: true, stopId, gates, runs };
+			return {
+				content: [{ type: "text" as const, text: JSON.stringify(data) }],
+				details: data,
+				terminate: true,
+			};
+		},
+	});
+
 	pi.on("context", (event, ctx) => {
 		// Retire only this extension's transient snapshots, including legacy queued notices.
 		const clean = event.messages.filter(
@@ -549,8 +644,33 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		pending.clear();
 		return content || undefined;
 	});
-	pi.on("input", event => { projectTests.input(event); quality.input(event); });
-	pi.on("agent_settled", async (event, ctx) => { await projectTests.settled(event, ctx); await quality.settled(event, ctx); });
+	pi.on("input", (event, ctx) => { projectTests.input(event); quality.input(event); stopInputUnlocks(event, ctx); });
+	pi.on("agent_settled", async (event, ctx) => {
+		// A stopped session stays silent: no test/review follow-ups revive it.
+		if (isSessionStopped(ctx)) return;
+		const quiet = !SHADOW && process.env.PI_SUBAGENT_CHILD !== "1" &&
+			ctx.isIdle?.() === true && !ctx.hasPendingMessages?.();
+		await projectTests.settled(event, ctx);
+		await quality.settled(event, ctx);
+		if (!quiet || !shouldAnnounceStopUnlock(ctx)) return;
+		let gates;
+		try {
+			gates = stopGates(ctx.sessionManager.getBranch?.() ?? []);
+		} catch {
+			return;
+		}
+		if (!gates.met) return;
+		markStopUnlockAnnounced(ctx);
+		try {
+			pi.sendMessage({
+				customType: "session-stop-unlock",
+				content: `[session stop] Completion stop is now unlocked (${gates.quality.detail}; ${gates.subagent.detail}). When all work is done and verified with nothing remaining, session_stop({action:"stop", reason:"..."}) ends the session: this session's active subagent runs stop and automatic quality/test follow-ups stay silent. Any new user message unlocks a stopped session as a normal continuation.`,
+				display: false,
+			}, { deliverAs: "followUp", triggerTurn: false });
+		} catch {
+			// The gates remain met; the agent can still discover session_stop via its tool description.
+		}
+	});
 	pi.on("before_agent_start", async (_event, ctx) => {
 		pending.delete("unverified-edits");
 		pending.delete("verify-failed");
@@ -587,6 +707,8 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		lastMutationBatch = undefined;
 		writeState(st);
 		quality.restore(ctx); await projectTests.restore(ctx);
+		// A branch rewrite is a new work context; a stop for the old one ends here.
+		unlockSessionStop(ctx);
 	});
 	pi.on("session_switch", async (_event, ctx) => { quality.restore(ctx); await projectTests.restore(ctx); });
 	pi.on("session_start", async (_event, ctx) => {

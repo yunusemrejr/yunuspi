@@ -39,6 +39,7 @@ import { openSubagentFleet } from "../tui/fleet.ts";
 import { SubagentFleetStatus, resolveFleetViewPlacement } from "../tui/fleet-status.ts";
 import { createSubagentParamsSchema } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
+import { stopAllSessionRuns } from "../runs/foreground/async-stop-action.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession } from "../runs/background/active-async-capacity.ts";
 import { cleanupResultIndexes, missionObserverResultCandidateFiles } from "../runs/background/result-files.ts";
@@ -606,6 +607,15 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		refreshResultDelivery: () => refreshResultDelivery(),
 	});
 	executorScheduled = executor.executeScheduled;
+	// Session self-stop cancels this session's async runs through the same
+	// ownership-checked path as the manual stop action. Registered only for
+	// the main executor; scheduled-owner executors must never steal it.
+	try {
+		(globalThis as any)[Symbol.for("yunus-pi.subagent-stop-all.v1")] = (sessionId: string) =>
+			stopAllSessionRuns(state, sessionId);
+	} catch {
+		// Session stop degrades to trigger suppression without run cancellation.
+	}
 	registerAutonomousRecovery(pi, executor.executeDelegated);
 
 	pi.registerMessageRenderer<SlashMessageDetails>(SLASH_RESULT_TYPE, (message, options, theme) => {

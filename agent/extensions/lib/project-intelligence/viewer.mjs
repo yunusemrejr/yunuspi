@@ -350,6 +350,7 @@ export async function openProjectViewer({ dbPath, identity, launch = true, launc
 export {
 	SERVER_PATH,
 	STARTUP_TIMEOUT_MS,
+	openExternal,
 	statePathFor,
 	viewerUrl,
 };

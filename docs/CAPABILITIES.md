@@ -103,13 +103,14 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`
+**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/commands`
 
 **Options:**
 
 - `pi.getCommands()`: Read the live command registry; command availability can depend on loaded extensions and configuration.
 - `/self`: Current-session diagnostics.
 - `/cost|/metrics|/obs`: Session accounting, metrics and observations.
+- `/sys-prompt|/used|/commands`: Separate-window popups: opening system prompt, session usage, command list.
 - `/effort`: Thinking control alias owned by the extension.
 - `/graph`: Open the project intelligence viewer.
 - `/todos`: Show the hierarchical action plan.
@@ -177,11 +178,11 @@ Coordinate independent Pi sessions sharing one checkout through voluntary object
 
 Inspect selected-model full-window context occupancy and 80% automatic compaction threshold alongside separate runtime, failure, efficiency and past-session diagnostics.
 
-**Entrypoints:** `session_self`, `session_audit`, `self`, `cost`, `metrics`
+**Entrypoints:** `session_self`, `session_audit`, `self`, `cost`, `metrics`, `sys-prompt`, `used`, `commands`
 
 **Catalog tool pointers:** `session_self`, `session_audit`
 
-**Commands:** `/self`, `/cost`, `/metrics`
+**Commands:** `/self`, `/cost`, `/metrics`, `/sys-prompt`, `/used`, `/commands`
 
 **Options:**
 
@@ -838,7 +839,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 54; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
-- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 195; literal)
+- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 206; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 303; definition)
 - `context_profile` — [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) (line 339; literal)
 - `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
@@ -878,15 +879,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 9; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2072; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 595; literal)
+- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1090; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 584; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 532; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1027; literal)
+- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 361; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 636; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 829; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
-- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 730; definition)
+- `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 740; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 173; literal)
@@ -908,7 +910,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `media_edit`, `media_info`, `music_compose`, `video_frames` (lines 149)
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
-- [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 780)
+- [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 790)
 - [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `coverage_select`, `decision_frontier`, `dependency_plan` (lines 8)
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 311, 638)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
@@ -925,7 +927,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 552)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1487)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 253)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 998)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 681)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3280)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 48)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 48)
@@ -956,7 +959,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1086)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3370)
-- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 527)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 956)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 914)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1278)
@@ -973,7 +976,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1052)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1004)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 961)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 980)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3019)
 
 ### Dynamic command owners
@@ -1150,6 +1155,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-metrics.ts`](../agent/extensions/lib/session-metrics.ts)
 - [`agent/extensions/lib/session-report.ts`](../agent/extensions/lib/session-report.ts)
 - [`agent/extensions/lib/session-signals.ts`](../agent/extensions/lib/session-signals.ts)
+- [`agent/extensions/lib/session-stop.ts`](../agent/extensions/lib/session-stop.ts)
 - [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts)
 - [`agent/extensions/lib/skill-discovery-controller.ts`](../agent/extensions/lib/skill-discovery-controller.ts)
 - [`agent/extensions/lib/skill-discovery.ts`](../agent/extensions/lib/skill-discovery.ts)
