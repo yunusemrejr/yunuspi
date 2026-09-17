@@ -8,6 +8,10 @@
  * Safety contract:
  *  - Only single, simple commands are classified. Anything with an unquoted
  *    operator (| & ; < > ` $ ( )) or a newline is left to bash untouched.
+ *  - One leading `cd <dir> &&` and/or `timeout <n>` is peeled before
+ *    classification, because `cd /tmp && curl …` defeated every rule in a
+ *    shell-heavy session; matches on a peeled command are always advisory
+ *    (cwd/timeout semantics stay with bash, so they never block).
  *  - Heredocs and redirect writes are matched only for a short advisory hint.
  *  - `escalate` rules may become a block on repeat (owned by bash-router.ts);
  *    `annotate` rules only add a one-line hint to the tool result.
@@ -123,10 +127,34 @@ function toDataPath(filter: string): string | null {
 
 const REPO_READ_ACTIONS: Record<string, string> = { status: "status", diff: "diff", log: "log", show: "show", branch: "branch" };
 
+/** Peel one leading `cd <dir> &&` or `timeout …` wrapper, if present. */
+function peelPrefix(raw: string): { rest: string; peeled: boolean } {
+  let rest = raw.trim();
+  let peeled = false;
+  for (let i = 0; i < 2; i++) {
+    const cd = /^(?:cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*&&\s+)([\s\S]+)$/.exec(rest);
+    if (cd && cd[1].trim()) { rest = cd[1].trim(); peeled = true; continue; }
+    const to = /^(?:timeout\s+(?:-\S+\s+)*\d+(?:\.\d+)?[smhd]?\s+)([\s\S]+)$/.exec(rest);
+    if (to && to[1].trim()) { rest = to[1].trim(); peeled = true; continue; }
+    break;
+  }
+  return { rest, peeled };
+}
+
 /** Classify one bash command. Returns null when bash should run untouched. */
 export function classifyBashCommand(command: string): BashRoute | null {
   const raw = command.trim();
   if (!raw || raw.length > 4000) return null;
+  const { rest, peeled } = peelPrefix(raw);
+  const match = classifySimple(peeled ? rest : raw);
+  if (!match || !peeled) return match;
+  // A peeled prefix means the command line carried cwd/timeout context the
+  // replacement cannot reproduce: hint only, never a blockable replacement.
+  const { replacement: _dropped, ...advisory } = match;
+  return { ...advisory, severity: "annotate" as const };
+}
+
+function classifySimple(raw: string): BashRoute | null {
 
   // Advisory-only: file content written through a redirect/heredoc.
   if (/^(?:echo|printf|cat|tee)\b[^|;&]*>{1,2}\s*\S+/.test(raw) || /<<-?\s*['"]?[A-Za-z_]/.test(raw)) {

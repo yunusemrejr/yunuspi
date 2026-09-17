@@ -55,6 +55,8 @@ test("utility tools receive automatic contextual guidance only when active", () 
     ['openapi_probe', 'Inspect OpenAPI endpoints'], ['coverage_probe', 'Inspect uncovered lines'],
     ['contract_diff', 'Inspect schema changes'], ['env_audit', 'Audit environment variables'],
     ['net_probe', 'Inspect DNS records'], ['archive_probe', 'Inspect archive contents'],
+    ['net_probe', 'Connect to the host and check why it is unreachable'],
+    ['net_probe', 'The request timed out, check the endpoint'],
   ]) {
     const enabled = fixture([tool]); enabled.start(prompt);
     assert.ok(enabled.take().some(h => h.tool === tool), tool);

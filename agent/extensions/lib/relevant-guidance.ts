@@ -12,7 +12,7 @@ import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
-import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection } from "./skill-relevance.ts";
+import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
 import { failureCategory } from "./session-diagnostics.ts";
@@ -71,7 +71,7 @@ export function createRelevantGuidance(pi: any) {
   const fatigueKey = (h: Hint) => isTopic(h.key) && !h.key.startsWith("signal:") && !h.skill
     ? (h.tool ? `${h.key}\0${h.tool}` : h.key) : null;
   const topicIgnored = (h: Hint) => { const key = fatigueKey(h); return key ? topicOffers.get(key) ?? 0 : 0; };
-  const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }> }>();
+  const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }>; links: string[] }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let recentTools: string[] = [], errorRun = 0, recentErrorKinds: string[] = [], diagnosticCount = 0, trivialPrompt = false;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
@@ -318,12 +318,32 @@ export function createRelevantGuidance(pi: any) {
       let entry = outlines.get(file);
       if (!entry || entry.mtimeMs !== stat.mtimeMs) {
         if (stat.size > 96 * 1024) return "";
-        entry = { mtimeMs: stat.mtimeMs, headings: headingOutline(fs.readFileSync(file, "utf8")) };
+        const body = fs.readFileSync(file, "utf8");
+        entry = { mtimeMs: stat.mtimeMs, headings: headingOutline(body), links: skillReferenceLinks(body) };
         if (outlines.size >= 24) outlines.delete(outlines.keys().next().value!);
         outlines.set(file, entry);
       }
       const section = bestSkillSection(entry.headings, terms);
       return section ? ` Start at ${JSON.stringify(section.text)} (line ${section.line}); skip unrelated sections.` : "";
+    } catch { return ""; }
+  };
+  // Follow-on detail: a skill whose body links references/ paths names them
+  // when read, so the agent follows the matching ones instead of stopping at
+  // the entry (a network session read the entry and never opened its two
+  // discovery/evidence references).
+  const referencePointer = (file: string): string => {
+    if (!file) return "";
+    try {
+      const stat = fs.statSync(file);
+      let entry = outlines.get(file);
+      if (!entry || entry.mtimeMs !== stat.mtimeMs) {
+        if (stat.size > 96 * 1024) return "";
+        const body = fs.readFileSync(file, "utf8");
+        entry = { mtimeMs: stat.mtimeMs, headings: headingOutline(body), links: skillReferenceLinks(body) };
+        if (outlines.size >= 24) outlines.delete(outlines.keys().next().value!);
+        outlines.set(file, entry);
+      }
+      return entry.links.length ? ` Follow-on detail: ${entry.links.map(link => JSON.stringify(link)).join(", ")} — read the ones matching this task.` : "";
     } catch { return ""; }
   };
   /** Catalog-wide relevance against the ongoing session profile. Weak or generic
@@ -333,7 +353,10 @@ export function createRelevantGuidance(pi: any) {
     let offered = 0;
     const coveredTerms = new Set<string>();
     for (const ranked of rankSkills(skillIndex, context.join(" "), 6)) {
-      if (skillCovered(ranked.skill.file)) continue;
+      // A skill already carrying a review target (route or file evidence) is
+      // covered: suggesting it again as a context candidate double-counts the
+      // same workflow instead of offering a fresh one.
+      if (skillCovered(ranked.skill.file) || reviewTargets.has(ranked.skill.file)) continue;
       // Suppressed workflows consume no offer slot and no covered terms: the
       // scarce slot passes fully to a fresh candidate instead of demoting in
       // place. Central add() suppression still guards every other producer.
@@ -346,6 +369,13 @@ export function createRelevantGuidance(pi: any) {
       // match still qualifies it.
       if (ranked.matched.length === 1 && !ranked.matched[0].includes('~')
         && skillRoutes.some(route => route.name !== ranked.skill.name && route.intent.test(terms[0])))
+        continue;
+      // A lone term that names an already-read or under-review skill is
+      // claimed signal, not a second workflow: "network" matching
+      // network-traffic-analysis after local-network-analysis was read is the
+      // same domain, not a new one. Multi-term matches still surface.
+      if (ranked.matched.length === 1 && !ranked.matched[0].includes('~')
+        && skillIndex.docs.some(doc => doc.skill.file !== ranked.skill.file && doc.name.has(terms[0]) && (read.has(doc.skill.file) || reviewTargets.has(doc.skill.file))))
         continue;
       // Require one genuinely fresh term instead of rejecting a workflow whose
       // whole match is shared vocabulary. Rejecting on any overlap let a single
@@ -449,7 +479,7 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('contract_diff','Structural changes: contract_diff compares two explicit JSON/YAML files or payloads. Use mode schema for required/optional schema contracts; sample payloads only establish observed shapes.');
       if (/\b(environment variables?|env audit|\.env\.example|missing configuration)\b/i.test(part))
         utilityHint('env_audit','Environment contract: env_audit compares explicit source/config paths and reports variable names only. It never reads live environment values or follows external env files.');
-      if (/\b(dns|tcp connectivity|tls certificate|certificate expir|connection refused)\b/i.test(part))
+      if (/\b(dns|tcp connectivity|tls certificate|certificate expir|connection refused)\b/i.test(part) || /\bconnect(?:ing|ion)? to\b/i.test(part) || /\b(unreachable|refused|timed?\s?out)\b/i.test(part))
         utilityHint('net_probe','Connection diagnostics: net_probe checks DNS, one TCP host:port or TLS certificate validation. Use one explicit endpoint; no network scanning.');
       if (/\b(archive contents?|zip contents?|tar contents?|inspect (?:an? )?archive)\b/i.test(part))
         utilityHint('archive_probe','Archive inspection: archive_probe lists, finds and stats members or reads one bounded text member without extraction.');
@@ -1005,7 +1035,7 @@ export function createRelevantGuidance(pi: any) {
         && event.details?.truncation?.truncated !== true && event.details?.deduplicated !== true
         && (input.limit === undefined || knownSkillRead && returnedWholeSkill(file, event.content));
       if (knownSkillRead && completeRead && !read.has(file)) {
-        add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' });
+        add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' + referencePointer(file) });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
         contextSkill(52);
         // Selected ledger: the snapshot below records the read list plus the

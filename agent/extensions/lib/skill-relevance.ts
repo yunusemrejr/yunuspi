@@ -157,6 +157,18 @@ export function headingOutline(markdown: string, limit = 200): Array<{ text: str
   }
   return out;
 }
+/** Follow-on `references/` paths linked from a skill body, deduplicated and
+ * bounded. Pure. */
+export function skillReferenceLinks(markdown: string, limit = 6): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const match of String(markdown ?? "").matchAll(/\]\((references\/[^)#\s]+)(?:#[^)]*)?\)/g)) {
+    const link = match[1].slice(0, 120);
+    if (!seen.has(link)) { seen.add(link); out.push(link); }
+    if (out.length >= limit) break;
+  }
+  return out;
+}
 /** Best heading for a bounded term list; needs at least one discriminating
  * match, so a generic "Overview" heading is never chosen for its own sake. */
 export function bestSkillSection(headings: readonly { text: string; line: number }[], terms: readonly string[]): { text: string; line: number } | undefined {
