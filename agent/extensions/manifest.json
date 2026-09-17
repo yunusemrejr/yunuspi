@@ -117,7 +117,8 @@
     "capability-health.ts",
     "capability-audit.ts",
     "activity-indicators.ts",
-    "prompt-interpretation.ts"
+    "prompt-interpretation.ts",
+    "session-stop.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

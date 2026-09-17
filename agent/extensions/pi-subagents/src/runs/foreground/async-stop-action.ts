@@ -21,6 +21,60 @@ function getAsyncStopTarget(
 	return direct ? { asyncId: direct.asyncId, asyncDir: direct.asyncDir } : undefined;
 }
 
+/** Stop every queued/running async run owned by one session. Ownership is
+ * proven by the run status file, never by tracked memory alone; runs whose
+ * session cannot be proven are left untouched (fail closed), as are
+ * controllers without a verifiable run. Injectable io keeps this
+ * unit-testable without touching processes. */
+export function stopAllSessionRuns(
+	state: SubagentState,
+	sessionId: string,
+	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean,
+	io?: {
+		reconcile?: (asyncDir: string, options?: { kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean }) => { status?: any };
+		deliver?: (request: { asyncDir: string; pid?: number; kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean; source: string }) => void;
+	},
+): { stopped: string[]; failed: { id: string; error: string }[] } {
+	const stopped: string[] = [], failed: { id: string; error: string }[] = [];
+	if (!state || typeof sessionId !== "string" || !sessionId) return { stopped, failed };
+	const reconcile = io?.reconcile ?? reconcileAsyncRun;
+	const deliver = io?.deliver ?? deliverStopRequest;
+	const seen = new Set<string>();
+	const jobs = [...(state.asyncJobs?.values() ?? []), ...(state.fleetJobs?.values() ?? [])];
+	for (const job of jobs) {
+		if (!job || typeof job.asyncDir !== "string" || seen.has(job.asyncDir)) continue;
+		seen.add(job.asyncDir);
+		if (typeof job.sessionId === "string" && job.sessionId && job.sessionId !== sessionId) continue;
+		let status: any;
+		try {
+			status = reconcile(job.asyncDir, { kill }).status;
+		} catch {
+			continue;
+		}
+		if (!status || status.sessionId !== sessionId) continue;
+		if (status.state !== "running" && status.state !== "queued") continue;
+		const id = typeof status.runId === "string" && status.runId ? status.runId : job.asyncId;
+		try {
+			deliver({ asyncDir: job.asyncDir, pid: typeof status.pid === "number" ? status.pid : undefined, kill, source: "session-stop" });
+		} catch (error) {
+			failed.push({ id, error: error instanceof Error ? error.message : String(error) });
+			continue;
+		}
+		try {
+			state.workflowControllers?.get(status.runId)?.abort?.(new Error("Session stopped."));
+		} catch {
+			// The stop request is delivered; a controller abort failure must not fail the run.
+		}
+		const tracked = state.asyncJobs?.get(job.asyncId) ?? state.asyncJobs?.get(status.runId);
+		if (tracked) {
+			tracked.activityState = undefined;
+			tracked.updatedAt = Date.now();
+		}
+		stopped.push(id);
+	}
+	return { stopped, failed };
+}
+
 export function stopAsyncRun(
 	state: SubagentState,
 	runId: string | undefined,
