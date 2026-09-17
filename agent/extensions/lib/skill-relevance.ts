@@ -77,6 +77,8 @@ export function skillEvidenceContext(evidence: { files?: readonly string[]; tool
     openapi_probe:'api contracts schema', contract_diff:'api contract compatibility',
     lsp_diagnostics:'compiler diagnostics', render_see:'visual browser verification',
     browser:'browser interaction', dependency_plan:'dependency architecture',
+    agentmail_status:'email inbox', agentmail_messages:'email inbox', agentmail_search:'email inbox',
+    agentmail_message:'email inbox', agentmail_send:'email outreach',
   };
   for (const name of (evidence.tools ?? []).slice(-32)) if (typeof name === 'string' && Object.hasOwn(operations, name)) terms.add(operations[name]);
   return [...terms].join(' ').slice(0,1600);

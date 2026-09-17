@@ -219,7 +219,7 @@ export function collectSessionMetrics(entries, live) {
  // Bottom KPI layer: only the powers this session actually used, emoji + count.
  // The full breakdown stays in /metrics (m.detail); ordering is stable by count
  // then name so the footer does not reshuffle between renders.
- const powerLabels = {subagent:'🤖',quality_review:'🔍',project_tests:'🧪',skill_review:'📚',session_self:'🪞',project_report:'🗺️',module_report:'🧭',symbol_search:'🔎',context_slice:'✂️',context_score:'🎯',handoff_capsule:'💊',evidence_cache:'🗃️',bg_run:'⏳',media_info:'🎬',media_edit:'🎞️',video_frames:'🎬',audio_analyze:'🔊',music_compose:'🎵',browser_session:'🌐',agentmail_status:'✉️',agentmail_send:'✉️',agentmail_messages:'📬',agentmail_message:'📨',render_see:'👁️',sandbox_run:'📦',obs_read:'🔬',context_profile:'📈',tool_search:'🧰'};
+ const powerLabels = {subagent:'🤖',quality_review:'🔍',project_tests:'🧪',skill_review:'📚',session_self:'🪞',project_report:'🗺️',module_report:'🧭',symbol_search:'🔎',context_slice:'✂️',context_score:'🎯',handoff_capsule:'💊',evidence_cache:'🗃️',bg_run:'⏳',media_info:'🎬',media_edit:'🎞️',video_frames:'🎬',audio_analyze:'🔊',music_compose:'🎵',browser_session:'🌐',agentmail_status:'✉️',agentmail_send:'✉️',agentmail_messages:'📬',agentmail_search:'🔎',agentmail_message:'📨',render_see:'👁️',sandbox_run:'📦',obs_read:'🔬',context_profile:'📈',tool_search:'🧰'};
  const powers=Object.entries(m.tools).filter(([name])=>powerLabels[name]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8).map(([name,count])=>`${powerLabels[name]}${count}`);
  const sessionEntry=entries.find(e=>e?.type==='session');
  const shortSessionId=typeof sessionEntry?.id==='string'?sessionEntry.id.slice(0,8):'';

@@ -158,6 +158,7 @@ function sessionSkills(ctx: any) {
     "agentmail_status",
     "agentmail_send",
     "agentmail_messages",
+    "agentmail_search",
     "agentmail_message",
     "bg_run",
     "bg_status",

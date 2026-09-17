@@ -32,6 +32,7 @@ const evidence = await import(shared + "free-route-evidence.ts");
 const { registerAutonomousRecovery, assistanceWidth, automaticHelperBody } = await import(
  "../../extensions/pi-subagents/src/extension/autonomous-recovery.ts"
 );
+const { routeSkills: routeSkillsLite } = await import("../../extensions/lib/skill-routing.ts");
 // Step 21: marked flows spend from the shared control; each scenario below
 // models a separate request, so isolate the singleton per fixture.
 const { resetSharedControl } = await import("../../extensions/lib/intervention-shared.ts");
@@ -211,7 +212,16 @@ check(
 );
 await f.emit("before_agent_start", { prompt });
 check("duplicate suppression", f.calls.length === 2);
-const contextPrompt = 'Improve the hero area with more appealing 3D animations.';
+const contextPrompt = 'Improve the hero area with more appealing visuals.';
+// A skill-claimed prompt defers to the observation-driven skill scout instead
+// of a generic investigator (single-role veto); the evidence test below needs
+// an unclaimed prompt so the helper actually launches in-fixture.
+assert.ok(routeSkillsLite(contextPrompt).length === 0, 'evidence prompt stays unclaimed');
+const vetoed = fixture();
+await vetoed.emit('input', { source: 'interactive', text: 'Improve the hero area with more appealing 3D animations.' });
+await vetoed.emit('before_agent_start', { prompt: 'Improve the hero area with more appealing 3D animations.' });
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(vetoed.calls.length, 0, 'skill-claimed single-role plan defers to the skill scout');
 const contextual = fixture({branch:[
  {type:'message',id:'design',message:{role:'user',content:'Keep the hero palette and typography.'}},
  {type:'message',id:'correction',message:{role:'user',content:'Actually replace only the hero animation.'}},

@@ -96,6 +96,9 @@ export function transformActivity(source, bundled) {
     // 19a05ee1… is the usage.route-keyed revision installed by the last --fix
     // (before per-route provider/model keying, model-config attribution and
     // the unattributed compaction row); same migration rule as above.
+    // 9cfeb9b1… is the 2026-09-17 revision before the agentmail_search power
+    // label; without it the repair path cannot migrate its own output after
+    // any session-metrics.ts edit, and the postcondition fails as drift.
     if (
       [
         "69cb692ba5dc040c678704ac65c57fb15f18590b7aff96e5168285ebd04eec47",
@@ -107,6 +110,7 @@ export function transformActivity(source, bundled) {
         "585b245cd4e1b332f3a6214bf5cee637ac80606e59378f76a7dba3b6172b5a00",
         "bb5072766b8b162ef5249af5aac00e43ca61fdab98595220a9a413b3b1f493fa",
         "19a05ee1cc56300a4936ea25f208aaeb912c4f74a926ca48fe8be4135760721f",
+        "9cfeb9b18e30aa269fa5735c457e24e807bc8753c1c4d1841d47a5b1817d3396",
       ].includes(createHash("sha256").update(helper).digest("hex"))
     ) {
       const old = activityCode(helper, bundled, 2);

@@ -272,6 +272,7 @@ export type AgentMailResult = {
   data?: unknown;
   text: string;
   truncated: boolean;
+  headers?: Record<string, string>;
 };
 
 /** One bounded AgentMail API call. Exported so tests can drive a local server. */
@@ -309,7 +310,80 @@ export async function agentMailRequest(
     data,
     text: result.body,
     truncated: result.truncated,
+    ...(result.headers && typeof result.headers === "object"
+      ? { headers: result.headers as Record<string, string> }
+      : {}),
   };
+}
+
+/** Statuses worth one automatic retry on idempotent reads. Sends never retry:
+ * the send endpoint takes no idempotency key, so a retried POST could deliver
+ * twice. */
+const GET_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const GET_RETRY_DEFAULT_MS = 400;
+const GET_RETRY_MAX_MS = 5_000;
+
+const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Honor a small Retry-After; otherwise wait a short fixed delay. Pure. */
+export function retryDelayMs(
+  headers: Record<string, string> | undefined,
+  fallbackMs = GET_RETRY_DEFAULT_MS,
+): number {
+  const clamp = (ms: number) =>
+    Number.isFinite(ms)
+      ? Math.min(GET_RETRY_MAX_MS, Math.max(0, Math.floor(ms)))
+      : fallbackMs;
+  if (!headers || typeof headers !== "object") return fallbackMs;
+  const entry = Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === "retry-after",
+  );
+  if (!entry) return fallbackMs;
+  const seconds = Number(entry[1]);
+  if (Number.isFinite(seconds)) return clamp(seconds * 1000);
+  const at = Date.parse(entry[1]);
+  if (!Number.isNaN(at)) return clamp(at - Date.now());
+  return fallbackMs;
+}
+
+export type GetWithRetry = {
+  result: AgentMailResult;
+  retried: boolean;
+};
+
+/** One GET with a single bounded retry on 429/5xx or a transport throw.
+ * Cancellation is never retried. Exported for tests. */
+export async function getWithRetry(
+  config: AgentMailConfig,
+  options: Omit<RequestOptions, "method" | "body">,
+  signal?: AbortSignal,
+): Promise<GetWithRetry> {
+  const attempt = () =>
+    agentMailRequest(config, { ...options, method: "GET" }, signal);
+  const cancelled = (error: unknown) =>
+    signal?.aborted === true ||
+    /abort|cancel/i.test(
+      error instanceof Error ? error.message : String(error),
+    );
+  try {
+    const first = await attempt();
+    if (!GET_RETRY_STATUSES.has(first.status) || signal?.aborted)
+      return { result: first, retried: false };
+    await sleep(retryDelayMs(first.headers));
+    if (signal?.aborted) return { result: first, retried: true };
+    try {
+      return { result: await attempt(), retried: true };
+    } catch (error) {
+      if (cancelled(error)) throw error;
+      return { result: first, retried: true };
+    }
+  } catch (error) {
+    if (cancelled(error)) throw error;
+    await sleep(GET_RETRY_DEFAULT_MS);
+    if (signal?.aborted) throw error;
+    return { result: await attempt(), retried: true };
+  }
 }
 
 type ApiErrorRow = {
@@ -492,6 +566,48 @@ export function distillMessageDetail(row: unknown, includeHtml = false) {
   };
 }
 
+/** Bounded search match fragments per field; the API sends these only for fields
+ * the query actually matched. */
+export function distillHighlights(row: unknown) {
+  const item = (row && typeof row === "object" ? row : {}) as Record<
+    string,
+    unknown
+  >;
+  const highlights =
+    item.highlights && typeof item.highlights === "object"
+      ? (item.highlights as Record<string, unknown>)
+      : undefined;
+  if (!highlights) return undefined;
+  const fragments = (value: unknown) => {
+    if (!Array.isArray(value)) return undefined;
+    const out = value
+      .filter((row): row is string => typeof row === "string" && !!row.trim())
+      .slice(0, 3)
+      .map((row) => row.trim().slice(0, 200));
+    return out.length ? out : undefined;
+  };
+  const from = fragments(highlights.from);
+  const recipients = fragments(highlights.recipients);
+  const subject = fragments(highlights.subject);
+  const text = fragments(highlights.text);
+  const out = {
+    ...(from ? { from } : {}),
+    ...(recipients ? { recipients } : {}),
+    ...(subject ? { subject } : {}),
+    ...(text ? { text } : {}),
+  };
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Cursor for the next list/search page, when the API returns one. */
+export function nextPageToken(data: unknown): string | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  return str(
+    (data as Record<string, unknown>).next_page_token,
+    512,
+  );
+}
+
 /** HTTP success is 2xx only: redirects are surfaced, never followed. */
 function isSuccess(status: number): boolean {
   return status >= 200 && status < 300;
@@ -628,10 +744,9 @@ export default function agentMailTools(pi: any) {
             nextStep: resolution.nextStep,
           });
         const { config } = resolution;
-        const result = await agentMailRequest(
+        const { result, retried } = await getWithRetry(
           config,
           {
-            method: "GET",
             path: "/v0/inboxes",
             query: [["limit", String(params.limit ?? 20)]],
             maxBytes: 8_192,
@@ -639,9 +754,10 @@ export default function agentMailTools(pi: any) {
           signal,
         );
         if (!isSuccess(result.status))
-          return fail(
-            describeApiFailure(result.status, result.data, result.text),
-          );
+          return fail({
+            ...describeApiFailure(result.status, result.data, result.text),
+            ...(retried ? { retried: true as const } : {}),
+          });
         const payload = (result.data ?? {}) as Record<string, unknown>;
         const rows = Array.isArray(payload.inboxes) ? payload.inboxes : [];
         const inboxes = rows.slice(0, 100).map((row: unknown) => {
@@ -738,7 +854,7 @@ export default function agentMailTools(pi: any) {
     name: "agentmail_messages",
     label: "AgentMail Messages",
     description:
-      "List recent email messages in an AgentMail inbox (most recent first) with compact rows: ids, from/to, subject, timestamp, labels and a short preview. Filter by labels, sender, subject or date; read a body with agentmail_message.",
+      "List recent email messages in an AgentMail inbox (most recent first) with compact rows: ids, from/to, subject, timestamp, labels and a short preview. Filter by labels, sender, recipients or subject; follow nextPageToken through every page before concluding. Use agentmail_search to find mail by topic, agentmail_message to read a body.",
     promptSnippet: "List AgentMail inbox messages",
     promptGuidelines: [GUIDELINE],
     parameters: Type.Object({
@@ -746,7 +862,12 @@ export default function agentMailTools(pi: any) {
       limit: Type.Optional(
         Type.Integer({ minimum: 1, maximum: MAX_MESSAGE_LIST }),
       ),
-      pageToken: Type.Optional(Type.String({ maxLength: 512 })),
+      pageToken: Type.Optional(
+        Type.String({
+          maxLength: 512,
+          description: "nextPageToken from a previous page.",
+        }),
+      ),
       labels: Type.Optional(
         Type.Array(Type.String({ maxLength: MAX_LABEL }), {
           maxItems: MAX_LABELS,
@@ -756,6 +877,12 @@ export default function agentMailTools(pi: any) {
         Type.String({
           maxLength: 200,
           description: "Substring match on the sender.",
+        }),
+      ),
+      to: Type.Optional(
+        Type.String({
+          maxLength: 200,
+          description: "Substring match on the recipients.",
         }),
       ),
       subject: Type.Optional(
@@ -789,6 +916,11 @@ export default function agentMailTools(pi: any) {
             bad("from", "must be a single-line substring");
           query.push(["from", from]);
         }
+        const to = text(params.to, "to", 200);
+        if (to) {
+          if (!SEARCH_TEXT.test(to)) bad("to", "must be a single-line substring");
+          query.push(["to", to]);
+        }
         const subject = text(params.subject, "subject", 200);
         if (subject) {
           if (!SEARCH_TEXT.test(subject))
@@ -798,10 +930,9 @@ export default function agentMailTools(pi: any) {
         if (params.ascending === true) query.push(["ascending", "true"]);
         if (params.includeSpam === true) query.push(["include_spam", "true"]);
         if (params.includeTrash === true) query.push(["include_trash", "true"]);
-        const result = await agentMailRequest(
+        const { result, retried } = await getWithRetry(
           config,
           {
-            method: "GET",
             path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages`,
             query,
             maxBytes: MESSAGE_LIST_BYTES,
@@ -812,14 +943,113 @@ export default function agentMailTools(pi: any) {
           return fail({
             ...describeApiFailure(result.status, result.data, result.text),
             inboxId,
+            ...(retried ? { retried: true as const } : {}),
           });
         const data = (result.data ?? {}) as Record<string, unknown>;
         const rows = Array.isArray(data.messages) ? data.messages : [];
+        const token = nextPageToken(data);
         return ok({
           ok: true,
           inboxId,
           count: typeof data.count === "number" ? data.count : rows.length,
           messages: rows.slice(0, MAX_MESSAGE_LIST).map(distillMessage),
+          ...(token ? { nextPageToken: token } : {}),
+          ...(result.truncated ? { truncated: true } : {}),
+        });
+      } catch (error) {
+        return transportFailure(error, signal);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "agentmail_search",
+    label: "AgentMail Search",
+    description:
+      "Full-text relevance search across one AgentMail inbox: sender, recipients and subject by substring plus tokenized body text. Returns compact rows with per-field match highlights; spam, trash, blocked and unauthenticated mail are always excluded by the API. Follow nextPageToken through every page; read a body with agentmail_message.",
+    promptSnippet: "Search AgentMail inbox messages",
+    promptGuidelines: [GUIDELINE],
+    parameters: Type.Object({
+      q: Type.String({
+        minLength: 1,
+        maxLength: 200,
+        description: "Full-text query matched against sender, recipients, subject and body.",
+      }),
+      inboxId: Type.Optional(Type.String({ maxLength: 320 })),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: MAX_MESSAGE_LIST }),
+      ),
+      pageToken: Type.Optional(
+        Type.String({
+          maxLength: 512,
+          description: "nextPageToken from a previous page.",
+        }),
+      ),
+      before: Type.Optional(
+        Type.String({
+          maxLength: 64,
+          description: "Only mail before this ISO timestamp.",
+        }),
+      ),
+      after: Type.Optional(
+        Type.String({
+          maxLength: 64,
+          description: "Only mail after this ISO timestamp.",
+        }),
+      ),
+    }),
+    async execute(_id: any, params: any, signal: AbortSignal) {
+      try {
+        const resolution = resolveConfig();
+        if (!resolution.ok) return configFailure(resolution);
+        const { config } = resolution;
+        const inboxId = validateInboxId(params.inboxId, config.defaultInboxId);
+        const q = text(params.q, "q", 200, true)!;
+        if (!SEARCH_TEXT.test(q)) bad("q", "must be a single-line query");
+        const query: Array<[string, string]> = [
+          ["q", q],
+          ["limit", String(params.limit ?? 20)],
+        ];
+        const pageToken = text(params.pageToken, "pageToken", 512);
+        if (pageToken) query.push(["page_token", pageToken]);
+        for (const field of ["before", "after"] as const) {
+          const bound = text(params[field], field, 64);
+          if (bound) {
+            if (!/^[^\r\n]{1,64}$/.test(bound))
+              bad(field, "must be a single-line timestamp");
+            query.push([field, bound]);
+          }
+        }
+        const { result, retried } = await getWithRetry(
+          config,
+          {
+            path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/search`,
+            query,
+            maxBytes: MESSAGE_LIST_BYTES,
+          },
+          signal,
+        );
+        if (!isSuccess(result.status))
+          return fail({
+            ...describeApiFailure(result.status, result.data, result.text),
+            inboxId,
+            ...(retried ? { retried: true as const } : {}),
+          });
+        const data = (result.data ?? {}) as Record<string, unknown>;
+        const rows = Array.isArray(data.messages) ? data.messages : [];
+        const token = nextPageToken(data);
+        return ok({
+          ok: true,
+          inboxId,
+          count: typeof data.count === "number" ? data.count : rows.length,
+          messages: rows.slice(0, MAX_MESSAGE_LIST).map((row) => {
+            const highlights = distillHighlights(row);
+            return {
+              ...distillMessage(row),
+              ...(highlights ? { highlights } : {}),
+            };
+          }),
+          ...(token ? { nextPageToken: token } : {}),
           ...(result.truncated ? { truncated: true } : {}),
         });
       } catch (error) {
@@ -832,13 +1062,13 @@ export default function agentMailTools(pi: any) {
     name: "agentmail_message",
     label: "AgentMail Message",
     description:
-      "Read one AgentMail email message body by id (from agentmail_messages). Returns bounded plain text plus metadata; set includeHtml only when the HTML form is actually needed.",
+      "Read one AgentMail email message body by id (from agentmail_messages or agentmail_search). Returns bounded plain text plus metadata; set includeHtml only when the HTML form is actually needed.",
     promptSnippet: "Read one AgentMail message",
     promptGuidelines: [GUIDELINE],
     parameters: Type.Object({
       id: Type.String({
         maxLength: 256,
-        description: "Message id from agentmail_messages.",
+        description: "Message id from agentmail_messages or agentmail_search.",
       }),
       inboxId: Type.Optional(Type.String({ maxLength: 320 })),
       includeHtml: Type.Optional(
@@ -855,10 +1085,9 @@ export default function agentMailTools(pi: any) {
         const { config } = resolution;
         const inboxId = validateInboxId(params.inboxId, config.defaultInboxId);
         const messageId = validateMessageId(params.id);
-        const result = await agentMailRequest(
+        const { result, retried } = await getWithRetry(
           config,
           {
-            method: "GET",
             path: `/v0/inboxes/${encodeURIComponent(inboxId)}/messages/${encodeURIComponent(messageId)}`,
             maxBytes: MESSAGE_DETAIL_BYTES,
           },
@@ -869,6 +1098,7 @@ export default function agentMailTools(pi: any) {
             ...describeApiFailure(result.status, result.data, result.text),
             inboxId,
             messageId,
+            ...(retried ? { retried: true as const } : {}),
           });
         return ok({
           ok: true,

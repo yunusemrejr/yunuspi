@@ -2027,17 +2027,19 @@
     {
       "id": "agentmail-email",
       "group": "communication",
-      "summary": "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.",
+      "summary": "Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing, full-text search, and single-message reads.",
       "entrypoints": [
         "agentmail_status",
         "agentmail_send",
         "agentmail_messages",
+        "agentmail_search",
         "agentmail_message"
       ],
       "tools": [
         "agentmail_status",
         "agentmail_send",
         "agentmail_messages",
+        "agentmail_search",
         "agentmail_message"
       ],
       "options": [
@@ -2058,8 +2060,12 @@
           "summary": "Send fields; a subject and a text or html body are required, and CR/LF is rejected."
         },
         {
-          "name": "inboxId|limit|pageToken|from|subject|labels|ascending|includeSpam|includeTrash",
-          "summary": "Inbox listing scope and filters; list rows stay compact and carry a preview."
+          "name": "inboxId|limit|pageToken|from|to|subject|labels|ascending|includeSpam|includeTrash",
+          "summary": "Inbox listing scope and filters; list rows stay compact and carry a preview, and nextPageToken pages through every page."
+        },
+        {
+          "name": "q|before|after",
+          "summary": "Full-text search query with optional ISO timestamp bounds; rows carry per-field match highlights."
         },
         {
           "name": "includeHtml",
@@ -2118,7 +2124,7 @@
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 252
+        "line": 253
       },
       {
         "name": "curator",
@@ -2273,7 +2279,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 526
+        "line": 527
       },
       {
         "name": "subagent-cost",
@@ -2399,25 +2405,31 @@
       {
         "name": "agentmail_message",
         "source": "agent/extensions/agentmail.ts",
-        "line": 831,
+        "line": 1061,
         "kind": "literal"
       },
       {
         "name": "agentmail_messages",
         "source": "agent/extensions/agentmail.ts",
-        "line": 737,
+        "line": 853,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_search",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 965,
         "kind": "literal"
       },
       {
         "name": "agentmail_send",
         "source": "agent/extensions/agentmail.ts",
-        "line": 686,
+        "line": 802,
         "kind": "literal"
       },
       {
         "name": "agentmail_status",
         "source": "agent/extensions/agentmail.ts",
-        "line": 609,
+        "line": 725,
         "kind": "literal"
       },
       {
@@ -2738,7 +2750,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 594,
+        "line": 595,
         "kind": "literal"
       },
       {
@@ -2750,7 +2762,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 531,
+        "line": 532,
         "kind": "literal"
       },
       {
@@ -2874,25 +2886,31 @@
       {
         "name": "agentmail_message",
         "source": "agent/extensions/agentmail.ts",
-        "line": 831,
+        "line": 1061,
         "kind": "literal"
       },
       {
         "name": "agentmail_messages",
         "source": "agent/extensions/agentmail.ts",
-        "line": 737,
+        "line": 853,
+        "kind": "literal"
+      },
+      {
+        "name": "agentmail_search",
+        "source": "agent/extensions/agentmail.ts",
+        "line": 965,
         "kind": "literal"
       },
       {
         "name": "agentmail_send",
         "source": "agent/extensions/agentmail.ts",
-        "line": 686,
+        "line": 802,
         "kind": "literal"
       },
       {
         "name": "agentmail_status",
         "source": "agent/extensions/agentmail.ts",
-        "line": 609,
+        "line": 725,
         "kind": "literal"
       },
       {
@@ -3066,7 +3084,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 594,
+        "line": 595,
         "kind": "literal"
       },
       {
@@ -3078,7 +3096,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 531,
+        "line": 532,
         "kind": "literal"
       },
       {
@@ -3311,10 +3329,10 @@
     ],
     "coverage": {
       "sourceFiles": 539,
-      "registrationSites": 60,
+      "registrationSites": 61,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 78,
-      "uniqueStableTools": 77,
+      "stableRegistrationRows": 79,
+      "uniqueStableTools": 78,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5076,6 +5094,10 @@
       {
         "name": "edge-model-deployment",
         "path": "agent/skills/edge-model-deployment/SKILL.md"
+      },
+      {
+        "name": "email",
+        "path": "agent/skills/email/SKILL.md"
       },
       {
         "name": "evidence-first-engineering",

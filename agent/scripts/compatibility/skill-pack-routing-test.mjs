@@ -59,7 +59,7 @@ for(const prompt of ['Harden the Ubuntu server firewall','Secure the server','Re
 
 assert.ok(routeSkills('Review C++20 code').some(r=>r.name==='cpp-performance-engineering'));
 assert.ok(routeSkills('Write frontend JS').some(r=>r.name==='browser-javascript-engineering'));
-assert.deepEqual(new Set([...cases.map(c=>c[0]),"product-ui-verification","colors","svg-motion-engineering","browser-animation-engineering","physical-animation-systems","procedural-animation-math","threejs-animation-engineering","wasm-animation-pipelines","llm-fine-tuning","llm-dataset-preparation","google-colab-training","local-network-analysis","wireless-signal-analysis","network-traffic-analysis","network-iso-compliance","industrial-automation-control","industrial-device-protocols","browser-automation","proxy-operations","audio-processing","image-analysis","financial-statement-analysis","investment-risk-analysis","rag-engineering","scientific-paper-research","spreadsheet-authoring","presentation-authoring","word-document-authoring","libreoffice-automation","blender-production","terminal-video-editing","cad-engineering","media-in-web","harness-self-maintenance","community-promotion","organic-growth-engineering","motion-graphics-production","video-analysis","sound-analysis","music-composition"]),new Set(skillRoutes.map(r=>r.name)));
+assert.deepEqual(new Set([...cases.map(c=>c[0]),"product-ui-verification","colors","svg-motion-engineering","browser-animation-engineering","physical-animation-systems","procedural-animation-math","threejs-animation-engineering","wasm-animation-pipelines","llm-fine-tuning","llm-dataset-preparation","google-colab-training","local-network-analysis","wireless-signal-analysis","network-traffic-analysis","network-iso-compliance","industrial-automation-control","industrial-device-protocols","browser-automation","proxy-operations","audio-processing","image-analysis","financial-statement-analysis","investment-risk-analysis","rag-engineering","scientific-paper-research","spreadsheet-authoring","presentation-authoring","word-document-authoring","libreoffice-automation","blender-production","terminal-video-editing","cad-engineering","media-in-web","harness-self-maintenance","community-promotion","organic-growth-engineering","motion-graphics-production","video-analysis","sound-analysis","music-composition","email"]),new Set(skillRoutes.map(r=>r.name)));
 const catalog='<available_skills>'+cases.map(([name])=>`<skill><name>${name}</name><description>fixture</description><location>${root}skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
 function fixture(prompt='',systemPrompt=catalog) {
  const entries=[];const ctx={cwd:'/routing-case',sessionManager:{getBranch:()=>entries}};
@@ -122,6 +122,24 @@ const voxelEntries=[];const voxelCtx={cwd:root,sessionManager:{getBranch:()=>vox
 const voxelGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>voxelEntries.push({type:'custom',customType,data})});
 voxelGuidance.restore(voxelCtx);voxelGuidance.start({prompt:'Create a voxel Three.js scene with low-poly composition',systemPrompt:voxelCatalog},voxelCtx);
 assert.ok(voxelGuidance.candidates().some(h=>h.skill===threejs.filePath&&/Voxel and low-poly art/.test(h.text)),'voxel task reaches the loaded threejs section');
+for(const prompt of ['Search old emails about the license renewal','Find Thunderbird inbox messages from last year','Send the newsletter to our subscribers','Triage the support mailbox','Check mail on the IMAP server','Read my gmail inbox'])
+ assert.ok(routeSkills(prompt).some(r=>r.name==='email'),`email routes: ${prompt}`);
+for(const prompt of ['Write a spring newsletter','Rewrite this article in my voice','Implement signup with Google','What is email?','Do not send email','Check the installed package version'])
+ assert.ok(!routeSkills(prompt).some(r=>r.name==='email'),`email ignores: ${prompt}`);
+assert.ok(routeSkills('','snap/thunderbird/common/.thunderbird/x/prefs.js').some(r=>r.name==='email'),'thunderbird profile path routes email');
+assert.ok(routeSkills('','mail/Archive.mbox').some(r=>r.name==='email'),'mbox file routes email');
+const emailLoaded=loaded.skills.find(s=>s.name==='email');assert.ok(emailLoaded,'Pi SDK loads email');
+const emailCatalog=`<available_skills><skill><name>email</name><description>${emailLoaded.description}</description><location>${emailLoaded.filePath}</location></skill></available_skills>`;
+const emailEntries=[];const emailCtx={cwd:'/email-case',sessionManager:{getBranch:()=>emailEntries}};
+const emailGuidance=createRelevantGuidance({getActiveTools:()=>['read'],appendEntry:(customType,data)=>emailEntries.push({type:'custom',customType,data})});
+emailGuidance.restore(emailCtx);emailGuidance.start({prompt:'Search old emails about the license renewal',systemPrompt:emailCatalog},emailCtx);
+assert.ok(emailGuidance.candidates().some(h=>h.skill===emailLoaded.filePath),'email delivery reaches the loaded skill');
+const emailBody=fs.readFileSync(emailLoaded.filePath,'utf8');
+assert.ok(emailBody.split(/\s+/).length<350,'email: compact entry');
+assert.ok(emailBody.includes('references/mailbox-search.md'),'email: conditional reference');
+const emailRef=fs.readFileSync(path.join(path.dirname(emailLoaded.filePath),'references/mailbox-search.md'),'utf8');
+assert.ok(emailRef.includes('https://'),'email: primary references');
+assert.doesNotMatch(emailBody+'\n'+emailRef,/\[TODO\]|TODO:|TBD/);
 console.log(`PASS: 34 skills, intent/file routing, ambiguity, priority, limits, receipts, compaction, voxel relevance and real Pi discovery (${loaded.skills.length} total skills)`);
 
 assert.ok(!routeSkills('sudo cp /etc/sudoers.d/rule ~/backup\nsetfacl: /workspace/lib/Net.cpp.o: Operation not permitted').some(r=>r.name==='cpp-performance-engineering'));

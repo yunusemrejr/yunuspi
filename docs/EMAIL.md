@@ -30,13 +30,19 @@ use, so a session can verify configuration before sending anything.
 | --- | --- |
 | `agentmail_status` | Configuration check plus the inbox list the key can reach. Read-only. |
 | `agentmail_send` | Send one message from an inbox. Requires a subject and a text and/or HTML body. |
-| `agentmail_messages` | List recent messages with compact rows (ids, from/to, subject, time, labels, preview) and filters such as labels, sender or subject. |
+| `agentmail_messages` | List recent messages with compact rows (ids, from/to, subject, time, labels, preview) and filters such as labels, sender, recipients or subject. |
+| `agentmail_search` | Full-text relevance search across sender, recipients, subject and body, with per-field match highlights. |
 | `agentmail_message` | Read one message body by id; HTML is opt-in because it is token-heavy. |
 
 Sending is explicit and immediate. The tools bound recipients (50), subject
 length, body size and request size, and reject CR/LF in subjects and addresses so
 a value cannot inject extra headers. Attachments are not exposed; use the
 AgentMail API directly for those.
+
+List and search results carry `nextPageToken` when more pages exist: pass it
+back as `pageToken` and follow every page before concluding. Reads retry once
+on 429/5xx (honoring a small `Retry-After`); sends never retry automatically,
+so a failed send is reported exactly once.
 
 ## Outreach conduct
 
@@ -61,8 +67,12 @@ enforce limits, not judgement.
   `{to, cc, bcc, reply_to, subject, text, html, labels}`; a success returns
   `message_id` and `thread_id`.
 - List: `GET /v0/inboxes/{inbox_id}/messages` with `limit`, `page_token`,
-  `labels`, `from`, `subject`, `ascending`, `include_spam`, `include_trash`.
-  Prefer the `preview` field over per-message detail calls for triage.
+  `labels`, `from`, `to`, `subject`, `ascending`, `include_spam`,
+  `include_trash`. Prefer the `preview` field over per-message detail calls
+  for triage.
+- Search: `GET /v0/inboxes/{inbox_id}/messages/search` with `q`, `limit`,
+  `page_token`, `before`, `after`. Spam, trash, blocked and unauthenticated
+  mail are always excluded by the API.
 - Errors carry `code`, `message`, `fix` and `docs`; the tools surface those
   fields instead of the raw body.
 - Transport is shared with `http_request` (bounded body, no redirect following,

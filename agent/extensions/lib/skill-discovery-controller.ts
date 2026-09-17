@@ -12,6 +12,7 @@ const OBSERVED_TOOLS = new Set([
   'lsp_navigation','ast_grep_search','context_slice','symbol_expand','context_code',
   'lsp_diagnostics','project_report','package_probe','openapi_probe','sqlite_probe','render_see','fetch_content','web_search','data_query','syntax_check',
   'browser','browser_navigate','browser_snapshot','browser_click','browser_screenshot','http_request','coverage_probe','contract_diff','env_audit','net_probe','archive_probe','artifact_check',
+  'agentmail_status','agentmail_send','agentmail_messages','agentmail_search','agentmail_message',
 ]);
 
 /** Advisory discovery piggybacks on successful native observations. No timers

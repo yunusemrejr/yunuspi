@@ -124,11 +124,11 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 #### agentmail-email
 
-Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing and single-message reads.
+Send and read email through AgentMail (outreach and inbox triage) with an environment-provided API key: inbox discovery, bounded sends with a required subject, compact inbox listing, full-text search, and single-message reads.
 
-**Entrypoints:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_message`
+**Entrypoints:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_search`, `agentmail_message`
 
-**Catalog tool pointers:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_message`
+**Catalog tool pointers:** `agentmail_status`, `agentmail_send`, `agentmail_messages`, `agentmail_search`, `agentmail_message`
 
 **Options:**
 
@@ -136,7 +136,8 @@ Send and read email through AgentMail (outreach and inbox triage) with an enviro
 - `AGENTMAIL_INBOX_ID`: Default sender inbox (usually the sending address) used when a call omits inboxId.
 - `AGENTMAIL_BASE_URL`: Optional endpoint override, for example another AgentMail region.
 - `to|cc|bcc|replyTo|subject|text|html|labels`: Send fields; a subject and a text or html body are required, and CR/LF is rejected.
-- `inboxId|limit|pageToken|from|subject|labels|ascending|includeSpam|includeTrash`: Inbox listing scope and filters; list rows stay compact and carry a preview.
+- `inboxId|limit|pageToken|from|to|subject|labels|ascending|includeSpam|includeTrash`: Inbox listing scope and filters; list rows stay compact and carry a preview, and nextPageToken pages through every page.
+- `q|before|after`: Full-text search query with optional ISO timestamp bounds; rows carry per-field match highlights.
 - `includeHtml`: Opt-in HTML body on a single-message read.
 
 **Related records:** `web-and-media`, `safety-bounds`
@@ -820,10 +821,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `agentmail_message` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 831; literal)
-- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 737; literal)
-- `agentmail_send` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 686; literal)
-- `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 609; literal)
+- `agentmail_message` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 1061; literal)
+- `agentmail_messages` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 853; literal)
+- `agentmail_search` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 965; literal)
+- `agentmail_send` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 802; literal)
+- `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 725; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 79; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
@@ -876,9 +878,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 9; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2072; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 594; literal)
+- `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 595; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 584; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 531; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 532; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 606; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
@@ -923,7 +925,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 552)
 - /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1487)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 252)
+- /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 253)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3280)
 - /effort — [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts) (line 48)
 - /export-json — [`agent/extensions/session-export-json.ts`](../../agent/extensions/session-export-json.ts) (line 48)
@@ -954,7 +956,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /reminder — [`agent/extensions/reminders.ts`](../../agent/extensions/reminders.ts) (line 1086)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 3370)
-- /self — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 526)
+- /self — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 527)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 914)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1278)
@@ -1289,7 +1291,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 144 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 145 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
@@ -1330,6 +1332,7 @@ The exporter includes 144 public skill directories. This list is a path inventor
 - `distributed-systems` — [`agent/skills/distributed-systems/SKILL.md`](../../agent/skills/distributed-systems/SKILL.md)
 - `dotnet-linux-engineering` — [`agent/skills/dotnet-linux-engineering/SKILL.md`](../../agent/skills/dotnet-linux-engineering/SKILL.md)
 - `edge-model-deployment` — [`agent/skills/edge-model-deployment/SKILL.md`](../../agent/skills/edge-model-deployment/SKILL.md)
+- `email` — [`agent/skills/email/SKILL.md`](../../agent/skills/email/SKILL.md)
 - `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../../agent/skills/evidence-first-engineering/SKILL.md)
 - `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../../agent/skills/financial-statement-analysis/SKILL.md)
 - `fonts` — [`agent/skills/fonts/SKILL.md`](../../agent/skills/fonts/SKILL.md)
