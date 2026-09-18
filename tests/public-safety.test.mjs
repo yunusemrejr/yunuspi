@@ -20,7 +20,7 @@ test('placeholders and runtime environment lookups remain publishable', () => {
   for (const text of ['const apiKey = process.env.PROVIDER_API_KEY;', JSON.stringify({ apiKey: 'YOUR_API_KEY' }), 'PROVIDER_API_KEY=${PROVIDER_API_KEY}']) assert.deepEqual(inspect(text), []);
 });
 test('sensitive files and runtime paths are rejected', () => {
-  for (const filename of ['.env', '.env.production', 'agent/auth.json', 'agent/settings.json', 'agent/sessions/run.jsonl', 'agent/memory/user.md', 'agent/backups/archive.zip', 'nested/.git/config', 'api-key']) assert.ok(scanPath(filename).length);
+  for (const filename of ['.env', '.env.production', 'agent/auth.json', 'agent/settings.json', 'agent/sessions/run.jsonl', 'agent/memory/user.md', 'agent/backups/archive.zip', 'agent/tasks/record.json', 'agent/work/notes.md', 'tasks/record.json', 'work/notes.md', 'nested/.git/config', 'api-key']) assert.ok(scanPath(filename).length);
 });
 test('dependency metadata is permitted but installed or private npm files are rejected', () => {
   assert.deepEqual(scanPath('agent/npm/package.json'), []);
