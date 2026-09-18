@@ -10,6 +10,14 @@ import {
   verifyBrowserText,
   safeBrowserUrl,
 } from "./browser-diagnostics.mjs";
+import {
+  MARKER_LIMIT,
+  buildCollectScript,
+  capEvaluateResult,
+  clearMarkers,
+  paintMarkers,
+  resolveMarker,
+} from "./browser-markers.mjs";
 export { safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
@@ -35,6 +43,7 @@ export async function runBrowserSession(input, output) {
   const lease = createBrowserLease();
   const logs = createBrowserEvents(),
     network = createBrowserEvents();
+  let markerStore = { url: null, markers: [] };
   const requests = new WeakMap();
   const record = (kind, extra) => logs.record(kind, extra);
   const close = async () => {
@@ -178,7 +187,17 @@ export async function runBrowserSession(input, output) {
           });
         }
         const surface = p.frame ? page.frameLocator(p.frame) : page;
+        const hasLocatorTarget = () =>
+          Number.isInteger(p.marker) ||
+          (typeof p.selector === "string" && p.selector.length > 0) ||
+          typeof p.role === "string";
         const locate = () => {
+          if (Number.isInteger(p.marker)) {
+            if (p.frame)
+              throw Error("Markers address the main frame; omit frame or use a selector");
+            const marker = resolveMarker(markerStore, p.marker, page.url());
+            return page.locator(marker.path);
+          }
           if (
             typeof p.selector === "string" &&
             p.selector.length > 0 &&
@@ -192,8 +211,13 @@ export async function runBrowserSession(input, output) {
           )
             return surface.getByRole(p.role, { name: p.name, exact: true });
           throw Error(
-            "Use a selector or exact role/name observed in this browser session",
+            "Use a marker id, selector or exact role/name observed in this browser session",
           );
+        };
+        const readCoords = () => {
+          if (!Number.isInteger(p.x) || !Number.isInteger(p.y) || p.x < 0 || p.y < 0)
+            throw Error("Coordinate actions need integer x/y of at least 0 (CSS pixels)");
+          return { x: p.x, y: p.y };
         };
         const snapshot = async () =>
           (p.selector || p.role ? locate() : surface.locator(":root")).evaluate(
@@ -201,6 +225,14 @@ export async function runBrowserSession(input, output) {
             { selector: p.selector ?? null },
             { timeout },
           );
+        const frameList = () =>
+          page
+            .frames()
+            .slice(0, 6)
+            .map((frame) => ({
+              url: safeBrowserUrl(frame.url()),
+              name: diagnosticText(frame.name(), 120),
+            }));
         let result;
         stage = action;
         if (action === "open" || action === "navigate") {
@@ -209,13 +241,57 @@ export async function runBrowserSession(input, output) {
             waitUntil: "domcontentloaded",
             timeout: 15000,
           });
+          markerStore = { url: null, markers: [] };
           record("navigation", {
             url: safeBrowserUrl(page.url()),
             status: response?.status(),
           });
         } else if (action === "click") {
-          await locate().click({ timeout });
+          if (!hasLocatorTarget() && Number.isInteger(p.x) && Number.isInteger(p.y)) {
+            const { x, y } = readCoords();
+            await page.mouse.click(x, y);
+          } else {
+            await locate().click({ timeout });
+          }
           record("click");
+        } else if (action === "hover") {
+          if (hasLocatorTarget()) {
+            await locate().hover({ timeout });
+          } else {
+            const { x, y } = readCoords();
+            await page.mouse.move(x, y);
+          }
+          record("hover");
+        } else if (action === "scroll") {
+          if (hasLocatorTarget()) {
+            await locate().scrollIntoViewIfNeeded({ timeout });
+          } else {
+            const dx = p.dx ?? 0;
+            const dy = p.dy ?? page.viewportSize()?.height ?? 800;
+            if (!Number.isInteger(dx) || !Number.isInteger(dy))
+              throw Error("Page scroll needs integer dx/dy wheel deltas");
+            await page.mouse.wheel(dx, dy);
+          }
+          record("scroll");
+        } else if (action === "drag") {
+          if (!Number.isInteger(p.toX) || !Number.isInteger(p.toY) || p.toX < 0 || p.toY < 0)
+            throw Error("drag needs integer toX/toY of at least 0 (CSS pixels)");
+          let from;
+          if (hasLocatorTarget()) {
+            const box = await locate().boundingBox({ timeout });
+            if (!box) throw Error("Drag source has no visible bounds");
+            from = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+          } else {
+            from = readCoords();
+          }
+          await page.mouse.move(from.x, from.y);
+          await page.mouse.down();
+          try {
+            await page.mouse.move(p.toX, p.toY, { steps: 12 });
+          } finally {
+            await page.mouse.up();
+          }
+          record("drag");
         } else if (action === "fill") {
           if (typeof p.text !== "string" || p.text.length > 8000)
             throw Error("fill text limit is 8000 characters");
@@ -269,6 +345,79 @@ export async function runBrowserSession(input, output) {
               { timeout },
             ),
           };
+        } else if (action === "evaluate") {
+          if (typeof p.script !== "string" || p.script.length === 0 || p.script.length > 8000)
+            throw Error("evaluate requires a script of 1–8000 characters");
+          const maxChars = p.maxChars ?? 8000;
+          if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
+            throw Error("Invalid maxChars: use 100–64000");
+          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+          const value = await surface
+            .locator(":root")
+            .evaluate(new AsyncFunction(p.script), null, { timeout });
+          result = { evaluation: capEvaluateResult(value, maxChars) };
+          record("evaluate");
+        } else if (action === "html") {
+          const maxChars = p.maxChars ?? 8000;
+          if (!Number.isInteger(maxChars) || maxChars < 100 || maxChars > 64000)
+            throw Error("Invalid maxChars: use 100–64000");
+          const markup = await locate().evaluate((el) => el.outerHTML, null, { timeout });
+          result = {
+            html: markup.slice(0, maxChars),
+            truncated: markup.length > maxChars,
+            chars: markup.length,
+          };
+        } else if (action === "markers") {
+          if (p.frame)
+            throw Error("markers captures the main frame; omit frame");
+          const collected = await page
+            .locator(":root")
+            .evaluate(new Function(buildCollectScript(MARKER_LIMIT)), null, { timeout });
+          markerStore = { url: page.url(), markers: collected.rows };
+          try {
+            await page.evaluate(paintMarkers, collected.rows);
+            const png = await page.screenshot({ type: "png", timeout: 10000 });
+            if (png.length > 1_100_000)
+              throw Error("Screenshot exceeds attachment limit");
+            result = {
+              png: png.toString("base64"),
+              mimeType: "image/png",
+              markers: collected.rows.map((row, index) => ({ id: index + 1, ...row })),
+              markerCount: collected.rows.length,
+              candidates: collected.candidates,
+              limit: collected.limit,
+              truncated: collected.truncated,
+            };
+          } finally {
+            await page.evaluate(clearMarkers).catch(() => {});
+          }
+          record("markers");
+        } else if (action === "observe") {
+          const state = await page
+            .locator(":root")
+            .evaluate(inspectPageState, {}, { timeout });
+          const png = await page.screenshot({ type: "png", timeout: 10000 });
+          if (png.length > 1_100_000)
+            throw Error("Screenshot exceeds attachment limit");
+          const cursor = logs.summary().cursor;
+          const recent = logs.read({
+            since: Math.max(0, cursor - 30),
+            limit: 30,
+            includeText: true,
+          });
+          result = {
+            pageState: state,
+            frames: frameList(),
+            png: png.toString("base64"),
+            mimeType: "image/png",
+            consoleErrors: recent.events.filter(
+              (event) =>
+                event.kind === "console-error" ||
+                event.kind === "page-script-error",
+            ),
+            diagnosticsNote:
+              "Latest console/page errors only; use logs/network for full bounded history.",
+          };
         } else if (action === "logs" || action === "network") {
           const data = (action === "logs" ? logs : network).read(p);
           result = {
@@ -280,9 +429,9 @@ export async function runBrowserSession(input, output) {
               "Bounded event history; bodies, cookies, authorization headers and URL parameters omitted. includeText enables best-effort minimized console/script messages; application prose can still contain private data.",
           };
         } else if (action === "screenshot") {
-          const png = await (p.selector || p.role ? locate() : page).screenshot(
-            { type: "png", timeout: 10000 },
-          );
+          const png = await (
+            p.marker || p.selector || p.role ? locate() : page
+          ).screenshot({ type: "png", timeout: 10000 });
           if (png.length > 1_100_000)
             throw Error("Screenshot exceeds attachment limit");
           result = { png: png.toString("base64"), mimeType: "image/png" };
@@ -299,13 +448,7 @@ export async function runBrowserSession(input, output) {
                   .evaluate(inspectPageState, {}, { timeout });
           result = {
             pageState: state,
-            frames: page
-              .frames()
-              .slice(0, 6)
-              .map((frame) => ({
-                url: safeBrowserUrl(frame.url()),
-                name: diagnosticText(frame.name(), 120),
-              })),
+            frames: frameList(),
           };
         }
         if (action === "renew") {
@@ -326,7 +469,9 @@ export async function runBrowserSession(input, output) {
         const failure = browserFailure(error, stage, action);
         if (
           stage === "observation" &&
-          ["click", "fill", "press", "select", "check"].includes(action)
+          ["click", "fill", "press", "select", "check", "hover", "scroll", "drag"].includes(
+            action,
+          )
         )
           failure.outcome = "action completed; subsequent observation failed";
         record("action-error", { failure });

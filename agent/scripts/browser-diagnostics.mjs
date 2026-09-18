@@ -142,7 +142,7 @@ export function browserFailure(error, stage, action) {
                 )
               ? "invalid-request"
               : "action-failed";
-  const mutation = stage !== "validation" && ["click", "fill", "press", "select", "check"].includes(action);
+  const mutation = stage !== "validation" && ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(action);
   return {
     stage,
     kind,
@@ -156,9 +156,13 @@ export function browserFailure(error, stage, action) {
           ? "Open a new session and reconcile any previous mutation."
           : kind === "ambiguous-target"
             ? "Inspect current state and choose one exact target."
-            : mutation
-              ? "Inspect current state and logs before retrying; do not replay a mutation automatically."
-              : "Inspect the current URL, target and diagnostics; correct the cause before retrying.",
+            : /Markers are stale/.test(text)
+              ? "Capture markers again on the current page; marker ids die on navigation."
+              : /No markers captured|Unknown marker id/.test(text)
+                ? "Use the markers action to capture numbered targets first."
+                : mutation
+                  ? "Inspect current state and logs before retrying; do not replay a mutation automatically."
+                  : "Inspect the current URL, target and diagnostics; correct the cause before retrying.",
   };
 }
 

@@ -55,7 +55,7 @@ export function registerBrowserSession(pi: any) {
     name: "browser_session",
     label: "Isolated browser",
     description:
-      "Agent-owned Chromium: open/navigate, snapshot, inspect DOM/CSS and option labels, click/fill/press, select by option label, check to a desired boolean, verify exact supplied text, wait, viewport, screenshot, logs/network, renew/list/close. Use an observed selector or exact role/name; frame selects an observed iframe. No imported personal profiles/credentials, downloads or arbitrary JS. Two sessions; renewable 10-minute/200-action leases. Results include lease remaining; renew observes current state and preserves this temporary browser. Save progress in todo before expiry/restart. Verification returns a boolean without revealing field values. Logs/network use nextCursor as since; includeText enables minimized diagnostics. Never replay uncertain mutations: reconcile first. web_search/web_research handle discovery; render_see handles local files.",
+      "Agent-owned Chromium: open/navigate, snapshot, markers (numbered screenshot plus element table for marker-id actions), observe (snapshot plus screenshot plus console errors in one call), evaluate (awaited page JS returning capped JSON; use return), html (capped element markup), click/fill/press/hover/scroll/drag, select by option label, check to a desired boolean, verify exact supplied text, inspect DOM/CSS and option labels, wait, viewport, screenshot, logs/network, renew/list/close. Target by marker id, observed selector, exact role/name, or x/y CSS-pixel coordinates (click/hover; drag needs toX/toY; markers and coordinates are main-frame). frame selects an observed iframe. No imported personal profiles/credentials or downloads. Two sessions; renewable 10-minute/200-action leases (reads and renewal stay free). Results include lease remaining; renew observes current state and preserves this temporary browser. Save progress in todo before expiry/restart. Verification returns a boolean without revealing field values. Logs/network use nextCursor as since; includeText enables minimized diagnostics. Never replay uncertain mutations: reconcile first. web_search/web_research handle discovery; render_see handles local files.",
     parameters: Type.Object({
       action: Type.Union(
         [
@@ -77,6 +77,13 @@ export function registerBrowserSession(pi: any) {
           "viewport",
           "list",
           "close",
+          "evaluate",
+          "markers",
+          "observe",
+          "html",
+          "hover",
+          "scroll",
+          "drag",
         ].map((value) => Type.Literal(value)),
       ),
       session: Type.Optional(Type.String()),
@@ -105,6 +112,15 @@ export function registerBrowserSession(pi: any) {
       timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 15000 })),
       width: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
       height: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
+      script: Type.Optional(Type.String({ maxLength: 8000, description: "Async JS body for evaluate; return a JSON-serializable value" })),
+      marker: Type.Optional(Type.Integer({ minimum: 1, description: "Marker id from the markers action (main frame; dies on navigation)" })),
+      x: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel x for click/hover, or drag start" })),
+      y: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel y for click/hover, or drag start" })),
+      toX: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel x for drag end" })),
+      toY: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel y for drag end" })),
+      dx: Type.Optional(Type.Integer({ description: "Horizontal wheel delta for page scroll" })),
+      dy: Type.Optional(Type.Integer({ description: "Vertical wheel delta for page scroll; defaults to one viewport" })),
+      maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 64000, description: "Result cap for evaluate/html; default 8000" })),
     }),
     async execute(
       _id: string,
