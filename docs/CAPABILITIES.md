@@ -852,11 +852,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 11; literal)
-- `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 191; configured-default)
-- `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 192; configured-default)
+- `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 192; configured-default)
+- `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 193; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 189; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 10; literal)
-- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 393; literal)
+- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 394; literal)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 70; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 162; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 159; factory)
@@ -868,7 +868,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 1924; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 165; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 644; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 733; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 584; literal)
@@ -879,12 +879,12 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 9; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2072; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1090; literal)
+- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1368; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 584; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1027; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1305; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 361; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 636; literal)
-- `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
+- `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 191; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 829; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
@@ -894,13 +894,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 173; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 86; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 170; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 208; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 96; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 59; literal)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
-- `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 189; configured-default)
+- `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 190; configured-default)
 - `workdir_snapshot` — [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts) (line 12; literal)
 
 ### Dynamic tool owners
@@ -914,7 +914,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `coverage_select`, `decision_frontier`, `dependency_plan` (lines 8)
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 311, 638)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
-- [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1654, 2242, 2341, 2685)
+- [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1655, 2243, 2388, 2779)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 70)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe` (lines 23)
 
@@ -927,12 +927,12 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 552)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1487)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 998)
-- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 681)
-- /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3280)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1276)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 810)
+- /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3374)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 48)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 48)
-- /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3322)
+- /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3416)
 - /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 821)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 65)
@@ -951,15 +951,15 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 600)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 184)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 47)
-- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 697)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 786)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 647)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 646)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 467)
 - /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1086)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
-- /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3370)
-- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 956)
+- /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3464)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1234)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 914)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1278)
@@ -976,10 +976,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1052)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1004)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 961)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1239)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 528)
-- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 980)
-- /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3019)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1258)
+- /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3113)
 
 ### Dynamic command owners
 
@@ -991,7 +991,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
+- [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
 - [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/contract.mjs`](../agent/extensions/lib/utility-mcp/contract.mjs) — `MCP`
@@ -1007,6 +1009,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../agent/extensions/pi-background-tasks/src/core/registry.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-subagents/src/agents/agent-management.ts`](../agent/extensions/pi-subagents/src/agents/agent-management.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/agents/agent-serializer.ts`](../agent/extensions/pi-subagents/src/agents/agent-serializer.ts) — `MCP`
 - [`agent/extensions/pi-subagents/src/agents/agents.ts`](../agent/extensions/pi-subagents/src/agents/agents.ts) — `MCP`
@@ -1043,7 +1046,9 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts`](../agent/extensions/pi-subagents/src/watchdog/lsp-diagnostics.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts`](../agent/extensions/pi-subagents/src/workflows/scripted-workflow.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts`](../agent/extensions/pi-subagents/src/workflows/workflow-receipt.ts) — `MCP`
+- [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — `wrapper/adapter`
 - [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) — `wrapper/adapter`
+- [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) — `wrapper/adapter`
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
 
 ## Extension source inventory

@@ -1,0 +1,483 @@
+/** Shared TypeSafe Jev judgment client, served through the configured
+ * OpenRouter key. Jev answers typed questions (noul/choice/score) over a
+ * state — no prose — which makes it a cheap mechanical judge for routing,
+ * screening, ranking, verifying, classifying, distilling and triage.
+ *
+ * Resilience contract (every consumer keeps its heuristic path; Jev refines,
+ * never gates):
+ * - Slug cascade per call: `~typesafe/jev-latest`, then `typesafe/jev-1.13`,
+ *   then any other jev variation discovered from the OpenRouter catalog.
+ *   Model rejections (4xx) advance the cascade; transport failures stop it.
+ * - The last working slug sticks; a fresh cascade runs on first use, after
+ *   recovery, and when the sticky slug is rejected.
+ * - An exhausted cascade opens the breaker for 5 minutes. A single
+ *   background probe then re-tests; success resumes dynamically, failure
+ *   re-arms. Callers fail fast to their fallback while open.
+ * - Answers are deduplicated per session (identical state+questions pay
+ *   once) and every paid call is ledgered as a `jev-usage-v1` session
+ *   entry so cost and metrics treat Jev like any other provider route.
+ */
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
+export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
+export const JEV_PREFERRED_SLUGS = ["~typesafe/jev-latest", "typesafe/jev-1.13"];
+export const JEV_PRICE_PER_M_INPUT = 0.042;
+export const JEV_REQUEST_TIMEOUT_MS = 15_000;
+export const JEV_DISCOVERY_TTL_MS = 10 * 60 * 1000;
+export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
+const JEV_CACHE_MAX = 500;
+
+const agentDir = (): string =>
+  process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+
+/** OpenRouter key: models.json provider entry ($VAR expanded), else env. */
+export function openRouterKey(): string | undefined {
+  try {
+    const json = JSON.parse(
+      readFileSync(join(agentDir(), "models.json"), "utf-8"),
+    ) as { providers?: Record<string, { apiKey?: string }> };
+    const raw = json.providers?.openrouter?.apiKey;
+    if (typeof raw === "string" && raw.startsWith("$")) {
+      const expanded = process.env[raw.slice(1)];
+      if (expanded) return expanded;
+    } else if (typeof raw === "string" && raw.length > 0) {
+      return raw;
+    }
+  } catch {
+    // Missing/unreadable config falls through to env.
+  }
+  return process.env.OPENROUTER_API_KEY ?? undefined;
+}
+
+export const estimateJevTokens = (chars: number): number =>
+  Math.max(1, Math.ceil(Math.max(0, chars) / 4));
+
+export const jevCostUsd = (inputTokens: number): number =>
+  (Math.max(0, inputTokens) / 1_000_000) * JEV_PRICE_PER_M_INPUT;
+
+const fmtTokens = (n: number): string =>
+  n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
+
+/** TUI marker appended next to whatever a Jev call served. */
+export function jevMark(
+  site: string,
+  detail: string,
+  usage: { inputTokens: number; cached: boolean },
+): string {
+  const cost = usage.cached ? "cached 0 tok" : `${fmtTokens(usage.inputTokens)} tok`;
+  return `[successfully routed with Jev · ${site}${detail ? ` · ${detail}` : ""} · ${cost}]`;
+}
+
+export type JevAnswer = {
+  type: string;
+  noul?: number;
+  choice?: string;
+  probabilities?: Record<string, number>;
+  confidence?: number;
+  score?: number;
+  legend?: Record<string, string>;
+};
+
+export type JevAskResult =
+  | {
+      ok: true;
+      answers: Record<string, JevAnswer>;
+      usage: {
+        model: string;
+        inputTokens: number;
+        costUsd: number;
+        ms: number;
+        cached: boolean;
+      };
+    }
+  | { ok: false; skipped: string };
+
+type Deps = {
+  fetchImpl: typeof fetch;
+  now: () => number;
+  schedule: (fn: () => void, ms: number) => { unref?: () => void };
+  openMs: number;
+};
+
+const deps: Deps = {
+  fetchImpl: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+  now: () => Date.now(),
+  schedule: (fn, ms) => {
+    const timer = setTimeout(fn, ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    return timer as unknown as { unref?: () => void };
+  },
+  openMs: 5 * 60 * 1000,
+};
+
+/** Test seam: inject fetch/clock/timers and shrink the breaker window. */
+export function configureJevClient(partial: Partial<Deps>): void {
+  Object.assign(deps, partial);
+}
+
+let stickySlug: string | undefined;
+let breakerOpen = false;
+let breakerOpenedAt = 0;
+let probeScheduled = false;
+let lastError = "";
+let discovered: { at: number; slugs: string[] } = { at: 0, slugs: [] };
+let discoveryInflight: Promise<string[]> | null = null;
+const cache = new Map<string, { answers: Record<string, JevAnswer>; inputTokens: number; model: string; at: number }>();
+
+/** Test seam: reset every module singleton. */
+export function resetJevClient(): void {
+  stickySlug = undefined;
+  breakerOpen = false;
+  breakerOpenedAt = 0;
+  probeScheduled = false;
+  lastError = "";
+  discovered = { at: 0, slugs: [] };
+  discoveryInflight = null;
+  cache.clear();
+}
+
+export function jevHealth(): {
+  state: "closed" | "open";
+  slug?: string;
+  lastError: string;
+  nextProbeInMs: number;
+} {
+  return {
+    state: breakerOpen ? "open" : "closed",
+    slug: stickySlug,
+    lastError,
+    nextProbeInMs: breakerOpen
+      ? Math.max(0, breakerOpenedAt + deps.openMs - deps.now())
+      : 0,
+  };
+}
+
+function cacheKey(site: string, slug: string, state: unknown, questions: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify([site, slug, state, questions]))
+    .digest("hex");
+}
+
+function cacheGet(key: string): { answers: Record<string, JevAnswer>; inputTokens: number; model: string } | undefined {
+  const hit = cache.get(key);
+  if (!hit) return undefined;
+  if (deps.now() - hit.at > JEV_CACHE_TTL_MS) {
+    cache.delete(key);
+    return undefined;
+  }
+  return hit;
+}
+
+function cacheSet(key: string, value: { answers: Record<string, JevAnswer>; inputTokens: number; model: string }): void {
+  if (cache.size >= JEV_CACHE_MAX) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, { ...value, at: deps.now() });
+}
+
+/** Any jev variation OpenRouter lists, typesafe-authored first. */
+async function discoverSlugs(): Promise<string[]> {
+  if (deps.now() - discovered.at < JEV_DISCOVERY_TTL_MS) return discovered.slugs;
+  if (discoveryInflight) return discoveryInflight;
+  discoveryInflight = (async () => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await deps.fetchImpl(JEV_MODELS_URL, { signal: controller.signal });
+        if (!response.ok) return discovered.slugs;
+        const body = (await response.json()) as { data?: Array<{ id?: string }> };
+        const ids = (body.data ?? [])
+          .map((entry) => entry?.id)
+          .filter((id): id is string => typeof id === "string" && id.toLowerCase().includes("jev"));
+        ids.sort((a, b) => Number(b.startsWith("typesafe/")) - Number(a.startsWith("typesafe/")));
+        discovered = { at: deps.now(), slugs: [...new Set(ids)] };
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      // Discovery is opportunistic; the preferred slugs stand alone.
+    } finally {
+      discoveryInflight = null;
+    }
+    return discovered.slugs;
+  })();
+  return discoveryInflight;
+}
+
+/** Full cascade order: preferred slugs, then discovered variations. */
+export async function jevCascadeSlugs(): Promise<string[]> {
+  const found = await discoverSlugs();
+  return [...new Set([...JEV_PREFERRED_SLUGS, ...found])];
+}
+
+function ledger(
+  pi: unknown,
+  entry: {
+    site: string;
+    model: string;
+    inputTokens: number;
+    costUsd: number;
+    ms: number;
+    cached: boolean;
+  },
+): void {
+  try {
+    (pi as { appendEntry?: (type: string, data: unknown) => void })?.appendEntry?.("jev-usage-v1", entry);
+  } catch {
+    // Accounting must never break the call it measures.
+  }
+}
+
+const PROBE_STATE = "ok";
+const PROBE_QUESTIONS = { ping: { type: "noul", instructions: "Is this text affirmative?" } };
+
+async function postDecisions(
+  slug: string,
+  state: unknown,
+  questions: Record<string, unknown>,
+  key: string,
+  signal?: AbortSignal,
+): Promise<{ answers: Record<string, JevAnswer> }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), JEV_REQUEST_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await deps.fetchImpl(JEV_DECISIONS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/yunusemrejr/yunuspi",
+        "X-Title": "yunuspi",
+      },
+      body: JSON.stringify({ model: slug, state, questions }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const err = Error(`decisions ${response.status}: ${body.slice(0, 160)}`) as Error & { status?: number };
+      err.status = response.status;
+      throw err;
+    }
+    const body = (await response.json()) as { answers?: Record<string, JevAnswer> };
+    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object")
+      throw Error("decisions: malformed answers");
+    return { answers: body.answers };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+function isModelRejection(status: number | undefined, message: string): boolean {
+  if (status === 404) return true;
+  if (status !== 400) return false;
+  return /model|slug|unknown|not\s*found|invalid/i.test(message);
+}
+
+function openBreaker(reason: string): void {
+  breakerOpen = true;
+  breakerOpenedAt = deps.now();
+  lastError = reason.slice(0, 240);
+  scheduleProbe();
+}
+
+function scheduleProbe(): void {
+  if (probeScheduled) return;
+  probeScheduled = true;
+  deps.schedule(() => {
+    probeScheduled = false;
+    void recoverProbe();
+  }, Math.max(0, breakerOpenedAt + deps.openMs - deps.now()));
+}
+
+async function recoverProbe(): Promise<void> {
+  if (!breakerOpen) return;
+  const key = openRouterKey();
+  if (!key) {
+    openBreaker("recover probe: no OpenRouter key");
+    return;
+  }
+  stickySlug = undefined;
+  const slugs = await jevCascadeSlugs();
+  for (const slug of slugs) {
+    try {
+      await postDecisions(slug, PROBE_STATE, PROBE_QUESTIONS, key);
+      stickySlug = slug;
+      breakerOpen = false;
+      lastError = "";
+      return;
+    } catch {
+      // Keep probing the cascade; one success reopens service.
+    }
+  }
+  openBreaker("recover probe: cascade exhausted");
+}
+
+export type JevAskOpts = {
+  pi?: unknown;
+  signal?: AbortSignal;
+};
+
+/**
+ * One batched judgment call. Returns answers or a fallback directive —
+ * callers treat every non-ok result as "use the heuristic path".
+ */
+export async function askJev(
+  site: string,
+  state: unknown,
+  questions: Record<string, unknown>,
+  opts: JevAskOpts = {},
+): Promise<JevAskResult> {
+  if ((process.env.PI_JEV ?? "").toLowerCase() === "off") return { ok: false, skipped: "disabled" };
+  if (state === undefined || state === null || (typeof state === "string" && !state.trim()))
+    return { ok: false, skipped: "trivial" };
+  if (!questions || typeof questions !== "object" || Object.keys(questions).length === 0)
+    return { ok: false, skipped: "trivial" };
+  const key = openRouterKey();
+  if (!key) return { ok: false, skipped: "no-key" };
+  if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
+  if (breakerOpen) {
+    scheduleProbe();
+    return { ok: false, skipped: "unhealthy" };
+  }
+
+  const payloadChars = JSON.stringify([state, questions]).length;
+  const inputTokens = estimateJevTokens(payloadChars);
+  const started = deps.now();
+  const slugs = await jevCascadeSlugs();
+  // Sticky slug first (known good), then the full preferred order.
+  const ordered = stickySlug && slugs.includes(stickySlug)
+    ? [stickySlug, ...slugs.filter((slug) => slug !== stickySlug)]
+    : slugs;
+  for (const slug of ordered) {
+    const hit = cacheGet(cacheKey(site, slug, state, questions));
+    if (hit) {
+      ledger(opts.pi, { site, model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true });
+      return {
+        ok: true,
+        answers: hit.answers,
+        usage: { model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true },
+      };
+    }
+  }
+  let modelRejections = 0;
+  for (const slug of ordered) {
+    try {
+      const { answers } = await postDecisions(slug, state, questions, key, opts.signal);
+      stickySlug = slug;
+      cacheSet(cacheKey(site, slug, state, questions), { answers, inputTokens, model: slug });
+      const ms = deps.now() - started;
+      const costUsd = jevCostUsd(inputTokens);
+      ledger(opts.pi, { site, model: slug, inputTokens, costUsd, ms, cached: false });
+      return { ok: true, answers, usage: { model: slug, inputTokens, costUsd, ms, cached: false } };
+    } catch (error) {
+      if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
+      const status = (error as { status?: number }).status;
+      const message = error instanceof Error ? error.message : String(error);
+      if (isModelRejection(status, message)) {
+        modelRejections++;
+        if (slug === stickySlug) stickySlug = undefined;
+        continue;
+      }
+      lastError = message.slice(0, 240);
+      openBreaker(`cascade stopped at ${slug}: ${lastError}`);
+      return { ok: false, skipped: "unavailable" };
+    }
+  }
+  openBreaker(
+    modelRejections === ordered.length && ordered.length > 0
+      ? `all ${ordered.length} slugs rejected`
+      : "cascade exhausted",
+  );
+  return { ok: false, skipped: "unavailable" };
+}
+
+/** Guard helper: skip judgments the input cannot support. Exported for tests. */
+export function tooShort(text: unknown, minChars: number): boolean {
+  return typeof text !== "string" || text.trim().length < minChars;
+}
+
+/** Split text into line-aware chunks for relevance scoring. */
+export function splitTextChunks(text: string, maxChunks = 8, chunkChars = 2000): string[] {
+  if (!text) return [];
+  const chunks: string[] = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    if (current && current.length + line.length + 1 > chunkChars) {
+      chunks.push(current);
+      current = "";
+      if (chunks.length >= maxChunks) break;
+    }
+    current += (current ? "\n" : "") + line;
+  }
+  if (current && chunks.length < maxChunks) chunks.push(current);
+  return chunks;
+}
+
+/** Score text chunks for distillation. First and last chunks are always
+ * kept; middle chunks need `keepAt` (0-1). Returns the rendered selection
+ * with its TUI mark, or undefined when nothing should change. The `ask`
+ * dependency lets tests drive the orchestration without transport. */
+export async function selectDistillChunks(
+  tool: string,
+  text: string,
+  ask: (
+    site: string,
+    state: unknown,
+    questions: Record<string, unknown>,
+  ) => Promise<JevAskResult>,
+  keepAt = 0.6,
+): Promise<string | undefined> {
+  const chunks = splitTextChunks(text, 8, 2000);
+  if (chunks.length < 2) return undefined;
+  const questions: Record<string, unknown> = {};
+  chunks.forEach((_, index) => {
+    questions[`chunk_${index}`] = {
+      type: "noul",
+      instructions: `Does chunk ${index} carry task-relevant information (errors, results, decisions, data)?`,
+    };
+  });
+  const judged = await ask(
+    "distill",
+    { tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
+    questions,
+  );
+  if (!judged.ok) return undefined;
+  const kept = chunks.map(
+    (_, index) =>
+      index === 0 ||
+      index === chunks.length - 1 ||
+      (judged.answers[`chunk_${index}`]?.noul ?? 0) >= keepAt,
+  );
+  if (kept.every(Boolean)) return undefined;
+  const keptCount = kept.filter(Boolean).length;
+  return `${renderKeptChunks(chunks, kept)}\n\n${jevMark("distill", `kept ${keptCount}/${chunks.length}`, judged.usage)}`;
+}
+
+/** Render kept chunk indexes extractively with omission notes. */
+export function renderKeptChunks(chunks: string[], kept: boolean[], maxChars = 12000): string {
+  const parts: string[] = [];
+  let omitted = 0;
+  chunks.forEach((chunk, index) => {
+    if (kept[index]) {
+      if (omitted > 0) {
+        parts.push(`[...${omitted} chunk(s) omitted...]`);
+        omitted = 0;
+      }
+      parts.push(chunk);
+    } else {
+      omitted++;
+    }
+  });
+  if (omitted > 0) parts.push(`[...${omitted} trailing chunk(s) omitted...]`);
+  const joined = parts.join("\n\n");
+  return joined.length > maxChars ? `${joined.slice(0, maxChars)}\n[...render capped...]` : joined;
+}

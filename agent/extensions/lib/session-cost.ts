@@ -67,6 +67,15 @@ export function collectSessionCost(entries, subscription = false) {
       // Terminal lifecycle without cost remains pending until accounting arrives.
       if (typeof data?.runId === 'string' && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
     }
+    // Jev judgments bill input-only through OpenRouter; cost is estimated
+    // from measured payload characters like any other estimated route.
+    if (entry.type === 'custom' && entry.customType === 'jev-usage-v1') {
+      const data = entry.data;
+      const cost = typeof data?.costUsd === 'number' && data.costUsd >= 0 ? data.costUsd : 0;
+      const evidence = {reported:0, estimated:cost, unknown:false, subscription:false, seen:true, estimatedUsage:data?.cached !== true};
+      auxiliary = mergeCostEvidence(auxiliary, evidence);
+      addRow('auxiliary', typeof data?.model === 'string' && data.model ? `openrouter/${data.model.slice(0,128)}` : 'openrouter/jev', evidence);
+    }
     const isMain = m?.role === 'assistant';
     const isAuxiliary = m?.role === 'toolResult' && !['subagent','bg_wait'].includes(m.toolName) && m.usage || ['compaction','branch_summary'].includes(entry.type);
     if (!isMain && !isAuxiliary) continue;

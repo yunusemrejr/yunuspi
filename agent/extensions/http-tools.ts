@@ -11,6 +11,7 @@
  */
 
 import { compactJsonWhitespace } from "./lib/compact-tool-json.ts";
+import { askJev, jevMark, tooShort } from "./lib/jev-client.ts";
 import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 import { Agent, request } from "undici";
@@ -423,6 +424,47 @@ export default function httpTools(pi: any) {
         };
       } catch (error) {
         const failure = describeHttpFailure(error, signal);
+        // Jev refines only the regex leftovers: short messages and decided
+        // kinds keep the deterministic verdict.
+        try {
+          if (failure.kind === "unknown" && !tooShort(failure.error, 40)) {
+            const judged = await askJev("classify", failure.error, {
+              kind: {
+                type: "choice",
+                instructions: "What kind of HTTP failure is this?",
+                criteria: {
+                  timeout: "The request timed out waiting.",
+                  network: "DNS, connection, socket, or proxy failure.",
+                  validation: "Bad URL, method, headers, or blocked/SSRF input.",
+                  auth: "Missing, expired, or rejected credentials.",
+                  quota: "Rate limit, billing refusal, or exhausted allowance.",
+                  server: "The server errored (5xx) or failed unexpectedly.",
+                  cancelled: "The caller cancelled the request.",
+                },
+              },
+            }, { pi, signal });
+            if (judged.ok) {
+              const cause = judged.answers.kind?.choice;
+              const confidence = judged.answers.kind?.confidence ?? 0;
+              const known = ["timeout", "network", "validation", "auth", "quota", "server", "cancelled"];
+              if (cause && known.includes(cause) && confidence >= 0.7) {
+                if ((["timeout", "network", "validation", "cancelled"] as string[]).includes(cause))
+                  (failure as { kind: string }).kind = cause;
+                if (cause === "server") failure.retryable = true;
+                if (cause === "auth") failure.nextStep = "Provide or refresh credentials, then retry.";
+                if (cause === "quota") failure.nextStep = "Back off for the provider cooldown window, then retry.";
+                if (cause === "server") failure.nextStep = "Retry once; the failure is server-side.";
+                (failure as unknown as Record<string, unknown>).jev = {
+                  mark: jevMark("classify", `${cause} ${confidence.toFixed(2)}`, judged.usage),
+                  cause,
+                  confidence,
+                };
+              }
+            }
+          }
+        } catch {
+          // The regex verdict stands.
+        }
         return {
           isError: true,
           content: [{ type: "text", text: JSON.stringify(failure) }],

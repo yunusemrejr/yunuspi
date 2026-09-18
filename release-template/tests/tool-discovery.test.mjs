@@ -10,6 +10,9 @@ const agent = [path.join(template, "agent"), path.resolve(template, "..")].find(
 const { registerToolDiscovery } = await import(
  pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts"))
 );
+// Lexical pins below stay hermetic: Jev re-ranking needs ambient network and
+// is covered by the dedicated mocked test at the end of this file.
+process.env.PI_JEV = "off";
 function fixture(extraTools = []) {
  const hooks = {},
   entries = [],
@@ -552,4 +555,52 @@ test("resume bounds old discoveries, drops stale receipts and retains unresolved
  );
  assert.ok(restored.has(names[0]));
  assert.ok(restored.has(names[7]));
+});
+
+test("jev rerank reorders ambiguous matches with a ledger mark", async () => {
+ const { configureJevClient, resetJevClient } = await import(
+  pathToFileURL(path.join(agent, "extensions/lib/jev-client.ts"))
+ );
+ const seen = [];
+ resetJevClient();
+ configureJevClient({
+  fetchImpl: async (url, opts) => {
+   if (String(url).includes("/api/v1/models"))
+    return { ok: true, status: 200, json: async () => ({ data: [] }), text: async () => "" };
+   seen.push(JSON.parse(opts.body).model);
+   return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+     answers: {
+      rank: { type: "choice", choice: "bravo_tool", probabilities: { bravo_tool: 0.9, alpha_tool: 0.1 }, confidence: 0.85 },
+      exists: { type: "noul", noul: 0.95 },
+     },
+    }),
+    text: async () => "",
+   };
+  },
+ });
+ const previousKey = process.env.OPENROUTER_API_KEY;
+ process.env.OPENROUTER_API_KEY = "sk-or-test";
+ delete process.env.PI_JEV;
+ try {
+  const f = fixture([
+   { name: "alpha_tool", description: "Handle fruit inventory." },
+   { name: "bravo_tool", description: "Handle fruit exports." },
+  ]);
+  const page = await f.call({ query: "fruit", limit: 8 });
+  const names = page.details.tools.map((tool) => tool.name);
+  assert.ok(names.includes("alpha_tool") && names.includes("bravo_tool"));
+  assert.ok(names.indexOf("bravo_tool") < names.indexOf("alpha_tool"), "jev order wins");
+  assert.equal(seen[0], "~typesafe/jev-latest");
+  assert.match(page.details.jev.mark, /successfully routed with Jev/);
+  assert.equal(page.details.jev.top, "bravo_tool");
+  assert.ok(f.entries.some((entry) => entry.customType === "jev-usage-v1"), "ledger entry appended");
+ } finally {
+  process.env.PI_JEV = "off";
+  if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = previousKey;
+  resetJevClient();
+ }
 });

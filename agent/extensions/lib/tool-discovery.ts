@@ -4,6 +4,44 @@
 import { Type } from 'typebox';
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from './capability-groups.ts';
 import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
+import { askJev, jevMark, tooShort } from './jev-client.ts';
+
+/** Jev re-ranks lexical matches by meaning. Single candidates, trivial
+ * queries and low-confidence judgments stay on the lexical order. */
+async function rerankWithJev<T>(
+  kind: string,
+  query: string,
+  matches: readonly T[],
+  idOf: (item: T) => string,
+  textOf: (item: T) => string,
+  pi: unknown,
+): Promise<{ matches: T[]; info: { mark: string; top: string; confidence: number } } | undefined> {
+  try {
+    if (tooShort(query, 3) || matches.length < 2) return undefined;
+    const pool = matches.slice(0, 25);
+    const candidates = pool.map((item) => ({ id: idOf(item), text: textOf(item).slice(0, 300) }));
+    const judged = await askJev('rank', { query: query.slice(0, 256) }, {
+      rank: {
+        type: 'choice',
+        instructions: `Which ${kind} entry best serves this need?`,
+        criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.text])),
+      },
+      exists: { type: 'noul', instructions: 'Does any candidate actually serve the need?' },
+    }, { pi });
+    if (!judged.ok) return undefined;
+    const order = judged.answers.rank?.probabilities ?? {};
+    const top = judged.answers.rank?.choice;
+    const topProb = top ? order[top] ?? 0 : 0;
+    if ((judged.answers.exists?.noul ?? 0) < 0.5 || topProb < 0.4 || !top) return undefined;
+    const rankOf = new Map(Object.entries(order).sort((a, b) => b[1] - a[1]).map(([id], index) => [id, index]));
+    const reordered = [...matches].sort(
+      (a, b) => (rankOf.get(idOf(a)) ?? 999) - (rankOf.get(idOf(b)) ?? 999),
+    );
+    return { matches: reordered, info: { mark: jevMark('rank', `${top} ${topProb.toFixed(2)}`, judged.usage), top, confidence: topProb } };
+  } catch {
+    return undefined;
+  }
+}
 const RECEIPT = 'harness-tool-activation-v1';
 const RESUME_TOOLS = 6;
 const DISCOVERY_PAGE = 8;
@@ -248,7 +286,15 @@ export function registerToolDiscovery(pi: any) {
         const page = query
           ? searchCapabilities({query,group,limit:input.limit,offset:input.offset})
           : browseCapabilities({group,limit:input.limit,offset:input.offset});
-        const results = page.results.map((record: any) => input.detail === true || input.enable === true
+        let jevRank: { mark: string; top: string; confidence: number } | undefined;
+        let ranked = page.results;
+        if (query) {
+          const reranked = await rerankWithJev('capability', query, page.results,
+            (record: any) => String(record?.id ?? ''),
+            (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi);
+          if (reranked) { ranked = reranked.matches; jevRank = reranked.info; }
+        }
+        const results = ranked.map((record: any) => input.detail === true || input.enable === true
           ? getCapabilityDetail(record.id) ?? record
           : record);
         if (input.enable === true) {
@@ -259,6 +305,7 @@ export function registerToolDiscovery(pi: any) {
           ...(page.group ? {group:page.group} : {}),
           offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
           nextOffset:page.remaining ? page.offset + results.length : null,
+          ...(jevRank ? {jev:jevRank} : {}),
           note:added.length?'Staged: the complete matched capability bundle(s) join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Matched capability bundle(s) already staged for the wire. No tool executed this turn.'});
         }
         return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
@@ -267,6 +314,7 @@ export function registerToolDiscovery(pi: any) {
           ...(page.group ? {group:page.group} : {}),
           offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
           nextOffset:page.remaining ? page.offset + results.length : null,
+          ...(jevRank ? {jev:jevRank} : {}),
           note:'Metadata only; the ability index is descriptive and no tool, command, or workflow was executed.'});
       }
 
@@ -331,6 +379,12 @@ export function registerToolDiscovery(pi: any) {
           });
         }
         matches = searchCapabilityMetadata(catalog, query);
+        if (!explicit.length) {
+          const reranked = await rerankWithJev('tool', query, matches,
+            (tool: any) => String(tool?.name ?? ''),
+            (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi);
+          if (reranked) { matches = reranked.matches; (matches as any).jevRank = reranked.info; }
+        }
       }
       const offset = explicit.length ? 0 : safeOffset(input.offset);
       const limit = pageLimit(input.limit,explicit.length || 3);
@@ -346,9 +400,11 @@ export function registerToolDiscovery(pi: any) {
         try { pi.appendEntry?.(RECEIPT,{names:added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
       }
       const resultingActive = new Set(pi.getActiveTools());
+      const toolsJevRank = (matches as any).jevRank as { mark: string; top: string; confidence: number } | undefined;
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,
+        ...(toolsJevRank ? {jev:toolsJevRank} : {}),
         note:activate?(added.length?'Staged: chosen schemas join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Chosen schemas are already staged for the wire. No tool executed this turn.'):'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });

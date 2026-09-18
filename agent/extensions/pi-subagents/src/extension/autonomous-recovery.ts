@@ -26,6 +26,7 @@ import { fetchEndpoints, rankRecoveryEndpoints, endpointRecoveryRouting, type En
 import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, readHealth } from "../runs/shared/provider-health.ts";
 import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
+import { askJev, tooShort } from "../../../lib/jev-client.ts";
 import { buildInterpBrief, classifyFollowup, parseInterpRead } from "../../../lib/prompt-interpretation.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
@@ -504,6 +505,33 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// Rank all applicable routes, then cap the available references. A missing
 		// high-priority skill must not displace a lower-ranked installed skill.
 		const wanted = new Set([...routeSkills(prompt).sort((a,b)=>b.priority-a.priority).map(r=>r.name), "evidence-first-engineering"]);
+		// Jev re-ranks the lexical shortlist by meaning so the surfaced
+		// references best match the task. Trivial prompts, single
+		// candidates and low-confidence distributions keep lexical order.
+		// Ledgered like any route; no result surface exists here, so the
+		// judgment shows in metrics and cost, not inline.
+		try {
+			const names = [...wanted];
+			if (!tooShort(prompt, 20) && names.length >= 2) {
+				const judged = await askJev("route", { task: prompt.slice(0, 2000) }, {
+					skill: {
+						type: "choice",
+						instructions: "Which skill best matches this task?",
+						criteria: Object.fromEntries(names.slice(0, 15).map((name) => [name, null])),
+					},
+				}, { pi });
+				if (judged.ok) {
+					const order = judged.answers.skill?.probabilities ?? {};
+					const top = judged.answers.skill?.choice;
+					if (top && (order[top] ?? 0) >= 0.35) {
+						wanted.clear();
+						for (const name of [...names].sort((a, b) => (order[b] ?? 0) - (order[a] ?? 0))) wanted.add(name);
+					}
+				}
+			}
+		} catch {
+			// Lexical order stands.
+		}
 		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
 			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
 		const paths = [...wanted].flatMap(name=>catalog.has(name)?[catalog.get(name)!]:[]).slice(0,2);

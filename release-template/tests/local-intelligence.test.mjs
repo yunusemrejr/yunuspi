@@ -12,6 +12,9 @@ const {outputLineDelta}=await load('extensions/lib/output-distiller.ts');
 const {addCompactionSalience,makeCapsule}=await load('extensions/pi-memory/context-salience.ts');
 const {finalizeSingleOutput}=await load('extensions/pi-subagents/src/runs/shared/single-output.ts');
 const {default:observations}=await load('extensions/pi-observations.ts');
+// Deterministic observation pins: Jev chunk selection needs ambient network
+// and is covered by its own mocked tests in jev-client.test.mjs.
+process.env.PI_JEV="off";
 const filler='General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.';
 const auth='Authentication timeout originates inside the login request handler during credential lookup.';
 const cache='Cache initialization allocates storage for frequently accessed application content during startup.';

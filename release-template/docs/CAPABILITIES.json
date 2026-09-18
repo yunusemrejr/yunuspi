@@ -2137,17 +2137,17 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 998
+        "line": 1276
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 681
+        "line": 810
       },
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3280
+        "line": 3374
       },
       {
         "name": "effort",
@@ -2162,7 +2162,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3322
+        "line": 3416
       },
       {
         "name": "graph",
@@ -2257,7 +2257,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 697
+        "line": 786
       },
       {
         "name": "or-provider",
@@ -2292,12 +2292,12 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3370
+        "line": 3464
       },
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 956
+        "line": 1234
       },
       {
         "name": "subagent-cost",
@@ -2382,7 +2382,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 961
+        "line": 1239
       },
       {
         "name": "tasks",
@@ -2392,12 +2392,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 980
+        "line": 1258
       },
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3019
+        "line": 3113
       }
     ],
     "commandDynamicOwners": [
@@ -2614,14 +2614,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 191,
+        "line": 192,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 192,
+        "line": 193,
         "kind": "configured-default",
         "configurable": true
       },
@@ -2640,7 +2640,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 393,
+        "line": 394,
         "kind": "literal"
       },
       {
@@ -2712,7 +2712,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 644,
+        "line": 733,
         "kind": "literal"
       },
       {
@@ -2778,7 +2778,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1090,
+        "line": 1368,
         "kind": "literal"
       },
       {
@@ -2790,7 +2790,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1027,
+        "line": 1305,
         "kind": "literal"
       },
       {
@@ -2808,7 +2808,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 190,
+        "line": 191,
         "kind": "configured-default",
         "configurable": true
       },
@@ -2869,7 +2869,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 170,
+        "line": 208,
         "kind": "literal"
       },
       {
@@ -2905,7 +2905,7 @@
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 189,
+        "line": 190,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3022,7 +3022,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 393,
+        "line": 394,
         "kind": "literal"
       },
       {
@@ -3064,7 +3064,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 644,
+        "line": 733,
         "kind": "literal"
       },
       {
@@ -3118,7 +3118,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1090,
+        "line": 1368,
         "kind": "literal"
       },
       {
@@ -3130,7 +3130,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1027,
+        "line": 1305,
         "kind": "literal"
       },
       {
@@ -3166,7 +3166,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 170,
+        "line": 208,
         "kind": "literal"
       },
       {
@@ -3323,10 +3323,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1654,
-          2242,
-          2341,
-          2685
+          1655,
+          2243,
+          2388,
+          2779
         ],
         "knownNames": [
           "fetch_content",
@@ -3368,7 +3368,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 540,
+      "sourceFiles": 541,
       "registrationSites": 62,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 80,
@@ -4652,7 +4652,19 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/jev-client.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/project-intelligence/client.mjs",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/tool-discovery.ts",
         "signals": [
           "wrapper/adapter"
         ]
@@ -4746,6 +4758,12 @@
         "source": "agent/extensions/pi-lens/dist/index.js",
         "signals": [
           "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/pi-observations.ts",
+        "signals": [
           "wrapper/adapter"
         ]
       },
@@ -4969,7 +4987,19 @@
         ]
       },
       {
+        "source": "agent/extensions/pi-web-access/index.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/project-intelligence.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/session-signals.ts",
         "signals": [
           "wrapper/adapter"
         ]

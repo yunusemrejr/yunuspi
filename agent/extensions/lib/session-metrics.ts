@@ -2,7 +2,7 @@
 /** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
- const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:{}};
+ const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:{},jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:{}}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
@@ -124,6 +124,14 @@ export function collectSessionMetrics(entries, live) {
 
  for(const [i,e] of entries.entries()) {
   const msg=e.type==='message'?e.message:undefined;
+  if(e.type==='custom'&&e.customType==='jev-usage-v1'){
+   const d=e.data??{};
+   m.jev.hits++;if(d.cached===true)m.jev.cached++;m.jev.tokens+=number(d.inputTokens);
+   if(typeof d.costUsd==='number'&&d.costUsd>=0)m.jev.costUsd+=d.costUsd;
+   const site=typeof d.site==='string'&&d.site?d.site.slice(0,48):'unknown';
+   if(!m.jev.bySite[site]&&Object.keys(m.jev.bySite).length<64)m.jev.bySite[site]={hits:0,tokens:0,costUsd:0};
+   const row=m.jev.bySite[site];if(row){row.hits++;row.tokens+=number(d.inputTokens);if(typeof d.costUsd==='number'&&d.costUsd>=0)row.costUsd+=d.costUsd;}
+  }
   if(msg?.role==='assistant') {
    m.responses++;usage(msg.usage);noteAssistant(msg.usage,msg,msg.stopReason==='error');if(msg.stopReason==='error')m.modelErrors++;
    // Aborted/zero-content attempts are telemetry, never model-visible

@@ -133,6 +133,8 @@ Automatic exit summaries abort provider work at their deadline, request at most 
 | Swarm and fusion | Existing workflow/planner policies, child budgets and capabilities | Bounded attributed outputs; attempts use one-based suffixes |
 | Provider recovery | Existing retry, cooldown and route constraints; settlement invalidates pending recovery | Existing results are retained; stale cancellation notices are not published after settlement |
 | Utility MCP | Explicit tool calls; two active workers and bounded queued requests | Tool results only; process startup and queue state add no messages |
+
+Cheap mechanical judgments (fetch screening, skill and tool ranking, claim verification, error classification, output distillation, compaction triage) route through TypeSafe Jev on the configured OpenRouter key. Every site keeps its heuristic path: Jev refines, low confidence keeps the legacy result, and failures degrade silently to it. Served results carry a `[successfully routed with Jev · …]` marker; each paid call is ledgered as session cost under its `openrouter/…` route and counted in session metrics. Slug failover, a 5-minute breaker with background recovery, trivial-input skips and per-session answer dedupe keep spend negligible with no hard caps; `PI_JEV=off` disables all calls.
 | Background services | Recognized persistent services default to no completion wake; explicit opt-in remains available | UI completion notices stay out of model context by default |
 
 Loading and inventory checks establish registered ownership, not live provider correctness. Offline scripted-stream tests validate request behavior without paid inference; unavailable live observations remain unverified.

@@ -34,6 +34,7 @@ import {
 	MAX_OUTPUT_CHARS,
 	isSearchCommand,
 } from "./lib/output-distiller.ts";
+import { askJev, selectDistillChunks } from "./lib/jev-client.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
@@ -128,6 +129,25 @@ export default function piObservationsExtension(
 	let counter = 0;
 	let visionHintSent = false;
 	let taskSignal = "";
+	// Background Jev chunk selections keyed like smol offers. First and last
+	// chunks are always kept; middle chunks need a keep score of 0.6.
+	const jevDistillPending = new Map<string, Promise<string | undefined>>();
+	const offerJevDistill = (key: string, tool: string, text: string): void => {
+		if (jevDistillPending.has(key)) return;
+		if (jevDistillPending.size >= 200) jevDistillPending.delete(jevDistillPending.keys().next().value!);
+		jevDistillPending.set(
+			key,
+			(async (): Promise<string | undefined> => {
+				try {
+					return await selectDistillChunks(tool, text, (site, state, questions) =>
+						askJev(site, state, questions, { pi }),
+					);
+				} catch {
+					return undefined;
+				}
+			})().catch(() => undefined),
+		);
+	};
 	// Provider-visible history is append-only: the first rendering chosen for a
 	// message is sealed and reused verbatim on later requests. A rewritten
 	// earlier message invalidates the provider cache prefix and re-bills the
@@ -378,6 +398,23 @@ export default function piObservationsExtension(
 				taskSignal,
 			);
 		}
+		// Jev scores chunks only when every deterministic and local path
+		// misses: large, successful, undistilled prose with no mini or smol
+		// coverage. Offered in the background like smol; the context render
+		// below consumes whatever is ready without waiting on slow calls.
+		if (
+			process.env.PI_OUTPUT_DISTILLER !== "off" &&
+			process.env.PI_JEV !== "off" &&
+			pi.getActiveTools().includes("obs_read") &&
+			!event.isError &&
+			text.length >= 6000 &&
+			text.length <= MAX_OUTPUT_CHARS &&
+			!miniSource(text) &&
+			!safeSmolOutput(event.toolName, text, false, event.details) &&
+			!distillOutput(event.toolName, text, ref.searchOutput)
+		) {
+			offerJevDistill(`${ref.id}:${ref.signature}`, event.toolName, text);
+		}
 		return finish();
 	});
 
@@ -464,6 +501,34 @@ export default function piObservationsExtension(
 						.then((value) => {
 							smolReady.set(index, value);
 						}),
+				);
+			});
+			if (pending.length) await Promise.all(pending);
+		}
+		const jevReady = new Map<number, string | undefined>();
+		if (process.env.PI_JEV !== "off") {
+			const pending: Array<Promise<void>> = [];
+			event.messages.forEach((message, index) => {
+				const ref = message.details?.piObservation as Reference | undefined;
+				if (
+					message.role !== "toolResult" ||
+					!message.content.every((part) => part.type === "text") ||
+					ref?.version !== 1 ||
+					!ref.operation ||
+					!TOOLS.has(message.toolName)
+				)
+					return;
+				const offered = jevDistillPending.get(`${ref.id}:${ref.signature}`);
+				if (!offered) return;
+				// Ready selections apply; a still-running judgment must not
+				// stall the context boundary past a short grace window.
+				pending.push(
+					Promise.race([
+						offered.then((value) => {
+							jevReady.set(index, value);
+						}),
+						new Promise<void>((resolve) => setTimeout(() => resolve(), 2000)),
+					]),
 				);
 			});
 			if (pending.length) await Promise.all(pending);
@@ -581,11 +646,13 @@ export default function piObservationsExtension(
 					? miniProjection(raw, selection)
 					: undefined;
 			if (miniRendered) noteHealth("ml.mini.used", { count: 1 });
+			const jevLines = jevReady.get(index);
 			const selected =
 				!delta && !summary && !message.isError
-					? (miniRendered ?? localLines)
+					? (miniRendered ?? localLines ?? jevLines)
 					: undefined;
 			if (selected && !miniRendered && localLines) noteHealth("ml.smol.used", { count: 1 });
+			if (selected && !miniRendered && !localLines && jevLines) noteHealth("ml.jev.used", { count: 1 });
 			if (!delta && !summary && !selected) {
 				if (
 					!message.isError &&
