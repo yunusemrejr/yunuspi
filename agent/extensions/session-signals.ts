@@ -130,33 +130,110 @@ export type SysSnapshot = {
 
 const SYS_SYSTEM_CAP = 262144;
 
-/** First-request envelope only: system text, model id and tool names. Never
- * messages — user content stays out of the snapshot. */
+/** Text from a provider content value: a bare string or an array of text
+ * parts (Anthropic, OpenAI and Responses shapes). Anything else yields "". */
+function providerContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      if (part) parts.push(part);
+    } else if (part && typeof part === "object" && typeof (part as any).text === "string") {
+      if ((part as any).text) parts.push((part as any).text);
+    }
+  }
+  return parts.join("\n");
+}
+
+/** System/developer-role text from a provider message list (OpenAI
+ * completions `messages`, Responses `input`). Every other role is skipped —
+ * user content stays out of the snapshot. */
+function systemRoleText(list: unknown): string {
+  if (!Array.isArray(list)) return "";
+  const texts: string[] = [];
+  for (const message of list) {
+    if (!message || typeof message !== "object") continue;
+    const role = (message as any).role;
+    if (role !== "system" && role !== "developer") continue;
+    const text = providerContentText((message as any).content);
+    if (text) texts.push(text);
+  }
+  return texts.join("\n\n");
+}
+
+/** Tool names from a wire tool list, expanding Google's nested
+ * functionDeclarations wrapper. Returns display names plus the true count. */
+function wireToolNames(rawTools: unknown[]): { tools: string[]; toolCount: number } {
+  const tools: string[] = [];
+  let toolCount = 0;
+  const push = (tool: any): void => {
+    if (!tool || typeof tool !== "object") return;
+    const nested = tool.functionDeclarations ?? tool.function_declarations;
+    if (Array.isArray(nested)) {
+      for (const entry of nested) push(entry);
+      return;
+    }
+    toolCount++;
+    if (tools.length < 300)
+      tools.push(
+        String(
+          tool?.name ?? tool?.function?.name ?? tool?.functionDeclaration?.name ?? "?",
+        ).slice(0, 160),
+      );
+  };
+  for (const tool of rawTools) push(tool);
+  return { tools, toolCount };
+}
+
+/** First-request envelope only: system text, model id and tool names. User,
+ * assistant and tool content is never read — only top-level system fields
+ * and system/developer-role messages. */
 export function extractSysSnapshot(payload: unknown): SysSnapshot | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const record = payload as Record<string, unknown>;
   let system: string | undefined;
   if (typeof record.system === "string") system = record.system;
   else if (typeof record.systemPrompt === "string") system = record.systemPrompt;
+  else if (typeof record.instructions === "string") system = record.instructions;
+  else if (typeof record.systemInstruction === "string") system = record.systemInstruction;
   else if (Array.isArray(record.system)) {
-    try {
-      system = JSON.stringify(record.system).slice(0, SYS_SYSTEM_CAP);
-    } catch {
-      system = undefined;
+    // Anthropic-style [{ type: "text", text }]: prefer readable text over JSON.
+    system = providerContentText(record.system) || undefined;
+    if (!system) {
+      try {
+        system = JSON.stringify(record.system).slice(0, SYS_SYSTEM_CAP) || undefined;
+      } catch {
+        system = undefined;
+      }
+    }
+  }
+  // OpenAI-compatible chat payloads (OpenAI, DeepSeek, OpenRouter, ...) carry
+  // the system prompt as a system/developer message, not a top-level field.
+  if (!system) system = systemRoleText(record.messages) || undefined;
+  // Responses APIs carry the same list as `input`.
+  if (!system) system = systemRoleText(record.input) || undefined;
+  // Google nests the instruction inside config.
+  if (!system) {
+    const config = record.config as Record<string, unknown> | undefined;
+    if (config && typeof config === "object") {
+      if (typeof config.systemInstruction === "string") system = config.systemInstruction;
+      else if (config.systemInstruction && typeof config.systemInstruction === "object")
+        system = providerContentText((config.systemInstruction as any).parts) || undefined;
     }
   }
   if (!system) return undefined;
   const truncated = system.length > SYS_SYSTEM_CAP;
   if (truncated) system = `${system.slice(0, SYS_SYSTEM_CAP)}\n[…truncated; ${system.length} characters total]`;
+  const configTools = (record.config as any)?.tools;
   const rawTools = Array.isArray(record.tools)
     ? record.tools
     : Array.isArray(record.functions)
       ? record.functions
-      : [];
-  const toolCount = rawTools.length;
-  const tools = rawTools
-    .slice(0, 300)
-    .map((tool: any) => String(tool?.name ?? tool?.function?.name ?? "?").slice(0, 160));
+      : Array.isArray(configTools)
+        ? configTools
+        : [];
+  const { tools, toolCount } = wireToolNames(rawTools);
   const model = typeof record.model === "string" ? record.model.slice(0, 200) : undefined;
   return { at: new Date().toISOString(), model, system, truncated, tools, toolCount };
 }
@@ -599,6 +676,11 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
   };
 }
 
+/** Harness system-prompt line: reuse before reinvention. A fixed string so the
+ * prompt prefix stays byte-stable for provider caching. */
+export const HARNESS_TOOL_FIRST =
+  "Use existing harness tools first: check tool_search (tools, capabilities, commands) and skill_review before reimplementing anything with shell commands or new code. Do not reinvent workflows the harness already provides.";
+
 export default function (pi: any) {
   // First-request system snapshots, in memory plus one runtime file per
   // session so /sys-prompt survives a reload. Runtime state, never exported.
@@ -634,18 +716,7 @@ export default function (pi: any) {
     }
     return undefined;
   };
-  const captureSysSnapshot = (payload: unknown, ctx: any): void => {
-    if (process.env.PI_SUBAGENT_CHILD === "1") return;
-    let sid = "";
-    try {
-      sid = ctx?.sessionManager?.getSessionId?.() ?? "";
-    } catch {
-      return;
-    }
-    if (!sid || sysSnapshots.has(sid)) return;
-    if (readSysSnapshot(ctx)) return;
-    const snapshot = extractSysSnapshot(payload);
-    if (!snapshot) return;
+  const storeSysSnapshot = (sid: string, snapshot: SysSnapshot): void => {
     sysSnapshots.set(sid, snapshot);
     try {
       fs.mkdirSync(sysPromptDir(), { recursive: true, mode: 0o700 });
@@ -654,6 +725,63 @@ export default function (pi: any) {
     } catch {
       // The memory snapshot still serves this session.
     }
+  };
+  // Opening-prompt snapshots captured at before_agent_start are provisional:
+  // the first parseable provider envelope upgrades them to wire truth.
+  const provisionalSys = new Set<string>();
+  const captureSysSnapshot = (payload: unknown, ctx: any): void => {
+    if (process.env.PI_SUBAGENT_CHILD === "1") return;
+    let sid = "";
+    try {
+      sid = ctx?.sessionManager?.getSessionId?.() ?? "";
+    } catch {
+      return;
+    }
+    if (!sid) return;
+    if (sysSnapshots.has(sid) && !provisionalSys.has(sid)) return;
+    if (!sysSnapshots.has(sid) && readSysSnapshot(ctx)) return;
+    const snapshot = extractSysSnapshot(payload);
+    if (!snapshot) return;
+    // Some wire payloads (e.g. Google) carry no model id; the request context
+    // identifies it.
+    if (!snapshot.model && typeof ctx?.model?.id === "string" && ctx.model.id)
+      snapshot.model = ctx.model.id.slice(0, 200);
+    storeSysSnapshot(sid, snapshot);
+    provisionalSys.delete(sid);
+  };
+  /** Failsafe capture from the assembled opening prompt. Provider payload
+   * shapes drift per API; this keeps /sys-prompt working even for an
+   * envelope extractSysSnapshot does not understand yet. */
+  const captureSysText = (systemText: unknown, ctx: any): void => {
+    if (process.env.PI_SUBAGENT_CHILD === "1") return;
+    if (typeof systemText !== "string" || !systemText) return;
+    let sid = "";
+    try {
+      sid = ctx?.sessionManager?.getSessionId?.() ?? "";
+    } catch {
+      return;
+    }
+    if (!sid || sysSnapshots.has(sid)) return;
+    if (readSysSnapshot(ctx)) return;
+    const truncated = systemText.length > SYS_SYSTEM_CAP;
+    let tools: string[] = [];
+    try {
+      const active = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+      if (Array.isArray(active)) tools = active.map((tool) => String(tool).slice(0, 160)).slice(0, 300);
+    } catch {
+      tools = [];
+    }
+    storeSysSnapshot(sid, {
+      at: new Date().toISOString(),
+      model: typeof ctx?.model?.id === "string" ? ctx.model.id.slice(0, 200) : undefined,
+      system: truncated
+        ? `${systemText.slice(0, SYS_SYSTEM_CAP)}\n[…truncated; ${systemText.length} characters total]`
+        : systemText,
+      truncated,
+      tools,
+      toolCount: tools.length,
+    });
+    provisionalSys.add(sid);
   };
   const openHtmlPopup = async (kind: string, title: string, bodyHtml: string, ctx: any): Promise<string> => {
     let sid = "";
@@ -866,12 +994,60 @@ export default function (pi: any) {
       return;
     return { messages };
   });
-  pi.on("model_select", () => {
+  const retainedTokens = (ctx: any): number | null => {
+    try {
+      const raw = ctx?.getContextUsage?.()?.tokens;
+      return Number.isFinite(raw) && raw >= 0 ? raw : null;
+    } catch {
+      return null;
+    }
+  };
+  const compactTokens = (n: number): string =>
+    n >= 1000 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`;
+  pi.on("model_select", (event: any, ctx: any) => {
     resetPressureSignals();
     outputRequest = undefined;
     requested = undefined;
     thresholds.reset();
     riskAnnounced = false;
+    // A mid-session switch to a smaller window can strand the session: when
+    // the retained context already exceeds the new window, even the
+    // compaction summary request cannot fit. Warn immediately with the
+    // numbers instead of letting the next request fail cryptically.
+    try {
+      const next = event?.model;
+      const window = next?.contextWindow;
+      if (!Number.isFinite(window) || window <= 0) return;
+      const prev = event?.previousModel;
+      if (prev && Number.isFinite(prev.contextWindow) && prev.contextWindow <= window) return;
+      const tokens = retainedTokens(ctx);
+      if (tokens === null || tokens <= window) return;
+      ctx.ui?.notify?.(
+        `Model switched to ${next.provider ?? "?"}/${next.id ?? "?"} (${compactTokens(window)} context) with ${compactTokens(tokens)} tokens retained — over the new window. Compact with the previous model first (/compact), or start a fresh session; the next request cannot fit otherwise.`,
+        "warning",
+      );
+    } catch {
+      // A diagnostics notice must never break model selection.
+    }
+  });
+  pi.on("session_compact_failed", (event: any, ctx: any) => {
+    // When automatic compaction fails while retained context still exceeds
+    // the window, the summary itself could not fit. Point at the recovery
+    // that works instead of leaving the raw headroom error unexplained.
+    try {
+      if (event?.aborted) return;
+      if (event?.reason !== "overflow" && event?.reason !== "threshold") return;
+      const window = ctx?.model?.contextWindow;
+      if (!Number.isFinite(window) || window <= 0) return;
+      const tokens = retainedTokens(ctx);
+      if (tokens === null || tokens <= window) return;
+      ctx.ui?.notify?.(
+        `Compaction (${event.reason}) failed with ${compactTokens(tokens)} tokens retained on a ${compactTokens(window)} window: the summary request itself cannot fit. Switch back to a larger-context model and /compact there, or start a fresh session.`,
+        "warning",
+      );
+    } catch {
+      // Notification is best-effort.
+    }
   });
   pi.on("before_provider_request", (e: any, ctx: any) => {
     captureSysSnapshot(e?.payload, ctx);
@@ -917,10 +1093,12 @@ export default function (pi: any) {
     // prefix the provider caches. Current time stays available on demand
     // via session_self.
     if (anchorText === undefined) anchorText = dateAnchor().text;
+    // Stable for the whole run, including tool continuations and compaction.
+    // Unlike custom messages this is metadata, not a fresh conversational turn.
+    const finalSystemPrompt = `${_e.systemPrompt}\n\n${anchorText}\n\n${HARNESS_TOOL_FIRST}`;
+    captureSysText(finalSystemPrompt, ctx);
     return {
-      // Stable for the whole run, including tool continuations and compaction.
-      // Unlike custom messages this is metadata, not a fresh conversational turn.
-      systemPrompt: `${_e.systemPrompt}\n\n${anchorText}`,
+      systemPrompt: finalSystemPrompt,
       ...(n
         ? {
             message: pressureSignal(n),
@@ -967,7 +1145,7 @@ export default function (pi: any) {
         const snapshot = readSysSnapshot(ctx);
         if (!snapshot) {
           ctx.ui?.notify?.(
-            "No system prompt captured yet — it is recorded on this session's first provider request.",
+            "No system prompt captured yet — it is recorded when this session's first agent run starts.",
             "info",
           );
           return;

@@ -34,9 +34,11 @@ test('popup html escapes untrusted branch content', () => {
   assert.ok(html.includes('x5'));
 });
 
-test('sys snapshot reads the envelope only, never messages', () => {
+test('sys snapshot reads system fields and system-role messages, never user content', () => {
   assert.equal(signals.extractSysSnapshot(undefined), undefined);
   assert.equal(signals.extractSysSnapshot({ messages: [{ role: 'user', content: 'secret' }] }), undefined);
+  assert.equal(signals.extractSysSnapshot({ messages: [{ role: 'assistant', content: 'draft' }] }), undefined);
+  assert.equal(signals.extractSysSnapshot({ input: [{ role: 'user', content: 'secret' }] }), undefined);
   const snapshot = signals.extractSysSnapshot({
     system: 'Be helpful.',
     model: 'fixture/model',
@@ -51,6 +53,61 @@ test('sys snapshot reads the envelope only, never messages', () => {
   const big = signals.extractSysSnapshot({ system: 'x'.repeat(300000) });
   assert.equal(big.truncated, true);
   assert.ok(big.system.includes('characters total'));
+});
+
+test('sys snapshot understands OpenAI, Responses, Anthropic and Google envelopes', () => {
+  // OpenAI-compatible chat payloads (OpenAI, DeepSeek, OpenRouter, ...): the
+  // system prompt travels as a system/developer message.
+  const openai = signals.extractSysSnapshot({
+    model: 'deepseek-chat',
+    messages: [
+      { role: 'system', content: 'You are helpful. OPENAI_MARKER' },
+      { role: 'user', content: 'user secret must stay out' },
+    ],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+  });
+  assert.ok(openai);
+  assert.equal(openai.system, 'You are helpful. OPENAI_MARKER');
+  assert.ok(!openai.system.includes('user secret'));
+  assert.deepEqual(openai.tools, ['read']);
+  const developer = signals.extractSysSnapshot({
+    messages: [{ role: 'developer', content: 'Reasoning instruction.' }],
+  });
+  assert.equal(developer.system, 'Reasoning instruction.');
+  // Responses APIs carry the same list as `input`.
+  const responses = signals.extractSysSnapshot({
+    model: 'gpt-x',
+    input: [
+      { role: 'system', content: 'You are helpful. RESPONSES_MARKER' },
+      { role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+    ],
+  });
+  assert.equal(responses.system, 'You are helpful. RESPONSES_MARKER');
+  // Anthropic: system is an array of text blocks — captured as readable text.
+  const anthropic = signals.extractSysSnapshot({
+    model: 'claude-x',
+    system: [{ type: 'text', text: 'You are Claude. ANTHROPIC_MARKER' }],
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+  assert.equal(anthropic.system, 'You are Claude. ANTHROPIC_MARKER');
+  // Google nests the instruction and the tool declarations inside config.
+  const google = signals.extractSysSnapshot({
+    contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+    config: {
+      systemInstruction: 'You are helpful. GOOGLE_MARKER',
+      tools: [{ functionDeclarations: [{ name: 'read' }, { name: 'bash' }] }],
+    },
+  });
+  assert.equal(google.system, 'You are helpful. GOOGLE_MARKER');
+  assert.deepEqual(google.tools, ['read', 'bash']);
+  assert.equal(google.toolCount, 2);
+});
+
+test('harness tool-first line is a fixed system-prompt string', () => {
+  assert.equal(typeof signals.HARNESS_TOOL_FIRST, 'string');
+  assert.ok(signals.HARNESS_TOOL_FIRST.includes('tool_search'));
+  assert.ok(signals.HARNESS_TOOL_FIRST.includes('skill_review'));
+  assert.ok(signals.HARNESS_TOOL_FIRST.length > 40);
 });
 
 const toolCall = (id, name, args) => ({
