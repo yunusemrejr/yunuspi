@@ -274,6 +274,28 @@ Inspect bounded syntax, AST context, symbols, callers/callees and Git structure 
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 
+#### artifact-numeric-checks
+
+Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.
+
+**Entrypoints:** `artifact_check`, `math_check`
+
+**Catalog tool pointers:** `artifact_check`, `math_check`
+
+**Options:**
+
+- `artifact_check.operation`: Explicit artifact inspection. Values: `svg`, `ui`, `image`, `text`.
+- `path|text`: One workspace path or supported inline source; SVG is bounded to 64 KiB.
+- `math_check.operation`: Deterministic numeric calculation. Values: `frame_budget`, `render_budget`, `summarize`, `compare`, `classify`, `vectors`, `split_overlap`.
+- `values|target_fps`: Observed frame durations in milliseconds and target rate.
+- `width|height|pixel_ratio|bytes_per_pixel|samples|buffers`: Explicit render attachment assumptions; excludes other allocations and driver overhead.
+
+**Related records:** `source-intelligence`, `web-and-media`, `safety-bounds`
+
+**Source:** [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts), [`agent/extensions/lib/svg-check.ts`](../../agent/extensions/lib/svg-check.ts), [`agent/extensions/lib/numeric-checks.ts`](../../agent/extensions/lib/numeric-checks.ts)
+
+**Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
+
 ### memory
 
 #### memory-retrieval
@@ -756,14 +778,15 @@ Coordinate distinct review kinds (quality, project, error) with trivial-work sup
 
 #### safety-bounds
 
-Run disposable experiments and guarded mutations with explicit path, process, resource and authority boundaries; unavailable isolation fails closed.
+Inspect host/session dependencies and device candidates before guarded operations; run disposable experiments with path, process, resource and authority boundaries. Recognized connectivity, power and session-destructive shell commands are blocked; unavailable isolation fails closed.
 
-**Entrypoints:** `sandbox_run`, `filesystem-safety`, `harness:mutation-preflight`
+**Entrypoints:** `sys_probe`, `sandbox_run`, `filesystem-safety`, `harness:mutation-preflight`
 
-**Catalog tool pointers:** `sandbox_run`, `git_info`
+**Catalog tool pointers:** `sys_probe`, `sandbox_run`, `git_info`
 
 **Options:**
 
+- `sys_probe.action`: Read host resources, network/power/session metadata or device candidates without opening devices. Values: `host`, `devices`, `listeners`, `services`, `processes`.
 - `command`: Inline sandbox Bash script.
 - `files[].path`: Relative disposable destination.
 - `files[].content|source`: Exactly one inline fixture or project source.
@@ -774,7 +797,7 @@ Run disposable experiments and guarded mutations with explicit path, process, re
 
 **Related records:** `session-coordination`, `subagent-dispatch`, `quick-commands`
 
-**Source:** [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts), [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts), [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
+**Source:** [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts), [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts), [`agent/extensions/lib/host-operation-safety.ts`](../../agent/extensions/lib/host-operation-safety.ts), [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts), [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts)
 
 **Documentation:** [`docs/SECURITY.md`](SECURITY.md)
 
@@ -848,7 +871,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `agentmail_send` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 802; literal)
 - `agentmail_status` — [`agent/extensions/agentmail.ts`](../../agent/extensions/agentmail.ts) (line 725; literal)
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
-- `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 79; factory)
+- `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 101; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 161; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 556; sdk-factory)
@@ -867,7 +890,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
 - `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
 - `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
-- `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 100; factory)
+- `data_query` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
@@ -877,7 +900,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 189; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 10; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 406; literal)
-- `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 70; factory)
+- `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 88; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 162; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 159; factory)
 - `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2487; literal)
@@ -904,7 +927,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 584; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1205; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 361; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 636; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../../agent/extensions/lib/relevant-guidance.ts) (line 642; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 191; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 829; literal)
@@ -913,10 +936,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 173; literal)
-- `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 86; literal)
+- `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 246; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 220; literal)
-- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 96; factory)
+- `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 119; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 160; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 59; literal)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
@@ -926,7 +949,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
-- [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 53)
+- [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 71)
 - [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 559)
 - [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `media_edit`, `media_info`, `music_compose`, `video_frames` (lines 149)
 - [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
@@ -1011,6 +1034,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
+- [`agent/extensions/filesystem-safety.ts`](../../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/jev-client.ts`](../../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
@@ -1071,6 +1095,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) — `wrapper/adapter`
 - [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts) — `wrapper/adapter`
 - [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) — `wrapper/adapter`
+- [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) — `wrapper/adapter`
 - [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
 
 ## Extension source inventory
@@ -1147,6 +1172,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/harness-orientation.ts`](../../agent/extensions/lib/harness-orientation.ts)
 - [`agent/extensions/lib/health-log.ts`](../../agent/extensions/lib/health-log.ts)
 - [`agent/extensions/lib/hook-ledger.ts`](../../agent/extensions/lib/hook-ledger.ts)
+- [`agent/extensions/lib/host-operation-safety.ts`](../../agent/extensions/lib/host-operation-safety.ts)
 - [`agent/extensions/lib/image-compaction.ts`](../../agent/extensions/lib/image-compaction.ts)
 - [`agent/extensions/lib/intent-context.ts`](../../agent/extensions/lib/intent-context.ts)
 - [`agent/extensions/lib/intervention-control.ts`](../../agent/extensions/lib/intervention-control.ts)
@@ -1202,6 +1228,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts)
 - [`agent/extensions/lib/stable-tool-order.ts`](../../agent/extensions/lib/stable-tool-order.ts)
 - [`agent/extensions/lib/stall-core.ts`](../../agent/extensions/lib/stall-core.ts)
+- [`agent/extensions/lib/svg-check.ts`](../../agent/extensions/lib/svg-check.ts)
 - [`agent/extensions/lib/sys-probe.ts`](../../agent/extensions/lib/sys-probe.ts)
 - [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts)
 - [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts)
@@ -1340,7 +1367,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 154 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 155 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
@@ -1383,6 +1410,7 @@ The exporter includes 154 public skill directories. This list is a path inventor
 - `dotnet-linux-engineering` — [`agent/skills/dotnet-linux-engineering/SKILL.md`](../../agent/skills/dotnet-linux-engineering/SKILL.md)
 - `edge-model-deployment` — [`agent/skills/edge-model-deployment/SKILL.md`](../../agent/skills/edge-model-deployment/SKILL.md)
 - `email` — [`agent/skills/email/SKILL.md`](../../agent/skills/email/SKILL.md)
+- `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../../agent/skills/embedded-device-engineering/SKILL.md)
 - `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../../agent/skills/evidence-first-engineering/SKILL.md)
 - `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../../agent/skills/financial-statement-analysis/SKILL.md)
 - `fonts` — [`agent/skills/fonts/SKILL.md`](../../agent/skills/fonts/SKILL.md)

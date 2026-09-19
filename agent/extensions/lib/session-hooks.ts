@@ -60,6 +60,21 @@ const isExecution = (args: HookArgs) => !args.action;
  */
 export const HOOK_RULES: readonly HookRule[] = [
   {
+    key: 'host-device-preflight', tools: ['sys_probe'],
+    when: args => args.action === 'host' || args.action === 'devices',
+    line: 'Preserve network, session ancestors and mounted data. Inspect test entrypoints; prefer isolated bounded experiments and compile-only firmware checks. Device metadata does not verify wiring or authorize writes.',
+  },
+  {
+    key: 'svg-source-evidence', tools: ['artifact_check'],
+    when: args => args.operation === 'svg',
+    line: 'Review SVG findings against the complete file, then inspect rendered appearance at intended sizes. No resources were fetched; security sanitization, font rendering and animation correctness remain unverified.',
+  },
+  {
+    key: 'graphics-budget-evidence', tools: ['math_check'],
+    when: args => args.operation === 'frame_budget' || args.operation === 'render_budget',
+    line: 'Keep measurements and render assumptions with the result. Compare the same scene and device before/after optimization; attachment arithmetic excludes other GPU allocations and cannot prove speed or visual fidelity.',
+  },
+  {
     key: 'ui-source-evidence', tools: ['artifact_check'],
     when: args => args.operation === 'ui',
     line: 'Inspect flagged components against project rules and real status data. Verify rendered typography, contrast and interaction states. Source cues cannot certify design; fix demonstrated defects first.',

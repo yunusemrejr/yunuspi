@@ -51,7 +51,7 @@ const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
 const codeFile = /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i;
 const envFile = /(?:^|\/)(?:migrations?|\.github\/workflows|terraform)(?:\/|$)|(?:^|\/)(?:Dockerfile|compose\.ya?ml)|\.(?:sql|tf)$/i;
 type Skill = { name: string; file: string; description: string };
-type Hint = { key: string; text: string; tool?: string; skill?: string; reason?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
+type Hint = { key: string; text: string; tool?: string; requiredTool?: string; skill?: string; reason?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
 
 export function createRelevantGuidance(pi: any) {
   let anchorContext = createContextAnchor();
@@ -446,7 +446,7 @@ export function createRelevantGuidance(pi: any) {
   const utilityHints = (prompt: string) => {
     const parts=prompt.replace(/```[^]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').split(/\n|[.!?](?:\s|$)|;/);
     for (const part of parts) {
-      if (!/\b(test|reproduce|try|check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate|search|find|connect)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
+      if (!/\b(test|reproduce|try|check|inspect|calculate|compute|measure|analy[sz]e|evaluate|audit|verify|fix|lint|convert|encode|decode|format|compact|compare|review|rank|retrieve|cache|reuse|prepare|prioriti[sz]e|read|query|extract|count|replace|rename|run|start|launch|wait|track|plan|fill|submit|navigate|delegate|use|fuse|merge|consolidate|search|find|connect|build|create|implement|optimize|configure|deploy|flash)\b/i.test(part) || /\b(explain|what is|how does|do not|don't|never|without tools|no tools)\b/i.test(part)) continue;
       if (/\b(json|yaml|yml)\b/i.test(part) && /\b(read|query|extract|count|filter|convert|inspect|compare)\b/i.test(part))
         utilityHint('data_query','Structured data: data_query reads, filters, counts and converts bounded JSON/YAML values without a shell script. Use its supported operations; it does not validate an arbitrary schema or write files.');
       if (/\b(syntax|parse errors?|syntax errors?|configuration files?|config files?)\b/i.test(part))
@@ -467,6 +467,8 @@ export function createRelevantGuidance(pi: any) {
         utilityHint('http_request','HTTP inspection: http_request returns status, headers and a capped body for a bounded request. Reuse it for endpoint diagnostics; preserve authorization and do not repeat an uncertain mutation.');
       if (/\b(listening ports?|systemd|service status|processes|cpu usage|memory usage)\b/i.test(part))
         utilityHint('sys_probe','System facts: sys_probe inspects processes, listening ports and systemd state without assembling shell pipelines. Use the narrowest supported operation and the returned current facts.');
+      if (/\b(linux|laptop|host machine|host environment|wifi|wi-fi|network interface|firewall|reboot|poweroff|stress test|raspberry\s*pi|esp32|esp8266|esp-idf|arduino|microcontroller|firmware|gpio|serial port|i2c|spi)\b/i.test(part))
+        utilityHint('sys_probe','Host/device preflight: sys_probe({action:"host"}) reports resources and session dependencies; action:"devices" lists candidate nodes without opening them. Preserve connectivity, parent processes and mounted data. Inspect test/build entrypoints before execution; use bounded sandbox_run for experiments. Board identity, voltage, pins and a recovery route must be verified before device writes.');
       if (/\b(sqlite|sqlite3|database tables?)\b/i.test(part))
         utilityHint('sqlite_probe','SQLite evidence: sqlite_probe inspects an explicit workspace database using tables/schema/describe/query/explain. Use its bounded read-only results instead of Python or sqlite3 shell snippets.');
       if (/\b(installed (?:package|version|dependency)|package exports|peer dependencies|lockfile|node_modules)\b/i.test(part))
@@ -500,6 +502,10 @@ export function createRelevantGuidance(pi: any) {
           add({key:'delegation-contract',tool:'subagent',priority:79,text:'Independent work: inspect subagent({action:"list",capabilities:true}) to select an executable agent with the needed tools. Use native tasks/chain and commonTask for bounded shared briefs, or the supported workflow helpers for dependencies and recovery. Pass task-relevant skills and acceptance checks to each child, retain successful outputs, and consume completion notifications. Delegate only within the user’s scope and keep one writer per file.'});
       }
       if (process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off') {
+        if (/\b(svg|viewbox|vector artwork)\b/i.test(part))
+          utilityHint('artifact_check','SVG preflight: artifact_check({operation:"svg",path:...}) inspects bounded structure, IDs/references and resource cues without rendering or fetching assets. Fix demonstrated findings, then inspect rendered sizes, clipping, typography and contrast with render_see; source checks do not prove appearance or sanitize active content.');
+        if (/\b(frame time|frame budget|frame pacing|gpu memory|render budget|webgpu|webgl|three\.?js)\b/i.test(part))
+          utilityHint('math_check','Graphics budgets: math_check operation:"frame_budget" summarizes observed frame milliseconds against target_fps; operation:"render_budget" estimates attachment bytes from width/height/pixel_ratio/bytes_per_pixel/samples/buffers. Measure representative hardware and compare visual detail before lowering quality; estimates exclude textures, geometry and driver overhead.');
         if (/\b(median|standard deviation|quartiles?|mae|rmse|r2|confusion matrix|precision and recall|f1|cosine|dot product|euclidean distance|split overlap|train.test overlap)\b/i.test(part)
           || /\b(?:calculate|compute|measure|compare|check|verify|estimate)\b[^;.!?]{0,80}\b(?:the |an? )?(?:arithmetic |geometric |harmonic |weighted )?mean\b/i.test(part.replace(/\bI mean\b/gi, ' ')))
           utilityHint('math_check','Numerical evidence: math_check computes summaries, regression/classification metrics, vector comparisons and exact split-ID overlap. Supply actual observations; undefined metrics remain null and exact-ID checks cannot rule out all leakage.');
@@ -1025,6 +1031,11 @@ export function createRelevantGuidance(pi: any) {
           for (const hint of pending.values()) if (hint.key.startsWith("signal:") && hint.sourceFile === changedFile && !remaining.has(hint.key)) { pending.delete(hint.key); releaseHint(hint.key); }
         }
         for (const signal of signals) signalHint(signal.key,signal.skill,signal.check,changedFile);
+        if (/\.svg$/i.test(changedFile) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|generated|backups)(?:\/|$)/i.test(changedFile) && process.env.PI_SMALL_TOOLS!=='off' && process.env.PI_REASONING_AIDS!=='off' && tools().has('artifact_check'))
+          add({key:'signal:svg-source-evidence',requiredTool:'artifact_check',priority:80,sourceFile:changedFile,text:'SVG changed: review any automatic source findings and verify actual rendering. Use artifact_check({operation:"svg",path:...}) if a full report is needed or the automatic check was unavailable. A partial snippet is not a complete SVG document.'});
+      }
+      if (name === 'artifact_check' && input.operation === 'svg' && typeof input.path === 'string' && pending.get('signal:svg-source-evidence')?.sourceFile === checkpointPath(input.path,cwd)) {
+        pending.delete('signal:svg-source-evidence'); releaseHint('signal:svg-source-evidence');
       }
       // Discovery/status is not execution: listing agents must not suppress
       // subsequent workflow guidance for the actual delegated work.
@@ -1099,7 +1110,7 @@ export function createRelevantGuidance(pi: any) {
       let emergency = urgentCount === 0;
       const active = tools();
       const effective = (h: Hint) => (h.priority ?? 0) - (topicIgnored(h) >= 2 ? 40 : 0);
-      const eligible = [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (!h.tool || active.has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)) && topicIgnored(h) < 4)
+      const eligible = [...pending.values()].filter(h => !wasShown(h.key) && (h.expiresAt === undefined || toolStep <= h.expiresAt) && (!h.requiredTool || active.has(h.requiredTool) && !unavailable.has(h.requiredTool)) && (!h.tool || active.has(h.tool) && !used.has(h.tool) && !unavailable.has(h.tool)) && (!h.skill || !read.has(h.skill)) && topicIgnored(h) < 4)
         .sort((a,b)=>effective(b)-effective(a));
       const selected: Hint[] = [];
       for (const hint of eligible) {

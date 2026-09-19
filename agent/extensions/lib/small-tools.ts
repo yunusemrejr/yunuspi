@@ -5,6 +5,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {numericCheck} from './numeric-checks.ts';
 import {inspectText, inspectImage, convertValue} from './artifact-checks.ts';
+import {inspectSvg} from './svg-check.ts';
 import {inspectUiSource} from './slop-guidance-signals.ts';
 import {parseData, executeDataQuery} from './data-query.ts';
 
@@ -49,6 +50,23 @@ async function readArtifact(file: unknown, cwd: unknown, limit: number, prefix: 
 
 export default function registerSmallTools(pi: any) {
   if (disabled() && process.env.PI_SUBAGENT_CHILD !== '1') return;
+  pi.on?.('tool_result',async (event:any,ctx:any)=>{
+    const file=event.input?.path;
+    if(disabled() || event.isError || !['write','edit'].includes(event.toolName) || typeof file!=='string' || file.length>1024 || !/\.svg$/i.test(file) || /(?:^|[\\/])(?:node_modules|vendor|dist|build|coverage|fixtures?|generated|backups|\.git)(?:[\\/]|$)/i.test(file))return;
+    let svgCheck:Record<string,unknown>,annotation='';
+    try {
+      const data=await readArtifact(file,ctx?.cwd,TEXT_LIMIT,false,undefined);
+      const source=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes);
+      const result=await inspectSvg(source),errors=result.findings.filter(f=>f.severity==='error');
+      svgCheck={status:result.status,path:file,sourceHash:result.sourceHash,counts:result.counts,errorCount:errors.reduce((n,f)=>n+f.count,0),findingKeys:errors.slice(0,3).map(f=>f.key),scope:'source-only'};
+      if(errors.length)annotation=('[svg-check] Saved SVG source needs review: '+errors.slice(0,3).map(f=>`${f.key}: ${f.message}`).join(' ')+' Inspect the complete file; rendered appearance remains unverified.').slice(0,600);
+    }catch{
+      // An unavailable/oversize/unstable file is not a successful check. Keep
+      // original mutation success intact and never echo filesystem diagnostics.
+      svgCheck={status:'unavailable',path:file,scope:'source-only',reason:'Complete stable SVG source could not be inspected within the workspace and parser limits.'};
+    }
+    return {content:annotation?[...(Array.isArray(event.content)?event.content:[]),{type:'text',text:annotation}]:event.content,details:{...event.details,svgCheck}};
+  });
   function register(name: string, description: string, parameters: any, run: (p: any, ctx: any, signal: any) => unknown, guidelines?: string[]) {
     pi.registerTool({name,label:name.replaceAll('_',' '),description,parameters,
       ...(guidelines && guidelines.length ? {promptGuidelines: guidelines} : {}),
@@ -68,21 +86,26 @@ export default function registerSmallTools(pi: any) {
     });
   }
   register('math_check',
-    'Compute bounded numeric summaries, regression/classification metrics, vector comparisons or exact-ID train/validation/test overlap. Use supplied observations, not guesses. No model inference or significance claims; null marks undefined metrics.',
+    'Compute bounded numeric summaries, regression/classification metrics, vectors, split-ID overlap, measured frame-time percentiles (frame_budget, values in ms), or render attachment memory (render_budget). Use supplied observations, not guesses; estimates do not establish runtime performance.',
     object({
-      operation:Type.Union(['summarize','compare','classify','vectors','split_overlap'].map(operation)),
+      operation:Type.Union(['summarize','compare','classify','vectors','split_overlap','frame_budget','render_budget'].map(operation)),
       values:Type.Optional(numbers()),actual:Type.Optional(Type.Union([numbers(),list(str())])),predicted:Type.Optional(Type.Union([numbers(),list(str())])),
       labels:Type.Optional(Type.Array(str(),{maxItems:32})),a:Type.Optional(numbers()),b:Type.Optional(numbers()),
       train:Type.Optional(list(str())),validation:Type.Optional(list(str())),test:Type.Optional(list(str())),
+      target_fps:Type.Optional(Type.Number({minimum:1,maximum:1000})),
+      width:Type.Optional(Type.Integer({minimum:1,maximum:65536})),height:Type.Optional(Type.Integer({minimum:1,maximum:65536})),
+      pixel_ratio:Type.Optional(Type.Number({minimum:.125,maximum:8})),bytes_per_pixel:Type.Optional(Type.Integer({minimum:1,maximum:64})),
+      samples:Type.Optional(Type.Integer({minimum:1,maximum:16})),buffers:Type.Optional(Type.Integer({minimum:1,maximum:8})),
     }),p=>numericCheck(p),
-    ['Use math_check for numeric summaries, metrics, vector comparisons and train/validation/test overlap instead of computing by hand.']);
+    ['Use math_check for numeric summaries, metrics, vectors, split overlap, measured frame times and render attachment budgets. Compare evidence under the same scene/device/settings before reducing visual detail.']);
   register('artifact_check',
-    'Inspect Unicode metadata (text), image header dimensions (image), or UI source cues such as blinking status pills, competing fonts, contrast pairs and fragile controls (ui). ui requires a workspace path, at most 24000 characters, and returns advisory cues with a source hash; it does not render or certify design.',
-    object({operation:Type.Union(['text','image','ui'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
-      if (!p || typeof p !== 'object' || Array.isArray(p) || !['text','image','ui'].includes(p.operation)) throw Error('Unsupported artifact operation');
+    'Inspect Unicode metadata (text), image header dimensions (image), SVG IDs/references/viewBox and resource/motion cues (svg), or UI source cues (ui). SVG accepts text or workspace path up to 64 KiB; ui requires a path and <=24000 characters. Source checks return advisory cues and a hash; no rendering, sanitization or design certification.',
+    object({operation:Type.Union(['text','image','ui','svg'].map(operation)),text:Type.Optional(str(TEXT_LIMIT)),path:Type.Optional(Type.String({minLength:1,maxLength:1024}))}),async (p,ctx,signal) => {
+      if (!p || typeof p !== 'object' || Array.isArray(p) || !['text','image','ui','svg'].includes(p.operation)) throw Error('Unsupported artifact operation');
       const keys=Object.keys(p);
       if (keys.some(k=>!['operation','text','path'].includes(k)) || ('text' in p) === ('path' in p) || 'text' in p && typeof p.text !== 'string' || 'path' in p && typeof p.path !== 'string') throw Error('Supply exactly one of text or path');
       if (p.operation==='text' && typeof p.text==='string') return inspectText(p.text);
+      if (p.operation==='svg' && typeof p.text==='string') return inspectSvg(p.text);
       if (p.operation==='image' && 'text' in p) throw Error('Image inspection requires a path');
       if (p.operation==='ui' && 'text' in p) throw Error('UI inspection requires a path');
       const data=await readArtifact(p.path,ctx?.cwd,p.operation==='image'?IMAGE_LIMIT:TEXT_LIMIT,p.operation==='image',signal);
@@ -90,9 +113,9 @@ export default function registerSmallTools(pi: any) {
       let text: string;
       try { text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data.bytes); }
       catch { throw Error('Text file is not valid UTF-8'); }
-      return p.operation==='ui' ? inspectUiSource(p.path,text) : inspectText(text);
+      return p.operation==='svg' ? inspectSvg(text) : p.operation==='ui' ? inspectUiSource(p.path,text) : inspectText(text);
     },
-    ['Use artifact_check for text/image metadata or operation:"ui" on a changed component. Source cues locate review work; verify UI with rendered and interaction evidence.']);
+    ['Use artifact_check for text/image metadata, operation:"svg" for standalone SVG source, or operation:"ui" on a changed component. Source cues locate review work; verify artwork/UI with rendered and interaction evidence.']);
   register('value_convert',
     'Convert supplied text: strict UTF-8 Base64, URI component encoding, or JSON format/compact. Returns bounded converted text; never evaluates code or writes a file. Use when exact encoding or formatting is needed.',
     object({operation:Type.Union(['json_format','json_compact','base64_encode','base64_decode','url_encode','url_decode'].map(operation)),text:str(TEXT_LIMIT)}),p=>convertValue(p),
