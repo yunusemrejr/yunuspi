@@ -178,17 +178,18 @@ export function registerBrowserSession(pi: any) {
           throw Error("request_help requires a concise reason, at most 500 characters");
         helping = true;
         try {
-        const capture = await execute(_id, { action: "observe", session: p.session, tab: p.tab }, signal, _update, ctx);
-        if (capture.isError) return capture;
-        const details = { ...capture.details, humanHelp: { ...capture.details.humanHelp, question: p.reason, status: "awaiting_user" } };
-        if (!ctx.hasUI || typeof ctx.ui?.input !== "function")
-          return reply({ ...details, nextStep: "Relay this question and screenshot to the user through the parent session. Resume here with their answer; browser handles belong to this agent." }, capture.content.filter((part: any) => part.type === "image"));
-        await execute(_id, { action: "renew", session: p.session, tab: capture.details.tab }, signal, _update, ctx);
-        _update?.(reply(details, capture.content.filter((part: any) => part.type === "image")));
-        const answer = await ctx.ui.input(`Browser needs help: ${p.reason}\nScreenshot: ${capture.details.output}`, "Enter the challenge answer, or reply done after completing it in the visible browser", { signal, timeout: 5 * 60_000 });
-        signal?.throwIfAborted();
-        if (owner !== scope || !sessions.has(p.session)) throw Error("Browser session changed while waiting for human help");
-        return reply({ session: p.session, tab: capture.details.tab, humanHelp: { status: answer === undefined ? "cancelled" : "answered", ...(answer === undefined ? {} : { answer: String(answer).slice(0, 8000) }) }, nextStep: "Inspect current state before entering an answer. If the user completed verification directly, confirm it instead of typing their acknowledgement. The reply alone is not proof of success." });
+          const renewed = await execute(_id, { action: "renew", session: p.session, tab: p.tab }, signal, _update, ctx);
+          if (renewed.isError) return renewed;
+          const capture = await execute(_id, { action: "observe", session: p.session, tab: renewed.details.tab }, signal, _update, ctx);
+          if (capture.isError) return capture;
+          const details = { ...capture.details, humanHelp: { ...capture.details.humanHelp, question: p.reason, status: "awaiting_user" } };
+          if (!ctx.hasUI || typeof ctx.ui?.input !== "function")
+            return reply({ ...details, nextStep: "Relay this question and screenshot to the user through the parent session. Resume here with their answer; browser handles belong to this agent." }, capture.content.filter((part: any) => part.type === "image"));
+          _update?.(reply(details, capture.content.filter((part: any) => part.type === "image")));
+          const answer = await ctx.ui.input(`Browser needs help: ${p.reason}\nScreenshot: ${capture.details.output}`, "Enter the challenge answer, or reply done after completing it in the visible browser", { signal, timeout: 5 * 60_000 });
+          signal?.throwIfAborted();
+          if (owner !== scope || !sessions.has(p.session)) throw Error("Browser session changed while waiting for human help");
+          return reply({ session: p.session, tab: capture.details.tab, humanHelp: { status: answer === undefined ? "cancelled" : "answered", ...(answer === undefined ? {} : { answer: String(answer).slice(0, 8000) }) }, nextStep: "Inspect current state before entering an answer. If the user completed verification directly, confirm it instead of typing their acknowledgement. The reply alone is not proof of success." });
         } finally { helping = false; }
       }
       let id = p.session;
