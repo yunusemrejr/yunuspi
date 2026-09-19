@@ -1032,7 +1032,12 @@ test("rounds with no dispatched reviewer are refunded, not charged", async (t) =
  await f.tool({ action: "review" });
  assert.equal(f.state().rounds, 0);
  assert.equal(f.state().refunded, 2);
- assert.equal(f.state().status, "pending");
+ assert.equal(f.state().status, "unavailable");
+ assert.match(f.state().reason, /No healthy permitted reviewer/);
+ assert.equal(f.state().reports[0].outcome, "unknown");
+ await f.settle(); await f.settle();
+ assert.equal(f.calls.length, 2, "settled hooks do not retry unavailable capacity");
+ assert.ok(f.sent.every(s => s.o.triggerTurn === false), "no model wakeup to acknowledge a dispatch gap");
 });
 
 test("disposition changes emit review.disposition telemetry", async (t) => {
@@ -1058,4 +1063,37 @@ test("disposition changes emit review.disposition telemetry", async (t) => {
   if (prev === undefined) delete globalThis[key];
   else globalThis[key] = prev;
  }
+});
+
+
+test('extra reviewer citations retain concrete findings instead of erasing the report', () => {
+ const finding = {severity:'blocking',file:'src/window.cpp',detail:'The resize error path retains an old buffer and writes beyond its allocation.'};
+ const report = parseReviewReport(JSON.stringify({outcome:'changes',evidence:Array.from({length:9},(_,i)=>`src/window.cpp:${i+1} inspected buffer ownership and the displayed frame path`),findings:[finding],gap:''}), 'correctness');
+ assert.equal(report.outcome,'changes'); assert.equal(report.evidence.length,6);
+ assert.equal(report.findings[0].detail,finding.detail); assert.equal(report.gap,'');
+ const invalid = parseReviewReport(JSON.stringify({outcome:'changes',evidence:report.evidence,findings:[finding,{...finding,file:'../private'}],gap:''}), 'correctness');
+ assert.equal(invalid.outcome,'unknown'); assert.equal(invalid.findings.length,1);
+ assert.match(invalid.gap,/invalid finding/); assert.ok(!JSON.stringify(invalid).includes('../private'));
+ const unavailable = parseReviewReport(JSON.stringify({outcome:'unknown',evidence:[],findings:[],gap:'The display capture could not be read.'}),'interface');
+ assert.equal(unavailable.gap,'The display capture could not be read.');
+});
+
+test('native games receive interface review before documentation and require actual displayed behavior', () => {
+ const aspects=reviewAspects(['src/window.cpp','src/main.cpp','README.md','Makefile'],'Create a pixel art space game on Ubuntu');
+ assert.equal(aspects[1].id,'interface');
+ assert.match(aspects[1].rubric,/native desktop\/game windows/);
+ assert.match(aspects[1].rubric,/Offscreen renders.*do not prove/);
+ assert.match(aspects[1].rubric,/independent probe/);
+ assert.ok(!reviewAspects(['src/server.cpp'],'Fix server buffer ownership').some(a=>a.id==='interface'));
+});
+
+test('an explicit retry can recover refunded capacity while later edits do not auto-retry it', async t => {
+ let available=false;
+ const f=await fixture(t,{runner:async req=>req.aspects.map(a=>available?pass(a.id):{aspect:a.id,ok:false,text:'',gap:'No permitted reviewer has capacity.',unattempted:true})});
+ await f.mutate(); await f.tool({action:'review'});
+ await f.mutate('src/value.js','export const value=2;'); await f.settle();
+ assert.equal(f.calls.length,1); assert.equal(f.state().status,'unavailable');
+ available=true; await f.tool({action:'review'});
+ assert.equal(f.calls.length,2); assert.equal(f.state().rounds,1);
+ assert.equal(f.state().reports[0].outcome,'pass'); assert.equal(f.state().status,'awaiting_assessment');
 });

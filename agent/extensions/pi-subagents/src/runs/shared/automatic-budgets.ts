@@ -7,4 +7,4 @@ export const AUTOMATIC_HELPER_LIMITS = { tools: 4, tokens: 48000, outputTokens: 
 // turns) and paid fallback at $0.0033/reviewer fails instantly. Automatic
 // rounds are now free-only (cost never binds); explicit reviews may spend
 // paid up to the raised cap. Deadline covers ~8 slow turns + synthesis.
-export const REVIEW_LIMITS = { rounds: 2, reviewers: 3, deadlineMs: 300000, costUsd: .05, tools: 8, tokens: 96000, outputTokens: AUTOMATIC_HELPER_LIMITS.outputTokens } as const;
+export const REVIEW_LIMITS = { rounds: 2, reviewers: 3, deadlineMs: 300000, costUsd: .05, tools: 8, toolsPerExtraAspect: 4, maxTools: 16, tokens: 96000, outputTokens: AUTOMATIC_HELPER_LIMITS.outputTokens } as const;

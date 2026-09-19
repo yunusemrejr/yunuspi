@@ -92659,7 +92659,7 @@ function formatCodeQualityWarningsAdvisory(report) {
     `Code-quality warnings introduced/touched this turn: ${report.summary.warnings} across ${report.summary.files} file(s).`,
     tiers ? `By tier: ${tiers}. Hint and info are style opinions, not defects.` : void 0,
     topRules ? `Top rules: ${topRules}` : void 0,
-    "Details written to .pi-lens/cache/code-quality-warnings.json",
+    'Inspect current findings with lens_diagnostics({mode:"delta"}); cache locations are implementation details.',
     "No action required unless you are already refactoring these areas."
   ].filter(Boolean).join("\n");
 }

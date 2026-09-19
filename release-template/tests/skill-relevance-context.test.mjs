@@ -51,3 +51,13 @@ test('short technical terms survive tokenization and compound routing', () => {
  assert.equal(rankSkills(index,'SQL')[0]?.skill.name,'sql-query-engineering');
  assert.equal(rankSkills(index,'PHP')[0]?.skill.name,'php-application');
 });
+
+
+test('generic engineering nouns do not route native work into unrelated platforms',()=>{
+ const index=buildSkillIndex([skill('java-platform-engineering','Engineer Java runtime behavior'),skill('cloudflare-platform-engineering','Deploy Cloudflare workers'),skill('llm-systems-engineering','LLM attention and inference'),skill('cpp-performance-engineering','C++ native memory and buffer contracts'),...unrelated]);
+ assert.deepEqual(rankSkills(index,'quality platform systems making title'),[]);
+ const context=skillEvidenceContext({files:['src/window.cpp']});
+ assert.equal(rankSkills(index,context)[0]?.skill.name,'cpp-performance-engineering');
+ assert.ok(!rankSkills(index,context).some(r=>r.skill.name==='llm-systems-engineering'));
+ assert.equal(rankSkills(index,'Cloudflare workers')[0]?.skill.name,'cloudflare-platform-engineering');
+});

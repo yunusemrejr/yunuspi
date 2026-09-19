@@ -60,8 +60,28 @@ try {
  assert.ok(streamed.some(r=>r.ok),'native results are delivered before the group deadline');
  const f=fixture();const results=await f.run();assert.equal(f.calls.length,3);assert.equal(results.length,6);assert.ok(results.every(r=>r.ok));
  assert.equal(new Set(f.calls.map(c=>c.params.model)).size,3);
- for(const {params} of f.calls){assert.equal(params.agent,'automatic-free-assistant');assert.equal(params.context,'fresh');assert.equal(params.toolBudget.hard,8);assert.equal(params.toolBudget.soft,6);assert.equal(params.toolBudget.block,'*');assert.equal(params.timeoutMs,300000);assert.equal(params.usageBudget.tokens.hard,96000);assert.ok(params.usageBudget.costUsd.hard<=.05/3);assert.ok(params.capabilityCeiling.allowedTools.includes('git_info'));assert.ok(!params.capabilityCeiling.allowedTools.includes('bash'));assert.ok(!params.capabilityCeiling.allowedTools.includes('write'));assert.match(params.task,/Current project source graph/);assert.ok(params.task.includes(JSON.stringify(root)));assert.match(params.task,/already committed/);}
+ for(const {params} of f.calls){assert.equal(params.agent,'automatic-free-assistant');assert.equal(params.context,'fresh');assert.equal(params.toolBudget.hard,12);assert.equal(params.toolBudget.soft,10);assert.equal(params.toolBudget.block,'*');assert.equal(params.timeoutMs,300000);assert.equal(params.usageBudget.tokens.hard,96000);assert.ok(params.usageBudget.costUsd.hard<=.05/3);assert.ok(params.capabilityCeiling.allowedTools.includes('git_info'));assert.ok(!params.capabilityCeiling.allowedTools.includes('bash'));assert.ok(!params.capabilityCeiling.allowedTools.includes('write'));assert.match(params.task,/Current project source graph/);assert.ok(params.task.includes(JSON.stringify(root)));assert.match(params.task,/already committed/);}
  assert.equal(f.entries.filter(e=>e.customType==='subagent-lifecycle-v1').length,3);
+ assert.ok(f.calls.every(c=>!c.params.capabilityCeiling.allowedTools.includes('sandbox_run')&&!c.params.capabilityCeiling.allowedTools.includes('artifact_check')),'bounded source reviewers do not spend calls on a second test environment or image headers');
+ assert.ok(f.calls.every(c=>c.params.task.includes('at most 6 evidence strings')),'prompt and parser share evidence bounds');
+ const vision=fixture({models:[free('free/a'),{...free('free/b'),input:['text','image']},free('free/c')]});
+ const visionReports=await vision.run({...request,aspects:[aspects[0],aspects[2],aspects[3]],evidence:['shots/window.png']});
+ assert.match(JSON.parse(visionReports.find(r=>r.aspect==='interface').text).gap,/image-read receipts/,'source reads and self-reported passes do not verify supplied pixels');
+ const ui=vision.calls.find(c=>c.params.task.includes('"id":"interface"'));
+ assert.equal(ui.params.model,'openrouter/free/b');
+ assert.match(ui.params.task,/^Visual review/,'native acceptance pixel audit is engaged');
+ assert.ok(vision.calls.every(c=>!c.params.task.includes('assigned aspects: [].')),'no empty reviewer after vision assignment');
+ const {checkVisualSourceEvidence}=await load('extensions/pi-subagents/src/runs/shared/acceptance.ts');
+ const pixel=fixture({models:[{...free('free/a'),input:['text','image']}],result:async params=>{
+  const imageStart={role:'assistant',content:[{type:'toolCall',id:'pixels',name:'read',arguments:{path:'shots/window.png'}}]};
+  const imageResult={role:'toolResult',toolCallId:'pixels',toolName:'read',isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
+  const messages=[start,receipt,imageStart,imageResult],check=checkVisualSourceEvidence(params.task,messages,root);
+  return {details:{results:[compactForegroundResult({exitCode:0,messages,acceptance:{runtimeChecks:[check]},output:JSON.stringify({reviews:[{aspect:'interface',outcome:'pass',evidence:['shots/window.png: inspected captured interface pixels'],findings:[],gap:''}]})})]}};
+ }});
+ const pixelReports=await pixel.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']});
+ assert.equal(JSON.parse(pixelReports[0].text).outcome,'pass');
+ const overflow=fixture({models:[free('free/a')],result:async params=>({details:{results:[compactForegroundResult({exitCode:0,messages:[start,receipt],output:JSON.stringify({reviews:JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0]+']').map(a=>({aspect:a.id,outcome:'changes',evidence:Array.from({length:9},(_,i)=>`src/value.js:${i+1} verified an actual source boundary`),findings:[{severity:'blocking',file:'src/value.js',detail:'A negative input reaches the unchecked allocation and throws.'}],gap:''}))})})]}})});
+ const retained=await overflow.run();assert.ok(retained.every(r=>r.ok&&JSON.parse(r.text).findings.length===1&&JSON.parse(r.text).evidence.length===6));
  const published=[];const streaming=fixture();await streaming.run({...request,onResult:r=>published.push(r)});assert.equal(published.length,6,'completed aspects are delivered without waiting for every peer');assert.ok(published.every(r=>r.ok));
  const native=[];
  const failed=fixture({result:async()=>{
