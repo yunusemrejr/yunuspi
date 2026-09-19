@@ -37,3 +37,10 @@ test('native file and tool evidence supplies domain context without arbitrary ou
  assert.equal(skillEvidenceContext({files:['constructor','unknown.zzz'],tools:['constructor']}),'');
  assert.equal(skillEvidenceContext({files:['src/old.css',...Array(32).fill('unknown.zzz')]}),'','old evidence outside bound is ignored');
 });
+
+test('local routing indexes skills beyond the model discovery packet limit',()=>{
+ const tail=skill('tail-workflow','Tail-only workflow for orbital ephemeris propagation');
+ const prefix=Array.from({length:256},(_,i)=>skill(`prefix-${i}`,'Unrelated installed workflow'));
+ const ranked=rankSkills(buildSkillIndex([...prefix,tail]),'tail workflow orbital ephemeris propagation');
+ assert.equal(ranked[0]?.skill.name,'tail-workflow');
+});

@@ -21,7 +21,6 @@ import {
   type NeedlePass,
   type RequestFamily,
 } from "./lib/micro-intelligence/advisory.ts";
-import { resetCoordinator } from "./lib/micro-intelligence/coordinator.ts";
 import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
 import { needleClassify, needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
@@ -83,7 +82,6 @@ export default function (pi: any) {
 
   const reset = () => {
     lastRequest = undefined;
-    resetCoordinator();
     microMetrics();
   };
 

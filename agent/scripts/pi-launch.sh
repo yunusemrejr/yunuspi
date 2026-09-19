@@ -8,8 +8,17 @@ SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT="${PI_CODING_AGENT_DIR:-$(dirname "$SCRIPTS")}"
 export PI_CODING_AGENT_DIR="$AGENT"
 if [[ "${1:-}" == update ]]; then
-  shift
-  exec "$NODE" "$SCRIPTS/core-update.mjs" "$@"
+  # Pi owns normal update subcommands such as `pi update --models` and
+  # `pi update --extensions`. YunusPi's source updater is selected only by
+  # its explicit reviewed checkout argument.
+  yunuspi_source=false
+  for arg in "$@"; do
+    [[ "$arg" == --source ]] && yunuspi_source=true
+  done
+  if [[ "$yunuspi_source" == true ]]; then
+    shift
+    exec "$NODE" "$SCRIPTS/core-update.mjs" "$@"
+  fi
 fi
 if [[ ! -f "$ENTRY" ]]; then
   echo 'YunusPi core is not built. Run npm ci --ignore-scripts and npm run build:core inside agent/runtime, or reinstall with --install-deps.' >&2

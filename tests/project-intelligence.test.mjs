@@ -493,6 +493,52 @@ test("source batches validate atomically and reject one stale member without par
     }
   }));
 
+test("snapshot keeps one provenance entry per source when an edge is observed repeatedly", () =>
+  fixture(async ({ temp }) => {
+    const db = openStore(path.join(temp, "provenance.sqlite"));
+    const identity = { id: "provenance", checkoutId: "main", root: temp, name: "Provenance" };
+    db.ensureProject(identity);
+    const source = nodeId("file", "src/source.ts");
+    const target = nodeId("file", "src/target.ts");
+    const make = (id, fingerprint) => ({
+      id,
+      scope: "main",
+      kind: "file",
+      locator: `${id}.json`,
+      fingerprint,
+      nodes: [
+        { id: source, type: "file", key: "src/source.ts", label: "source" },
+        { id: target, type: "file", key: "src/target.ts", label: "target" },
+      ],
+      claims: [{ subject: source, predicate: "imports", object: target, relation: true }],
+    });
+    try {
+      db.replaceSources([make("one", "one"), make("two", "two")]);
+      const edge = db.snapshot().edges.find(item => item.source === source && item.target === target);
+      assert.equal(edge.provenance.length, 2);
+      assert.deepEqual(edge.provenance.map(item => item.sourceId).sort(), ["one", "two"]);
+    } finally {
+      db.close();
+    }
+  }));
+
+test("a cancellation observed while a request is queued prevents worker dispatch", () =>
+  fixture(async ({ client }) => {
+    const c = client();
+    await c.ready;
+    const signal = {
+      aborted: false,
+      reason: Error("queued request cancelled"),
+      throwIfAborted() {},
+      addEventListener(_name, listener) {
+        this.aborted = true;
+        listener();
+      },
+      removeEventListener() {},
+    };
+    await assert.rejects(c.request("health", {}, { signal }), /queued request cancelled/);
+  }));
+
 test("bounded graph traversal and 3000-node simplification preserve endpoints and center", () =>
   fixture(async ({ temp }) => {
     const db = openStore(path.join(temp, "graph.sqlite"));

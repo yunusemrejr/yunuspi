@@ -7,7 +7,7 @@ description: Produce timed motion graphics for video, including title sequences,
 
 Establish message, aspect ratio, duration, frame rate and delivery format. Convert the story into beats with readable holds and deliberate entrances/exits. Use the existing typography and visual direction. For music or narration, map cue seconds before animating; effects should support the focal point.
 
-Make each frame a function of absolute time. Seed randomness, wait for fonts/assets and avoid accumulated frame deltas. For browser graphics, the [timeline starter](assets/timeline.html) exposes `window.renderFrame(seconds)` and an editable beat sequence. Copy it into the project, adapt the design and retain the render function. It is a mechanical starting point, not a finished visual style.
+Make each frame a function of absolute time. Seed randomness, wait for fonts/assets and avoid accumulated frame deltas. For browser graphics, the [timeline starter](assets/timeline-starter.html) exposes `window.renderFrame(seconds)` and an editable beat sequence. Copy it into the project, adapt the design and retain the render function. It is a mechanical starting point, not a finished visual style.
 
 Read [rendering and delivery](references/rendering.md) to use the bundled frame exporter or an existing renderer such as Blender. Render selected times first; inspect actual frames for type clipping, composition and transition continuity, then encode and review playback. Audio-reactive amplitude should be smoothed and normalized from measured signals rather than raw sample peaks.
 

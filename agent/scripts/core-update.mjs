@@ -38,7 +38,7 @@ export function updateInvocation(args, agent = process.env.PI_CODING_AGENT_DIR |
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help')) {
-    console.log('YunusPi owns its core. No automatic core updates or upstream version checks are performed.\nReview a YunusPi release checkout, stop active sessions, then run:\n  yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]\nPrivate state and compatible customizations carry forward. Source conflicts reject the update; the previous complete installation is preserved as a private backup.');
+    console.log('YunusPi owns its core. No automatic core updates or upstream version checks are performed.\nReview a YunusPi release checkout, stop active sessions, then run:\n  yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]\nPrivate state and compatible customizations carry forward. Source conflicts reject the update; the previous managed installation and configuration are preserved as a private backup.');
     return;
   }
   const invocation = updateInvocation(args);

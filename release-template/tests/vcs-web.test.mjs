@@ -142,6 +142,37 @@ test("managed capture and cleanup preserve repointed branches, foreign repos and
   assert.ok(fs.existsSync(path.join(foreign, "file.txt")));
 });
 
+test("remote redirect handling cancels discarded bodies and validates redirect bounds", async () => {
+  const { fetchRemoteUrl } = await load("extensions/pi-web-access/ssrf-protection.ts");
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
+  let cancelled = false;
+  const requested = [];
+  const redirect = {
+    status: 302,
+    headers: new Headers({ location: "https://example.com/next" }),
+    body: { cancel: async () => { cancelled = true; } },
+  };
+  const final = new Response("ok", { status: 200 });
+  const result = await fetchRemoteUrl("https://example.com/start", {}, {
+    lookup,
+    fetch: async (url) => {
+      requested.push(url.href);
+      return requested.length === 1 ? redirect : final;
+    },
+  });
+  assert.equal(await result.text(), "ok");
+  assert.deepEqual(requested, ["https://example.com/start", "https://example.com/next"]);
+  assert.equal(cancelled, true, "discarded redirect body is released before the next hop");
+  await assert.rejects(
+    fetchRemoteUrl("https://example.com/start", {}, { lookup, maxRedirects: -1 }),
+    /maxRedirects must be an integer from 0 through 20/,
+  );
+  await assert.rejects(
+    fetchRemoteUrl("https://example.com/start", {}, { lookup, maxRedirects: 21 }),
+    /maxRedirects must be an integer from 0 through 20/,
+  );
+});
+
 test("search pacing shares reservations between processes and obeys cancellation and Retry-After", async () => {
   clearPace();
   const {

@@ -54,7 +54,7 @@ export function smolExtractionSchema(source: SmolExtractionSource) {
 }
 
 /** Exact constrained JSON only; reject duplicate/escaped keys and trailing prose. */
-export function validateSmolExtraction(source: SmolExtractionSource, output: string): SmolExtractionValidation {
+export function validateSmolExtraction(source: SmolExtractionSource, output: string, sourceOrder = true): SmolExtractionValidation {
   const bad = (reason: string): SmolExtractionValidation => ({ ok: false, reason });
   if (typeof output !== 'string' || output.length > 512) return bad('output_limit');
   const status = '"status"\\s*:\\s*"(?:UNKNOWN|SELECT)"';
@@ -64,9 +64,9 @@ export function validateSmolExtraction(source: SmolExtractionSource, output: str
   try { value = JSON.parse(output); } catch { return bad('malformed_json'); }
   if (value.status === 'UNKNOWN') return bad(value.lineIds.length ? 'unknown_with_evidence' : 'unknown');
   if (!value.lineIds.length || value.lineIds.length > SMOL_MAX_SELECTED_LINES) return bad('selection_limit');
-  if (value.lineIds.some((id, index) => !Number.isSafeInteger(id) || id < 1 || id > source.lines.length || (index > 0 && id <= value.lineIds[index - 1]))) return bad('invalid_line_ids');
+  if (new Set(value.lineIds).size !== value.lineIds.length || value.lineIds.some((id, index) => !Number.isSafeInteger(id) || id < 1 || id > source.lines.length || (sourceOrder && index > 0 && id <= value.lineIds[index - 1]))) return bad('invalid_line_ids');
   if (source.requiredLineIds.some(id => !value.lineIds.includes(id))) return bad('missing_required_evidence');
-  return { ok: true, lineIds: Object.freeze([...value.lineIds]) };
+  return { ok: true, lineIds: Object.freeze([...value.lineIds].sort((a, b) => a - b)) };
 }
 
 /** Deterministic window for oversized line output: head + diagnostic lines +

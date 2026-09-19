@@ -88,11 +88,40 @@ test('a new managed file cannot overwrite conflicting custom source',t=>{
   assert.notEqual(f.update().status,0);assert.equal(f.read('extensions/custom.ts'),'private custom source');assert.equal(f.backups().length,0);
 });
 
-test('private symlinks cannot cause source updates to read or replace external data',t=>{
+test('unapproved private symlinks fail closed without reading external data',t=>{
   const f=fixture(t);const outside=path.join(f.root,'external');f.write(outside,'synthetic.txt','outside sentinel');
-  fs.symlinkSync(outside,path.join(f.target,'memory'));
-  assert.notEqual(f.update().status,0);assert.equal(fs.readlinkSync(path.join(f.target,'memory')),outside);
+  fs.symlinkSync(outside,path.join(f.target,'cache-link'));
+  const updated=f.update();assert.notEqual(updated.status,0);
+  assert.equal(fs.readlinkSync(path.join(f.target,'cache-link')),outside);
   assert.equal(fs.readFileSync(path.join(outside,'synthetic.txt'),'utf8'),'outside sentinel');assert.equal(f.backups().length,0);
+});
+
+test('large private model directories move intact instead of being copied',t=>{
+  const f=fixture(t), model=path.join(f.target,'local-models/tinybert/venv/bin');
+  fs.mkdirSync(model,{recursive:true});fs.writeFileSync(path.join(model,'python3.12'),'interpreter');
+  fs.symlinkSync('python3.12',path.join(model,'python3'));
+  const outside=path.join(f.root,'python');fs.writeFileSync(outside,'external interpreter');
+  fs.symlinkSync(outside,path.join(model,'python'));
+  const modelFile=path.join(model,'python3.12'), inode=fs.statSync(modelFile).ino;
+  const updated=f.update();assert.equal(updated.status,0,updated.stderr);
+  assert.equal(fs.lstatSync(path.join(f.target,'local-models')).isDirectory(),true);
+  assert.equal(fs.statSync(path.join(f.target,'local-models/tinybert/venv/bin/python3.12')).ino,inode);
+  assert.equal(fs.readFileSync(path.join(f.target,'local-models/tinybert/venv/bin/python3.12'),'utf8'),'interpreter');
+  assert.equal(fs.readlinkSync(path.join(f.target,'local-models/tinybert/venv/bin/python3')),'python3.12');
+  assert.equal(fs.readlinkSync(path.join(f.target,'local-models/tinybert/venv/bin/python')),outside);
+  const backup=f.backups()[0];assert.equal(fs.existsSync(path.join(f.root,backup,'local-models')),false);
+  const second=f.update();assert.equal(second.status,0,second.stderr);
+  assert.equal(fs.readFileSync(path.join(f.target,'local-models/tinybert/venv/bin/python3.12'),'utf8'),'interpreter');
+});
+
+test('private state roots cannot be symlinks even though contained venv links are preserved',t=>{
+  for (const name of ['local-models', 'memory', 'sessions']) {
+    const f=fixture(t), outside=path.join(f.root,'outside');
+    fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'sentinel'),'untouched');
+    fs.symlinkSync(outside,path.join(f.target,name));
+    const updated=f.update();assert.notEqual(updated.status,0);assert.match(updated.stderr,/Private state root must be a directory/);
+    assert.equal(f.backups().length,0);assert.equal(fs.readFileSync(path.join(outside,'sentinel'),'utf8'),'untouched');
+  }
 });
 
 test('missing and path-escaping managed inventories fail closed',t=>{

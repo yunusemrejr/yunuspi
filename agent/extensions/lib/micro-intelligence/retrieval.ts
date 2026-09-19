@@ -211,7 +211,7 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
 /**
  * Background embedding warmup for a static corpus (tool/capability/command
  * descriptions). Small batches with idle gaps so interactive ops interleave;
- * abortable, never throws, dedupes via the coordinator. Warmed embeddings
+ * abortable, never throws; the Needle owner caches exact embedding inputs. Warmed embeddings
  * turn repeat ranks from ~250ms into cache hits.
  */
 export async function warmEmbeddings(

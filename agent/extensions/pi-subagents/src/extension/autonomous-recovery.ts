@@ -621,7 +621,19 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			deadlineTimer.unref?.();
 		}
 		const remaining = RECOVERY_DEADLINE_MS - (now() - recoveryStart);
-		if (remaining <= 0) { paused = true; notice(ctx, "Recovery paused: bounded attempts/deadline exhausted; next user message resets it."); return; }
+		if (remaining <= 0) {
+			// The clock can advance between starting recovery and this check (for
+			// example after a delayed catalog lookup). Clear the controller and
+			// deadline before returning so a settled session cannot retain a stale
+			// active recovery that a later turn might accidentally observe.
+			paused = true;
+			if (deadlineTimer) clearTimeout(deadlineTimer);
+			deadlineTimer = undefined;
+			controller.abort();
+			if (active === controller) active = undefined;
+			notice(ctx, "Recovery paused: bounded attempts/deadline exhausted; next user message resets it.");
+			return;
+		}
 		const signal = AbortSignal.any([event.signal, controller.signal, AbortSignal.timeout(remaining)]);
 		busy = true;
 		try {

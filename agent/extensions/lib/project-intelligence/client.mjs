@@ -93,6 +93,13 @@ export class IntelligenceClient {
       }, timeout);
       signal?.addEventListener("abort", abort, { once: true });
       this.pending.set(id, { resolve, reject, cleanup });
+      // Abort can race with the initial preflight between listener setup and
+      // queue insertion. Re-check after insertion so a request never reaches
+      // the worker after its caller has already cancelled it.
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
       this.worker.ref();
       try {
         this.worker.postMessage({ id, op, payload });

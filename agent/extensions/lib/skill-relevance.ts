@@ -84,7 +84,12 @@ export function skillEvidenceContext(evidence: { files?: readonly string[]; tool
   return [...terms].join(' ').slice(0,1600);
 }
 export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
-  const docs = skills.slice(0, 256).map(skill => {
+  // The model-backed discovery packet has its own 256-entry budget, but this
+  // index is local metadata only. Truncating here made skills after the first
+  // 256 invisible to deterministic routing even though skill_review could
+  // browse and search the complete catalogue. Keep every supplied entry; the
+  // token and context bounds below still cap per-request work.
+  const docs = skills.map(skill => {
     // Hyphenated catalogue names should match ordinary task prose too.
     const name = new Set(skillTerms(`${skill.name} ${skill.name.replace(/[-_:/.]+/g, ' ')}`, 24));
     return { skill, name, tokens: new Set([...name, ...skillTerms(skill.description)]) };

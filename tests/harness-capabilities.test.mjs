@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,6 +11,23 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")] .find((dir) =
 );
 assert.ok(agent, "harness capability catalog is present");
 const catalog = await import(pathToFileURL(path.join(agent, "extensions/lib/harness-capabilities.ts")));
+
+test("installed capability details prefer runtime docs over stale legacy templates", async () => {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'capability-docs-'));
+  try {
+    const module = path.join(fixture, 'agent/extensions/lib/harness-capabilities.ts');
+    fs.mkdirSync(path.dirname(module), { recursive: true });
+    fs.copyFileSync(path.join(agent, 'extensions/lib/harness-capabilities.ts'), module);
+    const current = path.join(fixture, 'agent/runtime/docs/SKILLS-AND-CHECKS.md');
+    const stale = path.join(fixture, 'agent/public-template/docs/SKILLS-AND-CHECKS.md');
+    for (const file of [current, stale]) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'synthetic documentation'); }
+    const installed = await import(pathToFileURL(module));
+    const record = installed.HARNESS_CAPABILITIES.find(item => item.doc.endsWith('/SKILLS-AND-CHECKS.md'));
+    assert.equal(installed.getCapabilityDetail(record.id).doc, current);
+    fs.unlinkSync(current);
+    assert.equal(installed.getCapabilityDetail(record.id).doc, stale, 'older installations retain their fallback');
+  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
+});
 
 test("capability catalog is static, source-backed and covers the requested surfaces", () => {
   const { HARNESS_CAPABILITIES: records, getCapabilityDetail } = catalog;

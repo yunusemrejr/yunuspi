@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { needleHealth, needleHandle } from "../needle-runtime.ts";
 import { jevHealth, openRouterKey } from "../jev-client.ts";
 import { microMetrics } from "./metrics.ts";
-import { coordinator } from "./coordinator.ts";
 import { microHealthSnapshot, needleStatus, jevStatus, type LayerHealth } from "./health.ts";
 
 const INSPECT_KEY = Symbol.for("yunus-pi.micro.inspect.v1");
@@ -129,6 +128,5 @@ export function microStatusSnapshot(request?: {
     smol,
     kompress,
     metrics: microMetrics().summaryLines(),
-    ledger: coordinator().ledgerSummary(),
   };
 }

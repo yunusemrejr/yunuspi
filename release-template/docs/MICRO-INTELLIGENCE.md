@@ -83,11 +83,15 @@ prompt, file, or tool content leaves the machine for Needle.
 SmolLM2 proposes source-linked line selections for successful line-oriented
 output. The host reconstructs exact source text and keeps the original behind
 `obs_read`. It retains every distinct protected fact, boundary and task match;
-only identical repeated status facts can collapse. Plain inventory rows may be
+only identical repeated status/task facts can collapse. Plain inventory rows may be
 background. Protected facts are collected across the complete source before
 4–32 KiB windowing; unsafe or overly dense evidence falls back to raw. Windowed
 results identify both the original source hash and the selected window hash.
 Errors, instructions, secrets, cancellation and truncation are excluded.
+The background model receives at most 1,024 bytes of task-aware framing and whole
+source lines, with exact repeated rows deduplicated. Its IDs must belong to that
+candidate view; the host adds protected evidence from the complete source and
+orders the final extract. Malformed, duplicate or unoffered IDs fall back to raw.
 
 ## Kompress — extractive prose selection
 
@@ -135,6 +139,10 @@ answers. The circuit breaker preserves heuristic fallback. New sites: `rank` (va
 launching a general-model advisor. Valid catalog choices or clear no-fit
 judgments avoid that launch; uncertainty keeps the bounded original fallback.
 
+Preferred working routes and exact-input cache hits avoid model-catalog discovery.
+Only model rejections trigger catalog fallback. Cancelled, malformed and over-budget
+inputs stop before another judgment; the serialized state/question budget is 32 KiB.
+
 Jev evidence selection preserves protected chunks independently of scores,
 rejects sources exceeding the complete-input budget, and cannot truncate kept
 facts to meet an output cap. Ready results may apply at the context boundary;
@@ -144,13 +152,13 @@ Jev receives the complete bounded task before that judgment.
 
 ## Coordination, metrics, health
 
-`agent/extensions/lib/micro-intelligence/` holds the lightweight
-coordination layer: request dedup, bounded result caches, an opportunity
-ledger, escalation chains, provenance, and unified metrics. Subsystem
-owners keep their authority; the coordinator only stops repeated work.
+`agent/extensions/lib/micro-intelligence/` holds routing, evidence preparation
+and unified metrics. Needle, Smol, Kompress and Jev retain their own bounded
+caches and lifecycle controls. The unused duplicate coordinator and its
+always-empty ledger were removed; production helper metrics remain authoritative.
 
 - `micro_status` (read-only tool) reports request classification, the
-  advisory verdict, per-layer health, utilization, and the ledger.
+  advisory verdict, per-layer health and utilization.
 - Health vocabulary: `ready / warming / unavailable / disabled / busy /
   breaker-open / no-key`.
 - Metrics count actual offers, runs, accepts, cache hits, skip reasons, and

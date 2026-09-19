@@ -202,6 +202,13 @@ const CONTEXT_SEARCH_MAX_CHARS = 2_500;
 const CONTEXT_SEARCH_MAX_LINES = 80;
 const CONTEXT_MAX_CHARS = 16_000;
 
+// Memory reads are model-facing tool results. Keep a large memory file from
+// consuming an entire turn, while allowing callers to request more when they
+// are intentionally inspecting a long entry.
+const DEFAULT_MEMORY_READ_MAX_CHARS = CONTEXT_MAX_CHARS;
+const MAX_MEMORY_READ_CHARS = 64_000;
+const MAX_MEMORY_WRITE_CHARS = 64_000;
+
 const EXIT_SUMMARY_MAX_CHARS = 80_000;
 const EXIT_SUMMARY_MIN_MESSAGES = 4;
 const EXIT_SUMMARY_SYSTEM_PROMPT = [
@@ -311,6 +318,74 @@ function buildPreview(
 		totalChars,
 		previewLines,
 		previewChars,
+	};
+}
+
+function normalizeMemoryReadLimit(value: unknown): number {
+	if (value === undefined) return DEFAULT_MEMORY_READ_MAX_CHARS;
+	if (!Number.isInteger(value) || value < 1_000 || value > MAX_MEMORY_READ_CHARS) {
+		throw new Error(`maxChars must be an integer between 1000 and ${MAX_MEMORY_READ_CHARS}.`);
+	}
+	return value;
+}
+
+function normalizeMemoryReadOffset(value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new Error("offset must be a nonnegative safe integer.");
+	}
+	return value;
+}
+
+function boundedMemoryRead(
+	content: string,
+	filePath: string,
+	maxChars: number,
+	mode: TruncateMode,
+	date?: string,
+	offset?: number,
+) {
+	if (offset !== undefined && offset > content.length) {
+		throw new Error(`offset ${offset} exceeds the file length ${content.length}.`);
+	}
+	const exactPage = offset !== undefined;
+	const pageStart = offset ?? (mode === "end" ? Math.max(0, content.length - maxChars) : 0);
+	const splitsPair = (at: number) => at > 0 && at < content.length
+		&& content.charCodeAt(at - 1) >= 0xD800 && content.charCodeAt(at - 1) <= 0xDBFF
+		&& content.charCodeAt(at) >= 0xDC00 && content.charCodeAt(at) <= 0xDFFF;
+	if (exactPage && splitsPair(pageStart)) throw new Error("offset splits a Unicode character; use nextOffset from the previous page.");
+	let pageEnd = Math.min(content.length, pageStart + maxChars);
+	if (exactPage && splitsPair(pageEnd)) pageEnd--;
+	const source = exactPage ? content.slice(pageStart, pageEnd) : content;
+	// Exact pages must contain only source characters: adding a marker before
+	// calculating nextOffset would make callers skip or repeat source text.
+	const result = exactPage
+		? { text: source, truncated: pageStart + source.length < content.length }
+		: truncateText(source, maxChars, mode);
+	// Target-specific previews may keep both ends (middle) or the newest tail;
+	// their first exact continuation is therefore an explicit page from zero.
+	const nextOffset = exactPage ? pageStart + result.text.length : result.truncated ? 0 : undefined;
+	const note = !result.truncated ? undefined : exactPage
+		? `[more memory: showing UTF-16 offsets ${pageStart}-${nextOffset}/${content.length}; pass offset=${nextOffset} to continue]`
+		: `[truncated: bounded preview of ${content.length} chars; pass offset=0 with maxChars for exact paging]`;
+	return {
+		// Exact pages keep their first text block source-only. A separate block
+		// exposes continuation to models whose provider does not include details.
+		content: exactPage
+			? [{ type: "text", text: result.text }, ...(note ? [{ type: "text", text: note }] : [])]
+			: [{ type: "text", text: result.text + (note ? `\n\n${note}` : "") }],
+		details: {
+			path: filePath,
+			...(date ? { date } : {}),
+			truncated: result.truncated,
+			totalChars: content.length,
+			readChars: result.text.length,
+			maxChars,
+			offset: pageStart,
+			nextOffset,
+			hasMore: exactPage ? pageStart + result.text.length < content.length : result.truncated,
+			exactPage,
+		},
 	};
 }
 
@@ -1937,7 +2012,13 @@ export default function (pi: ExtensionAPI) {
 				description:
 					"Where to write: 'long_term' for global MEMORY.md, 'project' for this project's memory, or 'daily' for today's project log",
 			}),
-			content: Type.String({ description: "Content to write (Markdown)" }),
+			// Prevent accidental blank entries and unbounded tool payloads from
+			// turning memory into a context sink. Repeated writes remain append-only.
+			content: Type.String({
+				description: `Content to write (Markdown, 1-${MAX_MEMORY_WRITE_CHARS} characters)`,
+				minLength: 1,
+				maxLength: MAX_MEMORY_WRITE_CHARS,
+			}),
 			mode: Type.Optional(
 				StringEnum(["append"] as const, {
 					description:
@@ -1947,6 +2028,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// Session transitions may run while this invocation waits for its owner.
+			_signal?.throwIfAborted();
 			const projectKey = cwdSlug(ACTIVE_CWD);
 			const sid = shortSessionId(ctx.sessionManager.getSessionId());
 			const release = await acquireMemoryMutation(MEMORY_DIR, _signal);
@@ -1954,6 +2036,12 @@ export default function (pi: ExtensionAPI) {
 				_signal?.throwIfAborted();
 				ensureDirs();
 				const { target, content, mode } = params;
+				if (typeof content !== "string" || !content.trim()) {
+					throw new Error("memory_write content must contain at least one non-whitespace character.");
+				}
+				if (content.length > MAX_MEMORY_WRITE_CHARS) {
+					throw new Error(`memory_write content exceeds ${MAX_MEMORY_WRITE_CHARS} characters.`);
+				}
 				// Guard older/stale tool callers too; never silently reinterpret overwrite.
 				if (mode && mode !== "append") throw new Error("Memory overwrite is disabled. Use append or memory_forget (recoverable deletion).");
 				const ts = nowTimestamp();
@@ -2266,6 +2354,7 @@ export default function (pi: ExtensionAPI) {
 			"- 'scratchpad': Read SCRATCHPAD.md",
 			"- 'daily': Read a specific day's log (default: today). Pass date as YYYY-MM-DD.",
 			"- 'list': List all daily log files.",
+			"Reads are bounded to 16,000 characters by default. Pass maxChars and offset for exact contiguous pages; truncated responses include nextOffset.",
 		].join("\n"),
 		parameters: Type.Object({
 			target: StringEnum(["long_term", "project", "scratchpad", "daily", "list"] as const, {
@@ -2276,10 +2365,27 @@ export default function (pi: ExtensionAPI) {
 					description: "Date for daily log (YYYY-MM-DD). Default: today.",
 				}),
 			),
+			maxChars: Type.Optional(
+				Type.Integer({
+					minimum: 1_000,
+					maximum: MAX_MEMORY_READ_CHARS,
+					description: `Maximum characters returned for a file read (default ${DEFAULT_MEMORY_READ_MAX_CHARS}; truncated reads report totalChars).`,
+				}),
+			),
+			offset: Type.Optional(
+				Type.Integer({
+					minimum: 0,
+					maximum: Number.MAX_SAFE_INTEGER,
+					description: "UTF-16 start offset for exact paging; use nextOffset to continue. First text block is source-only; default is a bounded preview.",
+				}),
+			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			_signal?.throwIfAborted();
 			ensureDirs();
 			const { target, date } = params;
+			const maxChars = normalizeMemoryReadLimit(params.maxChars);
+			const offset = normalizeMemoryReadOffset(params.offset);
 
 			if (target === "list") {
 				try {
@@ -2334,10 +2440,7 @@ export default function (pi: ExtensionAPI) {
 						details: {},
 					};
 				}
-				return {
-					content: [{ type: "text", text: content }],
-					details: { path: filePath, date: d },
-				};
+				return boundedMemoryRead(content, filePath, maxChars, "end", d, offset);
 			}
 
 			if (target === "project") {
@@ -2349,7 +2452,7 @@ export default function (pi: ExtensionAPI) {
 						details: { path: filePath },
 					};
 				}
-				return { content: [{ type: "text", text: content }], details: { path: filePath } };
+				return boundedMemoryRead(content, filePath, maxChars, "middle", undefined, offset);
 			}
 
 			if (target === "scratchpad") {
@@ -2365,10 +2468,7 @@ export default function (pi: ExtensionAPI) {
 						details: {},
 					};
 				}
-				return {
-					content: [{ type: "text", text: content }],
-					details: { path: SCRATCHPAD_FILE },
-				};
+				return boundedMemoryRead(content, SCRATCHPAD_FILE, maxChars, "start", undefined, offset);
 			}
 
 			// long_term
@@ -2379,10 +2479,7 @@ export default function (pi: ExtensionAPI) {
 					details: {},
 				};
 			}
-			return {
-				content: [{ type: "text", text: content }],
-				details: { path: MEMORY_FILE },
-			};
+			return boundedMemoryRead(content, MEMORY_FILE, maxChars, "middle", undefined, offset);
 		},
 	});
 

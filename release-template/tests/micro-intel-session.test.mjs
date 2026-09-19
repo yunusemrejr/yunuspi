@@ -15,7 +15,6 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
 );
 const load = (rel) => import(pathToFileURL(path.join(agent, rel)));
 const metricsMod = await load("extensions/lib/micro-intelligence/metrics.ts");
-const coordMod = await load("extensions/lib/micro-intelligence/coordinator.ts");
 const retrievalMod = await load("extensions/lib/micro-intelligence/retrieval.ts");
 const evidenceMod = await load("extensions/lib/micro-intelligence/evidence.ts");
 const advisoryMod = await load("extensions/lib/micro-intelligence/advisory.ts");
@@ -55,9 +54,7 @@ const tools = [
 
 test("coding session: every layer does distinct useful work", async () => {
   metricsMod.resetMicroMetrics();
-  coordMod.resetCoordinator();
   const metrics = metricsMod.microMetrics();
-  const coord = coordMod.coordinator();
   const layers = new Set(["deterministic"]);
 
   // 1. Request arrives: deterministic + needle classification.

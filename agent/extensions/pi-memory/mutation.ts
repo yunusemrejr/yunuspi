@@ -52,8 +52,16 @@ export async function acquireMemoryMutation(
 	return () => {
 		if (released) return;
 		released = true;
-		fs.unlinkSync(ownerPath);
-		fs.rmdirSync(lockPath);
+		try { fs.unlinkSync(ownerPath); } catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		try { fs.rmdirSync(lockPath); } catch (error) {
+			// A concurrent explicit recovery or a diagnostic marker may have
+			// removed/added entries after our owner marker was created. Never
+			// remove another owner's marker; leave a non-empty lock for recovery.
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTEMPTY") throw error;
+		}
 	};
 }
 

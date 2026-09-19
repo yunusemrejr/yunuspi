@@ -55,6 +55,20 @@ function fixture() {
       ),
   };
 }
+test("default installed export uses current runtime templates before legacy templates", () => {
+  const f = fixture();
+  try {
+    for (const [relative, marker] of [['public-template', 'stale'], ['runtime/release-template', 'current']]) {
+      const target = path.join(f.source, relative);
+      fs.cpSync(f.templates, target, { recursive: true });
+      fs.mkdirSync(path.join(target, 'docs'));
+      fs.writeFileSync(path.join(target, 'docs/INSTALL.md'), marker);
+    }
+    const result = spawnSync(process.execPath, [exporter, '--source', f.source, '--output', f.output], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(path.join(f.output, 'docs/INSTALL.md'), 'utf8'), 'current');
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
 test("exporter rejects exact OAuth and account canaries without exposing their values", () => {
   for (const field of ["access", "refresh", "accountId"]) {
     const f = fixture();

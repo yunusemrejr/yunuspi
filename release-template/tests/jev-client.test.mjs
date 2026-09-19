@@ -133,6 +133,55 @@ test("identical calls pay once via the session cache", async () => {
   assert.equal(ledger[1].data.costUsd, 0);
 });
 
+test("preferred and cached judgments do not fetch the model catalog", async () => {
+  let catalogs = 0, judgments = 0;
+  harness(async url => {
+    if (String(url).includes('/api/v1/models')) { catalogs++; return emptyModels(); }
+    judgments++; return decisionsOk();
+  });
+  const ask = () => jev.askJev('lazy', 'synthetic state', { ping: { type: 'noul', instructions: 'Affirmative?' } });
+  assert.equal((await ask()).ok, true);
+  assert.equal((await ask()).usage.cached, true);
+  assert.equal(catalogs, 0, 'catalog discovery is a model-rejection fallback');
+  assert.equal(judgments, 1);
+});
+
+test("cancellation during fallback discovery returns promptly without another paid request", async () => {
+  let releaseCatalog, catalogStarted, judgments = 0;
+  const started = new Promise(resolve => { catalogStarted = resolve; });
+  harness(async url => {
+    if (String(url).includes('/api/v1/models')) {
+      catalogStarted();
+      return new Promise(resolve => { releaseCatalog = resolve; });
+    }
+    judgments++; return httpFail(404, 'model not found');
+  });
+  const abort = new AbortController();
+  const work = jev.askJev('cancelled', 'synthetic state', { ping: { type: 'noul', instructions: 'Affirmative?' } }, { signal: abort.signal });
+  await started;
+  abort.abort();
+  try {
+    assert.equal((await work).skipped, 'aborted');
+    assert.equal(judgments, 2, 'only the two preferred aliases were attempted');
+  } finally {
+    releaseCatalog(jsonOk({ data: [{ id: 'typesafe/jev-fallback' }] }));
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(judgments, 2);
+  assert.equal(jev.jevHealth().state, 'closed', 'cancellation is not a provider outage');
+});
+
+test("malformed and oversized inputs fail open before paying, including cancellable callers", async () => {
+  let fetches = 0;
+  harness(async () => { fetches++; return decisionsOk(); });
+  const circular = {}; circular.self = circular;
+  const questions = { ping: { type: 'noul', instructions: 'Affirmative?' } };
+  const opts = { signal: new AbortController().signal };
+  assert.equal((await jev.askJev('bounded', circular, questions, opts)).skipped, 'invalid-input');
+  assert.equal((await jev.askJev('bounded', 'x'.repeat(32769), questions, opts)).skipped, 'input-budget');
+  assert.equal(fetches, 0);
+});
+
 test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {
   const { pi } = harness(async () => decisionsOk());
   process.env.PI_JEV = "off";

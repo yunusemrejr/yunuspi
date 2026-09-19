@@ -75,6 +75,9 @@ export async function fetchWithCredentialRedirects(
 
 		const location = response.headers.get("location");
 		if (!location) return response;
+		// The redirect body is not exposed to callers. Release it before following
+		// the hop so repeated redirects cannot retain response streams/sockets.
+		await response.body?.cancel().catch(() => {});
 		if (redirects === MAX_API_REDIRECTS) {
 			throw new Error(`Too many API redirects from ${url}`);
 		}
@@ -348,7 +351,14 @@ async function fetchViaCurl(url: URL, init: RequestInit, proxyUrl: string): Prom
 			return response;
 		}
 		if (currentInit.redirect === "manual") return response;
-		if (currentInit.redirect === "error") throw new TypeError(`Proxy fetch redirect blocked from ${current.toString()}`);
+		if (currentInit.redirect === "error") {
+			await response.body?.cancel().catch(() => {});
+			throw new TypeError(`Proxy fetch redirect blocked from ${current.toString()}`);
+		}
+		// curl transport also discards redirect bodies when following manually.
+		// Cancel here for parity with the native fetch path and to keep custom
+		// Response implementations from retaining their stream.
+		await response.body?.cancel().catch(() => {});
 		if (redirects === 20) throw new Error(`Too many proxy redirects from ${url.toString()}`);
 
 		const next = new URL(location, current);

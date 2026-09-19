@@ -35,6 +35,8 @@ assert.equal(JSON.parse(fs.readFileSync(path.join(target,'runtime/core/coding-ag
 assert.equal(fs.readlinkSync(path.join(target,'bin/pi')),'yunuspi');
 assert.equal(fs.readFileSync(path.join(target,'runtime/docs/INSTALL.md'),'utf8'),'YunusPi source installation');
 assert.equal(fs.readFileSync(path.join(target,'runtime/AGENTS.md'),'utf8'),'Owned-source development');
+assert.equal(fs.readFileSync(path.join(target,'runtime/release-template/docs/INSTALL.md'),'utf8'),'YunusPi source installation');
+assert.equal(fs.readFileSync(path.join(target,'runtime/release-template/scripts/install.mjs'),'utf8'),fs.readFileSync(script,'utf8'));
 assert.match(fs.readFileSync(path.join(target,'runtime/.npmrc'),'utf8'),/^ignore-scripts=true/m);
 const unbuilt=spawnSync(path.join(target,'bin/yunuspi'),['--version'],{encoding:'utf8'});assert.notEqual(unbuilt.status,0);assert.match(unbuilt.stderr,/not built/);
 fs.writeFileSync(path.join(target,'private.txt'),'fixture-only');
@@ -43,11 +45,25 @@ assert.equal(run('--apply','--backup-existing','--offline').status,0);assert(!fs
 const calls=fs.readFileSync(path.join(root,'npm.log'),'utf8').trim().split('\n').map(JSON.parse);
 assert.deepEqual(calls,[['ci','--ignore-scripts','--no-audit','--no-fund','--offline'],['run','build:core']]);
 const launched=spawnSync(path.join(target,'bin/yunuspi'),['--version'],{encoding:'utf8'});assert.equal(launched.status,0,launched.stderr);assert.match(launched.stdout,/YunusPi fixture/);
+fs.writeFileSync(path.join(target,'runtime/core/coding-agent/dist/cli.js'),'console.log(JSON.stringify(process.argv.slice(2)));');
+const modelUpdate=spawnSync(path.join(target,'bin/yunuspi'),['update','--models'],{encoding:'utf8'});
+assert.equal(modelUpdate.status,0,modelUpdate.stderr);assert.match(modelUpdate.stdout,/\["update","--models"\]/);
+const privateModel=path.join(target,'local-models','fixture','venv','bin');fs.mkdirSync(privateModel,{recursive:true});fs.writeFileSync(path.join(privateModel,'python3.12'),'fixture-interpreter');
+const injectMove=spawnSync(process.execPath,[script,'--target',target,'--skip-needle','--apply','--backup-existing','--preserve-state','--offline'],{encoding:'utf8',env:{...env,NODE_ENV:'test',YUNUSPI_TEST_FAIL_AFTER_STATE_MOVE:'1'}});
+assert.notEqual(injectMove.status,0);assert.match(injectMove.stderr,/Injected activation failure/);assert.equal(fs.readFileSync(path.join(target,'local-models/fixture/venv/bin/python3.12'),'utf8'),'fixture-interpreter');assert.equal(fs.readdirSync(root).some(name=>name.startsWith('.yunuspi-install-')),false);
+const injectRollback=spawnSync(process.execPath,[script,'--target',target,'--skip-needle','--apply','--backup-existing','--preserve-state','--offline'],{encoding:'utf8',env:{...env,NODE_ENV:'test',YUNUSPI_TEST_FAIL_AFTER_STATE_MOVE:'1',YUNUSPI_TEST_FAIL_STATE_ROLLBACK:'1'}});
+assert.notEqual(injectRollback.status,0);assert.match(injectRollback.stderr,/staged data retained/);assert(fs.readdirSync(root).some(name=>name.startsWith('.yunuspi-install-')));
 const failedBuild=spawnSync(process.execPath,[script,'--target',target,'--skip-needle','--apply','--backup-existing','--offline'],{encoding:'utf8',env:{...env,YUNUSPI_TEST_BUILD_FAIL:'1'}});
 assert.notEqual(failedBuild.status,0);assert.match(failedBuild.stderr,/Owned core build failed/);assert(fs.existsSync(path.join(target,'runtime/core/coding-agent/dist/cli.js')));
 const backup=fs.readdirSync(root).find(x=>x.startsWith('target.backup-'));assert(backup);assert.equal(fs.readFileSync(path.join(root,backup,'private.txt'),'utf8'),'fixture-only');
 assert.notEqual(run('--bad').status,0);
 fs.symlinkSync('/tmp',path.join(repo,'agent','unsafe-link'));assert.notEqual(run('--apply','--backup-existing').status,0);fs.unlinkSync(path.join(repo,'agent','unsafe-link'));
+for (const name of ['agent','core','docs']) {
+ const actual=path.join(repo,name), outside=path.join(root,`outside-${name}`);
+ fs.renameSync(actual,outside);fs.symlinkSync(outside,actual);
+ try { const linked=run('--apply','--backup-existing');assert.notEqual(linked.status,0);assert.match(linked.stderr,/Source root must be a regular directory/); }
+ finally { fs.unlinkSync(actual);fs.renameSync(outside,actual); }
+}
 assert.notEqual(spawnSync(process.execPath,[script,'--target',path.join(repo,'nested')],{encoding:'utf8'}).status,0);
 const symlinkTarget=path.join(root,'link');fs.symlinkSync(target,symlinkTarget);assert.notEqual(spawnSync(process.execPath,[script,'--apply','--backup-existing','--target',symlinkTarget],{encoding:'utf8'}).status,0);
 const lease=spawn('flock',['--shared',path.join(target,'logs/harness-session.lock'),'/bin/bash','-c','printf ready; read -r done'],{stdio:['pipe','pipe','pipe']});

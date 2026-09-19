@@ -84,7 +84,15 @@ export const DEFAULT_COMPACTION_SETTINGS = {
  * Uses the native totalTokens field when available, falls back to computing from components.
  */
 export function calculateContextTokens(usage) {
-    return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+    // Providers occasionally return an omitted, NaN, or negative total while
+    // still supplying usable component counts. Never let malformed totals
+    // disable compaction; use only finite non-negative values and fall back to
+    // the independently reported components.
+    if (Number.isFinite(usage.totalTokens) && usage.totalTokens > 0) {
+        return usage.totalTokens;
+    }
+    const component = (value) => Number.isFinite(value) && value >= 0 ? value : 0;
+    return component(usage.input) + component(usage.output) + component(usage.cacheRead) + component(usage.cacheWrite);
 }
 /**
  * Get usage from an assistant message if available.
@@ -211,7 +219,7 @@ export function estimateTokens(message) {
                     chars += block.thinking.length;
                 }
                 else if (block.type === "toolCall") {
-                    chars += block.name.length + JSON.stringify(block.arguments).length;
+                    chars += block.name.length + safeJsonStringify(block.arguments).length;
                 }
             }
             return Math.ceil(chars / 4);
@@ -232,6 +240,15 @@ export function estimateTokens(message) {
         }
     }
     return 0;
+}
+
+function safeJsonStringify(value) {
+    try {
+        return JSON.stringify(value) ?? "undefined";
+    }
+    catch {
+        return "[unserializable]";
+    }
 }
 function isCutPointMessage(message) {
     switch (message.role) {

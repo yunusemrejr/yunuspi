@@ -30,7 +30,9 @@ for (let i = 0; i < args.length; i++) {
 }
 if (!output)
  throw Error("--output is required; never export into the live installation.");
-templates ??= fs.existsSync(path.join(source, "public-template"))
+templates ??= fs.existsSync(path.join(source, "runtime/release-template"))
+ ? path.join(source, "runtime/release-template")
+ : fs.existsSync(path.join(source, "public-template"))
  ? path.join(source, "public-template")
  : path.resolve(source, "../release-template");
 const within = (p, r) => p === r || p.startsWith(r + path.sep);
