@@ -712,14 +712,7 @@ export class ScheduledRunManager {
 			const run = store.history(schedule.id).find((item) => item.id === schedule.activeRunId);
 			if (run?.state === "running" && run.asyncId) this.observedAsyncIds.add(run.asyncId);
 			const startedAt = run?.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-			if (run?.state === "running" && run.asyncDir) {
-				try {
-					const status = readJson(path.join(run.asyncDir, "status.json"), "async status") as Partial<AsyncStatus>;
-					if (["complete", "failed", "stopped", "rejected"].includes(String(status.state))) this.finishRun(store, schedule, run, status.state === "complete", typeof status.error === "string" ? status.error : undefined);
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof Error && /ENOENT/.test(error.message))) throw error;
-				}
-			}
+			if (run) this.reconcileAsyncRun(store, schedule, run);
 			if (schedule.activeRunId && (!run || run.state !== "running" || (!run.asyncId && Number.isFinite(startedAt) && startedAt + STALE_LAUNCH_CLAIM_MS <= this.now()))) {
 				if (run?.state === "running") {
 					run.state = "failed_launch";
@@ -748,6 +741,8 @@ export class ScheduledRunManager {
 	}
 
 	private arm(schedule: ScheduleRecord, store: ScheduleStore, notBefore?: number): void {
+		// A launch can settle after stop() or a replacement manager binding.
+		if (this.stores.get(store.root) !== store) return;
 		this.clearTimer(store, schedule.id);
 		if (schedule.paused) return;
 		const next = nextRunAt(schedule);
@@ -836,32 +831,56 @@ export class ScheduledRunManager {
 		store.writeRun(schedule, run, "schedule.run.started");
 		try {
 			const result = await this.deps.launch(executionParams(schedule), this.requireContext(store), new AbortController().signal);
+			// Pause/resume and other sessions may have updated the record while launch awaited.
+			schedule = store.get(schedule.id);
 			const asyncId = result.details?.asyncId ?? result.details?.runId;
 			if (result.isError || !asyncId) throw new Error(result.content.find((item) => item.type === "text")?.text ?? "Scheduled launch failed.");
 			run.asyncId = asyncId;
 			run.asyncDir = result.details?.asyncDir;
-			this.observedAsyncIds.add(asyncId);
+			if (this.stores.get(store.root) === store) this.observedAsyncIds.add(asyncId);
 			store.writeRun(schedule, run, "schedule.run.attached_async");
-			this.arm(schedule, store);
-			return run;
 		} catch (error) {
+			schedule = store.get(schedule.id);
 			run.state = "failed_launch";
 			run.completedAt = timestamp(this.now());
 			run.error = error instanceof Error ? error.message : String(error);
-			schedule.activeRunId = undefined;
-			schedule.updatedAt = timestamp(this.now());
-			store.write(schedule);
+			if (schedule.activeRunId === run.id) {
+				schedule.activeRunId = undefined;
+				schedule.updatedAt = timestamp(this.now());
+				store.write(schedule);
+				fs.rmSync(lockPath, { force: true });
+			}
 			store.writeRun(schedule, run, "schedule.run.failed");
-			fs.rmSync(lockPath, { force: true });
 			this.arm(schedule, store);
 			return run;
+		}
+		// Fast workflows may emit their terminal event before the awaited launch
+		// returns its async id. Durable status closes that missed-event window.
+		try {
+			this.reconcileAsyncRun(store, schedule, run);
+		} catch (error) {
+			console.warn(`[pi-subagents] Scheduled run '${schedule.id}' status reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.arm(schedule, store);
+		return run;
+	}
+
+	private reconcileAsyncRun(store: ScheduleStore, schedule: ScheduleRecord, run: ScheduleRunRecord): void {
+		if (run.state !== "running" || !run.asyncDir) return;
+		try {
+			const status = readJson(path.join(run.asyncDir, "status.json"), "async status") as Partial<AsyncStatus>;
+			if (status.runId !== run.asyncId) throw new Error(`Async status does not match scheduled child '${run.asyncId}'.`);
+			if (["complete", "failed", "stopped", "rejected"].includes(String(status.state))) this.finishRun(store, schedule, run, status.state === "complete", typeof status.error === "string" ? status.error : undefined);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof Error && /ENOENT/.test(error.message))) throw error;
 		}
 	}
 
 	private finishRun(store: ScheduleStore, schedule: ScheduleRecord, run: ScheduleRunRecord, success: boolean, error?: string): void {
 		const now = this.now();
 		const next = nextRunAt(schedule);
-		if (next !== undefined && next <= now) {
+		const ownsClaim = schedule.activeRunId === run.id;
+		if (ownsClaim && next !== undefined && next <= now) {
 			const planned = duePlannedAt(schedule, now)!;
 			const skipped: ScheduleRunRecord = {
 				schemaVersion: 1,
@@ -879,10 +898,12 @@ export class ScheduledRunManager {
 		run.state = success ? "completed" : "failed_run";
 		run.completedAt = timestamp(now);
 		if (!success && error) run.error = error;
-		schedule.activeRunId = undefined;
-		schedule.updatedAt = timestamp(now);
-		store.write(schedule);
-		fs.rmSync(path.join(store.directory(schedule.id), "active.lock"), { force: true });
+		if (ownsClaim) {
+			schedule.activeRunId = undefined;
+			schedule.updatedAt = timestamp(now);
+			store.write(schedule);
+			fs.rmSync(path.join(store.directory(schedule.id), "active.lock"), { force: true });
+		}
 		store.writeRun(schedule, run, success ? "schedule.run.completed" : "schedule.run.failed");
 		this.arm(schedule, store);
 	}

@@ -26,6 +26,8 @@ import type {
 import { needlePolicy, needleText, needleHash, type NeedlePolicy, type NeedleSkipReason } from "./needle-policy.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
+const SHARED_RUNTIME = Symbol.for("yunus-pi.needle-runtime.v1");
+const processState = globalThis as typeof globalThis & { [SHARED_RUNTIME]?: NeedleHandle };
 
 function noteHealth(kind: string, data: Record<string, unknown>): void {
   try { (globalThis as Record<symbol, unknown>)[HEALTH_SINK]?.(kind, data); } catch { /* telemetry is optional */ }
@@ -593,6 +595,7 @@ export function createNeedleRuntime(options: {
     },
     async shutdown() {
       closed = true;
+      if (processState[SHARED_RUNTIME] === handle) delete processState[SHARED_RUNTIME];
       embedCache.clear();
       if (reprobeTimer) clearTimeout(reprobeTimer);
       reprobeTimer = undefined;
@@ -608,19 +611,16 @@ export function createNeedleRuntime(options: {
   return handle;
 }
 
-/** Narrow public operations. One shared handle per process; warmup is async
- * and every op degrades to a skip reason when Needle cannot serve. */
-let shared: NeedleHandle | undefined;
+/** The extension loader isolates modules, so the worker/queue/cache owner must
+ * live on the process bridge. Warmup remains asynchronous and fail-open. */
 
 export function needleHandle(): NeedleHandle {
-  if (!shared) shared = createNeedleRuntime();
-  return shared;
+  return processState[SHARED_RUNTIME] ??= createNeedleRuntime();
 }
 
 /** Test seam: drop the shared handle so the next caller builds a fresh one. */
 export function resetNeedleForTests(): void {
-  void shared?.shutdown().catch(() => {});
-  shared = undefined;
+  void processState[SHARED_RUNTIME]?.shutdown().catch(() => {});
 }
 
 export async function needleEmbed(texts: string[]): Promise<NeedleResult<NeedleEmbedResult>> {

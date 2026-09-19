@@ -280,6 +280,26 @@ const params = {
   files: ["a.txt", "b.txt"],
 };
 const preview = () => bulkCall({ ...params, action: "preview" });
+test("bulk edit preserves replacement syntax literally unless regex mode is selected", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bulk-literal-"));
+  const file = path.join(root, "replacement.txt");
+  const replacement = "$& $$ $` $' $1 $<name>";
+  try {
+    for (const isRegex of [false, true]) {
+      const original = "before old after old";
+      fs.writeFileSync(file, original);
+      const input = { pattern: "(old)", replacement, files: [path.basename(file)], isRegex };
+      if (!isRegex) input.pattern = "old";
+      const p = await bulkCall({ ...input, action: "preview" }, root);
+      assert.equal(p.isError, undefined);
+      const expected = isRegex ? original.replace(/(old)/g, replacement) : original.replace(/old/g, () => replacement);
+      assert.equal(JSON.parse(p.content[0].text).files[0].preview[0], `- ${original}\n+ ${expected}`);
+      const applied = await bulkCall({ ...input, action: "apply", token: p.details.token }, root);
+      assert.equal(applied.isError, undefined);
+      assert.equal(fs.readFileSync(file, "utf8"), expected);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 test("bulk edits require a real single-use preview bound to root and unchanged inputs", async () => {
   fs.writeFileSync(path.join(cwd, "a.txt"), "old A");
   fs.writeFileSync(path.join(cwd, "b.txt"), "old B");

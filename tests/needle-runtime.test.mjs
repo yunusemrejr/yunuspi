@@ -18,6 +18,27 @@ const load = (rel) => import(pathToFileURL(path.join(agent, rel)));
 const runtime = await load("extensions/lib/needle-runtime.ts");
 const policy = await load("extensions/lib/needle-policy.ts");
 
+test("isolated extension imports share Needle and shutdown releases the shared handle", async () => {
+  const isolated = await import(pathToFileURL(path.join(agent, "extensions/lib/needle-runtime.ts")) + "?extension-isolate");
+  runtime.resetNeedleForTests();
+  isolated.resetNeedleForTests();
+  const first = runtime.needleHandle();
+  try {
+    assert.equal(isolated.needleHandle(), first, "all extensions own one worker, queue, cache and health state");
+    await first.shutdown();
+    const reopened = isolated.needleHandle();
+    assert.notEqual(reopened, first, "a later session must not reuse a closed runtime");
+    assert.equal(runtime.needleHandle(), reopened);
+    await first.shutdown();
+    assert.equal(runtime.needleHandle(), reopened, "old cleanup cannot remove the replacement");
+    runtime.resetNeedleForTests();
+    assert.notEqual(isolated.needleHandle(), reopened, "reset applies across extension imports");
+  } finally {
+    runtime.resetNeedleForTests();
+    isolated.resetNeedleForTests();
+  }
+});
+
 const fixtureAssets = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-rt-"));
   for (const name of ["needle.js", "needle.wasm", "needle3.cact"]) {

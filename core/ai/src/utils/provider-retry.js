@@ -76,6 +76,8 @@ export async function retryProviderRequest(request, options = {}) {
     const maxRetries = options.maxRetries ?? 0;
     let retriesRemaining = maxRetries;
     for (;;) {
+        if (options.signal?.aborted)
+            throw createAbortError();
         try {
             // Each retry is a fresh SDK request, so X-Stainless-Retry-Count remains zero.
             return await request();

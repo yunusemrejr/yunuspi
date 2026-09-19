@@ -120,11 +120,15 @@ function sleep(ms, signal) {
             reject(new RetrySleepAbortError());
             return;
         }
-        const timeout = setTimeout(resolve, ms);
-        signal?.addEventListener("abort", () => {
+        const onAbort = () => {
             clearTimeout(timeout);
             reject(new RetrySleepAbortError());
-        }, { once: true });
+        };
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener("abort", onAbort, { once: true });
     });
 }
 /**
@@ -209,6 +213,9 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
         // provider stream aborts, so callers do not need to care when cancellation happened.
         try {
             await sleep(delayMs, signal);
+            await callbacks?.onRetryAttemptStart?.();
+            if (signal?.aborted)
+                throw new RetrySleepAbortError();
         }
         catch (error) {
             await callbacks?.onRetryFinished?.(false, attempt, lastRetry.errorMessage);
@@ -218,7 +225,6 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
             }
             throw error;
         }
-        await callbacks?.onRetryAttemptStart?.();
     }
 }
 /**
