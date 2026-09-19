@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 import { discoverAgents, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig } from "./agents.ts";
 import { getProjectSubagentsDir } from "../shared/artifacts.ts";
 import type { Details, JsonSchemaObject, SingleResult, SubagentState } from "../shared/types.ts";

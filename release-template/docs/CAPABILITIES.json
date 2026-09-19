@@ -2145,22 +2145,22 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 502
+        "line": 466
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 544
+        "line": 508
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 536
+        "line": 500
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 552
+        "line": 516
       },
       {
         "name": "catalog-status",
@@ -2175,12 +2175,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1276
+        "line": 1176
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 810
+        "line": 809
       },
       {
         "name": "curator",
@@ -2220,12 +2220,12 @@
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 585
+        "line": 546
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 632
+        "line": 593
       },
       {
         "name": "lens-allow-edit",
@@ -2280,7 +2280,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 600
+        "line": 561
       },
       {
         "name": "memory-prime",
@@ -2295,7 +2295,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 895
+        "line": 874
       },
       {
         "name": "or-provider",
@@ -2335,7 +2335,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1234
+        "line": 1134
       },
       {
         "name": "subagent-cost",
@@ -2420,17 +2420,17 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1239
+        "line": 1139
       },
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 528
+        "line": 492
       },
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1258
+        "line": 1158
       },
       {
         "name": "websearch",
@@ -2532,25 +2532,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 829,
+        "line": 790,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 783,
+        "line": 744,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 668,
+        "line": 629,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 752,
+        "line": 713,
         "kind": "literal"
       },
       {
@@ -2756,7 +2756,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 842,
+        "line": 821,
         "kind": "literal"
       },
       {
@@ -2822,7 +2822,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1368,
+        "line": 1268,
         "kind": "literal"
       },
       {
@@ -2834,7 +2834,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1305,
+        "line": 1205,
         "kind": "literal"
       },
       {
@@ -2994,25 +2994,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 829,
+        "line": 790,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 783,
+        "line": 744,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 668,
+        "line": 629,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 752,
+        "line": 713,
         "kind": "literal"
       },
       {
@@ -3114,7 +3114,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 842,
+        "line": 821,
         "kind": "literal"
       },
       {
@@ -3168,7 +3168,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1368,
+        "line": 1268,
         "kind": "literal"
       },
       {
@@ -3180,7 +3180,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1305,
+        "line": 1205,
         "kind": "literal"
       },
       {
@@ -3724,6 +3724,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/jev-client.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/local-models.ts",
         "exists": true
       },
@@ -4254,6 +4258,10 @@
         "exists": true
       },
       {
+        "path": "agent/scripts/lib/owned-core.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/scripts/lib/paragraph_selector.py",
         "exists": true
       },
@@ -4304,191 +4312,191 @@
     ],
     "patchModules": [
       {
-        "path": "agent/scripts/patches/autonomous-recovery.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/autonomous-recovery.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/background-task-signal-status.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/background-task-signal-status.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/background-task-terminal-publish.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/background-task-terminal-publish.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/cache-hit-footer.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/cache-hit-footer.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/cache-usage-accuracy.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/cache-usage-accuracy.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/calculate-cost.js",
+        "path": "agent/scripts/compatibility/legacy-transforms/calculate-cost.js",
         "kind": "js"
       },
       {
-        "path": "agent/scripts/patches/catalog-refresh-credential-gate.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/catalog-refresh-credential-gate.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/compaction-early.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/compaction-early.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/context-settings.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/context-settings.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/edit-optimistic-concurrency.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/edit-optimistic-concurrency.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/export-redaction.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/export-redaction.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/hook-metrics-wrapper.js",
+        "path": "agent/scripts/compatibility/legacy-transforms/hook-metrics-wrapper.js",
         "kind": "js"
       },
       {
-        "path": "agent/scripts/patches/hook-metrics.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/hook-metrics.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/local-context-allocation.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/local-context-allocation.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/model-selector-custom.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/model-selector-custom.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/mutation-path-boundary.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/mutation-path-boundary.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/native-read-mutation-queue.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/native-read-mutation-queue.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/notify-broker-delivery.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/notify-broker-delivery.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/openai-service-pricing.js",
+        "path": "agent/scripts/compatibility/legacy-transforms/openai-service-pricing.js",
         "kind": "js"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-atomic-preflight.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-atomic-preflight.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-autofix-debounce.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-autofix-debounce.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-compact-reports.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-compact-reports.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-diagnostic-scope.md",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-diagnostic-scope.md",
         "kind": "md"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-diagnostic-scope.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-diagnostic-scope.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-feedback-notices.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-feedback-notices.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-format-safety.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-format-safety.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-fuzzy-identifiers.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-fuzzy-identifiers.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-indent-comments.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-indent-comments.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-radar-state.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-radar-state.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-read-guard.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-read-guard.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-semantic-dry.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-semantic-dry.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-tool-result-profile.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-tool-result-profile.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/pi-lens-workspace-facts.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-workspace-facts.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/post-update-repair.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/preserve-terminal-scrollback.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/preserve-terminal-scrollback.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/provider-price-accuracy.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/provider-price-accuracy.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/README.md",
+        "kind": "md"
+      },
+      {
+        "path": "agent/scripts/compatibility/legacy-transforms/request-body-gate.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/request-body-gate.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/retry-429-policy.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/retry-429-policy.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/search-output-spill.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/search-output-spill.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/patches/session-cost-display.js",
+        "path": "agent/scripts/compatibility/legacy-transforms/session-cost-display.js",
         "kind": "js"
       },
       {
-        "path": "agent/scripts/patches/stream-idle.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/stream-idle.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/summary-effort.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/summary-effort.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/thinking-reflow.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/thinking-reflow.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/token-budget.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/token-budget.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/tool-validation.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/tool-validation.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/truncation-context.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/truncation-context.mjs",
         "kind": "mjs"
       },
       {
-        "path": "agent/scripts/patches/tui-branding.mjs",
+        "path": "agent/scripts/compatibility/legacy-transforms/tui-branding.mjs",
         "kind": "mjs"
       }
     ],
@@ -5756,6 +5764,14 @@
         "path": "docs/CHANGE-SCOPE.md"
       },
       {
+        "name": "CONTEXT-AUDIT.md",
+        "path": "docs/CONTEXT-AUDIT.md"
+      },
+      {
+        "name": "CORE-OWNERSHIP.md",
+        "path": "docs/CORE-OWNERSHIP.md"
+      },
+      {
         "name": "CORE-UPDATES.md",
         "path": "docs/CORE-UPDATES.md"
       },
@@ -5770,6 +5786,10 @@
       {
         "name": "GUIDANCE-AND-DIAGNOSTICS.md",
         "path": "docs/GUIDANCE-AND-DIAGNOSTICS.md"
+      },
+      {
+        "name": "INDEPENDENT-AUDIT.md",
+        "path": "docs/INDEPENDENT-AUDIT.md"
       },
       {
         "name": "INSTALL.md",
@@ -5800,8 +5820,16 @@
         "path": "docs/MODEL-ROUTING.md"
       },
       {
+        "name": "NEEDLE-AUDIT.md",
+        "path": "docs/NEEDLE-AUDIT.md"
+      },
+      {
         "name": "ORCHESTRATION-EVIDENCE.md",
         "path": "docs/ORCHESTRATION-EVIDENCE.md"
+      },
+      {
+        "name": "PATCH-MIGRATION.md",
+        "path": "docs/PATCH-MIGRATION.md"
       },
       {
         "name": "PLATFORMS.md",

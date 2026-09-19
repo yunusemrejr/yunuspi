@@ -29,7 +29,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	SessionEntry,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import {
 	distillOutput,
@@ -44,7 +44,7 @@ import {
 	providerImageCountLimit,
 	GATE_THRESHOLD_BYTES,
 } from "./lib/image-compaction.ts";
-import { hasRequestBodyLimit } from "../scripts/patches/request-body-gate.mjs";
+import { hasRequestBodyLimit } from "../scripts/compatibility/legacy-transforms/request-body-gate.mjs";
 
 const MIN_DEDUP_CHARS = 400;
 const MAX_ENTRIES = 64;
@@ -172,24 +172,17 @@ export default function piObservationsExtension(
 	// Settled Needle error-family cues by observation id (bounded; cleared on
 	// restore). Rendered as similarity cues next to the failure hint.
 	const needleCues = new Map<number, { family: string; score: number; margin: number }>();
-	// Background Jev chunk selections keyed like smol offers. First and last
-	// chunks are always kept; middle chunks need a keep score of 0.6.
-	const jevDistillPending = new Map<string, Promise<string | undefined>>();
+	// Background Jev selections are consumed only when already ready. Remote
+	// latency cannot hold the next provider request or rewrite a prior seal.
+	const jevDistillPending = new Map<string, {value?:string}>();
 	const offerJevDistill = (key: string, tool: string, text: string): void => {
 		if (jevDistillPending.has(key)) return;
 		if (jevDistillPending.size >= 200) jevDistillPending.delete(jevDistillPending.keys().next().value!);
-		jevDistillPending.set(
-			key,
-			(async (): Promise<string | undefined> => {
-				try {
-					return await selectDistillChunks(tool, text, (site, state, questions) =>
-						askJev(site, state, questions, { pi }),
-					);
-				} catch {
-					return undefined;
-				}
-			})().catch(() => undefined),
-		);
+		const slot: {value?:string} = {};
+		jevDistillPending.set(key,slot);
+		void selectDistillChunks(tool,text,(site,state,questions)=>askJev(site,state,questions,{pi}))
+			.then(value=>{if(jevDistillPending.get(key)===slot)slot.value=value;})
+			.catch(()=>{});
 	};
 	// Provider-visible history is append-only: the first rendering chosen for a
 	// message is sealed and reused verbatim on later requests. A rewritten
@@ -238,6 +231,7 @@ export default function piObservationsExtension(
 	function restore(ctx: ExtensionContext): void {
 		mini.reset();
 		smol.reset();
+		jevDistillPending.clear();
 		needleCues.clear();
 		taskSignal = "";
 		observations = new Map();
@@ -262,6 +256,7 @@ export default function piObservationsExtension(
 	pi.on("session_shutdown", () => {
 		mini.reset();
 		smol.reset();
+		jevDistillPending.clear();
 	});
 	pi.on("agent_end", () => {
 		// Turn boundary keeps validated caches and live inference: an observation
@@ -422,7 +417,8 @@ export default function piObservationsExtension(
 			void needleClassify({ text: text.slice(0, 2048), labels: ERROR_FAMILY_LABELS }).then(
 				(result) => {
 					const micro = microMetrics();
-					if (result.ok && result.value.accepted) {
+					if (result.ok) micro.run("needle", result.ms);
+					if (result.ok && !result.shadow && result.value.accepted) {
 						if (needleCues.size < 512) {
 							needleCues.set(cueId, {
 								family: result.value.label,
@@ -431,12 +427,11 @@ export default function piObservationsExtension(
 							});
 						}
 						coordinator().markProcessed(cueKey, "needle");
-						micro.run("needle", result.ms);
 						micro.accept("needle");
 					} else if (!result.ok) {
 						micro.skip("needle", result.reason);
 					} else {
-						micro.skip("needle", "low-confidence");
+						micro.skip("needle", result.shadow ? "shadow" : "low-confidence");
 					}
 				},
 				() => {
@@ -454,7 +449,6 @@ export default function piObservationsExtension(
 			!event.details?.cancelled &&
 			!event.details?.aborted &&
 			(event.details?.exitCode === undefined || event.details.exitCode === 0) &&
-			ctx?.model?.cost?.input >= 0 &&
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
 			miniSource(text) &&
@@ -469,7 +463,7 @@ export default function piObservationsExtension(
 			} catch {}
 			if (statusSize <= 80)
 				return mini
-					.select(text, ctx.model.cost.input, taskSignal)
+					.select(text, ctx?.model?.cost?.input, taskSignal)
 					.then(finish, () => finish());
 		}
 		// Structured successful line output complements Kompress prose selection.
@@ -508,12 +502,13 @@ export default function piObservationsExtension(
 			!safeSmolOutput(event.toolName, text, false, event.details) &&
 			!distilled
 		) {
-			(smol as { offerWindowed: (...args: [string, string, unknown, string, string]) => void }).offerWindowed(
+			(smol as { offerWindowed: (...args: [string, string, unknown, string, string, unknown]) => void }).offerWindowed(
 				`${ref.id}:${ref.signature}`,
 				text,
 				ctx?.model?.cost?.input,
 				taskSignal,
 				event.toolName,
+				event.details,
 			);
 		}
 		// Jev scores chunks only when every deterministic and local path
@@ -617,11 +612,11 @@ export default function piObservationsExtension(
 					smol
 						.takeAsync(`${ref.id}:${ref.signature}`, raw)
 						.then(async (value) => {
-							const takeWindowed = (smol as { takeWindowed?: (key: string, waitMs?: number) => Promise<string | undefined> }).takeWindowed;
+							const takeWindowed = (smol as { takeWindowed?: (key: string, waitMs?: number, raw?: string) => Promise<string | undefined> }).takeWindowed;
 							smolReady.set(
 								index,
 								value ?? (typeof takeWindowed === "function"
-									? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, 150)
+										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, 150, raw)
 									: undefined),
 							);
 						}),
@@ -631,31 +626,11 @@ export default function piObservationsExtension(
 		}
 		const jevReady = new Map<number, string | undefined>();
 		if (process.env.PI_JEV !== "off") {
-			const pending: Array<Promise<void>> = [];
-			event.messages.forEach((message, index) => {
-				const ref = message.details?.piObservation as Reference | undefined;
-				if (
-					message.role !== "toolResult" ||
-					!message.content.every((part) => part.type === "text") ||
-					ref?.version !== 1 ||
-					!ref.operation ||
-					!TOOLS.has(message.toolName)
-				)
-					return;
-				const offered = jevDistillPending.get(`${ref.id}:${ref.signature}`);
-				if (!offered) return;
-				// Ready selections apply; a still-running judgment must not
-				// stall the context boundary past a short grace window.
-				pending.push(
-					Promise.race([
-						offered.then((value) => {
-							jevReady.set(index, value);
-						}),
-						new Promise<void>((resolve) => setTimeout(() => resolve(), 2000)),
-					]),
-				);
+			event.messages.forEach((message,index)=>{
+				const ref=message.details?.piObservation as Reference|undefined;
+				if(message.role==='toolResult'&&ref?.version===1&&ref.operation&&TOOLS.has(message.toolName))
+					jevReady.set(index,jevDistillPending.get(`${ref.id}:${ref.signature}`)?.value);
 			});
-			if (pending.length) await Promise.all(pending);
 		}
 		const messages = event.messages.map((message, index) => {
 			if (
@@ -828,6 +803,10 @@ export default function piObservationsExtension(
 					text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}${needleHint ? `\n${needleHint}` : ""}`,
 				},
 			];
+			if (!sealed) microMetrics().rendered(
+				selected ? miniRendered ? "kompress" : localLines ? "smol" : "jev" : "deterministic",
+				raw.length - textOf(projected),
+			);
 			sealFirstRender(
 				ref.id,
 				ref.resultHash,

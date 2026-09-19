@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {resolveOwnedCore} from '../agent/scripts/lib/owned-core.mjs';
 // Public screenshots use only these synthetic fixtures, never live session data.
 // Run with Node >=22.19 and an installed harness that provides Playwright/Chromium.
 import fs from 'node:fs';
@@ -10,11 +11,11 @@ import { stripTypeScriptTypes } from 'node:module';
 import { stripVTControlCharacters } from 'node:util';
 const agent = path.resolve(process.env.PI_DEMO_AGENT_DIR || path.join(os.homedir(), '.pi/agent'));
 const output = path.resolve(process.argv[2] || path.join(path.dirname(fileURLToPath(import.meta.url)), '../docs/assets'));
-const core = path.join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(), '@earendil-works/pi-coding-agent');
+const core = resolveOwnedCore();
 const { chromium } = await import(pathToFileURL(path.join(agent, 'extensions/node_modules/playwright/index.mjs')));
 const { buildSessionReport } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-report.ts')));
 const panelSource = stripTypeScriptTypes(fs.readFileSync(path.join(agent, 'extensions/lib/metrics-panel.ts'), 'utf8'))
-  .replace("'@earendil-works/pi-tui'", JSON.stringify(pathToFileURL(path.join(core, 'node_modules/@earendil-works/pi-tui/dist/index.js')).href));
+  .replace("'@yunuspi/tui'", JSON.stringify(pathToFileURL(path.join(core, '../tui/dist/index.js')).href));
 const { createMetricsPanel } = await import('data:text/javascript;base64,' + Buffer.from(panelSource).toString('base64'));
 const message = (role, fields) => ({ type: 'message', message: { role, ...fields } });
 const entries = [];

@@ -1,6 +1,6 @@
-import { Agent, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
-import { convertToLlm, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { Agent, type AgentTool, type StreamFn } from "@yunuspi/agent-core";
+import { convertToLlm, type ExtensionContext } from "@yunuspi/coding-agent";
+import { streamSimple } from "@yunuspi/ai/compat";
 import { Type, type Static } from "typebox";
 import { appendPermissionAudit, permissionArgsPreview } from "../runs/shared/permissions.ts";
 import { agentStreamOptions } from "../shared/agent-stream-options.ts";

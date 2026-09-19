@@ -32,15 +32,15 @@ import { type ExecFileOptions, execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type Message, StringEnum, Type } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
+import { type Message, StringEnum, Type } from "@yunuspi/ai";
+import { complete } from "@yunuspi/ai/compat";
 import {
 	convertToLlm,
 	type ExtensionAPI,
 	type ExtensionContext,
 	type SessionEntry,
 	serializeConversation,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 
 // ---------------------------------------------------------------------------
 // Paths (mutable for testing via _setBaseDir / _resetBaseDir)

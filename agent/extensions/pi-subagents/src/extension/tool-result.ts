@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 
 /**
  * Convert pi-subagents' internal logical-error result into the rejection Pi's

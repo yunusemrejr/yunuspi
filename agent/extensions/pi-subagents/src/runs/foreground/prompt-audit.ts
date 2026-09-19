@@ -1,7 +1,7 @@
-import { Agent, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { convertToLlm, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
-import type { Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import { Agent, type StreamFn, type ThinkingLevel } from "@yunuspi/agent-core";
+import { convertToLlm, type ExtensionContext } from "@yunuspi/coding-agent";
+import { streamSimple } from "@yunuspi/ai/compat";
+import type { Model, ProviderHeaders } from "@yunuspi/ai";
 import { agentStreamOptions } from "../../shared/agent-stream-options.ts";
 import type { ForegroundRunControl } from "../../shared/types.ts";
 export type PromptAuditView = "authored" | "runtime" | "effective";

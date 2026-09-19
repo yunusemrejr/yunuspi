@@ -22,8 +22,8 @@
 import type {
 	ExtensionAPI,
 	ExtensionUIContext,
-} from "@earendil-works/pi-coding-agent";
-import type { KeyId } from "@earendil-works/pi-tui";
+} from "@yunuspi/coding-agent";
+import type { KeyId } from "@yunuspi/tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.js";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
 import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";

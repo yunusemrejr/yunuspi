@@ -3,7 +3,7 @@ import { AUTOMATIC_HELPER_LIMITS } from "./automatic-budgets.ts";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { BeforeProviderRequestEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BeforeProviderRequestEvent, ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import { registerNativeSupervisorClient } from "../../intercom/native-supervisor-channel.ts";
 import { shouldUseNativeFsWatch } from "../../shared/watch-strategy.ts";
 import { decodePermissionRules, permissionDecision, PERMISSION_AUDIT_PATH_ENV, PERMISSION_POLICY_ENV } from "./permissions.ts";

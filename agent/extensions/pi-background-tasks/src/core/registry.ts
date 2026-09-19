@@ -6,9 +6,9 @@ import { once } from "node:events";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { formatSize } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@yunuspi/ai";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
+import { formatSize } from "@yunuspi/coding-agent";
 import {
   boundedRead,
   deriveTaskNameFromCommand,

@@ -29,7 +29,7 @@ async function load(file, replacements = []) {
 }
 const safety = await load("filesystem-safety.ts", [
   [
-    /import \{\s*getAgentDir,[\s\S]*?from "@earendil-works\/pi-coding-agent";/,
+    /import \{\s*getAgentDir,[\s\S]*?from "@yunuspi\/coding-agent";/,
     `const getAgentDir=()=>${JSON.stringify(agent)};`,
   ],
 ]);

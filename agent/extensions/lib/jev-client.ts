@@ -21,6 +21,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { protectedEvidence } from "./local-intelligence.mjs";
+import { microMetrics } from './micro-intelligence/metrics.ts';
 
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -127,6 +129,7 @@ let lastError = "";
 let discovered: { at: number; slugs: string[] } = { at: 0, slugs: [] };
 let discoveryInflight: Promise<string[]> | null = null;
 const cache = new Map<string, { answers: Record<string, JevAnswer>; inputTokens: number; model: string; at: number }>();
+const inflight = new Map<string, Promise<JevAskResult>>();
 
 /** Test seam: reset every module singleton. */
 export function resetJevClient(): void {
@@ -138,6 +141,7 @@ export function resetJevClient(): void {
   discovered = { at: 0, slugs: [] };
   discoveryInflight = null;
   cache.clear();
+  inflight.clear();
 }
 
 export function jevHealth(): {
@@ -177,7 +181,7 @@ function cacheSet(key: string, value: { answers: Record<string, JevAnswer>; inpu
     const oldest = cache.keys().next().value as string | undefined;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(key, { ...value, at: deps.now() });
+  cache.set(key, { ...value, answers: structuredClone(value.answers), at: deps.now() });
 }
 
 /** Any jev variation OpenRouter lists, typesafe-authored first. */
@@ -300,6 +304,7 @@ function scheduleProbe(): void {
 
 async function recoverProbe(): Promise<void> {
   if (!breakerOpen) return;
+  if ((process.env.PI_JEV ?? '').toLowerCase() === 'off') return;
   const key = openRouterKey();
   if (!key) {
     openBreaker("recover probe: no OpenRouter key");
@@ -336,6 +341,31 @@ export async function askJev(
   questions: Record<string, unknown>,
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
+  // Independently cancellable calls keep their own transport. Concurrent
+  // uncancelled advisory requests with identical evidence share one payment.
+  if (opts.signal || (process.env.PI_JEV ?? '').toLowerCase() === 'off') return askJevOnce(site,state,questions,opts);
+  let identity: string;
+  try { identity=cacheKey(site,'inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
+  const pending=inflight.get(identity);
+  if(pending){
+    const result=await pending;
+    if(!result.ok)return result;
+    const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
+    ledger(opts.pi,{site,...usage});
+    return {ok:true,answers:structuredClone(result.answers),usage};
+  }
+  if(inflight.size>=64)return {ok:false,skipped:'busy'};
+  const work=askJevOnce(site,state,questions,opts);
+  inflight.set(identity,work);
+  try{return await work;}finally{if(inflight.get(identity)===work)inflight.delete(identity);}
+}
+
+async function askJevOnce(
+  site: string,
+  state: unknown,
+  questions: Record<string, unknown>,
+  opts: JevAskOpts = {},
+): Promise<JevAskResult> {
   if ((process.env.PI_JEV ?? "").toLowerCase() === "off") return { ok: false, skipped: "disabled" };
   if (state === undefined || state === null || (typeof state === "string" && !state.trim()))
     return { ok: false, skipped: "trivial" };
@@ -363,7 +393,7 @@ export async function askJev(
       ledger(opts.pi, { site, model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true });
       return {
         ok: true,
-        answers: hit.answers,
+        answers: structuredClone(hit.answers),
         usage: { model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true },
       };
     }
@@ -405,16 +435,18 @@ export function tooShort(text: unknown, minChars: number): boolean {
   return typeof text !== "string" || text.trim().length < minChars;
 }
 
-/** Split text into line-aware chunks for relevance scoring. */
+/** Split complete text into bounded line-aware chunks. Empty means the whole
+ * source cannot fit; callers must retain the original, never a hidden prefix. */
 export function splitTextChunks(text: string, maxChunks = 8, chunkChars = 2000): string[] {
-  if (!text) return [];
+  if (!text || !Number.isSafeInteger(maxChunks) || maxChunks < 1 || !Number.isSafeInteger(chunkChars) || chunkChars < 1) return [];
   const chunks: string[] = [];
   let current = "";
   for (const line of text.split("\n")) {
+    if (line.length > chunkChars) return [];
     if (current && current.length + line.length + 1 > chunkChars) {
       chunks.push(current);
       current = "";
-      if (chunks.length >= maxChunks) break;
+      if (chunks.length >= maxChunks) return [];
     }
     current += (current ? "\n" : "") + line;
   }
@@ -438,6 +470,9 @@ export async function selectDistillChunks(
 ): Promise<string | undefined> {
   const chunks = splitTextChunks(text, 8, 2000);
   if (chunks.length < 2) return undefined;
+  const required = chunks.map((chunk, index) => index === 0 || index === chunks.length - 1 || protectedEvidence.test(chunk));
+  if (required.every(Boolean)) return undefined;
+  const metrics=microMetrics();metrics.offer('jev');
   const questions: Record<string, unknown> = {};
   chunks.forEach((_, index) => {
     questions[`chunk_${index}`] = {
@@ -450,16 +485,28 @@ export async function selectDistillChunks(
     { tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
     questions,
   );
-  if (!judged.ok) return undefined;
+  if (!judged.ok) {metrics.skip('jev',judged.skipped);return undefined;}
+  metrics.run('jev',judged.usage.ms,text.length);
+  metrics.jevUsage('distill',chunks.length,judged.usage.inputTokens,judged.usage.costUsd,judged.usage.cached);
+  if(judged.usage.cached)metrics.cacheHit('jev');
   const kept = chunks.map(
     (_, index) =>
-      index === 0 ||
-      index === chunks.length - 1 ||
-      (judged.answers[`chunk_${index}`]?.noul ?? 0) >= keepAt,
+      required[index] ||
+      // Missing, mistyped or non-finite judgments cannot authorize omission.
+      judged.answers[`chunk_${index}`]?.type !== "noul" ||
+      !Number.isFinite(judged.answers[`chunk_${index}`]?.noul) ||
+      judged.answers[`chunk_${index}`].noul! < 0 ||
+      judged.answers[`chunk_${index}`].noul! > 1 ||
+      judged.answers[`chunk_${index}`].noul! >= keepAt,
   );
   if (kept.every(Boolean)) return undefined;
   const keptCount = kept.filter(Boolean).length;
-  return `${renderKeptChunks(chunks, kept)}\n\n${jevMark("distill", `kept ${keptCount}/${chunks.length}`, judged.usage)}`;
+  const rendered = renderKeptChunks(chunks, kept);
+  if (!rendered) return undefined;
+  const projection = `${rendered}\n\n${jevMark("distill", `kept ${keptCount}/${chunks.length}`, judged.usage)}`;
+  if(text.length-projection.length<256)return undefined;
+  metrics.accept('jev',text.length-projection.length,true);
+  return projection;
 }
 
 /** Render kept chunk indexes extractively with omission notes. */
@@ -479,5 +526,6 @@ export function renderKeptChunks(chunks: string[], kept: boolean[], maxChars = 1
   });
   if (omitted > 0) parts.push(`[...${omitted} trailing chunk(s) omitted...]`);
   const joined = parts.join("\n\n");
-  return joined.length > maxChars ? `${joined.slice(0, maxChars)}\n[...render capped...]` : joined;
+  // A render limit may reject a selection; it must never cut retained facts.
+  return joined.length > maxChars ? "" : joined;
 }

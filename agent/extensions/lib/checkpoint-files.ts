@@ -1,4 +1,4 @@
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { SessionEntry } from "@yunuspi/coding-agent";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 

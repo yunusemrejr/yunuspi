@@ -1,3 +1,4 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 // Load the complete declared main-session extension inventory against the
 // installed SDK (or the candidate bound at that path). No session or inference.
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const agent=fileURLToPath(new URL('../../',import.meta.url));
 const manifest=JSON.parse(fs.readFileSync(path.join(agent,'extensions/manifest.json'),'utf8'));
-const core=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8',timeout:5000}).trim(),'@earendil-works/pi-coding-agent');
+const core=resolveOwnedCore();
 const home=fs.mkdtempSync(path.join(os.tmpdir(),'pi-harness-load-'));
 const paths=[...manifest.extensions,...Object.keys(manifest.forks).map(name=>path.basename(name))].map(name=>path.join(agent,'extensions',name));
 try{

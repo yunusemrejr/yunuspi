@@ -1,9 +1,16 @@
 /** Untrusted model output may select source lines, never supply their text. */
 import { createHash } from 'node:crypto';
+import { protectedEvidence } from './local-intelligence.mjs';
 
 export const SMOL_MAX_INPUT_BYTES = 4096;
 export const SMOL_MAX_LINES = 128;
 export const SMOL_MAX_SELECTED_LINES = 16;
+/** Only plain inventory rows may treat a number/path as background. Distinct
+ * status, decisions, quantities and source qualifications remain mandatory. */
+export function smolProtectedLine(text: string): boolean {
+  if (/^[\w./-]+\s+bytes=\d+[. ]*\r?\n?$/.test(text)) return false;
+  return protectedEvidence.test(text) || /\b(?:balance|elapsed|result|summary|totals?)\b/i.test(text);
+}
 export interface SmolSourceLine { readonly id: number; readonly start: number; readonly end: number; readonly text: string }
 export interface SmolExtractionSource {
   readonly hash: string;
@@ -66,6 +73,7 @@ export function validateSmolExtraction(source: SmolExtractionSource, output: str
  * tail, mapped back to original line numbers. The window is its own source
  * (own hash); the original stays recoverable via obs_read. */
 export interface SmolWindow {
+  readonly sourceHash: string;
   readonly text: string;
   /** window line index (0-based) -> original line number (1-based). */
   readonly lineMap: readonly number[];
@@ -76,30 +84,41 @@ export interface SmolWindow {
 const WINDOW_BYTES = SMOL_MAX_INPUT_BYTES;
 const WINDOW_DIAGNOSTIC = /\b(?:error|exception|fatal|panic|failed|failure|warning|traceback|assertion)\b|^\s*(?:not ok\b|FAIL\b)/i;
 
-export function prepareSmolWindow(raw: string): SmolWindow | undefined {
+export function prepareSmolWindow(raw: string, requiredLineIds: readonly number[] = []): SmolWindow | undefined {
   if (typeof raw !== 'string' || !raw.length || raw.includes('\0')) return;
   if (Buffer.byteLength(raw, 'utf8') <= WINDOW_BYTES) return;
   if (Buffer.byteLength(raw, 'utf8') > 32768) return;
   if (Buffer.from(raw, 'utf8').toString('utf8') !== raw) return;
   const lines = raw.split('\n');
   if (lines.length < 16) return;
+  if (requiredLineIds.some(id => !Number.isSafeInteger(id) || id < 1 || id > lines.length)) return;
+  // Protect the complete source BEFORE making a lossy window. Deduplicate
+  // exact repeated facts only; changed numbers/statuses are different facts.
+  const protectedLines = new Set([0, lines.length - 1, ...requiredLineIds.map(id => id - 1)]);
+  const seen = new Set<string>();
+  lines.forEach((line, index) => {
+    if (!smolProtectedLine(line) || seen.has(line)) return;
+    seen.add(line); protectedLines.add(index);
+  });
+  const cost = (index: number) => Buffer.byteLength(lines[index], 'utf8') + 1;
+  const protectedBytes = [...protectedLines].reduce((sum, i) => sum + cost(i), 0);
+  if (protectedLines.size > SMOL_MAX_SELECTED_LINES - 2 || protectedBytes > WINDOW_BYTES - 512) return;
   // Split budget: head and tail each get ~45% so long lines cannot starve
   // either end; diagnostic lines share whatever remains.
   const head: number[] = [];
   const tail: number[] = [];
-  const cost = (index: number) => Buffer.byteLength(lines[index], 'utf8') + 1;
-  let headBudget = Math.floor(WINDOW_BYTES * 0.45);
+  let headBudget = Math.floor((WINDOW_BYTES - protectedBytes) * 0.45);
   for (let i = 0; i < lines.length && headBudget > 0; i++) {
     if (cost(i) > headBudget) break;
     head.push(i); headBudget -= cost(i);
   }
-  let tailBudget = Math.floor(WINDOW_BYTES * 0.45);
+  let tailBudget = Math.floor((WINDOW_BYTES - protectedBytes) * 0.45);
   for (let i = lines.length - 1; i >= 0 && tailBudget > 0; i--) {
     if (i < head.length) break;
     if (cost(i) > tailBudget) break;
     tail.unshift(i); tailBudget -= cost(i);
   }
-  const kept = new Set([...head, ...tail]);
+  const kept = new Set([...head, ...tail, ...protectedLines]);
   let rest = WINDOW_BYTES - [...kept].reduce((sum, i) => sum + cost(i), 0);
   for (let i = 0; i < lines.length && rest > 0; i++) {
     if (kept.has(i) || !WINDOW_DIAGNOSTIC.test(lines[i])) continue;
@@ -110,6 +129,7 @@ export function prepareSmolWindow(raw: string): SmolWindow | undefined {
   const text = order.map((i) => lines[i]).join('\n');
   if (!text.length || Buffer.byteLength(text, 'utf8') > WINDOW_BYTES) return;
   return Object.freeze({
+    sourceHash: createHash('sha256').update(raw).digest('hex'),
     text,
     lineMap: Object.freeze(order.map((i) => i + 1)),
     totalLines: lines.length,
@@ -136,7 +156,7 @@ export function renderSmolWindow(
   });
   if (lines.some((entry) => entry === undefined)) return;
   return JSON.stringify({
-    kind: 'untrusted-extractive-selection', sourceHash: source.hash, offsetUnit: 'utf16', complete: false,
+    kind: 'untrusted-extractive-selection', sourceHash: window.sourceHash, windowHash: source.hash, offsetUnit: 'utf16', complete: false,
     windowed: true, windowLines: source.lines.length, totalLines: window.totalLines, totalChars: window.totalChars,
     omittedLines: window.totalLines - checked.lineIds.length,
     lines,

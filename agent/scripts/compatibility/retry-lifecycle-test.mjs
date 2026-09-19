@@ -1,34 +1,20 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 // Offline regression of the actual SDK and CLI method bodies; no inference.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
-import {
- transformRetryLifecycle,
- transformDeterministicRejections,
- WINDOW_MS,
- COOLDOWN_MS,
-} from "../patches/retry-429-policy.mjs";
-const core = path.join(
- execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(),
- "@earendil-works/pi-coding-agent",
-);
+const WINDOW_MS = 120_000, COOLDOWN_MS = 25_000;
+const core = resolveOwnedCore();
 const sdk = fs.readFileSync(
  path.join(core, "dist/core/agent-session.js"),
  "utf8",
 );
-const chunks = path.join(core, "dist/bundle/chunks");
-const bundle = fs
- .readdirSync(chunks)
- .filter((f) => f.endsWith(".js"))
- .map((f) => fs.readFileSync(path.join(chunks, f), "utf8"))
- .find((s) => s.includes("async _prepareRetry("));
-assert.ok(bundle, "CLI owner required");
 const { isRetryableAssistantError } = await import(
- path.join(core, "node_modules/@earendil-works/pi-ai/dist/utils/retry.js")
+ path.join(core, "../ai/dist/utils/retry.js")
 );
-const baseline = process.argv.includes("--baseline");
+
 let failures = 0,
  checks = 0;
 function check(label, callback) {
@@ -45,14 +31,7 @@ const originalNow = Date.now;
 let now = 1_000;
 Date.now = () => now;
 try {
- for (const [label, raw, minified] of [
-  ["SDK", sdk, false],
-  ["CLI", bundle, true],
- ]) {
-  const patched = transformRetryLifecycle(raw, minified);
-  const source = baseline
-   ? transformRetryLifecycle(patched, minified, true)
-   : patched;
+ for (const [label, source] of [["owned SDK/CLI", sdk]]) {
   const start = source.indexOf("_willRetryAfterAgentEnd(");
   // First occurrence can be the call site. Require the method definition.
   const prediction = source.match(
@@ -194,30 +173,7 @@ try {
     true,
    ),
   );
-  if (!baseline) {
-   check(label + " patch is idempotent", () =>
-    assert.equal(transformRetryLifecycle(source, minified), source),
-   );
-   check(label + " removed patch reapplies exactly", () =>
-    assert.equal(
-     transformRetryLifecycle(
-      transformRetryLifecycle(source, minified, true),
-      minified,
-     ),
-     source,
-    ),
-   );
-   check(label + " partial patch is loud", () =>
-    assert.throws(
-     () =>
-      transformRetryLifecycle(
-       source.replace("PI_RETRY_CONTROLLER_READY", "DRIFT"),
-       minified,
-      ),
-     /drift/,
-    ),
-   );
-  }
+
  }
 } finally {
  Date.now = originalNow;
@@ -252,25 +208,6 @@ check("deterministic moderation rejection fails fast (SDK)", () =>
   false,
  ),
 );
-check("moderation fail-fast present in runtime bundle (parity)", () => {
- const idx = bundle.indexOf(
-  "DETERMINISTIC_REJECTION_PATTERN.test(errorMessage2)",
- );
- assert.ok(idx >= 0, "bundle moderation check missing");
- assert.ok(
-  bundle.indexOf(
-   "PI_DETERMINISTIC_REJECTION_BUNDLE (local patch; re-applied by verify-harness.mjs)",
-  ) >= 0,
-  "bundle moderation marker missing",
- );
- // Guard must sit BEFORE the retryable-pattern return so deterministic
- // rejections never reach the retryable pattern.
- const tail = bundle.slice(idx);
- assert.ok(
-  tail.indexOf("RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage2)") > 0,
-  "retryable pattern must follow the deterministic guard",
- );
-});
 check("quota/billing rejections still fail fast", () =>
  assert.equal(
   isRetryableAssistantError({
@@ -287,23 +224,17 @@ check("quota/billing rejections still fail fast", () =>
 // Run the installed SDK retry loop before/after the durable declaration
 // upgrade with a virtual delay. This catches the wrapper precedence bug, not
 // merely a regex literal changing. Neither copy calls a model or writes core.
-const retrySource=fs.readFileSync(path.join(core,"node_modules/@earendil-works/pi-ai/dist/utils/retry.js"),"utf8");
-const upgradedRetry=transformDeterministicRejections(retrySource);
-const upgradedModule=await import("data:text/javascript;base64,"+Buffer.from(upgradedRetry).toString("base64"));
+const retrySource=fs.readFileSync(path.join(core,"../ai/dist/utils/retry.js"),"utf8");
+const ownedModule=await import(path.join(core,"../ai/dist/utils/retry.js"));
 const invalidRequest='400: '+JSON.stringify({message:"Provider returned error",metadata:{raw:JSON.stringify({error:{message:"The request contains invalid parameters.",type:"invalid_request_error"}})}});
-check("SDK installed declaration upgrades idempotently",()=>assert.equal(transformDeterministicRejections(upgradedRetry),upgradedRetry));
-check("CLI installed declaration upgrades idempotently",()=>{
- const upgraded=transformDeterministicRejections(bundle,true);
- assert.equal(transformDeterministicRejections(upgraded,true),upgraded);
-});
 for(const errorMessage of [invalidRequest,"Provider returned error: unsupported parameter temperature"]){
  let produced=0,retries=0;
- await upgradedModule.retryAssistantCall(async()=>{produced++;return {role:"assistant",content:[],stopReason:"error",errorMessage};},
+ await ownedModule.retryAssistantCall(async()=>{produced++;return {role:"assistant",content:[],stopReason:"error",errorMessage};},
   {enabled:true,maxRetries:3,baseDelayMs:0},undefined,{onRetryScheduled:()=>retries++});
  check("invalid payload exits after one provider attempt",()=>{assert.equal(produced,1);assert.equal(retries,0);});
 }
-check("upgraded SDK still retries transient HTTP 400 wrappers",()=>assert.equal(upgradedModule.isRetryableAssistantError({stopReason:"error",errorMessage:"400 Provider returned error: overloaded"}),true));
+check("owned SDK still retries transient HTTP 400 wrappers",()=>assert.equal(ownedModule.isRetryableAssistantError({stopReason:"error",errorMessage:"400 Provider returned error: overloaded"}),true));
 console.log(
- `${checks - failures}/${checks} retry lifecycle checks passed${baseline ? " (patch-removed regression fixture)" : ""}`,
+ `${checks - failures}/${checks} retry lifecycle checks passed`,
 );
 process.exitCode = failures ? 1 : 0;

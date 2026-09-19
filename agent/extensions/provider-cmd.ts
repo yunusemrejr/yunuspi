@@ -36,7 +36,7 @@ import type {
 	AutocompleteItem,
 	ExtensionAPI,
 	ExtensionCommandContext,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

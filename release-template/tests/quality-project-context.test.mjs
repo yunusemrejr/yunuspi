@@ -12,7 +12,7 @@ try { await fs.access(agent); } catch { agent = path.resolve(release, '..'); }
 // Only the SDK's configuration lookup is substituted. The extension, client,
 // worker, discovery and SQLite store all execute their actual implementations.
 const config = 'data:text/javascript,' + encodeURIComponent('export const getAgentDir=()=>process.env.PI_CODING_AGENT_DIR;');
-register('data:text/javascript,' + encodeURIComponent(`export function resolve(n,c,next){return n==='@earendil-works/pi-coding-agent'?{url:${JSON.stringify(config)},shortCircuit:true}:next(n,c);}`), import.meta.url);
+register('data:text/javascript,' + encodeURIComponent(`export function resolve(n,c,next){return n==='@yunuspi/coding-agent'?{url:${JSON.stringify(config)},shortCircuit:true}:next(n,c);}`), import.meta.url);
 const { default: projectIntelligence } = await import(pathToFileURL(path.join(agent, 'extensions/project-intelligence.ts')));
 const { IntelligenceClient } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence/client.mjs')));
 const { openStore } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence/store.mjs')));

@@ -96,6 +96,11 @@ export function createMicroMetrics() {
       if (projected) helpers[helper].projectedSavedChars += Math.max(0, Math.floor(savedChars));
       else helpers[helper].savedChars += Math.max(0, Math.floor(savedChars));
     },
+    /** Count a newly sealed provider projection once, separately from inference
+     * acceptance. Replaying that seal does not manufacture further savings. */
+    rendered(helper: MicroHelper, savedChars: number): void {
+      helpers[helper].savedChars += Math.max(0, Math.floor(savedChars));
+    },
     cacheHit(helper: MicroHelper): void {
       helpers[helper].cacheHits++;
     },

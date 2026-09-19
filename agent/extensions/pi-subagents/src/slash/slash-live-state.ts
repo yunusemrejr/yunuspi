@@ -1,5 +1,5 @@
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
+import type { AgentToolResult } from "@yunuspi/agent-core";
+import type { Message } from "@yunuspi/ai";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { previewSimpleWorkflowRun } from "../workflows/scripted-workflow.ts";
 import { deriveChildSessionName } from "../shared/child-session-name.ts";

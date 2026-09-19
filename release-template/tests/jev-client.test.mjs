@@ -149,17 +149,33 @@ test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {
   assert.equal((await jev.askJev("s", "hello world", { q: { type: "noul", instructions: "x" } }, { pi, signal: controller.signal })).skipped, "aborted");
 });
 
+test('concurrent identical advisory calls pay once and cached answers cannot be mutated', async () => {
+  let fetches=0;
+  const {pi,ledger}=harness(async url=>{
+    if(String(url).includes('/api/v1/models'))return emptyModels();
+    fetches++;await new Promise(resolve=>setTimeout(resolve,10));return decisionsOk();
+  });
+  const ask=()=>jev.askJev('concurrent','synthetic state',{ping:{type:'noul',instructions:'Affirmative?'}},{pi});
+  const [first,second]=await Promise.all([ask(),ask()]);
+  assert.equal(fetches,1);
+  assert.equal(ledger.filter(row=>!row.data.cached).length,1);
+  assert.equal(second.usage.cached,true);
+  first.answers.ping.noul=0;
+  second.answers.ping.noul=0;
+  assert.equal((await ask()).answers.ping.noul,.9);
+});
+
 test("chunk split and extractive render stay bounded", () => {
   assert.deepEqual(jev.splitTextChunks("", 8, 2000), []);
   const text = Array.from({ length: 20 }, (_, i) => `line ${i} ${"x".repeat(100)}`).join("\n");
   const chunks = jev.splitTextChunks(text, 4, 500);
-  assert.equal(chunks.length, 4);
+  assert.deepEqual(chunks, [], "oversized input abstains instead of silently losing its tail");
   assert.ok(chunks.every((chunk) => chunk.length <= 600));
   const rendered = jev.renderKeptChunks(["a", "b", "c", "d"], [true, false, false, true]);
   assert.ok(rendered.includes("a") && rendered.includes("d"));
   assert.ok(!rendered.includes("\nb\n"));
   assert.ok(rendered.includes("2 chunk(s) omitted"));
-  assert.ok(jev.renderKeptChunks(["x".repeat(200)], [true], 100).includes("capped"));
+  assert.equal(jev.renderKeptChunks(["x".repeat(200)], [true], 100), "", "render cap cannot cut retained evidence");
 });
 
 test("distill selection keeps edges, drops low-score middles", async () => {

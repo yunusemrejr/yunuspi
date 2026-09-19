@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -79,7 +80,7 @@ test("installAssets network failure leaves no trace", async () => {
   assert.ok(!fs.existsSync(models) || fs.readdirSync(models).length === 0);
 });
 
-test("installAssets short-circuits when sizes and manifest match", async () => {
+test("installAssets repairs same-size corruption instead of trusting manifest", async () => {
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-ai-"));
   const dir = path.join(agentDir, "local-models", "needle3");
   fs.mkdirSync(dir, { recursive: true });
@@ -88,9 +89,8 @@ test("installAssets short-circuits when sizes and manifest match", async () => {
   }
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ ...assets.expectedManifest(), installedAt: "test" }));
   let fetched = 0;
-  const receipt = await assets.installAssets({ agentDir, fetchImpl: async () => { fetched++; throw new Error("must not fetch"); } });
-  assert.equal(receipt.installed, false);
-  assert.equal(fetched, 0);
+  await assert.rejects(assets.installAssets({ agentDir, retryDelayMs: 1, fetchImpl: async () => { fetched++; throw new Error("repair requested"); } }), /repair requested/);
+  assert.equal(fetched, 4);
 });
 
 test("CLI status/verify exit 2 on missing assets, help exits 0", () => {
@@ -110,4 +110,58 @@ test("CLI smoke exits 2 without assets (no hang, no crash)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-cli-"));
   const smoke = spawnSync(process.execPath, [cli, "smoke", "--agent-dir", dir], { encoding: "utf8", timeout: 30000 });
   assert.equal(smoke.status, 2);
+});
+
+const downloadFixture = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-download-"));
+  const body = Buffer.from("verified pinned bytes");
+  return { dir, dest: path.join(dir, "model"), body, expected: { local: "model", bytes: body.length, sha256: createHash("sha256").update(body).digest("hex") } };
+};
+
+test("download retries same-size corruption from zero instead of resuming poison", async () => {
+  const { dest, body, expected } = downloadFixture();
+  const ranges = [];
+  await assets.downloadFile("https://example.invalid/model", dest, expected, async (_url, options) => {
+    ranges.push(options.headers.Range);
+    return new Response(ranges.length === 1 ? Buffer.alloc(body.length) : body);
+  }, null, 1);
+  assert.deepEqual(ranges, [undefined, undefined]);
+  assert.deepEqual(fs.readFileSync(dest), body);
+});
+
+test("download resumes only matching Content-Range responses", async () => {
+  const { dest, body, expected } = downloadFixture();
+  fs.writeFileSync(`${dest}.part`, body.subarray(0, 5));
+  await assets.downloadFile("https://example.invalid/model", dest, expected, async (_url, options) => {
+    assert.equal(options.headers.Range, "bytes=5-");
+    return new Response(body.subarray(5), { status: 206, headers: { "content-range": `bytes 5-${body.length - 1}/${body.length}` } });
+  }, null, 1);
+  assert.deepEqual(fs.readFileSync(dest), body);
+});
+
+test("download rejects mismatched ranges then retries cleanly", async () => {
+  const { dest, body, expected } = downloadFixture();
+  fs.writeFileSync(`${dest}.part`, body.subarray(0, 5));
+  let attempts = 0;
+  await assets.downloadFile("https://example.invalid/model", dest, expected, async () => {
+    attempts++;
+    return attempts === 1 ? new Response(body.subarray(5), { status: 206, headers: { "content-range": "bytes 0-15/21" } }) : new Response(body);
+  }, null, 1);
+  assert.equal(attempts, 2);
+  assert.deepEqual(fs.readFileSync(dest), body);
+});
+
+
+test("download has bounded abortable attempts when the server never responds", async () => {
+  const { dest, expected } = downloadFixture();
+  let attempts = 0;
+  await assert.rejects(assets.downloadFile("https://example.invalid/model", dest, expected, async (_url, { signal }) => {
+    attempts++;
+    return new Promise((_resolve, reject) => {
+      const deadline = setTimeout(() => reject(new Error("abort was not delivered")), 1000);
+      signal.addEventListener("abort", () => { clearTimeout(deadline); reject(signal.reason); }, { once: true });
+    });
+  }, null, 1, 10), /timeout|aborted/i);
+  assert.equal(attempts, 4);
+  assert.equal(fs.existsSync(`${dest}.part`), false);
 });

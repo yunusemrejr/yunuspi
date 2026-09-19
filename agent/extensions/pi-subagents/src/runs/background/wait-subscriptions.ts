@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { listAsyncRuns, type AsyncRunSummary } from "./async-status.ts";
 import { formatResumeFirstFailedRunDetail } from "./resume-guidance.ts";
 import { readCompletionReplay } from "./completion-replay.ts";

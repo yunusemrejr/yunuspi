@@ -1,5 +1,5 @@
 // semantic-radar/runtime.mjs — turn-end adapter used by the pi-lens bundle
-// (via scripts/patches/pi-lens-semantic-dry.mjs). Keeps ALL policy here so the
+// (via scripts/compatibility/legacy-transforms/pi-lens-semantic-dry.mjs). Keeps ALL policy here so the
 // bundle patch stays tiny: gating, filtering, dedup, caps, formatting,
 // project-diagnostics emission (=> existing disposition/suppression pipeline).
 import path from "node:path";

@@ -104,8 +104,11 @@ export interface NeedleStats {
   classifyCalls: number;
   extractCalls: number;
   cacheHits: number;
+  /** Non-shadow successful operations; classifications must clear thresholds. */
   accepted: number;
   shadow: number;
+  shadowAgreed?: number;
+  shadowDisagreed?: number;
   escalatedToJev: number;
   escalatedToLlm: number;
   timeouts: number;

@@ -202,10 +202,10 @@ test("exporter refuses a hardcoded home path in executable source but sanitizes 
       os.homedir(),
       ".pi/agent/extensions/pi-lens/dist/index.js",
     );
-    fs.mkdirSync(path.join(f.source, "scripts/patches"), { recursive: true });
+    fs.mkdirSync(path.join(f.source, "scripts/compatibility/legacy-transforms"), { recursive: true });
     fs.mkdirSync(path.join(f.source, "skills/example"), { recursive: true });
     fs.writeFileSync(
-      path.join(f.source, "scripts/patches/example-patch.mjs"),
+      path.join(f.source, "scripts/compatibility/legacy-transforms/example-patch.mjs"),
       `const DIST = ${JSON.stringify(literal)};\n`,
     );
     fs.writeFileSync(
@@ -218,7 +218,7 @@ test("exporter refuses a hardcoded home path in executable source but sanitizes 
     assert.ok(!fs.existsSync(f.output));
 
     // Documentation keeps the privacy substitution instead of failing.
-    fs.rmSync(path.join(f.source, "scripts/patches/example-patch.mjs"));
+    fs.rmSync(path.join(f.source, "scripts/compatibility/legacy-transforms/example-patch.mjs"));
     const accepted = f.run();
     assert.equal(accepted.status, 0, accepted.stderr);
     const shipped = fs.readFileSync(
@@ -255,5 +255,33 @@ test("template dependency installs are omitted from both exported roots", () => 
     );
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("fork export selects the installation's owned source and rejects linked metadata", () => {
+  for (const linked of [false, true]) {
+    const f = fixture();
+    try {
+      fs.writeFileSync(path.join(f.templates, "package.json"), JSON.stringify({ workspaces: ["core/*"] }));
+      for (const [directory, body] of [[path.join(f.dir, "core"), "template baseline"], [path.join(f.source, "runtime/core"), "owned local fix"]]) {
+        fs.mkdirSync(path.join(directory, "coding-agent/src"), { recursive: true });
+        fs.writeFileSync(path.join(directory, "identity.json"), JSON.stringify({ releaseAuthority: "yunusemrejr/yunuspi" }));
+        fs.writeFileSync(path.join(directory, "coding-agent/package.json"), JSON.stringify({ name: "@yunuspi/coding-agent" }));
+        fs.writeFileSync(path.join(directory, "coding-agent/src/cli.js"), `// ${body}\n`);
+      }
+      if (linked) {
+        const manifest = path.join(f.source, "runtime/core/coding-agent/package.json");
+        fs.unlinkSync(manifest);
+        fs.symlinkSync(path.join(f.dir, "core/coding-agent/package.json"), manifest);
+      }
+      const result = f.run();
+      if (linked) {
+        assert.notEqual(result.status, 0);
+        assert.equal(fs.existsSync(f.output), false);
+      } else {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(fs.readFileSync(path.join(f.output, "core/coding-agent/src/cli.js"), "utf8"), "// owned local fix\n");
+      }
+    } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
   }
 });

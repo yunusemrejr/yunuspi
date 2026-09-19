@@ -1,6 +1,6 @@
 import { waitForSearchSlot, coolSearchProvider, retryAfterMs, readSearchBody } from "./search-transport.ts";
 import { readFileSync, statSync } from "node:fs";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { activityMonitor } from "./activity.ts";
 import type { SearchOptions, SearchResponse, SearchResult } from "./perplexity.ts";
 import { hasCredentialSource, redactCredential, resolveCredential } from "./credential-source.ts";

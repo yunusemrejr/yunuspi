@@ -1,7 +1,7 @@
 import { searchFree, searxngUrl } from "./free-search.ts";
 import { SearchCooldownError } from "./search-transport.ts";
 import { readFileSync, statSync } from "node:fs";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { CredentialResolutionError } from "./credential-source.ts";
 import {
 	isCurrentModelHostedSearchEligible,

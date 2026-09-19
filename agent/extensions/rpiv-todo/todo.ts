@@ -12,7 +12,7 @@
  * continue to import from `./todo.js`.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { PLAN_GUIDANCE, renderPlan } from "./state/plan.ts";
 import { loadConfig, validateGuidanceFields } from "./config.js";
 import { t } from "./state/i18n-bridge.js";

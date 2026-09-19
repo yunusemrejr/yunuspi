@@ -5,7 +5,7 @@ import * as path from "node:path";
 import {
 	getAgentDir,
 	type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 
 import {
 	canonicalMutationPath,

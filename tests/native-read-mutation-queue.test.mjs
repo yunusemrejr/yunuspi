@@ -7,12 +7,12 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 let agent=path.resolve(import.meta.dirname,'../agent');if(!fs.existsSync(agent))agent=path.resolve(import.meta.dirname,'../..');
-const {patchSource,isAppliedSource,targets}=await import(pathToFileURL(path.join(agent,'scripts/patches/native-read-mutation-queue.mjs')));
+const {patchSource,isAppliedSource}=await import(pathToFileURL(path.join(agent,'scripts/compatibility/legacy-transforms/native-read-mutation-queue.mjs')));
 function resolveCore(){
  if(process.env.PI_HARNESS_PATCH_TEST_CORE)return process.env.PI_HARNESS_PATCH_TEST_CORE;
- try{return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))),'..');}catch{}
- try{return path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@earendil-works/pi-coding-agent');}catch(error){
-  throw new Error('Pinned @earendil-works/pi-coding-agent is unavailable; run npm ci before this test', {cause:error});
+ try{return path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@yunuspi/coding-agent'))),'..');}catch{}
+ try{return path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@yunuspi/coding-agent');}catch(error){
+  throw new Error('Pinned @yunuspi/coding-agent is unavailable; run npm ci before this test', {cause:error});
  }
 }
 const core=resolveCore();
@@ -22,21 +22,16 @@ process.env.PI_HARNESS_PATCH_TEST_CORE ??= core;
 const tick=()=>new Promise(resolve=>setTimeout(resolve,15));
 const gate=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 test('read queue patch is applied to SDK and CLI owner, idempotent, and rejects partial patches',()=>{
- for(const target of targets()){
-  assert.equal(target.exists(),true,target.name);
-  if(!target.isApplied())target.apply();
-  assert.equal(target.isApplied(),true,target.name);
- }
  const text=fs.readFileSync(path.join(core,'dist/core/tools/read.js'),'utf8');assert.equal(patchSource(text),text);assert.ok(isAppliedSource(text));
  assert.throws(()=>patchSource(text.replace('PI_NATIVE_READ_QUEUE_END','DRIFT')),/partial\/drifted/);
  const unpatched=text.replace('import { withFileMutationQueue } from "./file-mutation-queue.js";\n','').replace('await withFileMutationQueue(absolutePath, async () => { /* PI_NATIVE_READ_MUTATION_QUEUE */','').replace('}); /* PI_NATIVE_READ_QUEUE_END */','');
  assert.equal(patchSource(unpatched),text);
 });
-for(const flavor of ['sdk','bundle'])test(`${flavor}: read waits through an edit truncation gap while other files stay concurrent`,async()=>{
+for(const flavor of ['sdk','package'])test(`${flavor}: read waits through an edit truncation gap while other files stay concurrent`,async()=>{
  const root=await fsp.mkdtemp(path.join(os.tmpdir(),'pi-native-read-queue-'));const file=path.join(root,'value.txt'),alias=path.join(root,'alias.txt'),other=path.join(root,'other.txt');
  const opened=gate(),release=gate();let running;
  try{
-  const api=flavor==='bundle'?await import(pathToFileURL(path.join(core,'dist/bundle/index.js'))):{...await import(pathToFileURL(path.join(core,'dist/core/tools/read.js'))),...await import(pathToFileURL(path.join(core,'dist/core/tools/edit.js')))};
+  const api=flavor==='package'?await import(pathToFileURL(path.join(core,'dist/index.js'))):{...await import(pathToFileURL(path.join(core,'dist/core/tools/read.js'))),...await import(pathToFileURL(path.join(core,'dist/core/tools/edit.js')))};
   await fsp.writeFile(file,'first\nold\nthird');await fsp.writeFile(other,'independent');await fsp.symlink(file,alias);
   const edit=api.createEditToolDefinition(root,{operations:{access:fsp.access,readFile:fsp.readFile,writeFile:async(p,content)=>{await fsp.writeFile(p,'');opened.resolve();await release.promise;await fsp.writeFile(p,content);}}});
   running=edit.execute('edit',{path:file,edits:[{oldText:'old',newText:'new'}]});await opened.promise;

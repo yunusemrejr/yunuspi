@@ -254,7 +254,7 @@ function manifestInventory(agentRoot, manifest) {
 			exists: fs.existsSync(path.join(agentRoot, key.replace(/^agent\//, ""))),
 		}))
 		.sort((a, b) => a.path.localeCompare(b.path));
-	const patches = walkFiles(path.join(agentRoot, "scripts", "patches"))
+	const patches = walkFiles(path.join(agentRoot, "scripts", "compatibility", "legacy-transforms"))
 		.map((file) => ({
 			path: canonicalAgentPath(agentRoot, file),
 			kind: path.extname(file).slice(1),
@@ -379,7 +379,7 @@ function capabilityMarkdown(
 		"- [MCP and wrapper service owners](#mcp-and-wrapper-service-owners)",
 		"- [Extension source inventory](#extension-source-inventory)",
 		"- [Skills](#skills)",
-		"- [Patch modules](#patch-modules)",
+		"- [Migration test fixtures](#migration-test-fixtures)",
 		"- [Public documentation](#public-documentation)",
 		"- [Retired source markers](#retired-source-markers)",
 		"",
@@ -563,9 +563,9 @@ function capabilityMarkdown(
 		"",
 	);
 	lines.push(
-		"## Patch modules",
+		"## Migration test fixtures",
 		"",
-		"These modules are present under `agent/scripts/patches` in the sanitized export. Their own source and updater checks define target compatibility and activation; this inventory does not infer runtime activation.",
+		"These historical transforms live under `agent/scripts/compatibility/legacy-transforms` for synthetic regression tests. The core build, installer, updater and verifier never apply them; runtime behavior is owned directly in source.",
 		"",
 		listItems(
 			inventory.patchModules,

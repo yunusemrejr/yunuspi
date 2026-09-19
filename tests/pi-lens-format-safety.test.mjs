@@ -11,7 +11,7 @@ const candidates = [
 	path.resolve(import.meta.dirname, "../../agent"),
 ];
 const agentRoot = candidates.find((dir) =>
-	fs.existsSync(path.join(dir, "scripts/patches/pi-lens-format-safety.mjs")),
+	fs.existsSync(path.join(dir, "scripts/compatibility/legacy-transforms/pi-lens-format-safety.mjs")),
 );
 
 test("pi-lens formatter safety patch is applied and idempotent", async (t) => {
@@ -19,7 +19,7 @@ test("pi-lens formatter safety patch is applied and idempotent", async (t) => {
 		t.skip("bundled pi-lens fork is not part of this standalone public export");
 		return;
 	}
-	const patchPath = path.join(agentRoot, "scripts/patches/pi-lens-format-safety.mjs");
+	const patchPath = path.join(agentRoot, "scripts/compatibility/legacy-transforms/pi-lens-format-safety.mjs");
 	const distPath = path.join(agentRoot, "extensions/pi-lens/dist/index.js");
 	if (!fs.existsSync(distPath)) {
 		t.skip("bundled pi-lens dist is unavailable on this host");

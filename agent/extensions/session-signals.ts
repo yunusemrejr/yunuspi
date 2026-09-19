@@ -10,8 +10,7 @@ import { collectSessionCost } from "./lib/session-cost.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
-import { askJev, jevMark } from "./lib/jev-client.ts";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,7 +21,7 @@ import {
   getAgentDir,
   type ExtensionAPI,
   type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import {
   PressureThresholds,
   pressureFacts,
@@ -1048,105 +1047,6 @@ export default function (pi: any) {
       );
     } catch {
       // Notification is best-effort.
-    }
-  });
-  pi.on("session_before_compact", async (event: any, ctx: any) => {
-    // Jev triage: score the to-summarize messages (preserve/keep/summarize)
-    // and record the plan for audit. The default summary path runs
-    // unchanged — except when its request could not fit the model window,
-    // where an extractive Jev-guided compaction rescues the session instead
-    // of dying on headroom errors. Same keep boundary as the default; only
-    // the summary text differs, and only when the default cannot exist.
-    try {
-      if (event?.signal?.aborted) return;
-      const prep = event?.preparation;
-      const messages = Array.isArray(prep?.messagesToSummarize) ? prep.messagesToSummarize : [];
-      if (messages.length < 10) return;
-      const textOf = (message: any): string => {
-        const role = typeof message?.role === "string" ? message.role : "?";
-        const content = message?.content;
-        const text = typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content.filter((part) => part?.type === "text" && typeof part?.text === "string").map((part) => part.text).join("\n")
-            : "";
-        return `[${role}] ${text}`.slice(0, 400);
-      };
-      const picked = [...messages.keys()].slice(0, 4).concat([...messages.keys()].slice(-28));
-      const selected = [...new Set(picked)].filter((index) => index >= 0 && index < messages.length).slice(0, 32);
-      const questions: Record<string, unknown> = {};
-      for (const index of selected)
-        questions[`msg_${index}`] = {
-          type: "choice",
-          instructions: `How must message ${index} survive compaction?`,
-          criteria: {
-            preserve: "User decisions, corrections, commitments, or facts the future session must not lose.",
-            keep: "Useful working context worth carrying forward verbatim.",
-            summarize: "Routine turns safe to compress into the summary.",
-          },
-        };
-      const judged = await askJev("compact",
-        { messages: selected.map((index) => ({ i: index, text: textOf(messages[index]) })) },
-        questions, { pi });
-      if (!judged.ok) return;
-      const verdictOf = (index: number): string => judged.answers[`msg_${index}`]?.choice ?? "summarize";
-      const counts = { preserve: 0, keep: 0, summarize: 0 };
-      for (const index of selected) {
-        const verdict = verdictOf(index);
-        if (verdict === "preserve" || verdict === "keep") counts[verdict]++;
-        else counts.summarize++;
-      }
-      const mark = jevMark("compact", `preserve ${counts.preserve} · keep ${counts.keep} · summarize ${counts.summarize}`, judged.usage);
-      try {
-        pi.appendEntry?.("jev-compact-plan-v1", {
-          at: new Date().toISOString(),
-          reason: event?.reason,
-          counts,
-          preserved: selected.filter((index) => verdictOf(index) === "preserve"),
-          mark,
-        });
-      } catch {
-        // The plan is audit-only.
-      }
-      // Emergency path only: default summary request cannot fit the window.
-      const window = ctx?.model?.contextWindow;
-      if (!Number.isFinite(window) || window <= 0) return;
-      let sourceChars = 0;
-      try {
-        sourceChars = JSON.stringify(messages).length;
-      } catch {
-        return;
-      }
-      const estimate = Math.ceil(sourceChars / 4) + 3000;
-      const fit = window - Math.ceil(window * 0.05) - 1024;
-      if (estimate <= fit || typeof prep?.firstKeptEntryId !== "string" || !prep.firstKeptEntryId) return;
-      if (typeof prep?.tokensBefore !== "number" || !Number.isFinite(prep.tokensBefore) || prep.tokensBefore < 0) return;
-      const budget = Math.max(4000, fit * 4);
-      const kept: string[] = [];
-      let dropped = 0;
-      for (const [index, message] of messages.entries()) {
-        const verdict = selected.includes(index) ? verdictOf(index) : "summarize";
-        if (verdict === "summarize") {
-          dropped++;
-          continue;
-        }
-        kept.push(textOf(message));
-      }
-      const previous = typeof prep?.previousSummary === "string" && prep.previousSummary.trim()
-        ? `Previous summary:\n${prep.previousSummary.slice(0, 4000)}\n\n`
-        : "";
-      let summary = `${mark}\n\n[Extractive emergency compaction — the default summary request (${estimate.toLocaleString()} tokens) could not fit this ${window.toLocaleString()}-token window. ${kept.length} message(s) preserved verbatim, ${dropped} dropped. Switch to a larger-context model and /compact there for a full-fidelity summary.]\n\n${previous}${kept.join("\n\n---\n\n")}`;
-      if (summary.length > budget) summary = `${summary.slice(0, budget)}\n[...extractive summary capped...]`;
-      return {
-        compaction: {
-          summary,
-          firstKeptEntryId: prep.firstKeptEntryId,
-          tokensBefore: prep.tokensBefore,
-          details: { source: "jev-extractive", kept: kept.length, dropped, mark },
-        },
-      };
-    } catch {
-      // Triage never blocks the default compaction.
     }
   });
   pi.on("before_provider_request", (e: any, ctx: any) => {

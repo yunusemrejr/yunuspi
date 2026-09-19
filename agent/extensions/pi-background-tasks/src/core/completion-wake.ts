@@ -2,7 +2,7 @@ import { serviceNotificationOnly } from "./service-policy.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 /** Completion observations are durable independently of permission to start inference. */
 export function pausesCompletionWake(message: any): boolean {
   // agent_settled occurs after ordinary retries. Any terminal failure/abort must

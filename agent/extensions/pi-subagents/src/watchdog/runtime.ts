@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { computeWatchdogRepoChangeSignature, eventIndicatesRepoEdit, type WatchdogRepoChangeSignature } from "./change-signature.ts";
 import { WatchdogEmissionGuard } from "./emission-guard.ts";
 import {

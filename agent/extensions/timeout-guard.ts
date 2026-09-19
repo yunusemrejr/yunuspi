@@ -16,7 +16,7 @@
  * Installed at ~/.pi/agent/extensions/ — auto-discovered by the harness.
  */
 
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@yunuspi/coding-agent";
 
 /** Default timeout applied when the model omits `timeout` on a bash call. */
 const DEFAULT_BASH_TIMEOUT_SECONDS = 120;

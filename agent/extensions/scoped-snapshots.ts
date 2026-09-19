@@ -1,8 +1,8 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@yunuspi/ai";
 import path from "node:path";
 import os from "node:os";
 import { Type } from "typebox";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue } from "@yunuspi/coding-agent";
 import { checkMutationPolicies } from "./lib/self-mutation-guard.ts";
 import { ScopedSnapshots } from "./lib/scoped-snapshots.ts";
 export default function (pi: any) {

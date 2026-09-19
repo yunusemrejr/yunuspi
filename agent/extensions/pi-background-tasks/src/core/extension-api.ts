@@ -1,4 +1,4 @@
-import type { EventBus } from "@earendil-works/pi-coding-agent";
+import type { EventBus } from "@yunuspi/coding-agent";
 import {
   DEFAULT_LOG_BYTES,
   normalizeMaxBytes,

@@ -1798,7 +1798,7 @@ async function forwardToBuiltInAnthropic(
         options?: PiSimpleStreamOptions,
       ) => AssistantMessageEventStreamLike;
     }>;
-    const mod = await dynamicImport("@earendil-works/pi-ai/anthropic");
+    const mod = await dynamicImport("@yunuspi/ai/anthropic");
     const delegated = mod.streamSimpleAnthropic(model, context, options);
     for await (const event of delegated) stream.push(event);
     stream.end(await delegated.result());

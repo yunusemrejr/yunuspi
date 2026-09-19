@@ -42,15 +42,16 @@ test("numeric listings are eligible (line-calibrated retention)", () => {
   assert.equal(smol.safeSmolOutput("bash", raw, true, undefined), false);
 });
 
-test("retention compresses boilerplate and abstains on dense matches", () => {
+test("retention deduplicates exact boilerplate and abstains on distinct protected facts", () => {
   const many = (n, reason) => Array.from({ length: n }, (_, i) => ({ id: i + 1, reason }));
   assert.deepEqual(smol.compressRequired([{ id: 1, reason: "boundary" }, { id: 9, reason: "boundary" }]), [1, 9]);
   const reps = smol.compressRequired([
     { id: 1, reason: "boundary" },
-    ...many(20, "status").map((e, i) => ({ id: i + 2, reason: "status" })),
+    ...many(20, "status").map((e, i) => ({ id: i + 2, reason: "status", text: "status: completed" })),
     { id: 99, reason: "boundary" },
   ]);
-  assert.deepEqual(reps, [1, 2, 3, 20, 21, 99]);
+  assert.deepEqual(reps, [1, 2, 99]);
+  assert.equal(smol.compressRequired(many(20, "status")), undefined);
   assert.equal(smol.compressRequired(many(11, "task")), undefined);
   assert.ok(smol.compressRequired([...many(10, "task"), { id: 50, reason: "boundary" }]).length <= 16);
 });
@@ -97,7 +98,7 @@ test("windowed offers cover oversized output with original line numbers", () => 
 
 test("windowed take remaps to original lines and revalidates", async () => {
   const rows = ["first line of the build output"];
-  for (let i = 0; i < 300; i++) rows.push(`build step ${String(i).padStart(3, "0")} completed ok ${".".repeat(20)}`);
+  for (let i = 0; i < 300; i++) rows.push(`Background compilation activity ${".".repeat(20)}`);
   rows.push("last line of the build output");
   const big = rows.join("\n");
   assert.ok(big.length > 4096 && big.length < 32768);

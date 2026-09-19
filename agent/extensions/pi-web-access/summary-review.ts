@@ -1,6 +1,6 @@
-import { clampThinkingLevel, type ModelThinkingLevel, type ThinkingLevel } from "@earendil-works/pi-ai";
-import { complete, completeSimple, type Api, type Message, type Model } from "@earendil-works/pi-ai/compat";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel, type ModelThinkingLevel, type ThinkingLevel } from "@yunuspi/ai";
+import { complete, completeSimple, type Api, type Message, type Model } from "@yunuspi/ai/compat";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { findModelWithProviderRouting, loadEnabledModelPatterns, modelMatchesEnabledPatterns, splitThinkingSuffix, type SummaryThinkingLevel } from "./summary-model-scope.ts";
 import type { QueryResultData } from "./storage.ts";
 

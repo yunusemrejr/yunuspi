@@ -93,10 +93,10 @@ test("needle rank serves every query with calibrated acceptance (asset-gated)", 
   }
 });
 
-test("system escalation rescues every needle miss (asset-gated)", { skip: !HAS_NEEDLE && "needle assets not installed" }, async () => {
-  // The architectural guarantee: needle proposes, and uncertainty or
-  // disagreement escalates to Jev instead of misapplying. With a correct
-  // judge, the blended system must reach 6/6 even where needle alone misses.
+test("escalation plumbing accepts a mocked correct judge (asset-gated)", { skip: !HAS_NEEDLE && "needle assets not installed" }, async () => {
+  // Contract test only: the judge is an oracle returning fixture.expected.
+  // This checks escalation/application plumbing, not actual Jev quality,
+  // measured model-call avoidance or real blended accuracy.
   const retrievalMod = await load("extensions/lib/micro-intelligence/retrieval.ts");
   const handle = needleRuntime.createNeedleRuntime({});
   try {
@@ -122,7 +122,7 @@ test("system escalation rescues every needle miss (asset-gated)", { skip: !HAS_N
       if (outcome.applied === "jev") appliedJev++;
       assert.equal(outcome.ordered[0].id, fixture.expected, `system top-1 for "${fixture.query}" (applied ${outcome.applied})`);
     }
-    console.log(`bench system-blend: applied needle=${appliedNeedle} jev=${appliedJev} lexical=0, top-1 6/6`);
+    console.log(`bench mocked-judge-plumbing: applied needle=${appliedNeedle} jev=${appliedJev} lexical=0, top-1 6/6`);
   } finally {
     await handle.shutdown();
   }

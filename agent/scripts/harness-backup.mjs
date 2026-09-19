@@ -36,6 +36,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveOwnedCore } from "./lib/owned-core.mjs";
 
 process.umask(0o077); // staging + outputs stay user-only
 
@@ -79,66 +80,11 @@ function resolveDesktop() {
 
 // ── pi / node / scanner paths ─────────────────────────────────────────
 function piVersion() {
-  try {
-    return execFileSync("pi", ["--version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    try {
-      const root = execFileSync("npm", ["root", "-g"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      const pkg = JSON.parse(
-        fs.readFileSync(
-          path.join(root, "@earendil-works", "pi-coding-agent", "package.json"),
-          "utf8",
-        ),
-      );
-      return String(pkg.version ?? "unknown");
-    } catch {
-      return "unknown";
-    }
-  }
+  try { return JSON.parse(fs.readFileSync(path.join(resolveOwnedCore(), "package.json"), "utf8")).version; }
+  catch { return "unknown"; }
 }
-
 function piDistDir() {
-  const candidates = [];
-  // Candidate 1: realpath of `which pi`, walked up to the dir that owns
-  // package.json. WHY walk-up, not the old fixed triple-dirname: it only
-  // worked when the bin symlink resolved at exactly dist/bundle/cli.js
-  // depth; any upstream layout change silently returned a wrong root.
-  try {
-    let dir = path.dirname(
-      fs.realpathSync(
-        execFileSync("which", ["pi"], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim(),
-      ),
-    );
-    while (dir && !fs.existsSync(path.join(dir, "package.json"))) {
-      const parent = path.dirname(dir);
-      dir = parent === dir ? null : parent; // null = filesystem root reached
-    }
-    if (dir) candidates.push(path.join(dir, "dist"));
-  } catch {
-    /* fall through */
-  }
-  // Candidate 2: global npm root (authoritative layout).
-  try {
-    const root = execFileSync("npm", ["root", "-g"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    candidates.push(
-      path.join(root, "@earendil-works", "pi-coding-agent", "dist"),
-    );
-  } catch {
-    /* fall through */
-  }
-  return candidates.find((p) => fs.existsSync(p)) ?? null;
+  try { return path.dirname(resolveOwnedCore()); } catch { return null; }
 }
 
 // ── credential env-var discovery (from real config, not a provider list) ──
@@ -276,7 +222,7 @@ function buildManifest({
       ".pi/agent/artifacts/ (subagent artifacts)",
       ".pi/agent/missions/ (runtime mission state)",
       ".pi/agent/scripts/.pi/ (background-task outputs)",
-      ".pi/agent/npm/node_modules/ (reinstall via npm ci from lockfile; extensions/node_modules symlink excluded)",
+      ".pi/agent/runtime/node_modules/ (reinstall via npm ci --ignore-scripts; dependency symlinks excluded)",
       // WHY: telemetry.json dropped from this list 2026-08-31 — orphan of the
       // deleted pi-context-router (2026-08-12 refactor); file deleted, nothing
       // writes or reads it anymore (see FORBIDDEN_FILE note below).
@@ -467,7 +413,8 @@ created ${new Date().toISOString()}. Pi core ${piVer}, node ${nodeVer}.
 - .pi/agent/: settings.json, models.json (provider defs incl. literal
   apiKey values), models-store.json, auth.json, extensions/ (all .ts +
   forks),
-  scripts/ (verify-harness.mjs, auto-update.sh, patches/, bench/),
+  scripts/ (verification, maintenance and compatibility checks),
+  runtime/ (owned core source, build metadata and workspace lockfile), bin/ (launchers),
   npm/package.json + package-lock.json (exact runtime dependency pins),
   memory/, backups/ (retired extension/script source), maintenance docs,
   and all other live agent configuration/resources (agents, prompts, themes).
@@ -481,12 +428,12 @@ Runtime/regenerable state: .pi/agent sessions/, logs/, artifacts/,
 missions/, scripts/.pi/, run-history.jsonl,
 and the ~/.pi top-level runtime dirs (sessions/,
 tasks/, inference-slots/, sibling-bridge/, web-search-cache/, backups/ older
-artifacts). npm/node_modules is reinstalled
-via npm ci (extensions/node_modules symlink is recreated in step 6), and
+artifacts). runtime/node_modules is reinstalled
+via npm ci --ignore-scripts (dependency symlinks are recreated in step 6), and
 *.bak* stale snapshots are dropped. (context-composition.json and
 telemetry.json are orphans of the deleted pi-context-router — removed
-2026-08-31, no writer/reader since 2026-08-12.) Pi core itself is an
-upstream npm package and is reinstalled by version (see manifest piVersion).
+2026-08-31, no writer/reader since 2026-08-12.) YunusPi core source is included in runtime/core and rebuilt locally.
+No upstream Pi package or release service is used for restoration.
 
 ## Safe restore procedure
 1. Stop pi sessions that might write ~/.pi/agent.
@@ -503,21 +450,22 @@ upstream npm package and is reinstalled by version (see manifest piVersion).
    cp -a "$restore_dir/.pi" ~/
    cp -a "$restore_dir/.config" ~/
    cp -a "$restore_dir/skills" ~/
-6. Install the recorded core FIRST, then runtime deps from the lockfile:
-   npm i -g --ignore-scripts @earendil-works/pi-coding-agent@${piVer}
-   npm --prefix ~/.pi/agent/npm ci
-   # Keep the saved allowScripts policy; do not blanket-approve new scripts.
-   # forks resolve npm deps through this symlink (excluded from the archive):
-   ln -sfn "$HOME/.pi/agent/npm/node_modules" ~/.pi/agent/extensions/node_modules
+6. Rebuild the archived owned core and locked third-party dependencies:
+   cd ~/.pi/agent/runtime
+   npm ci --ignore-scripts --no-audit --no-fund
+   npm run build:core
+   # Add --offline to npm ci when the dependency cache is complete.
+   ln -sfn ../runtime/node_modules ~/.pi/agent/extensions/node_modules
+   ln -sfn ../runtime/node_modules ~/.pi/agent/npm/node_modules
+   export PATH="$HOME/.pi/agent/bin:$PATH"
 7. Restore credentials (values are in META/credentials.env):
    set -a; source "$restore_dir/META/credentials.env"; set +a
    — merge the exports into ~/.bashrc (or your profile) to persist.
    /login-style auth lives in .pi/agent/auth.json, already restored.
-8. Re-enable the update timer:
-   systemctl --user daemon-reload
-   systemctl --user enable --now pi-auto-update.timer pi-harness-repair.timer
-9. Reapply node_modules patches + verify (also regenerates/enables the repair watch for this install):
-   node ~/.pi/agent/scripts/verify-harness.mjs --fix
+8. Optional old maintenance timers can be kept disabled. auto-update.sh now
+   verifies local files only; it never updates packages or checks upstream Pi.
+9. Verify the restored owned runtime:
+   node ~/.pi/agent/scripts/verify-harness.mjs
 10. Start a FRESH Pi session after verification; running sessions retain old JS.
 11. Portability: this is a private recovery snapshot, not the public installer.
     Linux systemd units are optional; do not enable them on macOS/Windows.
@@ -582,8 +530,8 @@ function verifyArchive(zipPath, expected = []) {
   // invariant that matters.
   if (!hasPrefix(".pi/agent/extensions/"))
     report.required.push("extensions/ dir");
-  if (!hasPrefix(".pi/agent/scripts/patches/"))
-    report.required.push("scripts/patches/ dir");
+  if (!hasPrefix(".pi/agent/runtime/core/"))
+    report.required.push("runtime/core/ owned source dir");
   // Optional credentials, Linux services, retired sources and external skills
   // are verified through the exact staged inventory when present.
   const FORBIDDEN_PREFIXES = [

@@ -1,5 +1,5 @@
-import { DynamicBorder, keyHint, rawKeyHint, type Theme } from "@earendil-works/pi-coding-agent";
-import { Container, fuzzyFilter, Input, type KeybindingsManager, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
+import { DynamicBorder, keyHint, rawKeyHint, type Theme } from "@yunuspi/coding-agent";
+import { Container, fuzzyFilter, Input, type KeybindingsManager, Spacer, Text, type TUI } from "@yunuspi/tui";
 
 /** A single selectable row. `value` is returned on confirm; `label` is the primary text. */
 export interface SelectorItem {

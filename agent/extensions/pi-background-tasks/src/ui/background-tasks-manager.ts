@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { formatSize } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@yunuspi/coding-agent";
+import { formatSize } from "@yunuspi/coding-agent";
 import {
   matchesKey,
   truncateToWidth,
   visibleWidth,
   type Component,
   type TUI,
-} from "@earendil-works/pi-tui";
+} from "@yunuspi/tui";
 import {
   boundedRead,
   compactWhitespace,

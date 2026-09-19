@@ -1,4 +1,4 @@
-import type { BeforeProviderRequestEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { BeforeProviderRequestEvent, ExtensionAPI } from "@yunuspi/coding-agent";
 
 export function rewriteFastModeProviderRequest(event: BeforeProviderRequestEvent): unknown {
 	if (!event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) return event.payload;

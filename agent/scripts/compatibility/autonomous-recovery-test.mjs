@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -115,6 +116,7 @@ check(
  "zero caps retain provider restrictions",
  cap.provider.only[0] === "safe" && cap.provider.max_price.prompt === 0,
 );
+const fixtureDisposals = [];
 function fixture({
  models = [free("free/a"), free("free/b")],
  launchResult,
@@ -186,6 +188,7 @@ function fixture({
   for (const fn of handlers.get(n) || []) result.push(await fn(e, ctx));
   return result;
  };
+ fixtureDisposals.push(() => emit('session_shutdown'));
  return { ctx, emit, notices, statuses, calls, selected, primary, entries };
 }
 check("routine requests avoid automatic delegation", ['Fix this typo','What is a cache?','Use a swarm to review this project thoroughly','Do not delegate; investigate the concurrency failure deeply'].every(p=>assistanceWidth(p)===0));
@@ -441,6 +444,7 @@ await rejected.emit("pi_provider_recovery", rejectedEvent);
 check("deterministic rejection never reroutes", rejectedEvent.decision === "pause" && rejected.selected.length === 0);
 await f.emit("message_end", {message:{role:"assistant",stopReason:"stop",content:[{type:"text",text:"Recovered"}]}});
 check("successful response clears stale recovery badge", f.statuses.at(-1)?.key === "autonomous-recovery" && f.statuses.at(-1)?.value === undefined);
+for (const dispose of fixtureDisposals) await dispose();
 // Real Pi + native child executor. A preload redirects only the official mock route;
 // every other non-loopback fetch is rejected. No external inference or catalog probes.
 const source = path.resolve(import.meta.dirname, "../../extensions");
@@ -453,7 +457,7 @@ fs.cpSync(
 fs.mkdirSync(path.join(agent, "extensions/lib"), {recursive:true});
 fs.cpSync(path.join(source, "lib"), path.join(agent, "extensions/lib"), {recursive:true});
 fs.symlinkSync(
- path.join(source, "node_modules"),
+ path.resolve(resolveOwnedCore(), "../../node_modules"),
  path.join(agent, "extensions/node_modules"),
  "dir",
 );
@@ -569,8 +573,8 @@ Object.defineProperty(globalThis, "fetch", { configurable: false, get: () => gua
 // override so the guard loads before SDK modules capture fetch; extension-load
 // shims are too late and can accidentally contact the official endpoint.
 const wrapper = path.join(root, "offline-pi.mjs");
-const packageRoot=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@earendil-works/pi-coding-agent');
-const piCli=path.join(packageRoot,JSON.parse(fs.readFileSync(path.join(packageRoot,'package.json'),'utf8')).bin.pi);
+const packageRoot=resolveOwnedCore();
+const piCli=path.join(packageRoot,JSON.parse(fs.readFileSync(path.join(packageRoot,'package.json'),'utf8')).bin.yunuspi);
 const coreDist=path.join(packageRoot,'dist');
 fs.writeFileSync(
  wrapper,
@@ -579,7 +583,7 @@ fs.writeFileSync(
 );
 // Reproduce Pi's dispatcher reinstall BEFORE launching any inference. The guard
 // must survive undici.install(), and its denied fetch must never open a socket.
-execFileSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify("file://" + preload)});const {configureHttpDispatcher}=await import(${JSON.stringify("file://" + path.join(coreDist, "core/http-dispatcher.js"))});configureHttpDispatcher();for(const request of [()=>fetch('https://offline-guard.invalid/'),()=>import(${JSON.stringify("file://" + path.join(coreDist, "../node_modules/undici/index.js"))}).then(m=>m.request('https://offline-guard.invalid/')),()=>import('node:net').then(m=>m.connect({host:'offline-guard.invalid',port:443}))]){try{await request();process.exit(2)}catch(e){if(!String(e).includes('External network forbidden'))throw e}}`], { env: process.env, stdio: "pipe", timeout: 10_000 });
+execFileSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify("file://" + preload)});const {configureHttpDispatcher}=await import(${JSON.stringify("file://" + path.join(coreDist, "core/http-dispatcher.js"))});configureHttpDispatcher();for(const request of [()=>fetch('https://offline-guard.invalid/'),()=>import(${JSON.stringify("file://" + path.join(coreDist, "../../../node_modules/undici/index.js"))}).then(m=>m.request('https://offline-guard.invalid/')),()=>import('node:net').then(m=>m.connect({host:'offline-guard.invalid',port:443}))]){try{await request();process.exit(2)}catch(e){if(!String(e).includes('External network forbidden'))throw e}}`], { env: process.env, stdio: "pipe", timeout: 10_000 });
 assert.match(fs.readFileSync(deniedFetches, "utf8"), /offline-guard\.invalid/);
 fs.rmSync(deniedFetches);
 fs.rmSync(guardedProcesses);

@@ -1,9 +1,9 @@
 import { registerResearchJobs } from "./research-jobs.ts";
 import { searxngUrl } from "./free-search.ts";
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Box, Text, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
+import { Box, Text, truncateToWidth, type KeyId } from "@yunuspi/tui";
 import { Type } from "typebox";
-import { StringEnum, type ImageContent, type TextContent } from "@earendil-works/pi-ai/compat";
+import { StringEnum, type ImageContent, type TextContent } from "@yunuspi/ai/compat";
 import type { ExtractedContent, ExtractOptions } from "./extract.ts";
 import { normalizeFetchContentParams } from "./fetch-params.ts";
 import { registerWebProbe } from "./web-probe.ts";

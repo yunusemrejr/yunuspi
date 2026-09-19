@@ -1,7 +1,7 @@
-import { Agent, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createReadOnlyTools, convertToLlm, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
-import type { Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import { Agent, type AgentTool, type StreamFn, type ThinkingLevel } from "@yunuspi/agent-core";
+import { createReadOnlyTools, convertToLlm, type ExtensionContext } from "@yunuspi/coding-agent";
+import { streamSimple } from "@yunuspi/ai/compat";
+import type { Model, ProviderHeaders } from "@yunuspi/ai";
 import { Type, type Static } from "typebox";
 import { resolveModelCandidate } from "../runs/shared/model-fallback.ts";
 import { agentStreamOptions } from "../shared/agent-stream-options.ts";

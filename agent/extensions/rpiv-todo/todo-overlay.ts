@@ -15,8 +15,8 @@
 import type {
 	ExtensionUIContext,
 	Theme,
-} from "@earendil-works/pi-coding-agent";
-import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+} from "@yunuspi/coding-agent";
+import { type TUI, truncateToWidth } from "@yunuspi/tui";
 import {
 	COLLAPSE_KEY_OFF,
 	getMaxWidgetLines,

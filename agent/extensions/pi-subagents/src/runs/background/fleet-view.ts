@@ -1,7 +1,7 @@
 import { formatProgressEvidence, type ChildProgressEvidence } from "../../shared/progress-evidence.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 import { safeTerminalText } from "../../shared/display-text.ts";
 import { formatDuration, formatModelThinking, formatTokens, shortenPath } from "../../shared/formatters.ts";
 import { formatActivityLabel } from "../../shared/status-format.ts";

@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -291,6 +293,7 @@ test("shadow mode flags results for agreement measurement", async () => {
   const rank = await handle.rank({ query: "screenshot now", candidates: [{ id: "a", text: "take one" }, { id: "b", text: "bake two" }] });
   assert.equal(rank.ok && rank.shadow, true);
   assert.equal(handle.stats().shadow, 1);
+  assert.equal(handle.stats().accepted, 0);
   await handle.shutdown();
 });
 
@@ -303,7 +306,83 @@ test("escalation and agreement counters record", async () => {
   const stats = handle.stats();
   assert.equal(stats.escalatedToJev, 1);
   assert.equal(stats.escalatedToLlm, 1);
+  assert.equal(stats.shadowAgreed, 1);
+  assert.equal(stats.shadowDisagreed, 1);
   await handle.shutdown();
+});
+
+test("failed initialization settles queued callers and consumes a bounded restart budget", async () => {
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    if (message.op === "init") reply({ id: message.id, ok: false, error: "invalid engine", ms: 1 });
+  }});
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), maxRestarts: 1 }, workerFactory: factory, assetDir: fixtureAssets() });
+  try {
+    const answer = await Promise.race([handle.embed(["hello world"]), new Promise((resolve) => setTimeout(() => resolve({ reason: "hung" }), 100))]);
+    assert.equal(answer.reason, "unavailable");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(handle.health().state, "cooling");
+    assert.equal(factory.workers.length, 2);
+  } finally { await handle.shutdown(); }
+});
+
+test("serial worker receives only one inference at a time", async () => {
+  const releases = [];
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    if (message.op === "init") return reply({ id: message.id, ok: true, result: { dim: 2 }, ms: 1 });
+    releases.push(() => reply({ id: message.id, ok: true, result: { dim: 2, vectors: [[1, 2]] }, ms: 1 }));
+  }});
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  try {
+    handle.warmup();
+    await settled(handle);
+    const first = handle.embed(["alpha beta"]);
+    const second = handle.embed(["gamma delta"]);
+    assert.equal(releases.length, 1);
+    releases.shift()();
+    assert.equal((await first).ok, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(releases.length, 1);
+    releases.shift()();
+    assert.equal((await second).ok, true);
+  } finally { await handle.shutdown(); }
+});
+
+test("shutdown is terminal and cached vectors are caller-owned", async () => {
+  const factory = canned(4);
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const first = await handle.embed(["alpha beta"]);
+  first.value.vectors[0][0] = 123;
+  const second = await handle.embed(["alpha beta"]);
+  assert.notEqual(second.value.vectors[0][0], 123);
+  second.value.vectors[0][0] = 456;
+  const third = await handle.embed(["alpha beta"]);
+  assert.notEqual(third.value.vectors[0][0], 456);
+  await handle.shutdown();
+  assert.equal((await handle.embed(["alpha beta"])).ok, false);
+  assert.equal((await handle.embed(["new input"])).ok, false);
+  handle.warmup();
+  assert.equal(factory.workers.length, 1);
+});
+
+test("foreign ids, nonfinite vectors and forged acceptance never leave runtime", async () => {
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    const result = message.op === "init" ? { dim: 2 }
+      : message.op === "embed" ? { dim: 2, vectors: [[NaN, 0]] }
+      : message.op === "rank" ? { ranked: [{ id: "outside-authorized-set", score: 0.99 }], margin: 0.5 }
+      : { label: "safe", score: 0.01, margin: 0, accepted: true };
+    reply({ id: message.id, ok: true, result, ms: 1 });
+  }});
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  try {
+    assert.equal((await handle.embed(["hello world"])).ok, false);
+    const candidates = [{ id: "safe", text: "safe action" }, { id: "unsafe", text: "unsafe action" }];
+    assert.equal((await handle.rank({ query: "pick a tool", candidates })).ok, false);
+    const classification = await handle.classify({ text: "pick a tool", labels: candidates });
+    assert.equal(classification.ok, true);
+    assert.equal(classification.value.accepted, false);
+    assert.equal(handle.stats().accepted, 0);
+    assert.equal((await handle.rank({ query: "pick a tool", candidates: [candidates[0], candidates[0]] })).ok, false);
+  } finally { await handle.shutdown(); }
 });
 
 // Real WASM inference: runs only when installed assets verify. Live
@@ -315,7 +394,7 @@ const hasLiveAssets = liveCheck.ok === true;
 test("live needle wasm embeds, ranks and classifies (asset-gated)", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
   const handle = runtime.createNeedleRuntime({});
   handle.warmup();
-  assert.equal(await settled(handle), "healthy", 120000);
+  assert.equal(await settled(handle, "healthy", 120000), "healthy");
   assert.ok(handle.health().dim > 0);
   const rank = await handle.rank({
     query: "take a screenshot of the browser page",
@@ -337,4 +416,120 @@ test("live needle wasm embeds, ranks and classifies (asset-gated)", { skip: !has
   });
   assert.equal(classify.ok && classify.value.label, "implementation");
   await handle.shutdown();
+});
+
+
+test("stale queued work expires without spending the worker restart budget", async () => {
+  const factory = fakeWorkerFactory();
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), maxOpTimeoutMs: 30 }, workerFactory: factory, assetDir: fixtureAssets() });
+  try {
+    const result = await handle.embed(["wait for startup"]);
+    assert.equal(result.reason, "busy");
+    assert.equal(handle.health().workerRestarts, 0);
+    assert.equal(handle.health().queued, 1); // init only
+  } finally { await handle.shutdown(); }
+});
+
+test("real worker refuses corrupt executable assets before loading them", async () => {
+  const dir = fixtureAssets();
+  fs.writeFileSync(path.join(dir, "needle.js"), 'throw new Error("UNVERIFIED_LOADER_EXECUTED");' + ' '.repeat(2048));
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), maxRestarts: 0 }, assetDir: dir });
+  try {
+    const result = await handle.embed(["hello world"]);
+    assert.equal(result.ok, false);
+    assert.match(handle.health().lastError, /asset integrity failed/);
+    assert.doesNotMatch(handle.health().lastError, /UNVERIFIED_LOADER_EXECUTED/);
+    assert.equal(handle.health().state, "cooling");
+  } finally { await handle.shutdown(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("live worker honors disabled cache and topK-independent margins", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
+  const dir = liveAssets.needleAssetDir();
+  const worker = new Worker(new URL(pathToFileURL(path.join(agent, "extensions/lib/needle-worker.mjs"))), { workerData: { cacheMax: 0 }, execArgv: [] });
+  let id = 0;
+  const call = (request) => new Promise((resolve, reject) => {
+    const requestId = ++id;
+    const timer = setTimeout(() => reject(new Error("worker deadline")), 30000);
+    const receive = (response) => {
+      if (response.id !== requestId) return;
+      clearTimeout(timer);
+      worker.off("message", receive);
+      resolve(response);
+    };
+    worker.on("message", receive);
+    worker.postMessage({ ...request, id: requestId });
+  });
+  try {
+    const initialized = await call({ op: "init", assets: { dir } });
+    assert.equal(initialized.ok, true);
+    const request = { op: "rank", query: "browser screenshot", candidates: [{ id: "screen", text: "browser screenshot" }, { id: "bread", text: "bake fresh bread" }] };
+    const one = await call({ ...request, topK: 1 });
+    const two = await call({ ...request, topK: 2 });
+    assert.equal(one.ok, true);
+    assert.ok(one.result.margin > 0);
+    assert.equal(one.result.margin, two.result.margin);
+    const health = await call({ op: "ping" });
+    assert.equal(health.result.cached, 0);
+    assert.equal(health.result.cacheHits, 0);
+  } finally { await worker.terminate(); }
+});
+
+test("live mixed workload keeps the event loop responsive and reuses embeddings", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
+  const handle = runtime.createNeedleRuntime({});
+  const rssBefore = process.memoryUsage().rss;
+  let ticks = 0;
+  const pulse = setInterval(() => ticks++, 10);
+  const candidates = [
+    { id: "read", text: "read a file and inspect its contents" },
+    { id: "edit", text: "edit a file to fix a software defect" },
+    { id: "test", text: "run tests and inspect failures" },
+    { id: "browser", text: "capture a browser screenshot" },
+  ];
+  try {
+    const coldStart = performance.now();
+    handle.warmup();
+    assert.equal(await settled(handle, "healthy", 30000), "healthy");
+    const coldMs = performance.now() - coldStart;
+    const start = performance.now();
+    const results = await Promise.all(Array.from({ length: 12 }, (_, i) => i % 3 === 0
+      ? handle.embed([candidates[i % 4].text])
+      : i % 3 === 1
+        ? handle.rank({ query: "capture a browser screenshot", candidates, topK: 2 })
+        : handle.classify({ text: "edit a file to fix a software defect", labels: candidates })));
+    assert.equal(results.filter((result) => result.ok).length, 12);
+    assert.ok(ticks > 0, "WASM must not block the main event loop");
+    const cached = await handle.embed([candidates[0].text]);
+    assert.equal(cached.ok && cached.cached, true);
+    const stats = handle.stats();
+    assert.equal(stats.workerRestarts, 0);
+    assert.equal(stats.timeouts, 0);
+    console.log(`bench needle-mixed: cold=${coldMs.toFixed(0)}ms, workload=${(performance.now() - start).toFixed(0)}ms, served=12/12, execution-p50=${stats.p50}ms, execution-p95=${stats.p95}ms, main-loop-ticks=${ticks}, RSS-delta=${((process.memoryUsage().rss - rssBefore) / 1048576).toFixed(1)}MiB, cached=${stats.cacheHits}`);
+  } finally { clearInterval(pulse); await handle.shutdown(); }
+});
+
+
+test("live singleton does not retain a host process after its operation settles", { skip: !hasLiveAssets && "needle assets not installed" }, () => {
+  const url = pathToFileURL(path.join(agent, "extensions/lib/needle-runtime.ts")).href;
+  const script = `import { needleEmbed } from ${JSON.stringify(url)}; const result = await needleEmbed(["process lifecycle check"]); console.log(JSON.stringify({ok: result.ok})); if (!result.ok) process.exitCode = 1;`;
+  const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 10000 });
+  assert.equal(child.error, undefined, `child must terminate without explicit shutdown: ${child.error}`);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout.trim()).ok, true);
+});
+
+test("live grammar extraction gets a decode budget and returns advisory fields", { skip: !hasLiveAssets && "needle assets not installed" }, async () => {
+  const handle = runtime.createNeedleRuntime();
+  try {
+    handle.warmup();
+    assert.equal(await settled(handle, "healthy", 30000), "healthy");
+    const result = await handle.extract({
+      text: "The delivery address is 42 Pine Street in Boston.", name: "address",
+      schema: { type: "object", properties: { street: { type: "string" }, city: { type: "string" } }, required: ["street", "city"] },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(typeof result.value.value.street, "string");
+    assert.equal(result.value.value.city, "Boston");
+    assert.equal(handle.stats().timeouts, 0);
+    console.log(`bench needle-extraction: ${result.ms}ms, city=${result.value.value.city}, street=${result.value.value.street}, confidence=${result.value.confidence}; fields remain advisory`);
+  } finally { await handle.shutdown(); }
 });

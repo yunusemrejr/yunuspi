@@ -1,4 +1,4 @@
-import { Container, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, type Component } from "@yunuspi/tui";
 import type { WatchdogWarningDetails } from "./types.ts";
 
 type WatchdogTheme = {

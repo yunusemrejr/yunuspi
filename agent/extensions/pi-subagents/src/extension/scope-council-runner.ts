@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
@@ -9,6 +9,9 @@ import { formatModelThinking } from "../shared/formatters.ts";
 import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
+import { needleRank } from "../../../lib/needle-runtime.ts";
+import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
+import { COUNCIL_PERSPECTIVES, selectPerspectives, type RankFn } from "../../../lib/micro-intelligence/review.ts";
 
 /** The automatic scope council is a service used by the parent lifecycle.
  * It deliberately has no registered user-facing tool: an agent cannot opt into
@@ -114,6 +117,8 @@ export interface ScopeCouncilRunnerDeps {
 	 * generation must make the council advisory result disappear. */
 	isCurrent?: (ctx: ExtensionContext) => boolean;
 	now?: () => number;
+	/** Local advisory ranking only; null disables it for a host without Needle. */
+	rankPerspectives?: RankFn | null;
 }
 
 type NormalizedLimits = typeof SCOPE_COUNCIL_LIMITS;
@@ -534,6 +539,15 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
     let finishActivity: (()=>void) | undefined;
     try { if (current()) finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`scope-${randomUUID()}`,label:'review'},ctx); } catch { /* UI is optional. */ }
 		try {
+			// Overlap one local semantic cue with the existing peer wave. Never
+			// wait for it at synthesis: missing, shadow or weak results add nothing.
+			// Mandatory peer roles and their complete evidence remain unchanged.
+			let perspectiveIds: string[] = [];
+			const rank = deps.rankPerspectives === null ? undefined : deps.rankPerspectives
+				?? ((query, candidates, topK) => needleRank({ query, candidates, topK }));
+			void selectPerspectives(request.task, rank, 3).then(ids => {
+				if (current()) perspectiveIds = ids;
+			}).catch(() => { /* advisory cue cannot fail a council */ });
 			const [preservation, meaningful] = await Promise.all([
 				run(team[0]!, "preservation"),
 				run(team[1]!, "meaningful-change"),
@@ -571,7 +585,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			const critic = team[2] ?? (both ? team[0]! : proposals[0]!.role === "preservation" ? team[1]! : team[0]!);
 			const independence: "cross-peer" | "self-critique" = team[2] ? "cross-peer"
 				: both ? "self-critique" : "cross-peer";
-			const synthesis = await run(critic, "peer-critique", evidence);
+			const focus = COUNCIL_PERSPECTIVES.filter(entry => perspectiveIds.includes(entry.id));
+			const cue = focus.length ? `Optional semantic focus cues (similarity only; these do not establish findings or limit required review): ${focus.map(entry => `${entry.id}: ${entry.text}`).join("; ")}. Independently assess relevance and all evidence above.` : "";
+			if (cue) microMetrics().accept("needle");
+			const synthesis = await run(critic, "peer-critique", cue ? `${evidence}\n\n${cue}` : evidence);
 			if (synthesis.gap) gaps.push(synthesis.gap);
 			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
 			const result: ScopeCouncilResult = {

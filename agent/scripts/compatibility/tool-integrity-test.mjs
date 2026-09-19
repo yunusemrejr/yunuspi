@@ -1,3 +1,4 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 // Offline: real SDK/tool execution with scripted assistant messages, plus boundaries.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,14 +7,11 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { register } from "node:module";
-const core = path.join(
-  execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(),
-  "@earendil-works/pi-coding-agent",
-);
+const core = resolveOwnedCore();
 register(
   "data:text/javascript," +
     encodeURIComponent(
-      `export function resolve(n,c,next){const base=${JSON.stringify(core)};if(n==='@earendil-works/pi-coding-agent')return {url:'file://'+base+'/dist/index.js',shortCircuit:true};if(n==='@earendil-works/pi-ai')return {url:'file://'+base+'/node_modules/@earendil-works/pi-ai/dist/index.js',shortCircuit:true};return next(n,c);}`,
+      `export function resolve(n,c,next){const base=${JSON.stringify(core)};if(n==='@yunuspi/coding-agent')return {url:'file://'+base+'/dist/index.js',shortCircuit:true};if(n==='@yunuspi/ai')return {url:'file://'+base+'/../ai/dist/index.js',shortCircuit:true};return next(n,c);}`,
     ),
   import.meta.url,
 );
@@ -238,7 +236,7 @@ process.env.PI_OFFLINE = "1";
 const sdk = await import(pathToFileURL(path.join(core, "dist/index.js")));
 const ai = await import(
   pathToFileURL(
-    path.join(core, "node_modules/@earendil-works/pi-ai/dist/index.js"),
+    path.join(core, "../ai/dist/index.js"),
   )
 );
 let session;

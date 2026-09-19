@@ -96,22 +96,34 @@ test("coding session: every layer does distinct useful work", async () => {
   assert.equal(ranked.applied, "needle");
   assert.equal(ranked.ordered[0].id, "bash");
 
-  // 4. Build output routes to Smol (structured) with dedup by signature.
-  const log = ["TAP version 13", ...Array(40).fill("ok 1 - case passes at path/to/file.js")].join("\n");
-  const route = evidenceMod.routeEvidence({ tool: "bash", text: log, isError: false });
-  assert.equal(route.smol, true);
-  const key = coordMod.opportunityKey(["smol", log.length]);
-  const first = await coord.assist(key, "smol", "evidence", async () => ({ selection: [1, 2] }));
-  const second = await coord.assist(key, "smol", "evidence", async () => ({ selection: [9] }));
-  assert.deepEqual(first.value, second.value, "identical evidence reuses the result");
-  assert.equal(second.provenance.cached, true);
+  // 4. Real Smol owner, schema validation and sealing; only transport is mocked.
+  const log = ["Build completed and bundles ready.", ...Array(36).fill("Routine compilation background describes ordinary bundling activity and surrounding workspace operations."), "Deployment remains pending verification."].join("\n");
+  const lineClient = smol.createSmolPreprocessor({
+    runtime: { version: 2, enabled: true, model: "SmolLM2-135M-Instruct", endpoint: "http://127.0.0.1:18735/completion", apiKey: "TEST_SYNTHETIC_LOCAL_KEY", execution: "background", timeoutMs: 1000 },
+    acquireLease: async () => true,
+    fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: [2] }) })),
+  });
+  lineClient.offer("coding-output", log, 0);
+  const lineSelection = await lineClient.takeAsync("coding-output", log, 500);
+  assert.ok(lineSelection && lineSelection.includes("pending verification"));
+  assert.ok(lineSelection.length < log.length - 1000);
+  assert.equal(lineClient.inspect().requests, 1);
+  assert.equal(lineClient.inspect().accepted, 1);
   layers.add("smol");
 
-  // 5. Documentation prose routes to Kompress.
+  // 5. Real Kompress owner and source projection; only transport is mocked.
   const filler = "General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.";
-  const prose = [filler, filler, filler, filler, filler, filler].join("\n\n");
-  const proseRoute = evidenceMod.routeEvidence({ tool: "read", text: prose, isError: false });
-  assert.ok(proseRoute.kompress || proseRoute.shape !== "trivial");
+  const prose = ["Deployment remains blocked until external verification.", ...Array(9).fill(filler)].join("\n\n");
+  const proseClient = mini.createMiniPreprocessor({
+    runtime: { version: 1, enabled: true, endpoint: "http://127.0.0.1:18736/select", apiKey: "TEST_MINI_PREPROCESSOR_KEY_1234567890" },
+    fetch: async () => new Response(JSON.stringify({ version: 1, status: "SELECT", sourceHash: mini.miniSource(prose).hash, keep: [0] })),
+  });
+  const proseSelection = await proseClient.select(prose, undefined);
+  const proseProjection = mini.miniProjection(prose, proseSelection);
+  assert.ok(proseProjection && proseProjection.includes("blocked until external verification"));
+  assert.ok(proseProjection.length < prose.length - 1000);
+  assert.equal(proseClient.inspect().requests, 1);
+  assert.equal(proseClient.inspect().accepted, 1);
   layers.add("kompress");
 
   // 6. Review findings cluster deterministically; main LLM decides fixes.
@@ -124,6 +136,12 @@ test("coding session: every layer does distinct useful work", async () => {
   assert.deepEqual([...layers].sort(), ["deterministic", "jev", "kompress", "needle", "smol"]);
   const snapshot = metrics.snapshot();
   assert.ok(snapshot.helpers.needle.runs >= 1);
+  for (const helper of ["smol", "kompress"]) {
+    assert.equal(snapshot.helpers[helper].runs, 1);
+    assert.equal(snapshot.helpers[helper].accepted, 1);
+    assert.ok(snapshot.helpers[helper].projectedSavedChars > 1000);
+    assert.equal(snapshot.helpers[helper].savedChars, 0, "owner-only test must not claim provider rendering");
+  }
   assert.ok(snapshot.jev.questions >= 5, "one batched advisory call, not many tiny ones");
 });
 

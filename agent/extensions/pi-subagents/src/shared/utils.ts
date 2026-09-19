@@ -3,14 +3,14 @@ import { collectSessionCost } from "../../../lib/session-cost.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Message, Usage as PiUsage } from "@earendil-works/pi-ai";
+import type { Message, Usage as PiUsage } from "@yunuspi/ai";
 import { previewDisplayText, sanitizeDisplayText, truncateDisplayText } from "./display-text.ts";
 import { formatToolCall } from "./formatters.ts";
 import type { AgentProgress, AsyncStatus, Details, DisplayItem, ErrorInfo, NestedRunSummary, SingleResult, ToolCallSummary, Usage } from "./types.ts";
 import { validateAsyncStatusLaneMetadata } from "../runs/shared/lane-metadata.ts";
 
 const DEFAULT_CONFIG_DIR_NAME = ".pi";
-const PI_CODING_AGENT_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+const PI_CODING_AGENT_PACKAGE_NAME = "@yunuspi/coding-agent";
 export const PI_CODING_AGENT_PACKAGE_ROOT_ENV = "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT";
 export const PROMPT_REDACTED = "[prompt redacted]";
 

@@ -7,7 +7,6 @@
     "node": ">=22.19.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1",
     "acorn": "8.18.0",
     "htmlparser2": "9.1.0",
     "linkedom": "0.16.11",
@@ -19,6 +18,12 @@
   "scripts": {
     "test": "node --test --test-concurrency=${PI_PUBLIC_TEST_CONCURRENCY:-1} tests/*.test.mjs",
     "check:public": "node scripts/check-public.mjs",
-    "prepare:hooks": "git config core.hooksPath .githooks"
-  }
+    "prepare:hooks": "git config core.hooksPath .githooks",
+    "build:core": "node scripts/build-core.mjs",
+    "test:fork": "node --test tests/core-independence.test.mjs"
+  },
+  "workspaces": [
+    "core/*",
+    "agent/npm"
+  ]
 }

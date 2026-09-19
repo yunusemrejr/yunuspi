@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Key } from "@earendil-works/pi-tui";
+import { Key } from "@yunuspi/tui";
 import { FLEET_KEYBINDING_ACTIONS, type ArtifactDirPreference, type ExtensionConfig } from "../shared/types.ts";
 import { validateMissionStoreConfig } from "../missions/store.ts";
 import { validateAuthorityPolicy } from "../policy/authority.ts";

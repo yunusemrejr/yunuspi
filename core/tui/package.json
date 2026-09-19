@@ -1,0 +1,44 @@
+{
+  "name": "@yunuspi/tui",
+  "version": "0.1.0",
+  "description": "Terminal User Interface library with differential rendering for efficient text-based applications",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "node ../../scripts/build-core.mjs"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "tui",
+    "terminal",
+    "ui",
+    "text-editor",
+    "differential-rendering",
+    "typescript",
+    "cli"
+  ],
+  "author": "Mario Zechner",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yunusemrejr/yunuspi.git",
+    "directory": "core/tui"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "get-east-asian-width": "1.6.0",
+    "marked": "18.0.5"
+  },
+  "private": true,
+  "yunuspiCore": {
+    "forkOrigin": "Pi 0.85.1",
+    "originCommit": "d981de1229ef899957bbe968bc8dcda02a21f477"
+  }
+}

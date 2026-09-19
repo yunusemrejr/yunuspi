@@ -1,40 +1,12 @@
 #!/usr/bin/env node
-/**
- * Pi harness verifier — THE single authority for harness integrity.
- *
- * Run after ANY pi / pi-coding-agent / extension npm update (and any time
- * behavior seems off). This file checks; the actual repair logic for every
- * node_modules patch lives in scripts/patches/<name>.mjs modules. There are
- * NO inline patch-application blocks in this file anymore (2026-08-31: the
- * old [2] moderation and [2b] thinking-reflow inline blocks were moved into
- * retry-429-policy.mjs and thinking-reflow.mjs — two mechanisms editing one
- * file is how drift happens).
- *
- * Patch module contract (scripts/patches/*.mjs):
- *   export function targets(): [{ name, exists(), isApplied(), apply() }]
- * Every module is auto-discovered and run through checkPatch() below — a new
- * patch file is verified the moment it lands, no second registry to update.
- *
- * Lifecycle (deterministic, idempotent):
- *   UPDATE  auto-update.sh            (systemd pi-auto-update.timer 06:23)
- *   VERIFY  verify-harness.mjs --fix  (re-apply wiped patches, prune, drift)
- *   BACKUP  harness-backup.mjs        (/harness-backup command)
- * Updates invoke verification; backups are an explicit user command.
- * --fix exits 0 only when the final checked state is clean.
- *
- * Usage:
- *   node ~/.pi/agent/scripts/verify-harness.mjs            # check only
- *   node ~/.pi/agent/scripts/verify-harness.mjs --fix      # repair what it can
- *   node ~/.pi/agent/scripts/verify-harness.mjs --smoke    # check + live smoke test (1 tiny LLM call)
- *
- * Exit code 0 = final state clean (including after --fix repairs);
- * 1 = issues remain (needs attention, or repaired-but-verify-again).
+/** YunusPi installation integrity checks. Owned core behavior lives in source;
+ * verification never downloads a core or rewrites its implementation.
+ * --fix repairs local harness configuration only; --smoke opts into inference.
  */
 
 import {
   execFile,
   execFileSync,
-  execSync,
   spawn,
   spawnSync,
 } from "node:child_process";
@@ -42,8 +14,8 @@ import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { launcherSpec, activePiProcesses } from "./core-update.mjs";
-import { leaseBlockingTarget } from "./write-lease.mjs";
+import { activePiProcesses } from "./core-update.mjs";
+import { resolveOwnedCore } from "./lib/owned-core.mjs";
 
 // WHY promisified execFile over a hand-rolled spawn wrapper: the runtime
 // already gives timeout (SIGTERM after N ms), maxBuffer output capping, and
@@ -108,7 +80,7 @@ async function checkSourceSyntax(file) {
 }
 
 const HOME = os.homedir();
-const AGENT_DIR = path.join(HOME, ".pi", "agent");
+const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(HOME, ".pi", "agent");
 const EXT_DIR = path.join(AGENT_DIR, "extensions");
 const NPM_DIR = path.join(AGENT_DIR, "npm");
 
@@ -265,155 +237,25 @@ function retireResurrections(name) {
   return hits;
 }
 
-/** Shared runner for the patch-registry section: import a patch module and
- *  check/fix every exported target. With --fix, a successful re-apply counts
- *  as repaired (not failed) so the run exits 0 on a clean final state. */
-async function checkPatch(file, label) {
-  let patch;
-  try {
-    patch = await import(path.join(AGENT_DIR, "scripts", "patches", file));
-  } catch (e) {
-    bad(`${label}: module failed to load — ${String(e.message ?? e)}`);
-    return;
-  }
-  if (typeof patch.targets !== "function") {
-    bad(`${label}: module violates the targets() contract`);
-    return;
-  }
-  let targets;
-  try {
-    targets = patch.targets();
-  } catch (e) {
-    bad(`${label}: targets() threw — ${String(e.message ?? e)}`);
-    return;
-  }
-  if (!Array.isArray(targets)) {
-    bad(`${label}: targets() must return an array — fix the patch module`);
-    return;
-  }
-  if (targets.length === 0) {
-    bad(`${label}: no targets found (package missing / layout changed)`);
-    return;
-  }
-  let applied = 0;
-  let deferred = 0;
-  for (const t of targets) {
-    // WHY enforce the contract here: this is the sole consumer of targets().
-    // A malformed module (e.g. a target without exists(), the 2026-08-31
-    // regression in the since-retired auto-update patch) must fail as one
-    // reported target, never
-    // TypeError-crash the whole verification run mid-refactor.
-    const missing = ["name", "exists", "isApplied", "apply"].filter(
-      (k) => typeof t?.[k] !== (k === "name" ? "string" : "function"),
-    );
-    if (missing.length > 0) {
-      bad(
-        `${label}: target violates targets() contract (missing ${missing.join(
-          ", ",
-        )}) — fix the patch module`,
-      );
-      continue;
-    }
-    try {
-      if (!t.exists()) {
-        bad(
-          `${t.name}: required target file missing — upstream layout changed`,
-        );
-      } else if (t.isApplied()) {
-        applied++;
-        ok(`${t.name}: patch present`);
-      } else if (FIX) {
-        const leaseHit = leaseBlockingTarget(t);
-        if (leaseHit) {
-          // Write-lease deferral: another writer holds a live lease on a
-          // target file. Racing it would corrupt the file mid-apply; the
-          // quiescent watchdog pass re-applies. Deferred is NOT a failure.
-          deferred++;
-          info(
-            `${t.name}: patch deferred — file leased by ${leaseHit.owner} (applies on next quiescent pass)`,
-          );
-        } else {
-        t.apply();
-        if (!t.isApplied())
-          throw new Error(
-            "apply() returned without establishing the patch invariant",
-          );
-        applied++;
-        fixed(`${t.name}: patch re-applied (was wiped by update)`);
-        }
-      } else {
-        bad(`${t.name}: patch MISSING — re-run with --fix`);
-      }
-    } catch (e) {
-      bad(`${t.name}: check/apply threw — ${String(e.message ?? e)}`);
-    }
-  }
-  if (applied === 0 && deferred === 0) {
-    bad(`${label}: no targets applied — manual review needed`);
-  }
-}
-
-// Write-lease gate: leaseFilesOf/leaseBlockingTarget live in
-// scripts/write-lease.mjs (single implementation, covered by its bench). A
-// patch target whose file carries a live foreign lease is DEFERRED in the
-// loop above, not failed; the quiescent watchdog pass re-applies it.
-
-// ── pi package location ────────────────────────────────────────────────
 function findPiPackage() {
-  try {
-    const which = execSync("which pi", { encoding: "utf-8" }).trim();
-    if (which) {
-      const real = fs.realpathSync(which);
-      const pkg = path.dirname(path.dirname(real)); // bin/pi -> package root
-      if (fs.existsSync(path.join(pkg, "package.json"))) return pkg;
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const root = execSync("npm root -g", { encoding: "utf-8" }).trim();
-    const pkg = path.join(root, "@earendil-works", "pi-coding-agent");
-    if (fs.existsSync(pkg)) return pkg;
-  } catch {
-    /* fall through */
-  }
-  return null;
+  try { return resolveOwnedCore(); } catch { return null; }
 }
 
 async function main() {
-  console.log("== Pi harness verification ==");
-  if (
-    !STAGED &&
-    fs.existsSync(path.join(AGENT_DIR, "logs/core-update-transaction.json"))
-  ) {
-    let validating = false;
-    try {
-      const held = fs.fstatSync(8),
-        expected = fs.statSync(
-          path.join(AGENT_DIR, "logs/harness-session.lock"),
-        );
-      validating =
-        process.env.PI_HARNESS_SESSION_LOCK_HELD === "1" &&
-        held.ino === expected.ino &&
-        held.dev === expected.dev;
-    } catch {}
-    if (!validating)
-      bad(
-        "interrupted core update pending — run auto-update.sh --repair-only before using Pi",
-      );
-  }
+  console.log("== YunusPi harness verification ==");
   const piPkg = findPiPackage();
   if (piPkg) {
     try {
       const pj = JSON.parse(
         fs.readFileSync(path.join(piPkg, "package.json"), "utf-8"),
       );
-      ok(`pi package found: ${pj.name} ${pj.version} (${piPkg})`);
+      if (pj.name !== "@yunuspi/coding-agent") throw Error("external core identity");
+      ok(`YunusPi core: ${pj.name} ${pj.version} (${piPkg})`);
     } catch {
       bad(`pi package at ${piPkg} has an unreadable package.json`);
     }
   } else {
-    bad("pi package not found — cannot verify patches; check the npm install");
+    bad("YunusPi-owned core is missing; install the reviewed source with --install-deps");
   }
 
   // ── 0. Canonical inventory (single source: extensions/manifest.json) ─
@@ -621,119 +463,22 @@ async function main() {
     info("load-state checks skipped: manifest.json unreadable (see above)");
   }
 
-  // ── 3. Patch registry (every scripts/patches/*.mjs, auto-discovered) ──
-  console.log("\n[3] Patch registry");
-  const patchDir = path.join(AGENT_DIR, "scripts", "patches");
-  const patchFiles = fs
-    .readdirSync(patchDir)
-    .filter((f) => f.endsWith(".mjs"))
-    .sort();
-  if (patchFiles.length === 0) bad("no patch modules found");
-  for (const f of patchFiles) {
-    await checkPatch(f, f.replace(/\.mjs$/, ""));
-  }
-
-  // ── 3a. Out-of-band update recovery (outside the replaceable package) ─
-  console.log("\n[3a] Automatic repair units");
-  if (
-    !manifest?.supportFiles?.some((file) =>
-      file.startsWith("scripts/systemd/pi-harness-repair."),
-    )
-  ) {
-    info("optional automatic repair units are not part of this installation");
-  } else
-    try {
-      if (!piPkg)
-        throw new Error(
-          "Cannot configure repair watch without a Pi installation",
-        );
-      const units = path.join(HOME, ".config", "systemd", "user");
-      // PathChanged takes one raw absolute path (spaces allowed), not shell quotes.
-      const unitPath = (p) => {
-        if (/[\r\n\0]/.test(p)) throw new Error("Invalid systemd watch path");
-        return p.replaceAll("%", "%%");
-      };
-      let changed = false;
-      for (const suffix of ["service", "timer", "path"]) {
-        const name = `pi-harness-repair.${suffix}`;
-        const source = fs
-          .readFileSync(
-            path.join(AGENT_DIR, "scripts", "systemd", name),
-            "utf8",
-          )
-          .replace("@CORE_PARENT@", unitPath(path.dirname(piPkg)))
-          .replace(
-            "@CORE_PACKAGE@",
-            unitPath(path.join(piPkg, "package.json")),
-          );
-        const file = path.join(units, name);
-        if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === source)
-          continue;
-        if (!FIX || STAGED) {
-          bad(`${name} missing or drifted — run --fix`);
-          continue;
-        }
-        fs.mkdirSync(units, { recursive: true });
-        fs.writeFileSync(file, source);
-        changed = true;
-        fixed(`${name} installed from maintained source`);
-      }
-      const systemctl = (...argv) =>
-        execFileSync("systemctl", ["--user", ...argv], {
-          encoding: "utf8",
-          timeout: 10000,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      const triggers = ["pi-harness-repair.timer", "pi-harness-repair.path"];
-      if (FIX && !STAGED) {
-        if (changed) systemctl("daemon-reload");
-        systemctl("enable", "--now", ...triggers);
-        if (changed) systemctl("restart", "pi-harness-repair.path");
-      }
-      for (const unit of STAGED ? [] : triggers) {
-        if (systemctl("is-enabled", unit).trim() !== "enabled")
-          throw new Error(`${unit} is not enabled`);
-        if (systemctl("is-active", unit).trim() !== "active")
-          throw new Error(`${unit} is not active`);
-      }
-      ok(
-        STAGED
-          ? "repair unit sources match host-verified configuration (host services checked before staging)"
-          : "installation-change watch and periodic repair fallback enabled and active",
-      );
-    } catch (error) {
-      bad(`automatic repair unavailable: ${error.message}`);
+  // ── 3. Owned runtime: the build contains source behavior, never patch targets.
+  console.log("\n[3] Owned core and launcher");
+  if (piPkg) {
+    for (const file of ["src/cli.js", "dist/cli.js", "src/core/agent-session.js"]) {
+      if (fs.existsSync(path.join(piPkg, file))) ok(`owned core file: ${file}`);
+      else bad(`owned core build/source missing: ${file}`);
     }
-
-  // The normal CLI takes a shared session lease before loading any core code.
-  // npm can replace its bin link, so launcher restoration belongs to repair.
-  try {
-    if (!piPkg) throw Error("Pi package unavailable");
-    const launcher = launcherSpec(piPkg);
-    const existing = fs.readFileSync(launcher.file, "utf8");
-    if (
-      !fs.lstatSync(launcher.file).isSymbolicLink() &&
-      existing === launcher.source
-    ) {
-      ok("Pi launcher protects sessions from concurrent update/repair");
-    } else if (FIX && !STAGED) {
-      const ownedLink =
-        fs.lstatSync(launcher.file).isSymbolicLink() &&
-        fs.realpathSync(launcher.file).startsWith(piPkg + path.sep);
-      if (!ownedLink && !existing.includes("# PI_HARNESS_LAUNCHER_V1\n"))
-        throw Error("Unrecognized Pi launcher; preserve it for review");
-      const temp = `${launcher.file}.${process.pid}.tmp`;
-      try {
-        fs.writeFileSync(temp, launcher.source, { mode: 0o755, flag: "wx" });
-        fs.renameSync(temp, launcher.file);
-      } finally {
-        fs.rmSync(temp, { force: true });
-      }
-      fixed("Pi session-lock launcher installed");
-    } else bad("Pi session-lock launcher missing or drifted — run --fix");
-  } catch (error) {
-    bad(`Pi launch protection unavailable: ${error.message}`);
   }
+  const installedRuntime = path.join(AGENT_DIR, "runtime/core/coding-agent");
+  if (fs.existsSync(installedRuntime)) {
+    const launcher = path.join(AGENT_DIR, "bin/yunuspi");
+    if (fs.existsSync(launcher) && fs.readFileSync(launcher, "utf8").includes('YUNUSPI_CORE_ROOT="$AGENT/runtime/core/coding-agent"'))
+      ok("YunusPi launcher selects the installation-owned core");
+    else bad("YunusPi launcher missing or drifted; reinstall the reviewed source");
+  } else info("source checkout: installer launcher is checked after installation");
+  info("core repair and automatic update watchers are retired; change owned source and rebuild");
 
   // ── 4. Config + memory store parse ───────────────────────────────────
   console.log("\n[4] Config + memory");
@@ -848,44 +593,14 @@ async function main() {
       "direct pi.setModel scan: no calls outside declared owners (structural coverage only)",
     );
 
-  // ── 6. Install-script allowlist (npm 11 allowScripts policy) ───────────
-  console.log("\n[6] Install-script allowlist (agent/npm)");
-  try {
-    const pkgJson = JSON.parse(
-      fs.readFileSync(path.join(NPM_DIR, "package.json"), "utf-8"),
-    );
-    const allow = pkgJson.allowScripts ?? {};
-    const withScripts = [];
-    for (const dir of fs.readdirSync(path.join(NPM_DIR, "node_modules"))) {
-      if (dir.startsWith(".") || dir.startsWith("@")) continue;
-      const pj = path.join(NPM_DIR, "node_modules", dir, "package.json");
-      let meta;
-      try {
-        if (!fs.existsSync(pj)) continue;
-        meta = JSON.parse(fs.readFileSync(pj, "utf-8"));
-      } catch {
-        continue;
-      }
-      const s = meta.scripts ?? {};
-      if (s.install || s.preinstall || s.postinstall)
-        withScripts.push({ name: dir, version: meta.version ?? "?" });
-    }
-    let uncovered = 0;
-    for (const p of withScripts) {
-      const key = `${p.name}@${p.version}`;
-      if (allow[key] === true || allow[p.name] === true) continue;
-      uncovered++;
-      bad(
-        `script-bearing dep not allowlisted: ${key} — run npm approve-scripts --all (auto-update.sh does it)`,
-      );
-    }
-    if (uncovered === 0)
-      ok(
-        `${withScripts.length} script-bearing dep${withScripts.length === 1 ? "" : "s"} covered by allowScripts`,
-      );
-  } catch (e) {
-    info(`allowlist check skipped (${String(e)})`);
-  }
+  // ── 6. Third-party lifecycle scripts remain disabled in installed workspaces.
+  console.log("\n[6] Dependency lifecycle policy");
+  const npmPolicy = path.join(AGENT_DIR, "runtime/.npmrc");
+  if (fs.existsSync(path.join(AGENT_DIR, "runtime"))) {
+    if (fs.existsSync(npmPolicy) && /^ignore-scripts\s*=\s*true\s*$/m.test(fs.readFileSync(npmPolicy, "utf8")))
+      ok("runtime npm lifecycle scripts disabled; core builds use the explicit owned build command");
+    else bad("runtime lifecycle policy missing; reinstall the reviewed YunusPi source");
+  } else info("source checkout: use npm ci --ignore-scripts before build:core");
 
   // ── 7. Duplicate package-skill prune (user ~/skills wins) ────────────
   console.log("\n[7] Duplicate package-skill prune (user skills win)");
@@ -1240,15 +955,6 @@ if (locked) {
           process.exitCode = code ?? 1;
         });
         return;
-      }
-      // Include legacy/direct launches that predate or bypass the wrapper.
-      if (
-        !STAGED &&
-        fs.existsSync(path.join(AGENT_DIR, "logs/core-update-transaction.json"))
-      ) {
-        throw Error(
-          "Interrupted core update pending; run auto-update.sh --repair-only to recover before repairing",
-        );
       }
       const core = findPiPackage();
       if (!STAGED && core && activePiProcesses(core).length) {

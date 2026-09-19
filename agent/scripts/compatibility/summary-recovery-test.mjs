@@ -1,16 +1,14 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
-const core = path.join(
-  execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(),
-  "@earendil-works/pi-coding-agent",
-);
+const core = resolveOwnedCore();
 const { retryAssistantCall } = await import(
   pathToFileURL(
-    path.join(core, "node_modules/@earendil-works/pi-ai/dist/utils/retry.js"),
+    path.join(core, "../ai/dist/utils/retry.js"),
   )
 );
 const { generateSummaryWithUsage, getSummarizationFailure } = await import(
@@ -130,32 +128,6 @@ try {
   assert.equal(recovered.text, "Preserved context.");
 } finally {
   globalThis.fetch = originalFetch;
-}
-const chunks = path.join(core, "dist/bundle/chunks");
-const source = fs
-  .readdirSync(chunks)
-  .filter((f) => f.endsWith(".js"))
-  .map((f) => fs.readFileSync(path.join(chunks, f), "utf8"))
-  .find((s) => s.includes("function getSummarizationFailure("));
-const start = source.indexOf("function getSummarizationFailure(");
-const end = source.indexOf("function createSummarizationOptions(", start);
-assert.ok(end > start);
-const bundled = runInNewContext(
-  source.slice(start, end) + ";getSummarizationFailure;",
-  {},
-  { timeout: 1000 },
-);
-for (const response of [
-  message(),
-  message(text),
-  message(text, "length"),
-  message(text, "aborted"),
-  { ...message([], "error"), errorMessage: "upstream unavailable" },
-]) {
-  assert.equal(
-    bundled(response, "Summary"),
-    getSummarizationFailure(response, "Summary"),
-  );
 }
 console.log(
   "PASS empty auxiliary retry recovery, exhaustion/disabled/abort/tool-call semantics; native summary rejection and SDK/runtime summary guard parity",

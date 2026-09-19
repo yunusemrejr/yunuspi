@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {patchSource,isAppliedSource} from '../patches/pi-lens-atomic-preflight.mjs';
 import {createRelevantGuidance} from '../../extensions/lib/relevant-guidance.ts';
 const source=fs.readFileSync(new URL('../../extensions/pi-lens/dist/index.js',import.meta.url),'utf8');
-const patched=patchSource(source);
-assert.ok(isAppliedSource(patched));assert.equal(patchSource(patched),patched);
-assert.throws(()=>patchSource(patched.replace('a rejected batch must never mutate files.','drift')),/drift/);
-const start=patched.indexOf('      if (preflightError) {',patched.indexOf('  if (isEditOnly && filePath && !getFlag("no-read-guard")) {'));
-const end=patched.indexOf('      logToolReadGuardEvent({',start);
+const start=source.indexOf('      if (preflightError) {',source.indexOf('  if (isEditOnly && filePath && !getFlag("no-read-guard")) {'));
+const end=source.indexOf('      logToolReadGuardEvent({',start);
 assert.ok(start>0&&end>start);
-const body=patched.slice(start,end);
+const body=source.slice(start,end);
 for(const partial of [[],[{oldText:'a',newText:'b'}]]) {
  let writes=0;
  const run=vm.runInNewContext('(async()=>{'+body+'return {block:false};})',{preflightError:'stale target; No edits were applied.',partiallyApplicable:partial,editBatchSummary:{},applyPartiallyApplicableEdits(){writes++;throw Error('must not mutate');},logBlockedEditSummary(){}});

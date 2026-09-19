@@ -4,6 +4,7 @@ import {protectedEvidence, relevanceScores, taskTerms} from './local-intelligenc
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {microMetrics} from './micro-intelligence/metrics.ts';
 export type MiniSelection = {version:1;status:'SELECT';sourceHash:string;keep:number[]};
 type Runtime = {version:1;enabled:true;endpoint:'http://127.0.0.1:18736/select';apiKey:string};
 const dependent = /^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b/i;
@@ -14,7 +15,9 @@ export function miniSource(raw:string) {
  if(raw.slice(start).trim())spans.push([start,raw.length]);
  if(spans.length<4||spans.length>24)return;
  const paragraphs=spans.map(([a,b])=>raw.slice(a,b));
- if(paragraphs.some(p=>p.includes('\n')||!/[.!?]["')]?\s*$/.test(p)))return;
+ // Soft line wrapping does not change paragraph ownership or its protected
+ // facts. Spans keep the exact original bytes, including those newlines.
+ if(paragraphs.some(p=>!/[.!?]["')]?\s*$/.test(p)))return;
  const required=new Set<number>();
  for(let i=0;i<paragraphs.length;i++){
   if(protectedEvidence.test(paragraphs[i])||paragraphs[i].trim().split(/\s+/).length<=6)required.add(i);
@@ -90,23 +93,28 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
   reset(){generation++;current?.abort();cache.clear();warmed=false;},
   warmup,
   endTurn,
-  inspect(){return {...stats,cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
+  inspect(){return {...stats,status:process.env.PI_MINI_PREPROCESSOR==='off'?'disabled':!runtime?'unavailable':busy?'busy':'ready',cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
   async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
-   if(process.env.PI_MINI_PREPROCESSOR==='off'||!runtime||typeof inputUsdPerMillion!=='number'||!Number.isFinite(inputUsdPerMillion)||inputUsdPerMillion<0)return;
-   const source=miniSource(raw);if(!source)return;
+   const metrics=microMetrics();metrics.offer('kompress');
+   const skip=(reason:string)=>{metrics.skip('kompress',reason);};
+   if(process.env.PI_MINI_PREPROCESSOR==='off'){skip('disabled');return;}
+   if(!runtime){skip('no-runtime');return;}
+   // Unknown-price providers still benefit from the measured context floor.
+   const inputPrice=typeof inputUsdPerMillion==='number'&&Number.isFinite(inputUsdPerMillion)?Math.max(0,inputUsdPerMillion):0;
+   const source=miniSource(raw);if(!source){skip('ineligible');return;}
    const signal=process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).sort().join(' ');
    const key=source.hash+':'+createHash('sha256').update(signal).digest('hex');
    const cached=validateMiniSelection(raw,cache.get(key));
    if(cached){
-    cache.delete(key);cache.set(key,cached);stats.cacheHits++;
+    cache.delete(key);cache.set(key,cached);stats.cacheHits++;metrics.cacheHit('kompress');
     // Cache owns its own IDs: callers cannot mutate a future source projection.
     return {...cached,keep:[...cached.keep]};
    }
-   if(busy||now()-last<Math.min(60000,10000*2**failures))return;
+   if(busy||now()-last<Math.min(60000,10000*2**failures)){skip(busy?'busy':'cooldown');return;}
    // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
    // Newly produced tool bytes have not appeared in the provider prefix yet.
    const potential=miniPotentialSavings(raw,signal);
-   if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputUsdPerMillion/1e6 < .45*.00002*10)return;
+   if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputPrice/1e6 < .45*.00002*10){skip('insufficient-savings');return;}
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
    stats.requests++;let accepted=false;
    let finishActivity: (()=>void) | undefined;
@@ -130,12 +138,15 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     const scores=relevanceScores(source.paragraphs,signal);
     selection={...selection,keep:[...new Set([...selection.keep,...scores.flatMap((score:number,i:number)=>score>0?[i]:[])])].sort((a,b)=>a-b)};
     const projection=miniProjection(raw,selection)!;const saved=raw.length-projection.length-256;
-    if(saved<150||saved/raw.length<.15||!usefulContextSaving(saved,raw.length)&&saved/6*inputUsdPerMillion/1e6<(performance.now()-started)/1000*.00002*10)return;
+    if(saved<150||saved/raw.length<.15||!usefulContextSaving(saved,raw.length)&&saved/6*inputPrice/1e6<(performance.now()-started)/1000*.00002*10)return;
     if(cache.size>=16)cache.delete(cache.keys().next().value!);
     cache.set(key,{...selection,keep:[...selection.keep]});accepted=true;failures=0;stats.accepted++;stats.projectedSavedChars+=saved;
+    metrics.accept('kompress',saved,true);
     return selection;
    }catch{return;}finally{
     clearTimeout(timer);
+    metrics.run('kompress',performance.now()-started,raw.length);
+    if(!accepted)skip(expired?'timeout':'invalid-or-insufficient-selection');
     try { finishActivity?.(); } catch { /* UI cannot alter selection. */ }
     if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
     try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}

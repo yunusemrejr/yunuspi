@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import { extractTextFromContent, extractToolArgsPreview } from "./utils.ts";
 
 const MAX_TOOL_PAYLOAD_BYTES = 32 * 1024;

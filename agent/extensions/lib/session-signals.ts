@@ -1,11 +1,11 @@
 import {
   PI_TOKEN_BUDGET_CEILING,
   PI_TOKEN_BUDGET_SCALE,
-} from "../../scripts/patches/token-budget.mjs";
+} from "../../scripts/compatibility/legacy-transforms/token-budget.mjs";
 import {
   automaticCompactionThreshold,
   compactionSettingsForWindow,
-} from "../../scripts/patches/compaction-early.mjs";
+} from "../../scripts/compatibility/legacy-transforms/compaction-early.mjs";
 export function pressureFacts(
   ctx: any,
   settings: any,

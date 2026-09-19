@@ -1,4 +1,4 @@
-import { complete, type Api, type Model, type ProviderHeaders } from "@earendil-works/pi-ai/compat";
+import { complete, type Api, type Model, type ProviderHeaders } from "@yunuspi/ai/compat";
 import type { SummaryGenerationContext } from "./summary-review.ts";
 import { findModelWithProviderRouting, loadEnabledModelPatterns, modelMatchesEnabledPatterns } from "./summary-model-scope.ts";
 

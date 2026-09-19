@@ -6,9 +6,9 @@ import type {
   Theme,
   ThemeColor,
   ToolRenderResultOptions,
-} from "@earendil-works/pi-coding-agent";
-import { formatSize } from "@earendil-works/pi-coding-agent";
-import { Text, type KeyId } from "@earendil-works/pi-tui";
+} from "@yunuspi/coding-agent";
+import { formatSize } from "@yunuspi/coding-agent";
+import { Text, type KeyId } from "@yunuspi/tui";
 import { Type, type Static } from "typebox";
 import {
   DEFAULT_LOG_BYTES,
@@ -16,8 +16,6 @@ import {
   deriveCompletionDeliveryGuidance,
   deriveTaskNameFromCommand,
   formatSnapshotList,
-  formatUpdateSegment,
-  isNewerVersion,
   normalizeMaxBytes,
   normalizeTaskName,
   parseBgCommandArgs,
@@ -32,9 +30,7 @@ import {
   type StartTaskOptions,
 } from "./core/common.js";
 import {
-  fetchLatestVersion,
   readPackageInfo,
-  type FetchLatestVersionOptions,
 } from "./core/update-check.js";
 import { BackgroundTaskRegistry, MAX_TASK_TIMEOUT_SECONDS } from "./core/registry.js";
 import { registerContinuationSource } from "../../lib/continuation-notice.ts";
@@ -70,7 +66,6 @@ const packageInfo = readPackageInfo(
     );
   },
 );
-const PACKAGE_NAME = packageInfo.name ?? "pi-background-tasks";
 const PACKAGE_VERSION = packageInfo.version;
 const LIGHT_BLUE_BG = "\x1b[48;2;183;223;255m";
 const LIGHT_BLUE_FG = "\x1b[38;2;11;70;110m";
@@ -192,8 +187,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   let currentCtx: ExtensionContext | undefined;
   let dockOpen = false;
   let statusInterval: NodeJS.Timeout | undefined;
-  let latestKnownVersion: string | undefined;
-  let updateCheckStarted = false;
 
   const completionNotifier = createCompletionNotifier(pi, () => currentCtx);
   const registry = new BackgroundTaskRegistry({
@@ -265,10 +258,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       );
       const unseenFinishedCount =
         unseenFailed.length + unseenStopped.length + unseenDone.length;
-      const updateSegment = formatUpdateSegment(
-        latestKnownVersion,
-        PACKAGE_VERSION ?? "",
-      );
+      const updateSegment = "";
       ctx.ui.setWidget("background-tasks", undefined);
       if (running.length === 0 && unseenFinishedCount === 0) {
         ctx.ui.setStatus(
@@ -420,30 +410,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     },
   );
 
-  async function scheduleUpdateCheck(ctx: ExtensionContext): Promise<void> {
-    if (updateCheckStarted) return;
-    updateCheckStarted = true;
-    const env = process.env;
-    if (env["PI_BG_DISABLE_UPDATE_CHECK"] === "1") return;
-    if (env["PI_OFFLINE"] === "1") return;
-    if (!PACKAGE_VERSION) return;
-    const options: FetchLatestVersionOptions = {
-      packageName: PACKAGE_NAME,
-      onError: (error) => {
-        console.error(
-          `[background-tasks] update check skipped: ${error.message}`,
-        );
-      },
-    };
-    const registryUrl = env["PI_BG_REGISTRY_URL"];
-    if (registryUrl) options.registryUrl = registryUrl;
-    const latest = await fetchLatestVersion(options);
-    if (latest && isNewerVersion(latest, PACKAGE_VERSION)) {
-      latestKnownVersion = latest;
-      updateUi(ctx);
-    }
-  }
-
   pi.on("session_start", async (_event, ctx) => {
     registry.setShuttingDown(false);
     currentCtx = ctx;
@@ -453,8 +419,6 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     statusInterval = setInterval(() => {
       updateUi();
     }, STATUS_INTERVAL_MS);
-    // One-shot, non-blocking: never awaited on the session-start path or the status tick.
-    void scheduleUpdateCheck(ctx);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -554,13 +518,10 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Show the local-fork update status; never replace the installed extension",
     handler: (_args, ctx) => {
       const current = PACKAGE_VERSION ?? "unknown";
-      const latest = latestKnownVersion;
       const lines = [
-        latest
-          ? `Local background-task fork ${current} is installed; ${latest} is the latest published package version.`
-          : `Local background-task fork ${current} is installed.`,
-        "This local fork is source-owned; /bg-update never installs or replaces it.",
-        "Review upstream changes and port them deliberately under the project extension directory before reloading Pi.",
+        `YunusPi background-task fork ${current} is installed.`,
+        "This source-owned extension changes only with a reviewed YunusPi release.",
+        "No upstream package version checks or automatic replacements are performed.",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
       return Promise.resolve();

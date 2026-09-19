@@ -5,10 +5,10 @@ import type { ChildProgressEvidence } from "./progress-evidence.ts";
 
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import type { AgentConfig } from "../agents/agents.ts";
 import type { FSWatcher } from "node:fs";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import type { ModelScopeRule } from "../runs/shared/model-scope.ts";
 import type { ChildSpawnPreflight, ChildRouteProvenance } from "../runs/shared/child-spawn-preflight.ts";
 import type { ChildTerminalCause, ChildTerminalState, GroupCounters, GroupLifecycleState, GroupTelemetry } from "../runs/shared/group-reliability.ts";
@@ -2393,7 +2393,7 @@ export interface RunSyncOptions {
 	allowZeroToolBudget?: boolean;
 	allowIntercomDetach?: boolean;
 	intercomEvents?: IntercomEventBus;
-	onUpdate?: (r: import("@earendil-works/pi-agent-core").AgentToolResult<Details>) => void;
+	onUpdate?: (r: import("@yunuspi/agent-core").AgentToolResult<Details>) => void;
 	/** Internal structured-delegation transport optimization: skip unchanged live snapshots. */
 	suppressUnchangedDelegationUpdates?: boolean;
 	onControlEvent?: (event: ControlEvent) => void;

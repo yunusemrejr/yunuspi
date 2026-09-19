@@ -27,3 +27,6 @@ needle.wasm
 *.pem
 *.key
 .DS_Store
+
+core/*/dist/
+core/build.json

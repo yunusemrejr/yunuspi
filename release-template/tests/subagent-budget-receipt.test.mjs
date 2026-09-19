@@ -22,13 +22,13 @@ for (const stepCount of [1, 2]) test(`background budget receipt preserves report
   const installRoots = [
     path.join(template, "node_modules"),
     path.join(agentRoot, "npm/node_modules"),
-    path.join(globalRoot, "@earendil-works/pi-coding-agent/node_modules"),
+    path.join(globalRoot, "@yunuspi/coding-agent/node_modules"),
   ];
   const jiti = [
     path.join(template, "node_modules/jiti/lib/jiti-cli.mjs"),
-    path.join(template, "node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti-cli.mjs"),
+    path.join(template, "node_modules/@yunuspi/coding-agent/node_modules/jiti/lib/jiti-cli.mjs"),
     path.join(agentRoot, "npm/node_modules/jiti/lib/jiti-cli.mjs"),
-    path.join(globalRoot, "@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti-cli.mjs"),
+    path.join(globalRoot, "@yunuspi/coding-agent/node_modules/jiti/lib/jiti-cli.mjs"),
   ].find((candidate) => fs.existsSync(candidate));
   assert.ok(jiti, "installed jiti runtime is available for the TypeScript runner");
   const extensionModules = path.join(agentRoot, "extensions/node_modules");

@@ -1,4 +1,4 @@
-import { isKeyRelease, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
+import { isKeyRelease, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@yunuspi/tui';
 
 /** A snapshot remains stable while reading. Resize retains the logical line. */
 export function createMetricsPanel(lines: string[], tui: any, theme: any, done: () => void) {

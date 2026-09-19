@@ -1,3 +1,4 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -59,7 +60,7 @@ for(const prompt of ['Harden the Ubuntu server firewall','Secure the server','Re
 
 assert.ok(routeSkills('Review C++20 code').some(r=>r.name==='cpp-performance-engineering'));
 assert.ok(routeSkills('Write frontend JS').some(r=>r.name==='browser-javascript-engineering'));
-assert.deepEqual(new Set([...cases.map(c=>c[0]),"product-ui-verification","colors","svg-motion-engineering","browser-animation-engineering","physical-animation-systems","procedural-animation-math","threejs-animation-engineering","wasm-animation-pipelines","llm-fine-tuning","llm-dataset-preparation","google-colab-training","local-network-analysis","wireless-signal-analysis","network-traffic-analysis","network-iso-compliance","industrial-automation-control","industrial-device-protocols","browser-automation","proxy-operations","audio-processing","image-analysis","financial-statement-analysis","investment-risk-analysis","rag-engineering","scientific-paper-research","spreadsheet-authoring","presentation-authoring","word-document-authoring","libreoffice-automation","blender-production","terminal-video-editing","cad-engineering","media-in-web","harness-self-maintenance","community-promotion","organic-growth-engineering","motion-graphics-production","video-analysis","sound-analysis","music-composition","email"]),new Set(skillRoutes.map(r=>r.name)));
+assert.deepEqual(new Set([...cases.map(c=>c[0]),"product-ui-verification","colors","svg-motion-engineering","browser-animation-engineering","physical-animation-systems","procedural-animation-math","threejs-animation-engineering","wasm-animation-pipelines","llm-fine-tuning","llm-dataset-preparation","google-colab-training","local-network-analysis","wireless-signal-analysis","network-traffic-analysis","network-iso-compliance","industrial-automation-control","industrial-device-protocols","browser-automation","proxy-operations","audio-processing","image-analysis","financial-statement-analysis","investment-risk-analysis","rag-engineering","scientific-paper-research","spreadsheet-authoring","presentation-authoring","word-document-authoring","libreoffice-automation","blender-production","terminal-video-editing","cad-engineering","media-in-web","harness-self-maintenance","community-promotion","organic-growth-engineering","motion-graphics-production","video-analysis","sound-analysis","music-composition","email","java-cross-platform","c-cpp-multiplatform","linux-network-engineering","linux-desktop-ui-ux","proxy-analysis","packet-trace-analysis","multi-developer-pipelines","modern-frontend-frameworks","gif-animation-editing"]),new Set(skillRoutes.map(r=>r.name)));
 const catalog='<available_skills>'+cases.map(([name])=>`<skill><name>${name}</name><description>fixture</description><location>${root}skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
 function fixture(prompt='',systemPrompt=catalog) {
  const entries=[];const ctx={cwd:'/routing-case',sessionManager:{getBranch:()=>entries}};
@@ -112,7 +113,7 @@ const restored=createRelevantGuidance(readFixture.pi);restored.restore(readFixtu
 const compacted={...readFixture.ctx,sessionManager:{getBranch:()=>[{type:'compaction'}]}};
 restored.restore(compacted);restored.start({prompt:'Implement PHP',systemPrompt:catalog},compacted);assert.ok(restored.candidates().some(h=>h.skill===php),'compaction invalidates read receipt');
 const disabled=process.env.PI_RELEVANT_GUIDANCE;process.env.PI_RELEVANT_GUIDANCE='off';assert.equal(fixture('Implement PHP').g.candidates().length,0);if(disabled===undefined)delete process.env.PI_RELEVANT_GUIDANCE;else process.env.PI_RELEVANT_GUIDANCE=disabled;
-const core=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8',timeout:5000}).trim(),'@earendil-works/pi-coding-agent/dist/core/skills.js');
+const core=path.join(resolveOwnedCore(),'dist/core/skills.js');
 const {loadSkillsFromDir}=await import(pathToFileURL(core));
 const loaded=loadSkillsFromDir({dir:path.join(root,'skills'),source:'user'});assert.deepEqual(loaded.diagnostics,[]);
 for(const [name] of cases)assert.ok(loaded.skills.some(s=>s.name===name),`Pi SDK loads ${name}`);

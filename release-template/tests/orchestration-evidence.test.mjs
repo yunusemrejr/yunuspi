@@ -37,7 +37,7 @@ test('stops and budgets have explicit causes; missing evidence stays unknown',()
  assert.deepEqual(projectRunEvidence({usage:{input:-1,output:NaN,cacheRead:Infinity}}).usage,{});
 });
 test('Lens profiling survives reinstall and rejects partial patch drift',async()=>{
- const {edits,applySource,targets}=await import(pathToFileURL(path.join(agent,'scripts/patches/pi-lens-tool-result-profile.mjs')));
+ const {edits,applySource,targets}=await import(pathToFileURL(path.join(agent,'scripts/compatibility/legacy-transforms/pi-lens-tool-result-profile.mjs')));
  const source=fs.readFileSync(path.join(agent,'extensions/pi-lens/dist/index.js'),'utf8');
  let baseline=source;for(const [old,next]of edits)baseline=baseline.replace(next,()=>old);
  assert.equal(applySource(baseline),source);assert.equal(applySource(source),source);assert.ok(targets()[0].isApplied());

@@ -8,7 +8,7 @@ const template = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')].find(p => fs.existsSync(path.join(p, 'extensions/filesystem-safety.ts')));
 const filename = path.join(agent, 'extensions/filesystem-safety.ts');
 let source = fs.readFileSync(filename, 'utf8')
-  .replace(/import \{\s*getAgentDir,[\s\S]*?from "@earendil-works\/pi-coding-agent";/, `const getAgentDir=()=>${JSON.stringify(agent)};`)
+  .replace(/import \{\s*getAgentDir,[\s\S]*?from "@yunuspi\/coding-agent";/, `const getAgentDir=()=>${JSON.stringify(agent)};`)
   .replace(/from "(\.\/?[^"\n]+)"/g, (_, ref) => `from ${JSON.stringify(new URL(ref, pathToFileURL(filename)).href)}`);
 const { invalidShellPath, assessShellMutation } = await import('data:text/javascript;base64,' + Buffer.from(stripTypeScriptTypes(source)).toString('base64'));
 

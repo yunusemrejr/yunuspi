@@ -57091,7 +57091,7 @@ var init_diagnostic_line_freshness = __esm({
 });
 
 // dist/clients/deps/pi-tui.js
-import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth } from "@yunuspi/tui";
 var init_pi_tui = __esm({
   "dist/clients/deps/pi-tui.js"() {
     "use strict";

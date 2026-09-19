@@ -1,4 +1,4 @@
-import type { ModelCost } from "@earendil-works/pi-ai";
+import type { ModelCost } from "@yunuspi/ai";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];

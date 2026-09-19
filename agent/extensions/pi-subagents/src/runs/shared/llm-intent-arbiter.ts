@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { cheapMutationScreen, resolveWithScreen } from "../../../../lib/micro-intelligence/intent.ts";
 import { microMetrics } from "../../../../lib/micro-intelligence/metrics.ts";
-import { Agent, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
-import { convertToLlm, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
-import type { ProviderHeaders } from "@earendil-works/pi-ai";
+import { Agent, type AgentTool, type StreamFn } from "@yunuspi/agent-core";
+import { convertToLlm, type ExtensionContext } from "@yunuspi/coding-agent";
+import { streamSimple } from "@yunuspi/ai/compat";
+import type { ProviderHeaders } from "@yunuspi/ai";
 import { Type, type Static } from "typebox";
 import { agentStreamOptions } from "../../shared/agent-stream-options.ts";
 

@@ -8,14 +8,14 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 const template=path.resolve(import.meta.dirname,'..');
-const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'scripts/patches/compaction-early.mjs')));
+const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'scripts/compatibility/legacy-transforms/compaction-early.mjs')));
 let parser;
 try {parser=await import('acorn');} catch {parser=createRequire(path.join(agent,'npm/package.json'))('acorn');}
 const {parseExpressionAt}=parser;
-const {targets}=await import(pathToFileURL(path.join(agent,'scripts/patches/compaction-early.mjs')));
+
 let core;
-try {core=path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))),'..');}
-catch {core=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@earendil-works/pi-coding-agent');}
+try {core=path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@yunuspi/coding-agent'))),'..');}
+catch {core=path.join(execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim(),'@yunuspi/coding-agent');}
 const saved=process.env.PI_HARNESS_PATCH_TEST_CORE;
 const stage=fs.mkdtempSync(path.join(os.tmpdir(),'pi-compaction-usage-'));
 function fn(source,name,scope) {
@@ -25,12 +25,11 @@ function fn(source,name,scope) {
  return vm.runInNewContext(`(${source.slice(node.start,node.end)})`,scope);
 }
 try {
- process.env.PI_HARNESS_PATCH_TEST_CORE=core;
- for(const file of new Set(targets().map(t=>t.file))) {
-  const dest=path.join(stage,path.relative(core,file));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(file,dest);
- }
- process.env.PI_HARNESS_PATCH_TEST_CORE=stage;
- for (const target of targets()) target.apply();
+ const targets=()=>[
+  {name:'owned shouldCompact',file:path.join(core,'dist/core/compaction/compaction.js')},
+  {name:'owned automatic full-window gates',file:path.join(core,'dist/core/agent-session.js')},
+  {name:'owned post-compaction usage',file:path.join(core,'dist/core/compaction/compaction.js')},
+ ];
  for (const target of targets().filter(t=>t.name.includes('shouldCompact'))) {
   await test(target.name+' waits for exactly 80% of the whole model window',()=>{
    const predicate=fn(fs.readFileSync(target.file,'utf8'),'shouldCompact',{});
@@ -65,8 +64,8 @@ try {
  }
  for(const target of targets().filter(t=>t.name.includes('post-compaction usage'))) {
   await test(target.name+' ignores retained stale usage without changing billing records',()=>{
-   target.apply();assert.equal(target.isApplied(),true);
-   const once=fs.readFileSync(target.file,'utf8');target.apply();assert.equal(fs.readFileSync(target.file,'utf8'),once);
+
+   const once=fs.readFileSync(target.file,'utf8');
    const usage=m=>m.role==='assistant'&&m.stopReason!=='error'&&m.stopReason!=='aborted'&&m.usage?.input>0?m.usage:undefined;
    const count=u=>u.input+u.output+u.cacheRead+u.cacheWrite;
    const estimate=m=>Math.ceil(String(m.content??m.summary??'').length/4);

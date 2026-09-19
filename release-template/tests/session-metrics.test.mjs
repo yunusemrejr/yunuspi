@@ -14,7 +14,7 @@ const { collectSessionMetrics } = await import(
   pathToFileURL(path.join(agent, "extensions/lib/session-metrics.ts"))
 );
 const { wrapper, transform } = await import(
-  pathToFileURL(path.join(agent, "scripts/patches/hook-metrics.mjs"))
+  pathToFileURL(path.join(agent, "scripts/compatibility/legacy-transforms/hook-metrics.mjs"))
 );
 const message = (role, fields) => ({
   type: "message",

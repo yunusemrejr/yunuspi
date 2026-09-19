@@ -48,7 +48,7 @@
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import {
 	GateDeniedError,
 	estimateTokens,

@@ -6,7 +6,7 @@ import { routeSkills } from "../runs/shared/skill-routing.ts";
 import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 import { READ_ONLY_REASONING_TOOLS } from "../runs/shared/tool-budget.ts";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -106,7 +106,7 @@ function recoveryConstraints(ctx: ExtensionContext, prompt: string, primary: Mod
 	return constraints;
 }
 /** Root lifecycle controller. Native executor owns processes, fleet slots and cancellation; one parent remains writer. */
-export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, deps: { now?: () => number; wait?: typeof wait; childRoutes?: readonly string[]; endpoints?: (modelId:string, signal:AbortSignal)=>Promise<Endpoint[]> } = {}): void {
+export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, deps: { now?: () => number; wait?: typeof wait; judge?: typeof askJev; childRoutes?: readonly string[]; endpoints?: (modelId:string, signal:AbortSignal)=>Promise<Endpoint[]> } = {}): void {
 	const child = process.env.PI_SUBAGENT_CHILD === "1";
 	if (child && !deps.childRoutes?.length) return;
 	const now = deps.now ?? Date.now;
@@ -502,41 +502,47 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	on("before_agent_start", async (event, ctx) => {
 		primary ??= ctx.model;
 		prompt ||= event.prompt;
+		skillBrief = "";
+		if (pi.getActiveTools && !pi.getActiveTools().includes("subagent")) return;
 		// Rank all applicable routes, then cap the available references. A missing
 		// high-priority skill must not displace a lower-ranked installed skill.
 		const wanted = new Set([...routeSkills(prompt).sort((a,b)=>b.priority-a.priority).map(r=>r.name), "evidence-first-engineering"]);
+		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
+			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
+		// An unavailable skill cannot be surfaced. Filter it before spending a
+		// remote judgment, while retaining lexical order for installed routes.
+		for (const name of wanted) if (!catalog.has(name)) wanted.delete(name);
 		// Jev re-ranks the lexical shortlist by meaning so the surfaced
 		// references best match the task. Trivial prompts, single
 		// candidates and low-confidence distributions keep lexical order.
 		// Ledgered like any route; no result surface exists here, so the
 		// judgment shows in metrics and cost, not inline.
 		try {
-			const names = [...wanted];
+			const names = [...wanted].slice(0, 15);
 			if (!tooShort(prompt, 20) && names.length >= 2) {
-				const judged = await askJev("route", { task: prompt.slice(0, 2000) }, {
+				const judged = await (deps.judge ?? askJev)("route", { task: prompt.slice(0, 2000) }, {
 					skill: {
 						type: "choice",
 						instructions: "Which skill best matches this task?",
-						criteria: Object.fromEntries(names.slice(0, 15).map((name) => [name, null])),
+						criteria: Object.fromEntries(names.map((name) => [name, null])),
 					},
 				}, { pi });
 				if (judged.ok) {
 					const order = judged.answers.skill?.probabilities ?? {};
 					const top = judged.answers.skill?.choice;
-					if (top && (order[top] ?? 0) >= 0.35) {
+					if (top && names.includes(top) && Number.isFinite(order[top]) && order[top] >= 0.35 && order[top] <= 1
+						&& names.every(name => order[name] === undefined || Number.isFinite(order[name]) && order[name] >= 0 && order[name] <= 1)) {
+						const remainder = [...wanted].filter(name => !names.includes(name));
 						wanted.clear();
-						for (const name of [...names].sort((a, b) => (order[b] ?? 0) - (order[a] ?? 0))) wanted.add(name);
+						for (const name of [...names].sort((a, b) => (order[b] ?? 0) - (order[a] ?? 0)).concat(remainder)) wanted.add(name);
 					}
 				}
 			}
 		} catch {
 			// Lexical order stands.
 		}
-		const catalog = new Map([...String(event.systemPrompt ?? "").slice(0,262144).matchAll(/<skill>\s*<name>([^<]+)<\/name>[\s\S]*?<location>([^<]+)<\/location>\s*<\/skill>/g)]
-			.filter(m=>wanted.has(m[1]) && m[2].startsWith("/") && m[2].length<512).map(m=>[m[1],m[2].replaceAll("&amp;","&")]));
 		const paths = [...wanted].flatMap(name=>catalog.has(name)?[catalog.get(name)!]:[]).slice(0,2);
 		skillBrief = paths.length ? `Optional skill references; read only if essential to a specific uncertainty: ${paths.map(p=>JSON.stringify(p)).join(", ")}.` : "";
-		if (pi.getActiveTools && !pi.getActiveTools().includes("subagent")) return;
 		// Project intelligence owns the automatic scope council for qualifying
 		// changes. Do not spend a second proactive helper budget on the same task
 		// or a referential continuation; the council runner still applies the

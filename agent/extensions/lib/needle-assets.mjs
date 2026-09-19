@@ -11,9 +11,9 @@
  * - Native fallback: <platform>/needle CLI (e.g. linux-x86_64/needle)
  */
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { rename, mkdir, rm, readFile, writeFile, stat } from "node:fs/promises";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { pipeline } from "node:stream/promises";
@@ -88,9 +88,9 @@ export async function readManifest(dir) {
 
 async function hashFile(path, bytes) {
   const hash = createHash("sha256");
-  const data = await readFile(path);
-  hash.update(data);
-  return { size: data.length, sha256: hash.digest("hex"), expected: bytes };
+  let size = 0;
+  for await (const chunk of createReadStream(path)) { size += chunk.length; hash.update(chunk); }
+  return { size, sha256: hash.digest("hex"), expected: bytes };
 }
 
 /** Verify installed assets. `full` hashes every file (35MB weights take
@@ -125,7 +125,7 @@ export async function verifyAssets(dir = needleAssetDir(), full = false) {
   return { ok: problems.length === 0, dir, problems, manifest: manifest ?? null };
 }
 
-async function downloadFile(url, dest, expected, fetchImpl, onProgress, retryDelayMs = 1000) {
+export async function downloadFile(url, dest, expected, fetchImpl, onProgress, retryDelayMs = 1000, downloadTimeoutMs = 120_000) {
   const { Readable } = await import("node:stream");
   const part = `${dest}.part`;
   // Resumable: long blob connections can drop mid-file (observed HF socket
@@ -137,17 +137,32 @@ async function downloadFile(url, dest, expected, fetchImpl, onProgress, retryDel
     let have = 0;
     try {
       have = (await stat(part)).size;
-      if (have > expected.bytes + 1024) await rm(part, { force: true }).catch(() => {});
+      if (have >= expected.bytes) {
+        const existing = have === expected.bytes ? await hashFile(part, expected.bytes) : null;
+        if (existing?.sha256 === expected.sha256) { await rename(part, dest); return; }
+        await rm(part, { force: true });
+        have = 0;
+      }
     } catch {
       have = 0;
     }
     try {
+      const signal = AbortSignal.timeout(downloadTimeoutMs);
       const response = await fetchImpl(url, {
+        signal,
         redirect: "follow",
         headers: have > 0 ? { Range: `bytes=${have}-` } : {},
       });
       if (!response.ok || !response.body) throw new Error(`download ${response.status} for ${url}`);
       const resumed = response.status === 206 && have > 0;
+      if (response.status === 206) {
+        const range = response.headers?.get("content-range");
+        if (range !== `bytes ${have}-${expected.bytes - 1}/${expected.bytes}`) {
+          await response.body.cancel().catch(() => {});
+          await rm(part, { force: true });
+          throw new Error(`invalid resume range for ${expected.local}`);
+        }
+      }
       if (!resumed && have > 0) {
         await rm(part, { force: true });
         have = 0;
@@ -165,10 +180,14 @@ async function downloadFile(url, dest, expected, fetchImpl, onProgress, retryDel
           }
         },
         sink,
+        { signal },
       );
       if (size !== expected.bytes) throw new Error(`${expected.local} size ${size} != pinned ${expected.bytes} (attempt ${attempt})`);
       const { sha256 } = await hashFile(part, expected.bytes);
-      if (sha256 !== expected.sha256) throw new Error(`${expected.local} sha256 mismatch`);
+      if (sha256 !== expected.sha256) {
+        await rm(part, { force: true });
+        throw new Error(`${expected.local} sha256 mismatch`);
+      }
       await rename(part, dest);
       return;
     } catch (error) {
@@ -191,10 +210,11 @@ export async function installAssets(options = {}) {
     onProgress = null,
     force = false,
     retryDelayMs = 1000,
+    downloadTimeoutMs = 120_000,
   } = options;
   const dir = process.env.PI_NEEDLE_ASSETS || join(agentDir, "local-models", "needle3");
   if (!force) {
-    const current = await verifyAssets(dir, false);
+    const current = await verifyAssets(dir, true);
     if (current.ok) return { installed: false, dir, note: "assets already match the pinned manifest" };
   }
   await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
@@ -202,7 +222,7 @@ export async function installAssets(options = {}) {
   await mkdir(stage, { recursive: true, mode: 0o700 });
   try {
     for (const file of NEEDLE_PINNED_FILES) {
-      await downloadFile(`${baseUrl()}/${file.remote}`, join(stage, file.local), file, fetchImpl, onProgress, retryDelayMs);
+      await downloadFile(`${baseUrl()}/${file.remote}`, join(stage, file.local), file, fetchImpl, onProgress, retryDelayMs, downloadTimeoutMs);
     }
     await writeFile(
       join(stage, "manifest.json"),

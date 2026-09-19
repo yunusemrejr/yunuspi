@@ -12,7 +12,7 @@
  * so a cached value cannot leak candidates across authorization contexts;
  * context-dependent candidate SETS are rebuilt by the owner on every call.
  */
-import type { NeedleResult } from "../needle-types.ts";
+import type { NeedleResult } from "../needle-runtime.ts";
 import type { NeedleRankResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
 
@@ -64,7 +64,7 @@ export function trivialQuery(query: unknown): boolean {
  *
  * - `lexical` is the caller's deterministic+lexical order (already bounded).
  * - Needle re-ranks the head slice; its order applies when the win is
- *   accepted (score/margin floors) or when it agrees with lexical-top.
+ *   accepted (score/margin floors); agreement alone cannot reorder the tail.
  * - Jev validates exactly when it adds value: Needle is uncertain, or
  *   Needle-top and lexical-top disagree. One batched call, same bars as the
  *   existing tool-discovery rerank (exists >= 0.5, topProb >= 0.4).
@@ -95,7 +95,8 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   }
 
   const slice = lexical.slice(0, MAX_STAGE);
-  const needleSlice = slice.slice(0, options.needleTopK ?? NEEDLE_STAGE);
+  const limit = Number.isSafeInteger(options.needleTopK) ? Math.max(2, Math.min(MAX_STAGE, options.needleTopK!)) : NEEDLE_STAGE;
+  const needleSlice = slice.slice(0, limit);
   let needleTop: string | undefined;
   let needleMargin = 0;
   let needleAccepted = false;
@@ -103,13 +104,16 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   let needleOrder: string[] | undefined;
 
   if (options.needle) {
+    metrics.offer("needle");
     try {
       const ranked = await options.needle(
         query.slice(0, EMBED_CHARS),
-        needleSlice.map((item) => ({ id: String(item.id).slice(0, 256), text: String(item.text).slice(0, EMBED_CHARS) })),
+        needleSlice.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, EMBED_CHARS) })),
         needleSlice.length,
       );
       if (ranked.ok) {
+        metrics.run("needle", ranked.ms);
+        if (ranked.cached) metrics.cacheHit("needle");
         needleShadow = ranked.shadow;
         const head = ranked.value.ranked;
         if (head.length) {
@@ -122,6 +126,9 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
           needleAccepted = score >= acceptScore && needleMargin >= acceptMargin;
           if (needleShadow) {
             metrics.shadowAgreement(needleTop === lexicalTop);
+            metrics.skip("needle", "shadow");
+          } else if (!needleAccepted) {
+            metrics.skip("needle", score < acceptScore ? "low-confidence" : "low-margin");
           }
         }
       } else {
@@ -132,33 +139,25 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
     }
   }
 
-  // Shadow mode: Needle measured, lexical order stays authoritative.
-  if (needleShadow) {
-    return done([...lexical], "lexical", { needleTop, needleMargin });
-  }
-
   const agrees = needleTop !== undefined && needleTop === lexicalTop;
-  // Fast path: an accepted Needle win, or agreement with lexical order.
-  // Disagreement and uncertainty fall through to Jev validation.
+  // Shadow may measure agreement but must preserve baseline Jev eligibility.
+  // Weak agreement on the first result does not authorize reordering others.
   let needleOrdered: T[] | undefined;
-  if (needleOrder && (needleAccepted || agrees)) {
+  if (!needleShadow && needleOrder && needleAccepted) {
     const rankOf = new Map(needleOrder.map((id, index) => [id, index]));
     needleOrdered = [...slice]
       .sort((a, b) => (rankOf.get(a.id) ?? 999) - (rankOf.get(b.id) ?? 999))
       .concat(lexical.slice(MAX_STAGE));
-    if (needleAccepted || agrees) {
-      metrics.run("needle");
+    if (!options.jev || agrees) {
       metrics.accept("needle");
-      if (!options.jev || needleAccepted) {
-        return done(needleOrdered, agrees && !needleAccepted ? "lexical" : "needle", { needleTop, needleMargin });
-      }
-      // Agreed but unaccepted: still cheap to confirm high-value picks.
+      return done(needleOrdered, "needle", { needleTop, needleMargin });
     }
   }
 
   // Jev validation: uncertain Needle, stage disagreement, or no Needle.
-  const needsJev = needleTop === undefined || !needleAccepted || !agrees;
+  const needsJev = needleShadow || needleTop === undefined || !needleAccepted || !agrees;
   if (options.jev && needsJev) {
+    metrics.offer("jev");
     try {
       const pool = (needleOrdered ?? [...lexical]).slice(0, MAX_STAGE);
       const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
@@ -177,9 +176,12 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
         metrics.run("jev");
         metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd ?? 0, judged.usage.cached);
         if (judged.usage.cached) metrics.cacheHit("jev");
-        if ((judged.answers.exists?.noul ?? 0) >= 0.5 && topProb >= 0.4 && top) {
+        const allowed = new Set(candidates.map((candidate) => candidate.id));
+        const exists = judged.answers.exists?.noul;
+        if (Number.isFinite(exists) && exists! >= 0.5 && exists! <= 1 && Number.isFinite(topProb) && topProb >= 0.4 && topProb <= 1 && top && allowed.has(top)) {
           const rankOf = new Map(
-            Object.entries(order).sort((a, b) => b[1] - a[1]).map(([id], index) => [id, index]),
+            Object.entries(order).filter(([id, probability]) => allowed.has(id) && Number.isFinite(probability) && probability >= 0 && probability <= 1)
+              .sort((a, b) => a[0] === top ? -1 : b[0] === top ? 1 : b[1] - a[1]).map(([id], index) => [id, index]),
           );
           const reordered = [...lexical].sort(
             (a, b) => (rankOf.get(a.id) ?? 999) - (rankOf.get(b.id) ?? 999),
@@ -200,6 +202,7 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   }
 
   if (needleOrdered && needleTop !== undefined) {
+    metrics.accept("needle");
     return done(needleOrdered, "needle", { needleTop, needleMargin });
   }
   return done([...lexical], "lexical", { needleTop, needleMargin });

@@ -1,7 +1,7 @@
 /**
  * Pure image-eviction logic for provider request-body compaction.
  *
- * The request-body-gate patch (scripts/patches/request-body-gate.mjs) hard-blocks
+ * The request-body-gate patch (scripts/compatibility/legacy-transforms/request-body-gate.mjs) hard-blocks
  * any provider send whose ENCODED body exceeds ~3.5 MB, and providers in this
  * harness also cap the COUNT of images per prompt (observed: friendli's
  * OpenAI-completions endpoint 400s with "At most 8 image(s) may be provided in
