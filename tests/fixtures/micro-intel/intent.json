@@ -1,0 +1,12 @@
+{
+  "tasks": [
+    { "task": "Summarize the authentication module and explain how sessions expire", "expected": "read-only" },
+    { "task": "Read the router configuration and list the registered endpoints", "expected": "read-only" },
+    { "task": "Review the payment handler for logic errors without changing anything", "expected": "read-only" },
+    { "task": "Search the codebase for retry logic and report where it lives", "expected": "read-only" },
+    { "task": "Implement rate limiting on the login endpoint with tests", "expected": "implementation" },
+    { "task": "Fix the failing checkout test by correcting the tax calculation", "expected": "implementation" },
+    { "task": "Refactor the session store to use the new cache interface", "expected": "implementation" },
+    { "task": "Migrate the billing schema and backfill historical invoices", "expected": "implementation" }
+  ]
+}

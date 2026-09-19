@@ -468,6 +468,26 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 **Documentation:** [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
 
+#### micro-intelligence
+
+Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, evidence triage, intent pre-screening and request advisories; deterministic owners keep authority and missing helpers degrade to documented skips.
+
+**Entrypoints:** `micro_status`
+
+**Catalog tool pointers:** `micro_status`
+
+**Options:**
+
+- `PI_MICRO_INTELLIGENCE`: Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners.
+- `PI_NEEDLE`: Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying.
+- `PI_MICRO_ADVISORY`: Set to off to skip the per-request Jev advisory batch.
+
+**Related records:** `local-intelligence`, `tool-catalog`, `skill-catalog`, `context-diagnostics`
+
+**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/micro-intelligence/coordinator.ts`](../agent/extensions/lib/micro-intelligence/coordinator.ts)
+
+**Documentation:** [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
+
 ### orchestration
 
 #### subagent-dispatch
@@ -856,7 +876,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 193; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 189; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 10; literal)
-- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 394; literal)
+- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 406; literal)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 70; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 162; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 159; factory)
@@ -866,9 +886,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2632; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2776; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 1924; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 61; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 165; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 711; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 842; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 584; literal)
@@ -894,7 +915,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 173; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 86; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 208; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 215; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 96; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 59; literal)
@@ -951,7 +972,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 600)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 184)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 47)
-- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 764)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 895)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 647)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 646)
@@ -1006,6 +1027,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/utility-mcp/server.mjs`](../agent/extensions/lib/utility-mcp/server.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/shapes.mjs`](../agent/extensions/lib/utility-mcp/shapes.mjs) — `MCP`
 - [`agent/extensions/lib/utility-mcp/worker.mjs`](../agent/extensions/lib/utility-mcp/worker.mjs) — `MCP`
+- [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-background-tasks/src/core/registry.ts`](../agent/extensions/pi-background-tasks/src/core/registry.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/pi-lens/dist/index.js`](../agent/extensions/pi-lens/dist/index.js) — `MCP`, `wrapper/adapter`
@@ -1073,6 +1095,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts)
+- [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts)
 - [`agent/extensions/model-config.ts`](../agent/extensions/model-config.ts)
 - [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts)
 - [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts)
@@ -1137,6 +1160,11 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/mini-preprocessor.ts`](../agent/extensions/lib/mini-preprocessor.ts)
 - [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/music-score.ts`](../agent/extensions/lib/music-score.ts)
+- [`agent/extensions/lib/needle-assets.mjs`](../agent/extensions/lib/needle-assets.mjs)
+- [`agent/extensions/lib/needle-policy.ts`](../agent/extensions/lib/needle-policy.ts)
+- [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts)
+- [`agent/extensions/lib/needle-types.ts`](../agent/extensions/lib/needle-types.ts)
+- [`agent/extensions/lib/needle-worker.mjs`](../agent/extensions/lib/needle-worker.mjs)
 - [`agent/extensions/lib/numeric-checks.ts`](../agent/extensions/lib/numeric-checks.ts)
 - [`agent/extensions/lib/output-distiller.ts`](../agent/extensions/lib/output-distiller.ts)
 - [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts)
@@ -1188,6 +1216,15 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ### Manifest support files
 
+- [`agent/extensions/lib/micro-intelligence/advisory.ts`](../agent/extensions/lib/micro-intelligence/advisory.ts)
+- [`agent/extensions/lib/micro-intelligence/coordinator.ts`](../agent/extensions/lib/micro-intelligence/coordinator.ts)
+- [`agent/extensions/lib/micro-intelligence/evidence.ts`](../agent/extensions/lib/micro-intelligence/evidence.ts)
+- [`agent/extensions/lib/micro-intelligence/health.ts`](../agent/extensions/lib/micro-intelligence/health.ts)
+- [`agent/extensions/lib/micro-intelligence/intent.ts`](../agent/extensions/lib/micro-intelligence/intent.ts)
+- [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+- [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../agent/extensions/lib/micro-intelligence/retrieval.ts)
+- [`agent/extensions/lib/micro-intelligence/review.ts`](../agent/extensions/lib/micro-intelligence/review.ts)
+- [`agent/extensions/lib/micro-intelligence/status.ts`](../agent/extensions/lib/micro-intelligence/status.ts)
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs)
 - [`agent/extensions/lib/project-intelligence/continuity.mjs`](../agent/extensions/lib/project-intelligence/continuity.mjs)
 - [`agent/extensions/lib/project-intelligence/discovery-parsers.mjs`](../agent/extensions/lib/project-intelligence/discovery-parsers.mjs)
@@ -1524,6 +1561,7 @@ These modules are present under `agent/scripts/patches` in the sanitized export.
 - [`docs/ISOLATION-AND-WEB.md`](ISOLATION-AND-WEB.md)
 - [`docs/LLM-PREFERENCES.md`](LLM-PREFERENCES.md)
 - [`docs/LOCAL-INTELLIGENCE.md`](LOCAL-INTELLIGENCE.md)
+- [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
 - [`docs/PLATFORMS.md`](PLATFORMS.md)

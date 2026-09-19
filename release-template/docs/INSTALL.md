@@ -74,6 +74,28 @@ npx --no-install playwright install chromium
 
 On Linux, Playwright may also require system packages; install them using its documented OS dependency procedure. Download browsers only when browser tasks are needed. Other tools mentioned in skills are installed separately. No local model download, API subscription, service or scheduled task is silently enabled by this bootstrap.
 
+## Optional local micro-models
+
+Needle3, Smol, and Kompress weights are not bundled. The installer records
+their absence and continues; every layer degrades to a documented skip.
+To light them up, set one or more endpoints and re-run the installer or
+`micro_status`:
+
+- Needle3: pinned WASM assets are fetched by
+  `node agent/extensions/lib/needle-assets.mjs install [--revision …]`;
+  `verify`, `repair`, and `smoke` keep the cache healthy.
+- Smol / Kompress: point at local llama.cpp-style servers serving the
+  SmolLM2 and Qwen3-1.7B-GGUF weights described in
+  `docs/MICRO-INTELLIGENCE.md`, or the stock-Ollama convenience names
+  when using Ollama.
+- Jev: no install step; it activates inside sandbox-guarded processes
+  using pinned dependencies.
+
+Direct semantic retrieval uses the `needle-query.mjs` helper. See
+`docs/MICRO-INTELLIGENCE.md` for the full pipeline, budgets, and
+observer controls (`PI_NEEDLE`, `PI_NEEDLE_SHADOW`, `PI_MICRO_ADVISORY`,
+`PI_MICRO_INTELLIGENCE`).
+
 ## Updates and recovery
 
 Review the new public release and security changes first. Stop Pi, keep a private backup, then use the explicit backup installation workflow above. Reconfigure your own credentials locally; never merge an old private tree into a release checkout. If installation fails before activation, the previous target remains; if activation fails after its rename, the installer attempts to restore it and reports failure. To roll back an activated install, stop Pi, move the new directory aside and rename the preserved backup to `~/.pi/agent`. Pinned core upgrades and rollback are separate from the agent directory.

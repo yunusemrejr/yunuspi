@@ -35,7 +35,8 @@
     "utility-tools.ts",
     "research-toolkit.ts",
     "session-export-json.ts",
-    "model-config.ts"
+    "model-config.ts",
+    "micro-intelligence.ts"
   ],
   "lib": [
     "media-process.ts",
@@ -118,7 +119,12 @@
     "capability-audit.ts",
     "activity-indicators.ts",
     "prompt-interpretation.ts",
-    "session-stop.ts"
+    "session-stop.ts",
+    "needle-types.ts",
+    "needle-policy.ts",
+    "needle-worker.mjs",
+    "needle-runtime.ts",
+    "needle-assets.mjs"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -467,6 +473,15 @@
     "extensions/lib/utility-mcp/server.mjs",
     "extensions/lib/utility-mcp/shapes.mjs",
     "extensions/lib/utility-mcp/worker.mjs",
-    "scripts/compatibility/utility-mcp-loader-test.mjs"
+    "scripts/compatibility/utility-mcp-loader-test.mjs",
+    "extensions/lib/micro-intelligence/metrics.ts",
+    "extensions/lib/micro-intelligence/coordinator.ts",
+    "extensions/lib/micro-intelligence/health.ts",
+    "extensions/lib/micro-intelligence/retrieval.ts",
+    "extensions/lib/micro-intelligence/evidence.ts",
+    "extensions/lib/micro-intelligence/advisory.ts",
+    "extensions/lib/micro-intelligence/review.ts",
+    "extensions/lib/micro-intelligence/status.ts",
+    "extensions/lib/micro-intelligence/intent.ts"
   ]
 }

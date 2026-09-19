@@ -5,9 +5,23 @@ import { Type } from 'typebox';
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from './capability-groups.ts';
 import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
 import { askJev, jevMark, tooShort } from './jev-client.ts';
+import { needleRank, needleEmbed } from './needle-runtime.ts';
+import { multiStageRetrieve, warmEmbeddings } from './micro-intelligence/retrieval.ts';
 
-/** Jev re-ranks lexical matches by meaning. Single candidates, trivial
- * queries and low-confidence judgments stay on the lexical order. */
+/** One background embedding pass per pool per process. Warmed descriptions
+ * turn repeat Needle ranks from ~250ms into worker-cache hits; the first
+ * search of each kind stays correct (just slower) while warming runs. */
+const warmedPools = new Set<string>();
+function warmPoolOnce(kind: string, texts: string[]): void {
+  if (warmedPools.has(kind) || process.env.PI_NEEDLE === 'off') return;
+  warmedPools.add(kind);
+  void warmEmbeddings(texts, (batch) => needleEmbed(batch).then((result) => ({ ok: result.ok })));
+}
+
+/** Multi-stage re-rank: lexical order -> Needle semantic ranking -> Jev
+ * validation when uncertain. Single candidates, trivial queries and
+ * low-confidence judgments stay on the lexical order. Needle reordering is
+ * silent (local reflex, no spend); a Jev reorder carries its ledger mark. */
 async function rerankWithJev<T>(
   kind: string,
   query: string,
@@ -15,29 +29,22 @@ async function rerankWithJev<T>(
   idOf: (item: T) => string,
   textOf: (item: T) => string,
   pi: unknown,
-): Promise<{ matches: T[]; info: { mark: string; top: string; confidence: number } } | undefined> {
+): Promise<{ matches: T[]; info?: { mark: string; top: string; confidence: number } } | undefined> {
   try {
     if (tooShort(query, 3) || matches.length < 2) return undefined;
-    const pool = matches.slice(0, 25);
-    const candidates = pool.map((item) => ({ id: idOf(item), text: textOf(item).slice(0, 300) }));
-    const judged = await askJev('rank', { query: query.slice(0, 256) }, {
-      rank: {
-        type: 'choice',
-        instructions: `Which ${kind} entry best serves this need?`,
-        criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.text])),
-      },
-      exists: { type: 'noul', instructions: 'Does any candidate actually serve the need?' },
-    }, { pi });
-    if (!judged.ok) return undefined;
-    const order = judged.answers.rank?.probabilities ?? {};
-    const top = judged.answers.rank?.choice;
-    const topProb = top ? order[top] ?? 0 : 0;
-    if ((judged.answers.exists?.noul ?? 0) < 0.5 || topProb < 0.4 || !top) return undefined;
-    const rankOf = new Map(Object.entries(order).sort((a, b) => b[1] - a[1]).map(([id], index) => [id, index]));
-    const reordered = [...matches].sort(
-      (a, b) => (rankOf.get(idOf(a)) ?? 999) - (rankOf.get(idOf(b)) ?? 999),
-    );
-    return { matches: reordered, info: { mark: jevMark('rank', `${top} ${topProb.toFixed(2)}`, judged.usage), top, confidence: topProb } };
+    const lexical = matches.map((item) => ({ id: idOf(item), text: textOf(item), item }));
+    const outcome = await multiStageRetrieve({
+      kind, site: 'rank', query, lexical,
+      needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }),
+      jev: (site, state, questions) => askJev(site, state, questions, { pi }),
+      jevMark: (site, detail, usage) => jevMark(site, detail, usage),
+    });
+    if (outcome.applied === 'lexical') return undefined;
+    const ordered = outcome.ordered.map((entry) => entry.item);
+    if (outcome.applied === 'jev' && outcome.mark && outcome.jevTop !== undefined && outcome.jevConfidence !== undefined) {
+      return { matches: ordered, info: { mark: outcome.mark, top: outcome.jevTop, confidence: outcome.jevConfidence } };
+    }
+    return { matches: ordered };
   } catch {
     return undefined;
   }
@@ -292,7 +299,7 @@ export function registerToolDiscovery(pi: any) {
           const reranked = await rerankWithJev('capability', query, page.results,
             (record: any) => String(record?.id ?? ''),
             (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi);
-          if (reranked) { ranked = reranked.matches; jevRank = reranked.info; }
+          if (reranked) { ranked = reranked.matches; if (reranked.info) jevRank = reranked.info; }
         }
         const results = ranked.map((record: any) => input.detail === true || input.enable === true
           ? getCapabilityDetail(record.id) ?? record
@@ -308,6 +315,7 @@ export function registerToolDiscovery(pi: any) {
           ...(jevRank ? {jev:jevRank} : {}),
           note:added.length?'Staged: the complete matched capability bundle(s) join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Matched capability bundle(s) already staged for the wire. No tool executed this turn.'});
         }
+        warmPoolOnce('capability', ranked.map((record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''}`));
         return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
           ...(page.groups ? {groups:page.groups} : {}),
           ...(page.query ? {query:page.query} : {}),
@@ -344,13 +352,22 @@ export function registerToolDiscovery(pi: any) {
           });
         } else {
           matches = searchCapabilityMetadata(sourceFiltered, query);
+          const reranked = await rerankWithJev('command', query, matches,
+            (command: any) => String(command?.name ?? ''),
+            (command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`, pi);
+          if (reranked) {
+            matches = reranked.matches;
+            if (reranked.info) (matches as any).jevRank = reranked.info;
+          }
         }
         const offset = id ? 0 : safeOffset(input.offset);
         const limit = pageLimit(input.limit);
         const selected = matches.slice(offset,offset + limit);
+        warmPoolOnce('command', matches.map((command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`));
         return answer({
           commands:selected.map(command => commandMetadata(command,input.detail === true || Boolean(id))),
           offset,limit,remaining:Math.max(0,matches.length - offset - selected.length),
+          ...((matches as any).jevRank ? {jev:(matches as any).jevRank} : {}),
           note:'Metadata only; registered extension, prompt-template, and skill commands are listed for orientation and were not executed.',
         });
       }
@@ -383,7 +400,7 @@ export function registerToolDiscovery(pi: any) {
           const reranked = await rerankWithJev('tool', query, matches,
             (tool: any) => String(tool?.name ?? ''),
             (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi);
-          if (reranked) { matches = reranked.matches; (matches as any).jevRank = reranked.info; }
+          if (reranked) { matches = reranked.matches; if (reranked.info) (matches as any).jevRank = reranked.info; }
         }
       }
       const offset = explicit.length ? 0 : safeOffset(input.offset);
@@ -401,6 +418,7 @@ export function registerToolDiscovery(pi: any) {
       }
       const resultingActive = new Set(pi.getActiveTools());
       const toolsJevRank = (matches as any).jevRank as { mark: string; top: string; confidence: number } | undefined;
+      warmPoolOnce('tool', catalog.map((tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`));
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,

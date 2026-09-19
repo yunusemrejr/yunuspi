@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { cheapMutationScreen, resolveWithScreen } from "../../../../lib/micro-intelligence/intent.ts";
+import { microMetrics } from "../../../../lib/micro-intelligence/metrics.ts";
 import { Agent, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
 import { convertToLlm, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
@@ -68,7 +70,11 @@ export interface TaskMutationArbiterOptions {
 	/** Injectable stream function (tests). */
 	streamFn?: StreamFn;
 	timeoutMs?: number;
+	/** Injectable cheap pre-screen (tests). Defaults to the Needle->Jev chain. */
+	preScreen?: (task: string) => Promise<TaskMutationVerdict | "defer">;
 }
+
+export { cheapMutationScreen } from "../../../../lib/micro-intelligence/intent.ts";
 
 const DEFAULT_ARBITER_TIMEOUT_MS = 10_000;
 
@@ -234,8 +240,16 @@ export function createTaskMutationArbiter(
 		const key = createHash("sha256").update(task).digest("base64url");
 		const cached = cache.get(key);
 		if (cached) return cached;
-		const auth = await resolveArbiterAuth(ctx, runtime.model);
-		const verdict = await runArbitration(runtime, auth, task);
+		// Cheap chain first: most rescue checks resolve without a full LLM call.
+		const screen = options?.preScreen ?? cheapMutationScreen;
+		const { verdict } = await resolveWithScreen(
+			() => screen(task),
+			async () => {
+				microMetrics().llmHelperCall();
+				const auth = await resolveArbiterAuth(ctx, runtime.model);
+				return runArbitration(runtime, auth, task);
+			},
+		);
 		if (cache.size > 200) cache.clear();
 		cache.set(key, verdict);
 		return verdict;

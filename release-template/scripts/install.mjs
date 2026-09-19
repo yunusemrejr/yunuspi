@@ -3,20 +3,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
-let apply = false, backupExisting = false, deps = false, target = path.join(os.homedir(), '.pi', 'agent');
+let apply = false, backupExisting = false, deps = false, needle = true, target = path.join(os.homedir(), '.pi', 'agent');
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '--apply') apply = true;
   else if (arg === '--backup-existing') backupExisting = true;
   else if (arg === '--install-deps') deps = true;
+  else if (arg === '--with-needle') needle = true;
+  else if (arg === '--skip-needle') needle = false;
   else if (arg === '--target' && args[i + 1] && !args[i + 1].startsWith('--')) target = path.resolve(args[++i]);
   else if (arg === '--help') {
-    console.log('node scripts/install.mjs [--apply] [--install-deps] [--backup-existing] [--target PATH]\nDefault is a read-only dry run. --target is for staging; runtime expects ~/.pi/agent.');
+    console.log('node scripts/install.mjs [--apply] [--install-deps] [--backup-existing] [--with-needle|--skip-needle] [--target PATH]\nDefault is a read-only dry run. --target is for staging; runtime expects ~/.pi/agent.\nNeedle3 local-semantic assets (~36MB, pinned official build) download during --apply unless --skip-needle; a failed download warns and never fails the install (repair later with: node <agent>/extensions/lib/needle-assets.mjs repair).');
     process.exit(0);
   } else throw Error(`Unknown or incomplete argument: ${arg}`);
 }
@@ -49,6 +51,7 @@ const existing = fs.existsSync(target);
 if (existing && !backupExisting) throw Error('Destination exists. Use a new target, or explicitly --backup-existing after stopping Pi. No files were changed.');
 console.log(`${apply ? 'Install' : 'Dry run'}: public agent tree → ${target}`);
 console.log(`Dependencies: ${deps ? 'npm ci --ignore-scripts (network download)' : 'not installed'}; existing installation: ${existing ? 'will be renamed to a private backup, never merged' : 'none'}`);
+console.log(`Needle3 local-semantic assets: ${needle ? 'pinned official build (~36MB download)' : 'skipped (--skip-needle)'}`);
 if (!apply) process.exit(0);
 fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 const stage = fs.mkdtempSync(path.join(path.dirname(target), '.yunuspi-install-'));
@@ -84,3 +87,19 @@ try {
   catch (error) { if (backup && !fs.existsSync(target)) fs.renameSync(backup, target); throw error; }
   console.log(`Public files installed. ${backup ? `Previous installation preserved at ${backup}. ` : ''}Follow docs/INSTALL.md to install and validate the pinned core before running Pi.`);
 } finally { fs.rmSync(stage, { recursive: true, force: true }); }
+// Needle3 assets: pinned, checksummed, atomic. A missing manager (minimal
+// fixture trees), offline network, or corrupt download warns and never fails
+// the install: Needle degrades gracefully and repairs on demand.
+if (needle) {
+  try {
+    const manager = await import(pathToFileURL(path.join(target, 'extensions/lib/needle-assets.mjs')).href).catch(() => null);
+    if (!manager?.installAssets) {
+      console.log('Needle3 assets: manager unavailable in this distribution; skipping (repair later with needle-assets.mjs).');
+    } else {
+      const receipt = await manager.installAssets({ agentDir: target });
+      console.log(`Needle3 assets: ${receipt.installed ? receipt.note : 'already installed and verified'}.`);
+    }
+  } catch (error) {
+    console.log(`Needle3 assets: download unavailable (${String(error?.message ?? error).slice(0, 160)}). Install continues without local semantics; repair later with: node ${target}/extensions/lib/needle-assets.mjs repair`);
+  }
+}

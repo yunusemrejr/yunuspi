@@ -64,13 +64,31 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  let runtime=options.runtime,busy=false,last=-Infinity,generation=0;const now=options.now??Date.now,request=options.fetch??fetch;let current:AbortController|undefined;
  const cache=new Map<string,MiniSelection>();
  let failures=0;
- const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,projectedSavedChars:0};
- if(!runtime)void loadRuntime().then(v=>{runtime=v;});
+ const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,timeouts:0,warmups:0,projectedSavedChars:0};
+ // Self-warmup: the first loopback inference pays model/server cold-start
+ // (measured ~450ms+ vs ~360ms warm), which the 450ms select budget cannot
+ // absorb. Warming off the critical path converts the first real select
+ // from likely-timeout to likely-accept. Never pollutes cooldown/failures.
+ const WARMUP_RAW=['General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.','Workspace overviews introduce readers to surrounding tools and ordinary routines through calm explanatory sentences written for unhurried study and reference.','Background sections collect familiar context so later paragraphs can focus on specific verification and deployment results without repeating introductions.','Closing paragraphs restate the current status plainly and point readers toward the retained evidence for any disputed or unresolved detail.','Status notes record what verification confirmed and what remains blocked so future readers inherit accurate context.'].join('\n\n');
+ let warmed=false;
+ const warmup=()=>{
+  if(warmed||process.env.PI_MINI_PREPROCESSOR==='off'||!runtime)return;
+  warmed=true;
+  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),4000);timer.unref?.();
+  request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw:WARMUP_RAW})}).then(
+   res=>{stats.warmups++;try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.warmup',{decision:res.ok?'warmed':'server-reject',count:1});}catch{};res.body?.cancel?.().catch(()=>{});},
+   ()=>{try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.warmup',{decision:'unreachable',count:1});}catch{}},
+  ).finally(()=>clearTimeout(timer));
+ };
+ // Self-warmup only on the async-load path (production wiring). Explicit
+ // runtimes (tests, embeds) warm deliberately via warmup().
+ if(!runtime)void loadRuntime().then(v=>{runtime=v;warmup();});
  // Turn boundary: validated cache and in-flight selections stay valid (keyed by
  // source+task hash), so unlike reset this neither aborts nor clears.
  const endTurn=()=>{};
  return {
-  reset(){generation++;current?.abort();cache.clear();},
+  reset(){generation++;current?.abort();cache.clear();warmed=false;},
+  warmup,
   endTurn,
   inspect(){return {...stats,cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
   async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
@@ -94,7 +112,8 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    let finishActivity: (()=>void) | undefined;
    try { finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`mini-${randomUUID()}`,label:'model'}); } catch { /* UI is optional. */ }
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
-   const timer=setTimeout(()=>abort.abort(),450);timer.unref?.();
+   let expired=false;
+   const timer=setTimeout(()=>{expired=true;abort.abort();},450);timer.unref?.();
    try{
     const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw})})]);
     if(!res.ok||!res.body)return;
@@ -118,7 +137,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    }catch{return;}finally{
     clearTimeout(timer);
     try { finishActivity?.(); } catch { /* UI cannot alter selection. */ }
-    if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;}
+    if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
     try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
     if(current===abort){busy=false;current=undefined;}
    }

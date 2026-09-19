@@ -62,6 +62,87 @@ export function validateSmolExtraction(source: SmolExtractionSource, output: str
   return { ok: true, lineIds: Object.freeze([...value.lineIds]) };
 }
 
+/** Deterministic window for oversized line output: head + diagnostic lines +
+ * tail, mapped back to original line numbers. The window is its own source
+ * (own hash); the original stays recoverable via obs_read. */
+export interface SmolWindow {
+  readonly text: string;
+  /** window line index (0-based) -> original line number (1-based). */
+  readonly lineMap: readonly number[];
+  readonly totalLines: number;
+  readonly totalChars: number;
+}
+
+const WINDOW_BYTES = SMOL_MAX_INPUT_BYTES;
+const WINDOW_DIAGNOSTIC = /\b(?:error|exception|fatal|panic|failed|failure|warning|traceback|assertion)\b|^\s*(?:not ok\b|FAIL\b)/i;
+
+export function prepareSmolWindow(raw: string): SmolWindow | undefined {
+  if (typeof raw !== 'string' || !raw.length || raw.includes('\0')) return;
+  if (Buffer.byteLength(raw, 'utf8') <= WINDOW_BYTES) return;
+  if (Buffer.byteLength(raw, 'utf8') > 32768) return;
+  if (Buffer.from(raw, 'utf8').toString('utf8') !== raw) return;
+  const lines = raw.split('\n');
+  if (lines.length < 16) return;
+  // Split budget: head and tail each get ~45% so long lines cannot starve
+  // either end; diagnostic lines share whatever remains.
+  const head: number[] = [];
+  const tail: number[] = [];
+  const cost = (index: number) => Buffer.byteLength(lines[index], 'utf8') + 1;
+  let headBudget = Math.floor(WINDOW_BYTES * 0.45);
+  for (let i = 0; i < lines.length && headBudget > 0; i++) {
+    if (cost(i) > headBudget) break;
+    head.push(i); headBudget -= cost(i);
+  }
+  let tailBudget = Math.floor(WINDOW_BYTES * 0.45);
+  for (let i = lines.length - 1; i >= 0 && tailBudget > 0; i--) {
+    if (i < head.length) break;
+    if (cost(i) > tailBudget) break;
+    tail.unshift(i); tailBudget -= cost(i);
+  }
+  const kept = new Set([...head, ...tail]);
+  let rest = WINDOW_BYTES - [...kept].reduce((sum, i) => sum + cost(i), 0);
+  for (let i = 0; i < lines.length && rest > 0; i++) {
+    if (kept.has(i) || !WINDOW_DIAGNOSTIC.test(lines[i])) continue;
+    if (cost(i) <= rest) { rest -= cost(i); kept.add(i); }
+  }
+  const order = [...kept].sort((a, b) => a - b);
+  if (!order.length) return;
+  const text = order.map((i) => lines[i]).join('\n');
+  if (!text.length || Buffer.byteLength(text, 'utf8') > WINDOW_BYTES) return;
+  return Object.freeze({
+    text,
+    lineMap: Object.freeze(order.map((i) => i + 1)),
+    totalLines: lines.length,
+    totalChars: raw.length,
+  });
+}
+
+/** Render a window selection with ORIGINAL line numbers plus an explicit
+ * window note. Never interpolates model text; only remaps line ids. */
+export function renderSmolWindow(
+  window: SmolWindow,
+  source: SmolExtractionSource,
+  selection: SmolExtractionValidation,
+): string | undefined {
+  if (!selection.ok) return;
+  if (source.raw !== window.text) return;
+  const checked = validateSmolExtraction(source, JSON.stringify({ status: 'SELECT', lineIds: selection.lineIds }));
+  if (!checked.ok) return;
+  const lines = checked.lineIds.map((id) => {
+    const original = window.lineMap[id - 1];
+    const text = source.lines[id - 1]?.text;
+    if (!original || text === undefined) return undefined;
+    return { line: original, text };
+  });
+  if (lines.some((entry) => entry === undefined)) return;
+  return JSON.stringify({
+    kind: 'untrusted-extractive-selection', sourceHash: source.hash, offsetUnit: 'utf16', complete: false,
+    windowed: true, windowLines: source.lines.length, totalLines: window.totalLines, totalChars: window.totalChars,
+    omittedLines: window.totalLines - checked.lineIds.length,
+    lines,
+  });
+}
+
 /** Never interpolate text produced by the model. The projection is not a complete summary. */
 export function renderSmolExtraction(source: SmolExtractionSource, selection: SmolExtractionValidation): string | undefined {
   if (!selection.ok) return;

@@ -851,6 +851,25 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		sourceFiles: ["agent/extensions/agentmail.ts", "agent/extensions/http-tools.ts"],
 		doc: "agent/public-template/docs/EMAIL.md",
 	}),
+	capability({
+		id: "micro-intelligence",
+		group: "models",
+		summary: "Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, evidence triage, intent pre-screening and request advisories; deterministic owners keep authority and missing helpers degrade to documented skips.",
+		entrypoints: ["micro_status"],
+		tools: ["micro_status"],
+		options: [
+			option("PI_MICRO_INTELLIGENCE", "Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners."),
+			option("PI_NEEDLE", "Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying."),
+			option("PI_MICRO_ADVISORY", "Set to off to skip the per-request Jev advisory batch."),
+		],
+		related: ["local-intelligence", "tool-catalog", "skill-catalog", "context-diagnostics"],
+		sourceFiles: [
+			"agent/extensions/micro-intelligence.ts",
+			"agent/extensions/lib/needle-runtime.ts",
+			"agent/extensions/lib/micro-intelligence/coordinator.ts",
+		],
+		doc: "agent/public-template/docs/MICRO-INTELLIGENCE.md",
+	}),
 ] as const);
 
 const CATALOG_BY_ID = new Map(HARNESS_CAPABILITIES.map((record) => [record.id, record]));

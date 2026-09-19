@@ -12,6 +12,18 @@
 
 import { compactJsonWhitespace } from "./lib/compact-tool-json.ts";
 import { askJev, jevMark, tooShort } from "./lib/jev-client.ts";
+import { needleClassify } from "./lib/needle-runtime.ts";
+import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
+
+const HTTP_CAUSE_LABELS = [
+  { id: "timeout", text: "The request timed out waiting." },
+  { id: "network", text: "DNS, connection, socket, or proxy failure." },
+  { id: "validation", text: "Bad URL, method, headers, or blocked/SSRF input." },
+  { id: "auth", text: "Missing, expired, or rejected credentials." },
+  { id: "quota", text: "Rate limit, billing refusal, or exhausted allowance." },
+  { id: "server", text: "The server errored (5xx) or failed unexpectedly." },
+  { id: "cancelled", text: "The caller cancelled the request." },
+];
 import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 import { Agent, request } from "undici";
@@ -424,6 +436,36 @@ export default function httpTools(pi: any) {
         };
       } catch (error) {
         const failure = describeHttpFailure(error, signal);
+        // Needle first: an accepted local classification refines the regex
+        // leftover without a network call. Application mirrors the Jev twin
+        // below: only timeout/network/validation/cancelled rewrite the kind;
+        // auth/quota/server add next-step guidance. A Needle kind verdict
+        // skips Jev; guidance-only causes still get Jev validation.
+        if (failure.kind === "unknown" && !tooShort(failure.error, 40)) {
+          try {
+            const ranked = await needleClassify({ text: failure.error.slice(0, 1024), labels: HTTP_CAUSE_LABELS });
+            if (ranked.ok && ranked.value.accepted) {
+              const cause = ranked.value.label;
+              if ((["timeout", "network", "validation", "cancelled"] as string[]).includes(cause))
+                (failure as { kind: string }).kind = cause;
+              if (cause === "server") failure.retryable = true;
+              if (cause === "auth") failure.nextStep = "Provide or refresh credentials, then retry.";
+              if (cause === "quota") failure.nextStep = "Back off for the provider cooldown window, then retry.";
+              if (cause === "server") failure.nextStep = "Retry once; the failure is server-side.";
+              (failure as unknown as Record<string, unknown>).needle = {
+                cause,
+                score: ranked.value.score,
+                margin: ranked.value.margin,
+              };
+              microMetrics().run("needle", ranked.ms);
+              microMetrics().accept("needle");
+            } else {
+              microMetrics().skip("needle", ranked.ok ? "low-confidence" : ranked.reason);
+            }
+          } catch {
+            microMetrics().skip("needle", "unavailable");
+          }
+        }
         // Jev refines only the regex leftovers: short messages and decided
         // kinds keep the deterministic verdict.
         try {

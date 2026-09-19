@@ -43,6 +43,20 @@ Earlier swarm/fusion telemetry used broader definitions, including reused groups
 
 Cached tokens still contribute to traffic. The panel's cumulative prompt cache rate differs from the existing footer's latest eligible response cache rate. Reported reasoning tokens are a subset of output, not additional traffic. Hook payload reduction measures characters removed at context and provider boundaries, with a four-characters-per-token estimate. Repeated projections can count the same content again; this is neither unique tokens removed nor billed savings.
 
+## Micro-intelligence metrics
+
+The `micro_status` tool and `/export-json` `analytics.micro` section expose
+the cheap-layer ledger: Needle head-slice re-rank counts by stage
+(tool/skill/command/intent), acceptance outcomes, shadow vs applied mode,
+embedding latency buckets, per-engine evidence outcomes (retained,
+offered, skipped, abstain reasons), advisory batches by family, pre-screen
+verdicts by label, and token-window allocations for Smol and Kompress.
+The `projectedCharsSaved` and `projectedTokensAvoided` fields estimate
+characters not forwarded plus sandbox outcome categories; they use the
+same four-characters-per-token convention and are not billed savings.
+Bounded numeric counters only: no prompts, tool outputs, vectors, or
+secret-bearing strings are retained in telemetry snapshots.
+
 New hook snapshots contain bounded numeric counters and extension/hook names. They do not capture prompts, tool outputs, secrets or reasoning text. Existing session files and logs remain private and must not be published.
 
 ## Harness corrections and activation

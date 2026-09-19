@@ -17,6 +17,8 @@ node_modules/
 **/artifacts/
 **/worktrees/
 **/local-models/
+*.cact
+needle.wasm
 **/__pycache__/
 *.pyc
 *.zip

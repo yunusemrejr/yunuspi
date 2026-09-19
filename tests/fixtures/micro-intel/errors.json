@@ -1,0 +1,10 @@
+{
+  "errors": [
+    { "text": "request to https://api.example.com/v1/data timed out after 30000ms while waiting for response headers", "expected": "timeout" },
+    { "text": "fetch failed: socket hang up while contacting the package registry", "expected": "transport" },
+    { "text": "429 Too Many Requests: rate limit exceeded, retry after 60 seconds", "expected": "capacity" },
+    { "text": "Validation failed for tool edit: oldText is required but was not provided", "expected": "input" },
+    { "text": "Error: Cannot find module './missing-helper' imported from the build script", "expected": "dependency" },
+    { "text": "Edit without read coverage: the target range was never read with the native read tool", "expected": "read-coverage" }
+  ]
+}

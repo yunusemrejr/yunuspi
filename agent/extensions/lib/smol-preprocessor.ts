@@ -4,13 +4,42 @@ import { join } from 'node:path';
 import { constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { protectedEvidence, relevanceScores, taskTerms } from './local-intelligence.mjs';
+import { relevanceScores, taskTerms } from './local-intelligence.mjs';
 
 /** Best-effort capability telemetry. Failures here never affect selection. */
 function noteHealth(kind: string, data: Record<string, unknown>): void {
   try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
 }
-import { prepareSmolExtraction, smolExtractionSchema, validateSmolExtraction, renderSmolExtraction } from './smol-extraction.ts';
+import { prepareSmolExtraction, smolExtractionSchema, validateSmolExtraction, renderSmolExtraction, prepareSmolWindow, renderSmolWindow, type SmolWindow, type SmolExtractionSource } from './smol-extraction.ts';
+
+// Line-calibrated retention (measured 2026-09-19): the block-level
+// protectedEvidence regex fires on any digit/path, which forced entire
+// numeric listings into the required set and abstained every offer (92
+// required lines vs the 16-line cap on a typical 4KB listing). Line
+// projections retain boundary + status/failure/value + task lines instead;
+// digits alone don't make a listing line critical, and obs_read always
+// keeps the original. Error/secret/instruction output stays excluded by
+// safeSmolOutput below.
+const lineCritical = /\b(?:exit[ _-]?code|status|result|summary|totals?|passed|failed|errors?|failures?|warnings?|completed?|success(?:ful|fully)?|denied|blocked|refused|mismatch|expected|actual|balance|elapsed)\b|\$\s?[\d,]+|\b\d+(?:\.\d+)?\s?%/i;
+const statusLine = /\b(?:status|exit[ _-]?code|result|summary|completed|not|no|never|none|neither|without|cannot|denied|blocked|invalid|unavailable|incomplete|partial|cancelled|aborted|skipped|unless|except|however|only|possibly|maybe|uncertain|unverified|pending|but)\b|n't\b/i;
+
+/**
+ * Frequency-capped retention: boundary lines always stay; task-matching
+ * lines stay up to 10 (more means the task matches everything and no
+ * selection is possible); repeated boilerplate status lines keep their
+ * first two and last two representatives. Genuinely critical-dense
+ * outputs (>16 distinct critical lines) still abstain via undefined.
+ * Deterministic and total.
+ */
+export function compressRequired(critical: Array<{ id: number; reason: 'boundary' | 'task' | 'status' }>): number[] | undefined {
+  const boundary = critical.filter(entry => entry.reason === 'boundary').map(entry => entry.id);
+  const task = critical.filter(entry => entry.reason === 'task').map(entry => entry.id);
+  if (task.length > 10) return undefined;
+  const status = critical.filter(entry => entry.reason === 'status').map(entry => entry.id);
+  const reps = status.length <= 4 ? status : [...status.slice(0, 2), ...status.slice(-2)];
+  const merged = [...new Set([...boundary, ...task, ...reps])].sort((a, b) => a - b);
+  return merged.length > 16 ? undefined : merged;
+}
 
 interface LegacySmolRuntime {
   version: 1; enabled: true; model: 'SmolLM2-135M-Instruct';
@@ -63,8 +92,10 @@ export async function loadSmolRuntime(): Promise<SmolRuntime | undefined> {
   finally { await handle?.close().catch(() => {}); }
 }
 
+const SMOL_LINE_TOOLS = new Set(['bash', 'read', 'grep', 'find', 'ls']);
+
 export function safeSmolOutput(tool: string, raw: string, isError: boolean, details: unknown): boolean {
-  if (tool !== 'bash' || isError || raw.length < 3000 || raw.length > 4096 || /[^\x09\x0a\x0d\x20-\x7e]/.test(raw)) return false;
+  if (!SMOL_LINE_TOOLS.has(tool) || isError || raw.length < 3000 || raw.length > 4096 || /[^\x09\x0a\x0d\x20-\x7e]/.test(raw)) return false;
   if (details != null && (typeof details !== 'object' || Array.isArray(details))) return false;
   try { if (JSON.stringify({isError: false, details: details ?? {}}).length > 500) return false; } catch { return false; }
   if (/<\||\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/i.test(raw)) return false;
@@ -114,7 +145,8 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
   let lastCall = -Infinity;
   const slots = new Map<string, Slot>();
   const cache = new Map<string, string>();
-  const stats = {requests:0,accepted:0,cacheHits:0,fallbacks:0};
+  const windows = new Map<string, {window: SmolWindow, source: SmolExtractionSource, slotKey: string}>();
+  const stats = {requests:0,accepted:0,cacheHits:0,fallbacks:0,windowed:0};
   const now = options.now ?? Date.now;
   const request = options.fetch ?? fetch;
   const acquireLease = options.acquireLease ?? acquireSmolLease;
@@ -125,6 +157,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     for (const slot of slots.values()) slot.abort?.abort();
     slots.clear();
     cache.clear();
+    windows.clear();
     // Keep the rate limit across compaction/branch switches.
   }
   /** Turn boundary: keep validated cache and live slots so inference that
@@ -135,6 +168,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       if (slots.size <= 32) break;
       if (slot.state !== 'pending') slots.delete(key);
     }
+    while (windows.size > 32) windows.delete(windows.keys().next().value!);
   }
   /** Shared seal: whatever is taken first is frozen. Late inference can only
    * warm the cache for identical future observations, never rewrite a seal. */
@@ -151,13 +185,13 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     if (!match) noteHealth('ml.smol.take', {decision:'hash-mismatch'});
     return match;
   }
-  return {
+  const api = {
     reset,
     endTurn,
-    inspect() { return {...stats,busy,cached:cache.size}; },
-    offer(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '') {
+    inspect() { return {...stats,busy,cached:cache.size,windowedSlots:windows.size}; },
+    offer(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash') {
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
-      if (!safeSmolOutput('bash', raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!safeSmolOutput(tool, raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       if (!validSmolRuntime(runtime)) { noteHealth('ml.smol.offer', {decision:'no-runtime'}); return; }
       if (slots.has(key) || slots.size >= 64) return;
       const background = runtime.version === 2;
@@ -177,11 +211,17 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const source = prepareSmolExtraction(raw);
       if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       // The model cannot delete boundary context or explicit status/negation evidence.
-      // The protected-evidence union adds numbers, paths, decisions, failures and
-      // unresolved work; outputs with too many required lines abstain below.
+      // Retention is line-calibrated (see lineCritical) and frequency-capped
+      // (see compressRequired): repeated boilerplate keeps representatives.
       const relevance = background ? relevanceScores(source.lines.map(line=>line.text),signal) : [];
-      const required = source.lines.filter((line, index) => index === 0 || index === source.lines.length - 1 || relevance[index] > 0 || protectedEvidence.test(line.text)
-        || /\b(?:status|exit[ _-]?code|result|summary|completed|not|no|never|none|neither|without|cannot|denied|blocked|invalid|unavailable|incomplete|partial|cancelled|aborted|skipped|unless|except|however|only|possibly|maybe|uncertain|unverified|pending|but)\b|n't\b/i.test(line.text)).map(line => line.id);
+      const critical: Array<{ id: number; reason: 'boundary' | 'task' | 'status' }> = [];
+      source.lines.forEach((line, index) => {
+        if (index === 0 || index === source.lines.length - 1) critical.push({ id: line.id, reason: 'boundary' });
+        else if (relevance[index] > 0) critical.push({ id: line.id, reason: 'task' });
+        else if (lineCritical.test(line.text) || statusLine.test(line.text)) critical.push({ id: line.id, reason: 'status' });
+      });
+      const required = compressRequired(critical);
+      if (!required) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       const prepared = prepareSmolExtraction(raw, required);
       if (!prepared) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       noteHealth('ml.smol.offer', {decision:'accepted',count:1});
@@ -201,7 +241,9 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       timer.unref?.();
       void (async () => {
         try {
-          if (!(await Promise.race([acquireLease(),deadline])) || abort.signal.aborted || epoch !== generation || !background && slot.state !== 'pending') return;
+          const leased = await Promise.race([acquireLease(),deadline]);
+          if (!leased) { noteHealth('ml.smol.offer', {decision:'no-lease'}); return; }
+          if (abort.signal.aborted || epoch !== generation || !background && slot.state !== 'pending') return;
           stats.requests++;
           const response = await Promise.race([deadline, request(config.endpoint, {
             method: 'POST', redirect:'error', signal: abort.signal,
@@ -284,5 +326,43 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const slot = slots.get(key);
       if (slot && slot.state !== 'frozen') { slot.abort?.abort(); slot.state = 'raw'; }
     },
+    /** Oversized line output (4KB..32KB): deterministically window to head +
+     * diagnostics + tail, offer the window, and remap the validated
+     * selection to original line numbers on take. Same safety gates,
+     * lease, sealing and cache rules as a direct offer. */
+    offerWindowed(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash') {
+      if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
+      if (windows.has(key) || windows.size >= 32) return;
+      const window = prepareSmolWindow(raw);
+      if (!window) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!safeSmolOutput(tool, window.text, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      const source = prepareSmolExtraction(window.text);
+      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      const slotKey = `${key}:window`;
+      windows.set(key, {window, source, slotKey});
+      stats.windowed++;
+      api.offer(slotKey, window.text, mainInputUsdPerMillion, task, tool);
+    },
+    async takeWindowed(key: string, waitMs?: number): Promise<string | undefined> {
+      const entry = windows.get(key);
+      if (!entry) return;
+      const rendered = await api.takeAsync(entry.slotKey, entry.window.text, waitMs);
+      if (!rendered) return;
+      // Revalidate the window projection and remap to original lines.
+      let ids: unknown;
+      try { ids = (JSON.parse(rendered) as {lines?: Array<{id?: unknown}>}).lines?.map(line => line?.id); }
+      catch { return; }
+      if (!Array.isArray(ids)) return;
+      const selection = validateSmolExtraction(entry.source, JSON.stringify({status:'SELECT',lineIds:ids}));
+      if (!selection.ok) return;
+      const remapped = renderSmolWindow(entry.window, entry.source, selection);
+      if (remapped) noteHealth('ml.smol.take', {decision:'selected-windowed',count:1});
+      return remapped;
+    },
+    discardWindowed(key: string) {
+      const entry = windows.get(key);
+      if (entry) api.discard(entry.slotKey);
+    },
   };
+  return api;
 }

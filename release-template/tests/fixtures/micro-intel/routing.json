@@ -1,0 +1,222 @@
+{
+  "lexical": [
+    {
+      "query": "read the configuration file",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "browser_screenshot",
+          "text": "browser_screenshot: Capture a screenshot of the browser page."
+        }
+      ],
+      "expected": "read"
+    },
+    {
+      "query": "run the unit test suite",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        }
+      ],
+      "expected": "bash"
+    },
+    {
+      "query": "capture a browser screenshot",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "browser_screenshot",
+          "text": "browser_screenshot: Capture a screenshot of the browser page."
+        }
+      ],
+      "expected": "browser_screenshot"
+    },
+    {
+      "query": "list files in the directory",
+      "candidates": [
+        {
+          "id": "ls",
+          "text": "ls: List files in a directory."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        }
+      ],
+      "expected": "ls"
+    },
+    {
+      "query": "search file contents for a pattern",
+      "candidates": [
+        {
+          "id": "grep",
+          "text": "grep: Search file contents for a text pattern."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        }
+      ],
+      "expected": "grep"
+    },
+    {
+      "query": "show the session cost report",
+      "candidates": [
+        {
+          "id": "cost",
+          "text": "cost: Show the session cost report with token usage."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        }
+      ],
+      "expected": "cost"
+    }
+  ],
+  "semantic": [
+    {
+      "query": "take a picture of the web page",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "browser_screenshot",
+          "text": "browser_screenshot: Capture a screenshot of the browser page."
+        }
+      ],
+      "expected": "browser_screenshot"
+    },
+    {
+      "query": "mend the broken login check",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        }
+      ],
+      "expected": "edit"
+    },
+    {
+      "query": "what did I spend on this session",
+      "candidates": [
+        {
+          "id": "cost",
+          "text": "cost: Show the session cost report with token usage."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        }
+      ],
+      "expected": "cost"
+    },
+    {
+      "query": "hunt through sources for the phrase",
+      "candidates": [
+        {
+          "id": "grep",
+          "text": "grep: Search file contents for a text pattern."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        }
+      ],
+      "expected": "grep"
+    },
+    {
+      "query": "display the directory inventory",
+      "candidates": [
+        {
+          "id": "ls",
+          "text": "ls: List files in a directory."
+        },
+        {
+          "id": "edit",
+          "text": "edit: Modify file contents with an exact text match."
+        },
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        }
+      ],
+      "expected": "ls"
+    },
+    {
+      "query": "peruse the settings document",
+      "candidates": [
+        {
+          "id": "read",
+          "text": "read: Read a file from the filesystem and return its contents."
+        },
+        {
+          "id": "bash",
+          "text": "bash: Execute a shell command and capture its output."
+        },
+        {
+          "id": "browser_screenshot",
+          "text": "browser_screenshot: Capture a screenshot of the browser page."
+        }
+      ],
+      "expected": "read"
+    }
+  ]
+}

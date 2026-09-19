@@ -60,3 +60,18 @@ claiming to repair every provider-specific payload mismatch.
 The optional mini paragraph selector retains up to 16 validated source-hash selections per client. Repeated source text can reuse exact paragraph IDs without inference, even during cooldown. Changed text needs its own selection; branch/reset clears the cache and aborts in-flight work. Returned IDs cannot mutate cached selections. Original tool text and source retrieval remain intact, and protected status, numbers, negation and qualifiers remain mandatory.
 
 Failed or unsupported inference backs off from 20 to at most 60 seconds; success returns to the existing ten-second limit. There is no retry queue. The client exposes request, accepted-selection, fallback and cache-hit counts plus projected character savings; these are not billed token measurements. Bounded health events carry only outcome categories and duration. Deterministic compaction still runs first, disabled/unavailable models preserve raw data, and no experimental SLM is enabled by these changes.
+
+## Micro-intelligence routing
+
+Cheap layers route work before expensive models see it. Tool, capability,
+and command discovery runs deterministic eligibility, then lexical order,
+then a Needle head-slice re-rank, then Jev validation when Needle is
+uncertain or disagrees with lexical order; the main model still chooses
+what to execute. Tool results route by deterministic content shape to
+Smol (structured), Kompress (prose), Needle (relevance/error cues), and
+Jev (ambiguity triage) after the deterministic distiller. A Needle→Jev
+intent pre-screen can resolve task-mutation rescue checks before the
+full-LLM arbiter, with asymmetric bars. None of these layers delay
+provider startup: slow or missing helpers degrade to skips, and the
+`micro_status` tool plus `docs/MICRO-INTELLIGENCE.md` show what ran,
+what skipped, and why.
