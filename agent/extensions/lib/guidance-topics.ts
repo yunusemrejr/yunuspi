@@ -16,7 +16,7 @@ export const guidanceTopics: readonly GuidanceTopic[] = [...systemsTopics, ...do
 const action = /\b(?:build|make|design|create|implement|fix|change|edit|refactor|debug|investigate|deploy|migrate|update|repair|refine|polish|optimize|review|write|analy[sz]e|train|evaluate|calculate|audit|compare|test|verify|add|remove|improve|configure)\b/i;
 const negated = /\b(?:do not|don't|never|no need to)\b|^\s*(?:without|avoid|skip|stop)\b/i;
 const excluded = /(?:^|\/)(?:node_modules|vendor|dist|build|coverage|fixtures?|generated|backups|\.git)(?:\/|$)|(?:\.min\.[^/]+|\.map|\.lock)$/i;
-const sourceFile = /\.(?:[cm]?[jt]sx?|css|scss|sass|less|vue|svelte|html?|py|rs|go|java|kt|rb|php|c|cc|cpp|h|hpp|cs|sql|ya?ml|toml|tf|sh|bash|md|mdx|r|jl|json)$/i;
+const sourceFile = /\.(?:[cm]?[jt]sx?|css|scss|sass|less|vue|svelte|html?|svg|ino|ini|py|rs|go|java|kt|rb|php|c|cc|cpp|h|hpp|cs|sql|ya?ml|toml|tf|sh|bash|md|mdx|r|jl|json)$/i;
 
 function maskDataCode(source: string, python: boolean): string {
   let result = '';

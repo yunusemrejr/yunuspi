@@ -1055,17 +1055,30 @@
     {
       "id": "safety-bounds",
       "group": "safety",
-      "summary": "Run disposable experiments and guarded mutations with explicit path, process, resource and authority boundaries; unavailable isolation fails closed.",
+      "summary": "Inspect host/session dependencies and device candidates before guarded operations; run disposable experiments with path, process, resource and authority boundaries. Recognized connectivity, power and session-destructive shell commands are blocked; unavailable isolation fails closed.",
       "entrypoints": [
+        "sys_probe",
         "sandbox_run",
         "filesystem-safety",
         "harness:mutation-preflight"
       ],
       "tools": [
+        "sys_probe",
         "sandbox_run",
         "git_info"
       ],
       "options": [
+        {
+          "name": "sys_probe.action",
+          "values": [
+            "host",
+            "devices",
+            "listeners",
+            "services",
+            "processes"
+          ],
+          "summary": "Read host resources, network/power/session metadata or device candidates without opening devices."
+        },
         {
           "name": "command",
           "summary": "Inline sandbox Bash script."
@@ -1106,6 +1119,8 @@
       "sourceFiles": [
         "agent/extensions/sandbox.ts",
         "agent/extensions/filesystem-safety.ts",
+        "agent/extensions/lib/host-operation-safety.ts",
+        "agent/extensions/sys-probe.ts",
         "agent/extensions/siblings.ts"
       ],
       "doc": "docs/SECURITY.md",
@@ -1833,6 +1848,68 @@
       "commands": []
     },
     {
+      "id": "artifact-numeric-checks",
+      "group": "engineering",
+      "summary": "Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.",
+      "entrypoints": [
+        "artifact_check",
+        "math_check"
+      ],
+      "tools": [
+        "artifact_check",
+        "math_check"
+      ],
+      "options": [
+        {
+          "name": "artifact_check.operation",
+          "values": [
+            "svg",
+            "ui",
+            "image",
+            "text"
+          ],
+          "summary": "Explicit artifact inspection."
+        },
+        {
+          "name": "path|text",
+          "summary": "One workspace path or supported inline source; SVG is bounded to 64 KiB."
+        },
+        {
+          "name": "math_check.operation",
+          "values": [
+            "frame_budget",
+            "render_budget",
+            "summarize",
+            "compare",
+            "classify",
+            "vectors",
+            "split_overlap"
+          ],
+          "summary": "Deterministic numeric calculation."
+        },
+        {
+          "name": "values|target_fps",
+          "summary": "Observed frame durations in milliseconds and target rate."
+        },
+        {
+          "name": "width|height|pixel_ratio|bytes_per_pixel|samples|buffers",
+          "summary": "Explicit render attachment assumptions; excludes other allocations and driver overhead."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "web-and-media",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/small-tools.ts",
+        "agent/extensions/lib/svg-check.ts",
+        "agent/extensions/lib/numeric-checks.ts"
+      ],
+      "doc": "docs/SKILLS-AND-CHECKS.md",
+      "commands": []
+    },
+    {
       "id": "web-and-media",
       "group": "web_media",
       "summary": "Search and read web sources, diagnose pages, inspect browser state and analyze or transform local media through bounded extension tools.",
@@ -2507,7 +2584,7 @@
       {
         "name": "artifact_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 79,
+        "line": 101,
         "kind": "factory"
       },
       {
@@ -2622,7 +2699,7 @@
       {
         "name": "data_query",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 100,
+        "line": 123,
         "kind": "factory"
       },
       {
@@ -2684,7 +2761,7 @@
       {
         "name": "math_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 70,
+        "line": 88,
         "kind": "factory"
       },
       {
@@ -2846,7 +2923,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 636,
+        "line": 642,
         "kind": "literal"
       },
       {
@@ -2901,7 +2978,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 86,
+        "line": 246,
         "kind": "literal"
       },
       {
@@ -2919,7 +2996,7 @@
       {
         "name": "value_convert",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 96,
+        "line": 119,
         "kind": "factory"
       },
       {
@@ -3192,7 +3269,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 636,
+        "line": 642,
         "kind": "literal"
       },
       {
@@ -3210,7 +3287,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 86,
+        "line": 246,
         "kind": "literal"
       },
       {
@@ -3251,7 +3328,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          53
+          71
         ],
         "knownNames": [
           "artifact_check",
@@ -3418,7 +3495,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 555,
+      "sourceFiles": 557,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,
@@ -3696,6 +3773,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/host-operation-safety.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/image-compaction.ts",
         "exists": true
       },
@@ -3913,6 +3994,10 @@
       },
       {
         "path": "agent/extensions/lib/stall-core.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/svg-check.ts",
         "exists": true
       },
       {
@@ -4765,6 +4850,12 @@
     ],
     "serviceOwners": [
       {
+        "source": "agent/extensions/filesystem-safety.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/http-tools.ts",
         "signals": [
           "wrapper/adapter"
@@ -5130,6 +5221,12 @@
         ]
       },
       {
+        "source": "agent/extensions/sys-probe.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/utility-tools.ts",
         "signals": [
           "MCP",
@@ -5301,6 +5398,10 @@
       {
         "name": "email",
         "path": "agent/skills/email/SKILL.md"
+      },
+      {
+        "name": "embedded-device-engineering",
+        "path": "agent/skills/embedded-device-engineering/SKILL.md"
       },
       {
         "name": "evidence-first-engineering",

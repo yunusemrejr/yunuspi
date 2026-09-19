@@ -508,10 +508,11 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "safety-bounds",
 		group: "safety",
-		summary: "Run disposable experiments and guarded mutations with explicit path, process, resource and authority boundaries; unavailable isolation fails closed.",
-		entrypoints: ["sandbox_run", "filesystem-safety", "harness:mutation-preflight"],
-		tools: ["sandbox_run", "git_info"],
+		summary: "Inspect host/session dependencies and device candidates before guarded operations; run disposable experiments with path, process, resource and authority boundaries. Recognized connectivity, power and session-destructive shell commands are blocked; unavailable isolation fails closed.",
+		entrypoints: ["sys_probe", "sandbox_run", "filesystem-safety", "harness:mutation-preflight"],
+		tools: ["sys_probe", "sandbox_run", "git_info"],
 		options: [
+			option("sys_probe.action", "Read host resources, network/power/session metadata or device candidates without opening devices.", ["host", "devices", "listeners", "services", "processes"]),
 			option("command", "Inline sandbox Bash script."),
 			option("files[].path", "Relative disposable destination."),
 			option("files[].content|source", "Exactly one inline fixture or project source."),
@@ -524,6 +525,8 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		sourceFiles: [
 			"agent/extensions/sandbox.ts",
 			"agent/extensions/filesystem-safety.ts",
+			"agent/extensions/lib/host-operation-safety.ts",
+			"agent/extensions/sys-probe.ts",
 			"agent/extensions/siblings.ts",
 		],
 		doc: "agent/public-template/docs/SECURITY.md",
@@ -766,6 +769,23 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"agent/extensions/git-tools.ts",
 		],
 		doc: "agent/public-template/docs/GUIDANCE-AND-DIAGNOSTICS.md",
+	}),
+	capability({
+		id: "artifact-numeric-checks",
+		group: "engineering",
+		summary: "Check SVG references and source cues, image/text metadata, measured frame timing, render attachment memory and numerical/ML metrics locally with bounded results and no model calls. These checks do not certify visual quality, physical safety or GPU performance.",
+		entrypoints: ["artifact_check", "math_check"],
+		tools: ["artifact_check", "math_check"],
+		options: [
+			option("artifact_check.operation", "Explicit artifact inspection.", ["svg", "ui", "image", "text"]),
+			option("path|text", "One workspace path or supported inline source; SVG is bounded to 64 KiB."),
+			option("math_check.operation", "Deterministic numeric calculation.", ["frame_budget", "render_budget", "summarize", "compare", "classify", "vectors", "split_overlap"]),
+			option("values|target_fps", "Observed frame durations in milliseconds and target rate."),
+			option("width|height|pixel_ratio|bytes_per_pixel|samples|buffers", "Explicit render attachment assumptions; excludes other allocations and driver overhead."),
+		],
+		related: ["source-intelligence", "web-and-media", "safety-bounds"],
+		sourceFiles: ["agent/extensions/lib/small-tools.ts", "agent/extensions/lib/svg-check.ts", "agent/extensions/lib/numeric-checks.ts"],
+		doc: "agent/public-template/docs/SKILLS-AND-CHECKS.md",
 	}),
 	capability({
 		id: "web-and-media",

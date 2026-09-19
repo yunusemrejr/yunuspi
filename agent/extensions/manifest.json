@@ -68,6 +68,7 @@
     "harness-orientation.ts",
     "health-log.ts",
     "hook-ledger.ts",
+    "host-operation-safety.ts",
     "image-compaction.ts",
     "intent-context.ts",
     "intervention-control.ts",
@@ -123,6 +124,7 @@
     "source-check.ts",
     "stable-tool-order.ts",
     "stall-core.ts",
+    "svg-check.ts",
     "sys-probe.ts",
     "tool-discovery.ts",
     "utility-client.ts"

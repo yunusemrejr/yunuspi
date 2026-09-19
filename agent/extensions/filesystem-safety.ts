@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { hostOperationRisk } from "./lib/host-operation-safety.ts";
 import {
 	getAgentDir,
 	type ExtensionAPI,
@@ -528,18 +529,23 @@ function assessShellMutation(
 		};
 		let childCwd = state.cwd;
 		let name = path.basename(shellValue(args[i++], state) ?? "");
+		let elevated = false;
 		while (
 			[
 				"command",
 				"exec",
 				"sudo",
+				"doas",
 				"env",
 				"nohup",
 				"timeout",
 				"nice",
 				"stdbuf",
+				"setsid",
+				"busybox",
 			].includes(name)
 		) {
+			if (name === "sudo" || name === "doas") elevated = true;
 			while (
 				i < args.length &&
 				(args[i].startsWith("-") || /^[A-Za-z_]\w*=/.test(args[i]))
@@ -594,12 +600,13 @@ function assessShellMutation(
 					}
 				}
 				if (
-					(name === "sudo" &&
-						["-u", "-g", "-h", "-p", "-C", "-D", "-R"].includes(option)) ||
+					(["sudo", "doas"].includes(name) &&
+						["-u", "-g", "-h", "-p", "-C", "-D", "-R", "--user", "--group", "--host", "--prompt", "--close-from", "--chdir", "--chroot"].includes(option)) ||
 					(name === "env" &&
 						["-u", "--unset", "-C", "--chdir"].includes(option)) ||
-					(name === "nice" && option === "-n") ||
-					(name === "timeout" && ["-s", "-k"].includes(option))
+					(name === "nice" && ["-n", "--adjustment"].includes(option)) ||
+					(name === "stdbuf" && ["-i", "-o", "-e", "--input", "--output", "--error"].includes(option)) ||
+					(name === "timeout" && ["-s", "-k", "--signal", "--kill-after"].includes(option))
 				)
 					i++;
 			}
@@ -609,6 +616,38 @@ function assessShellMutation(
 		mutationCwd = childCwd;
 		const operands = args.slice(i),
 			values = operands.map((arg) => shellValue(arg, state));
+		// Reuse the parsed executable/operands, so quoted examples and grep data
+		// do not become host mutations. Wrappers and substitutions share this gate.
+		note(hostOperationRisk(name, values));
+		if (/^python[\d.]*$/.test(name) && values[0] === "-m" && values[1] === "esptool")
+			note(hostOperationRisk("esptool", values.slice(2)));
+		if (name === "find") {
+			for (let at = 0; at < operands.length; at++) {
+				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(values[at] ?? "")) continue;
+				let end = at + 1;
+				while (end < operands.length && ![";", "+"].includes(values[end] ?? "")) end++;
+				const executable = path.basename(values[at + 1] ?? "");
+				note(hostOperationRisk(executable, values.slice(at + 2, end).map(value => value?.includes("{}") ? undefined : value)));
+				// Filesystem operands from find remain owned by the scoped-root
+				// checks below; recursively inspect only command/shell wrappers.
+				if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(executable))
+					note(assessShellMutation(operands.slice(at + 1, end).join(" "), state.cwd ?? cwd, childEnvironment, depth + 1));
+				at = end;
+			}
+		}
+		if (name === "xargs") {
+			let at = 0;
+			while (at < values.length && values[at]?.startsWith("-")) {
+				const option = values[at++];
+				if (option === "--") break;
+				if (["-a", "--arg-file", "-d", "--delimiter", "-I", "-L", "-n", "-P", "-s", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"].includes(option!)) at++;
+			}
+			// Dynamic stdin operands cannot be resolved, but a literal dangerous
+			// executable must not evade host preflight by using an xargs wrapper.
+			note(hostOperationRisk(path.basename(values[at] ?? ""), [...values.slice(at + 1), undefined]));
+		}
+		if (elevated && /^(?:bash|sh|dash|zsh|python[\d.]*|node|npm|npx|pnpm|yarn|pytest|make|ctest|cargo|go)$/.test(name))
+			uncertain(name, "Elevated scripts, builds and tests can change the host beyond this command's visible operands. Inspect the entrypoint, device/network access and recovery first; prefer an unprivileged focused check or sandbox_run", values.every(value => value !== undefined));
 		if (name === "cd") {
 			const dest = shellValue(
 				operands.find((a) => a !== "--" && a !== "-P" && a !== "-L") ?? "~",

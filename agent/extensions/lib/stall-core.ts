@@ -67,11 +67,17 @@ function similarQuery(a: ReturnType<typeof queryShape>, b: ReturnType<typeof que
 	return overlap / new Set([...a.words, ...b.words]).size >= 0.8;
 }
 
-/** Four completed turns of proven unproductive work gate only seen variants. */
+/** Four repeated single-query turns or exact observation cycles gate only seen inputs. */
 function createStrategyGuard() {
 	type Sample = {key: string; result: string; name: string; shape: ReturnType<typeof queryShape>};
 	let cluster: {anchor: Sample; variants: Set<string>; count: number} | undefined;
 	let pending: Sample[] = [], progressed = false;
+	// Exact cycles catch alternating inspections and repeated parallel batches.
+	// ponytail: at most three turns per cycle, four repeats, sixteen calls/turn.
+	const cyclePending = new Map<string, string>();
+	const cycleTurns: {key: string; samples: Map<string, string>}[] = [];
+	let cycleBlocked = new Map<string, string>(), cyclePeriod = 0;
+	const clearCycles = () => {cyclePending.clear(); cycleTurns.length = 0; cycleBlocked.clear(); cyclePeriod = 0;};
 	const refused = new Set<string>();
 	return {
 		record(event: ToolResultEvent) {
@@ -87,7 +93,15 @@ function createStrategyGuard() {
 					? evidenceHash
 					: loopFingerprint(["result", null, {content: event.content, isError: event.isError === true, details: event.details ?? null}])
 				: undefined;
-			if (!key || !result) {cluster = undefined; pending = []; progressed = true; refused.clear(); return;}
+			if (!key || !result || cyclePending.has(key) && cyclePending.get(key) !== result) {
+				cluster = undefined; pending = []; progressed = true; refused.clear(); clearCycles(); return;
+			}
+			if (cycleTurns.some(turn => turn.samples.has(key) && turn.samples.get(key) !== result) ||
+				cycleBlocked.size && cycleBlocked.get(key) !== result) {clearCycles(); refused.clear();}
+			cyclePending.set(key, result);
+			if (cyclePending.size > LOOP_MAX_CALLS) {
+				cluster = undefined; pending = []; progressed = true; refused.clear(); clearCycles(); return;
+			}
 			const sample = {key, result, name: event.toolName, shape: queryShape(event)};
 			const anchor = pending[0] ?? cluster?.anchor;
 			if (anchor && (anchor.result !== result || anchor.key !== key && !similarQuery(anchor.shape, sample.shape))) {
@@ -98,6 +112,19 @@ function createStrategyGuard() {
 			if (pending.length > LOOP_MAX_CALLS) {cluster = undefined; pending = []; progressed = true; refused.clear();}
 		},
 		finishTurn() {
+			if (!progressed && cyclePending.size) {
+				const key = loopFingerprint([...cyclePending].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))!;
+				cycleTurns.push({key, samples: new Map(cyclePending)});
+				if (cycleTurns.length > 12) cycleTurns.shift();
+				for (let period = 1; period <= 3; period++) {
+					const repeated = cycleTurns.slice(-period * 4);
+					if (repeated.length !== period * 4 || !repeated.every((turn, i) => turn.key === repeated[i % period].key)) continue;
+					cycleBlocked = new Map(repeated.slice(-period).flatMap(turn => [...turn.samples]));
+					cyclePeriod = period;
+					break;
+				}
+			}
+			cyclePending.clear();
 			if (!progressed && pending.length) {
 				const anchor = pending[0];
 				if (!cluster) cluster = {anchor, variants: new Set(), count: 0};
@@ -108,12 +135,15 @@ function createStrategyGuard() {
 			pending = []; progressed = false;
 		},
 		block(event: Pick<ToolResultEvent, "toolName" | "input">): string | undefined {
-			if (process.env.PI_SEMANTIC_LOOP_GUARD === "off" || !cluster || cluster.count < 4) return;
+			if (process.env.PI_SEMANTIC_LOOP_GUARD === "off" || !cycleBlocked.size && (!cluster || cluster.count < 4)) return;
 			const key = loopFingerprint([event.toolName, event.input]);
 			// Similarity helps group evidence but NEVER blocks an untried variant.
-			if (!key || !cluster.variants.has(key)) return;
+			if (!key) return;
+			const count = cluster && cluster.count >= 4 && cluster.variants.has(key) ? cluster.count : 0;
+			if (!count && !cycleBlocked.has(key)) return;
 			refused.add(key);
-			return `${GUARD_PREFIX} ${event.toolName} repeated an unchanged result across ${cluster.count} completed tool turns. This already-tried input is paused for this run. Use the existing evidence, choose a different query/range/tool, or report the blocker. Do not make a cosmetic edit merely to reset the guard. A new user instruction resets it.`;
+			const evidence = count ? `${count} completed tool turns` : `a ${cyclePeriod}-turn observation cycle repeated four times`;
+			return `${GUARD_PREFIX} ${event.toolName} repeated an unchanged result across ${evidence}. This already-tried input is paused for this run. Use the existing evidence, choose a different query/range/tool, or report the blocker. Do not make a cosmetic edit merely to reset the guard. A new user instruction resets it.`;
 		},
 	};
 }

@@ -24,6 +24,25 @@ const MARKERS = [
   "Dockerfile",
   "compose.yaml",
   "docker-compose.yml",
+  "compose.yml",
+  "docker-compose.yaml",
+  "vercel.json",
+  "netlify.toml",
+  "wrangler.toml",
+  "wrangler.jsonc",
+  "fly.toml",
+  "firebase.json",
+  ".htaccess",
+  ".cpanel.yml",
+  "CMakeLists.txt",
+  "platformio.ini",
+  "idf_component.yml",
+  "sdkconfig",
+  "sdkconfig.defaults",
+  "sketch.yaml",
+  "arduino-cli.yaml",
+  "pico_sdk_import.cmake",
+  "west.yml",
   "AGENTS.md",
   "WORKSPACE.md",
   "OPERATIONS.md",
@@ -37,9 +56,21 @@ const DIRS = [
   "tests",
   "test",
   "scripts",
+  "public_html",
+  "htdocs",
   ".github/workflows",
 ];
 const RUNTIME = ["uploads", "storage", "logs", "data", "db", "var", ".env"];
+const SURFACES = [
+  ["deployment", "containers", ["Dockerfile", "compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"]],
+  ["deployment", "managed hosting", ["vercel.json", "netlify.toml", "wrangler.toml", "wrangler.jsonc", "fly.toml", "firebase.json"]],
+  ["deployment", "Apache or shared hosting", [".htaccess", ".cpanel.yml", "public_html", "htdocs"]],
+  ["embedded", "PlatformIO", ["platformio.ini"]],
+  ["embedded", "ESP-IDF", ["idf_component.yml", "sdkconfig", "sdkconfig.defaults"]],
+  ["embedded", "Arduino", ["sketch.yaml", "arduino-cli.yaml"]],
+  ["embedded", "Raspberry Pi Pico SDK", ["pico_sdk_import.cmake"]],
+  ["embedded", "Zephyr/west", ["west.yml"]],
+];
 function classification(file) {
   if (/(^|\/)(\.env[^/]*|secrets?|credentials?)(\/|$)|\.(pem|key)$/i.test(file))
     return "protected/configuration candidate";
@@ -97,6 +128,7 @@ export async function workspaceFacts(cwd, signal) {
     directories: [],
     commands: [],
     dependencyEvidence: [],
+    environmentEvidence: [],
     protectedCandidates: [],
     git: { available: false },
     authority: "unresolved",
@@ -153,6 +185,18 @@ export async function workspaceFacts(cwd, signal) {
         authority: "unresolved",
         source: "filename only",
       });
+  const observed = new Set([...result.manifests.map((m) => m.path), ...result.directories]);
+  for (const [kind, candidate, markers] of SURFACES) {
+    const evidence = markers.filter((marker) => observed.has(marker));
+    if (evidence.length)
+      result.environmentEvidence.push({ kind, candidate, evidence, source: "local filenames only", verified: false });
+  }
+  if (result.environmentEvidence.length)
+    result.environmentGuidance = [
+      "Markers suggest configuration to inspect, not a live target, installed toolchain or successful build. Reuse existing scripts after checking their side effects; builds can run hooks or upload targets.",
+      ...(result.environmentEvidence.some((e) => e.kind === "deployment") ? ["Before deployment or synchronization, establish source/destination and preserve secrets, databases and user uploads. Review excludes, rollback and a supported dry run; do not equate repository contents with production state."] : []),
+      ...(result.environmentEvidence.some((e) => e.kind === "embedded") ? ["Use sys_probe host/devices for local capability and port metadata. Confirm board/port, target firmware, power/pin compatibility and recovery before flash/reset/write; compile-only checks must remain separate from upload/monitor."] : []),
+    ];
   if (result.manifests.some((m) => m.path === "package.json")) {
     let handle;
     try {
