@@ -14,8 +14,20 @@ process.env.PI_CODING_AGENT_DIR=root;
 fs.writeFileSync(path.join(root,'models.json'),'{"providers":{}}');
 try {
  const providers={};
- const {default:register}=await import(pathToFileURL(path.join(agent,'extensions/live-models.ts')));
- await register({registerProvider:(id,value)=>providers[id]=value,on(){}});
+ const {default:register,formatCatalogAge}=await import(pathToFileURL(path.join(agent,'extensions/live-models.ts')));
+ const commands={};
+ await register({registerProvider:(id,value)=>providers[id]=value,registerCommand:(name,cmd)=>commands[name]=cmd,on(){}});
+ assert.equal(formatCatalogAge(2323*60000),'1d 14h ago');
+ assert.equal(formatCatalogAge(90000),'1 min ago');
+ assert.equal(formatCatalogAge(0),'just now');
+ assert.equal(formatCatalogAge(null),'age unknown');
+ assert.equal(formatCatalogAge(NaN),'age unknown');
+ const refreshes=[];
+ const ctx={hasUI:true,model:{provider:'example'},modelRegistry:{refresh:async options=>refreshes.push(options)},ui:{notify(){},setStatus(){},theme:{fg:(_color,text)=>text}}};
+ await commands['catalog-status'].handler('',ctx);
+ assert.equal(refreshes.length,0);
+ await commands['catalog-status'].handler('refresh',ctx);
+ assert.deepEqual(refreshes,[{allowNetwork:true,force:true,providers:['example']}]);
  const map=async(provider,row,pricing)=>{
   fs.writeFileSync(path.join(root,'live-model-catalog.json'),JSON.stringify({version:1,providers:{}}));
   globalThis.fetch=async(url,init)=>{

@@ -21,11 +21,12 @@ import {
   type NeedlePass,
   type RequestFamily,
 } from "./lib/micro-intelligence/advisory.ts";
-import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
+import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
 import { needleClassify, needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
 import { askJev } from "./lib/jev-client.ts";
 import { Type } from "typebox";
+import { createHash } from "node:crypto";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 
@@ -38,6 +39,7 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
 }
 
 export interface MicroRequestState {
+  requestHash: string;
   deterministic: DeterministicPass;
   needle?: NeedlePass;
   needlePending: boolean;
@@ -54,8 +56,15 @@ export function lastMicroRequest(): MicroRequestState | undefined {
   return lastRequest;
 }
 
-export default function (pi: any) {
-  if (process.env.PI_MICRO_INTELLIGENCE === "off") return;
+/** Reuse only advice for the exact current task, never an earlier request. */
+export function microRequestAdvice(prompt: string): AdvisoryResult | undefined {
+  return lastRequest?.requestHash === createHash('sha256').update(prompt).digest('hex') && lastRequest.advisory?.ok ? lastRequest.advisory : undefined;
+}
+
+export default function (pi: any, deps = { classify: needleClassify, warmup: needleWarmup, ask: askJev }) {
+  if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD) return;
+  let controller: AbortController | undefined;
+  let advisoryTimer: ReturnType<typeof setTimeout> | undefined;
 
   pi.registerTool({
     name: "micro_status",
@@ -80,21 +89,30 @@ export default function (pi: any) {
     },
   });
 
+  const cancel = () => {
+    controller?.abort(); controller = undefined;
+    clearTimeout(advisoryTimer); advisoryTimer = undefined;
+    if (lastRequest) { lastRequest.needlePending = false; lastRequest.advisoryPending = false; }
+  };
   const reset = () => {
+    cancel();
     lastRequest = undefined;
     microMetrics();
   };
 
   pi.on("session_start", () => {
     reset();
+    resetMicroMetrics();
     // Asynchronous: the worker loads WASM + weights off the critical path.
     try {
-      needleWarmup();
+      deps.warmup();
     } catch {
       /* Warmup failure degrades to skips; the session is unaffected. */
     }
   });
-  pi.on("session_switch", reset);
+  for (const event of ['input', 'session_before_switch', 'session_before_fork', 'session_before_tree']) pi.on(event, reset);
+  for (const event of ['session_switch', 'session_fork', 'session_tree']) pi.on(event, () => { reset(); resetMicroMetrics(); });
+  pi.on('agent_end', cancel);
   pi.on("session_shutdown", () => {
     reset();
     try {
@@ -105,13 +123,17 @@ export default function (pi: any) {
   });
 
   pi.on("before_agent_start", (event: any) => {
+    reset();
+    const current = new AbortController(); controller = current;
+    const isCurrent = () => !current.signal.aborted && controller === current;
     const prompt = typeof event?.prompt === "string" ? event.prompt : "";
     const pass = deterministicRequestPass(prompt);
     const state: MicroRequestState = {
+      requestHash: createHash('sha256').update(prompt).digest('hex'),
       deterministic: pass,
       needlePending: false,
       advisoryPending: false,
-      family: "unknown",
+      family: pass.family,
       at: Date.now(),
     };
     lastRequest = state;
@@ -121,14 +143,15 @@ export default function (pi: any) {
     state.needlePending = true;
     let advisoryStarted = false;
     const startAdvisory = () => {
-      if (advisoryStarted || !shouldAdvise(pass, 0)) return;
+      if (!isCurrent() || advisoryStarted || !shouldAdvise(pass, 0)) return;
       advisoryStarted = true;
       state.advisoryPending = true;
       // One compact batched call, consumed at later checkpoints.
       runAdvisory(
         { prompt, family: state.family, terms: pass.terms, candidates: [] },
-        (site, advisoryState, questions) => askJev(site, advisoryState, questions, { pi }),
+        (site, advisoryState, questions) => deps.ask(site, advisoryState, questions, { pi, signal: current.signal }),
         (advisory) => {
+          if (!isCurrent()) return;
           state.advisoryPending = false;
           state.advisory = advisory;
           if (advisory.ok) {
@@ -146,10 +169,11 @@ export default function (pi: any) {
     };
     // Advisory carries the Needle family when it arrives promptly (500ms);
     // a slow/unavailable Needle never delays the advisory.
-    const advisoryTimer = setTimeout(startAdvisory, 500);
+    advisoryTimer = setTimeout(startAdvisory, 500);
     advisoryTimer.unref?.();
-    void needleRequestPass(prompt, (text, labels) => needleClassify({ text, labels })).then(
+    void needleRequestPass(prompt, (text, labels) => deps.classify({ text, labels })).then(
       (needle) => {
+        if (!isCurrent()) return;
         state.needlePending = false;
         if (needle) {
           state.needle = needle;
@@ -160,6 +184,7 @@ export default function (pi: any) {
         startAdvisory();
       },
       () => {
+        if (!isCurrent()) return;
         state.needlePending = false;
         clearTimeout(advisoryTimer);
         startAdvisory();

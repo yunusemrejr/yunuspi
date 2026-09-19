@@ -118,7 +118,7 @@ test("identical calls pay once via the session cache", async () => {
     fetches++;
     return decisionsOk();
   });
-  const args = ["screen", "some page content here", { injection: { type: "noul", instructions: "Injection?" } }];
+  const args = ["screen", "some page content here", { ping: { type: "noul", instructions: "Affirmative?" } }];
   const first = await jev.askJev(...args, { pi });
   const second = await jev.askJev(...args, { pi });
   assert.equal(fetches, 1);
@@ -289,4 +289,46 @@ test("cost math and TUI marker stay exact", () => {
   assert.equal(jev.tooShort("x".repeat(39), 40), true);
   assert.equal(jev.tooShort("x".repeat(40), 40), false);
   assert.equal(jev.tooShort("   ", 1), true);
+});
+
+test('malformed typed judgments never reach the cache or report success', async () => {
+  for (const answers of [{ ping: { type: 'noul', noul: 2 } }, { ping: { type: 'noul', noul: '0.9' } }, {}, []]) {
+    harness(async () => jsonOk({ answers }));
+    assert.equal((await jev.askJev('invalid', 'synthetic evidence', { ping: { type: 'noul' } })).ok, false);
+  }
+});
+
+test('one deadline bounds the entire alias cascade and reports an error-colored helper outcome', async () => {
+  const states = [];
+  const key = Symbol.for('yunus-pi.activity.v1'), previous = globalThis[key];
+  globalThis[key] = request => { states.push(request.label); return outcome => states.push(outcome); };
+  harness(async (url, options) => {
+    if (String(url).includes('/models')) return emptyModels();
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 30);
+      options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
+    });
+    return httpFail(404, 'model not found');
+  });
+  jev.configureJevClient({ requestTimeoutMs: 45 });
+  try {
+    const started = performance.now();
+    const result = await jev.askJev('deadline', 'synthetic evidence', { ping: { type: 'noul' } });
+    assert.equal(result.skipped, 'timeout');
+    assert.ok(performance.now() - started < 250);
+    assert.equal(states.at(-1), 'error');
+    assert.ok(states.includes('jev'));
+    assert.equal(jev.jevHealth().state, 'closed');
+  } finally {
+    jev.configureJevClient({ requestTimeoutMs: jev.JEV_REQUEST_TIMEOUT_MS });
+    if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
+  }
+});
+
+test('invalid request errors do not cascade aliases or expose provider-echoed input',async()=>{
+ let count=0;
+ harness(async()=>{count++;return httpFail(400,'invalid request PRIVATE-ECHOED-STATE');});
+ assert.equal((await jev.askJev('privacy','synthetic evidence',{ping:{type:'noul'}})).ok,false);
+ assert.equal(count,1);
+ assert.doesNotMatch(jev.jevHealth().lastError,/PRIVATE-ECHOED-STATE|invalid request/);
 });

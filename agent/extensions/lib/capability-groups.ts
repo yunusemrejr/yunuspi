@@ -1,6 +1,7 @@
 /** Small, deterministic groups shared by optional tool and skill discovery.
  * Grouping uses only the catalog entry's name and description. It never reads
  * a skill body, calls a model, or treats catalog prose as instructions. */
+import { oneEditAway } from './skill-relevance.ts';
 
 export type CapabilityGroup = Readonly<{
   id: string;
@@ -25,10 +26,12 @@ export function searchCapabilityMetadata<T extends CapabilityMetadata>(items: re
   const terms = tokens(query, 256);
   const identity = (value: string) => value.toLowerCase().trim().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
   const exact = identity(query);
+  const vocabulary = new Set(items.flatMap(item => tokens(`${item.name} ${item.description ?? ''}`, 4352)));
   return items.map(item => {
     const name = tokens(item.name, 256), description = tokens(item.description ?? '', 4096);
-    const match = (terms: string[], term: string) => terms.includes(term) ? 2
-      : term.length >= 4 && terms.some(candidate => candidate.startsWith(term)) ? 1 : 0;
+    const match = (words: string[], term: string) => words.includes(term) ? 2
+      : term.length >= 4 && words.some(candidate => candidate.startsWith(term)) ? 1
+      : term.length >= 6 && !vocabulary.has(term) && words.some(candidate => candidate.length >= 6 && oneEditAway(term, candidate)) ? 0.5 : 0;
     const score = !query.trim() ? 1 : identity(item.name) === exact ? 10000
       : terms.reduce((sum, term) => sum + 8 * match(name, term) + match(description, term), 0);
     return {item, score};

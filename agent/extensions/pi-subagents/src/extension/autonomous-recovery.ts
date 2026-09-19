@@ -1,3 +1,4 @@
+import { beginHarnessActivity, type ActivityOutcome } from '../../../lib/harness-activity.ts';
 import { registerSkillDiscoveryRunner } from "./skill-discovery-runner.ts";
 import { planAssistance, selectAssistanceTeam } from "../runs/shared/assistance-plan.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
@@ -261,6 +262,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				return pending.map(r=>({...r,gap:'Independent review skipped: the automatic assistance budget for this request is already spent.'}));
 			}
 			let status = 'failed';
+			const finishActivity = beginHarnessActivity('review');
 			let nativeRunId: string | undefined;
 			const evidencePaths = Array.isArray(request.evidence) ? request.evidence.filter((f: unknown): f is string => typeof f === 'string' && f.length > 0 && f.length <= 256 && !f.startsWith('/') && !f.split('/').includes('..')).slice(0, 8) : [];
 			const evidenceSection = evidencePaths.length ? `\nOutcome evidence supplied by the parent: inspect these project-relative paths before judging and cite them in evidence: ${JSON.stringify(evidencePaths)}.` : '';
@@ -344,7 +346,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 				status = childCompletedCleanly && reports.every((report:any) => report.ok === true) ? 'completed' : 'failed';
 				return reports;
 			} catch { return pending.map(r=>({...r,gap:'Reviewer execution failed before a report could be assessed.'})); }
-			finally { if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{index:0,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
+			finally { finishActivity(signal.aborted || !owns() ? 'cancelled' : status === 'completed' ? 'ok' : 'error'); if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{index:0,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
 		}).map((operation,index)=>operation.then(reports=>{
 			if (!owns() || signal.aborted) return;
 			settled[index] = reports.map(r=>({...r,gap:'gap' in r ? String(r.gap) : ''}));
@@ -359,7 +361,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	 * health event. A confident read steers display:false advice into the
 	 * current turn; the activity indicator shows it ran. */
 	const runInterpSidecar = async (ctx: ExtensionContext, signal: AbortSignal, epoch: number, promptText: string): Promise<void> => {
+		let finishActivity: ReturnType<typeof beginHarnessActivity> | undefined, activityOutcome: ActivityOutcome = 'error';
 		const note = (decision: string) => {
+			activityOutcome = ['additive','redirect'].includes(decision) ? 'ok' : decision === 'unclear' || decision === 'unavailable' ? 'skipped' : 'error';
 			try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("interp.sidecar", { decision }); } catch { /* telemetry is optional */ }
 		};
 		try {
@@ -373,6 +377,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			const flowId = `interp-flow-${randomUUID()}`;
 			if (enforceAssistanceFlow(flowId, { agent: "interp-sidecar", task: promptText, model: member.route, runId: flowId }) !== "admitted") { note("unavailable"); return; }
 			const launchId = `interp-${randomUUID()}`;
+			finishActivity = beginHarnessActivity('interpretation');
 			const result = await launch(launchId, {
 				agent: "automatic-free-assistant", model: member.route, modelOrigin: "explicit", context: "fresh", async: false, foregroundOnly: true,
 				acceptance: { level: "none", reason: "Advisory interpretation only; the parent owns the read." },
@@ -407,7 +412,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			}, { deliverAs: "steer", triggerTurn: false });
 		} catch {
 			note("failed");
-		}
+		} finally { finishActivity?.(signal.aborted || epoch !== generation ? 'cancelled' : activityOutcome); }
 	};
 	const group = async (ctx: ExtensionContext, signal: AbortSignal, failure?: string): Promise<string | undefined> => {
 		if (groupUsed) return;
@@ -437,6 +442,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		let branch: unknown;
 		try { branch = ctx.sessionManager.getBranch?.(); } catch { /* missing evidence is unknown */ }
 		const intent = helperIntentEvidence(prompt, branch);
+		const finishActivity = beginHarnessActivity(mode === 'fusion' ? 'fusion' : mode === 'swarm' ? 'swarm' : 'agents');
+		let activityOutcome: ActivityOutcome = 'error';
+		try {
 		const results = await Promise.all(routes.map(async (candidate, index) => {
 			const model = models.find(m => `${m.provider}/${m.id}` === candidate.route)!;
 			const key = candidate.route;
@@ -494,10 +502,12 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		}));
 		if (signal.aborted || groupEpoch !== generation || ctx.sessionManager.getSessionFile() !== groupSessionFile) return;
 		const good = results.filter(r => r.ok && r.output.trim());
+		activityOutcome = good.length === routes.length ? 'ok' : good.length ? 'skipped' : 'error';
 		if (!good.length) { notice(ctx, "Automatic helpers returned no usable evidence; parent continues without respawning the group."); return; }
 		const body = good.length === 1 ? `[${good[0].key}]\n${good[0].output}` : fuseChildOutputs(results, { maxBodyChars: 10000 }).fusedBody;
 		if (good.length > 1) try { metrics?.('fusions'); } catch {}
 		return `Read-only ${metered ? "free/low-cost" : "free"} ${mode} assistance (${good.length}/${routes.length} supplied advisory output; failed members: ${results.filter(r=>!r.ok || !r.output.trim()).map(r=>r.key).join(", ") || "none"}; independently verify every claim and resolve disagreements):\n${body}`;
+		} finally { finishActivity(signal.aborted || groupEpoch !== generation ? 'cancelled' : activityOutcome); }
 	};
 	on("before_agent_start", async (event, ctx) => {
 		primary ??= ctx.model;

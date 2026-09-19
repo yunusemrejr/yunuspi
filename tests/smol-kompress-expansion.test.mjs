@@ -209,25 +209,19 @@ const miniRuntime = {
 const filler = "General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.";
 const fact = "The current status remains blocked until verification confirms the deployment result.";
 
-test("mini warmup pings once without polluting cooldown", async () => {
+test("mini clients leave service warmup and its shared rate slot alone", async () => {
   let calls = 0;
-  const c = mini.createMiniPreprocessor({
-    runtime: miniRuntime,
-    fetch: async () => {
-      calls++;
-      return new Response(JSON.stringify({ version: 1, status: "UNKNOWN" }));
-    },
-  });
-  c.warmup();
-  c.warmup();
-  await new Promise((r) => setTimeout(r, 20));
-  assert.equal(calls, 1);
-  assert.equal(c.inspect().warmups, 1);
-  assert.equal(c.inspect().cooldownMs, 0);
+  const c = mini.createMiniPreprocessor({runtime: miniRuntime,fetch: async () => { calls++; return new Response('{"version":1,"status":"UNKNOWN"}'); }});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls,0);
+  const raw=[fact,...Array(9).fill(filler)].join('\n\n');
+  assert.equal(await c.select(raw,10,'verification status'),undefined);
+  assert.equal(calls,1);
+  assert.equal(c.inspect().timeouts,0);
+  assert.ok(c.inspect().cooldownMs<=10000,'valid refusal retains the normal cooldown');
   c.reset();
-  c.warmup();
-  await new Promise((r) => setTimeout(r, 20));
-  assert.equal(calls, 2, "reset re-arms deliberate warmup");
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls,1,'a session reset cannot trigger another warmup');
 });
 
 test("mini timeouts are counted apart from refusals", async () => {

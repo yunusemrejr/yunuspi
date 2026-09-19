@@ -44,3 +44,10 @@ test('local routing indexes skills beyond the model discovery packet limit',()=>
  const ranked=rankSkills(buildSkillIndex([...prefix,tail]),'tail workflow orbital ephemeris propagation');
  assert.equal(ranked[0]?.skill.name,'tail-workflow');
 });
+
+test('short technical terms survive tokenization and compound routing', () => {
+ assert.deepEqual(skillTerms('a an to of C++ C# API SQL CSS PDF AI ML'), ['c++','c#','api','sql','css','pdf','ai','ml']);
+ const index=buildSkillIndex([skill('sql-query-engineering','Relational transactions and query plans'),skill('php-application','Secure request handling'),...unrelated]);
+ assert.equal(rankSkills(index,'SQL')[0]?.skill.name,'sql-query-engineering');
+ assert.equal(rankSkills(index,'PHP')[0]?.skill.name,'php-application');
+});

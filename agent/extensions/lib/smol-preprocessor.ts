@@ -5,6 +5,7 @@ import { constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { relevanceScores, taskTerms } from './local-intelligence.mjs';
+import { beginHarnessActivity, type FinishActivity } from './harness-activity.ts';
 import { microMetrics } from './micro-intelligence/metrics.ts';
 
 /** Best-effort capability telemetry. Failures here never affect selection. */
@@ -231,7 +232,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const signal = process.env.PI_LOCAL_INTELLIGENCE === 'off' ? '' : taskTerms(task).sort().join(' ');
       const cacheKey = createHash('sha256').update(raw).update('\0').update(signal).digest('hex');
       const cached = background ? cache.get(cacheKey) : undefined;
-      if (cached) { stats.cacheHits++; microMetrics().cacheHit('smol'); slots.set(key,{state:'ready',value:cached}); noteHealth('ml.smol.offer', {decision:'cache-hit',count:1}); return; }
+      if (cached) { beginHarnessActivity('smol')('cached'); stats.cacheHits++; microMetrics().cacheHit('smol'); slots.set(key,{state:'ready',value:cached}); noteHealth('ml.smol.offer', {decision:'cache-hit',count:1}); return; }
       if (busy || now() - lastCall < 60_000) { noteHealth('ml.smol.offer', {decision:busy?'busy':'cooldown'}); return; }
       if (!background && raw.length < runtime.calibrated.minInputChars) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       // Background mode uses a context-saving floor even on zero/unknown-price
@@ -272,11 +273,13 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const epoch = generation;
       let accepted = false;
       let requested = false;
+      let expired = false;
+      let finishActivity: FinishActivity | undefined;
       let outcome = "unavailable";
       const deadline = new Promise<never>((_,reject)=>abort.signal.addEventListener('abort',()=>reject(new Error('local selection cancelled')),{once:true}));
       // Attach a rejection observer while lease acquisition is pending.
       void deadline.catch(()=>{});
-      const timer = setTimeout(() => abort.abort(), timeoutMs);
+      const timer = setTimeout(() => { expired = true; abort.abort(); }, timeoutMs);
       timer.unref?.();
       void (async () => {
         try {
@@ -285,6 +288,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
           if (abort.signal.aborted || epoch !== generation || !background && slot.state !== 'pending') return;
           stats.requests++;
           requested = true;
+          finishActivity = beginHarnessActivity('smol');
           const response = await Promise.race([deadline, request(config.endpoint, {
             method: 'POST', redirect:'error', signal: abort.signal,
             headers: {'Content-Type': 'application/json', ...(config.apiKey ? {Authorization: `Bearer ${config.apiKey}`} : {})},
@@ -335,7 +339,8 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
         } catch { /* Unsupported/malformed/cancelled results preserve the exact original. */ }
         finally {
           clearTimeout(timer);
-          stats.lastOutcome = abort.signal.aborted ? 'cancelled-or-timeout' : outcome;
+          stats.lastOutcome = expired ? 'timeout' : abort.signal.aborted ? 'cancelled' : outcome;
+          finishActivity?.(epoch !== generation || abort.signal.aborted && !expired ? 'cancelled' : accepted ? 'ok' : !expired && (outcome === 'insufficient-savings' || outcome === 'model-unknown') ? 'skipped' : 'error');
           if (requested) microMetrics().run('smol',Math.max(0,now()-lastCall),raw.length);
           if (!accepted && requested) microMetrics().skip('smol',stats.lastOutcome);
           noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});

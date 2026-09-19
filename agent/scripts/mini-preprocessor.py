@@ -86,7 +86,11 @@ def main():
  if args.key_file.stat().st_size>257:parser.error('Invalid key file size')
  key=args.key_file.read_text().strip()
  if not re.fullmatch(r'[A-Za-z0-9_-]{32,256}',key):parser.error('Invalid key file')
- selector=ParagraphSelector(args.model,args.tokenizer);release_workspace()
+ selector=ParagraphSelector(args.model,args.tokenizer)
+ # Warm the shared engine once, before admitting clients. No request-rate slot
+ # is spent and no per-session warmup competes with useful inference.
+ background='General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.'
+ selector.select('\n\n'.join([background]*5));release_workspace()
  server=Server(('127.0.0.1',args.port),selector,key);server.timeout=.2
  stopping=threading.Event()
  def stop(*_):stopping.set()

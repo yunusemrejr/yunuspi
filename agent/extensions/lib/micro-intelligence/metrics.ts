@@ -199,7 +199,7 @@ export function microMetrics(): MicroMetrics {
   return shared;
 }
 
-/** Test seam. */
+/** Session boundary: pending callers retain their original collector. */
 export function resetMicroMetrics(): void {
   shared = undefined;
 }

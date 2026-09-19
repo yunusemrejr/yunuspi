@@ -1214,6 +1214,16 @@ function resolvedCatalogApiKey(
 const outputFallbacks = new Map<string, number>();
 type CatalogHealth = {source:"live" | "cache" | "fallback"; observedAt:number; failure?:"refresh failed" | "cache write failed" | "registry refresh failed"};
 const catalogHealth = new Map<string,CatalogHealth>();
+export function formatCatalogAge(ageMs: number | null): string {
+  if (ageMs === null || !Number.isFinite(ageMs) || ageMs < 0) return 'age unknown';
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ''} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d${hours % 24 ? ` ${hours % 24}h` : ''} ago`;
+}
 export function catalogDiagnostics(now = Date.now()) {
   return [...catalogHealth].map(([provider,health]) => ({provider,...health,
     ageMs:health.observedAt > 0 ? Math.max(0,now-health.observedAt) : null,
@@ -1225,7 +1235,7 @@ function catalogStatus(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
   const row = catalogDiagnostics().find(item => item.provider === ctx.model?.provider);
   ctx.ui.setStatus("model-catalog", row && (row.failure || row.stale || row.facts === "expired")
-    ? `Catalog: ${row.provider} ${row.source}${row.ageMs === null ? " (age unknown)" : ` (${Math.floor(row.ageMs/60000)}m old)`}${row.failure ? `; ${row.failure}` : ""}${row.facts === "expired" ? "; snapshot facts expired" : ""}`
+    ? ctx.ui.theme.fg('warning', `Model list: ${row.provider} · ${row.source === 'fallback' ? 'fallback; update time unknown' : `updated ${formatCatalogAge(row.ageMs)}`}${row.stale ? ' · stale' : ''}${row.failure ? ` · ${row.failure}` : ''}${row.facts === 'expired' ? ' · model facts expired' : ''} · /catalog-status`)
     : undefined);
 }
 
@@ -1509,10 +1519,17 @@ export default async function registerLiveModels(
 ): Promise<void> {
 	const localProviderIds = registerLocalModels(pi, AGENT_DIR);
 	pi.registerCommand?.("catalog-status", {
-		description:"Show local catalog age, refresh failures and dated-fact expiry (no network)",
-		handler: async (_args: string, ctx: ExtensionContext) => {
+		description:"Show model-list age and failures; add refresh to update the selected provider's list",
+		handler: async (args: string, ctx: ExtensionContext) => {
+      if (args.trim() && args.trim() !== 'refresh') { ctx.ui.notify('Usage: /catalog-status [refresh]', 'info'); return; }
+      if (args.trim() === 'refresh') {
+        if (process.env.PI_OFFLINE !== undefined || !ctx.model?.provider) { ctx.ui.notify('Model-list refresh needs an online session and a selected provider.', 'warning'); return; }
+        try { await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
+        catch { ctx.ui.notify('Model-list refresh failed; the saved list remains available.', 'error'); }
+        catalogStatus(ctx);
+      }
 			const rows = catalogDiagnostics();
-			if (ctx.hasUI) ctx.ui.notify(rows.length ? rows.map(row => `${row.provider}: ${row.source}; ${row.ageMs === null ? "age unknown" : `${Math.floor(row.ageMs/60000)}m old`}; ${row.stale ? "stale" : "fresh"}${row.failure ? `; ${row.failure}` : ""}; facts ${row.facts}`).join("\n") : "Catalog has not been observed in this process.", "info");
+			if (ctx.hasUI) ctx.ui.notify(rows.length ? rows.map(row => `${row.provider}: ${row.source}; ${formatCatalogAge(row.ageMs)}; ${row.stale ? "stale" : "fresh"}${row.failure ? `; ${row.failure}` : ""}; facts ${row.facts}`).join("\n") + '\nRefresh the selected provider: /catalog-status refresh' : "Catalog has not been observed in this process.", "info");
 		},
 	});
 	for (const [providerId, meta] of [

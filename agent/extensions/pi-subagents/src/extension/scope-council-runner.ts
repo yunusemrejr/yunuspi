@@ -12,6 +12,8 @@ import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
 import { needleRank } from "../../../lib/needle-runtime.ts";
 import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
 import { COUNCIL_PERSPECTIVES, selectPerspectives, type RankFn } from "../../../lib/micro-intelligence/review.ts";
+import { microRequestAdvice } from '../../../micro-intelligence.ts';
+import type { ActivityOutcome, FinishActivity } from '../../../lib/harness-activity.ts';
 
 /** The automatic scope council is a service used by the parent lifecycle.
  * It deliberately has no registered user-facing tool: an agent cannot opt into
@@ -536,8 +538,8 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
 			}
 		};
-    let finishActivity: (()=>void) | undefined;
-    try { if (current()) finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`scope-${randomUUID()}`,label:'review'},ctx); } catch { /* UI is optional. */ }
+    let finishActivity: FinishActivity | undefined, activityOutcome: ActivityOutcome = 'error';
+    try { if (current()) finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`scope-${randomUUID()}`,label:'council'},ctx); } catch { /* UI is optional. */ }
 		try {
 			// Overlap one local semantic cue with the existing peer wave. Never
 			// wait for it at synthesis: missing, shadow or weak results add nothing.
@@ -585,9 +587,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			const critic = team[2] ?? (both ? team[0]! : proposals[0]!.role === "preservation" ? team[1]! : team[0]!);
 			const independence: "cross-peer" | "self-critique" = team[2] ? "cross-peer"
 				: both ? "self-critique" : "cross-peer";
-			const focus = COUNCIL_PERSPECTIVES.filter(entry => perspectiveIds.includes(entry.id));
+			const advisory = microRequestAdvice(request.task);
+			const focus = COUNCIL_PERSPECTIVES.filter(entry => [...perspectiveIds, ...(advisory?.perspectives ?? [])].includes(entry.id)).slice(0, 3);
 			const cue = focus.length ? `Optional semantic focus cues (similarity only; these do not establish findings or limit required review): ${focus.map(entry => `${entry.id}: ${entry.text}`).join("; ")}. Independently assess relevance and all evidence above.` : "";
-			if (cue) microMetrics().accept("needle");
+			if (cue && perspectiveIds.length) microMetrics().accept("needle");
 			const synthesis = await run(critic, "peer-critique", cue ? `${evidence}\n\n${cue}` : evidence);
 			if (synthesis.gap) gaps.push(synthesis.gap);
 			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
@@ -598,11 +601,12 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				gap: mergeGaps(gaps),
 				independence,
 			};
+			activityOutcome = result.status === 'complete' ? 'ok' : 'skipped';
 			try { request.onResult?.(result); } catch { /* observer cannot change the result */ }
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
-      try { finishActivity?.(); } catch { /* UI cannot change advice. */ }
+      try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
 			controller.abort();
 		}
 	};

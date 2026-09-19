@@ -207,34 +207,3 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   }
   return done([...lexical], "lexical", { needleTop, needleMargin });
 }
-
-/**
- * Background embedding warmup for a static corpus (tool/capability/command
- * descriptions). Small batches with idle gaps so interactive ops interleave;
- * abortable, never throws; the Needle owner caches exact embedding inputs. Warmed embeddings
- * turn repeat ranks from ~250ms into cache hits.
- */
-export async function warmEmbeddings(
-  texts: string[],
-  embed: (texts: string[]) => Promise<{ ok: boolean }>,
-  options: { batch?: number; gapMs?: number; signal?: AbortSignal } = {},
-): Promise<{ warmed: number; batches: number }> {
-  const batch = Math.max(1, Math.min(16, options.batch ?? 6));
-  const gapMs = Math.max(0, Math.min(5000, options.gapMs ?? 150));
-  const unique = [...new Set(texts.filter((text) => typeof text === "string" && text.trim().length >= 3))].slice(0, 512);
-  let warmed = 0, batches = 0;
-  for (let i = 0; i < unique.length; i += batch) {
-    if (options.signal?.aborted) break;
-    try {
-      const result = await embed(unique.slice(i, i + batch).map((text) => text.slice(0, EMBED_CHARS)));
-      if (result.ok) warmed += Math.min(batch, unique.length - i);
-      batches++;
-    } catch {
-      break;
-    }
-    if (i + batch < unique.length && gapMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, gapMs));
-    }
-  }
-  return { warmed, batches };
-}

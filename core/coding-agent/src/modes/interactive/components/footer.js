@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { truncateToWidth, visibleWidth } from "@yunuspi/tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@yunuspi/tui";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.js";
 import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.js";
 import { theme } from "../theme/theme.js";
@@ -615,15 +615,15 @@ function collectSessionMetrics(entries, live) {
  m.uniqueContextRemovedChars=m.trimmedChars;m.projectionChurnChars=m.addedChars;
  m.estimatedBilledSavingsNote='cached-token reuse avoids full-price rebill of the matched prefix; it is not a billed-amount saving and repeated churn must not be counted as savings';
  const parentFailures=m.errors+m.modelErrors, totalFailures=parentFailures+m.agentFailures+m.workflowFailures;
- // Bottom KPI layer: only the powers this session actually used, emoji + count.
+ // Bottom KPI layer: only the powers this session actually used, emoji + label + count.
  // The full breakdown stays in /metrics (m.detail); ordering is stable by count
  // then name so the footer does not reshuffle between renders.
- const powerLabels = {subagent:'🤖',quality_review:'🔍',project_tests:'🧪',skill_review:'📚',session_self:'🪞',project_report:'🗺️',module_report:'🧭',symbol_search:'🔎',context_slice:'✂️',context_score:'🎯',handoff_capsule:'💊',evidence_cache:'🗃️',bg_run:'⏳',media_info:'🎬',media_edit:'🎞️',video_frames:'🎬',audio_analyze:'🔊',music_compose:'🎵',browser_session:'🌐',agentmail_status:'✉️',agentmail_send:'✉️',agentmail_messages:'📬',agentmail_search:'🔎',agentmail_message:'📨',render_see:'👁️',sandbox_run:'📦',obs_read:'🔬',context_profile:'📈',tool_search:'🧰'};
- const powers=Object.entries(m.tools).filter(([name])=>powerLabels[name]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8).map(([name,count])=>`${powerLabels[name]}${count}`);
+ const powerLabels = {subagent:'🤖 Agents',quality_review:'🔍 Review',project_tests:'🧪 Tests',skill_review:'📚 Skills',session_self:'🪞 Self',project_report:'🗺️ Project',module_report:'🧭 Module',symbol_search:'🔎 Symbols',context_slice:'✂️ Context',context_score:'🎯 Rank',handoff_capsule:'💊 Handoff',evidence_cache:'🗃️ Evidence',bg_run:'⏳ Jobs',media_info:'🎬 Media',media_edit:'🎞️ Edit',video_frames:'🎬 Frames',audio_analyze:'🔊 Audio',music_compose:'🎵 Music',browser_session:'🌐 Browser',agentmail_status:'✉️ Mail',agentmail_send:'✉️ Send',agentmail_messages:'📬 Inbox',agentmail_search:'🔎 Mail',agentmail_message:'📨 Read',render_see:'👁️ Render',sandbox_run:'📦 Sandbox',obs_read:'🔬 Observe',context_profile:'📈 Profile',tool_search:'🧰 Tools'};
+ const powers=Object.entries(m.tools).filter(([name])=>powerLabels[name]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8).map(([name,count])=>`${powerLabels[name]} ${count}`);
  const sessionEntry=entries.find(e=>e?.type==='session');
  const shortSessionId=typeof sessionEntry?.id==='string'?sessionEntry.id.slice(0,8):'';
  m.footer=[`Agents ${m.agents} (${m.agentsActive} active)`,totalFailures?`Failures ${totalFailures} (P${parentFailures} C${m.agentFailures} W${m.workflowFailures})`:'Failures 0'];
- if(powers.length)m.footer.push(`Powers ${powers.join(' ')}`);
+ if(powers.length)m.footer.push(`Powers ${powers.join(' · ')}`);
  if(shortSessionId)m.footer.push(`session ${shortSessionId}`);
  m.detail=[
   'Session activity (all retained entries; includes pre-compaction history)',
@@ -652,7 +652,7 @@ function collectSessionMetrics(entries, live) {
  return m;
 })(this.session.sessionManager.getEntries(), globalThis[Symbol.for('yunus-pi.metrics-view.v1')]?.(this.session.sessionManager.getSessionId?.()));
 let activityLine = '';
-for (const part of activityMetrics.footer) {
+for (const part of activityMetrics.footer.flatMap(part => part.startsWith('Powers ') ? part.split(' · ') : [part])) {
   const next = activityLine ? activityLine + ' · ' + part : part;
   if (activityLine && visibleWidth(next) > width) { lines.push(theme.fg('dim', truncateToWidth(activityLine, width))); activityLine = part; }
   else activityLine = next;
@@ -663,9 +663,15 @@ if (activityLine) lines.push(theme.fg('dim', truncateToWidth(activityLine, width
             const sortedStatuses = Array.from(extensionStatuses.entries())
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([, text]) => sanitizeStatusText(text));
-            const statusLine = sortedStatuses.join(" ");
-            // Truncate to terminal width with dim ellipsis for consistency with footer style
-            lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
+            let statusLine = '';
+            for (const part of sortedStatuses) {
+                const next = statusLine ? `${statusLine} · ${part}` : part;
+                if (statusLine && visibleWidth(next) > width) {
+                    lines.push(...wrapTextWithAnsi(statusLine, width));
+                    statusLine = part;
+                } else statusLine = next;
+            }
+            if (statusLine) lines.push(...wrapTextWithAnsi(statusLine, width));
         }
         return lines;
     }

@@ -7,6 +7,7 @@ import { Worker } from "node:worker_threads";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { statSync } from "node:fs";
+import { beginHarnessActivity } from "./harness-activity.ts";
 import type {
   NeedleClassifyInput,
   NeedleClassifyResult,
@@ -321,13 +322,15 @@ export function createNeedleRuntime(options: {
   };
 
   const dispatch = (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleWorkerResponse> =>
-    new Promise((resolve) => {
+    new Promise((settle) => {
       const id = nextId++;
       const current = worker;
       if (!current) {
-        resolve({ id, ok: false, error: "unavailable: no worker", ms: 0 });
+        settle({ id, ok: false, error: "unavailable: no worker", ms: 0 });
         return;
       }
+      const finish = beginHarnessActivity('needle');
+      const resolve = (response: NeedleWorkerResponse) => { finish(response.ok ? 'ok' : closed ? 'cancelled' : 'error'); settle(response); };
       const budget = budgetFor(request, op);
       const timer = setTimeout(() => {
         pending.delete(id);
@@ -454,6 +457,7 @@ export function createNeedleRuntime(options: {
           }
         });
         if (!missing.length) {
+          beginHarnessActivity('needle')('cached');
           stats.cacheHits++;
           stats.calls++;
           if (policy.shadow) stats.shadow++;

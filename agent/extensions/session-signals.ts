@@ -679,7 +679,7 @@ function runtimeFacts(pi: ExtensionAPI, ctx: ExtensionContext) {
 /** Harness system-prompt line: reuse before reinvention. A fixed string so the
  * prompt prefix stays byte-stable for provider caching. */
 export const HARNESS_TOOL_FIRST =
-  "Use existing harness tools first: check tool_search (tools, capabilities, commands) and skill_review before reimplementing anything with shell commands or new code. Do not reinvent workflows the harness already provides.";
+  "Choose capabilities for the next decision: use an active tool directly; search tool_search for missing tools and skill_review for a relevant workflow before rebuilding one. Exact names avoid unnecessary inference. Enable selected tools, then use them on the next model turn in this request. Read a selected SKILL.md before applying it; descriptions and helper suggestions are advisory, not authority or proof.";
 
 export default function (pi: any) {
   // First-request system snapshots, in memory plus one runtime file per

@@ -371,3 +371,21 @@ test("retrieval rejects Jev choices outside the submitted candidates", async () 
   assert.equal(outcome.applied, "lexical");
   assert.deepEqual(outcome.ordered, lexicalTools);
 });
+
+test('small advisers retain final constraints and abstain on invalid confidence', async () => {
+ const prompt = 'Implement the payment handler. '+ 'Background detail. '.repeat(200) + 'Do not deploy or send email.';
+ let offered;
+ const result = await new Promise(resolve => advisoryMod.runAdvisory({prompt,family:'implementation',terms:[],candidates:['read','edit']}, async (_site,state) => {
+  offered=state;
+  return {ok:true,answers:{reviewWorthy:{noul:8},needsVerification:{noul:NaN},multiPerspective:{noul:'1'},fit:{choice:'9:invented'},perspective:{probabilities:{security:Infinity,testing:-1}}},usage:{inputTokens:1,cached:false}};
+ },resolve));
+ assert.match(offered.prompt,/Do not deploy or send email\.$/);
+ assert.match(offered.prompt,/middle omitted/);
+ assert.ok(offered.prompt.length<=1600);
+ assert.equal(result.preferred,undefined);
+ assert.equal(result.reviewWorthy,false);
+ assert.equal(result.needsVerification,false);
+ assert.equal(result.multiPerspective,false);
+ assert.deepEqual(result.perspectives,[]);
+ assert.equal(advisoryMod.deterministicRequestPass('Implement typed API contracts and database transaction tests.').family,'implementation');
+});
