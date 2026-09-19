@@ -257,6 +257,15 @@ test('changed config files suggest a single batched source checker using fresh p
   assert.ok(!f.g.candidates().some(h=>h.tool==='syntax_check'));
 });
 
+test('overlapping edit batches emit the same targeted recovery cue as stale edits',()=>{
+  const f=fixture();
+  f.start('Implement Python');
+  f.g.record({toolName:'edit',input:{path:'main.py'},isError:true,content:[{type:'text',text:'edits[0] and edits[1] overlap in main.py. Merge them into one edit or target disjoint regions.'}]});
+  const hint=f.g.candidates().find(h=>h.key==='signal:edit-recovery');
+  assert.ok(hint,'overlap failures need a recovery cue');
+  assert.match(hint.text,/Read the current target region/);
+});
+
 test('a bounded read that returns the entire skill satisfies review after compaction', () => {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'skill-full-read-'));
   const name='php-application-engineering', file=path.join(dir,name,'SKILL.md');

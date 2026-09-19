@@ -943,7 +943,7 @@ export function createRelevantGuidance(pi: any) {
       if (event.isError) {
         if (name === 'edit') {
           const message = (event.content ?? []).filter((item: any) => item.type === 'text').map((item: any) => String(item.text ?? '').slice(0,8000)).slice(0,4).join('\n');
-          if (/Edit without read|No verified read-tool coverage|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[/.test(message))
+          if (/Edit without read|No verified read-tool coverage|Edit target not found|RE-READ REQUIRED|PARTIAL APPLY|No edits were applied|Could not find edits\[|edits\[\d+\].*\boverlap\b/i.test(message))
             signalHint('edit-recovery','coding-practices','The edit was rejected or only partly applied. Read the current target region before rebuilding exact oldText. Follow the actual tool result: if nothing applied, retry the corrected complete batch; if some edits applied, retry only the failed edits. Preserve concurrent changes. Do not repeat stale text or bypass the guard with a whole-file overwrite.');
         }
         if (['read','edit','write','bash'].includes(name)) {

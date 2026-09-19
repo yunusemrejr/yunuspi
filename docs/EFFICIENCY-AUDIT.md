@@ -93,3 +93,21 @@ and memory/project intelligence/Smol/Jev/Needle behavior. All 45 declared extens
 entrypoints loaded against the owned runtime with 91 unique tools and no duplicate
 registrations. Structural host verification passed. These checks do not establish
 live provider availability or production semantic quality for every local model.
+
+### Historical-session follow-up
+
+Private-session review found repeated stale-text and overlapping-batch edit
+rejections across multiple model/provider routes. The current core already rejects
+overlapping edits safely and explains how to merge them, but the existing skill
+and recovery-guidance owner did not recognize that error wording. Its narrow
+matcher now treats overlap failures as edit-recovery events, with the same bounded
+advisory and cooldown behavior as stale or partially applied edits. Exact matching
+and concurrent-change protection remain enforced.
+
+Historical provider penalties for output-length stops and invalid thinking-suffix
+model IDs are already corrected in the current routing owner; this audit did not
+reintroduce route penalties, model rankings or universal skill-read requirements.
+Different task types, provider failures, harness versions, injected context and
+shell-based skill reads make raw route counts unsuitable as competence scores.
+New regression inputs are synthetic. Private prompts, sessions and their detailed
+analysis remain outside the public distribution.
