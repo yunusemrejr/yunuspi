@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { protectedEvidence } from "./local-intelligence.mjs";
 import { microMetrics } from './micro-intelligence/metrics.ts';
+import { beginHarnessActivity } from './harness-activity.ts';
 
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -104,6 +105,7 @@ type Deps = {
   now: () => number;
   schedule: (fn: () => void, ms: number) => { unref?: () => void };
   openMs: number;
+  requestTimeoutMs: number;
 };
 
 const deps: Deps = {
@@ -115,6 +117,7 @@ const deps: Deps = {
     return timer as unknown as { unref?: () => void };
   },
   openMs: 5 * 60 * 1000,
+  requestTimeoutMs: JEV_REQUEST_TIMEOUT_MS,
 };
 
 /** Test seam: inject fetch/clock/timers and shrink the breaker window. */
@@ -250,6 +253,8 @@ async function postDecisions(
   signal?: AbortSignal,
 ): Promise<{ answers: Record<string, JevAnswer> }> {
   signal?.throwIfAborted();
+  const finish = beginHarnessActivity('jev');
+  let returned = false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), JEV_REQUEST_TIMEOUT_MS);
   const onAbort = () => controller.abort();
@@ -268,15 +273,36 @@ async function postDecisions(
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      const err = Error(`decisions ${response.status}: ${body.slice(0, 160)}`) as Error & { status?: number };
+      // Provider error bodies may echo the submitted state. Retain only the
+      // status and safe model-rejection category in health/UI diagnostics.
+      const err = Error(`decisions ${response.status}${isModelRejection(response.status, body) ? ': invalid model' : ''}`) as Error & { status?: number };
       err.status = response.status;
       throw err;
     }
     const body = (await response.json()) as { answers?: Record<string, JevAnswer> };
-    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object")
+    signal?.throwIfAborted();
+    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
       throw Error("decisions: malformed answers");
+    // Validate the requested typed values before they reach routing, caches,
+    // intent guards or review planning. HTTP success is not a valid judgment.
+    const unit = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+    for (const [name, question] of Object.entries(questions)) {
+      const q = question as { type?: string; criteria?: Record<string, unknown> };
+      const answer = body.answers[name];
+      if (!Object.hasOwn(body.answers, name) || !answer || answer.type !== q.type
+        || q.type === 'noul' && !unit(answer.noul)
+        || q.type === 'score' && !Number.isFinite(answer.score)
+        || q.type === 'choice' && (typeof answer.choice !== 'string' || !q.criteria || !Object.hasOwn(q.criteria, answer.choice)
+          || !answer.probabilities || typeof answer.probabilities !== 'object' || Array.isArray(answer.probabilities)
+          || !Object.hasOwn(answer.probabilities, answer.choice)
+          || Object.entries(answer.probabilities).some(([id, value]) => !Object.hasOwn(q.criteria!, id) || !unit(value)))) {
+        throw Error('decisions: malformed answers');
+      }
+    }
+    returned = true;
     return { answers: body.answers };
   } finally {
+    finish(returned ? 'ok' : signal?.aborted && signal.reason?.name !== 'TimeoutError' ? 'cancelled' : 'error');
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
@@ -285,7 +311,7 @@ async function postDecisions(
 function isModelRejection(status: number | undefined, message: string): boolean {
   if (status === 404) return true;
   if (status !== 400) return false;
-  return /model|slug|unknown|not\s*found|invalid/i.test(message);
+  return /model|slug/i.test(message) && /unknown|not\s*found|invalid|unavailable|unsupported|not\s+supported|does\s+not\s+exist/i.test(message);
 }
 
 function openBreaker(reason: string): void {
@@ -362,7 +388,7 @@ export async function askJev(
 ): Promise<JevAskResult> {
   // Independently cancellable calls keep their own transport. Concurrent
   // uncancelled advisory requests with identical evidence share one payment.
-  if (opts.signal || (process.env.PI_JEV ?? '').toLowerCase() === 'off') return askJevOnce(site,state,questions,opts);
+  if (opts.signal || (process.env.PI_JEV ?? '').toLowerCase() === 'off') return boundedAsk(site,state,questions,opts);
   let identity: string;
   try { identity=cacheKey(site,'inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
   const pending=inflight.get(identity);
@@ -374,9 +400,21 @@ export async function askJev(
     return {ok:true,answers:structuredClone(result.answers),usage};
   }
   if(inflight.size>=64)return {ok:false,skipped:'busy'};
-  const work=askJevOnce(site,state,questions,opts);
+  const work=boundedAsk(site,state,questions,opts);
   inflight.set(identity,work);
   try{return await work;}finally{if(inflight.get(identity)===work)inflight.delete(identity);}
+}
+
+/** One deadline covers the entire alias cascade and discovery, not each
+ * alias independently. Cancellation never poisons provider health. */
+async function boundedAsk(site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
+  const controller = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), deps.requestTimeoutMs);
+  try {
+    const result = await askJevOnce(site, state, questions, { ...opts, signal });
+    return controller.signal.aborted && !opts.signal?.aborted ? { ok: false, skipped: 'timeout' } : result;
+  } finally { clearTimeout(timer); }
 }
 
 async function askJevOnce(
@@ -410,6 +448,7 @@ async function askJevOnce(
   for (const slug of ordered) {
     const hit = cacheGet(cacheKey(site, slug, state, questions));
     if (hit) {
+      beginHarnessActivity('jev')('cached');
       ledger(opts.pi, { site, model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true });
       return {
         ok: true,

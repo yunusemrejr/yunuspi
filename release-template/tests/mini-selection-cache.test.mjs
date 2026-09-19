@@ -79,7 +79,7 @@ test("worker failures back off without turning unavailable or malformed output i
    calls++;
    return new Response(
     JSON.stringify(
-     healthy ? selection(raw) : { version: 1, status: "UNKNOWN" },
+     healthy ? selection(raw) : { version: 1, status: "MALFORMED" },
     ),
    );
   },

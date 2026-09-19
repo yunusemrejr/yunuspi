@@ -18,6 +18,8 @@ const {registerAutonomousRecovery}=await load('extensions/pi-subagents/src/exten
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {collectSessionMetrics}=await load('extensions/lib/session-metrics.ts');
 const {collectSessionDiagnostics}=await load('extensions/lib/session-diagnostics.ts');
+const activity=[],activitySymbol=Symbol.for('yunus-pi.activity.v1'),previousActivity=globalThis[activitySymbol];
+globalThis[activitySymbol]=request=>{activity.push(request.label);return outcome=>activity.push(outcome);};
 const prices={prompt:'0',completion:'0',image:'0',request:'0',input_cache_read:'0',input_cache_write:'0'};
 evidence.publishFreeEvidence([...['free/a','free/b','free/c'].map(id=>({id,pricing:prices,capabilities:{toolCalling:true}})),{id:'paid/cheap',pricing:{...prices,prompt:'0.1',completion:'0.2'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL);
 const free=id=>({provider:'openrouter',id,api:'openai-completions',baseUrl:evidence.FREE_BASE_URL,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},input:['text'],reasoning:false,contextWindow:65536,maxTokens:8192});
@@ -126,6 +128,20 @@ try {
  assert.equal(autoPaidOnly.calls.length,0,'automatic paid-only capacity stays unattempted');
  const explicitPaid=fixture({models:[cheapPaid]});
  assert.ok((await explicitPaid.run({...request,automatic:false})).every(r=>r.ok),'explicit reviews may spend paid');
+ const priorCouncil=process.env.PI_SCOPE_COUNCIL,priorDiscovery=process.env.PI_SKILL_DISCOVERY;
+ process.env.PI_SCOPE_COUNCIL='off';process.env.PI_SKILL_DISCOVERY='off';
+ try{
+  for(const [label,prompt] of [['swarm','Investigate multiple independent subsystems and verify their interfaces.'],['fusion','Compare competing architecture approaches and their tradeoffs with source evidence.']]){
+   const offset=activity.length;
+   const helpers=fixture({result:async()=>({details:{results:[{exitCode:0,output:'Source evidence supports checking the existing boundary conditions.'}]}})});
+   await helpers.emit('input',{source:'interactive',text:prompt});
+   await helpers.emit('before_agent_start',{prompt,systemPrompt:''});
+   await new Promise(resolve=>setImmediate(resolve));
+   assert.ok(activity.slice(offset).includes(label)&&activity.slice(offset).includes('ok'),label+' reports its native group lifecycle');
+   await helpers.emit('session_shutdown',{});
+  }
+ }finally{for(const [key,value]of [['PI_SCOPE_COUNCIL',priorCouncil],['PI_SKILL_DISCOVERY',priorDiscovery]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
  process.env.PI_AUTONOMOUS_FREE_ASSIST='off';const disabled=fixture();assert.ok((await disabled.run()).every(r=>!r.ok && /disabled/.test(r.gap)));assert.equal(disabled.calls.length,0);
+ assert.ok(activity.includes('review')&&activity.includes('ok')&&activity.includes('error'),'native reviews report named activity with truthful success and failure outcomes');
  console.log('PASS quality dispatch: native launch contracts, free/cost routing, 3 reviewers / 6 aspects, read receipts, restrictions, failure lifecycle, accounting and session isolation');
-}finally{fs.rmSync(root,{recursive:true,force:true});}
+}finally{if(previousActivity===undefined)delete globalThis[activitySymbol];else globalThis[activitySymbol]=previousActivity;fs.rmSync(root,{recursive:true,force:true});}

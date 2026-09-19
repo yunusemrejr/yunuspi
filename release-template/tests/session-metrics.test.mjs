@@ -124,7 +124,7 @@ test("legacy failures and missing history remain distinguishable", () => {
   assert.deepEqual(powered.footer, [
     "Agents 0 (0 active)",
     "Failures 0",
-    "Powers 🧪2",
+    "Powers 🧪 Tests 2",
     "session 01a0a0f7",
   ]);
   const parallel = message("toolResult", {

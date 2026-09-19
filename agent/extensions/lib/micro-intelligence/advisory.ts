@@ -10,11 +10,13 @@ import { taskTerms } from "../local-intelligence.mjs";
 import { isPromptPivot, isPromptRefusal, isReferentialFollowup } from "../intent-context.ts";
 import type { NeedleResult, NeedleClassifyResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
+import { requestExcerpt } from '../prompt-interpretation.ts';
 
 export type RequestFamily =
   | "implementation" | "investigation" | "review" | "research" | "lookup" | "unknown";
 
 export interface DeterministicPass {
+  family: RequestFamily;
   terms: string[];
   pivot: boolean;
   refusal: boolean;
@@ -40,7 +42,15 @@ export function deterministicRequestPass(prompt: unknown): DeterministicPass {
   const chars = text.length;
   // Substantive: enough content to classify/route, not a bare stop/pivot cue.
   const substantive = chars >= 40 && terms.length >= 2 && !refusal;
-  return { terms, pivot, refusal, followup, chars, substantive };
+  // This is a cheap advisory prior, never a mutation/authorization decision.
+  // It keeps council shaping useful when local inference misses its 500ms window.
+  const cues = text.slice(0, 8192).replace(/```[\s\S]*?```/g, ' ').replace(/^\s*>.*$/gm, ' ');
+  const family: RequestFamily = /\b(?:implement|build|fix|refactor|add|edit|create|improve|optimi[sz]e)\b/i.test(cues) ? 'implementation'
+    : /\b(?:review|audit|critique|assess)\b/i.test(cues) ? 'review'
+    : /\b(?:debug|diagnose|trace|reproduce|investigate)\b/i.test(cues) ? 'investigation'
+    : /\b(?:research|compare|search|summarize)\b/i.test(cues) ? 'research'
+    : /\b(?:show|list|read|recall|look up)\b/i.test(cues) ? 'lookup' : 'unknown';
+  return { terms, pivot, refusal, followup, chars, substantive, family };
 }
 
 export const REQUEST_FAMILIES: Array<{ id: RequestFamily; text: string }> = [
@@ -68,7 +78,7 @@ export async function needleRequestPass(
   }
   try {
     // 512 chars keeps the background classification inside ~2.5s worst case.
-    const result = await classify(prompt.slice(0, 512), REQUEST_FAMILIES);
+    const result = await classify(requestExcerpt(prompt, 512), REQUEST_FAMILIES);
     if (!result.ok) {
       metrics.skip("needle", result.reason);
       return undefined;
@@ -201,7 +211,7 @@ export function shouldAdvise(pass: DeterministicPass, candidateCount: number): b
 
 function stateOf(context: AdvisoryContext): unknown {
   return {
-    prompt: context.prompt.slice(0, 600),
+    prompt: requestExcerpt(context.prompt, 1600),
     family: context.family,
     terms: context.terms.slice(0, 16),
     candidates: context.candidates.slice(0, 8),
@@ -238,18 +248,22 @@ export function runAdvisory(
       if (judged.usage.cached) metrics.cacheHit("jev");
       metrics.accept("jev");
       const fit = judged.answers.fit?.choice;
+      const fitCriteria = (questions.fit as { criteria?: Record<string, string> } | undefined)?.criteria;
+      const unit = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+      const confident = (n: unknown) => unit(n) && n >= 0.6;
       const perspectiveProbs = judged.answers.perspective?.probabilities ?? {};
       const perspectives = Object.entries(perspectiveProbs)
+        .filter(([, probability]) => unit(probability) && probability >= 0.15)
         .sort((a, b) => b[1] - a[1])
         .map(([name]) => name)
         .filter((name) => (REVIEW_PERSPECTIVES as readonly string[]).includes(name))
         .slice(0, 3);
       consume({
-        preferred: typeof fit === "string" ? fit.replace(/^\d+:/, "") : undefined,
-        noFit: (judged.answers.noFit?.noul ?? 0) >= 0.6,
-        needsVerification: (judged.answers.needsVerification?.noul ?? 0) >= 0.6,
-        reviewWorthy: (judged.answers.reviewWorthy?.noul ?? 0) >= 0.6,
-        multiPerspective: (judged.answers.multiPerspective?.noul ?? 0) >= 0.6,
+        preferred: typeof fit === "string" && fitCriteria && Object.hasOwn(fitCriteria, fit) && confident(judged.answers.fit?.probabilities?.[fit]) ? fitCriteria[fit] : undefined,
+        noFit: confident(judged.answers.noFit?.noul),
+        needsVerification: confident(judged.answers.needsVerification?.noul),
+        reviewWorthy: confident(judged.answers.reviewWorthy?.noul),
+        multiPerspective: confident(judged.answers.multiPerspective?.noul),
         perspectives,
         ok: true,
       });

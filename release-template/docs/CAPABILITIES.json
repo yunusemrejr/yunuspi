@@ -2165,7 +2165,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1511
+        "line": 1521
       },
       {
         "name": "claude-cache",
@@ -2738,7 +2738,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 60,
+        "line": 69,
         "kind": "literal"
       },
       {
@@ -2913,7 +2913,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 215,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3108,7 +3108,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 60,
+        "line": 69,
         "kind": "literal"
       },
       {
@@ -3216,7 +3216,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 215,
+        "line": 220,
         "kind": "literal"
       },
       {

@@ -26,13 +26,13 @@ test('native tools and automatic helpers share compact safe UI-only status with 
     f.emit('tool_execution_start', { toolCallId: 'auto', toolName: 'render_see', args: { secret: 'PRIVATE-ARGUMENT' } });
     assert.match(f.writes.at(-1).text, /Skill discovery · Browser/);
     finish();
-    assert.match(f.writes.at(-1).text, /^◌ Browser$/);
+    assert.match(f.writes.at(-1).text, /^◌ Browser/);
     f.emit('tool_execution_end', { toolCallId: 'auto', toolName: 'render_see', result: { text: 'PRIVATE-RESULT' } });
     assert.match(f.writes.at(-1).text, /Browser finished/);
     assert.doesNotMatch(JSON.stringify(f.writes), /PRIVATE|auto|\/project/);
     assert.ok(f.writes.every(write => write.key === '00-harness-activity'));
     f.emit('tool_execution_start', { toolCallId: 'probe', toolName: 'custom_probe' });
-    assert.equal(f.writes.at(-1).text, '◌ Custom probe');
+    assert.match(f.writes.at(-1).text, /^◌ Custom probe/);
     assert.doesNotThrow(() => f.service({ action: 'start', id: 'closed', label: 'tool' }, { sessionManager: { getSessionId() { throw Error('closed'); } }, ui: { setStatus() {} } }));
   } finally { f.close(); }
 });
@@ -43,16 +43,16 @@ test('switch, abort and run end clear status and stale closures cannot finish re
     const old = f.service({ action: 'start', id: 'same', label: 'skills' });
     const replacement = f.service({ action: 'start', id: 'same', label: 'browser' });
     old();
-    assert.match(f.writes.at(-1).text, /^◌ Browser$/);
+    assert.match(f.writes.at(-1).text, /^◌ Browser/);
     f.emit('session_before_switch');
     assert.equal(f.writes.at(-1).text, undefined);
     const next = f.ctx('session-b');
     f.emit('session_switch', {}, next);
     f.service({ action: 'start', id: 'same', label: 'review' }, next);
     replacement();
-    assert.match(f.writes.at(-1).text, /^◌ Review$/);
+    assert.match(f.writes.at(-1).text, /^◌ Review/);
     f.service({ action: 'end', id: 'same' }, f.ctx('session-a'));
-    assert.match(f.writes.at(-1).text, /^◌ Review$/);
+    assert.match(f.writes.at(-1).text, /^◌ Review/);
     f.emit('agent_end', {}, next);
     assert.equal(f.writes.at(-1).text, undefined);
     assert.equal(f.service({ action: 'start', id: 'late', label: 'model' }, next), undefined);
@@ -81,9 +81,29 @@ test('fast completion clears after a short UI timer without model events or pers
   const f = fixture();
   try {
     f.service({ action: 'start', id: 'fast', label: 'skills' })();
-    assert.equal(f.writes.at(-1).text, '· Skill discovery finished');
-    await new Promise(resolve => setTimeout(resolve, 1600));
+    assert.equal(f.writes.at(-1).text, '✓ Skill discovery finished');
+    await new Promise(resolve => setTimeout(resolve, 2600));
     assert.equal(f.writes.at(-1).text, undefined);
   } finally { f.close(); }
   assert.equal(globalThis[HARNESS_ACTIVITY], undefined);
+});
+
+test('named helpers show start, success, error and cancellation with theme colors and no payload',()=>{
+ const f=fixture();
+ try {
+  const context=f.ctx('session-a',{ui:{theme:{fg:(color,text)=>`<${color}>${text}</${color}>`},setStatus:(key,text)=>f.writes.push({key,text})}});
+  f.emit('before_agent_start',{},context);
+  f.emit('tool_execution_start',{toolCallId:'parent',toolName:'bash'},context);
+  const done=f.service({action:'start',id:'jev-1',label:'jev'},context);
+  assert.match(f.writes.at(-1).text,/<accent>.*JEV called/);
+  done('error');
+  assert.match(f.writes.at(-1).text,/<error>✗ JEV failed/);
+  assert.match(f.writes.at(-1).text,/Shell/,'helper return remains visible while the parent runs');
+  f.service({action:'start',id:'kompress-1',label:'kompress'},context)('ok');
+  assert.match(f.writes.at(-1).text,/<success>✓ Kompress returned/);
+  f.service({action:'start',id:'needle-1',label:'needle'},context)('cancelled');
+  assert.match(f.writes.at(-1).text,/<warning>○ Needle cancelled/);
+  f.emit('tool_execution_end',{toolCallId:'parent',isError:true},context);
+  assert.match(f.writes.at(-1).text,/<error>✗ Shell failed/);
+ } finally {f.close();}
 });

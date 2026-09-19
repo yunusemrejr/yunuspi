@@ -13,6 +13,7 @@ const { registerToolDiscovery } = await import(
 // Lexical pins below stay hermetic: Jev re-ranking needs ambient network and
 // is covered by the dedicated mocked test at the end of this file.
 process.env.PI_JEV = "off";
+process.env.PI_NEEDLE = "off";
 function fixture(extraTools = []) {
  const hooks = {},
   entries = [],
@@ -603,4 +604,42 @@ test("jev rerank reorders ambiguous matches with a ledger mark", async () => {
   else process.env.OPENROUTER_API_KEY = previousKey;
   resetJevClient();
  }
+});
+
+test('activation reaches the next model turn of the same request and respects a late restriction', async () => {
+ const f = fixture();
+ await f.call({names:['browser_session']});
+ assert.ok(!f.active().includes('browser_session'));
+ f.hooks.turn_end();
+ assert.ok(f.active().includes('browser_session'));
+ const g = fixture();
+ await g.call({names:['browser_session']});
+ g.api.setActiveTools(['read','tool_search']);
+ assert.equal((await g.call({names:['http_request']})).isError,true);
+ g.hooks.turn_end();
+ assert.deepEqual(g.active(),['read','tool_search']);
+});
+
+test('a delayed rerank cannot activate old tools after a session switch',async()=>{
+ const {configureJevClient,resetJevClient}=await import(pathToFileURL(path.join(agent,'extensions/lib/jev-client.ts')));
+ let release, entered, transportSignal;
+ const started=new Promise(resolve=>entered=resolve);
+ const oldKey=process.env.OPENROUTER_API_KEY;
+ process.env.OPENROUTER_API_KEY='TEST_JEV_DISCOVERY';
+ delete process.env.PI_JEV;
+ resetJevClient();
+ configureJevClient({fetchImpl:async(_url,options)=>{transportSignal=options.signal;entered();return new Promise(resolve=>release=resolve);}});
+ try {
+  const f=fixture([{name:'alpha_tool',description:'fruit inventory'},{name:'bravo_tool',description:'fruit exports'}]);
+  const work=f.call({query:'fruit',enable:true});
+  await started;
+  f.hooks.session_before_switch();
+  assert.equal(transportSignal.aborted,true);
+  release({ok:true,json:async()=>({answers:{rank:{type:'choice',choice:'bravo_tool',probabilities:{bravo_tool:.9,alpha_tool:.1}},exists:{type:'noul',noul:.9}}})});
+  const result=await work;
+  assert.equal(result.isError,true);
+  f.hooks.turn_end();
+  assert.ok(!f.active().includes('bravo_tool'));
+  assert.ok(!f.entries.some(e=>['harness-tool-activation-v1','jev-usage-v1'].includes(e.customType)));
+ }finally{process.env.PI_JEV='off';if(oldKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=oldKey;resetJevClient();configureJevClient({fetchImpl:(...args)=>globalThis.fetch(...args)});}
 });

@@ -5,23 +5,13 @@ import { Type } from 'typebox';
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from './capability-groups.ts';
 import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './harness-capabilities.ts';
 import { askJev, jevMark, tooShort } from './jev-client.ts';
-import { needleRank, needleEmbed } from './needle-runtime.ts';
-import { multiStageRetrieve, warmEmbeddings } from './micro-intelligence/retrieval.ts';
-
-/** One background embedding pass per pool per process. Warmed descriptions
- * turn repeat Needle ranks from ~250ms into worker-cache hits; the first
- * search of each kind stays correct (just slower) while warming runs. */
-const warmedPools = new Set<string>();
-function warmPoolOnce(kind: string, texts: string[]): void {
-  if (warmedPools.has(kind) || process.env.PI_NEEDLE === 'off') return;
-  warmedPools.add(kind);
-  void warmEmbeddings(texts, (batch) => needleEmbed(batch).then((result) => ({ ok: result.ok })));
-}
+import { needleRank } from './needle-runtime.ts';
+import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 
 /** Multi-stage re-rank: lexical order -> Needle semantic ranking -> Jev
  * validation when uncertain. Single candidates, trivial queries and
  * low-confidence judgments stay on the lexical order. Needle reordering is
- * silent (local reflex, no spend); a Jev reorder carries its ledger mark. */
+ * local (no API spend); a Jev reorder carries its ledger mark. */
 async function rerankWithJev<T>(
   kind: string,
   query: string,
@@ -29,14 +19,19 @@ async function rerankWithJev<T>(
   idOf: (item: T) => string,
   textOf: (item: T) => string,
   pi: unknown,
+  signal?: AbortSignal,
 ): Promise<{ matches: T[]; info?: { mark: string; top: string; confidence: number } } | undefined> {
   try {
     if (tooShort(query, 3) || matches.length < 2) return undefined;
+    // A named capability is already an unambiguous selection. Semantic
+    // ranking cannot improve it and must not demote it or spend inference.
+    const identity = (text: string) => text.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
+    if (matches.some(item => identity(idOf(item)) === identity(query))) return undefined;
     const lexical = matches.map((item) => ({ id: idOf(item), text: textOf(item), item }));
     const outcome = await multiStageRetrieve({
       kind, site: 'rank', query, lexical,
       needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }),
-      jev: (site, state, questions) => askJev(site, state, questions, { pi }),
+      jev: (site, state, questions) => askJev(site, state, questions, { pi, signal }),
       jevMark: (site, detail, usage) => jevMark(site, detail, usage),
     });
     if (outcome.applied === 'lexical') return undefined;
@@ -175,12 +170,12 @@ export function registerToolDiscovery(pi: any) {
     || typeof pi.getAllTools !== 'function' || typeof pi.setActiveTools !== 'function'
     || typeof pi.getActiveTools !== 'function') return;
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
+  let generation = 0;
+  let sessionController = new AbortController();
+  const invalidate = () => { generation++; sessionController.abort(); sessionController = new AbortController(); };
   const identity = (ctx: any) => JSON.stringify([ctx.cwd,ctx.sessionManager?.getSessionId?.()]);
-  // Provider-cache stability: swapping the wire mid-session rewrites the
-  // tool schemas inside an already-prefilled prompt prefix and destroys the
-  // provider cache. Activations therefore stage into `expected` and reach
-  // the wire only at natural cache-death boundaries (next user run, run
-  // end, session boundary) - as a no-op when the set already matches.
+  // Batch schema changes until the tool batch ends. The next model turn must
+  // be able to use tools it just discovered within this same user request.
   const applyActive = (names: Iterable<string>) => {
     const next = [...names];
     let live: Set<string> | undefined;
@@ -188,8 +183,16 @@ export function registerToolDiscovery(pi: any) {
     if (live && live.size === next.length && next.every(name => live.has(name))) { flushed = new Set(next); return; }
     try { pi.setActiveTools(next); flushed = new Set(next); } catch { /* Host keeps its wire if refused; staging stays logical. */ }
   };
-  const flushPending = () => { if (wireDirty) { wireDirty = false; applyActive(expected); } };
+  const flushPending = () => {
+    if (!wireDirty) return;
+    // A host narrowing access between discovery and the boundary wins.
+    const live = new Set<string>(pi.getActiveTools());
+    if (!same(live, flushed)) { allowed = new Set([...allowed].filter(name => live.has(name))); expected = new Set([...expected].filter(name => allowed.has(name))); }
+    applyActive(expected);
+    wireDirty = !same(expected, flushed);
+  };
   const initialize = (_event: any, ctx: any) => {
+    invalidate();
     // Explicit CLI tool selections belong to the caller, including --no-tools.
     if (process.argv.some(arg => arg === '--tools' || arg.startsWith('--tools=') || arg === '--no-tools')) return;
     const current = pi.getActiveTools();
@@ -208,8 +211,10 @@ export function registerToolDiscovery(pi: any) {
   };
   pi.on('session_start', initialize);
   pi.on('session_switch', initialize);
-  // Run boundaries where a cache reset is already unavoidable. Staged tools
-  // join the wire exactly once here, so mid-run prefixes stay intact.
+  for (const event of ['session_before_switch', 'session_before_fork', 'session_before_tree', 'session_shutdown']) pi.on(event, invalidate);
+  // turn_end precedes the owned core's next-turn context snapshot. turn_start
+  // would be too late; mutating in execute would split a parallel tool batch.
+  pi.on('turn_end', flushPending);
   pi.on('before_agent_start', flushPending);
   pi.on('agent_end', flushPending);
   pi.registerTool({
@@ -217,7 +222,7 @@ export function registerToolDiscovery(pi: any) {
     description:'Browse compact groups, the ability index, or registered command metadata; preview tool schemas and explicitly enable selected names. Discovery never executes commands or tools.',
     promptGuidelines:[
       'Optional capabilities: tool_search({}) shows compact groups; use kind:"capabilities" for the ability index, kind:"commands" for registered extension, prompt-template, and skill commands, or query/names for tool schemas. Built-in UI commands such as /model and /compact are outside this API. skill_review browse/search finds workflows. Explore when useful; no required sequence.',
-      'Before browser/screenshot/DOM work, web research, jq/python data reads, or past-session/memory questions, call tool_search first with enable:true: the right tool is usually already installed but off-wire.',
+      'When browser/screenshot/DOM work, web research, structured-data reads, or past-session/memory questions need a capability that is not active, call tool_search with enable:true: the right tool is usually already installed but off-wire.',
     ],
     parameters:Type.Object({
       kind:Type.Optional(Type.Union([
@@ -241,9 +246,13 @@ export function registerToolDiscovery(pi: any) {
       const explicitNames = Array.isArray(input.names) && input.names.length > 0;
       const bundleActivationRequested = kind === 'capabilities' && (input.enable === true || (typeof input.id === 'string' && input.id.trim() !== '' && explicitNames && input.enable !== false));
       const activationRequested = (kind === 'tools' && (input.enable === true || (explicitNames && input.enable !== false))) || bundleActivationRequested;
+      const ticket = generation, requestOwner = identity(ctx);
+      const signal = _signal ? AbortSignal.any([_signal, sessionController.signal]) : sessionController.signal;
+      const superseded = () => signal.aborted || ticket !== generation || identity(ctx) !== requestOwner
+        || activationRequested && !same(flushed, new Set(pi.getActiveTools()));
       const active = new Set(pi.getActiveTools());
       const ownerMatches = Boolean(owner && identity(ctx)===owner);
-      const selectionChanged = !ownerMatches || (!wireDirty && !same(expected,active));
+      const selectionChanged = !ownerMatches || !same(flushed,active);
       // Read-only metadata discovery remains useful after an external tool
       // selection change. Any request that can alter schemas still requires
       // the discovery-owned active set and therefore fails closed.
@@ -285,7 +294,7 @@ export function registerToolDiscovery(pi: any) {
           if (input.enable === true) {
             const added = stageBundle([detail]);
             return answer({capability:capabilityMetadata(detail,pi,true),staged:added,
-              note:added.length?'Staged: the complete capability bundle joins the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Capability bundle already staged for the wire. No tool executed this turn.'});
+              note:added.length?'Staged: the complete capability bundle joins the wire on the next model turn in this request. No tool executed.':'Capability bundle already staged for the wire. No tool executed.'});
           }
           return answer({capability:capabilityMetadata(detail,pi,true),note:'Metadata only; the capability was described and nothing was executed. Re-request with enable:true to stage its complete tool bundle in one lookup.'});
         }
@@ -298,7 +307,8 @@ export function registerToolDiscovery(pi: any) {
         if (query) {
           const reranked = await rerankWithJev('capability', query, page.results,
             (record: any) => String(record?.id ?? ''),
-            (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi);
+            (record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''} [${[...(record?.entrypoints ?? []), ...(record?.tools ?? [])].slice(0, 6).join(', ')}]`, pi, signal);
+          if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) { ranked = reranked.matches; if (reranked.info) jevRank = reranked.info; }
         }
         const results = ranked.map((record: any) => input.detail === true || input.enable === true
@@ -313,9 +323,8 @@ export function registerToolDiscovery(pi: any) {
           offset:page.offset,limit:page.limit,total:page.total,remaining:page.remaining,
           nextOffset:page.remaining ? page.offset + results.length : null,
           ...(jevRank ? {jev:jevRank} : {}),
-          note:added.length?'Staged: the complete matched capability bundle(s) join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Matched capability bundle(s) already staged for the wire. No tool executed this turn.'});
+          note:added.length?'Staged: the complete matched capability bundle(s) join the wire on the next model turn in this request. No tool executed.':'Matched capability bundle(s) already staged for the wire. No tool executed.'});
         }
-        warmPoolOnce('capability', ranked.map((record: any) => `${record?.id ?? ''}: ${record?.summary ?? ''}`));
         return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
           ...(page.groups ? {groups:page.groups} : {}),
           ...(page.query ? {query:page.query} : {}),
@@ -354,7 +363,8 @@ export function registerToolDiscovery(pi: any) {
           matches = searchCapabilityMetadata(sourceFiltered, query);
           const reranked = await rerankWithJev('command', query, matches,
             (command: any) => String(command?.name ?? ''),
-            (command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`, pi);
+            (command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`, pi, signal);
+          if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) {
             matches = reranked.matches;
             if (reranked.info) (matches as any).jevRank = reranked.info;
@@ -363,7 +373,6 @@ export function registerToolDiscovery(pi: any) {
         const offset = id ? 0 : safeOffset(input.offset);
         const limit = pageLimit(input.limit);
         const selected = matches.slice(offset,offset + limit);
-        warmPoolOnce('command', matches.map((command: any) => `${command?.name ?? ''}: ${command?.description ?? ''}`));
         return answer({
           commands:selected.map(command => commandMetadata(command,input.detail === true || Boolean(id))),
           offset,limit,remaining:Math.max(0,matches.length - offset - selected.length),
@@ -399,7 +408,8 @@ export function registerToolDiscovery(pi: any) {
         if (!explicit.length) {
           const reranked = await rerankWithJev('tool', query, matches,
             (tool: any) => String(tool?.name ?? ''),
-            (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi);
+            (tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`, pi, signal);
+          if (superseded()) return answer({error:'Tool discovery was cancelled or superseded; no tools activated.'},true);
           if (reranked) { matches = reranked.matches; if (reranked.info) (matches as any).jevRank = reranked.info; }
         }
       }
@@ -410,7 +420,7 @@ export function registerToolDiscovery(pi: any) {
       const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
       if (added.length) {
         expected = new Set([...expected,...added]);
-        // Stage, don't swap: the set goes live at the next run boundary
+        // Stage until the tool batch ends; apply once before the next model turn
         // (see applyActive/flushPending), keeping this turn's provider
         // prefix - and its cache - intact.
         wireDirty = true;
@@ -418,12 +428,11 @@ export function registerToolDiscovery(pi: any) {
       }
       const resultingActive = new Set(pi.getActiveTools());
       const toolsJevRank = (matches as any).jevRank as { mark: string; top: string; confidence: number } | undefined;
-      warmPoolOnce('tool', catalog.map((tool: any) => `${tool?.name ?? ''}: ${tool?.description ?? ''}`));
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,160),active:resultingActive.has(tool.name),...(activate&&Array.isArray(tool.promptGuidelines)&&tool.promptGuidelines.length?{guidance:tool.promptGuidelines.slice(0,2).map((text: unknown)=>String(text).slice(0,320))}:{})})),
         offset,limit,remaining:Math.max(0,matches.length-offset-selected.length),
         nextOffset:offset+selected.length<matches.length ? offset+selected.length : null,
         ...(toolsJevRank ? {jev:toolsJevRank} : {}),
-        note:activate?(added.length?'Staged: chosen schemas join the wire at the next user turn (swapping mid-turn would reset the provider prompt cache). No tool executed this turn.':'Chosen schemas are already staged for the wire. No tool executed this turn.'):'Preview only. Enable chosen tools with names; use offset for more matches.'});
+        note:activate?(added.length?'Staged: chosen schemas become available on the next model turn in this request. No tool executed.':'Chosen schemas are already active or staged for the next model turn. No tool executed.'):'Preview only. Enable chosen tools with names; use offset for more matches.'});
     },
   });
 }

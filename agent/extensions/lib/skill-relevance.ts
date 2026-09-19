@@ -14,6 +14,8 @@ export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
 const FUZZY_MIN_TERM = 6;
+const SHORT_DOMAINS = new Set('ai ml ui ux api css sql php pdf csv cad llm rag wasm c++ c# js ts'.split(' '));
+const usefulTerm = (term: string) => term.length >= MIN_TERM || SHORT_DOMAINS.has(term);
 // Common prose that would otherwise let a generic description match any task.
 // The trailing methodology words are mindset boilerplate, not domain signal: a
 // website palette session matched "evaluation workflows focused" strongly enough
@@ -28,13 +30,13 @@ export function skillTerms(text: string, limit = MAX_TERMS): string[] {
   if (!Number.isFinite(limit) || limit <= 0) return [];
   limit = Math.min(MAX_TERMS, Math.floor(limit));
   const add = (term: string) => {
-    if (term.length < MIN_TERM || term.length > MAX_TERM || STOP.has(term)) return;
+    if (!usefulTerm(term) || term.length > MAX_TERM || STOP.has(term)) return;
     out.add(term);
   };
   const wholes: string[] = [];
-  for (const match of String(text ?? "").slice(0, MAX_CONTEXT_CHARS).toLowerCase().matchAll(/[a-z][a-z0-9+#._-]{3,50}/g)) {
+  for (const match of String(text ?? "").slice(0, MAX_CONTEXT_CHARS).toLowerCase().matchAll(/[a-z][a-z0-9+#._-]{0,50}/g)) {
     const term = match[0].replace(/[._]+$/, "");
-    if (term.length < MIN_TERM || term.length > MAX_TERM || STOP.has(term)) continue;
+    if (!usefulTerm(term) || term.length > MAX_TERM || STOP.has(term)) continue;
     out.add(term);
     wholes.push(term);
     if (out.size >= limit) break;
@@ -116,7 +118,7 @@ export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
  * edit: skill routing should recover common typos without turning a weak
  * lexical overlap into a recommendation.
  */
-function oneEditAway(a: string, b: string): boolean {
+export function oneEditAway(a: string, b: string): boolean {
   if (a === b || Math.abs(a.length - b.length) > 1) return a === b;
   if (a.length === b.length) {
     const different: number[] = [];

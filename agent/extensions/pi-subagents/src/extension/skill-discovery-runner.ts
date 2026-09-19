@@ -143,7 +143,8 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
     timer.unref?.();
     let abort: () => void = () => {};
     const cancelled = new Promise<undefined>(resolve => { abort = () => resolve(undefined); signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort(); });
-    let finishActivity: (() => void) | undefined;
+    let finishActivity: ((outcome?: 'ok' | 'error' | 'cancelled' | 'skipped') => void) | undefined;
+    let activityOutcome: 'ok' | 'error' | 'cancelled' | 'skipped' = 'error';
     const bodyText = (row: any): string | undefined => {
       if (!row) return undefined;
       const candidates = [row.finalOutput, row.output, ...(Array.isArray(row.messages) ? row.messages.slice().reverse().filter((m: any) => m?.role === "assistant").map((m: any) => Array.isArray(m.content) ? m.content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("\n") : "") : [])];
@@ -215,12 +216,14 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       receipt(terminal, current.row); note(terminal, { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
       if (!current.ok) return;
       const body = current.body;
+      activityOutcome = body && body.length <= SKILL_DISCOVERY_LIMITS.outputChars ? 'ok' : 'error';
       // Never truncate a JSON value into a different or malformed selection.
       return body && body.length <= SKILL_DISCOVERY_LIMITS.outputChars ? body : undefined;
     } catch { const terminal = signal.aborted ? "stopped" : "failed"; receipt(terminal); note(terminal); return; }
     finally {
-      clearTimeout(timer); signal.removeEventListener("abort", abort); controller.abort();
-      try { finishActivity?.(); } catch { /* UI teardown is best effort. */ }
+      clearTimeout(timer); signal.removeEventListener("abort", abort);
+      try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI teardown is best effort. */ }
+      controller.abort();
     }
   };
 }

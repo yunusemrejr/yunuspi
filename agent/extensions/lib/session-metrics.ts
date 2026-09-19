@@ -224,15 +224,15 @@ export function collectSessionMetrics(entries, live) {
  m.uniqueContextRemovedChars=m.trimmedChars;m.projectionChurnChars=m.addedChars;
  m.estimatedBilledSavingsNote='cached-token reuse avoids full-price rebill of the matched prefix; it is not a billed-amount saving and repeated churn must not be counted as savings';
  const parentFailures=m.errors+m.modelErrors, totalFailures=parentFailures+m.agentFailures+m.workflowFailures;
- // Bottom KPI layer: only the powers this session actually used, emoji + count.
+ // Bottom KPI layer: only the powers this session actually used, emoji + label + count.
  // The full breakdown stays in /metrics (m.detail); ordering is stable by count
  // then name so the footer does not reshuffle between renders.
- const powerLabels = {subagent:'🤖',quality_review:'🔍',project_tests:'🧪',skill_review:'📚',session_self:'🪞',project_report:'🗺️',module_report:'🧭',symbol_search:'🔎',context_slice:'✂️',context_score:'🎯',handoff_capsule:'💊',evidence_cache:'🗃️',bg_run:'⏳',media_info:'🎬',media_edit:'🎞️',video_frames:'🎬',audio_analyze:'🔊',music_compose:'🎵',browser_session:'🌐',agentmail_status:'✉️',agentmail_send:'✉️',agentmail_messages:'📬',agentmail_search:'🔎',agentmail_message:'📨',render_see:'👁️',sandbox_run:'📦',obs_read:'🔬',context_profile:'📈',tool_search:'🧰'};
- const powers=Object.entries(m.tools).filter(([name])=>powerLabels[name]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8).map(([name,count])=>`${powerLabels[name]}${count}`);
+ const powerLabels = {subagent:'🤖 Agents',quality_review:'🔍 Review',project_tests:'🧪 Tests',skill_review:'📚 Skills',session_self:'🪞 Self',project_report:'🗺️ Project',module_report:'🧭 Module',symbol_search:'🔎 Symbols',context_slice:'✂️ Context',context_score:'🎯 Rank',handoff_capsule:'💊 Handoff',evidence_cache:'🗃️ Evidence',bg_run:'⏳ Jobs',media_info:'🎬 Media',media_edit:'🎞️ Edit',video_frames:'🎬 Frames',audio_analyze:'🔊 Audio',music_compose:'🎵 Music',browser_session:'🌐 Browser',agentmail_status:'✉️ Mail',agentmail_send:'✉️ Send',agentmail_messages:'📬 Inbox',agentmail_search:'🔎 Mail',agentmail_message:'📨 Read',render_see:'👁️ Render',sandbox_run:'📦 Sandbox',obs_read:'🔬 Observe',context_profile:'📈 Profile',tool_search:'🧰 Tools'};
+ const powers=Object.entries(m.tools).filter(([name])=>powerLabels[name]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,8).map(([name,count])=>`${powerLabels[name]} ${count}`);
  const sessionEntry=entries.find(e=>e?.type==='session');
  const shortSessionId=typeof sessionEntry?.id==='string'?sessionEntry.id.slice(0,8):'';
  m.footer=[`Agents ${m.agents} (${m.agentsActive} active)`,totalFailures?`Failures ${totalFailures} (P${parentFailures} C${m.agentFailures} W${m.workflowFailures})`:'Failures 0'];
- if(powers.length)m.footer.push(`Powers ${powers.join(' ')}`);
+ if(powers.length)m.footer.push(`Powers ${powers.join(' · ')}`);
  if(shortSessionId)m.footer.push(`session ${shortSessionId}`);
  m.detail=[
   'Session activity (all retained entries; includes pre-compaction history)',

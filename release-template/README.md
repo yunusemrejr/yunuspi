@@ -23,7 +23,7 @@ Start `yunuspi` in your project directory, choose an available model, and descri
 - **Get gentle reminders.** Your first prompt includes a brief, once-per-session invitation to look over useful harness capabilities and then focus on the task. It shares the existing request, with no extra model call, and does not repeat on resume. Relevant checkpoints can offer a concrete optional tool or skill match; those suggestions are deduplicated, have cooldowns, and stop after successful discovery within that request.
 - **Keep responsibility clear.** The agent chooses its approach. Safety hooks enforce access and mutation boundaries; quality checks track evidence. A suggestion, a tool call or agreement between subagents is not proof that the work is correct.
 
-Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
+Enabled tools become available at the next model turn within the same request; discovery batches schema changes once after the current tool batch. Within an uninterrupted session, selected tools stay available. Resuming an old session restores a small recent tool set plus tools needed for unfinished calls, instead of carrying every historical discovery forward. Explicit tool selections and child-agent limits retain their authority.
 
 Use `/reminder <text>` to give the agent a recurring instruction. The full text is sent immediately, then repeated every five minutes at the next active turn boundary. Reminders survive compaction and resume. `/reminder list` shows them; `/reminder clear` stops them. Periodic reminders do not restart completed work while the session is idle.
 
@@ -80,7 +80,7 @@ Less context does not guarantee a particular bill. Providers differ in tokenizat
 
 ## See what is happening
 
-Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context.
+Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context. JEV, Needle, Smol and Kompress show calls and timed returns; green marks success or cache reuse, red marks failure, and yellow marks cancellation or a skipped selection. Powers include a short name beside each emoji. Model-list warnings use readable ages such as `1d 14h ago`; `/catalog-status` explains them and `/catalog-status refresh` refreshes the selected provider.
 
 `/metrics` shows grouped failures, recovery clues, repeated output, large context contributors and review evidence gaps. Agents can inspect efficiency through `session_self({view:"efficiency"})`.
 

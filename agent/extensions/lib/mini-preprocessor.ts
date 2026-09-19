@@ -1,5 +1,6 @@
 /** Local non-generative paragraph selection. The transcript always owns raw text. */
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash} from 'node:crypto';
+import {beginHarnessActivity} from './harness-activity.ts';
 import {protectedEvidence, relevanceScores, taskTerms} from './local-intelligence.mjs';
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
@@ -67,31 +68,15 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
  let runtime=options.runtime,busy=false,last=-Infinity,generation=0;const now=options.now??Date.now,request=options.fetch??fetch;let current:AbortController|undefined;
  const cache=new Map<string,MiniSelection>();
  let failures=0;
- const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,timeouts:0,warmups:0,projectedSavedChars:0};
- // Self-warmup: the first loopback inference pays model/server cold-start
- // (measured ~450ms+ vs ~360ms warm), which the 450ms select budget cannot
- // absorb. Warming off the critical path converts the first real select
- // from likely-timeout to likely-accept. Never pollutes cooldown/failures.
- const WARMUP_RAW=['General background prose describes an ordinary workspace with assorted familiar concepts and broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.','Workspace overviews introduce readers to surrounding tools and ordinary routines through calm explanatory sentences written for unhurried study and reference.','Background sections collect familiar context so later paragraphs can focus on specific verification and deployment results without repeating introductions.','Closing paragraphs restate the current status plainly and point readers toward the retained evidence for any disputed or unresolved detail.','Status notes record what verification confirmed and what remains blocked so future readers inherit accurate context.'].join('\n\n');
- let warmed=false;
- const warmup=()=>{
-  if(warmed||process.env.PI_MINI_PREPROCESSOR==='off'||!runtime)return;
-  warmed=true;
-  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),4000);timer.unref?.();
-  request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw:WARMUP_RAW})}).then(
-   res=>{stats.warmups++;try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.warmup',{decision:res.ok?'warmed':'server-reject',count:1});}catch{};res.body?.cancel?.().catch(()=>{});},
-   ()=>{try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.warmup',{decision:'unreachable',count:1});}catch{}},
-  ).finally(()=>clearTimeout(timer));
- };
- // Self-warmup only on the async-load path (production wiring). Explicit
- // runtimes (tests, embeds) warm deliberately via warmup().
- if(!runtime)void loadRuntime().then(v=>{runtime=v;warmup();});
+ const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,timeouts:0,projectedSavedChars:0};
+ // The shared service warms once at startup. Per-client warmups consume its
+ // fleet-wide rate limit and can starve the first real selection.
+ if(!runtime)void loadRuntime().then(v=>{runtime=v;});
  // Turn boundary: validated cache and in-flight selections stay valid (keyed by
  // source+task hash), so unlike reset this neither aborts nor clears.
  const endTurn=()=>{};
  return {
-  reset(){generation++;current?.abort();cache.clear();warmed=false;},
-  warmup,
+  reset(){generation++;current?.abort();cache.clear();},
   endTurn,
   inspect(){return {...stats,status:process.env.PI_MINI_PREPROCESSOR==='off'?'disabled':!runtime?'unavailable':busy?'busy':'ready',cached:cache.size,busy,cooldownMs:Math.max(0,last+Math.min(60000,10000*2**failures)-now())};},
   async select(raw:string,inputUsdPerMillion:unknown,task=''):Promise<MiniSelection|undefined>{
@@ -106,6 +91,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    const key=source.hash+':'+createHash('sha256').update(signal).digest('hex');
    const cached=validateMiniSelection(raw,cache.get(key));
    if(cached){
+    beginHarnessActivity('kompress')('cached');
     cache.delete(key);cache.set(key,cached);stats.cacheHits++;metrics.cacheHit('kompress');
     // Cache owns its own IDs: callers cannot mutate a future source projection.
     return {...cached,keep:[...cached.keep]};
@@ -116,22 +102,23 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    const potential=miniPotentialSavings(raw,signal);
    if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputPrice/1e6 < .45*.00002*10){skip('insufficient-savings');return;}
    const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
-   stats.requests++;let accepted=false;
-   let finishActivity: (()=>void) | undefined;
-   try { finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`mini-${randomUUID()}`,label:'model'}); } catch { /* UI is optional. */ }
+   stats.requests++;let accepted=false,valid=false;
+   const finishActivity=beginHarnessActivity('kompress');
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
    let expired=false;
    const timer=setTimeout(()=>{expired=true;abort.abort();},450);timer.unref?.();
    try{
     const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw})})]);
-    if(!res.ok||!res.body)return;
+    if(!res.ok){valid=res.status===429||res.status===503;void res.body?.cancel().catch(()=>{});return;}
+    if(!res.body)return;
     const reader=res.body.getReader();const chunks:Uint8Array[]=[];let length=0;
     try{while(true){const part=await Promise.race([deadline,reader.read()]);if(part.done)break;length+=part.value.byteLength;if(length>2048){void reader.cancel().catch(()=>{});return;}chunks.push(part.value);}}finally{reader.releaseLock();}
     if(abort.signal.aborted||generation!==epoch)return;
     const wire=Buffer.concat(chunks).toString('utf8');
+    if(/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"UNKNOWN"\s*\}\s*$/.test(wire)){valid=true;return;}
     // Refuse duplicate/escaped/extra keys before JSON parsing.
     if(!/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"SELECT"\s*,\s*"sourceHash"\s*:\s*"[a-f0-9]{64}"\s*,\s*"keep"\s*:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*\}\s*$/.test(wire))return;
-    let selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;
+    let selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;valid=true;
     // Kompress is a token classifier, not an instruction model. Condition its
     // source-ID proposal locally; never prepend a prompt outside its training
     // distribution or allow task relevance to erase protected evidence.
@@ -146,9 +133,9 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    }catch{return;}finally{
     clearTimeout(timer);
     metrics.run('kompress',performance.now()-started,raw.length);
-    if(!accepted)skip(expired?'timeout':'invalid-or-insufficient-selection');
-    try { finishActivity?.(); } catch { /* UI cannot alter selection. */ }
-    if(!accepted && epoch===generation){failures=Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
+    if(!accepted)skip(expired?'timeout':valid?'no-useful-selection':'invalid-selection');
+    finishActivity(epoch!==generation?'cancelled':expired||!valid?'error':accepted?'ok':'skipped');
+    if(!accepted && epoch===generation){failures=valid?0:Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
     try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
     if(current===abort){busy=false;current=undefined;}
    }
