@@ -211,7 +211,7 @@ function stateOf(context: AdvisoryContext): unknown {
 /**
  * Run the advisory batch asynchronously. Fire-and-forget safe: never throws,
  * never blocks the caller, result is delivered to `consume`. Completed
- * advisories are cached by the coordinator under the caller's key.
+ * advisories are deduplicated and cached by the Jev client by exact input.
  */
 export function runAdvisory(
   context: AdvisoryContext,

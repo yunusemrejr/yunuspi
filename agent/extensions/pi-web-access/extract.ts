@@ -166,6 +166,7 @@ async function fetchAuthenticatedRemoteUrl(
 	profile: AuthFetchProfile,
 ): Promise<Response> {
 	let current = await validateRemoteUrl(url, {
+		signal: init.signal ?? undefined,
 		allowRanges: validationOptions.ssrf.allowRanges,
 		trustEnvProxy: validationOptions.ssrf.trustEnvProxy,
 		domainPolicy: validationOptions.domainPolicy,
@@ -179,9 +180,14 @@ async function fetchAuthenticatedRemoteUrl(
 		if (!REDIRECT_STATUSES.has(response.status)) return response;
 		const location = response.headers.get("location");
 		if (!location) return response;
+		// The redirect response is discarded. Cancel its body before resolving the
+		// next hop so authenticated fetches do not retain one response stream per
+		// redirect or leave a slow body consuming the request budget.
+		await response.body?.cancel().catch(() => {});
 		if (redirects === 5) throw new Error(`Too many redirects fetching ${current.toString()}`);
 		const from = current;
 		current = await validateRemoteUrl(new URL(location, current), {
+			signal: init.signal ?? undefined,
 			allowRanges: validationOptions.ssrf.allowRanges,
 			trustEnvProxy: validationOptions.ssrf.trustEnvProxy,
 			domainPolicy: validationOptions.domainPolicy,

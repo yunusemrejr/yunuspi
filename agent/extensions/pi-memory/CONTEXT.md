@@ -1,5 +1,13 @@
 # Local context utilities
 
+Core memory reads are bounded for model-facing safety: `memory_read` returns up
+to 16,000 characters by default and accepts `maxChars` from 1,000 to 64,000.
+For exact contiguous paging, pass `offset` (starting at 0); truncated responses
+include `nextOffset`, `hasMore`, and the total length. `memory_write`
+rejects blank content and limits one append to 64,000 characters. These limits
+bound individual tool results and writes; memory remains append-only and can be
+read in deliberate larger slices.
+
 The existing memory extension owns these tools; there is no model download,
 provider request, daemon, or background training. `PI_CONTEXT_MEMORY=off`
 disables the new tools, compaction priorities, salience ranking and fork capsules.

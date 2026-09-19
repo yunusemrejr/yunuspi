@@ -866,7 +866,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		sourceFiles: [
 			"agent/extensions/micro-intelligence.ts",
 			"agent/extensions/lib/needle-runtime.ts",
-			"agent/extensions/lib/micro-intelligence/coordinator.ts",
+			"agent/extensions/lib/micro-intelligence/metrics.ts",
 		],
 		doc: "agent/public-template/docs/MICRO-INTELLIGENCE.md",
 	}),
@@ -998,6 +998,7 @@ function repositoryReferenceCandidates(reference: string): string[] {
 	const withoutAgent = relative.replace(/^agent\//, "");
 	const distributionDoc = relative.replace(/^agent\/public-template\/docs\//, "docs/");
 	return [...new Set([
+		...(distributionDoc !== relative ? [path.resolve(agentRoot, "runtime", distributionDoc)] : []),
 		path.resolve(workspaceRoot, relative),
 		path.resolve(workspaceRoot, withoutAgent),
 		path.resolve(agentRoot, withoutAgent),

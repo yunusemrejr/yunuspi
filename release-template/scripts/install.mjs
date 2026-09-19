@@ -28,6 +28,8 @@ for (let i = 0; i < args.length; i++) {
 const source = path.join(repo, 'agent');
 const inside = (child, parent) => child === parent || child.startsWith(parent + path.sep);
 function assertTree(directory, skipped = new Set(['node_modules'])) {
+  const rootInfo = fs.lstatSync(directory);
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw Error(`Source root must be a regular directory: ${path.relative(repo, directory)}`);
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (skipped.has(entry.name)) continue;
     const file = path.join(directory, entry.name);
@@ -44,6 +46,18 @@ function assertAncestors(destination) {
   }
 }
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+// These directories are private runtime state, and may contain model weights,
+// virtual environments, sessions, or other data large enough that copying
+// them on every update is both slow and unnecessary. They are moved intact
+// from the renamed private backup into the staged installation after all
+// source/dependency checks pass.
+const PRIVATE_STATE_DIRECTORIES = new Set([
+  'sessions', 'memory', 'logs', 'backups', 'tasks', 'work', 'artifacts',
+  'worktrees', 'missions', 'local-models', 'project-intelligence',
+  // Existing live installations may also have these small private roots.
+  '.pi', 'cache', 'agent', 'public-template',
+]);
+const hasLstat = file => { try { fs.lstatSync(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } };
 function sourceInventory(directory, core = false) {
   const files = Object.create(null);
   const visit = current => {
@@ -88,12 +102,20 @@ function carryState(previous, stage, incoming, incomingCore) {
     throw Error(`Local owned-core source conflicts with the incoming release: ${relative}. Port the local change into the reviewed source checkout before updating; the current installation is retained.`);
   }
   const conflict = relative => { throw Error(`Local source conflicts with the incoming release: ${relative}. Port or review the local change before updating; the current installation is retained.`); };
+  const deferred = [];
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name), relative = path.relative(previous, file);
       if (excluded(relative)) continue;
       const stat = fs.lstatSync(file), destination = path.join(stage, relative);
-      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw Error(`Cannot preserve a symlink or special state file: ${relative}`);
+      if (relative.split(path.sep).length === 1 && PRIVATE_STATE_DIRECTORIES.has(relative)) {
+        if (!stat.isDirectory()) throw Error(`Private state root must be a directory: ${relative}`);
+        if (hasLstat(destination)) conflict(relative);
+        deferred.push(relative);
+        continue;
+      }
+      if (stat.isSymbolicLink()) throw Error(`Cannot preserve a symlink or special state file: ${relative}`);
+      if (!stat.isDirectory() && !stat.isFile()) throw Error(`Cannot preserve a special state file: ${relative}`);
       if (stat.isDirectory()) {
         if (incoming[relative]) conflict(relative);
         fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
@@ -115,6 +137,7 @@ function carryState(previous, stage, incoming, incomingCore) {
     if (incoming[relative] && incoming[relative] !== baseline) conflict(relative);
     fs.rmSync(path.join(stage, relative), { force: true });
   }
+  return deferred;
 }
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 19)) throw Error('Use Node.js 22.19 or newer; Node.js 24+ is recommended.');
@@ -164,7 +187,7 @@ if (existing) {
 }
 fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 const stage = fs.mkdtempSync(path.join(path.dirname(target), '.yunuspi-install-'));
-let backup;
+let backup, deferredState = [], movedState = [], retainStage = false;
 try {
   const managedFiles = sourceInventory(source);
   const managedCoreFiles = sourceInventory(path.join(repo, 'core'), true);
@@ -178,7 +201,7 @@ try {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error(`Invalid public ${name} example`);
     fs.writeFileSync(path.join(stage, `${name}.json`), content, { flag: 'wx', mode: 0o600 });
   }
-  if (preserveState) carryState(target, stage, managedFiles, managedCoreFiles);
+  if (preserveState) deferredState = carryState(target, stage, managedFiles, managedCoreFiles);
   const runtime = path.join(stage, 'runtime');
   fs.mkdirSync(path.join(runtime, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(runtime, '.npmrc'), 'ignore-scripts=true\naudit=false\nfund=false\n');
@@ -191,6 +214,21 @@ try {
     fs.copyFileSync(file, path.join(runtime, name));
   }
   if (fs.existsSync(path.join(repo, 'docs'))) fs.cpSync(path.join(repo, 'docs'), path.join(runtime, 'docs'), { recursive: true });
+  // Keep installed export safeguards and documentation on the same revision
+  // as the runtime. Older installations may have an unmanaged public-template
+  // directory; it must not silently override these maintained release inputs.
+  const templateRoot = fs.existsSync(path.join(repo, 'release-template')) ? path.join(repo, 'release-template') : repo;
+  if (!fs.lstatSync(templateRoot).isDirectory() || fs.lstatSync(templateRoot).isSymbolicLink()) throw Error('Release template root must be a regular directory');
+  const templateTarget = path.join(runtime, 'release-template');
+  fs.mkdirSync(templateTarget);
+  for (const name of ['.github', '.githooks', '.gitignore', '.npmrc', 'config', 'docs', 'scripts', 'tests', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
+    const file = path.join(templateRoot, name);
+    if (!fs.existsSync(file)) continue;
+    const info = fs.lstatSync(file);
+    if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory())) throw Error(`Release template must be regular source: ${name}`);
+    if (info.isDirectory()) assertTree(file);
+    fs.cpSync(file, path.join(templateTarget, name), { recursive: true, filter: item => !path.relative(file, item).split(path.sep).includes('node_modules') });
+  }
   for (const name of ['package.json', 'package-lock.json']) {
     const file = path.join(source, 'npm', name);
     if (fs.existsSync(file)) fs.copyFileSync(file, path.join(runtime, 'agent/npm', name));
@@ -230,11 +268,44 @@ exec /bin/bash "$AGENT/scripts/pi-launch.sh" ${quote(process.execPath)} "$YUNUSP
   }
   try {
     if (backup) fs.chmodSync(backup, 0o700);
+    // Avoid copying private sessions, logs, worktrees, and model environments.
+    // Move each directory only after the backup rename and retain a reverse
+    // journal so a failed activation can restore the prior layout.
+    for (const relative of deferredState) {
+      const destination = path.join(stage, relative);
+      const sourceState = path.join(backup, relative);
+      if (!hasLstat(sourceState) || hasLstat(destination)) throw Error(`Private state changed during installation: ${relative}`);
+      fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+      fs.renameSync(sourceState, destination);
+      movedState.push({ sourceState, destination });
+    }
+    if (process.env.NODE_ENV === 'test' && process.env.YUNUSPI_TEST_FAIL_AFTER_STATE_MOVE === '1')
+      throw Error('Injected activation failure after private-state moves');
     fs.renameSync(stage, target);
   }
-  catch (error) { if (backup && !fs.existsSync(target)) fs.renameSync(backup, target); throw error; }
-  console.log(`Public files installed. ${backup ? `Previous installation preserved at ${backup}. ` : ''}${deps ? `Launch ${target}/bin/yunuspi; add ${target}/bin to PATH.` : 'Source copied only. Install dependencies and build before launching; see docs/INSTALL.md.'}`);
-} finally { fs.rmSync(stage, { recursive: true, force: true }); }
+  catch (error) {
+    let recoveryError;
+    for (const { sourceState, destination } of movedState.reverse()) {
+      try {
+        if (process.env.NODE_ENV === 'test' && process.env.YUNUSPI_TEST_FAIL_STATE_ROLLBACK === '1')
+          throw Error('Injected private-state rollback failure');
+        if (hasLstat(destination) && !hasLstat(sourceState)) fs.renameSync(destination, sourceState);
+      } catch (restoreError) { recoveryError ??= restoreError; }
+    }
+    if (backup && !fs.existsSync(target)) {
+      try { fs.renameSync(backup, target); } catch (restoreError) { recoveryError ??= restoreError; }
+    }
+    if (recoveryError) {
+      retainStage = true;
+      error.message += `; private-state rollback failed: ${recoveryError.message}; staged data retained at ${stage}`;
+    }
+    throw error;
+  }
+  console.log(`Public files installed. ${backup ? `Previous managed installation preserved at ${backup}. ` : ''}${deps ? `Launch ${target}/bin/yunuspi; add ${target}/bin to PATH.` : 'Source copied only. Install dependencies and build before launching; see docs/INSTALL.md.'}`);
+} finally {
+  if (!retainStage) fs.rmSync(stage, { recursive: true, force: true });
+  else console.error(`Installer retained staged data for manual recovery: ${stage}`);
+}
 // Needle3 assets: pinned, checksummed, atomic. A missing manager (minimal
 // fixture trees), offline network, or corrupt download warns and never fails
 // the install: Needle degrades gracefully and repairs on demand.

@@ -1,5 +1,5 @@
 {
-  "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file \u2014 retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (only pi CORE receives third-party updates). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
+  "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file \u2014 retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (the YunusPi-owned core and extensions update only from YunusPi source). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
   "extensions": [
     "agent-context-tools.ts",
     "agentmail.ts",
@@ -181,6 +181,11 @@
     "playwright"
   ],
   "retired": [
+    {
+      "name": "micro-intelligence/coordinator.ts",
+      "retired": "2026-09-19",
+      "why": "Removed unused duplicate caches and write-only evidence ledger; helper owners retain their production caches and metrics."
+    },
     {
       "name": "subagent-tool-description.md",
       "retired": "2026-09-02",
@@ -477,7 +482,6 @@
     "extensions/lib/utility-mcp/worker.mjs",
     "scripts/compatibility/utility-mcp-loader-test.mjs",
     "extensions/lib/micro-intelligence/metrics.ts",
-    "extensions/lib/micro-intelligence/coordinator.ts",
     "extensions/lib/micro-intelligence/health.ts",
     "extensions/lib/micro-intelligence/retrieval.ts",
     "extensions/lib/micro-intelligence/evidence.ts",

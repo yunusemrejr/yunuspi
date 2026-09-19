@@ -660,14 +660,6 @@ function deleteOrphanNodes(db) {
              AND NOT EXISTS (SELECT 1 FROM source_nodes sn WHERE sn.node_id = nodes.id)`);
 }
 
-function sourceRowsForSnapshot(db, scope, includeInactive) {
-  const rows = scope
-    ? db.prepare(`SELECT * FROM sources WHERE scope = ? OR scope = 'shared' ORDER BY id`).all(scope)
-    : db.prepare('SELECT * FROM sources ORDER BY id').all();
-  const at = Date.now();
-  return rows.filter(row => includeInactive || sourceIsVisible(row, false, at));
-}
-
 function rowsForSources(db, sourceRows, table) {
   if (sourceRows.length === 0) return [];
   const placeholders = sourceRows.map(() => '?').join(',');
@@ -961,12 +953,11 @@ function commitSourceBatch(db, entries) {
 function storeSnapshot(db, options = {}) {
   const scope = validateScope(options.scope, { optional: true });
   const includeInactive = Boolean(options.includeInactive);
-  const sourceRows = sourceRowsForSnapshot(db, scope, includeInactive);
-  const visibleRows = sourceRows.filter(row => sourceIsVisible(row, includeInactive, Date.now()));
-  const visibleIds = new Set(visibleRows.map(row => row.id));
   const allSourceRows = scope
     ? db.prepare(`SELECT * FROM sources WHERE scope = ? OR scope = 'shared' ORDER BY id`).all(scope)
     : db.prepare('SELECT * FROM sources ORDER BY id').all();
+  const visibleAt = Date.now();
+  const visibleRows = allSourceRows.filter(row => sourceIsVisible(row, includeInactive, visibleAt));
   const selectedSources = includeInactive ? allSourceRows : visibleRows;
   const selectedSourceIds = new Set(selectedSources.map(row => row.id));
   const nodeRows = rowsForSources(db, selectedSources, 'source_nodes');

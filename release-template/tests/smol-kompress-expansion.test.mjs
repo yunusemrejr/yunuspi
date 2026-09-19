@@ -81,6 +81,59 @@ test("direct offer selects lines from a numeric listing", async () => {
   assert.equal(sp.inspect().accepted, 1);
 });
 
+test("tiny-model input is bounded, task-aware and deduplicates exact rows", () => {
+  const raw = ["inventory begins", ...Array(35).fill("Background activity handles ordinary application housekeeping and general administration."), "Deployment remains pending verification."].join("\n");
+  const source = ext.prepareSmolExtraction(raw, [1, 37]);
+  const input = smol.smolModelInput(source, "investigate connection setup");
+  assert.ok(Buffer.byteLength(input.prompt) <= 1024);
+  assert.match(input.prompt, /Task: investigate connection setup/);
+  assert.equal(input.prompt.match(/Background activity/g).length, 1);
+  assert.ok(input.lineIds.has(2), "repeated rows use their first source ID");
+  assert.ok(input.lineIds.has(37));
+  for (const id of input.lineIds) assert.ok(input.prompt.includes(`${id}: ${source.lines[id - 1].text}`));
+  const dense = smol.smolModelInput(ext.prepareSmolExtraction(listing()), "entry ".repeat(800));
+  assert.ok(Buffer.byteLength(dense.prompt) <= 1024, "prompt budget includes task and framing");
+  assert.ok(dense.lineIds.size < 82);
+});
+
+test("exact repeated task matches share a retention slot; distinct matches remain mandatory", () => {
+  const repeated = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, reason: "task", text: "same task fact\n" }));
+  assert.deepEqual(smol.compressRequired(repeated), [1]);
+  assert.equal(smol.compressRequired(repeated.map((row, i) => ({ ...row, text: `task fact ${i}\n` }))), undefined);
+});
+
+test("the host orders valid model IDs but rejects duplicates and unoffered source IDs", async () => {
+  const raw = listing();
+  const source = ext.prepareSmolExtraction(raw, [1, 82]);
+  const offered = smol.smolModelInput(source).lineIds;
+  const omitted = source.lines.find(line => !offered.has(line.id)).id;
+  for (const [ids, accepted] of [[[82, 1], true], [[1, 1], false], [[omitted], false]]) {
+    const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
+      fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: ids }) })),
+    });
+    helper.offer("ordered", raw, 0);
+    const selected = await helper.takeAsync("ordered", raw, 500);
+    assert.equal(Boolean(selected), accepted, JSON.stringify(ids));
+    if (selected) assert.deepEqual(JSON.parse(selected).lines.map(line => line.id), [1, 82]);
+  }
+  assert.equal(ext.validateSmolExtraction(source, '{"status":"SELECT","lineIds":[82,1]}').ok, false, "render-boundary validation still requires source order");
+});
+
+test("an unbounded wait cannot stall context rendering or rewrite its first exposure", async () => {
+  const raw = listing();
+  let finish;
+  const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
+    fetch: () => new Promise(resolve => { finish = resolve; }),
+  });
+  helper.offer("wait", raw, 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await helper.takeAsync("wait", raw, Infinity), undefined);
+  finish(new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(helper.take("wait", raw), undefined, "late results cannot replace a raw seal");
+  assert.equal(helper.inspect().cached, 1);
+});
+
 test("windowed offers cover oversized output with original line numbers", () => {
   const big = Array(400).fill("x".repeat(60)).join("\n");
   const window = ext.prepareSmolWindow(big);

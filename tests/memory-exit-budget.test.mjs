@@ -11,7 +11,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'pi-memory-exit-budget-'));
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(name,ctx,next){
  const sources={
  '@yunuspi/coding-agent':'export function convertToLlm(v){return v};export function serializeConversation(){return "fixture conversation"};export function getAgentDir(){return ${JSON.stringify(root)}};export function withFileMutationQueue(_p,fn){return fn()}',
- '@yunuspi/ai':'export const Type={Object:()=>({}),Optional:v=>v,String:()=>({}),Number:()=>({})};export function StringEnum(v){return v}',
+ '@yunuspi/ai':'export const Type={Object:()=>({}),Optional:v=>v,String:()=>({}),Number:()=>({}),Integer:()=>({})};export function StringEnum(v){return v}',
  '@yunuspi/ai/compat':'export async function complete(...args){return globalThis.__exitBudgetComplete(...args)}'};
  return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
 }`),import.meta.url);

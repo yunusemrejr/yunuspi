@@ -484,7 +484,7 @@ Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, e
 
 **Related records:** `local-intelligence`, `tool-catalog`, `skill-catalog`, `context-diagnostics`
 
-**Source:** [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/micro-intelligence/coordinator.ts`](../../agent/extensions/lib/micro-intelligence/coordinator.ts)
+**Source:** [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../../agent/extensions/lib/micro-intelligence/metrics.ts)
 
 **Documentation:** [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 
@@ -880,16 +880,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 70; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 162; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 159; factory)
-- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2390; literal)
-- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2259; literal)
-- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2533; literal)
-- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2632; literal)
-- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2776; literal)
-- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 1924; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 61; literal)
+- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2487; literal)
+- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2347; literal)
+- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2630; literal)
+- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2729; literal)
+- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2873; literal)
+- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 1999; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 60; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 165; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 821; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 819; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 584; literal)
@@ -899,7 +899,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 86; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 9; literal)
-- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2072; literal)
+- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2160; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1268; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 584; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1205; literal)
@@ -972,7 +972,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 561)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts) (line 184)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 47)
-- /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 874)
+- /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 872)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 647)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 646)
@@ -1218,7 +1218,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 ### Manifest support files
 
 - [`agent/extensions/lib/micro-intelligence/advisory.ts`](../../agent/extensions/lib/micro-intelligence/advisory.ts)
-- [`agent/extensions/lib/micro-intelligence/coordinator.ts`](../../agent/extensions/lib/micro-intelligence/coordinator.ts)
 - [`agent/extensions/lib/micro-intelligence/evidence.ts`](../../agent/extensions/lib/micro-intelligence/evidence.ts)
 - [`agent/extensions/lib/micro-intelligence/health.ts`](../../agent/extensions/lib/micro-intelligence/health.ts)
 - [`agent/extensions/lib/micro-intelligence/intent.ts`](../../agent/extensions/lib/micro-intelligence/intent.ts)
@@ -1559,6 +1558,7 @@ These historical transforms live under `agent/scripts/compatibility/legacy-trans
 - [`docs/CORE-OWNERSHIP.md`](CORE-OWNERSHIP.md)
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)
 - [`docs/COST-ACCOUNTING.md`](COST-ACCOUNTING.md)
+- [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
 - [`docs/INDEPENDENT-AUDIT.md`](INDEPENDENT-AUDIT.md)
@@ -1605,6 +1605,7 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `long-prompt-offload.ts` — retired 2026-08-31: long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted
 - `loop.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `micro-agents.ts` — retired 2026-09-02: user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate
+- `micro-intelligence/coordinator.ts` — retired 2026-09-19: Removed unused duplicate caches and write-only evidence ledger; helper owners retain their production caches and metrics.
 - `minify-system-prompt.mjs` — retired 2026-09-02: user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate
 - `openrouter-provider.ts` — retired 2026-08-31: provider routing redundant with native catalogs + suffix selectors; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/provider-cmd.ts (/provider + /or-provider slash command: interactive pick, order/only/sort/list/status/clear/json, persists providers.openrouter.modelOverrides[].compat.openRouterRouting)
 - `pi-agent-extensions.ts` — retired 2026-08-12: todo duty moved to the rpiv-todo fork

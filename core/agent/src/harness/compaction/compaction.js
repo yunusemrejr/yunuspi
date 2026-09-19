@@ -79,7 +79,13 @@ export const DEFAULT_COMPACTION_SETTINGS = {
 };
 /** Calculate total context tokens from provider usage. */
 export function calculateContextTokens(usage) {
-    return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+    // Provider totals are advisory input. Ignore malformed values rather than
+    // allowing a negative/NaN total to suppress compaction forever.
+    if (Number.isFinite(usage.totalTokens) && usage.totalTokens > 0) {
+        return usage.totalTokens;
+    }
+    const component = (value) => Number.isFinite(value) && value >= 0 ? value : 0;
+    return component(usage.input) + component(usage.output) + component(usage.cacheRead) + component(usage.cacheWrite);
 }
 function getAssistantUsage(msg) {
     if (msg.role === "assistant" && "usage" in msg) {

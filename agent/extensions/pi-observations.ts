@@ -23,7 +23,6 @@ import {
 } from "./lib/smol-preprocessor.ts";
 import { routeEvidence } from "./lib/micro-intelligence/evidence.ts";
 import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
-import { coordinator } from "./lib/micro-intelligence/coordinator.ts";
 import { needleClassify } from "./lib/needle-runtime.ts";
 import type {
 	ExtensionAPI,
@@ -426,7 +425,6 @@ export default function piObservationsExtension(
 								margin: result.value.margin,
 							});
 						}
-						coordinator().markProcessed(cueKey, "needle");
 						micro.accept("needle");
 					} else if (!result.ok) {
 						micro.skip("needle", result.reason);

@@ -40,7 +40,9 @@ function locateLayout(inputRoot) {
 	const root = path.resolve(inputRoot);
 	const liveManifest = path.join(root, "extensions", "manifest.json");
 	if (fs.existsSync(liveManifest)) {
-		const templateRoot = fs.existsSync(path.join(root, "public-template"))
+		const templateRoot = fs.existsSync(path.join(root, "runtime/release-template"))
+			? path.join(root, "runtime/release-template")
+			: fs.existsSync(path.join(root, "public-template"))
 			? path.join(root, "public-template")
 			: path.join(root, "release-template");
 		return { projectRoot: path.dirname(root), agentRoot: root, templateRoot };

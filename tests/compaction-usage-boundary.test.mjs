@@ -86,6 +86,19 @@ try {
    assert.equal(estimator([{...summary,timestamp:undefined},old]).lastUsageIndex,null,'unknown boundary falls back to current message size');
   });
  }
+ for(const target of targets().filter(t=>t.name.includes('post-compaction usage'))) {
+  await test(target.name+' rejects malformed provider totals and survives unserializable tool arguments',()=>{
+   const source=fs.readFileSync(target.file,'utf8');
+   const accounting=fn(source,'calculateContextTokens',{});
+   assert.equal(accounting({totalTokens:NaN,input:120,output:4,cacheRead:0,cacheWrite:0}),124);
+   assert.equal(accounting({totalTokens:-1,input:120,output:4,cacheRead:0,cacheWrite:0}),124);
+   assert.equal(accounting({totalTokens:0,input:120,output:4,cacheRead:0,cacheWrite:0}),124,'a zero total falls back when components carry usage');
+   const estimator=fn(source,'estimateTokens',{safeJsonStringify:value=>{try{return JSON.stringify(value)??'undefined';}catch{return '[unserializable]';}}});
+   const argumentsValue={};argumentsValue.self=argumentsValue;
+   const tokens=estimator({role:'assistant',content:[{type:'toolCall',name:'inspect',arguments:argumentsValue}]});
+   assert.ok(Number.isSafeInteger(tokens)&&tokens>0);
+  });
+ }
 } finally {
  if(saved===undefined)delete process.env.PI_HARNESS_PATCH_TEST_CORE;else process.env.PI_HARNESS_PATCH_TEST_CORE=saved;
  fs.rmSync(stage,{recursive:true,force:true});

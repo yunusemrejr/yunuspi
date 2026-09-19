@@ -1,4 +1,4 @@
-// Micro-intelligence coordination: metrics, coordinator, health, retrieval,
+// Micro-intelligence coordination: metrics, health, retrieval,
 // evidence routing, advisory, review helpers and status snapshots.
 // All model dependencies are mocked; no network, no workers, no assets.
 import test from "node:test";
@@ -13,7 +13,6 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
 );
 const load = (rel) => import(pathToFileURL(path.join(agent, rel)));
 const metricsMod = await load("extensions/lib/micro-intelligence/metrics.ts");
-const coordMod = await load("extensions/lib/micro-intelligence/coordinator.ts");
 const healthMod = await load("extensions/lib/micro-intelligence/health.ts");
 const retrievalMod = await load("extensions/lib/micro-intelligence/retrieval.ts");
 const evidenceMod = await load("extensions/lib/micro-intelligence/evidence.ts");
@@ -51,40 +50,6 @@ test("latencyStats computes p50/p95 over the ring", () => {
   const stats = metricsMod.latencyStats([10, 20, 30, 40]);
   assert.equal(stats.count, 4);
   assert.ok(stats.p50 <= stats.p95);
-});
-
-test("coordinator dedupes inflight work and caches results", async () => {
-  const coord = coordMod.createCoordinator({ cacheMax: 8 });
-  let runs = 0;
-  const worker = async () => {
-    runs++;
-    await new Promise((r) => setTimeout(r, 20));
-    return { value: 42 };
-  };
-  const [a, b] = await Promise.all([
-    coord.assist("k1", "needle", "test", worker),
-    coord.assist("k1", "needle", "test", worker),
-  ]);
-  assert.equal(runs, 1);
-  assert.deepEqual(a.value, { value: 42 });
-  assert.equal(a.provenance.helper, "needle");
-  const cached = await coord.assist("k1", "needle", "test", worker);
-  assert.equal(runs, 1);
-  assert.equal(cached.provenance.cached, true);
-  const summary = coord.ledgerSummary();
-  assert.equal(summary["needle:deduped"], 1);
-  assert.equal(summary["needle:served-cached"], 1);
-});
-
-test("coordinator tracks processed evidence and escalation chains", () => {
-  const coord = coordMod.createCoordinator();
-  coord.markProcessed("obs-1", "smol");
-  coord.markProcessed("obs-1", "needle");
-  assert.deepEqual(coord.processedBy("obs-1").sort(), ["needle", "smol"]);
-  assert.deepEqual(coord.processedBy("obs-unknown"), []);
-  coord.escalate("rank", "needle", "jev");
-  assert.deepEqual(coord.escalationChain("rank"), ["needle", "jev"]);
-  assert.ok(coordMod.opportunityKey(["a", 1]).length === 32);
 });
 
 test("health renders the compact five-layer block", () => {

@@ -32,6 +32,7 @@ export const JEV_REQUEST_TIMEOUT_MS = 15_000;
 export const JEV_DISCOVERY_TTL_MS = 10 * 60 * 1000;
 export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
 const JEV_CACHE_MAX = 500;
+const JEV_MAX_INPUT_CHARS = 32768;
 
 const agentDir = (): string =>
   process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -248,6 +249,7 @@ async function postDecisions(
   key: string,
   signal?: AbortSignal,
 ): Promise<{ answers: Record<string, JevAnswer> }> {
+  signal?.throwIfAborted();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), JEV_REQUEST_TIMEOUT_MS);
   const onAbort = () => controller.abort();
@@ -319,8 +321,10 @@ async function recoverProbe(): Promise<void> {
       breakerOpen = false;
       lastError = "";
       return;
-    } catch {
-      // Keep probing the cascade; one success reopens service.
+    } catch (error) {
+      // Model aliases can recover via another slug. Transport/auth failures
+      // cannot: walking every alias just repeats the same failing request.
+      if (!isModelRejection((error as { status?: number }).status, error instanceof Error ? error.message : String(error))) break;
     }
   }
   openBreaker("recover probe: cascade exhausted");
@@ -330,6 +334,21 @@ export type JevAskOpts = {
   pi?: unknown;
   signal?: AbortSignal;
 };
+
+function knownSlugs(): string[] {
+  return [...new Set([...(stickySlug ? [stickySlug] : []), ...JEV_PREFERRED_SLUGS, ...discovered.slugs])];
+}
+
+/** Catalog discovery is shared, but a cancelled caller need not wait for it. */
+async function discoverForCaller(signal?: AbortSignal): Promise<string[]> {
+  if (!signal) return jevCascadeSlugs();
+  if (signal.aborted) return [];
+  let cancel!: () => void;
+  const aborted = new Promise<string[]>(resolve => { cancel = () => resolve([]); });
+  signal.addEventListener('abort', cancel, { once: true });
+  try { return await Promise.race([jevCascadeSlugs(), aborted]); }
+  finally { signal.removeEventListener('abort', cancel); }
+}
 
 /**
  * One batched judgment call. Returns answers or a fallback directive —
@@ -379,14 +398,15 @@ async function askJevOnce(
     return { ok: false, skipped: "unhealthy" };
   }
 
-  const payloadChars = JSON.stringify([state, questions]).length;
+  let payloadChars: number;
+  try { payloadChars = JSON.stringify([state, questions]).length; }
+  catch { return { ok: false, skipped: 'invalid-input' }; }
+  if (payloadChars > JEV_MAX_INPUT_CHARS) return { ok: false, skipped: 'input-budget' };
   const inputTokens = estimateJevTokens(payloadChars);
   const started = deps.now();
-  const slugs = await jevCascadeSlugs();
-  // Sticky slug first (known good), then the full preferred order.
-  const ordered = stickySlug && slugs.includes(stickySlug)
-    ? [stickySlug, ...slugs.filter((slug) => slug !== stickySlug)]
-    : slugs;
+  // Known-good and preferred routes need no catalog request. Discover other
+  // aliases only after all known ones explicitly reject the requested model.
+  const ordered = knownSlugs();
   for (const slug of ordered) {
     const hit = cacheGet(cacheKey(site, slug, state, questions));
     if (hit) {
@@ -399,7 +419,18 @@ async function askJevOnce(
     }
   }
   let modelRejections = 0;
-  for (const slug of ordered) {
+  let searched = false;
+  for (let index = 0; ; index++) {
+    if (index >= ordered.length) {
+      if (searched) break;
+      searched = true;
+      const found = await discoverForCaller(opts.signal);
+      if (opts.signal?.aborted) return { ok: false, skipped: 'aborted' };
+      ordered.push(...found.filter(slug => !ordered.includes(slug)));
+      if (index >= ordered.length) break;
+    }
+    if (opts.signal?.aborted) return { ok: false, skipped: 'aborted' };
+    const slug = ordered[index];
     try {
       const { answers } = await postDecisions(slug, state, questions, key, opts.signal);
       stickySlug = slug;

@@ -2129,7 +2129,7 @@
       "sourceFiles": [
         "agent/extensions/micro-intelligence.ts",
         "agent/extensions/lib/needle-runtime.ts",
-        "agent/extensions/lib/micro-intelligence/coordinator.ts"
+        "agent/extensions/lib/micro-intelligence/metrics.ts"
       ],
       "doc": "docs/MICRO-INTELLIGENCE.md",
       "commands": []
@@ -2295,7 +2295,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 874
+        "line": 872
       },
       {
         "name": "or-provider",
@@ -2702,43 +2702,43 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2390,
+        "line": 2487,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2259,
+        "line": 2347,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2533,
+        "line": 2630,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2632,
+        "line": 2729,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2776,
+        "line": 2873,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1924,
+        "line": 1999,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 61,
+        "line": 60,
         "kind": "literal"
       },
       {
@@ -2756,7 +2756,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 821,
+        "line": 819,
         "kind": "literal"
       },
       {
@@ -2816,7 +2816,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2072,
+        "line": 2160,
         "kind": "literal"
       },
       {
@@ -3072,49 +3072,49 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2390,
+        "line": 2487,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2259,
+        "line": 2347,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2533,
+        "line": 2630,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2632,
+        "line": 2729,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2776,
+        "line": 2873,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1924,
+        "line": 1999,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 61,
+        "line": 60,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 821,
+        "line": 819,
         "kind": "literal"
       },
       {
@@ -3162,7 +3162,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2072,
+        "line": 2160,
         "kind": "literal"
       },
       {
@@ -3418,7 +3418,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 556,
+      "sourceFiles": 555,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,
@@ -3963,10 +3963,6 @@
     "supportFiles": [
       {
         "path": "agent/extensions/lib/micro-intelligence/advisory.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/lib/micro-intelligence/coordinator.ts",
         "exists": true
       },
       {
@@ -4625,6 +4621,11 @@
         "name": "micro-agents.ts",
         "retired": "2026-09-02",
         "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate"
+      },
+      {
+        "name": "micro-intelligence/coordinator.ts",
+        "retired": "2026-09-19",
+        "why": "Removed unused duplicate caches and write-only evidence ledger; helper owners retain their production caches and metrics."
       },
       {
         "name": "minify-system-prompt.mjs",
@@ -5782,6 +5783,10 @@
       {
         "name": "COST-ACCOUNTING.md",
         "path": "docs/COST-ACCOUNTING.md"
+      },
+      {
+        "name": "EFFICIENCY-AUDIT.md",
+        "path": "docs/EFFICIENCY-AUDIT.md"
       },
       {
         "name": "EMAIL.md",

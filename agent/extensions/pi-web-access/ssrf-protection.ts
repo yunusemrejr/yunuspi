@@ -4,6 +4,7 @@ import net from "node:net";
 import { getActiveProxy, getWebSearchConfigPath, hasScopedProxyDecision, isProxyBypassedUrl } from "./utils.ts";
 
 const DEFAULT_MAX_REDIRECTS = 5;
+const MAX_CONFIGURED_REDIRECTS = 20;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const LOOPBACK_ALLOW_RANGES = ["127.0.0.0/8", "::1", "::ffff:127.0.0.0/104"];
 
@@ -275,6 +276,9 @@ export async function fetchRemoteUrl(
 ): Promise<Response> {
 	const fetchImpl = options.fetch ?? fetch;
 	const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+	if (!Number.isSafeInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > MAX_CONFIGURED_REDIRECTS) {
+		throw new Error(`maxRedirects must be an integer from 0 through ${MAX_CONFIGURED_REDIRECTS}`);
+	}
 	const initSignal = init.signal ?? undefined;
 	const validationSignal = options.signal && initSignal
 		? AbortSignal.any([options.signal, initSignal])
@@ -291,6 +295,10 @@ export async function fetchRemoteUrl(
 
 		const location = response.headers.get("location");
 		if (!location) return response;
+		// A redirect body is not returned to the caller. Cancel it before issuing
+		// the next request so a slow or large body cannot hold a socket open for
+		// every hop in the redirect chain.
+		await response.body?.cancel().catch(() => {});
 		if (redirects === maxRedirects) throw new Error(`Too many redirects fetching ${current.toString()}`);
 
 		const from = current;
