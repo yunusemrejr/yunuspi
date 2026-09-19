@@ -63,7 +63,7 @@ The capability index explains entry points, supported options, related abilities
 | Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
 | Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) |
 | Manage longer tasks | Background jobs, dependency-aware action plans and verification records. [Action plans](docs/ACTION-PLANS.md) |
-| Work with the web | Search, isolated browser sessions, page inspection, screenshots, forms and HTTP diagnostics. Both browser tools support localhost previews. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
+| Work with the web | Search, rendered-page reading, isolated browser tabs, DOM references, screenshots, console JavaScript, condition waits, forms and human verification help. Both browser tools support localhost previews. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
 | Reach people by email | Send and read mail through AgentMail with an environment-provided key, bounded recipients, compact inbox previews and opt-in message bodies. [Email and outreach](docs/EMAIL.md) |
 | Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) |
 | Inspect and experiment | Structured-data and API tools, local utility MCP tools, and disposable sandboxes with resource limits. [Utility tools](agent/extensions/lib/utility-mcp/README.md) · [Sandboxes](docs/SANDBOXES.md) |

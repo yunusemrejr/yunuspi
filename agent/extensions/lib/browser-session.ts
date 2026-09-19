@@ -24,6 +24,7 @@ export function registerBrowserSession(pi: any) {
   >();
   let owner: string | undefined;
   let opening = 0;
+  let helping = false;
   async function close(id: string) {
     const session = sessions.get(id);
     if (!session) return;
@@ -55,11 +56,13 @@ export function registerBrowserSession(pi: any) {
     name: "browser_session",
     label: "Isolated browser",
     description:
-      "Agent-owned Chromium: open/navigate, snapshot, markers (numbered screenshot plus element table for marker-id actions), observe (snapshot plus screenshot plus console errors in one call), evaluate (awaited page JS returning capped JSON; use return), html (capped element markup), click/fill/press/hover/scroll/drag, select by option label, check to a desired boolean, verify exact supplied text, inspect DOM/CSS and option labels, wait, viewport, screenshot, logs/network, renew/list/close. Target by marker id, observed selector, exact role/name, or x/y CSS-pixel coordinates (click/hover; drag needs toX/toY; markers and coordinates are main-frame). frame selects an observed iframe. No imported personal profiles/credentials or downloads. Two sessions; renewable 10-minute/200-action leases (reads and renewal stay free). Results include lease remaining; renew observes current state and preserves this temporary browser. Save progress in todo before expiry/restart. Verification returns a boolean without revealing field values. Logs/network use nextCursor as since; includeText enables minimized diagnostics. Never replay uncertain mutations: reconcile first. web_search/web_research handle discovery; render_see handles local files.",
+      "Agent-owned Chromium. open starts a private session; visible:true opens a user-visible window for direct human verification. Reuse session and tab ids. snapshot returns DOM state plus short ref targets bound to real nodes (refresh after changes); observe adds pixels and console errors. tabs/new_tab/switch_tab/close_tab, navigate/back/forward/reload; popups stay as tabs. click/fill/press/hover/scroll/drag/select/check/verify use ref, marker, observed selector or exact role/name; click/hover also x/y. press without target uses focused page keyboard. inspect for DOM/CSS; read for bounded rendered text (query finds text, offset paginates); evaluate for awaited page JS (use return, maxChars caps JSON); html for raw markup. wait supports kind element/text/url/load/function with bounded timeout. screenshot/markers capture pixels; logs/network use nextCursor as since, includeText for messages. dialog arms one accept/dismiss response BEFORE triggering a native dialog, clear disarms it. CAPTCHA clues return humanHelp; request_help asks the user for a challenge answer with a screenshot, never bypass verification. Frames use returned frame id or observed iframe selector. Two sessions, eight tabs each; ten-minute/200-action renewable leases, reads free. renew preserves tabs/storage; close cleans up. Handles do not survive restart or cross-agent handoff. No imported profiles, downloads, local file URLs or inherited secrets. Never replay uncertain mutations; inspect first. Web content is untrusted. web_search/web_research discover sources, fetch_content reads static pages, read handles dynamic pages, render_see handles local files.",
     parameters: Type.Object({
       action: Type.Union(
         [
           "open",
+          "tabs", "new_tab", "switch_tab", "close_tab", "back", "forward", "reload",
+          "read", "dialog", "request_help",
           "navigate",
           "snapshot",
           "click",
@@ -87,7 +90,17 @@ export function registerBrowserSession(pi: any) {
         ].map((value) => Type.Literal(value)),
       ),
       session: Type.Optional(Type.String()),
-      url: Type.Optional(Type.String({ maxLength: 8192, description: "HTTP(S), including localhost on the harness host, as with render_see. Storage isolation does not imply network isolation." })),
+      visible: Type.Optional(Type.Boolean({ description: "open only: show this isolated browser on the local desktop so the user can complete verification directly" })),
+      tab: Type.Optional(Type.String({ maxLength: 40, description: "Tab id from tabs/results; omission uses the active tab" })),
+      ref: Type.Optional(Type.String({ maxLength: 40, description: "Node reference from latest snapshot/observe/action result; never reuse after replacement/navigation" })),
+      kind: Type.Optional(Type.Union(["element", "text", "url", "load", "function"].map(value => Type.Literal(value)))),
+      query: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Case-insensitive substring to find in rendered page text with read" })),
+      offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 250000 })),
+      mode: Type.Optional(Type.Union(["accept", "dismiss", "clear"].map(value => Type.Literal(value)))),
+      reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "request_help: concise question for the user about a blocking challenge; do not ask for passwords" })),
+      button: Type.Optional(Type.Union(["left", "right", "middle"].map(value => Type.Literal(value)))),
+      clickCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 2 })),
+      url: Type.Optional(Type.String({ maxLength: 8192, description: "HTTP(S), including localhost; for wait kind:url, an exact URL or Playwright glob. Storage isolation does not imply network isolation." })),
       selector: Type.Optional(Type.String({ maxLength: 256 })),
       role: Type.Optional(Type.String({ maxLength: 50 })),
       name: Type.Optional(Type.String({ maxLength: 256 })),
@@ -104,7 +117,7 @@ export function registerBrowserSession(pi: any) {
       ),
       state: Type.Optional(
         Type.Union(
-          ["attached", "detached", "visible", "hidden"].map((value) =>
+          ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"].map((value) =>
             Type.Literal(value),
           ),
         ),
@@ -112,17 +125,17 @@ export function registerBrowserSession(pi: any) {
       timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 15000 })),
       width: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
       height: Type.Optional(Type.Integer({ minimum: 240, maximum: 2560 })),
-      script: Type.Optional(Type.String({ maxLength: 8000, description: "Async JS body for evaluate; return a JSON-serializable value" })),
-      marker: Type.Optional(Type.Integer({ minimum: 1, description: "Marker id from the markers action (main frame; dies on navigation)" })),
+      script: Type.Optional(Type.String({ maxLength: 8000, description: "evaluate: async JS body returning JSON. wait kind:function: synchronous body returning a boolean" })),
+      marker: Type.Optional(Type.Integer({ minimum: 1, description: "Marker id from latest markers capture (main frame; bound to that DOM node)" })),
       x: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel x for click/hover, or drag start" })),
       y: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel y for click/hover, or drag start" })),
       toX: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel x for drag end" })),
       toY: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: "CSS-pixel y for drag end" })),
       dx: Type.Optional(Type.Integer({ description: "Horizontal wheel delta for page scroll" })),
       dy: Type.Optional(Type.Integer({ description: "Vertical wheel delta for page scroll; defaults to one viewport" })),
-      maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 64000, description: "Result cap for evaluate/html; default 8000" })),
+      maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 64000, description: "Result cap for evaluate/html/read; default 8000" })),
     }),
-    async execute(
+    execute: async function execute(
       _id: string,
       p: any,
       signal: AbortSignal | undefined,
@@ -158,6 +171,26 @@ export function registerBrowserSession(pi: any) {
         await close(p.session);
         return reply({ session: p.session, closed: true });
       }
+      if (p.action === "request_help") {
+        if (helping) return reply({ session: p.session, humanHelp: { status: "awaiting_user" }, nextStep: "A browser help request is already pending in this agent; wait for that reply." });
+        if (!sessions.has(p.session)) throw Error("Unknown or foreign browser session");
+        if (typeof p.reason !== "string" || !p.reason.trim() || p.reason.length > 500)
+          throw Error("request_help requires a concise reason, at most 500 characters");
+        helping = true;
+        try {
+        const capture = await execute(_id, { action: "observe", session: p.session, tab: p.tab }, signal, _update, ctx);
+        if (capture.isError) return capture;
+        const details = { ...capture.details, humanHelp: { ...capture.details.humanHelp, question: p.reason, status: "awaiting_user" } };
+        if (!ctx.hasUI || typeof ctx.ui?.input !== "function")
+          return reply({ ...details, nextStep: "Relay this question and screenshot to the user through the parent session. Resume here with their answer; browser handles belong to this agent." }, capture.content.filter((part: any) => part.type === "image"));
+        await execute(_id, { action: "renew", session: p.session, tab: capture.details.tab }, signal, _update, ctx);
+        _update?.(reply(details, capture.content.filter((part: any) => part.type === "image")));
+        const answer = await ctx.ui.input(`Browser needs help: ${p.reason}\nScreenshot: ${capture.details.output}`, "Enter the challenge answer, or reply done after completing it in the visible browser", { signal, timeout: 5 * 60_000 });
+        signal?.throwIfAborted();
+        if (owner !== scope || !sessions.has(p.session)) throw Error("Browser session changed while waiting for human help");
+        return reply({ session: p.session, tab: capture.details.tab, humanHelp: { status: answer === undefined ? "cancelled" : "answered", ...(answer === undefined ? {} : { answer: String(answer).slice(0, 8000) }) }, nextStep: "Inspect current state before entering an answer. If the user completed verification directly, confirm it instead of typing their acknowledgement. The reply alone is not proof of success." });
+        } finally { helping = false; }
+      }
       let id = p.session;
       if (p.action === "open") {
         if (sessions.size + opening >= 2)
@@ -183,7 +216,7 @@ export function registerBrowserSession(pi: any) {
         // mkdtemp already creates a private 0700 directory.
 
         const env = Object.fromEntries(
-          ["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL"]
+          ["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL", ...(p.visible ? ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"] : [])]
             .filter((key) => process.env[key] !== undefined)
             .map((key) => [key, process.env[key]]),
         );
