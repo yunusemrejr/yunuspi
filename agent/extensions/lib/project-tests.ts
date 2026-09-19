@@ -147,7 +147,7 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
     // the need stays unresolved forever, and automatic reviews stay off.
     || /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && tokens[1] === '-l' && tokens.length > 2 && tokens.slice(2).every(t => !t.startsWith('-'));
   if (!runner && !declared) return { reason: 'not a recognized test runner; declare it explicitly in an assessment plan to use it' };
-  return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: `${executable} check` } };
+  return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: bodyCommand.slice(0, 300) } };
 }
 
 export function projectCheckCommand(command: unknown, cwd: string, declared = false) {
@@ -201,7 +201,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1, delivered = '';
   let hashes: Record<string, string> = {};
-  const starts = new Map<string, { revision: number; check: { key: string; label: string }; epoch: number }>();
+  const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number }>();
   const earlyTerminals = new Map<string, any>();
   // Recent commands that LOOK like a planned check (same executable) but did
   // not match any receipt key: the usual cause is composition (trailing echo,
@@ -236,7 +236,6 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       const digest = state.root ? projectContentHash(state.root, file) : undefined;
       if (digest) { hashes[file] = digest; budgeted--; }
     }
-    for (const file of Object.keys(hashes)) if (!state.changed.includes(file)) delete hashes[file];
     save();
   };
   const scan = async (ctx: any, observeChanges = false) => {
@@ -255,18 +254,30 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
       if (ticket !== epoch || !active) return;
       options.onFacts?.(next, observeChanges);
-      if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; starts.clear(); }
+      if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; hashes = {}; starts.clear(); }
       state.root = next.root;
+      const nextSources = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
+      const currentHashes: Record<string, string> = {}, identities: Record<string, string> = {};
+      let remaining = PROJECT_HASH_FILES;
+      for (const [file, fingerprint] of Object.entries(nextSources ?? {}) as [string, string][]) {
+        const current = remaining-- > 0 ? projectContentHash(state.root, file) : undefined;
+        identities[file] = current ?? fingerprint;
+        if (current) currentHashes[file] = current;
+      }
       if (baseline && (observeChanges || state.changed.length)) {
         const paths = new Set([...Object.keys(baseline), ...Object.keys(next.sources)]);
-        // A truncated scan does not prove that an omitted source was deleted.
-        changed([...paths].filter(file => (observeChanges || state.changed.includes(file)) && next.sources[file] !== baseline![file] && (next.sources[file] !== undefined || !next.truncated)));
+        // Byte identity rejects touch/identical rewrites, and also detects a
+        // same-stat edit. Missing paths in a truncated scan are not deletions.
+        changed([...paths].filter(file => (observeChanges || state.changed.includes(file))
+          && (next.sources[file] !== undefined || !next.truncated)
+          && (next.sources[file] !== baseline![file] || currentHashes[file] && hashes[file] && currentHashes[file] !== hashes[file])
+          && (!currentHashes[file] || currentHashes[file] !== hashes[file])));
       }
-      baseline = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
-      // Bind receipts to the exact observed tree. A truncated scan merges the
-      // previous baseline, so treeComplete records whether the hash covers
-      // the full observed tree or a merged partial view.
-      state.tree = treeHash(baseline);
+      Object.assign(hashes, currentHashes);
+      for (const file of Object.keys(hashes)) if (!(file in nextSources)) delete hashes[file];
+      baseline = nextSources;
+      // Stat identities are retained for files beyond the bounded byte scan.
+      state.tree = treeHash(identities);
       state.treeComplete = next.truncated !== true;
       facts = next;
     };
@@ -287,9 +298,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
             : '');
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
-  const receipt = (start: { revision: number; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
+  const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
     state.checks = state.checks.filter(c => !(c.key === start.check.key && c.revision === start.revision));
-    state.checks.push({ ...start.check, revision: start.revision, outcome, callId, ...(state.tree ? { tree: state.tree } : {}), ...(handle ? { handle } : {}) });
+    state.checks.push({ ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}) });
     state.checks = state.checks.slice(-32); save();
   };
   const terminal = (task: any) => {
@@ -308,7 +319,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const api = {
     async restore(ctx: any) {
-      epoch++; active = true; state = fresh(); pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
+      epoch++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
       // The session branch remains the only durable owner, and a reload
       // never wakes work on its own. Restored receipts never resume as live
       // checks, but passed tree-bound evidence survives: the next scan
@@ -372,9 +383,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       const check = candidate && (state.assessment?.checks.some(c => c.key === candidate.key) ? candidate : projectCheckCommand(event.input?.command, ctx.cwd));
       if (check) {
         if (starts.size >= 64) starts.delete(starts.keys().next().value!);
-        starts.set(event.toolCallId, { revision: state.revision, check, epoch });
+        starts.set(event.toolCallId, { revision: state.revision, tree: state.tree, check, epoch });
       } else if (state.assessment?.revision === state.revision && state.assessment.disposition === 'required' && typeof event.input?.command === 'string') {
-        const planned = new Set(state.assessment.checks.map(c => c.label.split(' ', 1)[0]));
+        const planned = new Set(state.assessment.checks.map(c => firstExe(c.label)));
         if (planned.has(firstExe(event.input.command))) {
           if (unmatched.revision !== state.revision) unmatched = { revision: state.revision, commands: [] };
           const raw = event.input.command.trim().slice(0, 160);
@@ -386,15 +397,20 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if ((!enabled() && !options.onFacts) || !active) return;
       const ticket = epoch;
       const start = starts.get(event.toolCallId); starts.delete(event.toolCallId);
+      const mutationPath = event.details?.fileMutation?.resolved ?? event.input?.path;
+      const previousHash = typeof mutationPath === 'string' ? hashes[path.relative(state.root || ctx.cwd, path.resolve(ctx.cwd, mutationPath))] : undefined;
       if (['write', 'edit', 'bulk_edit', 'bash', 'bg_run'].includes(event.toolName)) {
         const before = state.revision;
         await scan(ctx, true);
         if (ticket !== epoch || !active) return;
         // Successful native receipts cover paths beyond the bounded scan.
-        const raw = event.details?.fileMutation?.resolved ?? event.input?.path;
+        const raw = mutationPath;
         if (['write', 'edit'].includes(event.toolName) && (!event.isError || event.details?.fileMutation) && typeof raw === 'string') {
           const relative = path.relative(state.root || ctx.cwd, path.resolve(ctx.cwd, raw));
-          if (!relative.startsWith('../') && !path.isAbsolute(relative) && isProjectTestSource(relative) && (before === state.revision || !state.changed.includes(relative))) changed([relative]);
+          if (!relative.startsWith('../') && !path.isAbsolute(relative) && isProjectTestSource(relative) && (before === state.revision || !state.changed.includes(relative))) {
+            const current = projectContentHash(state.root || ctx.cwd, relative);
+            if (!current || current !== previousHash) changed([relative]);
+          }
         }
       }
       if (start && start.epoch === epoch) {
@@ -449,14 +465,14 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
     snapshot: summary,
   };
-  registerContinuationSource({ name: 'project tests', pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
+  registerContinuationSource({ name: 'project tests', verification: () => enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length && (projectTestNeed(state) || state.assessment?.disposition === 'blocked') ? [state.assessment?.disposition === 'blocked' ? `Blocked: ${state.assessment.reason}` : `Current checks unresolved (${projectTestNeed(state)}); command exits do not establish user-visible behavior.`] : [], pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
     description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',
     parameters: Type.Object({ action: Type.Union([Type.Literal('inspect'), Type.Literal('assess')]),
       disposition: Type.Optional(Type.Union([Type.Literal('required'), Type.Literal('not_needed'), Type.Literal('blocked')])),
       reason: Type.Optional(Type.String({ minLength: 12, maxLength: 1200 })),
-      commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { maxItems: 8 })) }),
+      commands: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000, description: 'Executable command only, e.g. make test. Put explanations in reason, never append prose or parenthetical notes. Inspect returns the exact planned commands and their receipts.' }), { maxItems: 8 })) }),
     async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
       const ticket = epoch;
       signal?.throwIfAborted(); await scan(ctx); signal?.throwIfAborted();

@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import {
   collectContinuationLines,
+  collectVerificationLines,
   continuationWarning,
+  verificationWarning,
 } from "./lib/continuation-notice.ts";
 
 /** Appends a bounded warning to a finished answer when registered sources
@@ -24,9 +26,11 @@ export default function continuationNoticeExtension(pi: ExtensionAPI): void {
       return undefined;
     const pendingMessages = ctx.hasPendingMessages();
     const lines = collectContinuationLines();
+    const verification = collectVerificationLines();
     const key = JSON.stringify({ lines, pendingMessages });
-    if (key === lastKey) return undefined;
-    const warning = continuationWarning(lines, pendingMessages);
+    // Evidence gaps remain attached to every final answer that could otherwise
+    // claim success. Deduplication applies only to continuation announcements.
+    const warning = verificationWarning(verification) + (key === lastKey ? '' : continuationWarning(lines, pendingMessages));
     if (!warning) return undefined;
     lastKey = key;
     let content: unknown;

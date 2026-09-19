@@ -2879,13 +2879,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 453,
+        "line": 469,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 428,
+        "line": 409,
         "kind": "literal"
       },
       {
@@ -3225,13 +3225,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 453,
+        "line": 469,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 428,
+        "line": 409,
         "kind": "literal"
       },
       {
@@ -3511,7 +3511,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 557,
+      "sourceFiles": 558,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,
