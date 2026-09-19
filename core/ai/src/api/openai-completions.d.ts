@@ -10,11 +10,12 @@ export interface OpenAICompletionsOptions extends StreamOptions {
 export interface ConvertCompletionsMessagesOptions {
     grammarToolInputProperties?: ReadonlyMap<string, string>;
 }
-type ResolvedOpenAICompletionsCompat = Omit<Required<OpenAICompletionsCompat>, "cacheControlFormat" | "deferredToolsMode" | "supportsThinkingTokenBudget" | "thinkingTokenBudgetField" | "vllmPriority"> & {
+type ResolvedOpenAICompletionsCompat = Omit<Required<OpenAICompletionsCompat>, "cacheControlFormat" | "deferredToolsMode" | "supportsThinkingTokenBudget" | "thinkingTokenBudgetField" | "thinkingTokenBudgetOff" | "vllmPriority"> & {
     cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
     deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
     supportsThinkingTokenBudget?: OpenAICompletionsCompat["supportsThinkingTokenBudget"];
     thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
+    thinkingTokenBudgetOff?: OpenAICompletionsCompat["thinkingTokenBudgetOff"];
     vllmPriority?: OpenAICompletionsCompat["vllmPriority"];
 };
 export declare const stream: StreamFunction<"openai-completions", OpenAICompletionsOptions>;

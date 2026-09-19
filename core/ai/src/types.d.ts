@@ -29,7 +29,7 @@ export type ChatTemplateKwargValue = string | number | boolean | null | {
     omitWhenOff?: boolean;
 };
 /** Top-level request field used to cap reasoning tokens on OpenAI-compatible servers. */
-export type ThinkingTokenBudgetField = "thinking_token_budget" | "thinking_budget" | "thinking_budget_tokens";
+export type ThinkingTokenBudgetField = "thinking_token_budget" | "thinking_budget" | "thinking_budget_tokens" | "reasoning_budget";
 /** Token budgets for each thinking level (token-based providers only) */
 export interface ThinkingBudgets {
     minimal?: number;
@@ -506,6 +506,8 @@ export interface OpenAICompletionsCompat {
      * `"thinking_budget_tokens"` is llama.cpp. Off by default; not set on the generated catalog.
      */
     thinkingTokenBudgetField?: ThinkingTokenBudgetField;
+    /** Explicit budget value to disable thinking, only for endpoints documenting one. */
+    thinkingTokenBudgetOff?: number;
     /** Alias for `thinkingTokenBudgetField: "thinking_token_budget"` (vLLM). Prefer `thinkingTokenBudgetField`. Default: false. */
     supportsThinkingTokenBudget?: boolean;
     /** Whether the provider supports OpenAI custom tools with Lark/regex grammar formats. When false, grammar-constrained tools fall back to normal function tools. Default: false; the generated model catalog enables it for capable models. */

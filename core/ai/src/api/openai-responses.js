@@ -9,7 +9,7 @@ import { getProviderEnvValue } from "../utils/provider-env.js";
 import { retryProviderRequest } from "../utils/provider-retry.js";
 import { createGrammarToolInputProperties } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
+import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { buildBaseOptions } from "./simple-options.js";
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
@@ -52,7 +52,7 @@ function getCompat(model) {
     return {
         supportsDeveloperRole: model.compat?.supportsDeveloperRole ?? true,
         sessionAffinityFormat: model.compat?.sessionAffinityFormat ?? detectSessionAffinityFormat(model),
-        supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
+        supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? isOpenAIEndpoint(model.baseUrl),
         supportsStrictMode: model.compat?.supportsStrictMode ?? false,
         supportsOpenAIGrammarTools: model.compat?.supportsOpenAIGrammarTools ?? false,
         supportsAdditionalTools: model.compat?.supportsAdditionalTools ?? false,
@@ -207,6 +207,10 @@ function createClient(model, context, apiKey, optionsHeaders, fetch, sessionId) 
     });
 }
 function buildParams(model, context, options, compat = getCompat(model), grammarToolInputProperties = createGrammarToolInputProperties(context.tools, compat.supportsOpenAIGrammarTools)) {
+    if (options?.reasoningEffort !== undefined) {
+        const level = clampThinkingLevel(model, options.reasoningEffort === "none" ? "off" : options.reasoningEffort);
+        options = { ...options, reasoningEffort: level === "off" ? undefined : level };
+    }
     const deferredToolsMode = compat.supportsAdditionalTools
         ? "additional-tools"
         : compat.supportsToolSearch
@@ -254,7 +258,7 @@ function buildParams(model, context, options, compat = getCompat(model), grammar
         if (options?.reasoningEffort || options?.reasoningSummary) {
             const effort = options?.reasoningEffort
                 ? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-                : "medium";
+                : clampThinkingLevel(model, "medium");
             params.reasoning = {
                 effort: effort,
                 summary: options?.reasoningSummary || "auto",

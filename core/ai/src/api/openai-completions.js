@@ -11,7 +11,7 @@ import { retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { appendGrammarToolInputJsonDelta, createGrammarToolInputProperties, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
-import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
+import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
 import { buildBaseOptions, clampThinkingBudgetToAnswerRoom, thinkingBudgetForLevel } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 /**
@@ -579,13 +579,18 @@ function createClient(model, context, apiKey, optionsHeaders, fetch, sessionId, 
     });
 }
 function buildParams(model, context, options, compat = getCompat(model), cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env), grammarToolInputProperties = createGrammarToolInputProperties(context.tools, compat.supportsOpenAIGrammarTools)) {
+    // Direct SDK calls share the same capability clamp as sessions and workers.
+    if (options?.reasoningEffort !== undefined) {
+        const level = clampThinkingLevel(model, options.reasoningEffort === "none" ? "off" : options.reasoningEffort);
+        options = { ...options, reasoningEffort: level === "off" ? undefined : level };
+    }
     const messages = convertMessages(model, context, compat, { grammarToolInputProperties });
     const cacheControl = getCompatCacheControl(compat, cacheRetention);
     const params = {
         model: model.id,
         messages,
         stream: true,
-        prompt_cache_key: (model.baseUrl.includes("api.openai.com") && cacheRetention !== "none") ||
+        prompt_cache_key: (isOpenAIEndpoint(model.baseUrl) && cacheRetention !== "none") ||
             (cacheRetention === "long" && compat.supportsLongCacheRetention)
             ? clampOpenAIPromptCacheKey(options?.sessionId)
             : undefined,
@@ -635,10 +640,12 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
         params.priority = compat.vllmPriority;
     }
     const thinkingTokenBudgetField = resolveThinkingTokenBudgetField(compat);
-    const thinkingBudget = resolveClampedThinkingBudget(model, options, params);
+    const thinkingBudget = !options?.reasoningEffort && model.reasoning && model.thinkingLevelMap?.off !== null
+        ? compat.thinkingTokenBudgetOff : resolveClampedThinkingBudget(model, options, params);
     if (compat.thinkingFormat === "zai" && model.reasoning) {
         const zaiParams = params;
-        zaiParams.thinking = options?.reasoningEffort ? { type: "enabled", clear_thinking: false } : { type: "disabled" };
+        if (options?.reasoningEffort || model.thinkingLevelMap?.off !== null)
+            zaiParams.thinking = options?.reasoningEffort ? { type: "enabled", clear_thinking: false } : { type: "disabled" };
         if (options?.reasoningEffort && compat.supportsReasoningEffort) {
             const mappedEffort = model.thinkingLevelMap?.[options.reasoningEffort];
             const effort = mappedEffort === undefined ? options.reasoningEffort : mappedEffort;
@@ -648,7 +655,8 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
         }
     }
     else if (compat.thinkingFormat === "qwen" && model.reasoning) {
-        params.enable_thinking = !!options?.reasoningEffort;
+        if (options?.reasoningEffort || model.thinkingLevelMap?.off !== null)
+            params.enable_thinking = !!options?.reasoningEffort;
         if (options?.reasoningEffort && compat.supportsReasoningEffort) {
             const effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
             if (typeof effort === "string") {
@@ -657,16 +665,20 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
         }
     }
     else if (compat.thinkingFormat === "qwen-chat-template" && model.reasoning) {
-        params.chat_template_kwargs = {
-            enable_thinking: !!options?.reasoningEffort,
-            preserve_thinking: true,
-        };
+        if (options?.reasoningEffort || model.thinkingLevelMap?.off !== null) {
+            params.chat_template_kwargs = {
+                enable_thinking: !!options?.reasoningEffort,
+                preserve_thinking: true,
+            };
+        }
     }
     else if (compat.thinkingFormat === "chat-template" && model.reasoning) {
         const chatTemplateKwargs = buildChatTemplateValues(model, options, compat.chatTemplateKwargs, thinkingBudget);
         if (chatTemplateKwargs) {
             params.chat_template_kwargs = chatTemplateKwargs;
         }
+        if (options?.reasoningEffort && model.compat?.supportsReasoningEffort === true)
+            params.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
     }
     else if (compat.thinkingFormat === "baseten" && model.reasoning) {
         const basetenParams = params;
@@ -715,7 +727,8 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
     }
     else if (compat.thinkingFormat === "together" && model.reasoning) {
         const togetherParams = params;
-        togetherParams.reasoning = { enabled: !!options?.reasoningEffort };
+        if (options?.reasoningEffort || model.thinkingLevelMap?.off !== null)
+            togetherParams.reasoning = { enabled: !!options?.reasoningEffort };
         if (options?.reasoningEffort && compat.supportsReasoningEffort) {
             togetherParams.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
         }
@@ -735,7 +748,7 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
     }
     else if (!options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
         const offValue = model.thinkingLevelMap?.off;
-        if (typeof offValue === "string") {
+        if (typeof offValue === "string" && compat.thinkingTokenBudgetOff === undefined) {
             params.reasoning_effort = offValue;
         }
     }
@@ -1327,34 +1340,36 @@ function mapStopReason(reason) {
 function detectCompat(model) {
     const provider = model.provider;
     const baseUrl = model.baseUrl;
+    let host = "";
+    try { host = new URL(baseUrl).hostname; } catch {}
     const isZai = provider === "zai" ||
         provider === "zai-coding-cn" ||
-        baseUrl.includes("api.z.ai") ||
-        baseUrl.includes("open.bigmodel.cn");
-    const isTogether = provider === "together" || baseUrl.includes("api.together.ai") || baseUrl.includes("api.together.xyz");
-    const isMoonshot = provider === "moonshotai" || provider === "moonshotai-cn" || baseUrl.includes("api.moonshot.");
-    const isOpenRouter = provider === "openrouter" || baseUrl.includes("openrouter.ai");
-    const isCloudflareWorkersAI = provider === "cloudflare-workers-ai" || baseUrl.includes("api.cloudflare.com");
-    const isCloudflareAiGateway = provider === "cloudflare-ai-gateway" || baseUrl.includes("gateway.ai.cloudflare.com");
-    const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
-    const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
-    const isDeepSeek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
+        host === "api.z.ai" ||
+        host === "open.bigmodel.cn";
+    const isTogether = provider === "together" || host === "api.together.ai" || host === "api.together.xyz";
+    const isMoonshot = provider === "moonshotai" || provider === "moonshotai-cn" || ["api.moonshot.ai", "api.moonshot.cn"].includes(host);
+    const isOpenRouter = provider === "openrouter" || host === "openrouter.ai";
+    const isCloudflareWorkersAI = provider === "cloudflare-workers-ai" || host === "api.cloudflare.com";
+    const isCloudflareAiGateway = provider === "cloudflare-ai-gateway" || host === "gateway.ai.cloudflare.com";
+    const isNvidia = provider === "nvidia" || host === "integrate.api.nvidia.com";
+    const isAntLing = provider === "ant-ling" || host === "api.ant-ling.com";
+    const isDeepSeek = provider === "deepseek" || host === "api.deepseek.com";
     const isNonStandard = isNvidia ||
         provider === "cerebras" ||
-        baseUrl.includes("cerebras.ai") ||
+        host === "api.cerebras.ai" ||
         provider === "xai" ||
-        baseUrl.includes("api.x.ai") ||
+        host === "api.x.ai" ||
         isTogether ||
-        baseUrl.includes("chutes.ai") ||
+        (host === "chutes.ai" || host.endsWith(".chutes.ai")) ||
         isDeepSeek ||
         isZai ||
         isMoonshot ||
         provider === "opencode" ||
-        baseUrl.includes("opencode.ai") ||
+        host === "opencode.ai" ||
         isCloudflareWorkersAI ||
         isCloudflareAiGateway ||
         isAntLing;
-    const useMaxTokens = baseUrl.includes("chutes.ai") ||
+    const useMaxTokens = (host === "chutes.ai" || host.endsWith(".chutes.ai")) ||
         isDeepSeek ||
         isMoonshot ||
         isCloudflareAiGateway ||
@@ -1362,7 +1377,7 @@ function detectCompat(model) {
         isNvidia ||
         isAntLing ||
         isZai;
-    const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
+    const isGrok = provider === "xai" || host === "api.x.ai";
     const isOpenRouterDeveloperRoleModel = isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
     const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;
     return {
@@ -1394,17 +1409,14 @@ function detectCompat(model) {
         zaiToolStream: false,
         supportsThinkingTokenBudget: false,
         thinkingTokenBudgetField: undefined,
+        thinkingTokenBudgetOff: undefined,
         supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
         supportsOpenAIGrammarTools: false,
         cacheControlFormat,
         sendSessionAffinityHeaders: false,
         deferredToolsMode: undefined,
         sessionAffinityFormat: isOpenRouter ? "openrouter" : "openai",
-        supportsLongCacheRetention: !(isTogether ||
-            isCloudflareWorkersAI ||
-            isCloudflareAiGateway ||
-            isNvidia ||
-            isAntLing),
+        supportsLongCacheRetention: isOpenAIEndpoint(baseUrl),
     };
 }
 /**
@@ -1435,6 +1447,7 @@ function getCompat(model) {
         zaiToolStream: model.compat.zaiToolStream ?? detected.zaiToolStream,
         supportsThinkingTokenBudget: model.compat.supportsThinkingTokenBudget ?? detected.supportsThinkingTokenBudget,
         thinkingTokenBudgetField: model.compat.thinkingTokenBudgetField ?? detected.thinkingTokenBudgetField,
+        thinkingTokenBudgetOff: model.compat.thinkingTokenBudgetOff ?? detected.thinkingTokenBudgetOff,
         supportsStrictMode: model.compat.supportsStrictMode ?? detected.supportsStrictMode,
         supportsOpenAIGrammarTools: model.compat.supportsOpenAIGrammarTools ?? detected.supportsOpenAIGrammarTools,
         cacheControlFormat: model.compat.cacheControlFormat ?? detected.cacheControlFormat,

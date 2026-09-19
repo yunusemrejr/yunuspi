@@ -101,7 +101,7 @@ function wireFor(providerId: string): { api: string; baseUrl: string } {
 	}
 }
 
-type PiModel = { liveImageInput?: boolean } & Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
+type PiModel = { liveImageInput?: boolean; liveFields?: string[] } & Omit<ProviderModelConfig, "cost"> & { cost: ProviderModelConfig["cost"] & { missing?: string[]; knownFree?: boolean }; outputLimitEstimated?: boolean };
 type RefreshModelContext = Parameters<
 	NonNullable<ProviderConfig["refreshModels"]>
 >[0];
@@ -138,6 +138,15 @@ function modelRows<T extends { id: string }>(value: unknown): T[] {
 			isRecord(row) &&
 			typeof row.id === "string" &&
 			row.id.trim() &&
+			["supported_parameters", "input_modalities", "output_modalities"].every(key =>
+                row[key] == null || Array.isArray(row[key]) && row[key].every(v => typeof v === "string") ||
+                key === "supported_parameters" && isRecord(row[key])) &&
+            ["pricing", "architecture", "top_provider", "limits", "capabilities"].every(key => row[key] == null || isRecord(row[key])) &&
+            [row.architecture?.input_modalities, row.architecture?.output_modalities, row.reasoning?.supported_efforts].every(value =>
+                value == null || Array.isArray(value) && value.every(v => typeof v === "string")) &&
+            (row.reasoning == null || typeof row.reasoning === "boolean" || isRecord(row.reasoning)) &&
+            (row.reasoning_options == null || Array.isArray(row.reasoning_options) && row.reasoning_options.every(option =>
+                isRecord(option) && typeof option.type === "string" && (option.values == null || Array.isArray(option.values) && option.values.every(v => typeof v === "string")))) &&
 			!/[\u0000-\u001f\u007f-\u009f]/u.test(row.id) &&
 			[
 				"context_length",
@@ -330,30 +339,18 @@ function modalitiesToInput(mods: string[] | undefined): ("text" | "image")[] {
 		: ["text"];
 }
 
-/**
- * Effort map for live-only OpenRouter models (no pi.dev store entry yet).
- * OpenRouter normalizes unlisted efforts, so low/medium/high always pass
- * through; minimal/xhigh/max are opt-in (non-null map entries) and are only
- * mapped when the model's live metadata (reasoning.supported_efforts)
- * actually advertises them. Without metadata this degrades to the
- * conservative low/medium/high-only map — the shape that surfaced as
- * "muse-spark-1.3 has only three effort options" when the pi.dev store had
- * not picked the model up yet.
- */
+/** An advertised enum is authoritative; absent metadata keeps router defaults. */
 function openrouterEffortMap(
-	supportedEfforts: string[] | undefined,
+    supportedEfforts: string[] | undefined,
     mandatory?: boolean,
 ): Record<string, string | null> {
-	const has = (effort: string) => supportedEfforts?.includes(effort) ?? false;
-	return {
-		off: mandatory === false || has("none") ? "none" : null,
-		minimal: has("minimal") ? "minimal" : null,
-		low: "low",
-		medium: "medium",
-		high: "high",
-		xhigh: has("xhigh") ? "xhigh" : null,
-		max: has("max") ? "max" : null,
-	};
+    const levels = ["minimal", "low", "medium", "high", "xhigh", "max"];
+    const has = (level: string) => supportedEfforts?.includes(level) ?? false;
+    return {
+        off: mandatory !== true && (mandatory === false || has("none")) ? "none" : null,
+        ...Object.fromEntries(levels.map(level => [level,
+            (supportedEfforts ? has(level) : ["low", "medium", "high"].includes(level)) ? level : null])),
+    };
 }
 
 async function fetchJson(
@@ -413,7 +410,7 @@ function catalogAddedAt(created: unknown): { catalogAddedAt?: number } {
 }
 
 function openRouterCapabilities(m: OrLiveModel): FreeRouteCapabilities {
-	const params = m.supported_parameters ?? [];
+	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
 	return {
 		...catalogAddedAt(m.created),
 		...(typeof m.top_provider?.context_length === "number" ||
@@ -440,7 +437,7 @@ function openRouterCapabilities(m: OrLiveModel): FreeRouteCapabilities {
 }
 
 function mapOpenRouterModel(m: OrLiveModel): PiModel {
-	const params = m.supported_parameters ?? [];
+	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
 	const reasoning =
 		params.includes("reasoning") ||
 		(m.reasoning?.mandatory ?? false) ||
@@ -530,17 +527,16 @@ async function refreshOpenRouter(
 		}
 		return {
 			...m,
-			thinkingLevelMap: fromStore.thinkingLevelMap,
+			thinkingLevelMap: effortsById.get(m.id) !== undefined ? m.thinkingLevelMap : fromStore.thinkingLevelMap ?? m.thinkingLevelMap,
 			compat: mergeCompat(
 				{ thinkingFormat: "openrouter" },
 				fromStore.compat ?? {},
 			),
 		};
 	});
-	// Store-only entries (pi.dev aliases like ~anthropic/claude-sonnet-latest)
-	// stay as-is: live never lists them.
+	// Synthetic aliases are absent from the API; retired concrete IDs must not return.
 	const keepStoreOnly = [...store.values()].filter(
-		(m) => !live.some((x) => x.id === m.id),
+		(m) => m.id.startsWith("~") && !live.some((x) => x.id === m.id),
 	);
 	return [...projected, ...keepStoreOnly];
 }
@@ -966,7 +962,7 @@ interface FriendliLiveModel {
 		input_cache_read?: string;
 	};
 	deprecation_date?: string;
-	reasoning_options?: Array<{ type?: string }>;
+	reasoning_options?: Array<{ type?: string; values?: string[] }>;
 }
 
 /** GLM effort models: top-level reasoning_effort, enum low|high|max only. */
@@ -980,7 +976,22 @@ const GLM_EFFORT_LEVELS: Record<string, string | null> = {
 	max: "max",
 };
 
-function friendliThinkingWiring(id: string): Partial<PiModel> {
+function friendliThinkingWiring(id: string, options?: FriendliLiveModel["reasoning_options"]): Partial<PiModel> {
+    if (options) {
+        const efforts = options.find(option => option.type === "effort")?.values;
+        const toggle = options.some(option => option.type === "toggle");
+        const budget = options.some(option => option.type === "budget_tokens");
+        return {
+            thinkingLevelMap: efforts ? openrouterEffortMap(efforts, !toggle && !budget) : {
+                off: toggle || budget ? "none" : null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: null, max: null,
+            },
+            compat: {
+                thinkingFormat: "openai", supportsReasoningEffort: !!efforts,
+                ...(toggle ? {thinkingFormat: "chat-template", chatTemplateKwargs: {enable_thinking: {$var:"thinking.enabled"}}} : {}),
+                ...(budget ? {thinkingTokenBudgetField:"reasoning_budget", thinkingTokenBudgetOff:0} : {}),
+            },
+        };
+    }
 	if (id === "zai-org/GLM-5.3-Flash" || id === "zai-org/GLM-5.3") {
 		return {
 			compat: { thinkingFormat: "openai", supportsReasoningEffort: true },
@@ -1025,7 +1036,7 @@ function mapFriendliModel(m: FriendliLiveModel): PiModel | undefined {
 			cacheRead: toPerMillion(m.pricing?.input_cache_read ?? m.pricing?.input),
 			cacheWrite: 0,
 		},
-		...friendliThinkingWiring(m.id),
+		...friendliThinkingWiring(m.id, m.reasoning_options),
 	};
 }
 
@@ -1291,16 +1302,27 @@ async function refreshCerebras(context: RefreshModelContext): Promise<PiModel[]>
         const raw = await fetchJson("https://api.cerebras.ai/public/v1/models", context.signal);
         const store = storeModels("cerebras");
         const rows = modelRows<any>((raw as any)?.data);
-        const models = rows.map((m) => {
+        const models = rows.filter(m => m.deprecated !== true).map((m) => {
             const base = store.get(m.id) ?? minimalModel(m.id, "cerebras");
+            const liveFields: string[] = [];
+            const live: Partial<PiModel> = {};
+            const contextWindow = boundedContextLimit(m.limits?.max_context_length, m.context_length);
+            const maxTokens = boundedContextLimit(m.limits?.max_completion_tokens, m.max_completion_tokens);
+            if (contextWindow) { live.contextWindow = contextWindow; liveFields.push("contextWindow"); }
+            if (maxTokens) { live.maxTokens = maxTokens; live.outputLimitEstimated = false; liveFields.push("maxTokens"); }
+            if (typeof m.capabilities?.reasoning === "boolean") { live.reasoning = m.capabilities.reasoning; liveFields.push("reasoning"); }
+            if (typeof m.capabilities?.vision === "boolean") { live.input = m.capabilities.vision ? ["text", "image"] : ["text"]; liveFields.push("input"); }
+            const model = { ...base, ...live, liveFields,
+                ...(m.supported_parameters?.max_completion_tokens === true ? {compat: {...base.compat, maxTokensField:"max_completion_tokens"}} : {}),
+            };
             const p = m.pricing;
-            if (!p) return base;
+            if (!p) return normalizeModelLimits(model);
             const input = p.prompt !== undefined ? toPerMillion(p.prompt) : p.input;
             const output = p.completion !== undefined ? toPerMillion(p.completion) : p.output;
-            if (![input, output].every(v => typeof v === "number" && Number.isFinite(v) && v >= 0)) return base;
-            return { ...base, cost: { input, output,
+            if (![input, output].every(v => typeof v === "number" && Number.isFinite(v) && v >= 0)) return normalizeModelLimits(model);
+            return normalizeModelLimits({ ...model, cost: { input, output,
                 cacheRead: p.input_cache_read !== undefined ? toPerMillion(p.input_cache_read) : input,
-                cacheWrite: p.input_cache_write !== undefined ? toPerMillion(p.input_cache_write) : input } };
+                cacheWrite: p.input_cache_write !== undefined ? toPerMillion(p.input_cache_write) : input } });
         });
         if (models.length) return models;
     } catch { if (context.signal.aborted) return []; }
@@ -1331,7 +1353,7 @@ const idOnlyFacts = (provider: string): Record<string, IdOnlyFacts> => currentMo
 const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 	// Applies to fresh and cached catalogs; explicit model/provider overrides win.
 	openrouter: { sendSessionAffinityHeaders: true },
-	// Cerebras rejects max_completion_tokens, including on proxy base URLs.
+	// Legacy fallback; live supported_parameters and explicit config take precedence.
 	cerebras: { maxTokensField: "max_tokens" },
 };
 function publishModels(
@@ -1351,7 +1373,7 @@ function publishModels(
 	return validModels(models).map((cachedModel) => {
 		const { outputLimitEstimated, ...cachedRaw } = cachedModel;
 		const historical = idOnly && (provider !== "deepseek" || officialDeepSeek) && Object.hasOwn(MODEL_FACTS[provider as "cerebras" | "deepseek"].models, cachedRaw.id);
-		const rawModel = historical && !currentModelFacts(provider)
+		const rawModel = historical && !Array.isArray(cachedRaw.liveFields) && !currentModelFacts(provider)
 			? store?.get(cachedRaw.id) ?? minimalModel(cachedRaw.id, provider)
 			: cachedRaw;
 		// Probe results arrive after catalog persistence. Project them here so the
@@ -1369,10 +1391,12 @@ function publishModels(
 				}),
 			}
 			: rawModel;
-		const facts =
+		const snapshotFacts =
 			idOnly && (provider !== "deepseek" || ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))) && Object.hasOwn(idOnlyFacts(provider), model.id)
 				? idOnlyFacts(provider)[model.id]
 				: undefined;
+        const facts = snapshotFacts && Object.fromEntries(Object.entries(snapshotFacts).filter(([key]) =>
+            !Array.isArray(model.liveFields) || !model.liveFields.includes(key)));
 		const explicit =
 			config?.modelOverrides?.[model.id]?.maxTokens ??
 			(Array.isArray(config?.models)
@@ -1510,11 +1534,16 @@ export default async function registerLiveModels(
 	}
 	// Auto-fresh so new models appear without `pi update --models` or manual
 	// work: every session start triggers a non-blocking network refresh scoped
-	// to OUR providers (never the pi.dev builtins). Per-provider TTLs guard
+	// to live adapters and available native providers. Per-provider TTLs guard
 	// the fetches, so frequent boots cost one cached list read, not I/O.
 	// Discovery belongs to the interactive parent; each child already receives
 	// the model catalog. Do not fan out background requests per worker/session.
-	const automaticRefreshAllowed = () => process.env.PI_OFFLINE !== '1' && !process.env.PI_SUBAGENT_CHILD;
+	const automaticRefreshAllowed = () => process.env.PI_OFFLINE === undefined && !process.env.PI_SUBAGENT_CHILD;
+    const refreshScope = (ctx: ExtensionContext) => [...new Set([
+        ...REFRESHER_IDS, ...localProviderIds,
+        ...(ctx.modelRegistry.getAvailable?.() ?? []).map(model => model.provider),
+        ...(ctx.model ? [ctx.model.provider] : []),
+    ])];
 	let sessionGeneration = 0;
  let researchController = new AbortController();
 	let lastRouterRefresh = 0;
@@ -1534,7 +1563,7 @@ export default async function registerLiveModels(
 		lastRouterRefresh = Date.now();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
 		void ctx.modelRegistry
-			.refresh({ allowNetwork: true, providers: [...REFRESHER_IDS, ...localProviderIds] })
+			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: researchController.signal })
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); });
 		outputLimitStatus(ctx);
@@ -1548,7 +1577,7 @@ export default async function registerLiveModels(
 		lastRouterRefresh = timestamp;
 		routerRefreshPending = true;
 		const generation = sessionGeneration;
-		void ctx.modelRegistry.refresh({allowNetwork: true, providers: [...REFRESHER_IDS]})
+		void ctx.modelRegistry.refresh({allowNetwork: true, providers: refreshScope(ctx), signal: researchController.signal})
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
 			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });

@@ -59,6 +59,7 @@ const ChatTemplateKwargVariableSchema = Type.Object({
 });
 const ChatTemplateKwargSchema = Type.Union([ChatTemplateKwargScalarSchema, ChatTemplateKwargVariableSchema]);
 const OpenAICompletionsCompatSchema = Type.Object({
+    thinkingTokenBudgetOff: Type.Optional(Type.Number({ minimum: 0 })),
     supportsStore: Type.Optional(Type.Boolean()),
     supportsDeveloperRole: Type.Optional(Type.Boolean()),
     supportsReasoningEffort: Type.Optional(Type.Boolean()),
