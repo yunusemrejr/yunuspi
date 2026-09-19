@@ -5760,6 +5760,10 @@
         "path": "docs/ACTION-PLANS.md"
       },
       {
+        "name": "AUDIT-CHANGED-FILES.md",
+        "path": "docs/AUDIT-CHANGED-FILES.md"
+      },
+      {
         "name": "CHANGE-SCOPE.md",
         "path": "docs/CHANGE-SCOPE.md"
       },

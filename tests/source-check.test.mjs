@@ -42,11 +42,15 @@ test('installed native parsers check syntax without running project code or star
   write('startup.rb',`File.write(${JSON.stringify(marker)},'executed')`);
   process.env.BASH_ENV=path.join(workspace,'startup.sh');process.env.PYTHONPATH=workspace;process.env.RUBYOPT=`-r${path.join(workspace,'startup.rb')}`;
   try {
+    // This fixture proves syntax and startup-hook isolation, not cold-start
+    // latency on shared CI hosts. Production keeps its 3-second bound; the
+    // separate deadline/cancellation fixture still exercises incomplete results.
+    const syntaxFixtureBudgetMs = 15000;
     for(const [ext,valid,invalid] of cases) {
-      const good=await checkSourceText(`sample.${ext}`,valid,workspace);
+      const good=await checkSourceText(`sample.${ext}`,valid,workspace,undefined,syntaxFixtureBudgetMs);
       if(good.status==='unavailable'){t.diagnostic(`${ext}: ${good.diagnostics.join(' ')}`);continue;}
       assert.equal(good.status,'passed',JSON.stringify(good));assert.equal(fs.existsSync(marker),false,ext);
-      const bad=await checkSourceText(`sample.${ext}`,invalid,workspace);
+      const bad=await checkSourceText(`sample.${ext}`,invalid,workspace,undefined,syntaxFixtureBudgetMs);
       assert.equal(bad.status,'failed',JSON.stringify(bad));assert.ok(bad.diagnostics.length,ext);
     }
   } finally {for(const [key,value] of Object.entries(previous)) if(value===undefined)delete process.env[key];else process.env[key]=value;}

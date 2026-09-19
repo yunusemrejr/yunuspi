@@ -3,7 +3,7 @@
 Exact changed paths relative to audited main f01b66accab161b24eea114fe180ce1b4d3f014c.
 A = added; M = modified; D = deleted. Moves are shown as deletion plus addition.
 Generated dist, dependency trees, build receipts and private state are excluded.
-Paths: 1584
+Paths: 1586
 
 ```text
 M	.github/workflows/public-safety.yml
@@ -1546,6 +1546,7 @@ M	release-template/tests/session-stop.test.mjs
 M	release-template/tests/shell-substitution-paths.test.mjs
 M	release-template/tests/skill-discovery-runner.test.mjs
 M	release-template/tests/smol-kompress-expansion.test.mjs
+M	release-template/tests/source-check.test.mjs
 M	release-template/tests/startup-motion.test.mjs
 M	release-template/tests/subagent-budget-receipt.test.mjs
 A	release-template/tests/update-preservation.test.mjs
@@ -1586,6 +1587,7 @@ M	tests/session-stop.test.mjs
 M	tests/shell-substitution-paths.test.mjs
 M	tests/skill-discovery-runner.test.mjs
 M	tests/smol-kompress-expansion.test.mjs
+M	tests/source-check.test.mjs
 M	tests/startup-motion.test.mjs
 M	tests/subagent-budget-receipt.test.mjs
 A	tests/update-preservation.test.mjs

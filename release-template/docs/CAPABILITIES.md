@@ -1553,6 +1553,7 @@ These historical transforms live under `agent/scripts/compatibility/legacy-trans
 ## Public documentation
 
 - [`docs/ACTION-PLANS.md`](ACTION-PLANS.md)
+- [`docs/AUDIT-CHANGED-FILES.md`](AUDIT-CHANGED-FILES.md)
 - [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
 - [`docs/CONTEXT-AUDIT.md`](CONTEXT-AUDIT.md)
 - [`docs/CORE-OWNERSHIP.md`](CORE-OWNERSHIP.md)
