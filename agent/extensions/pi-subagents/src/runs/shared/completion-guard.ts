@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import type { AcceptanceRole, TrackedMutationEvidence } from "../../shared/types.ts";
 import { isMutatingTool } from "./long-running-guard.ts";
 import { classifyTaskMutationIntent, expectsImplementationMutation, taskMayMutate } from "./task-intent.ts";

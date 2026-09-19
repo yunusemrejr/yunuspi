@@ -1,5 +1,5 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { Theme } from "@yunuspi/coding-agent";
+import { Text } from "@yunuspi/tui";
 import { formatStatusLabel } from "../state/i18n-bridge.js";
 import { selectTaskSubjectById } from "../state/selectors.js";
 import type { TaskState } from "../state/state.js";

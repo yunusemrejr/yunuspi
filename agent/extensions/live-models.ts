@@ -42,7 +42,7 @@ import type {
 	ExtensionContext,
 	ProviderConfig,
 	ProviderModelConfig,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import type { FreeRouteCapabilities } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

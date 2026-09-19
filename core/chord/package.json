@@ -1,0 +1,65 @@
+{
+  "name": "@yunuspi/chord",
+  "version": "0.1.0",
+  "description": "Application composition runtime for services, replicated state, RPC, and plugins",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "import": "./dist/context/index.js"
+    },
+    "./delta": {
+      "types": "./dist/delta/index.d.ts",
+      "import": "./dist/delta/index.js"
+    },
+    "./bundler": {
+      "types": "./dist/bundler.d.ts",
+      "import": "./dist/bundler.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-core.mjs"
+  },
+  "keywords": [
+    "application",
+    "plugins",
+    "rpc",
+    "services",
+    "state"
+  ],
+  "author": "Earendil Works",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yunusemrejr/yunuspi.git",
+    "directory": "core/chord"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "esbuild": "0.28.1"
+  },
+  "private": true,
+  "yunuspiCore": {
+    "forkOrigin": "Pi 0.85.1",
+    "originCommit": "d981de1229ef899957bbe968bc8dcda02a21f477"
+  }
+}

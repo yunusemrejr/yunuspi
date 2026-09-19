@@ -99,7 +99,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	SessionStartEvent,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import { registerHarnessActivity } from "./lib/harness-activity.ts";
 import {
 	registerToolDiscovery,
@@ -124,7 +124,7 @@ import {
 import {
 	COOLDOWN_MS,
 	WINDOW_MS,
-} from "../scripts/patches/retry-429-policy.mjs";
+} from "../scripts/compatibility/legacy-transforms/retry-429-policy.mjs";
 import {
 	buildHarnessOrientation,
 	hasOrientationReceipt,
@@ -161,7 +161,7 @@ const CONTEXT_RULES: Array<{ tag: string; match: RegExp; text: string }> = [
 		match:
 			/\b(?:Yunus Pi|Pi harness|harness)\b|verify-harness|scripts\/patches|\.pi\/agent/i,
 		text:
-			"Preservation: harness edits go in ~/.pi/agent/extensions/*.ts or scripts/patches/*.mjs; verify-harness.mjs --fix re-applies patches after ANY update; never hand-edit node_modules.",
+			"Preservation: harness edits go in ~/.pi/agent/extensions/*.ts or scripts/compatibility/legacy-transforms/*.mjs; verify-harness.mjs --fix re-applies patches after ANY update; never hand-edit node_modules.",
 	},
 	{
 		tag: "rateLimit",

@@ -5,9 +5,9 @@ import { formatProgressEvidence, formatWriteProgressEvidence } from "../shared/p
 
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme, keyText, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import type { AgentToolResult } from "@yunuspi/agent-core";
+import { getMarkdownTheme, keyText, type ExtensionContext } from "@yunuspi/coding-agent";
+import { Container, Markdown, Spacer, Text, visibleWidth, type Component } from "@yunuspi/tui";
 import {
 	type AgentProgress,
 	type AsyncJobState,

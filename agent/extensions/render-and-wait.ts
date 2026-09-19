@@ -1,6 +1,6 @@
 import {registerBrowserSession} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@yunuspi/coding-agent";
 import { runManagedCommand } from "./managed-bash.ts";
 const scripts = fileURLToPath(new URL("../scripts/", import.meta.url));
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";

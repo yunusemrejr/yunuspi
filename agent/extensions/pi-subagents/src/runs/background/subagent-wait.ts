@@ -40,7 +40,7 @@ import { addUsageCost } from "../../shared/cost-accounting.ts";
  */
 
 import * as fs from "node:fs";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 import {
 	listBackgroundWorkWakeChannels,
 	snapshotBackgroundWork,

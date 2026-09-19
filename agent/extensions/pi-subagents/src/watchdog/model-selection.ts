@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { normalizeModelSegment, resolveModelCandidate } from "../runs/shared/model-fallback.ts";
 import {
 	getSupportedThinkingLevels,

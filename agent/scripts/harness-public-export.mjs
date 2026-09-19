@@ -217,7 +217,7 @@ try {
    fs.rmSync(temp, { recursive: true });
   }
  }
- for (const dir of ["patches", "lib"])
+ for (const dir of ["lib", "compatibility/legacy-transforms"])
   if (fs.existsSync(path.join(source, "scripts", dir)))
    copyTree(path.join(source, "scripts", dir), "agent/scripts/" + dir);
  // The updater's synthetic compatibility gate is release code. Historical
@@ -267,6 +267,33 @@ try {
     fs.readFileSync(p),
      fs.statSync(p).mode & 0o111 ? 0o755 : 0o644,
    );
+ }
+ // Fork source is part of the product, never reconstructed from an upstream package.
+ const productFile = path.join(stage, "package.json");
+ const product = fs.existsSync(productFile) ? JSON.parse(fs.readFileSync(productFile, "utf8")) : {};
+ if (product.workspaces?.includes("core/*")) {
+  // Export the selected installation's actual owned source. Templates provide
+  // the core only for a checkout source; they must not mask local core fixes.
+  const coreSource = [path.join(source, "runtime/core"), path.resolve(source, "../core"), path.resolve(templates, "../core")]
+   .find(dir => fs.existsSync(path.join(dir, "identity.json")));
+  if (!coreSource) throw Error("Owned core source missing; export from a complete YunusPi checkout or installation");
+  if (fs.realpathSync(coreSource) !== coreSource) throw Error("Owned core source contains a symlink ancestor");
+  const readOwnedFile = file => {
+   const stat = fs.lstatSync(file);
+   if (!stat.isFile() || stat.isSymbolicLink()) throw Error("Owned core input must be a regular source file");
+   return fs.readFileSync(file);
+  };
+  const coreIdentity = JSON.parse(readOwnedFile(path.join(coreSource, "identity.json")).toString("utf8"));
+  if (coreIdentity.releaseAuthority !== "yunusemrejr/yunuspi") throw Error("Unowned core release authority");
+  put("core/identity.json", readOwnedFile(path.join(coreSource, "identity.json")));
+  for (const entry of fs.readdirSync(coreSource, { withFileTypes: true })) {
+   if (!entry.isDirectory() || !fs.existsSync(path.join(coreSource, entry.name, "package.json"))) continue;
+   const owned = path.join(coreSource, entry.name);
+   for (const name of ["package.json", "LICENSE", "README.md", "CHANGELOG.md"]) {
+    if (fs.existsSync(path.join(owned, name))) put(`core/${entry.name}/${name}`, readOwnedFile(path.join(owned, name)));
+   }
+   for (const name of ["src", "docs"]) if (fs.existsSync(path.join(owned, name))) copyTree(path.join(owned, name), `core/${entry.name}/${name}`);
+  }
  }
  // Generate the inventory only after both the sanitized source and mirrored
  // release template exist. The generated files are then included in the

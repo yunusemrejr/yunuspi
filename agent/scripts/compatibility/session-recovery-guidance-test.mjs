@@ -1,13 +1,15 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import register, {buildCompletionDetails,formatSingleCompletion} from '../../extensions/pi-subagents/src/runs/background/notify.ts';
 import {formatSubagentExtensionConflictError} from '../../extensions/pi-subagents/src/runs/shared/subagent-startup-retry.ts';
 import {createRelevantGuidance} from '../../extensions/lib/relevant-guidance.ts';
 import {register as registerLoader} from 'node:module';
 import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-const core=execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim()+'/@earendil-works/pi-coding-agent';
-const aliases=Object.fromEntries(['pi-coding-agent','pi-agent-core','pi-ai','pi-tui'].map(name=>['@earendil-works/'+name,pathToFileURL(name==='pi-coding-agent'?core+'/dist/index.js':core+'/node_modules/@earendil-works/'+name+'/dist/index.js').href]));
-aliases['@earendil-works/pi-ai/compat']=pathToFileURL(core+'/node_modules/@earendil-works/pi-ai/dist/compat.js').href;
+const core=resolveOwnedCore();
+const aliases=Object.fromEntries([['coding-agent','coding-agent'],['agent-core','agent'],['ai','ai'],['tui','tui']].map(([name,dir])=>['@yunuspi/'+name,pathToFileURL(path.join(core,'..',dir,'dist/index.js')).href]));
+aliases['@yunuspi/ai/compat']=pathToFileURL(core+'/../ai/dist/compat.js').href;
 registerLoader('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){const aliases=${JSON.stringify(aliases)};return aliases[n]?{url:aliases[n],shortCircuit:true}:next(n,c);}`),import.meta.url);
 const {createSubagentExecutor}=await import('../../extensions/pi-subagents/src/runs/foreground/subagent-executor.ts');
 const failure={id:'workflow',runId:'workflow',agent:'workflow',mode:'workflow',success:true,state:'complete',sessionId:'session',completionOwnerId:'owner',summary:'Script returned normally',results:[{runId:'good',success:true,output:'Useful report'},{runId:'bad',success:false,error:'Model "fixture" not found',output:''}]};

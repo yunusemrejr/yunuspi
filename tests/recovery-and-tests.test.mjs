@@ -10,7 +10,7 @@ const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsS
 assert.ok(agent,'recovery support ships in public releases');
 const h=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/provider-health.ts')));
 const endpoints=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/openrouter-endpoints.ts')));
-const {transformDeterministicRejections}=await import(pathToFileURL(path.join(agent,'scripts/patches/retry-429-policy.mjs')));
+const {transformDeterministicRejections}=await import(pathToFileURL(path.join(agent,'scripts/compatibility/legacy-transforms/retry-429-policy.mjs')));
 const {projectTestFacts}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
 
 test('an attributed upstream cooldown does not block the whole router; account quota does',()=>{

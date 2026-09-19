@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI } from '@yunuspi/coding-agent';
 
 /** Record each selected model's runtime configuration as session evidence.
  * Assistant messages carry provider/model, but the thinking level and the

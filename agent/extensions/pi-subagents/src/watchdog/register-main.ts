@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@yunuspi/coding-agent";
+import { Text } from "@yunuspi/tui";
 import { resolveEffectiveThinking, splitKnownThinkingSuffix, THINKING_LEVELS, type ThinkingLevel } from "../shared/model-info.ts";
 import { SLASH_TEXT_RESULT_TYPE } from "../shared/types.ts";
 import { recommendStrongWatchdogModel, resolveWatchdogModelInput, parseWatchdogThinkingInput } from "./model-selection.ts";

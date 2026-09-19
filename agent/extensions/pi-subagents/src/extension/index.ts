@@ -21,9 +21,9 @@ import { ACTIVITY_MESSAGE_TYPE, ACTIVITY_TAGS, type ActivityDetails } from "../.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { keyText, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Spacer, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import type { AgentToolResult } from "@yunuspi/agent-core";
+import { keyText, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@yunuspi/coding-agent";
+import { Box, Container, Spacer, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@yunuspi/tui";
 import { discoverAgentSnapshot, discoverAgents, type AgentConfig, type AgentScope } from "../agents/agents.ts";
 import { clearRuntimeAgentsForPi, listRuntimeAgentConfigs, mergeRuntimeAgents } from "../agents/runtime-agent-registry.ts";
 import { registerRuntimeAgentEventListener } from "../agents/runtime-agent-events.ts";

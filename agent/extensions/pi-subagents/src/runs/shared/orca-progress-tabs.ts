@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import { resolveNodeExecutable } from "../../shared/node-executable.ts";
 import { getProjectSubagentsDir } from "../../shared/artifacts.ts";
 import { TEMP_ROOT_DIR, type OrcaProgressTabsConfig } from "../../shared/types.ts";

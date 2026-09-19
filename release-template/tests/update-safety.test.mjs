@@ -3,113 +3,52 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import vm from 'node:vm';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const agent = [path.join(root, 'agent'), path.resolve(root, '..')]
-  .find(dir => fs.existsSync(path.join(dir, 'scripts/core-update.mjs')));
-const {promoteCandidate, recoverInterruptedUpdate, customizationDigest, launcherSpec} =
-  await import(pathToFileURL(path.join(agent, 'scripts/core-update.mjs')));
+const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => fs.existsSync(path.join(dir, 'scripts/core-update.mjs')));
+const {updateInvocation} = await import(pathToFileURL(path.join(agent, 'scripts/core-update.mjs')));
 const {CORE_COMPATIBILITY_TESTS} = await import(pathToFileURL(path.join(agent, 'scripts/lib/core-compatibility.mjs')));
 
-function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-public-update-'));
-  const core = path.join(dir, 'core'), candidate = path.join(dir, 'candidate'), journal = path.join(dir, 'journal');
-  for (const [file, text] of [[core, 'customized previous'], [candidate, 'upstream candidate']]) {
-    fs.mkdirSync(file); fs.writeFileSync(path.join(file, 'value'), text);
-  }
-  return {dir, core, candidate, journal};
-}
-const value = file => fs.readFileSync(path.join(file, 'value'), 'utf8');
-
-test('retirement checks match whole component names without flagging newer prefixed files', () => {
-  const source = fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
-  const declaration = source.match(/function retireNameRe\(name\) \{[\s\S]*?\n\}/)?.[0];
-  assert.ok(declaration);
-  const pattern = vm.runInNewContext(`(${declaration})`);
-  for(const text of ['capabilities.ts','lib/capabilities.ts','"capabilities.ts"'])
-    assert.equal(pattern('capabilities.ts').test(text),true,text);
-  for(const text of ['harness-capabilities.ts','new_capabilities.ts','capabilities.tsx'])
-    assert.equal(pattern('capabilities.ts').test(text),false,text);
-  assert.equal(pattern('*-auto-models.ts').test('extensions/provider-auto-models.ts'),true);
-  assert.equal(pattern('*-auto-models.ts').test('"*-auto-models.ts"'),true);
-  assert.equal(pattern('pi-fff').test('node_modules/pi-fff/README.md'),true);
+test('retirement checks match whole component names', () => {
+ const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
+ const declaration=source.match(/function retireNameRe\(name\) \{[\s\S]*?\n\}/)?.[0];assert.ok(declaration);
+ const pattern=vm.runInNewContext(`(${declaration})`);
+ assert.equal(pattern('capabilities.ts').test('lib/capabilities.ts'),true);
+ assert.equal(pattern('capabilities.ts').test('harness-capabilities.ts'),false);
 });
-
-test('public releases include every required offline compatibility check', () => {
-  assert.equal(new Set(CORE_COMPATIBILITY_TESTS).size, CORE_COMPATIBILITY_TESTS.length);
-  assert.ok(CORE_COMPATIBILITY_TESTS.includes('harness-load-test.mjs'));
-  for (const name of CORE_COMPATIBILITY_TESTS) {
-    const file = path.join(agent, 'scripts/compatibility', name);
-    assert.ok(fs.statSync(file).isFile(), name);
-    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /import\s+["'][^"']*bench\//);
-  }
+test('every source compatibility check is shipped without patch application', () => {
+ assert.equal(new Set(CORE_COMPATIBILITY_TESTS).size,CORE_COMPATIBILITY_TESTS.length);
+ for(const name of CORE_COMPATIBILITY_TESTS){const source=fs.readFileSync(path.join(agent,'scripts/compatibility',name),'utf8');assert.doesNotMatch(source,/import\s+["'][^"']*bench\//);assert.doesNotMatch(source,/from\s+["']\.\.\/patches\//);assert.doesNotMatch(source,/npm[^\n]*root/);}
 });
-
-test('a public installation can validate without private systemd units', () => {
-  const source = fs.readFileSync(path.join(agent, 'scripts/verify-harness.mjs'), 'utf8');
-  const section = source.slice(source.indexOf('  // ── 3a.'), source.indexOf('  // The normal CLI'));
-  let optional = false;
-  vm.runInNewContext(section, {manifest: {supportFiles: []}, console: {log() {}},
-    info: () => {optional = true;}, bad: assert.fail});
-  assert.equal(optional, true);
+test('update has no default source and refuses old upstream advance options', () => {
+ assert.equal(updateInvocation([]),null);
+ for(const option of ['--force','--rehearse','--recover','--self','--all'])assert.throws(()=>updateInvocation([option]),/Usage/);
 });
-
-test('a failed candidate restores the exact customized core', async () => {
-  const f = fixture();
-  try {
-    const original = fs.statSync(f.core).ino;
-    await assert.rejects(promoteCandidate({...f, validate: async () => {
-      assert.equal(value(f.core), 'upstream candidate');
-      throw Error('synthetic compatibility failure');
-    }}), /previous core restored/);
-    assert.equal(value(f.core), 'customized previous');
-    assert.equal(fs.statSync(f.core).ino, original);
-    assert.equal(fs.existsSync(f.journal), false);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+test('explicit updates consume reviewed local YunusPi source and preserve installation backup', () => {
+ const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-update-source-'));
+ try {
+  fs.mkdirSync(path.join(tmp,'core/coding-agent'),{recursive:true});fs.mkdirSync(path.join(tmp,'scripts'));
+  const manifest=path.join(tmp,'core/coding-agent/package.json');fs.writeFileSync(manifest,JSON.stringify({name:'@yunuspi/coding-agent',version:'0.1.0'}));
+  fs.writeFileSync(path.join(tmp,'scripts/install.mjs'),'// fixture');
+  assert.deepEqual(updateInvocation(['--source',tmp,'--offline','--skip-needle'],'/tmp/private-agent'),[path.join(tmp,'scripts/install.mjs'),'--apply','--backup-existing','--preserve-state','--target','/tmp/private-agent','--offline','--skip-needle']);
+  fs.writeFileSync(manifest,JSON.stringify({name:'external-core',version:'99.0.0'}));
+  assert.throws(()=>updateInvocation(['--source',tmp]),/must own/);
+ }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 });
-
-test('missing rollback data keeps recovery pending instead of trusting the candidate', async () => {
-  const f = fixture();
-  try {
-    const previous = fs.statSync(f.core), next = fs.statSync(f.candidate);
-    fs.renameSync(f.core, path.join(f.dir, 'lost'));
-    fs.renameSync(f.candidate, f.core);
-    fs.writeFileSync(f.journal, JSON.stringify({core: f.core, backup: path.join(f.dir, '.pi-core-last-good'),
-      rejected: path.join(f.dir, '.pi-core-rejected'), phase: 'validating',
-      originalIdentity: `${previous.dev}:${previous.ino}`, candidateIdentity: `${next.dev}:${next.ino}`}));
-    assert.throws(() => recoverInterruptedUpdate(f.core, f.journal), /cannot be attested/);
-    assert.ok(fs.existsSync(f.journal));
-    assert.equal(value(f.core), 'upstream candidate');
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+test('a hypothetical newer upstream release has no effect on idle update or timer', () => {
+ const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-ignore-upstream-'));
+ try {
+  const bin=path.join(tmp,'bin'),scripts=path.join(tmp,'agent/scripts'),calls=path.join(tmp,'registry-calls');fs.mkdirSync(bin);fs.mkdirSync(scripts,{recursive:true});
+  for(const name of ['npm','curl','wget'])fs.writeFileSync(path.join(bin,name),`#!/bin/sh\necho contacted >> '${calls}'\necho 99.0.0\n`,{mode:0o755});
+  const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,PI_CODING_AGENT_DIR:path.dirname(scripts)};
+  const unchanged=spawnSync(process.execPath,[path.join(agent,'scripts/core-update.mjs')],{encoding:'utf8',env});assert.equal(unchanged.status,0,unchanged.stderr);assert.match(unchanged.stdout,/No automatic core updates/);
+  fs.copyFileSync(path.join(agent,'scripts/auto-update.sh'),path.join(scripts,'auto-update.sh'));fs.writeFileSync(path.join(scripts,'verify-harness.mjs'),'console.log("local-only verification");');
+  const timer=spawnSync('/bin/bash',[path.join(scripts,'auto-update.sh')],{encoding:'utf8',env});assert.equal(timer.status,0,timer.stderr);assert(!fs.existsSync(calls));
+  assert.match(fs.readFileSync(path.join(tmp,'agent/logs/auto-update.log'),'utf8'),/local-only verification/);
+ }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 });
-
-test('busy maintenance leaves both core directories untouched', async () => {
-  const f = fixture();
-  try {
-    await assert.rejects(promoteCandidate({...f, idle: () => [1], validate: () => assert.fail('must not validate')}), /deferred/);
-    assert.equal(value(f.core), 'customized previous');
-    assert.equal(value(f.candidate), 'upstream candidate');
-    assert.equal(fs.existsSync(f.journal), false);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
-});
-
-test('linked skills and permission changes invalidate the customization digest', () => {
-  const f = fixture();
-  try {
-    const skills = path.join(f.dir, 'skills'), external = path.join(f.dir, 'external.md');
-    fs.mkdirSync(skills); fs.writeFileSync(external, 'original'); fs.symlinkSync(external, path.join(skills, 'linked.md'));
-    const before = customizationDigest(f.dir);
-    fs.writeFileSync(external, 'changed'); assert.notEqual(customizationDigest(f.dir), before);
-    const changed = customizationDigest(f.dir);
-    fs.chmodSync(external, 0o700); assert.notEqual(customizationDigest(f.dir), changed);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
-});
-
-test('launcher rejects upstream entrypoints that escape the package', () => {
-  const f = fixture();
-  try {
-    fs.writeFileSync(path.join(f.core, 'package.json'), JSON.stringify({bin: {pi: '../other.js'}}));
-    assert.throws(() => launcherSpec(f.core), /Unsupported/);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+test('verification does not apply runtime core patches or find a global npm core', () => {
+ const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');assert.doesNotMatch(source,/checkPatch\(|launcherSpec\(|npm root -g|core-update-transaction/);assert.match(source,/resolveOwnedCore/);
 });

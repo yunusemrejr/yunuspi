@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Readability } from "@mozilla/readability";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
+import { resizeImage } from "@yunuspi/coding-agent";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import pLimit from "p-limit";

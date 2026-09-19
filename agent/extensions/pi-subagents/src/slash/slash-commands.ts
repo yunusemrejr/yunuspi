@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { keyText, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth, type Component, type KeyId, type TUI } from "@earendil-works/pi-tui";
+import { keyText, type ExtensionAPI, type ExtensionContext } from "@yunuspi/coding-agent";
+import { Key, matchesKey, truncateToWidth, type Component, type KeyId, type TUI } from "@yunuspi/tui";
 import { discoverAgentSnapshot, discoverAgents, findBlockingAgentDiagnostic, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryDiagnostic, type AgentScope, type UnknownAgentDiagnosticContext } from "../agents/agents.ts";
 import { listRuntimeAgentConfigs, mergeRuntimeAgents } from "../agents/runtime-agent-registry.ts";
 import { resolveExistingReadPaths } from "../shared/settings.ts";

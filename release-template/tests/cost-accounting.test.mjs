@@ -12,8 +12,8 @@ const {addUsageCost,addAuxiliaryUsage}=await load('extensions/pi-subagents/src/s
 const {sumResultsCost,sumResultsUsage,toAgentToolUsage}=await load('extensions/pi-subagents/src/shared/utils.ts');
 const {persistSubagentCost}=await load('extensions/pi-subagents/src/extension/session-cost.ts');
 const {toWaitCompletion}=await load('extensions/pi-subagents/src/runs/background/wait-completions.ts');
-const calculate=vm.runInNewContext('('+fs.readFileSync(path.join(agent,'scripts/patches/calculate-cost.js'),'utf8')+')');
-const service=vm.runInNewContext(fs.readFileSync(path.join(agent,'scripts/patches/openai-service-pricing.js'),'utf8')+';applyServiceTierPricing',{URL});
+const calculate=vm.runInNewContext('('+fs.readFileSync(path.join(agent,'scripts/compatibility/legacy-transforms/calculate-cost.js'),'utf8')+')');
+const service=vm.runInNewContext(fs.readFileSync(path.join(agent,'scripts/compatibility/legacy-transforms/openai-service-pricing.js'),'utf8')+';applyServiceTierPricing',{URL});
 const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-10,`${actual} != ${expected}`);
 const usage=(total,source='provider-reported',extra={})=>({input:100,output:20,cacheRead:80,cacheWrite:0,cost:{total,source},...extra});
 const empty=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,cost:0,turns:0});
@@ -164,7 +164,7 @@ test('reported zero corrects a same-turn estimate and stale estimates cannot dow
 });
 
 test('native provider/auth billing classification follows each response across switches',async()=>{
- const {transform}=await load('scripts/patches/provider-price-accuracy.mjs');
+ const {transform}=await load('scripts/compatibility/legacy-transforms/provider-price-accuracy.mjs');
  const body=transform('async function handle(event){await this._emitExtensionEvent(event)}','billing');
  const handle=vm.runInNewContext('('+body+')');
  const delivered=[];

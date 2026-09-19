@@ -5,9 +5,8 @@
  */
 import { Worker } from "node:worker_threads";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { statSync } from "node:fs";
 import type {
   NeedleClassifyInput,
   NeedleClassifyResult,
@@ -61,6 +60,7 @@ type WorkerFactory = (script: URL, options: { workerData: unknown; execArgv: str
   on(event: string, listener: (...args: never[]) => void): unknown;
   postMessage(message: unknown): void;
   terminate(): Promise<unknown>;
+  unref?(): void;
 };
 
 type Pending = {
@@ -99,6 +99,8 @@ export function createNeedleRuntime(options: {
 
   let state: NeedleHealthState = policy.enabled ? "warming" : "disabled";
   let starting = false;
+  let closed = false;
+  let active = false;
   let worker: ReturnType<WorkerFactory> | undefined;
   let nextId = 1;
   let ready = false;
@@ -109,11 +111,10 @@ export function createNeedleRuntime(options: {
   let restartMarks: number[] = [];
   let coolingUntil = 0;
   let reprobeTimer: ReturnType<typeof setTimeout> | undefined;
-  let consecutiveTimeouts = 0;
   let degraded = false;
 
   const pending = new Map<number, Pending>();
-  const queue: Array<{ request: Omit<NeedleWorkerRequest, "id">; op: string; queuedAt: number; resolve: (r: NeedleResult<never>) => void }> = [];
+  const queue: Array<{ request: Omit<NeedleWorkerRequest, "id">; op: string; queuedAt: number; resolve: (r: NeedleResult<never>) => void; timer: ReturnType<typeof setTimeout> }> = [];
   const embedCache = new Map<string, number[]>();
   const stats: NeedleStats = {
     calls: 0, embedCalls: 0, rankCalls: 0, classifyCalls: 0, extractCalls: 0,
@@ -166,12 +167,12 @@ export function createNeedleRuntime(options: {
     pending.clear();
     while (queue.length) {
       const item = queue.shift();
-      item?.resolve(skip(reason, detail));
+      if (item) { clearTimeout(item.timer); item.resolve(skip(reason, detail)); }
     }
   };
 
   const scheduleReprobe = (): void => {
-    if (reprobeTimer || !policy.enabled) return;
+    if (reprobeTimer || !policy.enabled || closed) return;
     const wait = state === "cooling"
       ? Math.max(0, coolingUntil - now())
       : policy.reprobeMs;
@@ -197,13 +198,17 @@ export function createNeedleRuntime(options: {
     // terminate() must not double-count one wedge as two crashes.
     if (instance !== undefined && worker !== instance) return;
     starting = false;
-    const hadWorker = worker !== undefined;
+    const previous = worker;
+    const hadWorker = previous !== undefined;
     worker = undefined;
+    // Detach before termination: the resulting exit belongs to the old worker.
+    void previous?.terminate().catch(() => {});
+    embedCache.clear();
     ready = false;
     dim = 0;
     failAll("unavailable", why);
-    if (!policy.enabled) {
-      setState("disabled");
+    if (!policy.enabled || closed) {
+      setState(closed ? "unavailable" : "disabled");
       return;
     }
     restartMarks = restartMarks.filter((mark) => now() - mark < policy.restartWindowMs);
@@ -225,7 +230,7 @@ export function createNeedleRuntime(options: {
   };
 
   const startWorker = (): void => {
-    if (!policy.enabled || worker || starting) return;
+    if (!policy.enabled || closed || worker || starting) return;
     if (!assetsPresent()) {
       setState("unavailable", `assets missing in ${assets}`);
       scheduleReprobe();
@@ -245,13 +250,13 @@ export function createNeedleRuntime(options: {
     }
     worker = instance;
     instance.on("message", (message) => {
+      if (worker !== instance) return;
       const response = message as NeedleWorkerResponse;
       if (response?.id === -1) return; // worker hello
       const entry = pending.get(response?.id);
       if (!entry) return;
       pending.delete(response.id);
       clearTimeout(entry.timer);
-      consecutiveTimeouts = 0;
       entry.resolve(response);
     });
     const down = (error: unknown): void => {
@@ -261,12 +266,19 @@ export function createNeedleRuntime(options: {
     instance.on("exit", (code: unknown) => {
       onWorkerDown(`worker exited (${String(code)})`, instance);
     });
+    // An idle semantic helper must not retain a CLI or test host. Awaited
+    // dispatch/queue timers stay referenced while work is required.
+    instance.unref?.();
     // Init handshake runs as a normal op so timeouts apply uniformly.
     dispatch({ op: "init", assets: assetPaths() }, "init").then(
       (response) => {
-        if (!response.ok || worker !== instance) return;
+        if (worker !== instance) return;
+        if (!response.ok) {
+          onWorkerDown(typeof response.error === "string" ? response.error : "init failed", instance);
+          return;
+        }
         const value = response.result as { dim?: number } | undefined;
-        if (!value || !Number.isInteger(value.dim) || value.dim <= 0) {
+        if (!value || !Number.isInteger(value.dim) || value.dim <= 0 || value.dim > 8192) {
           onWorkerDown("init returned no dimension", instance);
           return;
         }
@@ -286,6 +298,9 @@ export function createNeedleRuntime(options: {
    * batches get headroom up to the ceiling instead of a fixed 1.5s. */
   const budgetFor = (request: Omit<NeedleWorkerRequest, "id">, op: string): number => {
     if (op === "init") return Math.max(policy.opTimeoutMs, 30_000);
+    // Grammar decoding is substantially slower than embeddings; its output
+    // work is not predicted by input characters alone. Keep the hard ceiling.
+    if (op === "extract" || op === "complete") return policy.maxOpTimeoutMs;
     let chars = 0;
     const add = (value: unknown): void => {
       if (typeof value === "string") chars += value.length;
@@ -317,13 +332,11 @@ export function createNeedleRuntime(options: {
       const timer = setTimeout(() => {
         pending.delete(id);
         stats.timeouts++;
-        consecutiveTimeouts++;
         noteHealth("ml.needle.timeout", { op, count: 1 });
         resolve({ id, ok: false, error: "timeout", ms: budget });
-        if (consecutiveTimeouts >= 2 && worker === current) {
-          void current.terminate().catch(() => {});
-          onWorkerDown("wedged worker (consecutive timeouts)", current);
-        }
+        // A synchronous WASM call cannot be cancelled. Drop this worker so
+        // stale work cannot consume the next operation's execution budget.
+        if (worker === current) onWorkerDown(`${op} timed out`, current);
       }, budget);
       // Ref'd: this timer guards an awaited promise. Only fire-and-forget
       // timers (reprobe/cooldown) may unref.
@@ -338,13 +351,15 @@ export function createNeedleRuntime(options: {
     });
 
   const drain = (): void => {
-    if (!ready || !worker) return;
-    while (queue.length && pending.size < policy.maxQueue) {
-      const item = queue.shift();
-      if (!item) break;
-      pushLatency(stats.queueWaits, now() - item.queuedAt);
-      void runOp(item.request, item.op).then(item.resolve);
-    }
+    if (!ready || !worker || active || !queue.length) return;
+    const item = queue.shift()!;
+    clearTimeout(item.timer);
+    pushLatency(stats.queueWaits, now() - item.queuedAt);
+    active = true;
+    void runOp(item.request, item.op).then(item.resolve).finally(() => {
+      active = false;
+      drain();
+    });
   };
 
   const enqueue = (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleResult<never>> =>
@@ -353,7 +368,18 @@ export function createNeedleRuntime(options: {
         resolve(skip("busy"));
         return;
       }
-      queue.push({ request, op, queuedAt: now(), resolve });
+      // Queue deadlines prevent speculative work from becoming unbounded
+      // latency. Only dispatched work spends an inference timeout/restart.
+      const item = { request, op, queuedAt: now(), resolve, timer: undefined as unknown as ReturnType<typeof setTimeout> };
+      item.timer = setTimeout(() => {
+        const index = queue.indexOf(item);
+        if (index < 0) return;
+        queue.splice(index, 1);
+        pushLatency(stats.queueWaits, now() - item.queuedAt);
+        resolve(skip("busy", "queue deadline exceeded"));
+      }, policy.maxOpTimeoutMs);
+      queue.push(item);
+      drain();
     });
 
   const runOp = async (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleResult<never>> => {
@@ -362,9 +388,10 @@ export function createNeedleRuntime(options: {
     const ms = now() - started;
     pushLatency(stats.latencies, ms);
     if (!response.ok) {
-      const reason: NeedleSkipReason = response.error === "timeout" ? "timeout" : "unavailable";
+      const error = typeof response.error === "string" ? response.error : "malformed worker response";
+      const reason: NeedleSkipReason = error === "timeout" ? "timeout" : "unavailable";
       stats.skipReasons[reason] = (stats.skipReasons[reason] ?? 0) + 1;
-      return { ok: false, reason, detail: response.error.slice(0, 160) };
+      return { ok: false, reason, detail: error.slice(0, 160) };
     }
     stats.calls++;
     if (policy.shadow) stats.shadow++;
@@ -372,6 +399,7 @@ export function createNeedleRuntime(options: {
   };
 
   const call = (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleResult<never>> => {
+    if (closed) return Promise.resolve(skip("unavailable", "shutdown"));
     if (!policy.enabled) return Promise.resolve(skip("disabled"));
     if (state === "cooling") return Promise.resolve(skip("cooldown", lastError));
     if (!ready || !worker) {
@@ -381,14 +409,13 @@ export function createNeedleRuntime(options: {
       if (!worker) return Promise.resolve(skip(state === "cooling" ? "cooldown" : "unavailable"));
       return enqueue(request, op);
     }
-    if (pending.size >= policy.maxQueue) return Promise.resolve(skip("busy"));
-    return runOp(request, op);
+    return enqueue(request, op);
   };
 
   const finished = <T>(result: NeedleResult<never>, counter: "embedCalls" | "rankCalls" | "classifyCalls" | "extractCalls"): NeedleResult<T> => {
     if (result.ok) {
       stats[counter]++;
-      stats.accepted++;
+      if (!result.shadow && (counter !== "classifyCalls" || (result.value as NeedleClassifyResult).accepted)) stats.accepted++;
       noteHealth("ml.needle.call", { op: counter.replace("Calls", ""), cached: result.cached, shadow: result.shadow, durationMs: result.ms, count: 1 });
       return result as NeedleResult<T>;
     }
@@ -397,9 +424,11 @@ export function createNeedleRuntime(options: {
 
   const handle: NeedleHandle = {
     warmup() {
-      if (policy.enabled && !worker && !starting && state !== "cooling") startWorker();
+      if (!closed && policy.enabled && !worker && !starting && state !== "cooling") startWorker();
     },
     async embed(texts) {
+      if (closed) return skip("unavailable", "shutdown");
+      if (!policy.enabled) return skip("disabled");
       if (!Array.isArray(texts) || !texts.length) return skip("trivial");
       if (texts.length > policy.maxBatch) return skip("too-large", `batch of ${texts.length}`);
       const cleaned: string[] = [];
@@ -416,7 +445,9 @@ export function createNeedleRuntime(options: {
         cleaned.forEach((text, index) => {
           const hit = embedCache.get(keys[index]);
           if (hit) {
-            vectors[index] = hit;
+            vectors[index] = [...hit];
+            embedCache.delete(keys[index]);
+            embedCache.set(keys[index], hit);
           } else {
             missing.push(text);
             missingIdx.push(index);
@@ -425,8 +456,8 @@ export function createNeedleRuntime(options: {
         if (!missing.length) {
           stats.cacheHits++;
           stats.calls++;
-          stats.embedCalls++;
-          return { ok: true, value: { dim, vectors }, cached: true, ms: 0, shadow: policy.shadow };
+          if (policy.shadow) stats.shadow++;
+          return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: true, ms: 0, shadow: policy.shadow }, "embedCalls");
         }
       } else {
         missing.push(...cleaned);
@@ -435,14 +466,15 @@ export function createNeedleRuntime(options: {
       const result = await call({ op: "embed", texts: missing }, "embed");
       if (!result.ok) return result as NeedleResult<NeedleEmbedResult>;
       const value = result.value as NeedleEmbedResult;
-      if (!value || value.dim !== dim || !Array.isArray(value.vectors) || value.vectors.length !== missing.length) {
+      if (!value || value.dim !== dim || !Array.isArray(value.vectors) || value.vectors.length !== missing.length
+        || value.vectors.some((vector) => !Array.isArray(vector) || vector.length !== dim || !vector.every(Number.isFinite) || !vector.some((v) => v !== 0))) {
         return skip("unavailable", "malformed embed result");
       }
       value.vectors.forEach((vector, i) => {
         vectors[missingIdx[i]] = vector;
         if (policy.embedCacheMax > 0) {
           embedCache.delete(keys[missingIdx[i]]);
-          embedCache.set(keys[missingIdx[i]], vector);
+          embedCache.set(keys[missingIdx[i]], [...vector]);
           if (embedCache.size > policy.embedCacheMax) embedCache.delete(embedCache.keys().next().value!);
         }
       });
@@ -454,10 +486,13 @@ export function createNeedleRuntime(options: {
       if (!query || !candidates.length) return skip("trivial");
       if (candidates.length > policy.maxBatch * 4) return skip("too-large", `${candidates.length} candidates`);
       const cleaned: NeedleRankCandidate[] = [];
+      const ids = new Set<string>();
       for (const candidate of candidates.slice(0, policy.maxBatch * 4)) {
         const text = needleText(candidate?.text, policy.maxTextChars);
-        const id = typeof candidate?.id === "string" ? candidate.id.slice(0, 256) : "";
-        if (id && text) cleaned.push({ id, text });
+        const id = typeof candidate?.id === "string" && candidate.id.length <= 256 ? candidate.id : "";
+        if (!id || !text || ids.has(id)) return skip("unsupported-shape", "invalid or duplicate candidate");
+        ids.add(id);
+        cleaned.push({ id, text });
       }
       if (!cleaned.length) return skip("no-candidates");
       const topK = Number.isSafeInteger(input?.topK) && (input.topK as number) > 0
@@ -466,7 +501,15 @@ export function createNeedleRuntime(options: {
       const result = await call({ op: "rank", query, candidates: cleaned, topK }, "rank");
       if (!result.ok) return result as NeedleResult<NeedleRankResult>;
       const value = result.value as NeedleRankResult;
-      if (!value || !Array.isArray(value.ranked) || !value.ranked.length) return skip("unavailable", "malformed rank result");
+      const seen = new Set<string>();
+      if (!value || !Array.isArray(value.ranked) || value.ranked.length !== topK
+        || !Number.isFinite(value.margin) || value.margin < 0 || value.margin > 2
+        || value.ranked.some((entry, i) => {
+          if (!entry || !ids.has(entry.id) || seen.has(entry.id) || !Number.isFinite(entry.score)
+            || entry.score < -1 || entry.score > 1 || (i > 0 && entry.score > value.ranked[i - 1].score)) return true;
+          seen.add(entry.id);
+          return false;
+        })) return skip("unavailable", "malformed rank result");
       return finished<NeedleRankResult>(result as NeedleResult<NeedleRankResult>, "rankCalls");
     },
     async classify(input: NeedleClassifyInput) {
@@ -475,26 +518,33 @@ export function createNeedleRuntime(options: {
       if (!text || labels.length < 2) return skip("trivial");
       if (labels.length > policy.maxBatch) return skip("too-large", `${labels.length} labels`);
       const cleaned: NeedleRankCandidate[] = [];
+      const ids = new Set<string>();
       for (const label of labels) {
         const body = needleText(label?.text, policy.maxTextChars);
-        const id = typeof label?.id === "string" ? label.id.slice(0, 256) : "";
-        if (id && body) cleaned.push({ id, text: body });
+        const id = typeof label?.id === "string" && label.id.length <= 256 ? label.id : "";
+        if (!id || !body || ids.has(id)) return skip("unsupported-shape", "invalid or duplicate label");
+        ids.add(id);
+        cleaned.push({ id, text: body });
       }
       if (cleaned.length < 2) return skip("no-candidates");
       const acceptAt = typeof input?.acceptAt === "number" ? input.acceptAt : policy.acceptScore;
       const marginAt = typeof input?.marginAt === "number" ? input.marginAt : policy.acceptMargin;
+      if (!Number.isFinite(acceptAt) || acceptAt < -1 || acceptAt > 1 || !Number.isFinite(marginAt) || marginAt < 0 || marginAt > 2) return skip("unsupported-shape", "invalid thresholds");
       const result = await call({ op: "classify", text, labels: cleaned, acceptAt, marginAt }, "classify");
       if (!result.ok) return result as NeedleResult<NeedleClassifyResult>;
       const value = result.value as NeedleClassifyResult;
-      if (!value || typeof value.label !== "string") return skip("unavailable", "malformed classify result");
+      if (!value || !ids.has(value.label) || !Number.isFinite(value.score) || value.score < -1 || value.score > 1
+        || !Number.isFinite(value.margin) || value.margin < 0 || value.margin > 2) return skip("unavailable", "malformed classify result");
+      value.accepted = value.score >= acceptAt && value.margin >= marginAt;
       if (!value.accepted) {
-        stats.skipReasons["low-confidence"] = (stats.skipReasons["low-confidence"] ?? 0) + 1;
+        const reason = value.score < acceptAt ? "low-confidence" : "low-margin";
+        stats.skipReasons[reason] = (stats.skipReasons[reason] ?? 0) + 1;
       }
       return finished<NeedleClassifyResult>({ ...(result as NeedleResult<NeedleClassifyResult>), value }, "classifyCalls");
     },
     async extract(input: NeedleExtractInput) {
       const text = needleText(input?.text, policy.maxTextChars);
-      if (!text || !input?.schema || typeof input.schema !== "object") return skip("trivial");
+      if (!text || !input?.schema || (typeof input.schema !== "object" || Array.isArray(input.schema))) return skip("trivial");
       let schemaSize = 0;
       try {
         schemaSize = JSON.stringify(input.schema).length;
@@ -526,7 +576,7 @@ export function createNeedleRuntime(options: {
     },
     stats() {
       const { p50, p95 } = needleLatencySummary(stats.latencies);
-      return { ...stats, latencies: [...stats.latencies], queueWaits: [...stats.queueWaits], skipReasons: { ...stats.skipReasons }, p50, p95 };
+      return { ...stats, shadowAgreed, shadowDisagreed, latencies: [...stats.latencies], queueWaits: [...stats.queueWaits], skipReasons: { ...stats.skipReasons }, p50, p95 };
     },
     noteEscalation(kind) {
       if (kind === "jev") stats.escalatedToJev++;
@@ -538,6 +588,8 @@ export function createNeedleRuntime(options: {
       noteHealth("ml.needle.shadow", { decision: agreed ? "agree" : "disagree", count: 1 });
     },
     async shutdown() {
+      closed = true;
+      embedCache.clear();
       if (reprobeTimer) clearTimeout(reprobeTimer);
       reprobeTimer = undefined;
       failAll("unavailable", "shutdown");

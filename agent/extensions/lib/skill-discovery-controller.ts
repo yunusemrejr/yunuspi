@@ -96,7 +96,7 @@ export function createSkillDiscoveryController(options: {
       const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(25_000), ...(current.signal ? [current.signal] : [])]);
       void Promise.resolve().then(() => {
         if (epoch !== generation || signal.aborted || !permitted()) return;
-        return runner({brief:request.brief, task:prompt}, current, signal);
+        return runner({brief:request.brief, task:prompt, candidates:request.catalog.map(skill => ({name:skill.name,description:skill.description.slice(0,160)}))}, current, signal);
       }).then(body => {
         if (epoch !== generation || signal.aborted || !permitted() || typeof body !== 'string') return;
         for (const suggestion of parseSkillDiscoverySuggestions(body, request.catalog)) {

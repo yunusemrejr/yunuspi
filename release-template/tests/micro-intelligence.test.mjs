@@ -337,6 +337,19 @@ test("review helpers rank perspectives and cluster findings", async () => {
   assert.deepEqual(uncertain, { duplicate: false, ok: false });
 });
 
+test("perspective cues reject shadow, weak and unrecognized model choices", async () => {
+  const task = "audit the authentication flow for vulnerabilities";
+  const good = { ok: true, cached: false, ms: 1, shadow: false, value: { ranked: [{ id: "security", score: 0.97 }], margin: 0.04 } };
+  for (const bad of [
+    { ...good, shadow: true },
+    { ...good, value: { ...good.value, margin: 0.001 } },
+    { ...good, value: { ...good.value, ranked: [{ id: "invented", score: 0.98 }] } },
+    { ...good, value: { ...good.value, ranked: [{ id: "security", score: NaN }] } },
+    { ...good, value: { ...good.value, ranked: [{ id: "security", score: 0.97 }, { id: "security", score: 0.96 }] } },
+  ]) assert.deepEqual(await reviewMod.selectPerspectives(task, async () => bad), []);
+  assert.deepEqual(await reviewMod.selectPerspectives(task, async () => good), ["security"]);
+});
+
 test("status snapshot reports health without running inference", async () => {
   const key = Symbol.for("yunus-pi.micro.inspect.v1");
   const prior = globalThis[key];
@@ -357,4 +370,39 @@ test("status snapshot reports health without running inference", async () => {
     if (prior === undefined) delete globalThis[key];
     else globalThis[key] = prior;
   }
+});
+
+
+test("retrieval validates accepted disagreement and preserves Jev during shadow", async () => {
+  for (const shadow of [false, true]) {
+    let calls = 0;
+    const outcome = await retrievalMod.multiStageRetrieve({
+      kind: "tool", site: "rank", query: "browser screenshot", lexical: lexicalTools,
+      needle: async () => ({ ok: true, cached: false, ms: 4, shadow,
+        value: { ranked: [{ id: "bash", score: 0.99 }, { id: "read", score: 0.9 }, { id: "browser_session", score: 0.8 }], margin: 0.09 } }),
+      jev: async () => { calls++; return { ok: true, answers: { rank: { choice: "browser_session", probabilities: { browser_session: 0.9 } }, exists: { noul: 0.9 } }, usage: { inputTokens: 40, cached: false } }; },
+    });
+    assert.equal(calls, 1);
+    assert.equal(outcome.applied, "jev");
+    assert.equal(outcome.ordered[0].id, "browser_session");
+  }
+});
+
+test("weak Needle agreement cannot reorder the rest of the candidate set", async () => {
+  const outcome = await retrievalMod.multiStageRetrieve({
+    kind: "tool", site: "rank", query: "read some file", lexical: lexicalTools,
+    needle: async () => ({ ok: true, cached: false, ms: 4, shadow: false,
+      value: { ranked: [{ id: "read", score: 0.91 }, { id: "bash", score: 0.9 }, { id: "browser_session", score: 0.89 }], margin: 0.01 } }),
+  });
+  assert.equal(outcome.applied, "lexical");
+  assert.deepEqual(outcome.ordered, lexicalTools);
+});
+
+test("retrieval rejects Jev choices outside the submitted candidates", async () => {
+  const outcome = await retrievalMod.multiStageRetrieve({
+    kind: "tool", site: "rank", query: "read some file", lexical: lexicalTools,
+    jev: async () => ({ ok: true, answers: { rank: { choice: "invented", probabilities: { invented: 0.9, bash: 0.8 } }, exists: { noul: 0.9 } }, usage: { inputTokens: 40, cached: false } }),
+  });
+  assert.equal(outcome.applied, "lexical");
+  assert.deepEqual(outcome.ordered, lexicalTools);
 });

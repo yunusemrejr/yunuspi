@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 import type { Details, SubagentState } from "../../shared/types.ts";
 import { deliverStopRequest } from "../background/control-channel.ts";
 import { reconcileAsyncRun } from "../background/stale-run-reconciler.ts";

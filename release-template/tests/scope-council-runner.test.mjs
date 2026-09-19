@@ -96,6 +96,41 @@ test('dispatches two independent scope opinions and a synthesis peer under read-
   assert.doesNotMatch(JSON.stringify(entries),/assistant-only preference/);
 });
 
+test('settled local perspective cues inform critique without replacing peer evidence',async()=>{
+  const calls=[];
+  registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{
+    available:()=>models,constraints:()=>({}),
+    rankPerspectives:async()=>({ok:true,ms:1,cached:false,shadow:false,value:{ranked:[{id:'security',score:.98},{id:'testing',score:.94}],margin:.04}}),
+    launch:async(_id,params)=>{calls.push(params);await Promise.resolve();return result(`Evidence from peer ${calls.length}`);},
+  });
+  const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task},context());
+  assert.equal(output.status,'complete');
+  assert.equal(calls.length,3);
+  assert.match(calls[0].task,/Preservation peer/);
+  assert.match(calls[1].task,/Meaningful-change peer/);
+  assert.doesNotMatch(calls[0].task,/Optional semantic focus cues/);
+  assert.match(calls[2].task,/Optional semantic focus cues.*security:.*testing:/);
+  assert.match(calls[2].task,/Evidence from peer 2/);
+  assert.match(calls[2].task,/do not establish findings or limit required review/);
+});
+
+test('a slow or shadow perspective rank cannot delay or alter council critique',async()=>{
+  for(const rankPerspectives of [()=>new Promise(()=>{}),async()=>({ok:true,ms:1,cached:false,shadow:true,value:{ranked:[{id:'security',score:.98}],margin:.04}})]) {
+    resetSharedControl();
+    const calls=[];
+    registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{available:()=>models,constraints:()=>({}),rankPerspectives,
+      launch:async(_id,params)=>{calls.push(params);return result('Original peer evidence');}});
+    let timer;
+    try {
+      const output=await Promise.race([globalThis[SCOPE_COUNCIL_RUNNER]({task},context()),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Council waited for optional local ranking')),1000);})]);
+      assert.equal(output.status,'complete');
+      assert.equal(calls.length,3);
+      assert.doesNotMatch(calls[2].task,/Optional semantic focus cues/);
+      assert.match(calls[2].task,/Original peer evidence/);
+    } finally {clearTimeout(timer);}
+  }
+});
+
 test('current route restrictions and cancellation fail closed without late publication',async()=>{
   const calls=[],entries=[],pi={getActiveTools:()=>['subagent'],appendEntry:(customType,data)=>entries.push({customType,data})};
   let restriction={sameModel:true};

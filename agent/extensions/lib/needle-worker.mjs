@@ -13,7 +13,8 @@ import { parentPort, workerData } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, resolve } from "node:path";
+import { verifyAssets } from "./needle-assets.mjs";
 
 process.env.NEEDLE_TELEMETRY = "0";
 process.env.DO_NOT_TRACK = "1";
@@ -21,7 +22,7 @@ process.env.DO_NOT_TRACK = "1";
 const MAX_TEXTS = 512;
 const MAX_TEXT_CHARS = 32768;
 const MAX_COMPLETE_OUT = 8192;
-const CACHE_MAX = Number.isSafeInteger(workerData?.cacheMax) && workerData.cacheMax > 0
+const CACHE_MAX = Number.isSafeInteger(workerData?.cacheMax) && workerData.cacheMax >= 0
   ? Math.min(32768, workerData.cacheMax)
   : 2048;
 
@@ -39,6 +40,7 @@ let cacheHits = 0;
 const hashText = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
 function cacheGet(text) {
+  if (CACHE_MAX === 0) return undefined;
   const hit = cache.get(hashText(text));
   if (!hit) return undefined;
   cache.delete(hashText(text));
@@ -48,6 +50,7 @@ function cacheGet(text) {
 }
 
 function cacheSet(text, vec) {
+  if (CACHE_MAX === 0) return;
   const key = hashText(text);
   cache.delete(key);
   cache.set(key, vec);
@@ -85,9 +88,9 @@ function embedOne(text) {
   if (!outPtr) throw new Error("wasm out of memory");
   try {
     const rc = M.ccall("needle_embed", "number", ["string", "number", "number"], [text, outPtr, dim]);
-    if (rc < 0) throw new Error(`needle_embed failed (rc=${rc})`);
+    if (rc !== dim) throw new Error(`needle_embed returned unexpected dimension (rc=${rc}, expected=${dim})`);
     const vec = heapF32(M, outPtr, dim);
-    if (vec.length !== dim || !vec.every(Number.isFinite)) throw new Error("needle_embed returned degenerate vector");
+    if (vec.length !== dim || !vec.every(Number.isFinite) || !vec.some((value) => value !== 0)) throw new Error("needle_embed returned degenerate vector");
     cacheSet(text, vec);
     return vec;
   } finally {
@@ -99,10 +102,10 @@ function cosine(a, b) {
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   if (na <= 0 || nb <= 0) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+  return Math.max(-1, Math.min(1, dot / (Math.sqrt(na) * Math.sqrt(nb))));
 }
 
-function opInit(assets) {
+async function opInit(assets) {
   if (Module) return { dim, cacheHits };
   const dir = assets?.dir;
   const loaderJs = assets?.loaderJs ?? (dir ? join(dir, "needle.js") : undefined);
@@ -111,6 +114,12 @@ function opInit(assets) {
   for (const [label, file] of [["loader", loaderJs], ["wasm", wasm], ["weights", weights]]) {
     if (typeof file !== "string" || !existsSync(file)) throw new Error(`needle asset missing: ${label}`);
   }
+  for (const [file, name] of [[loaderJs, "needle.js"], [wasm, "needle.wasm"], [weights, "needle3.cact"]]) {
+    if (typeof dir !== "string" || resolve(file) !== resolve(dir, name)) throw new Error("needle asset paths must use the pinned asset directory");
+  }
+  // Verify bytes before evaluating the executable loader, not just at install.
+  const verified = await verifyAssets(dir, true);
+  if (!verified.ok) throw new Error(`needle asset integrity failed: ${verified.problems.join("; ")}`);
   // The Emscripten loader resolves needle.wasm relative to its own path.
   const requireAsset = createRequire(loaderJs);
   const createNeedle = requireAsset(loaderJs);
@@ -167,7 +176,7 @@ function opRank(query, candidates, topK) {
   scored.sort((a, b) => b.score - a.score);
   const limit = Number.isSafeInteger(topK) && topK > 0 ? Math.min(topK, scored.length) : scored.length;
   const ranked = scored.slice(0, limit);
-  return { ranked, margin: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0 };
+  return { ranked, margin: scored.length > 1 ? scored[0].score - scored[1].score : 0 };
 }
 
 function opClassify(text, labels, acceptAt, marginAt) {

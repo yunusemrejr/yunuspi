@@ -444,7 +444,7 @@ export default function httpTools(pi: any) {
         if (failure.kind === "unknown" && !tooShort(failure.error, 40)) {
           try {
             const ranked = await needleClassify({ text: failure.error.slice(0, 1024), labels: HTTP_CAUSE_LABELS });
-            if (ranked.ok && ranked.value.accepted) {
+            if (ranked.ok && !ranked.shadow && ranked.value.accepted) {
               const cause = ranked.value.label;
               if ((["timeout", "network", "validation", "cancelled"] as string[]).includes(cause))
                 (failure as { kind: string }).kind = cause;
@@ -460,7 +460,7 @@ export default function httpTools(pi: any) {
               microMetrics().run("needle", ranked.ms);
               microMetrics().accept("needle");
             } else {
-              microMetrics().skip("needle", ranked.ok ? "low-confidence" : ranked.reason);
+              microMetrics().skip("needle", ranked.ok ? (ranked.shadow ? "shadow" : "low-confidence") : ranked.reason);
             }
           } catch {
             microMetrics().skip("needle", "unavailable");

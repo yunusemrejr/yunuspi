@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import type { SteeringNotice, SubagentState } from "../shared/types.ts";
 
 export const SUBAGENT_STEERING_MESSAGE_TYPE = "subagent_steering_notice";

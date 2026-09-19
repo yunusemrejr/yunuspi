@@ -10,7 +10,7 @@
  * contains hashes, roles and counts only — no prompt text, no tool output.
  * Records are a bounded ring; a very long session caps stored digests.
  */
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";

@@ -11,7 +11,7 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")]
 const {createRelevantGuidance} = await import(pathToFileURL(path.join(agent, "extensions/lib/relevant-guidance.ts")));
 const {matchHook} = await import(pathToFileURL(path.join(agent, "extensions/lib/session-hooks.ts")));
 const {collectSessionMetrics} = await import(pathToFileURL(path.join(agent, "extensions/lib/session-metrics.ts")));
-const {activitySource,transformActivity} = await import(pathToFileURL(path.join(agent,"scripts/patches/cache-hit-footer.mjs")));
+const {activitySource,transformActivity} = await import(pathToFileURL(path.join(agent,"scripts/compatibility/legacy-transforms/cache-hit-footer.mjs")));
 
 function fixture(active = [], skills = []) {
   const entries = [];

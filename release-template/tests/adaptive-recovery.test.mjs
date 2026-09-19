@@ -29,18 +29,35 @@ const sample=(m,ok,now=Date.now())=>{
  if(ok)h.recordSuccess({provider:m.provider,model:m.id,now,economyUsage:{input:1000,output:100,cacheRead:0,cacheWrite:0,costUsd:.001,rates,elapsedMs:2000}});
  else h.recordFailure({provider:m.provider,model:m.id,now,errorMessage:'500 server error',rates});
 };
-async function fixture({model=base,models=[base,{...base,provider:'direct',baseUrl:'https://direct.invalid/v1'}],getEndpoints=async()=>endpoints,prompt='Continue the task',usage=1000,wait=async()=>{}}={}) {
+async function fixture({model=base,models=[base,{...base,provider:'direct',baseUrl:'https://direct.invalid/v1'}],getEndpoints=async()=>endpoints,prompt='Continue the task',usage=1000,wait=async()=>{},activeTools=['read'],judge}={}) {
  clear();
  const handlers=new Map(),selected=[],entries=[];let lookups=0;
  const ctx={model,scopedModels:[],getContextUsage:()=>({tokens:usage}),ui:{setStatus(){}},abort(){},modelRegistry:{getAvailable:()=>models},sessionManager:{getSessionFile:()=>path.join(dir,'session.jsonl'),getBranch:()=>[]}};
- const pi={on:(n,f)=>handlers.set(n,[...(handlers.get(n)??[]),f]),registerCommand(){},getActiveTools:()=>['read'],appendEntry:(type,data)=>entries.push({type,...data}),sendMessage(){},setModel:async m=>{ctx.model=m;selected.push(m);return true;}};
- registerAutonomousRecovery(pi,async()=>{throw Error('Unexpected delegation');},{endpoints:async(...args)=>{lookups++;return getEndpoints(...args);},wait});
+ const pi={on:(n,f)=>handlers.set(n,[...(handlers.get(n)??[]),f]),registerCommand(){},getActiveTools:()=>activeTools,appendEntry:(type,data)=>entries.push({type,...data}),sendMessage(){},setModel:async m=>{ctx.model=m;selected.push(m);return true;}};
+ registerAutonomousRecovery(pi,async()=>{throw Error('Unexpected delegation');},{endpoints:async(...args)=>{lookups++;return getEndpoints(...args);},wait,judge});
  const emit=async(n,event={})=>{let result;for(const f of handlers.get(n)??[]) {const r=await f(event,ctx);if(r)result=r;}return result;};
  await emit('input',{source:'user',text:prompt});
  const fail=async(error=upstream('Host a'))=>{const message={role:'assistant',provider:ctx.model.provider,model:ctx.model.id,stopReason:'error',content:[],errorMessage:error};h.recordFailure({provider:message.provider,model:message.model,errorMessage:error,endpoint:ctx.model.compat?.recoveryEndpointName});const event={message,signal:new AbortController().signal};await emit('pi_provider_recovery',event);return event;};
  return {pi,ctx,selected,entries,emit,fail,lookups:()=>lookups};
 }
 try {
+ // Optional semantic preparation only sees usable skill references and never
+ // spends a request when the subagent consumer is unavailable.
+ const skillPrompt='Audit the README documentation and release notes for this repository';
+ const skillCatalog=names=>names.map(name=>`<skill><name>${name}</name><location>/skills/${name}/SKILL.md</location></skill>`).join('\n');
+ const availableNames=['github-readme-authoring','github-release-notes','evidence-first-engineering'];
+ const judgedSkills=[];
+ const judge=async(_site,_state,questions)=>{judgedSkills.push(Object.keys(questions.skill.criteria));return {ok:false,skipped:'unavailable'};};
+ let prepared=await fixture({prompt:skillPrompt,judge});
+ await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(availableNames)});
+ assert.equal(judgedSkills.length,0,'no semantic call without the subagent consumer');
+ await prepared.emit('session_shutdown');
+ prepared=await fixture({prompt:skillPrompt,judge,activeTools:['read','subagent']});
+ await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['evidence-first-engineering'])});
+ assert.equal(judgedSkills.length,0,'one installed candidate does not need ranking');
+ await prepared.emit('before_agent_start',{prompt:skillPrompt,systemPrompt:skillCatalog(['github-readme-authoring','evidence-first-engineering'])});
+ assert.deepEqual(judgedSkills,[['github-readme-authoring','evidence-first-engineering']],'uninstalled lexical matches never reach the judge');
+ await prepared.emit('session_shutdown');
  const now=Date.now();
  h.recordFailure({provider:'openrouter',model:base.id,errorMessage:upstream('Host a'),now});
  assert.equal(h.evaluateRoute({provider:'openrouter',model:base.id,now}).allowed,true,'one upstream does not cool all OpenRouter');

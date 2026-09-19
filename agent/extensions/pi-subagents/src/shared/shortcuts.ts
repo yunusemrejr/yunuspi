@@ -1,4 +1,4 @@
-import { Key, type KeyId } from "@earendil-works/pi-tui";
+import { Key, type KeyId } from "@yunuspi/tui";
 
 export const FLEET_OPEN_SHORTCUT: KeyId = Key.ctrlAlt("f");
 

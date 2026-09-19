@@ -2,7 +2,7 @@ import { spawn as nodeSpawn, type SpawnOptions } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { Api, Model } from '@earendil-works/pi-ai';
+import type { Api, Model } from '@yunuspi/ai';
 import type {
   BackgroundTaskChildProcess,
   BackgroundTaskContext,

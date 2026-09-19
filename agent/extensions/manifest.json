@@ -1,5 +1,5 @@
 {
-  "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file — retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (only pi CORE receives third-party updates). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
+  "$comment": "Canonical extension inventory for the pi harness. verify-harness.mjs derives its section [1]/[2] truth tables (expected extension files, lib modules, forks, folded markers, npm packages, vendored deps) from THIS file \u2014 retire an extension by removing it here AND deleting the file on disk, never by editing verify-harness.mjs. Deleted/retired components are tombstoned in retired[] below (machine-readable, one entry per component); verify-harness.mjs section [9] flags any doc/script reference to a retired name that is not a deletion record, and any retired file that reappears on disk. If a retired component returns, register it deliberately in extensions[]/lib[]/forks[]/npmPackages[] AND remove it from retired[]. npmPackages[] is EMPTY since the 2026-08-31 fork completion: every former third-party extension is a local fork under extensions/ and settings.json packages[] must stay empty (only pi CORE receives third-party updates). vendoredDeps[] = the exact-pinned runtime dependency root agent/npm/package.json must contain (imported by the forks via the extensions/node_modules symlink).",
   "extensions": [
     "agent-context-tools.ts",
     "agentmail.ts",
@@ -39,92 +39,93 @@
     "micro-intelligence.ts"
   ],
   "lib": [
-    "media-process.ts",
-    "music-score.ts",
-    "stall-core.ts",
-    "output-distiller.ts",
-    "smol-extraction.ts",
-    "smol-preprocessor.ts",
-    "relevant-guidance.ts",
-    "harness-orientation.ts",
-    "intent-context.ts",
-    "scope-deliberation.ts",
-    "guidance-topics.ts",
-    "guidance-topics-systems.ts",
-    "guidance-topics-domains.ts",
-    "reminders-state.ts",
-    "image-compaction.ts",
-    "session-signals.ts",
-    "scoped-snapshots.ts",
-    "checkpoint-files.ts",
-    "continuation-notice.ts",
-    "code-guidance-signals.ts",
+    "activity-indicators.ts",
+    "artifact-checks.ts",
     "authored-review.ts",
+    "bash-routing.ts",
+    "browser-session.ts",
+    "bulk-edit.ts",
+    "capability-audit.ts",
+    "capability-groups.ts",
+    "capability-health.ts",
+    "catalog-cache-lock.ts",
+    "checkpoint-files.ts",
+    "code-guidance-signals.ts",
+    "code-lexical-mask.ts",
+    "compact-tool-json.ts",
+    "context-anchor.ts",
+    "context-limits.ts",
+    "continuation-notice.ts",
+    "cost-evidence.ts",
+    "data-query.ts",
+    "effort-policy.mjs",
+    "git-authority.ts",
+    "guidance-topics-domains.ts",
+    "guidance-topics-systems.ts",
+    "guidance-topics.ts",
+    "harness-activity.ts",
+    "harness-capabilities.ts",
+    "harness-orientation.ts",
+    "health-log.ts",
+    "hook-ledger.ts",
+    "image-compaction.ts",
+    "intent-context.ts",
+    "intervention-control.ts",
+    "intervention-intents.ts",
+    "intervention-registry.ts",
+    "intervention-session.ts",
+    "intervention-shared.ts",
+    "jev-client.ts",
+    "local-models.ts",
+    "media-process.ts",
+    "metrics-panel.ts",
+    "mini-preprocessor.ts",
+    "model-facts.ts",
+    "music-score.ts",
+    "needle-assets.mjs",
+    "needle-policy.ts",
+    "needle-runtime.ts",
+    "needle-types.ts",
+    "needle-worker.mjs",
+    "numeric-checks.ts",
+    "output-distiller.ts",
+    "project-tests.ts",
+    "prompt-interpretation.ts",
     "quality-review-owner.ts",
     "quality-review-signals.ts",
     "quality-review.ts",
-    "slop-guidance-signals.ts",
-    "compact-tool-json.ts",
-    "local-models.ts",
-    "stable-tool-order.ts",
-    "skill-relevance.ts",
-    "source-check.ts",
-    "skill-routing.ts",
-    "code-lexical-mask.ts",
     "reasoning-aids.ts",
-    "small-tools.ts",
-    "numeric-checks.ts",
-    "artifact-checks.ts",
-    "health-log.ts",
+    "relevant-guidance.ts",
+    "reminders-state.ts",
     "render-queue.ts",
-    "context-limits.ts",
-    "model-facts.ts",
-    "catalog-cache-lock.ts",
-    "mini-preprocessor.ts",
-    "self-mutation-guard.ts",
-    "session-metrics.ts",
-    "session-cost.ts",
-    "cost-evidence.ts",
-    "session-telemetry.ts",
-    "hook-ledger.ts",
-    "session-report.ts",
-    "metrics-panel.ts",
-    "bash-routing.ts",
-    "data-query.ts",
-    "bulk-edit.ts",
-    "sys-probe.ts",
-    "session-hooks.ts",
-    "session-diagnostics.ts",
-    "session-audit.ts",
-    "project-tests.ts",
-    "browser-session.ts",
-    "utility-client.ts",
-    "context-anchor.ts",
-    "skill-discovery.ts",
-    "skill-discovery-controller.ts",
-    "harness-activity.ts",
-    "tool-discovery.ts",
-    "capability-groups.ts",
-    "harness-capabilities.ts",
-    "git-authority.ts",
-    "effort-policy.mjs",
     "review-coordinator.ts",
+    "scope-deliberation.ts",
+    "scoped-snapshots.ts",
+    "self-mutation-guard.ts",
+    "session-audit.ts",
+    "session-cost.ts",
+    "session-diagnostics.ts",
     "session-export-json.ts",
-    "intervention-control.ts",
-    "intervention-session.ts",
-    "intervention-intents.ts",
-    "intervention-registry.ts",
-    "intervention-shared.ts",
-    "capability-health.ts",
-    "capability-audit.ts",
-    "activity-indicators.ts",
-    "prompt-interpretation.ts",
+    "session-hooks.ts",
+    "session-metrics.ts",
+    "session-report.ts",
+    "session-signals.ts",
     "session-stop.ts",
-    "needle-types.ts",
-    "needle-policy.ts",
-    "needle-worker.mjs",
-    "needle-runtime.ts",
-    "needle-assets.mjs"
+    "session-telemetry.ts",
+    "skill-discovery-controller.ts",
+    "skill-discovery.ts",
+    "skill-relevance.ts",
+    "skill-routing.ts",
+    "slop-guidance-signals.ts",
+    "small-tools.ts",
+    "smol-extraction.ts",
+    "smol-preprocessor.ts",
+    "source-check.ts",
+    "stable-tool-order.ts",
+    "stall-core.ts",
+    "sys-probe.ts",
+    "tool-discovery.ts",
+    "utility-client.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -188,52 +189,52 @@
     {
       "name": "micro-agents.ts",
       "retired": "2026-09-02",
-      "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) — pi-subagents + pi-background-tasks cover the capability. Do not recreate"
+      "why": "user direction: single-model read-only micro-agent swarm (micro_agent/micro_status/micro_wait/micro_kill tools, /micro-agent command, micro-agents.json config, agent/micro-runs/ state) removed permanently (no backup) \u2014 pi-subagents + pi-background-tasks cover the capability. Do not recreate"
     },
     {
       "name": "governor.ts",
       "retired": "2026-09-02",
-      "why": "user direction: injection-budget broker removed permanently (no backup) — governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate"
+      "why": "user direction: injection-budget broker removed permanently (no backup) \u2014 governor.ts + lib/governor-core.ts, /gov /why commands, governance tool, ~/.pi/governor policy/state all deleted. reminders/checkpoints/siblings now inject directly with their own hysteresis/dedup. Do not recreate"
     },
     {
       "name": "governor-core.ts",
       "retired": "2026-09-02",
-      "why": "user direction: governor policy core removed with governor.ts (see that tombstone) — no broker remains; each extension owns its own injection gating. Do not recreate"
+      "why": "user direction: governor policy core removed with governor.ts (see that tombstone) \u2014 no broker remains; each extension owns its own injection gating. Do not recreate"
     },
     {
       "name": "capabilities.ts",
       "retired": "2026-09-02",
-      "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) — the toolkit reachability is already evident from the tool list itself. Do not recreate"
+      "why": "user direction: one-time per-session delegation/parallelism awareness message removed permanently (no backup) \u2014 the toolkit reachability is already evident from the tool list itself. Do not recreate"
     },
     {
       "name": "tool-desc-overrides.mjs",
       "retired": "2026-09-02",
-      "why": "user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) — patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate"
+      "why": "user direction: tool-description override seam (SDK agent-session.js + bundle chunk __piOverrideTools builder) removed permanently (no backup) \u2014 patch module, tool-description-overrides.json config, and bench/tool-overrides-test.mjs all deleted. Do not recreate"
     },
     {
       "name": "minify-system-prompt.mjs",
       "retired": "2026-09-02",
-      "why": "user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) — saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate"
+      "why": "user direction: system-prompt minification (intro + tool-catalog snippet dedupe) removed permanently (no backup) \u2014 saving prompt bytes no longer worth patching pi core and altering tool-catalog presentation. Do not recreate"
     },
     {
       "name": "pi-fff",
       "retired": "2026-09-01",
-      "why": "user direction: fffind/ffgrep (fuzzy find/grep via @ff-labs/fff-node, native libfff_c.so through ffi-rs) removed ENTIRELY — fork source DELETED with NO backup retained (user: no rollback ability wanted), FFF_DEFER session_start-defer folded marker removed, vendored node_modules (@ff-labs/fff-node + ffi-rs + @yuuang/ffi-rs-linux-x64-gnu native platform binding) deleted with it, ~/.pi/agent/fff/ runtime state (frecency/history index) deleted, harness-backup vendored-deps machinery removed. Do not recreate"
+      "why": "user direction: fffind/ffgrep (fuzzy find/grep via @ff-labs/fff-node, native libfff_c.so through ffi-rs) removed ENTIRELY \u2014 fork source DELETED with NO backup retained (user: no rollback ability wanted), FFF_DEFER session_start-defer folded marker removed, vendored node_modules (@ff-labs/fff-node + ffi-rs + @yuuang/ffi-rs-linux-x64-gnu native platform binding) deleted with it, ~/.pi/agent/fff/ runtime state (frecency/history index) deleted, harness-backup vendored-deps machinery removed. Do not recreate"
     },
     {
       "name": "context-mode",
       "retired": "2026-09-01",
-      "why": "user direction: context/knowledge-base system removed entirely — ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate"
+      "why": "user direction: context/knowledge-base system removed entirely \u2014 ctx_* MCP-bridge tools, 8 ctx skills, CM_PREWARM folded marker, ctx group in tool-loader, ctx overrides/excludes, drift-prompt mention; ~/.pi/context-mode/ state archived to ~/.pi/backups/retired-context-mode-state-20260901; fork moved to backups/retired-extensions/context-mode. Do not recreate"
     },
     {
       "name": "greybeard",
       "retired": "2026-09-01",
-      "why": "user direction: Greybeard standards engine removed entirely — fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate"
+      "why": "user direction: Greybeard standards engine removed entirely \u2014 fork (standards dir, skills, /greybeard commands, code-intent JIT banner) deleted; shared detectCodeIntent heuristic removed from tool-loader.ts; fork moved to backups/retired-extensions/greybeard. Do not recreate"
     },
     {
       "name": "pi-ux.ts",
       "retired": "2026-09-01",
-      "why": "user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate"
+      "why": "user direction: UX-discipline extension removed \u2014 ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate"
     },
     {
       "name": "a-speech-fix.ts",
@@ -243,7 +244,7 @@
     {
       "name": "long-prompt-offload.ts",
       "retired": "2026-08-31",
-      "why": "long-prompt offload system removed per user direction — long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted"
+      "why": "long-prompt offload system removed per user direction \u2014 long prompts now pass through the normal input path verbatim (no file offload, ORIENTATION map, or discovery pre-pass); ~/.pi/prompt-offload/ deleted"
     },
     {
       "name": "pi-tinyfish.ts",
@@ -253,7 +254,7 @@
     {
       "name": "*-auto-models.ts",
       "retired": "2026-08-31",
-      "why": "the 7 provider auto-catalog extensions (openrouter, baseten, cerebras, friendli, lmstudio, orcarouter, together) — superseded by native pi-ai catalogs + static models.json; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/live-models.ts (single live-catalog extension for openrouter/orcarouter/together/friendli — native catalog lacks orcarouter entirely; live lists merged over the store)"
+      "why": "the 7 provider auto-catalog extensions (openrouter, baseten, cerebras, friendli, lmstudio, orcarouter, together) \u2014 superseded by native pi-ai catalogs + static models.json; backups/provider-cleanup-20260831/. SUPERSEDED AGAIN 2026-08-31 by extensions/live-models.ts (single live-catalog extension for openrouter/orcarouter/together/friendli \u2014 native catalog lacks orcarouter entirely; live lists merged over the store)"
     },
     {
       "name": "openrouter-provider.ts",
@@ -268,7 +269,7 @@
     {
       "name": "session-bridge.ts",
       "retired": "2026-08-31",
-      "why": "cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts — user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations"
+      "why": "cross-session awareness + bridge tool removed at user direction; backups/retired-extensions/session-bridge.ts; data dir ~/.pi/session-bridge deleted (residual files from still-running sessions queued for cleanup). SUPERSEDED 2026-08-31 by extensions/siblings.ts \u2014 user-directed reinstatement, leaner: one-shot join notice + voluntary md board; no bridge tool, no tool-result annotations"
     },
     {
       "name": "thinking-control.ts",
@@ -293,7 +294,7 @@
     {
       "name": "ponytail",
       "retired": "2026-08-31",
-      "why": "pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename \"pilot\" deliberately NOT tombstoned — too generic a token for word-boundary matching.)"
+      "why": "pilot/ponytail governor-predecessor experiment; scrubbed. (Sibling codename \"pilot\" deliberately NOT tombstoned \u2014 too generic a token for word-boundary matching.)"
     },
     {
       "name": "pi-goal",
@@ -303,27 +304,27 @@
     {
       "name": "pi-context-router.ts",
       "retired": "2026-08-12",
-      "why": "task classifier (doctrine/memory/goal/todo/gov injection, context budgets); 2026-08-12 refactor — do not recreate"
+      "why": "task classifier (doctrine/memory/goal/todo/gov injection, context budgets); 2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pi-orchestrator.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pi-cache-optimizer.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pi-goals.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate (distinct from pi-goal)"
+      "why": "2026-08-12 refactor \u2014 do not recreate (distinct from pi-goal)"
     },
     {
       "name": "pi-evaluator.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pi-subagents.ts",
@@ -343,37 +344,37 @@
     {
       "name": "pi-capabilities.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pi-mcp-adapter.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "loop.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "ultimate-pi.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "auto-recover.ts",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "DOCTRINE.md",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "harness-config.json",
       "retired": "2026-08-12",
-      "why": "2026-08-12 refactor — do not recreate"
+      "why": "2026-08-12 refactor \u2014 do not recreate"
     },
     {
       "name": "pressure-journal.mjs",
@@ -383,7 +384,7 @@
     {
       "name": "auto-update-extensions.mjs",
       "retired": "2026-09-01",
-      "why": "dormant: settings.packages=[] since the 2026-08-31 fork completion — session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/"
+      "why": "dormant: settings.packages=[] since the 2026-08-31 fork completion \u2014 session-start auto-apply of npm extension updates had nothing to apply; extensions are local forks updated via git; moved to backups/retired-patches/"
     },
     {
       "name": "auto-apply-extensions.sh",
@@ -447,6 +448,7 @@
     "scripts/pi-launch.sh",
     "scripts/auto-update.sh",
     "scripts/lib/core-compatibility.mjs",
+    "scripts/lib/owned-core.mjs",
     "scripts/lib/effort-audit.mjs",
     "scripts/effort-audit.mjs",
     "scripts/transaction.mjs",

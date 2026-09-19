@@ -5,8 +5,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const agent = [path.join(root,'agent'),path.resolve(root,'..')].find(dir=>fs.existsSync(path.join(dir,'scripts/patches/tui-branding.mjs')));
-const {startRatMotion} = await import(pathToFileURL(path.join(agent,'scripts/patches/tui-branding.mjs')));
+const agent = [path.join(root,'agent'),path.resolve(root,'..')].find(dir=>fs.existsSync(path.join(dir,'scripts/compatibility/legacy-transforms/tui-branding.mjs')));
+const {startRatMotion} = await import(pathToFileURL(path.join(agent,'scripts/compatibility/legacy-transforms/tui-branding.mjs')));
 test('startup animation stops before repainting an overflowing terminal', () => {
   let tick, time=0, stopped=false, renders=0;
   const owner={isInitialized:true,chatContainer:{children:[]},builtInHeader:{setExpanded(){}},getStartupExpansionState:()=>false,

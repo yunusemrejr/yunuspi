@@ -12,6 +12,7 @@ export interface PiLaunchSpec {
 
 export interface PiLaunchDependencies {
   readonly platform?: NodeJS.Platform;
+  readonly env?: NodeJS.ProcessEnv;
   readonly execPath?: string;
   readonly resolvePackageJson?: (specifier: string) => string;
   readonly readFile?: (path: string) => string | Buffer;
@@ -45,7 +46,7 @@ export class PiCommandLineLimitError extends Error {
   }
 }
 
-const PI_PACKAGE_NAME = '@earendil-works/pi-coding-agent';
+const PI_PACKAGE_NAME = '@yunuspi/coding-agent';
 const PI_PACKAGE_MANIFEST = `${PI_PACKAGE_NAME}/package.json`;
 const WINDOWS_COMMAND_LINE_LIMIT = 32767;
 
@@ -123,10 +124,10 @@ function readPiBin(manifest: JsonRecord, manifestPath: string): string {
   const bin = manifest['bin'];
   if (typeof bin === 'string' && bin.trim().length > 0) return bin;
   if (isJsonRecord(bin)) {
-    const pi = bin['pi'];
+    const pi = bin['yunuspi'];
     if (typeof pi === 'string' && pi.trim().length > 0) return pi;
   }
-  failResolution(`manifest bin.pi is missing or malformed at ${manifestPath}`);
+  failResolution(`manifest bin.yunuspi is missing or malformed at ${manifestPath}`);
 }
 
 function pathInside(parent: string, child: string): boolean {
@@ -136,7 +137,14 @@ function pathInside(parent: string, child: string): boolean {
 
 export function resolvePiLaunch(deps: PiLaunchDependencies = {}): PiLaunchSpec {
   const platform = deps.platform ?? process.platform;
-  if (platform !== 'win32') return { executable: 'pi', argvPrefix: [], kind: 'path' };
+  // Installed launchers explicitly select the owned, session-leased executable.
+  // SDK/checkouts resolve the owned package; never fall back to an unrelated PATH pi.
+  const configuredLauncher = (deps.env ?? process.env).PI_SUBAGENT_PI_BINARY?.trim();
+  if (configuredLauncher) {
+    if (platform === 'win32' && /\.(?:mjs|cjs|js)$/i.test(configuredLauncher))
+      return { executable: deps.execPath ?? process.execPath, argvPrefix: [configuredLauncher], kind: 'package-node-cli' };
+    return { executable: configuredLauncher, argvPrefix: [], kind: 'path' };
+  }
 
   const resolvePackageJson = deps.resolvePackageJson ?? defaultResolvePackageJson;
   const readFile = deps.readFile ?? readFileSync;
@@ -157,6 +165,7 @@ export function resolvePiLaunch(deps: PiLaunchDependencies = {}): PiLaunchSpec {
     readPath('manifest read', manifestPath, () => readFile(manifestPath)),
     manifestPath,
   );
+  if (manifest['name'] !== PI_PACKAGE_NAME) failResolution(`package identity is not ${PI_PACKAGE_NAME}`);
   const bin = readPiBin(manifest, manifestPath);
   const targetCandidate = join(packageRoot, bin);
   const targetReal = readPath('bin target realpath', targetCandidate, () => realpath(targetCandidate));

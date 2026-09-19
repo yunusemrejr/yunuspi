@@ -64,7 +64,7 @@ import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 // The cooldown FALLBACK and the cooldown-class regex are OWNED by
-// scripts/patches/retry-429-policy.mjs (the policy authority). They are
+// scripts/compatibility/legacy-transforms/retry-429-policy.mjs (the policy authority). They are
 // INLINED here — not imported — because sandboxed real-pi suites copy the
 // pi-subagents fork STANDALONE (no extensions/lib, no scripts/), and any
 // import outside extensions/pi-subagents breaks those child extension boots

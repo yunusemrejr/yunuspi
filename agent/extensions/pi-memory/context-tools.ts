@@ -1,4 +1,4 @@
-import { Type, StringEnum } from '@earendil-works/pi-ai';
+import { Type, StringEnum } from '@yunuspi/ai';
 import { scoreContext, makeCapsule, type ContextItem } from './context-salience.ts';
 import { evidenceCache } from './context-evidence.ts';
 export function registerContextTools(pi: any, directory: () => string) {

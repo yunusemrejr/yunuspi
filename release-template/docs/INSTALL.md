@@ -1,6 +1,6 @@
 # Install a public release
 
-Use Linux, Windows with WSL2 Ubuntu, or an Ubuntu VM on macOS; see [platform details](PLATFORMS.md). This is a source distribution with a pinned Pi core and locally maintained extensions. Do not install over a running Pi session.
+Use Linux, Windows with WSL2 Ubuntu, or an Ubuntu VM on macOS; see [platform details](PLATFORMS.md). This source distribution owns the YunusPi core and its maintained extensions. Pi 0.85.1 is the historical fork origin; upstream releases never control installation or updates. Do not install over a running Pi session.
 
 ## Prerequisites
 
@@ -20,32 +20,29 @@ git clone https://github.com/yunusemrejr/yunuspi.git
 cd yunuspi
 node scripts/install.mjs
 node scripts/install.mjs --apply --install-deps
-npm install --global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@0.85.1
+export PATH="$HOME/.pi/agent/bin:$PATH"
+yunuspi --version
 ```
 
-The first installer invocation is a read-only preview. The second copies only the release's public `agent/` tree to `~/.pi/agent`, installs the exact dependency lockfile with npm lifecycle scripts disabled, creates its relative dependency link, and initializes private local settings/models from the public `config/*.example.json` templates. It does not copy keys, sessions, private reminders, local models or personal state. Dependency packages are downloaded from the npm registry; review package and lockfile changes before installing updates.
+The first invocation is a read-only preview. The second copies public `agent/` files and the repository-owned `core/` packages into `~/.pi/agent`, installs the exact root workspace lockfile with npm lifecycle scripts disabled, and runs `build:core`. The core is built from local source; no upstream Pi package or version endpoint is consulted. Third-party dependencies still download from npm. Review their lockfile changes before installing a release.
 
-An existing target is refused by default. After stopping Pi, `--backup-existing` explicitly renames the old installation to a private adjacent backup before activation. It does not merge credentials or overwrite individual files. That backup can contain secrets and must never be committed. `--target /some/empty/path` is available for inspecting a staged copy; the runtime and patch machinery expect `~/.pi/agent`, so an arbitrary target is not a supported live runtime relocation.
+The installation contains `runtime/core/`, `runtime/node_modules/`, and `bin/yunuspi` (with `bin/pi` as a compatibility alias). Both extension dependency links select that same workspace, so core imports resolve to the owned packages. Add the `bin` directory to your shell's PATH permanently after validating the installation. An unrelated globally installed `pi` is not modified; invoke `yunuspi` to make selection explicit.
 
-## Validate the patched core
+Private settings/models are initialized from public templates. Keys, sessions, reminders, local models and private state are never copied from a working installation. An existing target is refused by default. After stopping sessions, `--backup-existing` renames the complete old installation into an adjacent private backup and installs a fresh tree. Active maintained-launcher sessions block replacement. Restore your credentials deliberately from that private backup after reviewing the new configuration; never commit the backup.
 
-After installing the pinned core, apply and verify the release's patches:
+`--target /some/empty/path` is supported for staging and CLI checks. The full harness still expects `~/.pi/agent` for several subsystem paths. Omitting `--install-deps` copies source only; the launcher explains that the core needs a build. For an offline installation with a populated npm cache, use `--apply --offline`. This passes `--offline` to npm and skips optional Needle downloads. An incomplete cache fails before replacing the previous installation. Neither mode contacts an upstream Pi release service.
+
+## Validate the owned core
 
 ```sh
-node ~/.pi/agent/scripts/verify-harness.mjs --fix
 node ~/.pi/agent/scripts/verify-harness.mjs
 ```
 
-Read the results and resolve every failure before using Pi. The harness's patch modules are version-sensitive: keep core 0.85.1 until a later version has been validated with this harness. Do not silently continue after failed patch checks, or run an unattended global update. The public installation must not rely on the original author's credentials, machine paths or systemd units.
-
-Successful repair also installs the maintained CLI launcher. Subsequent core
-updates use its isolated compatibility gate; see [core updates and recovery](CORE-UPDATES.md).
-
-The installer itself does not patch an unrelated globally installed core or run a model request. Core verification and repair are separate steps because they modify installed application code. The first verification command modifies the installed core; the second checks the resulting installation.
+Read every failure before using YunusPi. Verification checks the owned core, extension inventory, configuration and local safety controls. It does not patch the core or retrieve another Pi version. Maintainers change `core/*/src` and rebuild under YunusPi review and tests. See [updates and recovery](CORE-UPDATES.md).
 
 ## Bring your own credentials
 
-Launch `pi` and use its login/provider setup for a provider you control. Alternatively configure provider environment variables or the documented local authentication file outside the Git checkout. Keep credentials out of skills, examples, prompts, shell commands saved to transcripts, screenshots and public issues. Do not copy a private `auth.json`, `models.json`, `.env`, provider receipt cache or entire `.pi` directory into this repository.
+Launch `yunuspi` and use its login/provider setup for a provider you control. Alternatively configure provider environment variables or the documented local authentication file outside the Git checkout. Keep credentials out of skills, examples, prompts, shell commands saved to transcripts, screenshots and public issues. Do not copy a private `auth.json`, `models.json`, `.env`, provider receipt cache or entire `.pi` directory into this repository.
 
 Select a model actually available to your account before starting work. Catalog metadata and displayed pricing are estimates, not billing guarantees. Free routes may have limits or disappear. Start with a small task and inspect tool results and costs before enabling autonomous workflows.
 
@@ -76,10 +73,7 @@ On Linux, Playwright may also require system packages; install them using its do
 
 ## Optional local micro-models
 
-Needle3, Smol, and Kompress weights are not bundled. The installer records
-their absence and continues; every layer degrades to a documented skip.
-To light them up, set one or more endpoints and re-run the installer or
-`micro_status`:
+Model weights are not bundled. A normal `--apply` attempts to install pinned, checksummed Needle3 WASM assets; `--skip-needle` and `--offline` skip this optional download. A failed download warns and leaves local semantics unavailable until repair. Smol and Kompress require separately configured local servers. Inspect availability with `micro_status`:
 
 - Needle3: pinned WASM assets are fetched by
   `node agent/extensions/lib/needle-assets.mjs install [--revision …]`;
@@ -98,4 +92,4 @@ observer controls (`PI_NEEDLE`, `PI_NEEDLE_SHADOW`, `PI_MICRO_ADVISORY`,
 
 ## Updates and recovery
 
-Review the new public release and security changes first. Stop Pi, keep a private backup, then use the explicit backup installation workflow above. Reconfigure your own credentials locally; never merge an old private tree into a release checkout. If installation fails before activation, the previous target remains; if activation fails after its rename, the installer attempts to restore it and reports failure. To roll back an activated install, stop Pi, move the new directory aside and rename the preserved backup to `~/.pi/agent`. Pinned core upgrades and rollback are separate from the agent directory.
+Review the new public release and security changes first. Stop Pi, keep a private backup, then use the explicit backup installation workflow above. Reconfigure your own credentials locally; never merge an old private tree into a release checkout. If installation fails before activation, the previous target remains; if activation fails after its rename, the installer attempts to restore it and reports failure. To roll back an activated install, stop Pi, move the new directory aside and rename the preserved backup to `~/.pi/agent`. The owned core is inside the agent directory and rolls back with it. Upstream Pi releases have no effect. An explicit reviewed-source update preserving private state and compatible local customizations is available as `yunuspi update --source /path/to/reviewed/yunuspi`; see [the update policy](CORE-UPDATES.md).

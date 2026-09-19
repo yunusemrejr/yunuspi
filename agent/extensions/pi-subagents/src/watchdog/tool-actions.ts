@@ -1,5 +1,5 @@
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult } from "@yunuspi/agent-core";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { THINKING_LEVELS, type ThinkingLevel } from "../shared/model-info.ts";
 import type { Details } from "../shared/types.ts";
 import { buildWatchdogStatus } from "./register-main.ts";

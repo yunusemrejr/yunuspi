@@ -44,20 +44,21 @@ export async function resolveWithScreen<T>(
   return { verdict: await fallback(), screened: false };
 }
 
-export async function cheapMutationScreen(task: string): Promise<MutationScreenVerdict> {
+export async function cheapMutationScreen(task: string, deps: { classify?: typeof needleClassify; ask?: typeof askJev } = {}): Promise<MutationScreenVerdict> {
   if (process.env.PI_INTENT_PRESCREEN === "off") return "defer";
   if (typeof task !== "string" || task.length < 12 || task.length > 8000) return "defer";
   const metrics = microMetrics();
   try {
-    const ranked = await needleClassify({ text: task.slice(0, 512), labels: PRESCREEN_LABELS });
-    if (ranked.ok && !ranked.shadow) {
+    const ranked = await (deps.classify ?? needleClassify)({ text: task.slice(0, 512), labels: PRESCREEN_LABELS, acceptAt:PRESCREEN_BARS.implementation.score, marginAt:PRESCREEN_BARS.implementation.margin });
+    if (ranked.ok && !ranked.shadow && ranked.value.accepted) {
       const { label, score, margin } = ranked.value;
       const bars = PRESCREEN_BARS;
       if (label === "implementation" && score >= bars.implementation.score && margin >= bars.implementation.margin) {
         metrics.llmAvoided(800);
         return "implementation";
       }
-      if (label === "read-only" && score >= bars.readOnly.score && margin >= bars.readOnly.margin) {
+      // A clipped prefix cannot establish the absence of a later mutation.
+      if (task.length <= 512 && label === "read-only" && score >= bars.readOnly.score && margin >= bars.readOnly.margin) {
         metrics.llmAvoided(800);
         return "read-only";
       }
@@ -66,14 +67,16 @@ export async function cheapMutationScreen(task: string): Promise<MutationScreenV
     /* Fall through to Jev, then to the full arbiter. */
   }
   try {
-    const judged = await askJev("intent", { task: task.slice(0, 1024) }, {
+    const judged = await (deps.ask ?? askJev)("intent", { task }, {
       instructsChanges: {
         type: "noul",
         instructions: "Does this task instruct the agent to create, edit, or delete files or code?",
       },
     });
     if (judged.ok) {
-      const score = judged.answers.instructsChanges?.noul ?? 0.5;
+      const answer = judged.answers.instructsChanges;
+      const score = answer?.noul;
+      if (answer?.type !== 'noul' || typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1) return 'defer';
       metrics.run("jev");
       metrics.jevUsage("intent", 1, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
       if (score <= 0.15) {

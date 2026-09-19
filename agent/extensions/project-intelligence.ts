@@ -3,7 +3,7 @@
 import path from "node:path";
 import { createContextAnchor } from "./lib/context-anchor.ts";
 import { Type } from "typebox";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@yunuspi/coding-agent";
 import { IntelligenceClient } from "./lib/project-intelligence/client.mjs";
 import { openProjectViewer } from "./lib/project-intelligence/viewer.mjs";
 import { safeText, secretFile } from "./lib/project-intelligence/privacy.mjs";

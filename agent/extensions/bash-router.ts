@@ -24,7 +24,7 @@
  * Only tracks bounded per-session counters and never logs command text.
  */
 
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@yunuspi/coding-agent";
 import { classifyBashCommand, selfMatchingSignal } from "./lib/bash-routing.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");

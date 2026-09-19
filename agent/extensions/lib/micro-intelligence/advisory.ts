@@ -74,6 +74,14 @@ export async function needleRequestPass(
       return undefined;
     }
     metrics.run("needle", result.ms);
+    if (result.shadow || !result.value.accepted) {
+      metrics.skip("needle", result.shadow ? "shadow" : "low-confidence");
+      return undefined;
+    }
+    if (!REQUEST_FAMILIES.some((entry) => entry.id === result.value.label)) {
+      metrics.skip("needle", "unknown-family");
+      return undefined;
+    }
     metrics.accept("needle");
     const family = (REQUEST_FAMILIES.some((entry) => entry.id === result.value.label)
       ? result.value.label

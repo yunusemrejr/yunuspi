@@ -39,10 +39,42 @@ function fixture(options = {}) {
   registerSkillDiscoveryRunner(pi, {
     available: () => options.models ?? [model], constraints: (...args) => options.constraintsFn ? options.constraintsFn(...args) : options.constraints ?? {}, captureCurrent: () => () => current,
     claimBudget: () => { if (claimed || options.denyBudget) return false; claimed = true; return true; },
+    judge: options.judge ?? (async () => ({ok:false,skipped:'test-disabled'})),
     launch: async (...args) => { calls.push(args); return options.launch ? options.launch(...args) : result('{"skills":[]}'); },
   });
   return { calls, entries, ctx, runner: globalThis[SKILL_DISCOVERY_RUNNER], stale: () => { current = false; } };
 }
+
+test('typed skill selection avoids a full child and cannot invent catalog identifiers', async () => {
+  const {microMetrics,resetMicroMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/micro-intelligence/metrics.ts')));
+  const request={brief:'Review database query plans using the supplied sql skill.',task:'Review database query plans',candidates:[{name:'sql-query-engineering',description:'Database query execution plans'}]};
+  const judged=(name,exists=.95)=>({ok:true,answers:{skill:{type:'choice',choice:name,probabilities:{[name]:.9}},exists:{type:'noul',noul:exists}},usage:{model:'mock',inputTokens:20,costUsd:0,ms:1,cached:false}});
+  resetMicroMetrics();
+  const f=fixture({judge:async()=>judged('sql-query-engineering')});
+  assert.equal(JSON.parse(await f.runner(request,f.ctx)).suggestions[0].name,'sql-query-engineering');
+  assert.equal(f.calls.length,0);
+  assert.equal(microMetrics().snapshot().llm.avoided,1);
+  assert.equal(microMetrics().snapshot().llm.estimatedTokensAvoided,0,'no invented token savings');
+  const unknown=fixture({judge:async()=>judged('invented')});
+  await unknown.runner(request,unknown.ctx);
+  assert.equal(unknown.calls.length,1,'invalid IDs retain the existing bounded fallback');
+  const none=fixture({judge:async()=>judged('sql-query-engineering',.05)});
+  assert.deepEqual(JSON.parse(await none.runner(request,none.ctx)),{suggestions:[]});
+  assert.equal(none.calls.length,0);
+});
+
+test('skill judge respects delegation policy and rejects stale results', async () => {
+  let calls=0,resolve;
+  const request={brief:'Select useful skills.',candidates:[{name:'sql-query-engineering',description:'Database query plans'}]};
+  const blocked=fixture({constraints:{noDelegation:true},judge:async()=>{calls++;return {ok:false,skipped:'unavailable'};}});
+  assert.equal(await blocked.runner(request,blocked.ctx),undefined);
+  assert.equal(calls,0);
+  const stale=fixture({judge:()=>new Promise(r=>{resolve=r;})});
+  const work=stale.runner(request,stale.ctx);stale.stale();
+  resolve({ok:true,answers:{exists:{type:'noul',noul:0}},usage:{model:'mock',inputTokens:10,costUsd:0,ms:1,cached:false}});
+  assert.equal(await work,undefined);
+  assert.equal(stale.calls.length,0);
+});
 
 test('one tool-free fresh helper shares the existing assistance budget and leaves only bounded JSON', async () => {
   const f = fixture(); const request = { brief: 'Candidate identifiers and successful observed tool calls; return {"skills":[]}.' };

@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 
-export const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
+export const PI_CODING_AGENT_PACKAGE = "@yunuspi/coding-agent";
 export const PI_SUBAGENT_PI_BINARY_ENV = "PI_SUBAGENT_PI_BINARY";
 
 export function findPiPackageRootFromEntry(
@@ -86,7 +86,7 @@ function normalizePath(filePath: string): string {
 
 function isStandalonePiExecutable(execPath: string): boolean {
 	const executableName = execPath.split(/[\\/]/).pop();
-	return /^pi(?:\.exe)?$/i.test(executableName ?? "");
+	return /^yunuspi(?:\.exe)?$/i.test(executableName ?? "");
 }
 
 function resolvePiCliScriptFromPackageJson(
@@ -122,8 +122,10 @@ export function resolvePiCliScript(
 		if (isRunnableNodeScript(argvPath, existsSync)) {
 			try {
 				const canonicalArgvPath = realpathSync(argvPath);
-				if (isRunnableNodeScript(canonicalArgvPath, existsSync) && findPiPackageRootFromEntry(canonicalArgvPath)) {
-					return canonicalArgvPath;
+				const packageRoot = findPiPackageRootFromEntry(canonicalArgvPath);
+				if (isRunnableNodeScript(canonicalArgvPath, existsSync) && packageRoot) {
+					const declaredCli = resolvePiCliScriptFromPackageJson(path.join(packageRoot, "package.json"), readFileSync, existsSync);
+					if (declaredCli && realpathSync(declaredCli) === canonicalArgvPath) return canonicalArgvPath;
 				}
 			} catch {
 				// Host package metadata is untrusted here; keep resolving the installed Pi CLI.
@@ -193,5 +195,5 @@ export function getPiSpawnCommand(
 		);
 	}
 
-	return { command: "pi", args };
+	throw new Error(`Owned YunusPi CLI is unavailable; set ${PI_SUBAGENT_PI_BINARY_ENV} to its launcher.`);
 }

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import {selectEvidence} from "../../../../lib/local-intelligence.mjs";
 import * as path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import type { OutputMode, SavedOutputReference } from "../../shared/types.ts";
 import { hasMutationToolCapability } from "./completion-guard.ts";
 

@@ -5,8 +5,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => fs.existsSync(path.join(dir, 'scripts/patches/preserve-terminal-scrollback.mjs')));
-const { transformScrollback } = await import(pathToFileURL(path.join(agent, 'scripts/patches/preserve-terminal-scrollback.mjs')));
+const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => fs.existsSync(path.join(dir, 'scripts/compatibility/legacy-transforms/preserve-terminal-scrollback.mjs')));
+const { transformScrollback } = await import(pathToFileURL(path.join(agent, 'scripts/compatibility/legacy-transforms/preserve-terminal-scrollback.mjs')));
 const source = `function paint(clear, newLines, height) {
   const output = { append: value => writes.push(value) };
   if (clear) {

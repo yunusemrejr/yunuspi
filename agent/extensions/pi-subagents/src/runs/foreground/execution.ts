@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig } from "../../agents/agents.ts";
 import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts";
 import { alignForkedSessionCwd } from "../../shared/fork-session-cwd.ts";

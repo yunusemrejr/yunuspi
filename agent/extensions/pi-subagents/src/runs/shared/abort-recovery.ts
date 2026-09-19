@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@yunuspi/ai";
 
 export const ABORT_RECOVERY_PROMPT = "The prior run ended from a verified provider/transport failure after useful progress. Inspect the retained transcript and current files before acting. Continue from where it stopped; do not restart or repeat completed mutations. If the requested work is already complete, report that without changing anything. Fix any validation failure or write the required report, then finish with final output.";
 

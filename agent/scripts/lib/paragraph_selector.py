@@ -26,7 +26,7 @@ def release_workspace():
   libc=ctypes.CDLL(None);trim=libc.malloc_trim;trim.argtypes=[ctypes.c_size_t];trim.restype=ctypes.c_int;trim(0)
  except (AttributeError,OSError):pass
 THRESHOLD=.35  # calibrated on development prose; original protected tests unchanged
-PROTECTED=re.compile(r'\b(?:not|no|never|none|neither|nor|without|except|unless|only|if|until|before|after|must|shall|require\w*|need\w*|should|cannot|can\x27t|don\x27t|fail\w*|error\w*|warning|blocked|pending|unresolved|unverified|unknown|uncertain\w*|may|might|could|reported|observed|said|says|claimed|according|alleged|denied|confirmed|verified|unconfirmed|current|latest|remaining|deprecated|superseded)\b|\d|https?://|[/\\]|\b\w+\.\w+\b',re.I)
+PROTECTED=re.compile(r'\b(?:not|no|never|none|neither|nor|without|except|unless|only|if|until|before|after|must|shall|require\w*|need\w*|should|cannot|can\x27t|don\x27t|fail\w*|error\w*|warning|blocked|pending|unresolved|unverified|unknown|uncertain\w*|may|might|could|reported|observed|said|says|claimed|according|alleged|denied|confirmed|verified|unconfirmed|current|latest|remaining|deprecated|superseded|decid\w*|decision\w*|constraint\w*|verif\w*|test\w*|pass\w*|success\w*|succeed\w*|complet\w*|cancel\w*|abort\w*|status|exit|reject\w*|hypothes\w*|changed|modified|deleted|created|next step|next action)\b|\d|https?://|[/\\]|\b\w+\.\w+\b',re.I)
 DEPENDENT=re.compile(r'^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b',re.I)
 class ParagraphSelector:
  def __init__(self,model_path,tokenizer_path):
@@ -49,8 +49,8 @@ class ParagraphSelector:
   if raw[start:].strip():spans.append((start,len(raw)))
   if not 4<=len(spans)<=24:return fallback('paragraph_count')
   paragraphs=[raw[a:b] for a,b in spans]
-  # Avoid silently changing formatting of multiline blocks/structured records.
-  if any('\n' in p or not re.search(r'[.!?][\"\x27)]?\s*$',p) for p in paragraphs):return fallback('paragraph_shape')
+  # Soft wrapping stays inside the exact blank-line paragraph span.
+  if any(not re.search(r'[.!?][\"\x27)]?\s*$',p) for p in paragraphs):return fallback('paragraph_shape')
   enc=self.tok.encode(raw)
   if len(enc.ids)>512:return fallback('token_limit')
   protected={i for i,p in enumerate(paragraphs) if PROTECTED.search(p) or len(p.split())<=6}

@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@yunuspi/coding-agent";
 
 /** Pi exposes replaced extension contexts as ordinary Errors without a stable code. */
 export function isStaleExtensionContextError(error: unknown): boolean {

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { registerRuntimeAgent, type RuntimeAgentDefinition, type RuntimeAgentRegistration } from "./runtime-agent-registry.ts";
 
 export const RUNTIME_AGENT_REGISTER_EVENT = "pi-subagents:runtime-agent-register:v1";

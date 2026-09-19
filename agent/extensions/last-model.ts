@@ -1,4 +1,4 @@
-import { SettingsManager, getAgentDir, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { SettingsManager, getAgentDir, type ExtensionAPI } from '@yunuspi/coding-agent';
 
 /** Remember the main interactive model using Pi's locked, field-merging writer.
  * Startup resolution still owns availability checks and explicit CLI overrides.

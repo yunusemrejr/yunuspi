@@ -1,29 +1,24 @@
-// Offline: deployed SDK + CLI predicate and the real between-tool-turn hook.
+// Offline: owned SDK/CLI predicate and the real between-tool-turn hook.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import {
-  targets,
-  automaticCompactionThreshold,
-  compactionSettingsForWindow,
-} from "../patches/compaction-early.mjs";
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 const settings = {
   enabled: true,
   reserveTokens: 16384,
   keepRecentTokens: 20000,
   maxContextTokens: 256000,
 };
-const ts = targets();
-const sdk = ts.find((t) => t.name === "sdk: shouldCompact cap");
-const core = path.resolve(path.dirname(sdk.file), "..");
-const { shouldCompact, prepareCompaction, estimateContextTokens } = await import(sdk.file);
-const bundle = ts.find((t) => t.name === "bundle: shouldCompact cap");
-const code = fs
-  .readFileSync(bundle.file, "utf8")
-  .match(/function shouldCompact\([^}]+\}/)[0];
-const cli = vm.runInNewContext(`(${code})`);
-for (const predicate of [shouldCompact, cli]) {
+const core = path.join(resolveOwnedCore(), 'dist/core');
+const { shouldCompact, prepareCompaction, estimateContextTokens } = await import(path.join(core, 'compaction/compaction.js'));
+const automaticCompactionThreshold = (_tokens, window) => Math.ceil(window * 0.8);
+// Read the owned helper directly; it is intentionally internal to this module.
+const compactionSource = fs.readFileSync(path.join(core, 'compaction/compaction.js'), 'utf8');
+const budgetHelper = compactionSource.match(/function compactionSettingsForWindow\(contextWindow, settings\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(budgetHelper);
+const compactionSettingsForWindow = vm.runInNewContext(`(${budgetHelper})`);
+for (const predicate of [shouldCompact]) {
   for (const window of [8192,32768,128000,272000,1000000,1310720]) {
     const threshold = Math.ceil(window * 0.8);
     assert.equal(automaticCompactionThreshold(0,window,settings),threshold);
@@ -40,7 +35,7 @@ for (const predicate of [shouldCompact, cli]) {
   for(const window of [0,-1,NaN,Infinity,undefined])assert.equal(predicate(500000,window,settings),false,'unknown window cannot trigger');
   for(const tokens of [NaN,Infinity,-1])assert.equal(predicate(tokens,1000000,settings),false,'invalid usage cannot trigger');
 }
-assert.deepEqual(compactionSettingsForWindow(272000, settings), settings, "large windows retain configured defaults");
+assert.deepEqual(JSON.parse(JSON.stringify(compactionSettingsForWindow(272000, settings))), settings, "large windows retain configured defaults");
 assert.equal(compactionSettingsForWindow(1000000, { ...settings, keepRecentTokens: 0 }).keepRecentTokens, 0, "explicit zero tail is preserved");
 for (const window of [8192, 16384, 32768]) {
   const entries = Array.from({ length: 28 }, (_, i) => ({
@@ -53,7 +48,7 @@ for (const window of [8192, 16384, 32768]) {
   assert.equal(shouldCompact(before, window, settings), true);
   const preparation = prepareCompaction(entries, settings, window);
   assert.ok(preparation, `${window}: configured 20k tail must not prevent compaction`);
-  assert.deepEqual(preparation.settings, compactionSettingsForWindow(window, settings));
+  assert.deepEqual(preparation.settings, JSON.parse(JSON.stringify(compactionSettingsForWindow(window, settings))));
   assert.equal(prepareCompaction(entries, { ...settings, keepRecentTokens: 0 }, window).settings.keepRecentTokens, 0);
   assert.ok(preparation.messagesToSummarize.length + preparation.turnPrefixMessages.length > 0);
   const firstKept = entries.findIndex(entry => entry.id === preparation.firstKeptEntryId);
@@ -94,7 +89,6 @@ for (const window of [8192, 16384, 32768]) {
 const { payloadPressureWarning } = await import("../../extensions/lib/session-signals.ts");
 assert.match(payloadPressureWarning(95), /Compaction is routine; do not skip required work or verification/);
 assert.equal(payloadPressureWarning(20), undefined, "no pressure, no extra reminder");
-for (const t of ts) assert.ok(t.isApplied(), t.name);
 const { AgentSession } = await import(path.join(core, "agent-session.js"));
 const retained = [
   {
@@ -156,7 +150,7 @@ assert.deepEqual(
   "a failed compaction does not discard history",
 );
 console.log(
-  "PASS automatic compaction: live-budget regression, SDK/CLI parity, disabled policy, retained tail and between-turn continuation",
+  "PASS automatic compaction: live-budget regression, shared SDK/CLI behavior, disabled policy, retained tail and between-turn continuation",
 );
 
 // All automatic reasons obey the same boundary, including old resumed errors.

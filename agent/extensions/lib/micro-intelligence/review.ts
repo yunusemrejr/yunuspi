@@ -6,7 +6,8 @@
  * All model dependencies are injected; nothing here launches subagents,
  * declares code correct, or establishes review completeness.
  */
-import type { NeedleResult, NeedleRankResult } from "../needle-types.ts";
+import type { NeedleResult } from "../needle-runtime.ts";
+import type { NeedleRankResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
 
 export const COUNCIL_PERSPECTIVES = [
@@ -46,14 +47,33 @@ export async function selectPerspectives(
     return [];
   }
   try {
-    const result = await rank(task.slice(0, 1024), [...COUNCIL_PERSPECTIVES], topK);
+    metrics.offer("needle");
+    const limit = Number.isFinite(topK) ? Math.max(1, Math.min(3, Math.floor(topK))) : 3;
+    const result = await rank(task.slice(0, 1024), [...COUNCIL_PERSPECTIVES], limit);
     if (!result.ok) {
       metrics.skip("needle", result.reason);
       return [];
     }
     metrics.run("needle", result.ms);
-    metrics.accept("needle");
-    return result.value.ranked.map((entry) => entry.id);
+    if (result.cached) metrics.cacheHit("needle");
+    const ranked = result.value?.ranked;
+    const allowed = new Set<string>(COUNCIL_PERSPECTIVES.map(entry => entry.id));
+    if (result.shadow) {
+      metrics.skip("needle", "shadow");
+      return [];
+    }
+    if (!Array.isArray(ranked) || !ranked.length || ranked.length > limit
+      || ranked.some(entry => !allowed.has(entry.id) || !Number.isFinite(entry.score) || entry.score < -1 || entry.score > 1)
+      || new Set(ranked.map(entry => entry.id)).size !== ranked.length
+      || ranked.some((entry, index) => index > 0 && entry.score > ranked[index - 1].score)
+      || !Number.isFinite(result.value.margin) || result.value.margin < 0.025 || result.value.margin > 2
+      || ranked[0].score < 0.9) {
+      metrics.skip("needle", "low-confidence");
+      return [];
+    }
+    // The consumer records acceptance only if this already-settled hint is
+    // actually included. A late result is work performed, not advice used.
+    return ranked.filter(entry => entry.score >= 0.9).map(entry => entry.id);
   } catch {
     metrics.skip("needle", "unavailable");
     return [];

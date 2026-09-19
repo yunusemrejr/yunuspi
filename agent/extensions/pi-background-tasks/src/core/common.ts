@@ -1,7 +1,7 @@
 import { statSync, type WriteStream } from "node:fs";
 import { open } from "node:fs/promises";
 import { extname, isAbsolute, join, win32 } from "node:path";
-import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES } from "@yunuspi/coding-agent";
 import type { BackgroundTaskChildProcess } from "./registry.js";
 
 export const TASK_STATUS_VALUES = [

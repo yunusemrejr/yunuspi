@@ -18,17 +18,17 @@ assert.ok(agent, "public template resolves the session signal extension");
 // CI installs the pinned SDK in this checkout. Only private live installs
 // need the global fallback; pi-ai may be hoisted or nested under that SDK.
 let coreUrl;
-try { coreUrl = import.meta.resolve("@earendil-works/pi-coding-agent"); }
+try { coreUrl = import.meta.resolve("@yunuspi/coding-agent"); }
 catch (error) {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
   coreUrl = pathToFileURL(path.join(
     execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(),
-    "@earendil-works/pi-coding-agent/dist/index.js",
+    "@yunuspi/coding-agent/dist/index.js",
   )).href;
 }
 register(
   `data:text/javascript,${encodeURIComponent(
-    `const core=${JSON.stringify(coreUrl)};export function resolve(name,context,next){if(name==="@earendil-works/pi-coding-agent")return {url:core,shortCircuit:true};return next(name,name==="@earendil-works/pi-ai"?{...context,parentURL:core}:context);}`,
+    `const core=${JSON.stringify(coreUrl)};export function resolve(name,context,next){if(name==="@yunuspi/coding-agent")return {url:core,shortCircuit:true};return next(name,name==="@yunuspi/ai"?{...context,parentURL:core}:context);}`,
   )}`,
   import.meta.url,
 );

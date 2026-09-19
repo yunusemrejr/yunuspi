@@ -4,17 +4,19 @@
   <img src="docs/assets/rat.gif" alt="Animated ASCII rat mascot from the YunusPi startup header" width="434">
 </p>
 
-**A Pi coding-agent harness with a broad set of tools and skills, designed to keep the agent's working context small.**
+**An independently maintained coding agent and Pi-derived core, with tools, skills, project memory and a layered intelligence stack.**
 
-YunusPi extends Pi with code inspection, browser and media tools, project memory, subagents, quality checks and runtime fixes. You bring your own model provider and credentials. The agent starts with a core tool set and can discover specialized capabilities as the task develops.
+YunusPi owns its core and provides code inspection, browser and media tools, project memory, subagents, quality checks and runtime fixes. You bring your own model provider and credentials. The agent starts with a core tool set and can discover specialized capabilities as the task develops.
 
 The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
 
 [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
+Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
+
 ## How a session works
 
-Start Pi in your project directory, choose an available model, and describe the work normally. You do not need to select a workflow or browse a catalog before every task.
+Start `yunuspi` in your project directory, choose an available model, and describe the work normally. You do not need to select a workflow or browse a catalog before every task.
 
 - **Start small.** Main sessions expose core editing, inspection, coordination and quality tools. Specialized tool schemas and the full skill catalog stay out of the initial model context.
 - **Discover when useful.** The agent can browse capability groups, search short descriptions, and load selected tools or read a relevant skill. Direct search and activation are also available; browsing is optional.
@@ -94,9 +96,9 @@ Both screenshots use synthetic fixtures. [Screenshot provenance](docs/SCREENSHOT
 
 ## Install and maintain
 
-Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installer preview, dependency setup, the pinned Pi core, patch verification and provider login. The full harness targets Linux. Windows uses WSL2; macOS can use a Linux VM. Native macOS limitations are documented, and native Windows support is not claimed.
+Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installer preview, dependency setup, the owned YunusPi core, source verification and provider login. The full harness targets Linux. Windows uses WSL2; macOS can use a Linux VM. Native macOS limitations are documented, and native Windows support is not claimed.
 
-This is a source distribution with maintained extensions and version-sensitive core patches. Stop active Pi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
+This is a standalone source distribution with six owned runtime packages under `core/` and maintained extensions. Upstream Pi releases have no automatic effect. Stop active YunusPi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
 
 For development snapshots, the exact source identity is the Git commit SHA; package metadata identifies the compatibility/release line rather than every commit. Formal tags, GitHub Releases and package metadata move together only when a release is intentionally cut. [Release and versioning policy](docs/PUBLISHING.md#release-identity)
 

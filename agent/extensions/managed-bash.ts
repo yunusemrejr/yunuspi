@@ -29,11 +29,11 @@ import { guardedCommand } from "./lib/self-mutation-guard.ts";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import {
 	createBashToolDefinition,
 	getShellConfig,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -441,7 +441,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				}
 			});
 		},
-	} satisfies import("@earendil-works/pi-coding-agent").BashOperations;
+	} satisfies import("@yunuspi/coding-agent").BashOperations;
 }
 
 /** Internal bounded helpers share the bash job registry, shutdown and process-tree cleanup. */

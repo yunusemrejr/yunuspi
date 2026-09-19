@@ -2,6 +2,7 @@
  * and diagnostics surfaces. Gathers live helper state without running
  * inference: no embeddings, no judgments, no side effects.
  */
+import { readFileSync } from "node:fs";
 import { needleHealth, needleHandle } from "../needle-runtime.ts";
 import { jevHealth, openRouterKey } from "../jev-client.ts";
 import { microMetrics } from "./metrics.ts";
@@ -9,6 +10,22 @@ import { coordinator } from "./coordinator.ts";
 import { microHealthSnapshot, needleStatus, jevStatus, type LayerHealth } from "./health.ts";
 
 const INSPECT_KEY = Symbol.for("yunus-pi.micro.inspect.v1");
+
+/** Read build provenance from the package actually resolved by this harness. */
+export function activeCoreIdentity(): Record<string, unknown> {
+  try {
+    const entry = import.meta.resolve("@yunuspi/coding-agent");
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", entry), "utf8"));
+    if (manifest.name !== "@yunuspi/coding-agent") return { status: "unowned" };
+    const receipt = JSON.parse(readFileSync(new URL("../../build.json", entry), "utf8"));
+    if (receipt.releaseAuthority !== "yunusemrejr/yunuspi" || receipt.version !== manifest.version)
+      return { status: "mismatch" };
+    return { status: "owned", version: receipt.version, origin: { project: receipt.forkOrigin?.project, version: receipt.forkOrigin?.version, commit: receipt.forkOrigin?.commit },
+      sourceCommit: receipt.sourceCommit ?? null, sourceDigest: receipt.sourceDigest,
+      releaseAuthority: receipt.releaseAuthority, updatePolicy: receipt.updatePolicy };
+  } catch { return { status: "unavailable" }; }
+}
+
 
 function registry(): Record<string, () => unknown> {
   try {
@@ -31,7 +48,7 @@ function safeInspect(name: string): unknown {
 function smolStatus(inspect: unknown): string {
   if (!inspect || typeof inspect !== "object") return "unknown";
   const value = inspect as Record<string, unknown>;
-  if (value.status === "unknown") return "unknown";
+  if (["unknown", "unavailable", "disabled", "busy", "ready"].includes(String(value.status))) return String(value.status);
   if (typeof value.busy === "boolean") return value.busy ? "busy" : "ready";
   return "ready";
 }
@@ -83,6 +100,7 @@ export function microStatusSnapshot(request?: {
     },
   ];
   return {
+    core: activeCoreIdentity(),
     health: microHealthSnapshot(layers),
     request: request
       ? {

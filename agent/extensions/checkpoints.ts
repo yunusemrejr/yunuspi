@@ -33,9 +33,9 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	SessionEntry,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@yunuspi/ai";
 import { readRemindersRestore } from "./lib/reminders-state.ts";
 import {
 	checkpointPath,

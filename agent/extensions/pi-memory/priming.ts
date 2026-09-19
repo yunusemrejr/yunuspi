@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import {
   getAgentDir,
   withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
+} from "@yunuspi/coding-agent";
 const terms = (s: string) =>
   [
     ...new Set(

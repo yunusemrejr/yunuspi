@@ -4,7 +4,7 @@
  * Long answers, reasoning speed and model names are not loop signals.
  */
 import { createHash } from "node:crypto";
-import type { ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ToolResultEvent } from "@yunuspi/coding-agent";
 
 const LOOP_REPEATS = 3;
 const LOOP_WINDOW_TURNS = 6;

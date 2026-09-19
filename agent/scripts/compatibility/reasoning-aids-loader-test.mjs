@@ -1,3 +1,4 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 // Reproduce ambient + explicit child extension loading without inference.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,9 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-const core =
- execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim() +
- "/@earendil-works/pi-coding-agent";
+const core = resolveOwnedCore();
 const sdk = await import(core + "/dist/index.js");
 const agentRoot = fileURLToPath(new URL("../../", import.meta.url));
 const canonical = path.join(agentRoot, "extensions/reasoning-aids.ts");

@@ -62,7 +62,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@yunuspi/coding-agent";
 
 const DIR = path.join(os.homedir(), ".pi", "sibling-bridge");
 const ACTIVE_DIR = path.join(DIR, "active");

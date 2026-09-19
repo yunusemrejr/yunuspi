@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@yunuspi/coding-agent";
 import { SubagentWaitParams } from "../../extension/schemas.ts";
 import type { Details, SubagentState } from "../../shared/types.ts";
 import { resolveWaitToolConfig, waitForSubagents } from "./subagent-wait.ts";

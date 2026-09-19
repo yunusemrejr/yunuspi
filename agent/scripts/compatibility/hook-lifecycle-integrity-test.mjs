@@ -1,15 +1,13 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {execFileSync} from 'node:child_process';
-import {patchHookCancellation,patchRequestGate} from '../patches/autonomous-recovery.mjs';
 import {createCompletionNotifier} from '../../extensions/pi-background-tasks/src/core/completion-wake.ts';
-const core=process.env.PI_HARNESS_PATCH_TEST_CORE??execFileSync('npm',['root','-g'],{encoding:'utf8'}).trim()+'/@earendil-works/pi-coding-agent';
-const owners=[core+'/dist/core/extensions/runner.js',...fs.readdirSync(core+'/dist/bundle/chunks').filter(x=>x.endsWith('.js')).map(x=>core+'/dist/bundle/chunks/'+x).filter(x=>fs.readFileSync(x,'utf8').includes('async emitBeforeProviderRequest('))];
+const core=resolveOwnedCore();
+const owners=[core+'/dist/core/extensions/runner.js'];
 for(const file of owners){
- const source=patchHookCancellation(patchRequestGate(fs.readFileSync(file,'utf8')));
- assert.equal(patchHookCancellation(source),source);
- assert.throws(()=>patchHookCancellation(source.replace('_piRequestSignal?.throwIfAborted();','')),/drift/);
+ const source=fs.readFileSync(file,'utf8');
  const method=source.slice(source.indexOf('async emitBeforeProviderRequest('),source.indexOf('async emitBeforeProviderHeaders('));
  const Class=vm.runInNewContext(`(class{${method}})`);
  for(const mode of ['before','during','throws','ordinary','success']){

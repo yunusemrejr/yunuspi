@@ -1,3 +1,4 @@
+import {resolveOwnedCore} from '../lib/owned-core.mjs';
 // Offline: load through the real SDK/Jiti boundary, initialize the session
 // hook, validate schemas with Pi's validator, and execute the actual MCP bridge.
 import assert from 'node:assert/strict';
@@ -7,9 +8,9 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const agent = fileURLToPath(new URL('../../', import.meta.url));
-const core = path.join(execFileSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5000 }).trim(), '@earendil-works/pi-coding-agent');
+const core=resolveOwnedCore();
 const sdk = await import(pathToFileURL(path.join(core, 'dist/index.js')));
-const { validateToolArguments } = await import(pathToFileURL(path.join(core, 'node_modules/@earendil-works/pi-ai/dist/utils/validation.js')));
+const { validateToolArguments } = await import(pathToFileURL(path.join(core, '../ai/dist/utils/validation.js')));
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'utility-sdk-'));
 let extension;
 try {

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@yunuspi/agent-core";
 import { writePrivateAtomicJson } from "../shared/atomic-json.ts";
 import { PROMPT_REDACTED } from "../shared/utils.ts";
 import type { Details, SubagentRunMode } from "../shared/types.ts";

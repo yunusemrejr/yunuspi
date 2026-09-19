@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getLanguageFromPath, highlightCode, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { getLanguageFromPath, highlightCode, type ExtensionContext } from "@yunuspi/coding-agent";
+import { Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi, type MarkdownTheme } from "@yunuspi/tui";
 import { safeTerminalText as safeDisplayText } from "../shared/display-text.ts";
 import { isTrustedRecordedSessionFile } from "../shared/session-file-trust.ts";
 

@@ -13,8 +13,8 @@ assert.ok(agent, 'agent tree with session-stop.ts is present');
 // part of the public distribution, so tests stub its two imported packages.
 register('data:text/javascript,' + encodeURIComponent(`export function resolve(name,ctx,next){
  const sources={
- '@earendil-works/pi-coding-agent':'export function getAgentDir(){return ${JSON.stringify(path.join(template, 'agentFixture'))}};export class SettingsManager{static create(){return {getCompactionSettings(){return{};}};}}',
- '@earendil-works/pi-ai':'export function StringEnum(v){return v}'};
+ '@yunuspi/coding-agent':'export function getAgentDir(){return ${JSON.stringify(path.join(template, 'agentFixture'))}};export class SettingsManager{static create(){return {getCompactionSettings(){return{};}};}}',
+ '@yunuspi/ai':'export function StringEnum(v){return v}'};
  return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
 }`), import.meta.url);
 
