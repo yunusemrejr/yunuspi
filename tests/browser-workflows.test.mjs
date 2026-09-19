@@ -109,6 +109,7 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     assert.equal(challenge.humanHelp.kind, 'verification');
     const relay = await raw({ action: 'request_help', session, reason: 'What answer is shown in this fixture?' });
     assert.equal(relay.details.humanHelp.status, 'awaiting_user');
+    assert.equal(relay.details.lease.generation, challenge.lease.generation + 1, 'Parent-relayed help also renews the lease before returning the capture');
     let asked = false;
     const answer = await raw({ action: 'request_help', session, reason: 'What answer is shown in this fixture?' }, { ...ctx, hasUI: true, ui: { input: async (question, _, options) => { asked = true; assert.match(question, /Screenshot:/); assert.equal(options.timeout, 300000); const duplicate = await raw({ action: 'request_help', session, reason: 'Concurrent help' }); assert.equal(duplicate.details.humanHelp.status, 'awaiting_user'); return 'fixture answer'; } } });
     assert.ok(asked);
