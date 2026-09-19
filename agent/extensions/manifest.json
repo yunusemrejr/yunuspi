@@ -410,6 +410,8 @@
     "scripts/browser-session-runner.mjs",
     "scripts/browser-session-lease.mjs",
     "scripts/browser-diagnostics.mjs",
+    "scripts/browser-markers.mjs",
+    "scripts/browser-page-tools.mjs",
     "scripts/workspace-facts.mjs",
     "scripts/wait-condition.mjs",
     "extensions/pi-memory/priming.ts",

@@ -115,7 +115,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "browser-session-workflow", tools: ["browser_session"],
-		line: "Retain task authorization and destination rules; verify exact draft and account before submitting. Record outcomes in todo. Renew before lease expiry; after restart reacquire state and reconcile pending submissions.",
+		line: "Retain task authorization and destination rules; verify exact draft and account before submitting. Record outcomes in todo. Use fresh tab/ref targets after changes; wait for an observed condition. If humanHelp reports a blocking challenge, request_help once instead of retrying. Renew before lease expiry; after restart reacquire state and reconcile pending submissions.",
 		when: (args) => ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(String(args.action)),
 	},
 	{

@@ -805,7 +805,7 @@ Inspect host/session dependencies and device candidates before guarded operation
 
 #### web-and-media
 
-Search and read web sources, diagnose pages, inspect browser state and analyze or transform local media through bounded extension tools.
+Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.
 
 **Entrypoints:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`
 
@@ -825,6 +825,10 @@ Search and read web sources, diagnose pages, inspect browser state and analyze o
 - `url|urls`: Web or local source targets.
 - `mode`: Fetch mode. Values: `readable`, `raw`, `answer`.
 - `action`: Browser or media operation selected by the tool schema.
+- `session|tab|ref|frame`: Reuse owned browser handles and fresh DOM targets, including popup tabs and iframe ids.
+- `kind|state|timeoutMs`: Browser wait condition: element, text, URL, load or JavaScript predicate.
+- `query|offset|maxChars`: Search and paginate rendered page text with browser_session read.
+- `reason`: request_help asks the user about a blocking verification challenge with a screenshot.
 - `path|times|count|width|height`: Local media and frame bounds.
 
 **Related records:** `source-intelligence`, `safety-bounds`, `background-tasks`
@@ -880,7 +884,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 629; literal)
 - `bg_status` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 713; literal)
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
-- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 54; literal)
+- `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 55; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 206; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 303; definition)
@@ -1298,6 +1302,8 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/rpiv-todo/state/plan.ts`](../agent/extensions/rpiv-todo/state/plan.ts)
 - [`agent/scripts/auto-update.sh`](../agent/scripts/auto-update.sh)
 - [`agent/scripts/browser-diagnostics.mjs`](../agent/scripts/browser-diagnostics.mjs)
+- [`agent/scripts/browser-markers.mjs`](../agent/scripts/browser-markers.mjs)
+- [`agent/scripts/browser-page-tools.mjs`](../agent/scripts/browser-page-tools.mjs)
 - [`agent/scripts/browser-session-lease.mjs`](../agent/scripts/browser-session-lease.mjs)
 - [`agent/scripts/browser-session-runner.mjs`](../agent/scripts/browser-session-runner.mjs)
 - [`agent/scripts/compatibility/atomic-edit-preflight-test.mjs`](../agent/scripts/compatibility/atomic-edit-preflight-test.mjs)
