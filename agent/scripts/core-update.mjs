@@ -27,7 +27,10 @@ export function updateInvocation(args, agent = process.env.PI_CODING_AGENT_DIR |
     else if (args[i] === '--skip-needle') skipNeedle = true;
     else throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]');
   }
-  if (!source) return null;
+  if (!source) {
+    if (args.length) throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]');
+    return null;
+  }
   const manifest = JSON.parse(fs.readFileSync(path.join(source, 'core/coding-agent/package.json'), 'utf8'));
   if (manifest.name !== '@yunuspi/coding-agent') throw Error('Update source must own @yunuspi/coding-agent');
   const installer = path.join(source, 'scripts/install.mjs');

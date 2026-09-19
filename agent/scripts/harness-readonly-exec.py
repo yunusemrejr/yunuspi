@@ -191,7 +191,7 @@ def main():
     arguments = ['/usr/bin/bwrap', '--unshare-user', '--unshare-pid',
                  '--ro-bind', '/', '/', *writable,
                  *ssh_mounts,
-                 '--proc', '/proc', '--dev-bind', '/dev', '/dev',
+                 '--proc', '/proc', '--dev', '/dev',
                  '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
     try:
         os.execv(arguments[0], arguments)

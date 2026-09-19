@@ -24,7 +24,12 @@ test('every source compatibility check is shipped without patch application', ()
 });
 test('update has no default source and refuses old upstream advance options', () => {
  assert.equal(updateInvocation([]),null);
- for(const option of ['--force','--rehearse','--recover','--self','--all'])assert.throws(()=>updateInvocation([option]),/Usage/);
+ for(const option of ['--force','--rehearse','--recover','--self','--all','--offline','--skip-needle'])assert.throws(()=>updateInvocation([option]),/Usage/);
+});
+test('source-less update flags fail instead of launching an interactive Node process', () => {
+ const result=spawnSync(process.execPath,[path.join(agent,'scripts/core-update.mjs'),'--offline'],{encoding:'utf8',input:'console.log("unexpected child runtime");',timeout:5000});
+ assert.equal(result.status,1,result.stderr);assert.match(result.stderr,/Usage: yunuspi update --source/);
+ assert.doesNotMatch(result.stdout,/unexpected child runtime/);
 });
 test('explicit updates consume reviewed local YunusPi source and preserve installation backup', () => {
  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-update-source-'));

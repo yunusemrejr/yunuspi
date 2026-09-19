@@ -257,6 +257,15 @@ function reduceTaskMutation(
 			const current = state.tasks[idx];
 			if (current.status === "deleted")
 				return errorResult(state, `#${current.id} is already deleted`);
+			const dependent = state.tasks.find((task) =>
+				task.status !== "deleted" && task.blockedBy?.includes(current.id),
+			);
+			if (dependent) {
+				return errorResult(
+					state,
+					`Cannot delete #${current.id}; live task #${dependent.id} still depends on it. Remove the dependency first.`,
+				);
+			}
 			const updated: Task = { ...current, status: "deleted" };
 			const newTasks = [...state.tasks];
 			newTasks[idx] = updated;

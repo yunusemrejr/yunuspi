@@ -164,7 +164,9 @@ function copyTree(dir, prefix) {
    !allowedExt.has(path.extname(entry.name)) &&
    !/^(?:LICENSE|NOTICE|COPYING)(?:\..*)?$/.test(entry.name) &&
    ![".gitignore", "pre-push", "pre-commit"].includes(entry.name) &&
-   !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel)
+   !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel) &&
+   !/^core\/coding-agent\/src\/core\/export-html\/template\.(?:html|css)$/.test(rel) &&
+   rel !== "agent/skills/motion-graphics-production/assets/timeline-starter.html"
   )
    continue;
   let bytes = fs.readFileSync(p);

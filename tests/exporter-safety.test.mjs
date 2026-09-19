@@ -282,7 +282,14 @@ test("fork export selects the installation's owned source and rejects linked met
         fs.writeFileSync(path.join(directory, "identity.json"), JSON.stringify({ releaseAuthority: "yunusemrejr/yunuspi" }));
         fs.writeFileSync(path.join(directory, "coding-agent/package.json"), JSON.stringify({ name: "@yunuspi/coding-agent" }));
         fs.writeFileSync(path.join(directory, "coding-agent/src/cli.js"), `// ${body}\n`);
+        const assets = path.join(directory, "coding-agent/src/core/export-html");
+        fs.mkdirSync(assets, { recursive: true });
+        for (const ext of ["html", "css"]) fs.writeFileSync(path.join(assets, `template.${ext}`), `/* ${body} */`);
       }
+      const skillAssets = path.join(f.source, "skills/motion-graphics-production/assets");
+      fs.mkdirSync(skillAssets, { recursive: true });
+      fs.writeFileSync(path.join(skillAssets, "timeline-starter.html"), "<p>synthetic timeline</p>");
+      fs.writeFileSync(path.join(skillAssets, "private-session.html"), "<p>must remain excluded</p>");
       if (linked) {
         const manifest = path.join(f.source, "runtime/core/coding-agent/package.json");
         fs.unlinkSync(manifest);
@@ -295,6 +302,9 @@ test("fork export selects the installation's owned source and rejects linked met
       } else {
         assert.equal(result.status, 0, result.stderr);
         assert.equal(fs.readFileSync(path.join(f.output, "core/coding-agent/src/cli.js"), "utf8"), "// owned local fix\n");
+        for (const ext of ["html", "css"]) assert.equal(fs.readFileSync(path.join(f.output, `core/coding-agent/src/core/export-html/template.${ext}`), "utf8"), "/* owned local fix */");
+        assert.equal(fs.readFileSync(path.join(f.output, "agent/skills/motion-graphics-production/assets/timeline-starter.html"), "utf8"), "<p>synthetic timeline</p>");
+        assert.equal(fs.existsSync(path.join(f.output, "agent/skills/motion-graphics-production/assets/private-session.html")), false);
       }
     } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
   }

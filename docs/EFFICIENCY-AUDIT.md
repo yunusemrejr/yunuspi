@@ -60,3 +60,36 @@ assets. The owned-core build compiled 1,138 source files across six packages. Cl
 and staged Git privacy scans passed, along with offline compatibility and installation checks.
 Live activation verifies the committed source identity, normal launchers, all extension
 entrypoints and local helper health, while preserving private state and local overrides.
+
+## Follow-up lifecycle and release audit
+
+A subsequent bounded Luna audit started from `b0f85977b88866cacf2af9b9c7080bad79752779`.
+It examined orchestration and task dependencies, execution isolation, model refresh
+cancellation, memory and local intelligence, hook accounting, tool registration,
+and the installation/public-export boundary. This is targeted subsystem coverage,
+not a claim that every remaining bug or external-provider failure has been eliminated.
+
+The verified fixes are:
+
+- Background task output directories follow the current project and session;
+  telemetry launches honor the registry's configured child launcher.
+- Deleting a prerequisite still referenced by a live task is rejected. Removing
+  its dependency links and deleting it in an atomic batch remains supported.
+- Local model catalog callers can cancel independently. Canceled older requests
+  cannot overwrite a newer catalog when their response parsing completes late.
+- Guarded shell processes receive an isolated device filesystem, preventing writes
+  to the host's shared-memory directory through a writable device bind mount.
+- Public exports retain the session HTML/CSS templates and the referenced motion
+  starter. Unrelated HTML stays excluded. An unused core retry backup was removed.
+- Source updater flags without a source fail with usage guidance, rather than
+  starting a Node process that can consume terminal input as JavaScript.
+- Hook accounting removes indexes when their dispatch leaves the retained window,
+  while preserving duplicate counts for dispatches whose displayed rows were capped.
+
+Focused regression coverage includes installer rollback and private-state
+preservation, public-export privacy, core identity/session exports, background
+work, task graphs, local catalogs, real namespace isolation, Git/web/utility tools,
+and memory/project intelligence/Smol/Jev/Needle behavior. All 45 declared extension
+entrypoints loaded against the owned runtime with 91 unique tools and no duplicate
+registrations. Structural host verification passed. These checks do not establish
+live provider availability or production semantic quality for every local model.
