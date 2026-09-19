@@ -15,19 +15,39 @@ function mergeModels(baseline, dynamic) {
     }
     return merged;
 }
-function parseCatalog(providerId, value) {
-    const entries = Array.isArray(value)
-        ? value
-        : typeof value === "object" && value !== null && "models" in value && Array.isArray(value.models)
-            ? value.models
-            : typeof value === "object" && value !== null
-                ? Object.values(value)
-                : undefined;
-    if (!entries)
-        throw new Error(`Invalid model catalog for provider "${providerId}"`);
-    return entries
-        .filter((entry) => typeof entry === "object" && entry !== null && "id" in entry)
-        .map((model) => ({ ...model, provider: providerId }));
+// Validate network and disk at the same boundary. Additive catalog fields survive;
+// malformed rows cannot replace working built-ins or poison the next session.
+const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const positiveLimit = value => Number.isSafeInteger(value) && value > 0;
+function validCatalogModel(model) {
+    if (!isRecord(model) || typeof model.id !== "string" || !model.id.trim() || /[\u0000-\u001f\u007f-\u009f]/u.test(model.id) ||
+        typeof model.name !== "string" || typeof model.api !== "string" || !model.api || typeof model.baseUrl !== "string" ||
+        typeof model.reasoning !== "boolean" || !Array.isArray(model.input) || !model.input.length ||
+        !model.input.every(value => typeof value === "string") || !positiveLimit(model.contextWindow) || !positiveLimit(model.maxTokens) ||
+        !isRecord(model.cost) || !["input", "output", "cacheRead", "cacheWrite"].every(key => Number.isFinite(model.cost[key]) && model.cost[key] >= 0)) return false;
+    if (model.thinkingLevelMap !== undefined && (!isRecord(model.thinkingLevelMap) ||
+        !Object.values(model.thinkingLevelMap).every(value => value === null || typeof value === "string" && value.length > 0))) return false;
+    if (model.cost.tiers !== undefined && (!Array.isArray(model.cost.tiers) || !model.cost.tiers.every(tier =>
+        isRecord(tier) && Number.isFinite(tier.inputTokensAbove) && tier.inputTokensAbove >= 0 &&
+        ["input", "output", "cacheRead", "cacheWrite"].every(key => tier[key] === undefined || Number.isFinite(tier[key]) && tier[key] >= 0)))) return false;
+    if (model.cost.missing !== undefined && (!Array.isArray(model.cost.missing) || !model.cost.missing.every(key => typeof key === "string"))) return false;
+    if (model.compat !== undefined && (!isRecord(model.compat) || !Object.entries(model.compat).every(([key, value]) =>
+        !/^(supports|requires|sendSession)/.test(key) || typeof value === "boolean"))) return false;
+    if (model.samplingParams !== undefined && !isRecord(model.samplingParams)) return false;
+    try { if (!["https:", "http:"].includes(new URL(model.baseUrl).protocol)) return false; } catch { return false; }
+    return true;
+}
+function parseCatalog(providerId, value, strict = true) {
+    const entries = Array.isArray(value) ? value
+        : isRecord(value) && Array.isArray(value.models) ? value.models
+        : isRecord(value) ? Object.values(value) : [];
+    const models = new Map();
+    for (const model of entries) {
+        if (validCatalogModel(model) && !models.has(model.id))
+            models.set(model.id, { ...model, provider: providerId, maxTokens: Math.min(model.maxTokens, model.contextWindow) });
+    }
+    if (strict && models.size === 0) throw new Error(`Invalid or empty model catalog for provider "${providerId}"`);
+    return [...models.values()];
 }
 function remoteModels(entry, localGeneratedAt) {
     if (!entry)
@@ -45,7 +65,7 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
         getModels: () => mergeModels(provider.getModels(), dynamicModels),
         refreshModels: async (context) => {
             const stored = context.stored;
-            const restored = remoteModels(stored, localGeneratedAt).filter((model) => model.provider === provider.id);
+            const restored = parseCatalog(provider.id, remoteModels(stored, localGeneratedAt), false);
             if (!(await context.publish({
                 update: () => {
                     dynamicModels = restored;
@@ -58,12 +78,14 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
             if (!context.force &&
                 stored?.checkedAt !== undefined &&
                 stored.lastModified !== undefined &&
-                Date.now() - stored.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS) {
+                Date.now() >= stored.checkedAt &&
+                Date.now() - stored.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS &&
+                restored.length > 0) {
                 return;
             }
             // Only revalidate when a cached body backs the validator, so a 304 can never
             // leave the overlay empty.
-            const validator = stored?.models.length ? stored.etag : undefined;
+            const validator = restored.length ? stored?.etag : undefined;
             const url = new URL(`/api/models/providers/${encodeURIComponent(provider.id)}`, catalogBaseUrl);
             const response = await fetchWithRetry(url, {
                 headers: {

@@ -30,6 +30,18 @@ Free billing evidence still belongs to the live catalog: [OpenRouter](https://op
 
 Set `PI_MODEL_RESEARCH=off` to disable background research. No paid inference probes are run. The 500-route test records cached selector latency, with a 150 ms regression ceiling; this is a local fixture measurement, not a service latency guarantee.
 
+## Provider capability updates
+
+The parent refreshes live catalogs and the existing native catalog adapters for available providers at startup and at prompt boundaries after 15 minutes. Each adapter retains its own TTL; workers and offline sessions do not start automatic network discovery. Shutdown cancels outstanding discovery. Completed refreshes update the selected route's capacities and supported thinking level before the next prompt's context checks. Catalog disappearance never silently switches the user's route.
+
+Explicit `models.json` overrides remain authoritative. Otherwise, live capability metadata wins over stored snapshots: OpenRouter's advertised effort enum determines the available levels, Friendli's `reasoning_options` drives effort/toggle/budget controls, and Cerebras' public limits and supported parameters determine token limits and request fields. Missing metadata uses existing adapter defaults or dated facts; malformed catalogs retain prior usable data. Retired concrete OpenRouter IDs are removed from the live list while synthetic `~` aliases remain. Native catalogs validate network and disk records before applying them; unknown additive fields survive.
+
+Direct SDK calls and session/worker calls clamp requested effort through the same model capability map. Friendli's documented disable controls omit the unsupported `none` effort and use a zero reasoning budget plus its template toggle where advertised. A declared `thinkingTokenBudgetOff` supports this endpoint behavior without applying it to other providers. Prompt-cache keys remain stable per session; extended cache retention requires an exact supported OpenAI endpoint or explicit compatibility. Cache accounting and bounded retries retain their existing owners.
+
+Metadata cannot prove inference availability, undocumented capabilities, tokenizer accuracy, or future API compatibility. Unknown facts remain uncertain; explicit overrides and `/catalog-status` provide the existing correction and diagnostics paths. These changes do not infer capabilities from a new model's family name or spend inference tokens probing it.
+
+Sources checked 2026-09-19: [OpenRouter model schema](https://github.com/OpenRouterTeam/terraform-provider-openrouter/blob/main/docs/data-sources/model.md), [Friendli's provider integration](https://github.com/friendliai/hermes-friendli-provider), [Cerebras public catalog](https://api.cerebras.ai/public/v1/models), and [DeepSeek thinking protocol](https://api-docs.deepseek.com/guides/thinking_mode/). Regression coverage: `tests/provider-capabilities.test.mjs`, `agent/scripts/compatibility/live-models-refresh-test.mjs`, and `agent/scripts/compatibility/provider-cache-wire-test.mjs` use synthetic data and loopback requests.
+
 ## Choosing the form of assistance
 
 Automatic assistance uses one helper for a bounded independent investigation, a swarm for separable project investigations, and fusion for competing approaches or alternatives. It runs once per user input and does not delay the parent's first request. Explicit delegation requests are left to the parent to avoid launching a duplicate team; delegation/tool/route opt-outs still apply.

@@ -359,7 +359,7 @@ export const streamSimple = (model, context, options) => {
         toolChoice: options?.toolChoice,
     };
     const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
-    const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
+    const reasoningEffort = clampedReasoning === "off" ? "none" : clampedReasoning;
     return stream(model, context, {
         ...base,
         reasoningEffort,
@@ -413,11 +413,11 @@ function buildRequestBody(model, context, options, cacheSessionId, grammarToolIn
             supportsOpenAIGrammarTools,
         });
     }
-    if (options?.reasoningEffort !== undefined) {
-        const effort = options.reasoningEffort === "none"
-            ? (model.thinkingLevelMap?.off ?? "none")
-            : (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort);
-        if (effort !== null) {
+    if (model.reasoning && options?.reasoningEffort !== undefined) {
+        const level = clampThinkingLevel(model, options.reasoningEffort === "none" ? "off" : options.reasoningEffort);
+        const mapped = model.thinkingLevelMap?.[level];
+        const effort = mapped === undefined ? (level === "off" ? "none" : level) : mapped;
+        if (typeof effort === "string") {
             body.reasoning = {
                 effort,
                 summary: options.reasoningSummary ?? "auto",

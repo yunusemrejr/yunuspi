@@ -887,6 +887,9 @@ export class AgentSession {
             // Flush any pending bash and custom messages before the new prompt
             this._flushPendingBashMessages();
             this._flushPendingCustomMessages();
+            // Adopt completed catalog refreshes before context accounting and inference.
+            // Preserve the selected route; never switch providers after a catalog removal.
+            this._refreshCurrentModelFromRegistry();
             // Validate model
             if (!this.model) {
                 throw new Error(formatNoModelSelectedMessage());
@@ -1994,6 +1997,8 @@ export class AgentSession {
             return;
         }
         this.agent.state.model = refreshedModel;
+        if (clampThinkingLevel(refreshedModel, this.thinkingLevel) !== this.thinkingLevel)
+            this.setThinkingLevel(this.thinkingLevel);
     }
     _bindExtensionCore(runner) {
         const getCommands = () => {
