@@ -192,14 +192,16 @@ export function createMicroMetrics() {
 
 export type MicroMetrics = ReturnType<typeof createMicroMetrics>;
 
-let shared: MicroMetrics | undefined;
+// Jiti isolates extension modules; all producers and status readers share this
+// session collector, while already-running work can retain its old collector.
+const SHARED_METRICS = Symbol.for("yunus-pi.micro-metrics.v1");
+const processState = globalThis as typeof globalThis & { [SHARED_METRICS]?: MicroMetrics };
 
 export function microMetrics(): MicroMetrics {
-  if (!shared) shared = createMicroMetrics();
-  return shared;
+  return processState[SHARED_METRICS] ??= createMicroMetrics();
 }
 
 /** Session boundary: pending callers retain their original collector. */
 export function resetMicroMetrics(): void {
-  shared = undefined;
+  delete processState[SHARED_METRICS];
 }

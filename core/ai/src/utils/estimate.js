@@ -1,7 +1,11 @@
 const CHARS_PER_TOKEN = 4;
 const ESTIMATED_IMAGE_CHARS = 4800;
 export function calculateContextTokens(usage) {
-    return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+    // Match compaction accounting: malformed totals cannot hide usable input counts.
+    if (Number.isFinite(usage.totalTokens) && usage.totalTokens > 0)
+        return usage.totalTokens;
+    const component = (value) => Number.isFinite(value) && value >= 0 ? value : 0;
+    return component(usage.input) + component(usage.output) + component(usage.cacheRead) + component(usage.cacheWrite);
 }
 function safeJsonStringify(value) {
     try {

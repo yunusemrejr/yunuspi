@@ -20,6 +20,26 @@ const advisoryMod = await load("extensions/lib/micro-intelligence/advisory.ts");
 const reviewMod = await load("extensions/lib/micro-intelligence/review.ts");
 const statusMod = await load("extensions/lib/micro-intelligence/status.ts");
 
+test("isolated extensions report to one collector and session reset reaches every import", async () => {
+  const isolated = await import(pathToFileURL(path.join(agent, "extensions/lib/micro-intelligence/metrics.ts")) + "?extension-isolate");
+  metricsMod.resetMicroMetrics();
+  isolated.resetMicroMetrics();
+  try {
+    const previous = isolated.microMetrics();
+    previous.run("smol", 12, 3000);
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.smol.runs, 1, "status sees helpers in other extensions");
+    metricsMod.resetMicroMetrics();
+    const next = isolated.microMetrics();
+    assert.notEqual(next, previous);
+    assert.equal(next, metricsMod.microMetrics());
+    previous.run("smol", 8, 3000);
+    assert.equal(next.snapshot().helpers.smol.runs, 0, "captured work retains its original session collector");
+  } finally {
+    metricsMod.resetMicroMetrics();
+    isolated.resetMicroMetrics();
+  }
+});
+
 test("metrics record offers/runs/skips and render honest summaries", () => {
   const metrics = metricsMod.createMicroMetrics();
   metrics.offer("needle");

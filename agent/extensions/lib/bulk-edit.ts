@@ -28,8 +28,8 @@ export function applyPattern(content: string, regex: RegExp, replacement: string
   if (typeof replacement !== "string" || replacement.length > 1000) throw new Error("replacement must be a string up to 1000 characters");
   const matches = [...content.matchAll(regex)].length;
   if (!matches) return { updated: content, matches: 0 };
-  const repl = literal ? replacement.replaceAll("$", "$$") : replacement;
-  return { updated: content.replace(regex, repl), matches };
+  const updated = literal ? content.replace(regex, () => replacement) : content.replace(regex, replacement);
+  return { updated, matches };
 }
 
 /** First differing lines, bounded, as compact `- old` / `+ new` pairs. */
