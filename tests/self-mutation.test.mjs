@@ -349,6 +349,29 @@ guard.main()
  }
 });
 
+test("guarded commands cannot mutate host-writable device subtrees", (t) => {
+ const f = fixture();
+ const target = `/dev/shm/yunuspi-guard-${process.pid}-${Date.now()}`;
+ try {
+  const python = process.platform === "linux" ? "/usr/bin/python3" : "python3";
+  const result = spawnSync(
+   python,
+   ["-I", wrapper, f.protectedDir, "--", python, "-c", `open(${JSON.stringify(target)},'w').write('bad')`],
+   { cwd: f.project, encoding: "utf8" },
+  );
+  if (result.status !== 0 && /(?:bubblewrap|namespace|Operation not permitted|Permission denied)/i.test(result.stderr ?? "")) {
+   if (process.env.PI_REQUIRE_ISOLATION_TEST === "1") assert.fail(result.stderr);
+   t.skip("Real namespace integration unavailable on this host");
+   return;
+  }
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(target), false, "host /dev/shm must not be writable from the guarded child");
+ } finally {
+  try { fs.unlinkSync(target); } catch {}
+  f.close();
+ }
+});
+
 test("native guards distinguish protected inode aliases from ordinary project hardlinks", () => {
  const f = fixture();
  try {

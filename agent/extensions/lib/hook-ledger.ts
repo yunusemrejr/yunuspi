@@ -148,7 +148,7 @@ export function createHookLedger(
 
 	const dispatches = new Map<
 		string,
-		{ hook: string; eventId: string; rows: DispatchRow[]; firstMutator?: string }
+		{ hook: string; eventId: string; rows: DispatchRow[]; owners: Set<string>; firstMutator?: string }
 	>();
 	const counts = new Map<string, number>();
 	const toolCallOwners = new Map<string, Set<string>>();
@@ -163,7 +163,19 @@ export function createHookLedger(
 		while (dispatches.size > maxDispatches) {
 			const oldest = dispatches.keys().next().value as string | undefined;
 			if (oldest === undefined) break;
+			const entry = dispatches.get(oldest);
 			dispatches.delete(oldest);
+			if (!entry) continue;
+			for (const owner of entry.owners) {
+				const cKey = `${owner}${KEY_SEP}${entry.hook}${KEY_SEP}${entry.eventId}`;
+				counts.delete(cKey);
+			}
+			if (entry.hook === "tool_call") {
+				toolCallOwners.delete(entry.eventId);
+				toolCallBlocked.delete(entry.eventId);
+			} else if (entry.hook === "tool_result") {
+				toolResultOwners.delete(entry.eventId);
+			}
 		}
 	};
 
@@ -177,7 +189,7 @@ export function createHookLedger(
 		const dKey = dispatchKey(record.hook, eventId);
 		let entry = dispatches.get(dKey);
 		if (!entry) {
-			entry = { hook: record.hook, eventId, rows: [] };
+			entry = { hook: record.hook, eventId, rows: [], owners: new Set() };
 			dispatches.set(dKey, entry);
 			evict();
 		}
@@ -201,6 +213,7 @@ export function createHookLedger(
 		)
 			entry.firstMutator = record.owner;
 
+		entry.owners.add(record.owner);
 		const cKey = `${record.owner}${KEY_SEP}${record.hook}${KEY_SEP}${eventId}`;
 		counts.set(cKey, (counts.get(cKey) ?? 0) + 1);
 

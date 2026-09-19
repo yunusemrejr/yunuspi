@@ -43,13 +43,38 @@ export function registerLocalModels(pi:any,agentDir:string):string[] {
   const ids:string[]=[];
   for(const [id,name,fallback] of [['lmstudio','LM Studio','http://127.0.0.1:1234/v1'],['ollama-local','Ollama Local','http://127.0.0.1:11434/v1']]) {
     const config=providers[id]??{},base=loopbackBase(config.baseUrl??fallback);if(!base)continue;
-    let cache:any[]=[],last=0,pending:Promise<any[]>|undefined;
+    let cache:any[]=[],last=0;
+    // Refreshes may be requested concurrently by startup and a manual model
+    // reload. Keep the network request shared, but never let one caller's
+    // cancellation abort the request for the other callers.
+    let pending:{promise:Promise<any[]>;controller:AbortController;waiters:number}|undefined;
+    const awaitRefresh=(entry:{promise:Promise<any[]>;controller:AbortController;waiters:number},signal?:AbortSignal):Promise<any[]>=>{
+      entry.waiters++;
+      let released=false;
+      const release=()=>{
+        if(released)return;
+        released=true;
+        entry.waiters--;
+        if(entry.waiters===0&&!entry.controller.signal.aborted)entry.controller.abort();
+      };
+      if(!signal){return entry.promise.finally(release);}
+      if(signal.aborted){release();return Promise.resolve(cache);}
+      const result=new Promise<any[]>((resolve,reject)=>{
+        const cleanup=()=>signal.removeEventListener('abort',onAbort);
+        const onAbort=()=>{cleanup();release();resolve(cache);};
+        signal.addEventListener('abort',onAbort,{once:true});
+        entry.promise.then(value=>{cleanup();resolve(value);},error=>{cleanup();reject(error);});
+      });
+      return result.finally(release);
+    };
     const fetchModels=async(ctx:any)=>{
       if(ctx.signal?.aborted||ctx.allowNetwork===false||process.env.PI_OFFLINE==='1')return cache;
       if(!ctx.force&&Date.now()-last<15000)return cache;
-      if(pending)return pending;
+      if(pending&&!pending.controller.signal.aborted)return awaitRefresh(pending,ctx.signal);
+      if(pending?.controller.signal.aborted)pending=undefined;
+      const controller=new AbortController();
       const work=async()=>{
-        const signal=ctx.signal?AbortSignal.any([ctx.signal,AbortSignal.timeout(2000)]):AbortSignal.timeout(2000);
+        const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(2000)]);
         const key=ctx.credential?.type==='api_key'?ctx.credential.key:undefined;
         const headers=key?{Authorization:`Bearer ${key}`} : undefined;
         const get=async(endpoint:string)=>{
@@ -68,13 +93,23 @@ export function registerLocalModels(pi:any,agentDir:string):string[] {
             try{data=await get('/api/v1/models');}
             catch(error:any){if(error.status!==404)throw error;data=await get('/api/v0/models');}
           } else data=await get('/api/ps');
-          const next=mapLocalModels(id,data,config);if(ctx.signal?.aborted)return cache;
+          const next=mapLocalModels(id,data,config);
+          // A cancelled shared request may finish JSON parsing after a newer
+          // refresh has started. Never let that stale result overwrite it.
+          if(controller.signal.aborted)return cache;
           cache=next;last=Date.now();
           try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'ok',count:next.length});}catch{}
           return cache;
-        } catch { if(!ctx.signal?.aborted){cache=[];last=Date.now();try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
+        } catch { if(!controller.signal.aborted){cache=[];last=Date.now();try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
       };
-      pending=work();try{return await pending;}finally{pending=undefined;}
+      const promise=work();
+      pending={promise,controller,waiters:0};
+      // The controller is intentionally separate from every caller signal;
+      // cancellation happens only after the last waiter leaves.
+      const entry=pending;
+      const result=await awaitRefresh(entry,ctx.signal);
+      if(pending===entry&&entry.waiters===0)pending=undefined;
+      return result;
     };
     pi.registerProvider(id,{name,baseUrl:base.href,api:config.api??'openai-completions',
       apiKey:config.apiKey??'local-no-key',...(config.headers?{headers:config.headers}:{}),refreshModels:fetchModels});

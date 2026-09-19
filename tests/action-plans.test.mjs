@@ -26,6 +26,25 @@ test('public action plan graph is atomic, recoverable and actionable',()=>{
  assert.deepEqual(replayFromBranch({sessionManager:{getBranch:()=>branch}}),made.state);
 });
 
+test('action plans reject deleting a task that still blocks live work',()=>{
+ const empty={tasks:[],nextId:1};
+ const made=applyTaskMutation(empty,'batch',{operations:[
+  {action:'create',id:-1,subject:'Dependency'},
+  {action:'create',subject:'Dependent',blockedBy:[-1]},
+ ]});
+ const deleted=applyTaskMutation(made.state,'delete',{id:1});
+ assert.equal(deleted.op.kind,'error');
+ assert.match(deleted.op.message,/live task #2 still depends on it/);
+ assert.equal(made.state.tasks[0].status,'pending');
+ const cleaned=applyTaskMutation(made.state,'batch',{operations:[
+  {action:'update',id:2,removeBlockedBy:[1]},
+  {action:'delete',id:1},
+ ]});
+ assert.equal(cleaned.op.kind,'batch');
+ assert.equal(cleaned.state.tasks[0].status,'deleted');
+ assert.equal(cleaned.state.tasks[1].blockedBy,undefined);
+});
+
 const {miniSource,miniProjection,miniPotentialSavings,createMiniPreprocessor}=await import(pathToFileURL(path.join(agent,'extensions/lib/mini-preprocessor.ts')).href);
 const {scoreContext}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/context-salience.ts')).href);
 test('local selection protects evidence and supports meaningful free-route context savings',async()=>{

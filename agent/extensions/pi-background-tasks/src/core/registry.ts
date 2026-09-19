@@ -702,6 +702,7 @@ function noopOnChange(): void {
 export class BackgroundTaskRegistry {
   private readonly tasks = new Map<string, BgTask>();
   private runtimeDir: RuntimeDir | undefined;
+  private runtimeDirKey: string | undefined;
   private shuttingDown = false;
   private readonly spawn: BackgroundTaskSpawn;
   private readonly killProcess: KillProcessFn;
@@ -768,15 +769,20 @@ export class BackgroundTaskRegistry {
   }
 
   async ensureRuntimeDir(ctx: BackgroundTaskContext): Promise<RuntimeDir> {
-    if (this.runtimeDir) return this.runtimeDir;
+    // The extension registry survives session switches. Keep the cache tied to
+    // both the project and session so a task started after switching worktrees
+    // cannot write into the previous session's .pi/tasks directory.
     const sessionId = sanitizePathSegment(
       ctx.sessionId ?? `session-${String(process.pid)}`,
     );
+    const runtimeDirKey = `${ctx.cwd}\0${sessionId}`;
+    if (this.runtimeDir && this.runtimeDirKey === runtimeDirKey) return this.runtimeDir;
     const runId = `${sessionId}-${String(process.pid)}`;
     const runtimeDirAbs = join(ctx.cwd, ".pi", "tasks", runId);
     const runtimeDirDisplay = join(".pi", "tasks", runId);
     await mkdir(runtimeDirAbs, { recursive: true });
     this.runtimeDir = { abs: runtimeDirAbs, display: runtimeDirDisplay };
+    this.runtimeDirKey = runtimeDirKey;
     return this.runtimeDir;
   }
 
@@ -814,7 +820,7 @@ export class BackgroundTaskRegistry {
       isAgent && commandMayLaunchPiAgent(normalizedCommand, this.env);
     const piTelemetryLaunch =
       piTelemetryRequested && baseInvocation.dialect === "posix"
-        ? resolvePiLaunch({ platform: this.platform })
+        ? resolvePiLaunch({ platform: this.platform, env: this.env })
         : undefined;
 
     const dir = await this.ensureRuntimeDir(ctx);

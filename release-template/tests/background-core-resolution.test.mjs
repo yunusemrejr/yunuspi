@@ -4,8 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {EventEmitter} from 'node:events';
+import {createJiti} from 'jiti';
 import {resolvePiLaunch} from '../agent/extensions/pi-background-tasks/src/core/pi-launch.ts';
 import {resolvePiCliScript, getPiSpawnCommand} from '../agent/extensions/pi-subagents/src/runs/shared/pi-spawn.ts';
+
+const {BackgroundTaskRegistry}=await createJiti(import.meta.dirname).import('../agent/extensions/pi-background-tasks/src/core/registry.ts');
 
 test('subagents use the declared owned CLI when hosted through RPC or SDK modules', () => {
  const core=path.resolve(import.meta.dirname,'../core/coding-agent');
@@ -39,6 +43,35 @@ test('background CLI resolves the owned package on Linux and Windows without PAT
 test('background children retain explicitly configured installed launcher leases', () => {
  const launch=resolvePiLaunch({platform:'linux',env:{PI_SUBAGENT_PI_BINARY:'/fixture/agent/bin/yunuspi'}});
  assert.deepEqual(launch,{executable:'/fixture/agent/bin/yunuspi',argvPrefix:[],kind:'path'});
+});
+
+test('background registry keeps session directories isolated and resolves telemetry launcher from its environment', async () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-bg-registry-'));
+ try {
+  const child=new EventEmitter();child.pid=4242;child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>true;
+  let spawnOptions;
+  const launcher='/fixture/leased-yunuspi';
+  const registry=new BackgroundTaskRegistry({
+   env:{PI_SUBAGENT_PI_BINARY:launcher,PATH:process.env.PATH},
+   spawn:(_command,_args,options)=>{spawnOptions=options;return child},
+   sendCompletionNotification:()=>{},
+  });
+  const context=(cwd,sessionId)=>({cwd,sessionId,modelRegistry:{getAll:()=>[]}});
+  const first=await registry.ensureRuntimeDir(context(path.join(root,'first'),'session-a'));
+  const second=await registry.ensureRuntimeDir(context(path.join(root,'second'),'session-b'));
+  assert.notEqual(first.abs,second.abs);
+  assert.equal(second.abs.startsWith(path.join(root,'second')),true);
+  const task=await registry.startTask(context(path.join(root,'second'),'session-b'),'pi --print hello',{isAgent:true});
+  assert.equal(spawnOptions.env.PI_SUBAGENT_PI_BINARY,launcher);
+  const wrapper=fs.readdirSync(path.dirname(task.outputAbsPath)).find(name=>name.endsWith('.pi-telemetry-wrapper.cjs'));
+  assert.ok(wrapper);
+  assert.match(fs.readFileSync(path.join(path.dirname(task.outputAbsPath),wrapper),'utf8'),new RegExp(launcher.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&')));
+  const terminal=new Promise(resolve=>task.waiters.push(resolve));
+  child.emit('close',0,null);
+  await terminal;
+  await new Promise(resolve=>setImmediate(resolve));
+  await task.metadataWriteChain;
+ } finally { fs.rmSync(root,{recursive:true,force:true}); }
 });
 
 test('background package resolution rejects an unowned identity or escaping CLI target', () => {

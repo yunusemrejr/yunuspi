@@ -13,6 +13,7 @@ const {runPool,parseSelection} = await import(pathToFileURL(path.join(agent,"scr
 const {buildSkillIndex,rankSkills} = await import(pathToFileURL(path.join(agent,"extensions/lib/skill-relevance.ts")));
 const {SemanticIndex} = await import(pathToFileURL(path.join(agent,"extensions/pi-lens/semantic-radar/index.mjs")));
 const {assertNoStaleCheckoutPaths} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
+const {createHookLedger} = await import(pathToFileURL(path.join(agent,"extensions/lib/hook-ledger.ts")));
 
 test("fresh installations expose built-in search and economical child thinking",()=>{
   const settings=JSON.parse(fs.readFileSync(path.join(root,"config/settings.example.json"),"utf8"));
@@ -50,6 +51,27 @@ test("concurrent hook results emit once and optional telemetry cannot break tool
     fire("tool_call",{toolCallId:"child",toolName:"subagent"});
     assert.match(fire("tool_result",{toolCallId:"child",toolName:"subagent",isError:true,content:[]}).content[0].text,/successful siblings/);
   }finally{if(before===undefined)delete globalThis[sink];else globalThis[sink]=before;}
+});
+
+test("hook ledger eviction removes stale indexes with the bounded dispatch window",()=>{
+  const ledger=createHookLedger({maxDispatches:1,maxRows:4});
+  ledger.record({owner:"old",hook:"tool_call",eventId:"old-call"});
+  ledger.record({owner:"new",hook:"tool_call",eventId:"new-call"});
+  const snapshot=ledger.snapshot();
+  assert.equal(snapshot.dispatches,1);
+  assert.equal(snapshot.records,2);
+  assert.equal(snapshot.expectedPairs,1);
+  assert.equal(snapshot.duplicated.some(row=>row.eventId==="old-call"),false);
+});
+
+test("hook ledger eviction preserves duplicate counts inside retained dispatches",()=>{
+  const ledger=createHookLedger({maxDispatches:1,maxRows:1});
+  ledger.record({owner:"old",hook:"tool_call",eventId:"evicted"});
+  ledger.record({owner:"same",hook:"tool_call",eventId:"kept"});
+  ledger.record({owner:"same",hook:"tool_call",eventId:"kept"});
+  const snapshot=ledger.snapshot();
+  assert.equal(snapshot.duplicated[0]?.eventId,"kept");
+  assert.equal(snapshot.duplicated[0]?.count,2);
 });
 
 test("offline scheduler keeps explicit bounds and input ordering",async()=>{
