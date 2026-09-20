@@ -21,7 +21,8 @@ const cancelled = (signal: any) => { if (signal?.aborted) throw Error('Cancelled
 async function readArtifact(file: unknown, cwd: unknown, limit: number, prefix: boolean, signal: any) {
   if (typeof file !== 'string' || !file || file.length > 1024 || typeof cwd !== 'string' || !cwd) throw Error('A workspace file path and cwd are required');
   cancelled(signal);
-  const root = await fs.realpath(cwd), resolved = await fs.realpath(path.resolve(root,file));
+  const requested=path.resolve(cwd,file);
+  const root = await fs.realpath(cwd), resolved = await fs.realpath(requested);
   const relative = path.relative(root,resolved);
   if (relative === '..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative)) throw Error('File must remain inside the current workspace');
   // Nonblocking open prevents special files from hanging before the regular-file check.
@@ -42,8 +43,11 @@ async function readArtifact(file: unknown, cwd: unknown, limit: number, prefix: 
       size += bytesRead;
     }
     cancelled(signal);
-    const after=await handle.stat();
-    if (after.size!==stat.size || after.mtimeMs!==stat.mtimeMs || size!==buffer.length) throw Error('Artifact changed while being inspected; retry against a stable file');
+    const after=await handle.stat(),current=await fs.lstat(resolved);
+    const sameSnapshot=[after,current].every(s=>s.isFile()&&s.dev===stat.dev&&s.ino===stat.ino&&s.size===stat.size&&s.mtimeMs===stat.mtimeMs&&s.ctimeMs===stat.ctimeMs);
+    // Preserve the original request identity across leaf/ancestor/cwd symlink changes.
+    const sameTarget=await fs.realpath(requested)===resolved && await fs.realpath(cwd)===root;
+    if (!sameSnapshot || !sameTarget || size!==buffer.length) throw Error('Artifact changed while being inspected; retry against a stable file');
     return {bytes:buffer.subarray(0,size),fileBytes:stat.size,headerOnly:stat.size>size};
   } finally { await handle.close(); }
 }

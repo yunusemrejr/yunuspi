@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, ".."), path.resolve(root, "../..")]
   .find((dir) => existsSync(path.join(dir, "extensions/sys-probe.ts")));
 assert.ok(agent, "find live or exported agent sources");
-const { default: register, deviceFacts, hostSafetyFacts } = await import(pathToFileURL(path.join(agent, "extensions/sys-probe.ts")));
+const { default: register, deviceFacts, hostSafetyFacts, runSysProbe } = await import(pathToFileURL(path.join(agent, "extensions/sys-probe.ts")));
 const { sessionDependencySignals, deviceKind, defaultRouteInterfaces } = await import(pathToFileURL(path.join(agent, "extensions/lib/sys-probe.ts")));
 const { workspaceFacts } = await import(pathToFileURL(path.join(agent, "scripts/workspace-facts.mjs")));
 
@@ -37,9 +37,21 @@ test("session and route facts omit addresses and retain control-channel uncertai
   assert.deepEqual(defaultRouteInterfaces(v4), ["wlan0"]);
   assert.deepEqual(defaultRouteInterfaces(`${"0".repeat(32)} 00 ${"0".repeat(32)} 00 ${"1".repeat(32)} 00000001 00000000 00000000 00000003 wlan0`, true), ["wlan0"]);
   assert.equal(defaultRouteInterfaces(null), null);
-  assert.equal(defaultRouteInterfaces(Array.from({ length: 33 }, (_, i) => `net${i} 00000000 00000000 0003 0 0 100 00000000`).join("\n")), null, "an oversized default-route set remains unknown");
+  assert.equal(defaultRouteInterfaces(Array.from({ length: 33 }, (_, i) => `net${i} 00000000 00000000 0003 0 0 100 00000000 0 0 0`).join("\n")), null, "an oversized default-route set remains unknown");
   for (const name of ["ttyUSB0", "ttyACM0", "ttyAMA0", "gpiochip0", "i2c-1", "spidev0.1", "dri/renderD128"]) assert.ok(deviceKind(name));
   for (const name of ["sda", "mem", "tty", "../ttyUSB0", "ttyUSB0.bak"]) assert.equal(deviceKind(name), null);
+});
+
+test("malformed or incomplete route metadata stays unknown; valid empty tables remain distinct", () => {
+  const header = "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n";
+  const row = "wlan0 00000000 01020304 0003 0 0 100 00000000 0 0 0\n";
+  assert.deepEqual(defaultRouteInterfaces(header), []);
+  assert.deepEqual(defaultRouteInterfaces("", true), []);
+  for (const malformed of ["", "permission denied", header + "partial", row.replace("0003", "1oops"), row + "corrupt row", "x".repeat(4097)])
+    assert.equal(defaultRouteInterfaces(malformed), null, malformed.slice(0, 40));
+  const v6 = `${"0".repeat(32)} 00 ${"0".repeat(32)} 00 ${"1".repeat(32)} 00000001 00000000 00000000 00000003 wlan0`;
+  assert.equal(defaultRouteInterfaces(v6.replace('00000003 wlan0', '0000000z wlan0'), true), null);
+  assert.equal(defaultRouteInterfaces(v6 + '\npartial', true), null);
 });
 
 test("host safety metadata distinguishes default Wi-Fi and battery state without credentials or identifiers", async (t) => {
@@ -68,6 +80,8 @@ test("host safety metadata distinguishes default Wi-Fi and battery state without
   assert.equal((await hostSafetyFacts(undefined, dir)).power.supplies.find((x) => x.name === "BAT0").capacityPercent, null);
   await write("proc/net/route", "x".repeat(5000));
   assert.equal((await hostSafetyFacts(undefined, dir)).network.interfaces[0].defaultV4, null);
+  await write("proc/net/route", "partial route metadata");
+  assert.equal((await hostSafetyFacts(undefined, dir)).network.interfaces[0].defaultV4, null);
   await fs.unlink(path.join(dir, "sys/class/power_supply/BAT0/status"));
   await fs.symlink("serial_number", path.join(dir, "sys/class/power_supply/BAT0/status"));
   const linked = await hostSafetyFacts(undefined, dir);
@@ -81,6 +95,20 @@ test("host safety metadata distinguishes default Wi-Fi and battery state without
   assert.equal(missing.network.available, false);
   assert.equal(missing.power.available, false);
   await assert.rejects(hostSafetyFacts(AbortSignal.abort(), dir));
+});
+
+test("read-only discovery never executes inherited PATH wrappers", async (t) => {
+  const dir = await temporary(t);
+  const previous = process.env.PATH;
+  t.after(() => { if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous; });
+  for (const name of ['ps', 'git'])
+    await fs.writeFile(path.join(dir, name), '#!/bin/sh\n: > "${0%/*}/executed"\nprintf "PRIVATE-WRAPPER\\n"\n', {mode:0o700});
+  process.env.PATH = dir;
+  const processes = await runSysProbe('processes', 2);
+  const workspace = await workspaceFacts(dir);
+  assert.ok(processes.rows.length > 0 && processes.rows.length <= 2);
+  assert.doesNotMatch(JSON.stringify([processes, workspace]), /PRIVATE-WRAPPER/);
+  await assert.rejects(fs.stat(path.join(dir, 'executed')), {code:'ENOENT'});
 });
 
 test("registered probes cancel safely and inspect tools/devices without executing or opening them", async (t) => {
@@ -132,4 +160,12 @@ test("workspace deployment and embedded hints preserve unknown authority and omi
   await fs.mkdir(generic);
   await fs.writeFile(path.join(generic, "CMakeLists.txt"), "generic build");
   assert.deepEqual((await workspaceFacts(generic)).environmentEvidence, []);
+  const spoofed = path.join(dir, 'spoofed');
+  await fs.mkdir(spoofed);
+  for (const name of ['package.json', 'platformio.ini', 'vercel.json']) await fs.mkdir(path.join(spoofed, name));
+  for (const name of ['public_html', 'src']) await fs.writeFile(path.join(spoofed, name), 'PRIVATE-NOT-A-DIRECTORY');
+  const invalidKinds = await workspaceFacts(spoofed);
+  assert.deepEqual(invalidKinds.manifests, []);
+  assert.deepEqual(invalidKinds.directories, []);
+  assert.deepEqual(invalidKinds.environmentEvidence, []);
 });

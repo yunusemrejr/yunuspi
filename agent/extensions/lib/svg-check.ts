@@ -76,8 +76,10 @@ export async function inspectSvg(source: string) {
     const scalar='[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?';
     const valid=new RegExp(`^${scalar}(?:(?:\\s*,\\s*|\\s+)${scalar}){3}$`).test(value);
     const parts=value.split(/[\s,]+/).map(Number);
-    if(valid&&parts.every(Number.isFinite)&&parts[2]>0&&parts[3]>0)viewBox=parts;
-    else note('invalid-viewbox','viewBox needs four finite numbers with positive width and height.',0,'error');
+    if(valid&&parts.every(Number.isFinite)&&parts[2]>=0&&parts[3]>=0){
+      viewBox=parts;
+      if(parts[2]===0||parts[3]===0)note('empty-viewbox','Zero viewBox width or height disables rendering; verify that this is intentional.',0);
+    }else note('invalid-viewbox','viewBox needs four finite numbers with nonnegative width and height.',0,'error');
   }else note('missing-viewbox','No viewBox: verify responsive sizing and the intended coordinate space.',0);
   for(const {id,offset}of refs)if(!ids.has(id))note('missing-reference','A local fragment or accessible-name reference has no matching ID in this document.',offset,'error');
   if(root['aria-hidden']!=='true'&&!root['aria-label']?.trim()&&!root['aria-labelledby']?.trim()&&!titles)note('accessible-name','No local accessible-name cue: verify informative versus decorative use, including host markup.',0);

@@ -22,6 +22,8 @@ test('SVG checks actual references, malformed source and bounded review cues wit
   assert.equal(result.status,'issues');assert.equal(result.counts.filterPrimitives,1);assert.equal(globalThis.domainExecuted,undefined);
   assert.ok(!JSON.stringify(result).includes('example.invalid'),'does not echo URLs or source');
   assert.match(result.scope,/not certified/);
+  const hidden=await inspectSvg('<svg viewBox="0 0 0 24" aria-hidden="true"/>');
+  assert.equal(hidden.status,'inspected');assert.deepEqual(hidden.viewBox,[0,0,0,24]);assert.equal(hidden.findings.find(f=>f.key==='empty-viewbox').severity,'review','SVG 2 zero extent disables rendering without invalidating the attribute');
   for(const source of ['<svg><g></svg>','<svg><path>','<svg id=a/>','<svg id="a" id="b"/>','<svg/><svg/>','<html/>','<svg viewBox="0 0 -1 10"/>','<svg viewBox="0,,0,10,10"/>'])assert.equal((await inspectSvg(source)).status,'issues',source);
   assert.deepEqual(keys(await inspectSvg(svg('<!-- <script/> <use href="#no"/> -->'))),[],'comments are not interpreted as elements');
   const forward=await inspectSvg(svg('<use href="#later"/><path id="later"/>'));
@@ -96,6 +98,8 @@ test('successful SVG saves run a bounded full-file check while unrelated and fai
   assert.ok(result.details.svgCheck.findingKeys.length<=3);
   fs.writeFileSync(path.join(cwd,'drawing.svg'),svg(''));
   const clean=await call('drawing.svg');assert.equal(clean.details.svgCheck.status,'inspected');assert.equal(clean.details.svgCheck.errorCount,0);assert.equal(clean.content,originalContent,'no noise for no demonstrated error');
+  fs.writeFileSync(path.join(cwd,'drawing.svg'),'<svg viewBox="0 0 0 24" aria-hidden="true"/>');
+  const hidden=await call('drawing.svg');assert.equal(hidden.details.svgCheck.errorCount,0);assert.equal(hidden.content,originalContent,'intentional zero extent is not an automatic error');
   assert.equal(originalDetails.svgCheck,undefined,'does not mutate upstream result');
   const originalRealpath=fs.promises.realpath;let reads=0;
   fs.promises.realpath=async()=>{reads++;throw Error('unexpected I/O');};
@@ -130,4 +134,46 @@ test('automatic SVG receipts never label missing, oversized, malformed or unstab
   };
   try{assert.equal((await call('changing.svg')).details.svgCheck.status,'unavailable','concurrent mutation cannot produce a checked snapshot');}
   finally{fs.promises.open=originalOpen;}
+  for(const mutation of ['same-size-preserved-time','atomic-replacement']){
+    const file=path.join(workspace,'changing.svg'),original=svg('<g/>'),changed=svg('<a/>');
+    fs.writeFileSync(file,original);fs.utimesSync(file,new Date(1000000000000),new Date(1000000000000));
+    const before=fs.statSync(file);
+    fs.promises.open=async(...args)=>{
+      const handle=await originalOpen(...args),read=handle.read.bind(handle);
+      handle.read=async(...readArgs)=>{
+        const result=await read(...readArgs);
+        if(mutation==='atomic-replacement'){
+          const replacement=path.join(workspace,'replacement.svg');fs.writeFileSync(replacement,changed);fs.utimesSync(replacement,before.atime,before.mtime);fs.renameSync(replacement,file);
+        }else{fs.writeFileSync(file,changed);fs.utimesSync(file,before.atime,before.mtime);}
+        return result;
+      };
+      return handle;
+    };
+    try{assert.equal((await call('changing.svg')).details.svgCheck.status,'unavailable',mutation+' must not attest to stale saved-file bytes');}
+    finally{fs.promises.open=originalOpen;}
+  }
+});
+
+test('artifact snapshots recheck leaf, ancestor and workspace symlink targets',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'svg-path-snapshot-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const left=path.join(root,'left'),right=path.join(root,'right');fs.mkdirSync(left);fs.mkdirSync(right);
+  fs.writeFileSync(path.join(left,'drawing.svg'),svg(''));fs.writeFileSync(path.join(right,'drawing.svg'),svg('<use href="#missing"/>'));
+  const hooks=new Map();register({registerTool(){},on:(name,handler)=>hooks.set(name,handler)});
+  const call=(cwd,file)=>hooks.get('tool_result')({toolName:'write',input:{path:file},content:[],details:{}},{cwd});
+  const originalOpen=fs.promises.open;
+  for(const kind of ['leaf','ancestor','workspace','workspace-absolute-input']){
+    const leaf=kind==='leaf',alias=path.join(root,leaf?'selected.svg':'selected');
+    fs.symlinkSync(leaf?path.join(left,'drawing.svg'):left,alias);
+    const cwd=kind.startsWith('workspace')?alias:root;
+    const request=kind==='workspace-absolute-input'?path.join(left,'drawing.svg'):kind==='workspace'?'drawing.svg':leaf?'selected.svg':'selected/drawing.svg';
+    const link=alias;
+    assert.equal((await call(cwd,request)).details.svgCheck.status,'inspected','unchanged in-workspace alias is readable');
+    fs.promises.open=async(...args)=>{
+      const handle=await originalOpen(...args),read=handle.read.bind(handle);
+      handle.read=async(...readArgs)=>{const result=await read(...readArgs);fs.unlinkSync(link);fs.symlinkSync(leaf?path.join(right,'drawing.svg'):right,link);return result;};
+      return handle;
+    };
+    try{assert.equal((await call(cwd,request)).details.svgCheck.status,'unavailable',kind+' retarget must invalidate the old snapshot');}
+    finally{fs.promises.open=originalOpen;fs.unlinkSync(link);}
+  }
 });

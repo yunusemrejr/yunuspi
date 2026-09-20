@@ -530,6 +530,12 @@ function assessShellMutation(
 		let childCwd = state.cwd;
 		let name = path.basename(shellValue(args[i++], state) ?? "");
 		let elevated = false;
+		const envAssignment = (raw: string): [string, string | undefined] | undefined => {
+			const lexical = /^([A-Za-z_]\w*)=(.*)$/s.exec(raw);
+			if (lexical) return [lexical[1], shellValue(lexical[2], state)];
+			const evaluated = /^([A-Za-z_]\w*)=(.*)$/s.exec(shellValue(raw, state) ?? "");
+			if (evaluated) return [evaluated[1], evaluated[2]];
+		};
 		while (
 			[
 				"command",
@@ -548,21 +554,31 @@ function assessShellMutation(
 			if (name === "sudo" || name === "doas") elevated = true;
 			while (
 				i < args.length &&
-				(args[i].startsWith("-") || /^[A-Za-z_]\w*=/.test(args[i]))
+				((shellValue(args[i], state) ?? "").startsWith("-") || /^[A-Za-z_]\w*=/.test(args[i]) || name === "env" && envAssignment(args[i]) !== undefined)
 			) {
-				const option = args[i++];
+				const rawOption = args[i++];
+				const assignment = name === "env" ? envAssignment(rawOption) : undefined;
+				if (assignment) { childEnvironment[assignment[0]] = assignment[1]; continue; }
+				const option = shellValue(rawOption, state);
+				if (option === undefined) { uncertain(name, "Wrapper option is unresolved"); return; }
+				if (option === "--") break;
+				// These wrapper modes only describe a command; substitutions above
+				// are still assessed because the shell evaluates them first.
+				if (name === "command" && /^-[pvV]*[vV][pvV]*$/.test(option) ||
+					name === "sudo" && (option === "--list" || /^-[ABbEHknPSlv]*l[ABbEHknPSlv]*$/.test(option))) return;
 				if (name === "env") {
-					const assignment = /^([A-Za-z_]\w*)=(.*)$/s.exec(option);
-					if (assignment)
-						childEnvironment[assignment[1]] = shellValue(assignment[2], state);
 					if (option === "-i" || option === "--ignore-environment")
 						childEnvironment = {};
-					if (option === "-u" || option === "--unset")
-						delete childEnvironment[args[i]];
+					if (option === "-u" || option === "--unset") {
+						const key = shellValue(args[i] ?? "", state);
+						if (key === undefined) { uncertain("env", "Environment removal is unresolved"); return; }
+						delete childEnvironment[key];
+					}
 					if (option.startsWith("--unset="))
 						delete childEnvironment[option.slice(8)];
-					if (option === "-S" || option === "--split-string") {
-						const script = shellValue(args[i++] ?? "", state);
+					if (option === "-S" || option === "--split-string" || option.startsWith("--split-string=") || /^-S./s.test(option)) {
+						const script = option.startsWith("--split-string=") ? option.slice(15)
+							: /^-S./s.test(option) ? option.slice(2) : shellValue(args[i++] ?? "", state);
 						if (script === undefined)
 							uncertain("env -S", "Split command is unresolved");
 						else
@@ -577,7 +593,7 @@ function assessShellMutation(
 						return;
 					}
 					if (option.startsWith("--chdir=")) {
-						const dest = shellValue(option.slice(8), state);
+						const dest = option.slice(8);
 						try {
 							childCwd =
 								dest !== undefined
@@ -603,14 +619,25 @@ function assessShellMutation(
 					(["sudo", "doas"].includes(name) &&
 						["-u", "-g", "-h", "-p", "-C", "-D", "-R", "--user", "--group", "--host", "--prompt", "--close-from", "--chdir", "--chroot"].includes(option)) ||
 					(name === "env" &&
-						["-u", "--unset", "-C", "--chdir"].includes(option)) ||
+						["-u", "--unset", "-C", "--chdir", "-a", "--argv0", "-f", "--file"].includes(option)) ||
+					(name === "exec" && option === "-a") ||
 					(name === "nice" && ["-n", "--adjustment"].includes(option)) ||
 					(name === "stdbuf" && ["-i", "-o", "-e", "--input", "--output", "--error"].includes(option)) ||
 					(name === "timeout" && ["-s", "-k", "--signal", "--kill-after"].includes(option))
 				)
 					i++;
 			}
+			// env still accepts assignments after its option terminator.
+			if (name === "env") while (i < args.length) {
+				const assignment = envAssignment(args[i]);
+				if (!assignment) break;
+				childEnvironment[assignment[0]] = assignment[1]; i++;
+			}
 			if (name === "timeout") i++;
+			if (i < args.length && shellValue(args[i], state) === undefined) {
+				uncertain(name, "Wrapped command or option is unresolved; use explicit operands");
+				return;
+			}
 			name = path.basename(shellValue(args[i++] ?? "", state) ?? "");
 		}
 		mutationCwd = childCwd;
@@ -640,11 +667,14 @@ function assessShellMutation(
 			while (at < values.length && values[at]?.startsWith("-")) {
 				const option = values[at++];
 				if (option === "--") break;
-				if (["-a", "--arg-file", "-d", "--delimiter", "-I", "-L", "-n", "-P", "-s", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"].includes(option!)) at++;
+				if (["-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "-P", "-s", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"].includes(option!)) at++;
 			}
 			// Dynamic stdin operands cannot be resolved, but a literal dangerous
 			// executable must not evade host preflight by using an xargs wrapper.
 			note(hostOperationRisk(path.basename(values[at] ?? ""), [...values.slice(at + 1), undefined]));
+			if (/^(?:command|exec|sudo|doas|env|nohup|timeout|nice|stdbuf|setsid|busybox|bash|sh|dash|zsh|ksh|python[\d.]*|xargs)$/.test(path.basename(values[at] ?? "")))
+				note(assessShellMutation([...operands.slice(at), '"${__PI_XARGS_OPERAND}"'].join(" "), state.cwd ?? cwd,
+					{ ...childEnvironment, __PI_XARGS_OPERAND: undefined }, depth + 1));
 		}
 		if (elevated && /^(?:bash|sh|dash|zsh|python[\d.]*|node|npm|npx|pnpm|yarn|pytest|make|ctest|cargo|go)$/.test(name))
 			uncertain(name, "Elevated scripts, builds and tests can change the host beyond this command's visible operands. Inspect the entrypoint, device/network access and recovery first; prefer an unprivileged focused check or sandbox_run", values.every(value => value !== undefined));
