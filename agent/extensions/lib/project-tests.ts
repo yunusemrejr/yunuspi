@@ -8,13 +8,15 @@ import { Type } from 'typebox';
 import { projectTestFacts, isProjectTestSource } from '../../scripts/workspace-facts.mjs';
 import { tokenizeSimple } from './bash-routing.ts';
 import { registerContinuationSource } from './continuation-notice.ts';
+import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
 
 const ENTRY = 'project-test-checkpoint-v1';
 const MAX_FOLLOWUPS = 2;
 type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string };
 type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[] };
-type State = { root: string; revision: number; changed: string[]; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
-const fresh = (root = ''): State => ({ root, revision: 0, changed: [], checks: [], evidence: [], followups: 0, paused: false, optedOut: false });
+type ChangeAttribution = { status: 'current_session' | 'another_session' | 'unattributed'; sessionId?: string; detail?: string };
+type State = { root: string; revision: number; changed: string[]; attribution: Record<string, ChangeAttribution>; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
+const fresh = (root = ''): State => ({ root, revision: 0, changed: [], attribution: {}, checks: [], evidence: [], followups: 0, paused: false, optedOut: false });
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 /** Stable identity of the observed sources: sorted path:hash entries hashed.
  * Revision counters reset across scopes and reloads; the tree hash is what
@@ -82,6 +84,23 @@ function sanitizeRestoredChecks(checks: unknown, revision: number): Check[] {
       ...(typeof candidate.tree === 'string' ? { tree: candidate.tree } : {}) });
   }
   return out;
+}
+
+function sanitizeRestoredAttribution(value: unknown, changed: string[]): Record<string, ChangeAttribution> {
+	if (!value || typeof value !== 'object') return {};
+	const allowed = new Set(changed);
+	const result: Record<string, ChangeAttribution> = {};
+	for (const [file, raw] of Object.entries(value as Record<string, unknown>)) {
+		if (!allowed.has(file) || !raw || typeof raw !== 'object') continue;
+		const candidate = raw as Partial<ChangeAttribution>;
+		if (!['current_session', 'another_session', 'unattributed'].includes(candidate.status ?? '')) continue;
+		result[file] = {
+			status: candidate.status as ChangeAttribution['status'],
+			...(typeof candidate.sessionId === 'string' ? { sessionId: candidate.sessionId.slice(0, 160) } : {}),
+			...(typeof candidate.detail === 'string' ? { detail: candidate.detail.slice(0, 240) } : {}),
+		};
+	}
+	return result;
 }
 
 /** A check receipt must describe the command that actually ran. Reject shell
@@ -218,12 +237,17 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   const discover = options.discover ?? projectTestFacts;
   const enabled = () => (process.env.PI_PROJECT_TESTS ?? 'on').toLowerCase() !== 'off';
   const capable = () => pi.getActiveTools?.().includes('project_tests') && pi.getActiveTools?.().some((t: string) => ['bash', 'bg_run'].includes(t));
-  const save = () => { try { pi.appendEntry?.(ENTRY, { ...state, changed: state.changed.slice(-128), checks: state.checks.slice(-32),
+  const save = () => { try { pi.appendEntry?.(ENTRY, { ...state, changed: state.changed.slice(-128), attribution: Object.fromEntries(state.changed.slice(-128).map(file => [file, state.attribution[file]]).filter(([, value]) => value)), checks: state.checks.slice(-32),
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => state.changed.includes(file)).slice(-128)) }); } catch { /* history persistence is best effort */ } };
-  const changed = (files: string[]) => {
+  const changed = (files: string[], ctx?: any) => {
     if (!files.length) return;
     state.revision++;
     state.changed = [...new Set([...state.changed, ...files])].slice(-128);
+    for (const file of files) {
+      const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
+      state.attribution[file] = attributeWorkspacePath(ctx?.cwd ?? state.root, sid, file);
+    }
+    for (const file of Object.keys(state.attribution)) if (!state.changed.includes(file)) delete state.attribution[file];
     notedRevision = -1;
     // Hash eagerly at change time: after a reload the in-memory map is gone,
     // so only hashes persisted alongside the change can prove the tree is
@@ -272,7 +296,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         changed([...paths].filter(file => (observeChanges || state.changed.includes(file))
           && (next.sources[file] !== undefined || !next.truncated)
           && (next.sources[file] !== baseline![file] || currentHashes[file] && hashes[file] && currentHashes[file] !== hashes[file])
-          && (!currentHashes[file] || currentHashes[file] !== hashes[file])));
+          && (!currentHashes[file] || currentHashes[file] !== hashes[file])), ctx);
       }
       Object.assign(hashes, currentHashes);
       for (const file of Object.keys(hashes)) if (!(file in nextSources)) delete hashes[file];
@@ -353,12 +377,12 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           restoredChecks = true;
           restoredTree = data.treeComplete === true && typeof data.tree === 'string' ? data.tree : undefined;
           hashes = verified;
-          state = { ...fresh(data.root), revision: data.revision, changed: restoredChanged,
+          state = { ...fresh(data.root), revision: data.revision, changed: restoredChanged, attribution: sanitizeRestoredAttribution((data as any)?.attribution, restoredChanged),
             assessment: sanitizeRestoredAssessment((data as any)?.assessment, data.revision),
             checks: sanitizeRestoredChecks((data as any)?.checks, data.revision),
             optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), evidence, paused: true };
         } else {
-          state = { ...fresh(data.root), revision: data.revision + 1, changed: restoredChanged,
+          state = { ...fresh(data.root), revision: data.revision + 1, changed: restoredChanged, attribution: sanitizeRestoredAttribution((data as any)?.attribution, restoredChanged),
             optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), evidence, paused: true };
         }
         pauseReason = 'reload';
@@ -381,7 +405,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         // late old check still cannot collide with the new scope's revision.
         epoch++; starts.clear(); earlyTerminals.clear();
         const carry = [...state.evidence, ...state.checks.filter(c => c.outcome === 'passed' && typeof c.tree === 'string')].slice(-32);
-        const optedOut = state.optedOut; state = fresh(state.root); state.optedOut = optedOut; state.evidence = carry;
+        const optedOut = state.optedOut; const attribution = state.attribution; state = fresh(state.root); state.optedOut = optedOut; state.evidence = carry; state.attribution = attribution;
       }
       state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1; delivered = '';
       if (typeof event.text === 'string') {
@@ -424,7 +448,11 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           const relative = path.relative(state.root || ctx.cwd, path.resolve(ctx.cwd, raw));
           if (!relative.startsWith('../') && !path.isAbsolute(relative) && isProjectTestSource(relative) && (before === state.revision || !state.changed.includes(relative))) {
             const current = projectContentHash(state.root || ctx.cwd, relative);
-            if (!current || current !== previousHash) changed([relative]);
+            if (!current || current !== previousHash) {
+              const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
+              if (sid) recordWorkspaceMutation(ctx.cwd, sid, relative, event.toolName);
+              changed([relative], ctx);
+            }
           }
         }
       }

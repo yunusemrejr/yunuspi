@@ -55,17 +55,55 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
 }
 
 /** Parent-supplied outcome evidence (renders, logs, test output) so reviewers
- * judge behavior instead of inferring it from source. Same path rules as
- * findings: relative, bounded, no parent traversal. Invalid entries drop. */
+ * judge behavior instead of inferring it from source. Validation is explicit:
+ * a path must be a regular file inside the project, not merely a normalized
+ * string. The legacy helper remains available for callers that only need the
+ * syntax filter; the tool path uses validateReviewEvidence and reports every
+ * rejected entry to the model. */
 export function validReviewEvidence(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  for (const entry of value.slice(0, 8)) {
-    const file = normalizeReviewPath(entry);
-    if (!file) continue;
-    if (!out.includes(file)) out.push(file);
-  }
-  return out;
+	if (!Array.isArray(value)) return [];
+	const out: string[] = [];
+	for (const entry of value.slice(0, 8)) {
+		const file = normalizeReviewPath(entry);
+		if (!file) continue;
+		if (!out.includes(file)) out.push(file);
+	}
+	return out;
+}
+
+export function validateReviewEvidence(root: string, value: unknown): { paths: string[]; rejected: string[] } {
+	const paths: string[] = [], rejected: string[] = [];
+	if (value === undefined) return { paths, rejected };
+	if (!Array.isArray(value)) return { paths, rejected: ["evidence must be an array"] };
+	for (const entry of value.slice(0, 8)) {
+		const display = typeof entry === "string" ? entry.slice(0, 256) : String(entry).slice(0, 256);
+		const file = normalizeReviewPath(entry);
+		if (!file) { rejected.push(`${display}: invalid relative path`); continue; }
+		const absolute = path.resolve(root, file);
+		const relative = path.relative(root, absolute);
+		if (relative.startsWith("..") || path.isAbsolute(relative)) { rejected.push(`${display}: outside project root`); continue; }
+		try {
+			const stat = fs.lstatSync(absolute);
+			if (!stat.isFile() || stat.isSymbolicLink()) { rejected.push(`${file}: not a regular project file`); continue; }
+		} catch {
+			rejected.push(`${file}: file does not exist`);
+			continue;
+		}
+		try {
+			const real = fs.realpathSync(absolute);
+			if (!insideRoot(root, real)) { rejected.push(`${file}: resolves outside project root`); continue; }
+		} catch {
+			rejected.push(`${file}: could not resolve file`);
+			continue;
+		}
+		if (!paths.includes(file)) paths.push(file);
+	}
+	return { paths, rejected };
+}
+
+function insideRoot(root: string, candidate: string): boolean {
+	const relative = path.relative(path.resolve(root), path.resolve(candidate));
+	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 /** Bound even a faulty service that fails to honor AbortSignal. Its late result
  * has no path back into checkpoint state; the native executor still owns kill. */
@@ -125,7 +163,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
   let truncated = false, delivered = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
-  let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [];
+	let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [], evidenceRejected: string[] = [];
   let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   // File -> last confirmed content hash. Shared by the discovery pass and the
@@ -137,7 +175,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("review", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
-  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow, dispatchGap, reviewedEvidence, reviewedEvidencePaths,
+  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow, dispatchGap, reviewedEvidence, reviewedEvidencePaths, evidenceRejected,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
   const invalidate = (files: string[]) => {
     if (!files.length) return;
@@ -149,7 +187,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file}))).slice(0,12);
   const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
     ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
-    reason: reason || dispatchGap || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''), truncated: truncated || scopeOverflow,
+    reason: reason || dispatchGap || (evidenceRejected.length ? `Outcome evidence rejected: ${evidenceRejected.join(' ').slice(0, 1000)}` : '') || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''),
+    ...(evidenceRejected.length ? { evidenceRejected } : {}), truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history), historicalSamples: history.length,
     patterns: patternReport(),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. An incomplete review can retry within its round budget when an explicit call supplies new or updated outcome evidence. Tests, visual evidence and deployed behavior require their own observations.' });
@@ -174,7 +213,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const noteDisposition = () => {
     noteHealth('review.disposition', { decision: disposition, count: reports.flatMap(r => r.findings).filter(f => f.severity === 'blocking').length });
   };
-  const run = async (ctx: any, signal?: AbortSignal, automatic = false, evidence: string[] = []) => {
+  const run = async (ctx: any, signal?: AbortSignal, automatic = false, evidence: string[] = [], rejectedEvidence: string[] = []) => {
     const entryGeneration = generation;
     await refresh(ctx);
     if (entryGeneration !== generation || signal?.aborted || ctx.signal?.aborted) return summary();
@@ -213,16 +252,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     } else {
       try { shadowPlane.shadow(reviewRoundIntent({ revision: rev, round: rounds + 1, automatic, files: changed.length, task })); } catch { /* observation never affects review */ }
     }
-    dispatchGap = ''; disposition = ''; reason = '';
+		dispatchGap = ''; disposition = ''; reason = ''; evidenceRejected = rejectedEvidence.slice(0, 8);
     rounds++; reviewedEvidence = evidenceKey; reviewedEvidencePaths = [...evidence]; save();
     const operation = (async () => {
       const context = options.context ?? (globalThis as any)[QUALITY_PROJECT_CONTEXT];
       try {
-        const info = await withinDeadline(Promise.resolve(context?.({ action:'read', files:changed, task }, ctx, combined)),combined);
-        if (ticket !== generation || combined.aborted) return summary();
-        graph = typeof info?.graph === 'string' ? info.graph.slice(0,5000) : graph;
-        history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
-      } catch {}
+		const info = await withinDeadline(Promise.resolve(context?.({ action:'read', files:changed, task }, ctx, combined)),combined);
+		if (ticket !== generation) return summary();
+		graph = typeof info?.graph === 'string' ? info.graph.slice(0,5000) : graph;
+		history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
+	  } catch {}
       const aspects = reviewAspects(changed,task,history);
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
       // Admit each completed aspect before the shared deadline. A slow peer
@@ -246,8 +285,11 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         const result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS, onResult, automatic, evidence }, ctx, combined)),combined);
         if (Array.isArray(result)) result.forEach(onResult);
       } catch { failure = combined.aborted ? 'The review deadline expired before this aspect completed.' : 'The native quality review runner failed before returning this aspect.'; }
-      if (ticket !== generation || !active || paused || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
-      await refresh(ctx);
+		// A user/session cancellation discards the in-flight turn. The local
+		// deadline is different: it must settle as an explicit unknown gap so a
+		// spent round cannot disappear as if it never ran.
+		if (ticket !== generation || !active || paused || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
+		await refresh(ctx);
       if (ticket !== generation || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       const evidenceChanged = evidence.length > 0 && evidenceKey !== outcomeEvidenceKey(root, evidence);
       const received: ReviewReport[] = aspects.map(a => {
@@ -283,7 +325,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const api = {
     observe(facts: any, observeChanges: boolean) {
       if (!active || !enabled()) return;
-      if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; refunded = 0; history = []; scopeOverflow = false; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = []; patterns.clear(); hashes = {}; }
+    if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; refunded = 0; history = []; scopeOverflow = false; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; patterns.clear(); hashes = {}; }
       root = facts.root; truncated = facts.truncated === true;
       if (truncated && disposition === 'accepted') { disposition = ''; reviewed = -1; reason = 'Current source discovery is incomplete; earlier acceptance cannot establish the current scope.'; }
       const next = facts.reviewSources ?? {};
@@ -316,7 +358,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
       cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; refunded = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
-      scopeOverflow = false; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = [];
+      scopeOverflow = false; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = [];
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
       if (data?.root === root && Number.isSafeInteger(data.revision) && Array.isArray(data.changed)) {
         const restoredChanged = data.changed.filter((f:any) => typeof f === 'string' && isProjectReviewSource(f)).slice(-128);
@@ -334,6 +376,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         dispatchGap = typeof data.dispatchGap === 'string' ? data.dispatchGap.slice(0, 1200) : '';
         reviewedEvidence = typeof data.reviewedEvidence === 'string' ? data.reviewedEvidence.slice(0, 64) : '';
         reviewedEvidencePaths = validReviewEvidence(data.reviewedEvidencePaths);
+        evidenceRejected = Array.isArray(data.evidenceRejected) ? data.evidenceRejected.filter((entry:any) => typeof entry === 'string').slice(-8).map((entry:string) => entry.slice(0, 320)) : [];
         if (verified && (data.disposition === 'accepted' || data.disposition === 'blocked')) {
           // An acceptance replays only alongside its own reports; a recorded
           // evidence gap stays a gap, never a pass.
@@ -362,7 +405,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     input(event: any) {
       if (event.source === 'extension') return;
       try { shadowPlane.beginRequest('review-input'); } catch { /* shadow only */ }
-      cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = []; followups = 0; delivered = ''; noted = '';
+      cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; dispatchGap = ''; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; followups = 0; delivered = ''; noted = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));
       if (disposition && !(disposition === 'blocked' && resume)) { changed = []; scopeOverflow = false; patterns.clear(); }
       // Explicit input grants a fresh bounded attempt, including recovery from
@@ -435,7 +478,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   pi.on?.('session_compact', () => { noted = ''; });
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
-    parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): relative project paths, no parent traversal. Invalid entries are dropped. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
+    parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
     async execute(_id: string, params: any, signal: any, _update: any, ctx: any) {
       const ticket = generation;
       const checkCurrent = () => {
@@ -443,7 +486,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         if (ticket !== generation || !active) throw Error('Quality review cancelled by user input, session change or shutdown.');
       };
       checkCurrent(); await refresh(ctx); checkCurrent();
-      if (params.action === 'review') { await run(ctx,signal,false,validReviewEvidence(params.evidence)); checkCurrent(); }
+      if (params.action === 'review') {
+        const validation = validateReviewEvidence(ctx.cwd, params.evidence);
+        if (validation.rejected.length && validation.paths.length === 0) throw Error(`No usable outcome evidence was accepted. ${validation.rejected.join(' ')}`);
+        await run(ctx,signal,false,validation.paths,validation.rejected);
+        checkCurrent();
+      }
       if (params.action === 'assess') {
         if (!['accepted','blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 20) throw Error('Assessment requires a concrete rationale of at least 20 characters.');
         if (params.disposition === 'accepted') {

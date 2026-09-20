@@ -3364,7 +3364,7 @@ async function runSubagent(
 		step.breakerReason = reason;
 		step.terminalCause = reason === "provider_failure_streak" ? "provider_failure"
 			: reason === "tool_failure_streak" || reason === "no_useful_progress" ? "tool_failure"
-				: reason === "excessive_turns" || reason === "runaway_cost" ? "budget_exhausted"
+				: reason === "excessive_tool_calls" || reason === "excessive_turns" || reason === "runaway_cost" ? "budget_exhausted"
 				: "timeout";
 		appendJsonl(eventsPath, JSON.stringify({
 			type: "subagent.step.breaker_tripped",
@@ -3913,6 +3913,7 @@ async function runSubagent(
 				lastActivityAt,
 				currentTool: step.currentTool,
 				thinking: step.thinking,
+				taskPreview: step.description,
 				now,
 			}));
 			if (idleState === "needs_attention") {

@@ -18,6 +18,7 @@ export type ChildBreakerReason =
 	| "provider_failure_streak"
 	| "tool_failure_streak"
 	| "no_useful_progress"
+	| "excessive_tool_calls"
 	| "excessive_turns"
 	| "stale_activity"
 	| "runaway_cost";
@@ -29,6 +30,7 @@ export const CHILD_BREAKER_REASONS: readonly ChildBreakerReason[] = [
 	"provider_failure_streak",
 	"tool_failure_streak",
 	"no_useful_progress",
+	"excessive_tool_calls",
 	"excessive_turns",
 	"stale_activity",
 	"runaway_cost",
@@ -43,6 +45,8 @@ export interface ChildBreakerPolicy {
 	noProgressMs: number;
 	/** Hard cap on model turns for one child. */
 	maxTurns: number;
+	/** Hard cap on tool calls for one child, independent of model turns. */
+	maxToolCalls: number;
 	/** No activity at all (no event, no output) within this window. */
 	staleActivityMs: number;
 	/** Per-child spend ceiling. */
@@ -58,6 +62,7 @@ export const DEFAULT_CHILD_BREAKER_POLICY: ChildBreakerPolicy = {
 	maxConsecutiveProviderFailures: 4,
 	maxConsecutiveToolFailures: 8,
 	noProgressMs: 15 * 60_000,
+	maxToolCalls: 48,
 	maxTurns: 400,
 	staleActivityMs: 20 * 60_000,
 	maxCostUsd: 25,
@@ -102,6 +107,7 @@ export function resolveChildBreakerPolicy(env: NodeJS.ProcessEnv = process.env, 
 		maxConsecutiveProviderFailures: positiveIntEnv(env.PI_SUBAGENT_MAX_PROVIDER_FAILURES, base.maxConsecutiveProviderFailures),
 		maxConsecutiveToolFailures: positiveIntEnv(env.PI_SUBAGENT_MAX_TOOL_FAILURES, base.maxConsecutiveToolFailures),
 		noProgressMs: positiveIntEnv(env.PI_SUBAGENT_NO_PROGRESS_MS, base.noProgressMs),
+		maxToolCalls: positiveIntEnv(env.PI_SUBAGENT_MAX_CHILD_TOOLS, base.maxToolCalls),
 		maxTurns: positiveIntEnv(env.PI_SUBAGENT_MAX_TURNS, base.maxTurns),
 		staleActivityMs: positiveIntEnv(env.PI_SUBAGENT_STALE_ACTIVITY_MS, base.staleActivityMs),
 		maxCostUsd: Number.isFinite(Number(env.PI_SUBAGENT_MAX_CHILD_COST_USD)) && Number(env.PI_SUBAGENT_MAX_CHILD_COST_USD) > 0
@@ -143,6 +149,14 @@ export function evaluateChildBreakers(
 			reason: "excessive_turns",
 			detail: `Child reached ${num(observation.turns)} turns (limit ${policy.maxTurns}).`,
 			evidence: { turns: num(observation.turns), limit: policy.maxTurns },
+		};
+	}
+	if (policy.maxToolCalls > 0 && num(observation.toolCalls) >= policy.maxToolCalls) {
+		return {
+			tripped: true,
+			reason: "excessive_tool_calls",
+			detail: `Child reached ${num(observation.toolCalls)} tool calls (limit ${policy.maxToolCalls}).`,
+			evidence: { toolCalls: num(observation.toolCalls), limit: policy.maxToolCalls },
 		};
 	}
 	if (policy.maxCostUsd > 0 && num(observation.costUsd) >= policy.maxCostUsd) {

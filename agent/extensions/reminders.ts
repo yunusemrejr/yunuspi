@@ -130,6 +130,14 @@ import {
 	hasOrientationReceipt,
 	markOrientationDelivered,
 } from "./lib/harness-orientation.ts";
+import {
+	acquireWorkspaceWriterLease,
+	readWorkspaceGitState,
+	recordWorkspaceMutation,
+	releaseWorkspaceWriterLease,
+	workspaceGitDrift,
+	type WorkspaceGitState,
+} from "./lib/workspace-write-lease.ts";
 
 const STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
@@ -415,11 +423,17 @@ export function reminderText(
 		);
 	}
 	if (fire.caution) {
+		const receipts = st.mutationAudit.length
+			? st.mutationAudit.slice(-8).map((entry) => `${entry.path} (${entry.sha256 ? `sha256:${entry.sha256.slice(0, 12)}` : "hash unavailable"})`).join(", ")
+			: "none recorded";
 		lines.push(
-			`[signal] Since the previous mutation caution (or session start), ${st.runMutCount > 0 ? st.runMutCount : "an uncounted number of"} successful mutation-capable tool call(s) were recognized. ` +
+			`[signal] Observed mutation targets: ${receipts}. ` +
 				"This is not a filesystem audit: failed/partial operations and unrecognized shell mutations may be missing. " +
 				"When editing or appending to a file, make sure you do not accidentally replace its full contents if that is not your intention; prefer targeted edits, and verify the result afterwards.",
 		);
+	}
+	if (st.workspaceWarnings.length) {
+		lines.push(`[workspace warning] ${st.workspaceWarnings.slice(-4).join(" ")} Re-read the affected paths before attributing or approving the result.`);
 	}
 	if (fire.drift) {
 		lines.push(
@@ -522,6 +536,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	}
 	// Per-session live state; sid "" (unknown) is tolerated.
 	const live = new Map<string, ReminderState>();
+	const workspaceBaselines = new Map<string, WorkspaceGitState | undefined>();
+	const workspaceLeaseCwds = new Map<string, string>();
 	const todoSnapshots = new WeakMap<
 		ReminderState,
 		Array<{
@@ -602,6 +618,19 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		}
 		return st;
 	};
+	const observeWorkspace = (sid: string, ctx: ExtensionContext, st: ReminderState): void => {
+		if (!sid || !ctx?.cwd) return;
+		const current = readWorkspaceGitState(ctx.cwd);
+		if (!workspaceBaselines.has(sid)) {
+			workspaceBaselines.set(sid, current);
+			return;
+		}
+		const warnings = workspaceGitDrift(workspaceBaselines.get(sid), current);
+		for (const warning of warnings) {
+			if (!st.workspaceWarnings.includes(warning)) st.workspaceWarnings.push(warning);
+		}
+		st.workspaceWarnings = st.workspaceWarnings.slice(-16);
+	};
 
 	const advanceDelivered = (r: ManualReminder, now: number) => {
 		r.delivered += 1;
@@ -647,10 +676,33 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const sid = sidOf(ctx);
 			if (event.reason === "startup" || event.reason === "new") cleanupStale(sid);
 			const st = load(sid);
+			if (sid) {
+				acquireWorkspaceWriterLease(ctx.cwd, sid);
+				workspaceBaselines.set(sid, readWorkspaceGitState(ctx.cwd));
+				workspaceLeaseCwds.set(sid, ctx.cwd);
+			}
 			restoreTodos(ctx, st);
 			writeState(sid, st);
 		} catch (err) {
 			logReminderErr("session_start", err);
+		}
+	});
+	pi.on("session_switch", (_event, ctx) => {
+		try {
+			const nextSid = sidOf(ctx);
+			for (const [sid, cwd] of workspaceLeaseCwds) {
+				if (sid === nextSid) continue;
+				releaseWorkspaceWriterLease(cwd, sid);
+				workspaceBaselines.delete(sid);
+				workspaceLeaseCwds.delete(sid);
+			}
+			if (nextSid && ctx?.cwd) {
+				acquireWorkspaceWriterLease(ctx.cwd, nextSid);
+				workspaceBaselines.set(nextSid, readWorkspaceGitState(ctx.cwd));
+				workspaceLeaseCwds.set(nextSid, ctx.cwd);
+			}
+		} catch (err) {
+			logReminderErr("session_switch", err);
 		}
 	});
 
@@ -681,6 +733,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		try {
 			loop.record(event);
 			guidance.record(event);
+			const sid = sidOf(ctx);
+			const st = sid ? load(sid) : undefined;
+			if (sid && st) observeWorkspace(sid, ctx, st);
 			if (event.toolName === "todo" && !event.isError) {
 				const d = event.details as
 					| {
@@ -709,9 +764,23 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			// Caution arm: a completed mutating action nudges the NEXT check-in.
 			// (isError excluded — a failed rm taught nothing and needs no nudge.)
 			if (!event.isError && isMutatingToolResult(event.toolName, event.input)) {
-				const sid = sidOf(ctx);
-				if (!sid) return;
-				const st = load(sid);
+				if (!sid || !st) return;
+				const rawPath = event.details?.fileMutation?.resolved ?? event.input?.path;
+				const audit = typeof rawPath === "string"
+					? recordWorkspaceMutation(ctx.cwd, sid, rawPath, event.toolName)
+					: undefined;
+				const conflicts = audit?.conflicts ?? [];
+				const mutation = audit ?? {
+					path: "<shell mutation target unresolved>",
+					tool: event.toolName,
+					observedAt: Date.now(),
+				};
+				st.mutationAudit = [...st.mutationAudit, mutation].slice(-32);
+				for (const owner of conflicts) {
+					const warning = `Concurrent writer overlap: ${mutation.path} is also leased by session ${owner.sessionId.slice(0, 12)}.`;
+					if (!st.workspaceWarnings.includes(warning)) st.workspaceWarnings.push(warning);
+				}
+				st.workspaceWarnings = st.workspaceWarnings.slice(-16);
 				st.mutPending = true;
 				st.lastMutAt = Date.now();
 				st.runMutCount += 1;
@@ -761,7 +830,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				!fire.todo &&
 				!fire.drift &&
 				!fire.caution &&
-				dueManual.length === 0
+				dueManual.length === 0 &&
+				st.workspaceWarnings.length === 0
 			) {
 				writeState(sid, st);
 				return undefined;
@@ -803,6 +873,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				st.mutPending = false; // consumed: one fire per armed mutation
 				st.runMutCount = 0; // consumed here, never by an internal recovery run
 			}
+			st.workspaceWarnings = [];
 			st.lastRemindAt = now;
 			writeState(sid, st);
 			return {
@@ -1080,7 +1151,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		loop = createLoopTracker();
 		try {
 			const sid = sidOf(ctx);
-			if (sid) writeState(sid, load(sid));
+			if (sid) {
+				writeState(sid, load(sid));
+				releaseWorkspaceWriterLease(workspaceLeaseCwds.get(sid) ?? ctx.cwd, sid);
+				workspaceBaselines.delete(sid);
+				workspaceLeaseCwds.delete(sid);
+			}
 			live.clear();
 		} catch (err) {
 			logReminderErr("session_shutdown", err);

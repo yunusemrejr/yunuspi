@@ -2298,7 +2298,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 821
+        "line": 831
       },
       {
         "name": "harness-backup",
@@ -2388,7 +2388,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 872
+        "line": 892
       },
       {
         "name": "or-provider",
@@ -2413,7 +2413,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1092
+        "line": 1168
       },
       {
         "name": "run",
@@ -2849,7 +2849,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 819,
+        "line": 839,
         "kind": "literal"
       },
       {
@@ -2873,19 +2873,19 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 697,
+        "line": 707,
         "kind": "literal"
       },
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 483,
+        "line": 511,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 437,
+        "line": 480,
         "kind": "literal"
       },
       {
@@ -3207,7 +3207,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 819,
+        "line": 839,
         "kind": "literal"
       },
       {
@@ -3219,19 +3219,19 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 697,
+        "line": 707,
         "kind": "literal"
       },
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 483,
+        "line": 511,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 437,
+        "line": 480,
         "kind": "literal"
       },
       {
@@ -3511,7 +3511,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 559,
+      "sourceFiles": 560,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,
