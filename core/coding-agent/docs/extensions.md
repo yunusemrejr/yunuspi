@@ -1419,6 +1419,8 @@ pi.registerTool({
 
 Inject a custom message into the session. Custom messages participate in LLM context. For durable TUI-only content that should not be sent to the LLM, use [`pi.appendEntry()`](#piappendentrycustomtype-data) with [`pi.registerEntryRenderer()`](#piregisterentryrenderercustomtype-renderer).
 
+The method returns a Promise that settles when the message has been accepted by the session queue or appended to the session. Await it when advancing durable extension state depends on delivery; ignored promises still report failures through the extension error channel.
+
 ```typescript
 pi.sendMessage({
   customType: "my-extension",
@@ -1440,7 +1442,7 @@ pi.sendMessage({
 
 ### pi.sendUserMessage(content, options?)
 
-Send a user message to the agent. Unlike `sendMessage()` which sends custom messages, this sends an actual user message that appears as if typed by the user. Always triggers a turn.
+Send a user message to the agent. Unlike `sendMessage()` which sends custom messages, this sends an actual user message that appears as if typed by the user. Always triggers a turn. The method returns a Promise that settles after the message has been accepted for delivery.
 
 ```typescript
 // Simple text message

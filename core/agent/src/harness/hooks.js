@@ -62,13 +62,19 @@ export class HookRegistry {
                 await this.invokeAllFailClosed(name, event, context);
                 return undefined;
             case "before_run_end": {
-                let followUp;
+                const followUps = [];
                 await this.invokeAll(name, event, (value) => {
                     const result = value;
                     if (result?.followUp !== undefined)
-                        followUp = result.followUp;
+                        followUps.push(result.followUp);
                 }, context);
-                return followUp === undefined ? undefined : { followUp };
+                if (followUps.length === 0)
+                    return undefined;
+                // Multiple independent extensions may own a useful terminal
+                // follow-up. Preserve every accepted contribution instead of
+                // silently letting registration order discard all but the
+                // last one.
+                return { followUp: followUps.join("\n\n") };
             }
             case "transform_context":
                 return this.transformContext(event, context);

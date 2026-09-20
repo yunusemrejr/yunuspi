@@ -22,7 +22,7 @@ export async function startRun(lane, drive, run) {
     }, drive.context);
     if (prompt.kind === "cancel_requested")
         return { kind: "continue" };
-    const hook = await lane.hooks.runWithGate("before_run", { lane: lane.name, runId: drive.operationId, prompt: prompt.value, resources: lane.readConfig().resources }, drive.gate, drive.context);
+    const hook = await lane.hooks.runWithGate("before_run", { lane: lane.name, runId: drive.operationId, prompt: prompt.value, resources: drive.configuration.resources }, drive.gate, drive.context);
     const injected = hook?.messages ?? [];
     for (const message of injected) {
         if (message.role === "assistant" && message.stopReason === "pending") {
@@ -66,7 +66,7 @@ export async function runCheckpoint(lane, drive, run) {
             return {
                 kind: "commit",
                 writes: placement.writes,
-                operationState: assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId, false),
+                operationState: assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId, false, drive.configuration),
                 lane: { tipId: placement.tipId, inbox: placement.inbox },
                 materialize: () => ({ kind: "continue" }),
                 events: (commit) => boundaryPlacementEvents(placement, commit, 0, lane.name, drive.operationId),
@@ -110,7 +110,7 @@ export async function runCheckpoint(lane, drive, run) {
             return {
                 kind: "commit",
                 writes: placement.writes,
-                operationState: assistantReadyAtBoundary(lane, state, current, current.triggerEntryId, current.continuation.overflowRecoveryUsed),
+                operationState: assistantReadyAtBoundary(lane, state, current, current.triggerEntryId, current.continuation.overflowRecoveryUsed, drive.configuration),
                 lane: { tipId: placement.tipId, inbox: placement.inbox },
                 materialize: () => ({ kind: "continue" }),
                 events: (commit) => boundaryPlacementEvents(placement, commit, 0, lane.name, drive.operationId),

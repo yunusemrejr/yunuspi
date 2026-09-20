@@ -1444,7 +1444,7 @@ export default function (pi: any) {
         : {}),
     };
   });
-  pi.on("turn_end", (e: any, ctx: any) => {
+  pi.on("turn_end", async (e: any, ctx: any) => {
     // A pressure notice is useful only while normal tool execution continues.
     // Queuing a steer into a stopped/failed run can revive work the user ended.
     if (
@@ -1459,7 +1459,7 @@ export default function (pi: any) {
     const n = notice(ctx);
     if (n) lines.push(n);
     if (lines.length)
-      pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
+      await pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.

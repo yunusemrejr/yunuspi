@@ -9,6 +9,42 @@ import { branchTip, deleteValue, entryLabel, laneConfig, laneState, sessionName,
 import { Lane } from "./lane.js";
 import { readLaneStorage, restoreLaneState, restoreSession } from "./restore.js";
 import { SliceNotImplemented } from "./types.js";
+/** Copy configuration data without cloning executable callbacks. */
+function cloneConfigValue(value, seen = new WeakMap()) {
+    if (value === null || typeof value !== "object")
+        return value;
+    const previous = seen.get(value);
+    if (previous !== undefined)
+        return previous;
+    if (value instanceof Date)
+        return new Date(value.getTime());
+    if (Array.isArray(value)) {
+        const copy = [];
+        seen.set(value, copy);
+        for (const item of value)
+            copy.push(cloneConfigValue(item, seen));
+        return copy;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    // Harness configuration is JSON-shaped apart from tool callbacks. Keep
+    // application-owned class instances opaque rather than changing their
+    // prototype or accidentally copying live resources.
+    if (prototype !== Object.prototype && prototype !== null)
+        return value;
+    const copy = Object.create(prototype);
+    seen.set(value, copy);
+    for (const key of Reflect.ownKeys(value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor?.enumerable)
+            copy[key] = cloneConfigValue(value[key], seen);
+    }
+    return copy;
+}
+function cloneStoredConfig(key, value) {
+    if (key === "tools")
+        return (value ?? []).map((tool) => cloneConfigValue(tool));
+    return cloneConfigValue(value);
+}
 /** Runtime implementation of AgentHarness. The harness manages lanes but is not itself a lane. */
 export class Harness {
     session;
@@ -36,11 +72,11 @@ export class Harness {
         }, context));
         this.configStore = {
             value: {
-                tools: options.tools ?? [],
-                resources: options.resources ?? {},
-                streamOptions: options.streamOptions ?? {},
-                retryPolicy: options.retry ?? DEFAULT_RETRY_POLICY,
-                compaction: options.compaction ?? DEFAULT_COMPACTION_SETTINGS,
+                tools: cloneStoredConfig("tools", options.tools ?? []),
+                resources: cloneStoredConfig("resources", options.resources ?? {}),
+                streamOptions: cloneStoredConfig("streamOptions", options.streamOptions ?? {}),
+                retryPolicy: cloneStoredConfig("retryPolicy", options.retry ?? DEFAULT_RETRY_POLICY),
+                compaction: cloneStoredConfig("compaction", options.compaction ?? DEFAULT_COMPACTION_SETTINGS),
                 steeringMode: options.steeringMode ?? "all",
                 followUpMode: options.followUpMode ?? "all",
                 toolExecution: options.toolExecution ?? "parallel",
@@ -248,11 +284,16 @@ export class Harness {
             return this.closePromise;
         const error = new HarnessClosed();
         this.closedError = error;
-        const idleCallbacks = [...this.lanesByName.values()].map((lane) => lane.seal(error));
+        const drains = [...this.lanesByName.values()].map((lane) => lane.seal(error));
         this.hooks.close(error);
         this.events.close(error);
-        const sessionClose = this.session.close(context);
-        this.closePromise = Promise.all([sessionClose, ...idleCallbacks]).then(() => undefined);
+        // Keep the session storage open until every installed drive has
+        // actually unwound. The public drive completion is intentionally
+        // rejected immediately on close, so it cannot be used as a drain
+        // signal: a provider or tool may still be holding the real task.
+        this.closePromise = Promise.all(drains)
+            .then(() => this.session.close(context))
+            .then(() => undefined);
         return this.closePromise;
     }
     buildLane(name, state) {
@@ -260,13 +301,14 @@ export class Harness {
     }
     async getConfig(key, _context) {
         this.assertOpen();
-        return this.configStore.value[key];
+        return cloneStoredConfig(key, this.configStore.value[key]);
     }
     async setConfig(key, value, event, context) {
         this.assertOpen();
         const previous = this.configStore.value[key];
-        this.configStore.value = { ...this.configStore.value, [key]: value };
-        await this.events.emit(event(previous, value), context);
+        const next = cloneStoredConfig(key, value);
+        this.configStore.value = { ...this.configStore.value, [key]: next };
+        await this.events.emit(event(cloneStoredConfig(key, previous), cloneStoredConfig(key, next)), context);
     }
     assertOpen() {
         if (this.faultError !== undefined)

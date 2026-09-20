@@ -36,7 +36,7 @@ export async function readBoundedContext(lane, drive, capability) {
         return entries;
     return {
         kind: "result",
-        value: await buildSessionContext(entries.value, { entryProjectors: lane.readConfig().entryProjectors }, drive.context),
+        value: await buildSessionContext(entries.value, { entryProjectors: drive.configuration.entryProjectors }, drive.context),
     };
 }
 export function readLaneQueues(reader, inbox, context) {

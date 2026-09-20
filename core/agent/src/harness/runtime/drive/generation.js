@@ -15,8 +15,8 @@ function configurationError(code, details) {
         details,
     };
 }
-async function resolveSystemPrompt(lane, context) {
-    const config = lane.readConfig();
+async function resolveSystemPrompt(configuration, context) {
+    const config = configuration;
     if (config.systemPrompt === undefined)
         return "";
     if (typeof config.systemPrompt === "string")
@@ -31,7 +31,7 @@ async function prepareGeneration(lane, drive, generation) {
     if (model === undefined) {
         return { kind: "configuration_failure", error: configurationError("model_unavailable", identity) };
     }
-    const config = lane.readConfig();
+    const config = drive.configuration;
     const toolsByName = new Map(config.tools.map((tool) => [tool.name, tool]));
     const missingTools = generation.generationContext.configuration.activeToolNames.filter((name) => !toolsByName.has(name));
     if (missingTools.length !== 0) {
@@ -54,7 +54,7 @@ async function prepareGeneration(lane, drive, generation) {
     const messages = await readBoundedContext(lane, drive, generation);
     if (messages.kind === "cancel_requested")
         return messages;
-    const systemPrompt = await resolveSystemPrompt(lane, drive.context);
+    const systemPrompt = await resolveSystemPrompt(config, drive.context);
     const beforeRequest = await lane.hooks.runWithGate("before_request", {
         lane: lane.name,
         runId: drive.operationId,

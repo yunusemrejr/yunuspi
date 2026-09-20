@@ -468,11 +468,11 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
         // Action methods - delegate to shared runtime
         sendMessage(message, options) {
             assertActive();
-            runtime.sendMessage(message, options);
+            return runtime.sendMessage(message, options);
         },
         sendUserMessage(content, options) {
             assertActive();
-            runtime.sendUserMessage(content, options);
+            return runtime.sendUserMessage(content, options);
         },
         appendEntry(customType, data) {
             assertActive();

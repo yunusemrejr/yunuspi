@@ -391,13 +391,13 @@ interface PendingCompletion {
 	resolve(accepted: boolean): void;
 }
 
-function sendCompletion(pi: Pick<ExtensionAPI, "sendMessage">, items: PendingCompletion[]): boolean {
+async function sendCompletion(pi: Pick<ExtensionAPI, "sendMessage">, items: PendingCompletion[]): Promise<boolean> {
 	if (items.length === 0) return true;
 	const details = items.map((item) => item.details);
 	const content = details.length === 1 ? formatSingleCompletion(details[0]!) : formatGroupedCompletion(details);
 	const display = details.some((detail) => detail.source === "foreground" || detail.status !== "completed" || detail.scheduleOrigin !== undefined);
 	try {
-		pi.sendMessage(
+		await pi.sendMessage(
 			{
 				customType: "subagent-notify",
 				content,
@@ -521,6 +521,7 @@ export default function registerSubagentNotify(
 ): CompletionNotifier {
 	const seen = new Map<string, number>();
 	const pending = new Map<string, Promise<boolean>>();
+	const inFlight = new Map<string, PendingCompletion>();
 	const ttlMs = 10 * 60 * 1000;
 	const now = options.now ?? Date.now;
 	const batchConfig = resolveCompletionBatchConfig(options.batchConfig);
@@ -533,6 +534,8 @@ export default function registerSubagentNotify(
 
 	const settle = (items: PendingCompletion[], accepted: boolean) => {
 		for (const item of items) {
+			if (inFlight.get(item.key) !== item) continue;
+			inFlight.delete(item.key);
 			pending.delete(item.key);
 			if (accepted) markSeenWithTtl(seen, item.key, now(), ttlMs);
 			item.resolve(accepted);
@@ -548,7 +551,11 @@ export default function registerSubagentNotify(
 			(owned ? accepted : rejected).push(item);
 		}
 		settle(rejected, false);
-		settle(accepted, sendCompletion(pi, accepted));
+		if (accepted.length === 0) return;
+		void sendCompletion(pi, accepted).then(
+			(delivered) => settle(accepted, !disposed && delivered),
+			() => settle(accepted, false),
+		);
 	};
 	const getBatcher = (result: CompletionNotification) => {
 		const key = completionBatchKey(result);
@@ -575,8 +582,8 @@ export default function registerSubagentNotify(
 		const seenAt = seen.get(key);
 		if (seenAt !== undefined && now() - seenAt <= ttlMs) return Promise.resolve(true);
 		if (seenAt !== undefined) seen.delete(key);
-		const inFlight = pending.get(key);
-		if (inFlight) return inFlight;
+		const pendingDelivery = pending.get(key);
+		if (pendingDelivery) return pendingDelivery;
 		const details = buildCompletionDetails(result);
 		let resolve!: (accepted: boolean) => void;
 		const completion = new Promise<boolean>((settleCompletion) => { resolve = settleCompletion; });
@@ -589,6 +596,7 @@ export default function registerSubagentNotify(
 			triggerTurn: result.triggerTurn !== false,
 			resolve,
 		};
+		inFlight.set(key, item);
 		if (details.source === "foreground") {
 			emit([item]);
 			return completion;
@@ -616,6 +624,7 @@ export default function registerSubagentNotify(
 			if (disposed) return;
 			disposed = true;
 			for (const batcher of batchers.values()) settle(batcher.dispose(), false);
+			settle([...inFlight.values()], false);
 			batchers.clear();
 			for (const unsubscribe of [unsubscribeAsync, unsubscribeForeground]) {
 				try {
