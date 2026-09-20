@@ -44,13 +44,14 @@ export function createCompactionSummaryMessage(summary, tokensBefore, timestamp)
         timestamp: typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime(),
     };
 }
-export function createCustomMessage(customType, content, display, details, timestamp) {
+export function createCustomMessage(customType, content, display, details, timestamp, excludeFromContext = false) {
     return {
         role: "custom",
         customType,
         content,
         display,
         details,
+        ...(excludeFromContext ? { excludeFromContext: true } : {}),
         timestamp: typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime(),
     };
 }
@@ -68,6 +69,9 @@ export function convertToLlm(messages) {
                     timestamp: m.timestamp,
                 };
             case "custom": {
+                if (m.excludeFromContext) {
+                    return undefined;
+                }
                 const content = typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content;
                 return {
                     role: "user",

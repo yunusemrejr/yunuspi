@@ -21,6 +21,8 @@ export interface CustomMessage<T = unknown> {
     content: string | (TextContent | ImageContent)[];
     display: boolean;
     details?: T;
+    /** If true, keep the message in runtime state but omit it from provider context. */
+    excludeFromContext?: boolean;
     timestamp: number;
 }
 export interface BranchSummaryMessage {
@@ -46,5 +48,5 @@ declare module "../types.ts" {
 export declare function bashExecutionToText(msg: BashExecutionMessage): string;
 export declare function createBranchSummaryMessage(summary: string, fromId: string | null, timestamp: string | number): BranchSummaryMessage;
 export declare function createCompactionSummaryMessage(summary: string, tokensBefore: number, timestamp: string | number): CompactionSummaryMessage;
-export declare function createCustomMessage(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details: unknown | undefined, timestamp: string | number): CustomMessage;
+export declare function createCustomMessage(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details: unknown | undefined, timestamp: string | number, excludeFromContext?: boolean): CustomMessage;
 export declare function convertToLlm(messages: AgentMessage[]): Message[];

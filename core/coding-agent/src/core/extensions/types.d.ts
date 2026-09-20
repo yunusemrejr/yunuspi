@@ -295,7 +295,7 @@ export interface ExtensionCommandContext extends ExtensionContext {
  * This is passed to `withSession()` callbacks on `newSession()`, `fork()`, and `switchSession()`.
  */
 export interface ReplacedSessionContext extends ExtensionCommandContext {
-    sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+    sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
@@ -843,7 +843,7 @@ export interface MessageEndEventResult {
     message?: AgentMessage;
 }
 export interface BeforeAgentStartEventResult {
-    message?: Pick<CustomMessage, "customType" | "content" | "display" | "details">;
+    message?: Pick<CustomMessage, "customType" | "content" | "display" | "details" | "excludeFromContext">;
     /** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
     systemPrompt?: string;
 }
@@ -968,7 +968,7 @@ export interface ExtensionAPI {
     /** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
     registerEntryRenderer<T = unknown>(customType: string, renderer: EntryRenderer<T>): void;
     /** Send a custom message to the session. */
-    sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+    sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): void;
@@ -1182,7 +1182,7 @@ export interface ExtensionShortcut {
     extensionPath: string;
 }
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
-export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
     triggerTurn?: boolean;
     deliverAs?: "steer" | "followUp" | "nextTurn";
 }) => void;

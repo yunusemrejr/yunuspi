@@ -175,8 +175,11 @@ export function sessionEntryToContextMessages(entry) {
         return [message];
     }
     if (entry.type === "custom_message") {
+        if (entry.excludeFromContext === true) {
+            return [];
+        }
         return [
-            createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp),
+            createCustomMessage(entry.customType, entry.content ?? [], entry.display, entry.details, entry.timestamp, entry.excludeFromContext),
         ];
     }
     if (entry.type === "branch_summary" && entry.summary) {
@@ -878,13 +881,14 @@ export class SessionManager {
      * @param details Optional extension-specific metadata (not sent to LLM)
      * @returns Entry id
      */
-    appendCustomMessageEntry(customType, content, display, details) {
+    appendCustomMessageEntry(customType, content, display, details, excludeFromContext = false) {
         const entry = {
             type: "custom_message",
             customType,
             content,
             display,
             details,
+            ...(excludeFromContext ? { excludeFromContext: true } : {}),
             id: generateId(this.byId),
             parentId: this.leafId,
             timestamp: new Date().toISOString(),
