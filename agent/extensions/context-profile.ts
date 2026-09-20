@@ -1,10 +1,12 @@
 /**
  * context_profile — native context-cost diagnostics for the running session.
  *
- * The probe hashes the final pi-format message array produced by the context
- * hook (so a prefix break names its owner as `custom:<customType>`, a tool, or
- * a role), finalizes one record per provider request, and attaches the
- * provider's own usage counters from the assistant message.
+ * The probe hashes the provider-visible message array from the final request
+ * payload when available (falling back to the context hook for providers with
+ * non-array prompts). This keeps display-only or filtered context entries from
+ * being misattributed as cache-prefix breaks. A prefix break names its owner
+ * as `custom:<customType>`, a tool, or a role, and each request is finalized
+ * with the provider's own usage counters from the assistant message.
  *
  * State lives in `logs/context-profile/` (runtime state, never exported) and
  * contains hashes, roles and counts only — no prompt text, no tool output.
@@ -21,9 +23,12 @@ import {
   compareEnvelope,
   compositionFromBranch,
   DEFAULT_RING,
+  isPrefixBreak,
   payloadEnvelope,
+  payloadMessages,
   prefixSummary,
   PROFILE_VERSION,
+  selectProbeMessages,
 } from "./lib/context-profile.mjs";
 
 const MAX_STATE_CHARS = 512 * 1024;
@@ -184,7 +189,10 @@ function recordRequest(
   const id = sessionId(ctx);
   if (!id) return;
   const state = getState(id);
-  const messages = state.pending ?? wireMessages ?? [];
+  // `pending` is the pre-provider context hook and may contain entries that
+  // convertToLlm or a provider adapter filters. Prefer the final payload so
+  // diagnostics describe the bytes that can actually affect provider caching.
+  const messages = selectProbeMessages(wireMessages, state.pending);
   if (!Array.isArray(messages) || messages.length === 0) return;
   const now = Date.now();
   // The envelope (system prompt, tool list, request scalars) sits in front of
@@ -208,7 +216,7 @@ function recordRequest(
   state.digests = digests;
   state.records = appendRecord(state.records, record, DEFAULT_RING);
   state.totals.requests += 1;
-  if (record.firstChange) state.totals.breaks += 1;
+  if (isPrefixBreak(record)) state.totals.breaks += 1;
   if (record.envelopeChanged) state.totals.envelopeBreaks += 1;
   state.totals.resentChars += record.resentChars;
   if (envelope) {
@@ -231,9 +239,7 @@ function renderProfile(
   const totals = state.totals;
   const prompt = totals.input + totals.cacheRead + totals.cacheWrite;
   const branchChars = composition.reduce((sum, row) => sum + row.chars, 0);
-  const breaks = records.filter(
-    (record) => record?.firstChange && !record.baseline && !record.appendedOnly,
-  );
+  const breaks = records.filter(isPrefixBreak);
   const lines: string[] = [];
   lines.push(
     `context_profile — session ${state.session.slice(0, 24)} | ${state.totals.requests} recorded request(s), ${state.records.length}/${DEFAULT_RING} in ring`,
@@ -263,7 +269,7 @@ function renderProfile(
           ? ` | ${(record.msSincePrev / 1000).toFixed(1)}s since previous`
           : "";
       lines.push(
-        `  #${record.seq} ${record.appendedOnly && !record.envelopeChanged ? "append" : "break"} ${changeKey(record.firstChange)} lcp ${record.lcpIndex}/${record.messages} (${Math.round(record.lcpRatio * 100)}%) → est. ${formatCount(record.resentChars)} chars${usage}${gap}${record.digestsCapped ? " | digests capped" : ""}${envelopeNote(record)}`,
+        `  #${record.seq} ${record.appendedOnly && !record.envelopeChanged ? "append" : "break"} ${record.firstChange ? changeKey(record.firstChange) : "envelope"} lcp ${record.lcpIndex}/${record.messages} (${Math.round(record.lcpRatio * 100)}%) → est. ${formatCount(record.resentChars)} chars${usage}${gap}${record.digestsCapped ? " | digests capped" : ""}${envelopeNote(record)}`,
       );
     }
   }
@@ -307,10 +313,7 @@ export default function contextProfileExtension(pi: any) {
   });
 
   pi.on("before_provider_request", (event: any, ctx: any) => {
-    const fallback = Array.isArray(event?.payload?.messages)
-      ? event.payload.messages
-      : null;
-    recordRequest(ctx, fallback, event?.payload ?? null);
+    recordRequest(ctx, payloadMessages(event?.payload), event?.payload ?? null);
     return undefined;
   });
 
