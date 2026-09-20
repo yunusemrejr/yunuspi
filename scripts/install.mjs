@@ -213,7 +213,10 @@ try {
     if (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink()) throw Error(`Documentation input must be a regular file: ${name}`);
     fs.copyFileSync(file, path.join(runtime, name));
   }
-  if (fs.existsSync(path.join(repo, 'docs'))) fs.cpSync(path.join(repo, 'docs'), path.join(runtime, 'docs'), { recursive: true });
+  if (fs.existsSync(path.join(repo, 'docs'))) {
+    const docsRoot = path.join(repo, 'docs');
+    fs.cpSync(docsRoot, path.join(runtime, 'docs'), { recursive: true, filter: file => !path.relative(docsRoot, file).split(path.sep).includes('node_modules') });
+  }
   // Keep installed export safeguards and documentation on the same revision
   // as the runtime. Older installations may have an unmanaged public-template
   // directory; it must not silently override these maintained release inputs.

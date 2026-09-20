@@ -98,17 +98,28 @@ export function resolveMemoryDir(
 		}
 	}
 
-	const memoryDir = path.resolve(rootDir, ...segments);
-	if (!isWithin(memoryDir, rootDir)) {
+	const resolvedRoot = path.resolve(rootDir);
+	const memoryDir = path.resolve(resolvedRoot, ...segments);
+	if (!isWithin(memoryDir, resolvedRoot)) {
 		return { error: "memory path escapes the memory root" };
 	}
 
 	try {
-		if (fs.existsSync(rootDir) && fs.lstatSync(rootDir).isSymbolicLink()) {
-			return { error: "memory root must not be a symlink" };
+		// A not-yet-created root still inherits every existing ancestor. Verify
+		// the nearest one before accepting the lexical path; otherwise
+		// `parent/alias/missing` can escape through `alias -> outside`.
+		let existingAncestor = resolvedRoot;
+		while (!fs.existsSync(existingAncestor)) {
+			const parent = path.dirname(existingAncestor);
+			if (parent === existingAncestor) break;
+			existingAncestor = parent;
 		}
-		const rootReal = fs.existsSync(rootDir) ? fs.realpathSync(rootDir) : path.resolve(rootDir);
-		let current = rootDir;
+		const ancestorStat = fs.lstatSync(existingAncestor);
+		if (!ancestorStat.isDirectory() || ancestorStat.isSymbolicLink() || fs.realpathSync(existingAncestor) !== existingAncestor) {
+			return { error: "memory root must not contain a symlink ancestor" };
+		}
+		const rootReal = fs.existsSync(resolvedRoot) ? fs.realpathSync(resolvedRoot) : resolvedRoot;
+		let current = resolvedRoot;
 		for (const segment of segments) {
 			current = path.join(current, segment);
 			if (!fs.existsSync(current)) break;

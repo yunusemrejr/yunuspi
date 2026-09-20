@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const template = path.resolve(import.meta.dirname, "..");
@@ -68,4 +69,18 @@ test("memory tools reject blank/oversized writes and bound reads", async () => {
     memory._resetBaseDir();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("memory reads reject FIFOs and oversized files without blocking", { skip: process.platform === "win32" }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-memory-safe-read-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const fifo = path.join(dir, "MEMORY.md");
+  const made = spawnSync("mkfifo", [fifo]);
+  assert.ifError(made.error);assert.equal(made.status, 0);
+  const code = `import assert from 'node:assert/strict';import {readFileSafe} from ${JSON.stringify(pathToFileURL(indexPath).href)};assert.equal(readFileSafe(process.argv[1]),null);`;
+  const child = spawnSync(process.execPath, ["--no-warnings", "--input-type=module", "-e", code, fifo], { encoding: "utf8", timeout: 3000 });
+  assert.ifError(child.error);assert.equal(child.status, 0, child.stderr);
+  fs.unlinkSync(fifo);
+  fs.writeFileSync(fifo, Buffer.alloc(8 * 1024 * 1024 + 1));
+  assert.equal(memory.readFileSafe(fifo), null, "unbounded memory files are not loaded into the harness");
 });

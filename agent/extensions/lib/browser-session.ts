@@ -7,6 +7,53 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { createRenderQueue } from "./render-queue.ts";
 
+export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
+
+const ACTIONS_WITH_FOLLOWUP_OBSERVATION = new Set([
+  "open", "navigate", "new_tab", "switch_tab", "back", "forward", "reload",
+  "click", "fill", "press", "select", "check", "hover", "scroll", "drag",
+  "wait", "viewport", "snapshot", "renew",
+]);
+
+export function browserRequestDeadlineMs(params: { action?: unknown; timeoutMs?: unknown; kind?: unknown }): number {
+  const timeout = Number.isInteger(params.timeoutMs) ? Number(params.timeoutMs) : 5000;
+  if (params.action === "open") return 60_000;
+  if (params.action === "navigate" || params.action === "new_tab") return 50_000;
+  const hasFollowupObservation = ACTIONS_WITH_FOLLOWUP_OBSERVATION.has(String(params.action));
+  return Math.max(30_000, (hasFollowupObservation ? timeout * 2 : timeout) + 15_000);
+}
+
+export function prepareBrowserRequest(params: Record<string, unknown>, id: string):
+  | { ok: true; frame: string; bytes: number }
+  | { ok: false; bytes: number; failure: { stage: string; kind: string; outcome: string; nextStep: string } } {
+  // Keep the id first so even a defensive runner-side size rejection can correlate
+  // a frame produced by this parent. Reassign after spreading so callers cannot
+  // replace the transport id with an input property.
+  const request = { id, ...params };
+  request.id = id;
+  const frame = JSON.stringify(request) + "\n";
+  const bytes = Buffer.byteLength(frame, "utf8");
+  if (bytes <= BROWSER_REQUEST_MAX_BYTES) return { ok: true, frame, bytes };
+  return {
+    ok: false,
+    bytes,
+    failure: {
+      stage: "transport",
+      kind: "request-limit",
+      outcome: "not-dispatched",
+      nextStep: `Reduce the browser request below ${BROWSER_REQUEST_MAX_BYTES} UTF-8 bytes; no browser action was dispatched.`,
+    },
+  };
+}
+
+export function handleBrowserTransportDisconnect(
+  session: { pending?: { reject: (error: Error) => void } },
+  closeSession: () => Promise<unknown> | unknown,
+): void {
+  session.pending?.reject(Error("Browser process disconnected; session closed"));
+  void Promise.resolve().then(closeSession).catch(() => {});
+}
+
 export function registerBrowserSession(pi: any) {
   const sessions = new Map<
     string,
@@ -89,7 +136,7 @@ export function registerBrowserSession(pi: any) {
           "drag",
         ].map((value) => Type.Literal(value)),
       ),
-      session: Type.Optional(Type.String()),
+      session: Type.Optional(Type.String({ maxLength: 64 })),
       visible: Type.Optional(Type.Boolean({ description: "open only: show this isolated browser on the local desktop so the user can complete verification directly" })),
       tab: Type.Optional(Type.String({ maxLength: 40, description: "Tab id from tabs/results; omission uses the active tab" })),
       ref: Type.Optional(Type.String({ maxLength: 40, description: "Node reference from latest snapshot/observe/action result; never reuse after replacement/navigation" })),
@@ -277,7 +324,10 @@ export function registerBrowserSession(pi: any) {
             }
           }
         });
-        child.stdin.on("error", () => {});
+        const disconnect = () => {
+          handleBrowserTransportDisconnect(session, () => close(id));
+        };
+        child.stdin.on("error", disconnect);
         child.stderr.on("data", () => {}); // Raw startup diagnostics may include environment paths.
         child.on("error", () => {
           session.pending?.reject(Error("Browser process could not start"));
@@ -285,7 +335,7 @@ export function registerBrowserSession(pi: any) {
         });
         child.on("exit", () => {
           session.pending?.reject(
-            Error("Browser session expired or process exited"),
+            Error("Browser session expired or process exited; open a new session and reconcile pending work"),
           );
           void close(id).catch(() => {});
         });
@@ -293,7 +343,7 @@ export function registerBrowserSession(pi: any) {
       const session = sessions.get(id);
       if (!session)
         throw Error(
-          "Unknown or foreign browser session; open one in this agent first",
+          "Unknown or foreign browser session (it may have expired); open a new session in this agent and reconcile pending work",
         );
       let release: () => void;
       try {
@@ -312,22 +362,33 @@ export function registerBrowserSession(pi: any) {
       try {
         signal?.throwIfAborted();
         if (session.closed) throw Error("Browser session is closed");
+        const requestId = randomUUID();
+        const prepared = prepareBrowserRequest(p, requestId);
+        if (!prepared.ok) {
+          if (p.action === "open") await close(id);
+          return reply({
+            session: id,
+            ok: false,
+            failure: prepared.failure,
+            transport: { bytes: prepared.bytes, limitBytes: BROWSER_REQUEST_MAX_BYTES },
+          });
+        }
         const result = await new Promise<any>((resolve, reject) => {
-          const requestId = randomUUID();
           session.pending = { id: requestId, resolve, reject };
+          const deadlineMs = browserRequestDeadlineMs(p);
           timer = setTimeout(() => {
             reject(
               Error(
-                "Browser action exceeded 30s; session closed, effects may be incomplete",
+                `Browser action exceeded ${deadlineMs}ms; session closed, effects may be incomplete`,
               ),
             );
             void close(id).catch(() => {});
-          }, 30_000);
+          }, deadlineMs);
           signal?.addEventListener("abort", abort, { once: true });
           session.child.stdin.write(
-            JSON.stringify({ ...p, id: requestId }) + "\n",
+            prepared.frame,
             (error) => {
-              if (error) reject(Error("Browser process disconnected"));
+              if (error) handleBrowserTransportDisconnect(session, () => close(id));
             },
           );
           if (signal?.aborted) abort();

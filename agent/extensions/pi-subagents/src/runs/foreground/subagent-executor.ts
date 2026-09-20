@@ -13,6 +13,7 @@ import { getArtifactsDir, getProjectArtifactPackagingWarning, getProjectSubagent
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { createCapacityResilientJsonWriter } from "../../shared/capacity-resilient-json.ts";
 import { isStorageCapacityError } from "../../shared/file-system-retry.ts";
+import { writeGuardedStatus, type RevisionedStatus } from "../shared/status-revision.ts";
 import { resolveEffectiveThinking, toModelInfo, type ModelInfo } from "../../shared/model-info.ts";
 import {
 	beginForegroundChild,
@@ -4954,6 +4955,18 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						console.error(`Failed to append async workflow event '${eventsPath}':`, error);
 					}
 				};
+				let statusRevision = 0;
+				let lastStatusWriteAccepted = false;
+				const persistGuardedStatus = (filePath: string, payload: object): void => {
+					const next = payload as RevisionedStatus;
+					const result = writeGuardedStatus(filePath, {
+						...next,
+						revision: Math.max(statusRevision, typeof next.revision === "number" ? next.revision : 0),
+					});
+					lastStatusWriteAccepted = result.written;
+					statusRevision = Math.max(statusRevision, result.revision);
+					status.revision = statusRevision;
+				};
 				let indexedState: AsyncStatus["state"] | undefined;
 				const indexPersistence = createCapacityResilientJsonWriter({
 					keepAlive: true,
@@ -4970,11 +4983,13 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				};
 				const runPersistence = createCapacityResilientJsonWriter({
 					keepAlive: true,
-					onSuccess: (filePath) => { if (filePath === statusPath) queueActiveRunIndex(); },
+					onSuccess: (filePath) => { if (filePath === statusPath && lastStatusWriteAccepted) queueActiveRunIndex(); },
 					onError: (error, filePath) => console.error(`Failed to persist async workflow state '${filePath}':`, error),
 					write: (filePath, payload) => filePath === resultPath
 						? writeAsyncResultFile(filePath, payload as Record<string, unknown>)
-						: writeAtomicJson(filePath, payload),
+						: filePath === statusPath
+							? persistGuardedStatus(filePath, payload)
+							: writeAtomicJson(filePath, payload),
 				});
 				let initialPersistenceComplete = false;
 				let persistClosed = false;
@@ -4994,9 +5009,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					status.workflowChildren = workflowChildSummary({ parentToolCallId: toolCallId, workflowRunId, workflowState, inventoryComplete: workflowState !== "running", trace: status.workflow?.trace, steps: status.steps });
 					status.lastUpdate = Date.now();
 					if (!initialPersistenceComplete) {
-						writeAtomicJson(statusPath, status);
+						persistGuardedStatus(statusPath, status);
 						initialPersistenceComplete = true;
-						queueActiveRunIndex();
+						if (lastStatusWriteAccepted) queueActiveRunIndex();
 					} else if (options.tolerateStatusWriteFailure) {
 						try {
 							runPersistence.write(statusPath, status);

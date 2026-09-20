@@ -12,6 +12,7 @@ const load=relative=>import(pathToFileURL(path.join(runtime,'core',relative)));
 const chat=await load('ai/dist/api/openai-completions.js');
 const responses=await load('ai/dist/api/openai-responses.js');
 const codex=await load('ai/dist/api/openai-codex-responses.js');
+const {convertResponsesMessages}=await load('ai/dist/api/openai-responses-shared.js');
 const {getSupportedThinkingLevels}=await load('ai/dist/models.js');
 const model={id:'fixture',name:'Fixture',provider:'fixture',api:'openai-completions',baseUrl:'https://fixture.invalid/v1',reasoning:true,
  input:['text'],contextWindow:65536,maxTokens:8192,cost:{input:1,output:2,cacheRead:0.1,cacheWrite:0},
@@ -41,6 +42,20 @@ test('direct calls and simple calls obey the same reasoning enum across request 
  const optional={...model,api:'openai-codex-responses',thinkingLevelMap:{...model.thinkingLevelMap,off:'none'}};
  assert.equal((await request(codex,optional,{reasoning:'off'},true)).reasoning.effort,'none');
  assert.equal((await request(codex,{...optional,reasoning:false},{reasoningEffort:'high'})).reasoning,undefined);
+ const summaryMapped={...model,api:'openai-responses',thinkingLevelMap:{...model.thinkingLevelMap,medium:'high'}};
+ assert.equal((await request(responses,summaryMapped,{reasoningSummary:'auto'})).reasoning.effort,'high','summary-only requests still apply the provider effort map');
+});
+test('cross-model Responses tool ids stay distinct and paired after normalization',()=>{
+ const ids=['call:a','call/a'];
+ const messages=[
+  {role:'assistant',provider:'foreign',api:'foreign-api',model:'foreign-model',timestamp:1,stopReason:'toolUse',usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},content:ids.map((id,index)=>({type:'toolCall',id,name:`tool_${index}`,arguments:{index}}))},
+  ...ids.map((toolCallId,index)=>({role:'toolResult',toolCallId,toolName:`tool_${index}`,timestamp:index+2,content:[{type:'text',text:`result_${index}`}]})),
+ ];
+ const converted=convertResponsesMessages({...model,api:'openai-responses'}, {systemPrompt:'',messages}, new Set(), {});
+ const calls=converted.filter(item=>item.type==='function_call');
+ const outputs=converted.filter(item=>item.type==='function_call_output');
+ assert.equal(new Set(calls.map(item=>item.call_id)).size,2,'distinct source ids must not collapse to one call id');
+ assert.deepEqual(outputs.map(item=>item.call_id),calls.map(item=>item.call_id),'tool outputs must retain their matching normalized call ids');
 });
 test('long-cache fields need an exact supported endpoint or explicit compatibility',async()=>{
  for(const driver of [chat,responses]){
@@ -62,7 +77,8 @@ test('live provider metadata wins over snapshots, survives cache, and drives act
  try{
   fs.writeFileSync(path.join(dir,'models.json'),'{"providers":{}}');
   const stored={...model,id:'future',thinkingLevelMap:{...model.thinkingLevelMap,medium:'medium'}};
-  fs.writeFileSync(path.join(dir,'models-store.json'),JSON.stringify({openrouter:{models:[stored,{...stored,id:'retired'},{...stored,id:'~alias'}]}}));
+  const sparseStored={...stored,id:'sparse',name:'Stored sparse',input:['text','image'],contextWindow:32768,maxTokens:4096,cost:{input:3,output:7,cacheRead:1,cacheWrite:2},compat:{supportsDeveloperRole:true}};
+  fs.writeFileSync(path.join(dir,'models-store.json'),JSON.stringify({openrouter:{models:[stored,sparseStored,{...stored,id:'retired'},{...stored,id:'~alias'}]}}));
   const providers={},hooks={};
   const {default:register}=await import(pathToFileURL(path.join(agent,'extensions/live-models.ts')));
   await register({registerProvider:(id,p)=>providers[id]=p,on:(name,fn)=>hooks[name]=fn});
@@ -71,10 +87,13 @@ test('live provider metadata wins over snapshots, survives cache, and drives act
    return providers[id].refreshModels({allowNetwork:true,force:true,signal:new AbortController().signal});
   };
   const rows=await refresh('openrouter',[{id:'bad',architecture:{input_modalities:42}},
-   {id:'future',context_length:64000,top_provider:{context_length:32000,max_completion_tokens:16000},supported_parameters:['reasoning'],reasoning:{mandatory:true,supported_efforts:['none','high','max']}}]);
+   {id:'future',context_length:64000,top_provider:{context_length:32000,max_completion_tokens:16000},supported_parameters:['reasoning'],reasoning:{mandatory:true,supported_efforts:['none','high','max']}},{id:'sparse'}]);
   const fresh=rows.find(m=>m.id==='future');
   assert.equal(fresh.contextWindow,32000);assert.equal(fresh.maxTokens,16000);
   assert.deepEqual(getSupportedThinkingLevels(fresh),['high','max']);
+  const sparse=rows.find(m=>m.id==='sparse');
+  assert.equal(sparse.name,'Stored sparse');assert.equal(sparse.reasoning,true);assert.deepEqual(sparse.input,['text','image']);
+  assert.equal(sparse.contextWindow,32768);assert.equal(sparse.maxTokens,4096);assert.deepEqual(sparse.cost,sparseStored.cost);
   assert.ok(!rows.some(m=>m.id==='retired'||m.id==='bad'));assert.ok(rows.some(m=>m.id==='~alias'));
   const routerWire=await request(chat,{...model,...fresh,provider:'openrouter'},{reasoningEffort:'medium'});
   assert.equal(routerWire.reasoning.effort,'high');
@@ -120,5 +139,15 @@ test('native catalogs reject malformed network and disk data and keep healthy mo
   stored={models:[{...model,thinkingLevelMap:{high:42}},null],lastModified:1};
   await provider.refreshModels({allowNetwork:false,stored,signal:new AbortController().signal,publish:async p=>{p.update?.();return true;}});
   assert.deepEqual(provider.getModels(),[model]);
+  const localGeneratedAt=Date.now()-1000;
+  let headerlessStored;
+  const headerless=withRemoteCatalog({id:'headerless',getModels:()=>[model]},'https://catalog.invalid',localGeneratedAt);
+  globalThis.fetch=async()=>new Response(JSON.stringify([{...model,id:'headerless-live'}]));
+  await headerless.refreshModels({allowNetwork:true,force:true,signal:new AbortController().signal,publish:async p=>{if(p.persist)headerlessStored=p.persist;p.update?.();return true;}});
+  assert.ok(headerless.getModels().some(m=>m.id==='headerless-live'),'a valid 200 response does not require Last-Modified to publish');
+  assert.equal(headerlessStored.lastModified,undefined);assert.ok(headerlessStored.validatedAt>localGeneratedAt);
+  const restored=withRemoteCatalog({id:'headerless',getModels:()=>[model]},'https://catalog.invalid',localGeneratedAt);
+  await restored.refreshModels({allowNetwork:false,stored:headerlessStored,signal:new AbortController().signal,publish:async p=>{p.update?.();return true;}});
+  assert.ok(restored.getModels().some(m=>m.id==='headerless-live'),'the headerless catalog remains usable offline');
  }finally{globalThis.fetch=saved;}
 });

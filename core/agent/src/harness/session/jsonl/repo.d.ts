@@ -8,6 +8,7 @@ export declare class JsonlSessionRepo implements SessionRepo<JsonlSessionMetadat
     private readonly now;
     private readonly openSessions;
     private readonly pendingCreates;
+    private readonly admitted;
     private closed;
     private closePromise;
     constructor(options: JsonlSessionRepoOptions);
@@ -30,4 +31,5 @@ export declare class JsonlSessionRepo implements SessionRepo<JsonlSessionMetadat
     private loadStorage;
     private root;
     private assertOpen;
+    private admit;
 }

@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@yunuspi/agent-core";
-import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { DIRS, type Details, type SubagentState } from "../../shared/types.ts";
 import { readStatus } from "../../shared/utils.ts";
 import { updateActiveRunIndex } from "../background/active-run-index.ts";
 import { reconcileAsyncRun } from "../background/stale-run-reconciler.ts";
 import { resultFilePath } from "../background/result-files.ts";
+import { updateGuardedStatus } from "../shared/status-revision.ts";
 
 export function dismissRecoveredWorkflow(
 	state: SubagentState,
@@ -64,8 +64,12 @@ export function dismissRecoveredWorkflow(
 		if (reconciled) latestStatus = reconciled;
 	}
 
-	const dismissed = { ...latestStatus, displayDismissedAt: Date.now() };
-	writeAtomicJson(path.join(asyncDir, "status.json"), dismissed);
+	const dismissedAt = Date.now();
+	updateGuardedStatus(path.join(asyncDir, "status.json"), (current) =>
+		current.runId === latestStatus.runId && current.state === "running"
+			? { ...current, displayDismissedAt: dismissedAt }
+			: undefined,
+	);
 	const repaired = reconcileAsyncRun(asyncDir).status;
 	if (repaired && repaired.state !== "running") {
 		return {

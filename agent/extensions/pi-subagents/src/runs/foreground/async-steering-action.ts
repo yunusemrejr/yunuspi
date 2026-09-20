@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@yunuspi/agent-core";
-import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import type { AsyncStatus, Details, SubagentState, ToolBudgetConfig } from "../../shared/types.ts";
 import { readStatus } from "../../shared/utils.ts";
 import { consumeSteerAcks, deliverInterruptRequest, queueRevivalBrief, requestAsyncSteer, type SteerDeliveryMode, type SteerRequest } from "../background/control-channel.ts";
 import { resolveAsyncResumeTarget } from "../background/async-resume.ts";
 import { reconcileAsyncRun } from "../background/stale-run-reconciler.ts";
 import { actionResultFromSteeringStatus, claimSteeringRecovery, createSteeringStatus, recordSteeringRequest, remainingSteeringRecoveryLimits, steeringReceipt, updateSteeringTarget, waitForSteeringAction } from "../background/steering.ts";
+import { writeGuardedStatus } from "../shared/status-revision.ts";
 
 export function canQueueRetainedAsyncFollowUp(status: AsyncStatus, index?: number): boolean {
 	const steps = status.steps ?? [];
@@ -77,7 +77,7 @@ export async function steerAsyncRun(input: {
 		}
 		status.steering ??= createSteeringStatus();
 		recordSteeringRequest(status.steering, { id: request.id, requestedAt: request.ts, source: request.source, message: request.message, targets: [{ index: 0, state: "scheduled" }] });
-		writeAtomicJson(path.join(asyncDir, "status.json"), status);
+		writeGuardedStatus(path.join(asyncDir, "status.json"), status);
 		const queued = { requestId: request.id, state: "scheduled" as const, deliveryStatus: "queued" as const, sourceRunId: status.runId, targets: [{ index: 0, state: "scheduled" as const }] };
 		return { content: [{ type: "text", text: steeringReceipt(request.message, `Follow-up queued for the next resume of retained async run ${status.runId} (request ${request.id}).`) }], details: { mode: "management", results: [], steering: queued } };
 	}
@@ -210,7 +210,7 @@ export async function steerAsyncRun(input: {
 					// Status remains authoritative when diagnostic event persistence fails.
 				}
 			}
-			if (lateAckRecorded) writeAtomicJson(path.join(asyncDir, "status.json"), paused);
+			if (lateAckRecorded) writeGuardedStatus(path.join(asyncDir, "status.json"), paused);
 			let recoveryTarget;
 			try {
 				recoveryTarget = resolveAsyncResumeTarget(
@@ -231,7 +231,7 @@ export async function steerAsyncRun(input: {
 				updateSteeringTarget(paused.steering, requestId, targetIndex, "recovered", Date.now(), { replacementRunId: revived.details.asyncId });
 				const stepSteering = paused.steps?.[targetIndex]?.steering;
 				if (stepSteering) updateSteeringTarget(stepSteering, requestId, targetIndex, "recovered", Date.now(), { replacementRunId: revived.details.asyncId });
-				writeAtomicJson(path.join(asyncDir, "status.json"), paused);
+				writeGuardedStatus(path.join(asyncDir, "status.json"), paused);
 			}
 			const recovered = paused.steering ? actionResultFromSteeringStatus(paused.steering, status.runId, requestId, revived.details.asyncId) : undefined;
 			appendSteeringNotice("recovered", `Steering recovered for run ${status.runId}; replacement ${revived.details.asyncId} launched.`);
@@ -245,7 +245,7 @@ export async function steerAsyncRun(input: {
 				const stepSteering = failedStatus.steps?.[targetIndex]?.steering;
 				if (stepSteering) updateSteeringTarget(stepSteering, requestId, targetIndex, "failed", Date.now(), { reason });
 				failedStatus.activityState = "needs_attention";
-				writeAtomicJson(path.join(asyncDir, "status.json"), failedStatus);
+				writeGuardedStatus(path.join(asyncDir, "status.json"), failedStatus);
 			}
 			const failed = failedStatus?.steering ? actionResultFromSteeringStatus(failedStatus.steering, status.runId, requestId) : undefined;
 			appendSteeringNotice("failed", `Steering failed for run ${status.runId}: ${reason}`);

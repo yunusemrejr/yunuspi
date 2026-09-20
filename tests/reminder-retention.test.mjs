@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {syncBuiltinESMExports} from 'node:module';
 import {pathToFileURL} from 'node:url';
 
 const release = path.resolve(import.meta.dirname, '..');
@@ -64,4 +65,20 @@ test('state cleanup preserves active manual reminders across long idle periods',
  await emit('session_start', {reason: 'resume'}, ctx('old-active'));
  const restored = await emit('before_agent_start', {prompt: 'Continue'}, ctx('old-active'));
  assert.match(restored.message.content, /Preserve the archived project constraint/);
+});
+
+test('reentrant reminder writers never rename another writer\'s temporary bytes',()=>{
+ const sid='concurrent-writers',first=defaultRemindersState(),second=defaultRemindersState();
+ first.promptCount=1;second.promptCount=2;
+ const originalRename=fs.renameSync;let nested=false,nestedResult;
+ fs.renameSync=(from,to)=>{
+  if(!nested){nested=true;nestedResult=writeRemindersState(sid,second);}
+  return originalRename(from,to);
+ };
+ syncBuiltinESMExports();
+ try{
+  const firstResult=writeRemindersState(sid,first);
+  assert.equal(nestedResult,true);assert.equal(firstResult,true);
+  assert.equal(JSON.parse(fs.readFileSync(remindersStateFile(sid),'utf8')).promptCount,1,'the last renaming writer persists its own bytes');
+ }finally{fs.renameSync=originalRename;syncBuiltinESMExports();}
 });

@@ -66,17 +66,26 @@ export function convertResponsesMessages(model, context, allowedToolCallProvider
         const normalized = sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
         return normalized.replace(/_+$/, "");
     };
+    // Call ids are opaque. Keep a readable prefix for diagnostics, but include the
+    // original id in a stable hash so punctuation replacement and truncation cannot
+    // collapse distinct calls onto the same Responses call_id.
+    const normalizeCallId = (part) => {
+        const suffix = shortHash(part);
+        const prefixLimit = 64 - suffix.length - 1;
+        const prefix = (normalizeIdPart(part).slice(0, prefixLimit).replace(/_+$/, "") || "call");
+        return `${prefix}_${suffix}`;
+    };
     const buildForeignResponsesItemId = (itemId) => {
         const normalized = `fc_${shortHash(itemId)}`;
         return normalized.length > 64 ? normalized.slice(0, 64) : normalized;
     };
     const normalizeToolCallId = (id, _targetModel, source) => {
         if (!allowedToolCallProviders.has(model.provider))
-            return normalizeIdPart(id);
+            return normalizeCallId(id);
         if (!id.includes("|"))
-            return normalizeIdPart(id);
+            return normalizeCallId(id);
         const [callId, itemId] = id.split("|");
-        const normalizedCallId = normalizeIdPart(callId);
+        const normalizedCallId = normalizeCallId(callId);
         const isForeignToolCall = source.provider !== model.provider || source.api !== model.api;
         let normalizedItemId = isForeignToolCall ? buildForeignResponsesItemId(itemId) : normalizeIdPart(itemId);
         // OpenAI Responses API requires item id to start with "fc"

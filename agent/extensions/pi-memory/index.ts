@@ -157,11 +157,30 @@ export function shortSessionId(sessionId: string): string {
 	return sessionId.slice(0, 8);
 }
 
+const MAX_SAFE_MEMORY_FILE_BYTES = 8 * 1024 * 1024;
+
 export function readFileSafe(filePath: string): string | null {
+	let fd: number | undefined;
 	try {
-		return fs.readFileSync(filePath, "utf-8");
+		const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+		const nonblock = typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0;
+		fd = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow | nonblock);
+		const stat = fs.fstatSync(fd);
+		if (!stat.isFile() || stat.size > MAX_SAFE_MEMORY_FILE_BYTES) return null;
+		const bytes = Buffer.allocUnsafe(stat.size);
+		let offset = 0;
+		while (offset < bytes.length) {
+			const read = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
+			if (read === 0) break;
+			offset += read;
+		}
+		return bytes.subarray(0, offset).toString("utf-8");
 	} catch {
 		return null;
+	} finally {
+		if (fd !== undefined) {
+			try { fs.closeSync(fd); } catch { /* best effort */ }
+		}
 	}
 }
 

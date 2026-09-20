@@ -256,104 +256,133 @@ export class MemorySessionRepo {
     now;
     sessions = new Map();
     pendingIds = new Set();
+    admitted = new Set();
     closed = false;
     closePromise;
     constructor(options = {}) {
         this.now = options.now ?? Date.now;
     }
     async create(options, context) {
-        this.assertOpen();
-        const createdAt = this.now();
-        const id = options.id ?? uuidv7(createdAt);
-        this.reserveId(id);
-        const metadata = {
-            id,
-            createdAt,
-            storageVersion: MEMORY_STORAGE_VERSION,
-            ...(options.parentSessionId === undefined ? {} : { parentSessionId: options.parentSessionId }),
-        };
-        const storage = new MemoryStorage({ now: this.now });
-        const session = new StorageBackedSession(metadata, storage);
+        const finishOperation = this.admit();
         try {
-            const record = {
-                metadata,
-                storage,
-                session,
-                open: true,
-            };
-            this.sessions.set(id, record);
-            return this.openRecord(record);
-        }
-        catch (error) {
-            await session.close(context);
-            throw error;
-        }
-        finally {
-            this.pendingIds.delete(id);
-        }
-    }
-    open(metadata, _context) {
-        // Memory sessions are always created at the current storage version, so
-        // persistent-backend version gating does not apply here.
-        this.assertOpen();
-        const record = this.sessions.get(metadata.id);
-        if (record === undefined)
-            return Promise.reject(new Error(`Unknown session: ${metadata.id}`));
-        if (record.open)
-            return Promise.reject(new Error(`Session is already open: ${metadata.id}`));
-        record.open = true;
-        return Promise.resolve(this.openRecord(record));
-    }
-    list(_options, _context) {
-        this.assertOpen();
-        return Promise.resolve([...this.sessions.values()].map(({ metadata }) => metadata));
-    }
-    async delete(metadata, context) {
-        this.assertOpen();
-        const record = this.sessions.get(metadata.id);
-        if (record === undefined)
-            throw new Error(`Unknown session: ${metadata.id}`);
-        if (record.open)
-            throw new Error(`Session is open: ${metadata.id}`);
-        await record.session.close(context);
-        this.sessions.delete(metadata.id);
-    }
-    async fork(source, options, context) {
-        this.assertOpen();
-        const sourceRecord = this.sessions.get(source.id);
-        if (sourceRecord === undefined)
-            throw new Error(`Unknown session: ${source.id}`);
-        const createdAt = this.now();
-        const id = options.id ?? uuidv7(createdAt);
-        this.reserveId(id);
-        try {
-            const snapshot = createForkSnapshot(await sourceRecord.storage.captureForkSource(context), options);
-            const storage = MemoryStorage.fromSnapshot({ now: this.now }, snapshot);
+            const createdAt = this.now();
+            const id = options.id ?? uuidv7(createdAt);
+            this.reserveId(id);
             const metadata = {
                 id,
                 createdAt,
                 storageVersion: MEMORY_STORAGE_VERSION,
-                parentSessionId: sourceRecord.metadata.id,
+                ...(options.parentSessionId === undefined ? {} : { parentSessionId: options.parentSessionId }),
             };
+            const storage = new MemoryStorage({ now: this.now });
             const session = new StorageBackedSession(metadata, storage);
-            const record = {
-                metadata,
-                storage,
-                session,
-                open: true,
-            };
-            this.sessions.set(id, record);
+            try {
+                const record = {
+                    metadata,
+                    storage,
+                    session,
+                    open: true,
+                };
+                this.sessions.set(id, record);
+                return this.openRecord(record);
+            }
+            catch (error) {
+                await session.close(context);
+                throw error;
+            }
+            finally {
+                this.pendingIds.delete(id);
+            }
+        }
+        finally {
+            finishOperation();
+        }
+    }
+    async open(metadata, _context) {
+        const finishOperation = this.admit();
+        try {
+            // Memory sessions are always created at the current storage version, so
+            // persistent-backend version gating does not apply here.
+            const record = this.sessions.get(metadata.id);
+            if (record === undefined)
+                throw new Error(`Unknown session: ${metadata.id}`);
+            if (record.open)
+                throw new Error(`Session is already open: ${metadata.id}`);
+            record.open = true;
             return this.openRecord(record);
         }
         finally {
-            this.pendingIds.delete(id);
+            finishOperation();
+        }
+    }
+    async list(_options, _context) {
+        const finishOperation = this.admit();
+        try {
+            return [...this.sessions.values()].map(({ metadata }) => metadata);
+        }
+        finally {
+            finishOperation();
+        }
+    }
+    async delete(metadata, context) {
+        const finishOperation = this.admit();
+        try {
+            const record = this.sessions.get(metadata.id);
+            if (record === undefined)
+                throw new Error(`Unknown session: ${metadata.id}`);
+            if (record.open)
+                throw new Error(`Session is open: ${metadata.id}`);
+            await record.session.close(context);
+            this.sessions.delete(metadata.id);
+        }
+        finally {
+            finishOperation();
+        }
+    }
+    async fork(source, options, context) {
+        const finishOperation = this.admit();
+        try {
+            const sourceRecord = this.sessions.get(source.id);
+            if (sourceRecord === undefined)
+                throw new Error(`Unknown session: ${source.id}`);
+            const createdAt = this.now();
+            const id = options.id ?? uuidv7(createdAt);
+            this.reserveId(id);
+            try {
+                const snapshot = createForkSnapshot(await sourceRecord.storage.captureForkSource(context), options);
+                const storage = MemoryStorage.fromSnapshot({ now: this.now }, snapshot);
+                const metadata = {
+                    id,
+                    createdAt,
+                    storageVersion: MEMORY_STORAGE_VERSION,
+                    parentSessionId: sourceRecord.metadata.id,
+                };
+                const session = new StorageBackedSession(metadata, storage);
+                const record = {
+                    metadata,
+                    storage,
+                    session,
+                    open: true,
+                };
+                this.sessions.set(id, record);
+                return this.openRecord(record);
+            }
+            finally {
+                this.pendingIds.delete(id);
+            }
+        }
+        finally {
+            finishOperation();
         }
     }
     close(context) {
         if (this.closePromise !== undefined)
             return this.closePromise;
         this.closed = true;
-        this.closePromise = Promise.all([...this.sessions.values()].map(({ session }) => session.close(context))).then(() => undefined);
+        this.closePromise = (async () => {
+            await Promise.allSettled([...this.admitted]);
+            await Promise.all([...this.sessions.values()].map(({ session }) => session.close(context)));
+        })();
         return this.closePromise;
     }
     openRecord(record) {
@@ -369,5 +398,17 @@ export class MemorySessionRepo {
     assertOpen() {
         if (this.closed)
             throw new Error("MemorySessionRepo is closed");
+    }
+    admit() {
+        this.assertOpen();
+        let finish;
+        const completion = new Promise((resolve) => {
+            finish = resolve;
+        });
+        this.admitted.add(completion);
+        return () => {
+            this.admitted.delete(completion);
+            finish();
+        };
     }
 }
