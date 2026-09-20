@@ -291,6 +291,10 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
           TMPDIR: tempRoot,
           TMP: tempRoot,
           TEMP: tempRoot,
+          // Optional local-inference weights are deliberately not part of the
+          // sanitized export. Keep a host installation's private asset store
+          // from changing which asset-gated public tests run.
+          PI_NEEDLE_ASSETS: path.join(fixture, ".needle-assets-not-shipped"),
         },
       }),
     );
