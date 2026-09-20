@@ -400,7 +400,7 @@ export declare class AgentSession {
      * @param options.triggerTurn If true and not streaming, triggers a new LLM turn
      * @param options.deliverAs Delivery mode: "steer", "followUp", or "nextTurn"
      */
-    sendCustomMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+    sendCustomMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;

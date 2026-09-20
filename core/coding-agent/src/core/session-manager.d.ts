@@ -86,13 +86,16 @@ export interface SessionInfoEntry extends SessionEntryBase {
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
  *
- * Unlike CustomEntry, this DOES participate in LLM context.
- * The content is converted to a user message in buildSessionContext().
+ * Unlike CustomEntry, this participates in LLM context by default.
+ * The content is converted to a user message in buildSessionContext(), unless
+ * excludeFromContext is true.
  * Use details for extension-specific metadata (not sent to LLM).
  *
  * display controls TUI rendering:
  * - false: hidden entirely
  * - true: rendered with distinct styling (different from user messages)
+ * - excludeFromContext: when true, persist/render the message but do not send
+ *   its content to the model
  */
 export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
     type: "custom_message";
@@ -100,6 +103,7 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
     content: string | (TextContent | ImageContent)[];
     details?: T;
     display: boolean;
+    excludeFromContext?: boolean;
 }
 /** Session entry - has id/parentId for tree structure (returned by "read" methods in SessionManager) */
 export type SessionEntry = SessionMessageEntry | ThinkingLevelChangeEntry | ModelChangeEntry | CompactionEntry | BranchSummaryEntry | CustomEntry | CustomMessageEntry | LabelEntry | SessionInfoEntry;
@@ -234,9 +238,10 @@ export declare class SessionManager {
      * @param content Message content (string or TextContent/ImageContent array)
      * @param display Whether to show in TUI (true = styled display, false = hidden)
      * @param details Optional extension-specific metadata (not sent to LLM)
+     * @param excludeFromContext Keep the entry in the transcript while omitting it from LLM context
      * @returns Entry id
      */
-    appendCustomMessageEntry<T = unknown>(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: T): string;
+    appendCustomMessageEntry<T = unknown>(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: T, excludeFromContext?: boolean): string;
     getLeafId(): string | null;
     getLeafEntry(): SessionEntry | undefined;
     getEntry(id: string): SessionEntry | undefined;

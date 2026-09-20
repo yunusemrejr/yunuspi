@@ -391,7 +391,7 @@ export class AgentSession {
             // Check if this is a custom message from extensions
             if (event.message.role === "custom") {
                 // Persist as CustomMessageEntry
-                this.sessionManager.appendCustomMessageEntry(event.message.customType, event.message.content, event.message.display, event.message.details);
+                this.sessionManager.appendCustomMessageEntry(event.message.customType, event.message.content, event.message.display, event.message.details, event.message.excludeFromContext);
             }
             else if (event.message.role === "user" ||
                 event.message.role === "assistant" ||
@@ -940,6 +940,7 @@ export class AgentSession {
                         content: msg.content ?? [],
                         display: msg.display,
                         details: msg.details,
+                        ...(msg.excludeFromContext ? { excludeFromContext: true } : {}),
                         timestamp: Date.now(),
                     });
                 }
@@ -1121,6 +1122,7 @@ export class AgentSession {
             content: message.content ?? [],
             display: message.display,
             details: message.details,
+            ...(message.excludeFromContext ? { excludeFromContext: true } : {}),
             timestamp: Date.now(),
         };
         if (options?.deliverAs === "nextTurn") {
@@ -1150,7 +1152,7 @@ export class AgentSession {
     }
     _appendCustomMessage(appMessage) {
         this.agent.state.messages.push(appMessage);
-        this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display, appMessage.details);
+        this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display, appMessage.details, appMessage.excludeFromContext);
         this._emit({ type: "message_start", message: appMessage });
         this._emit({ type: "message_end", message: appMessage });
     }

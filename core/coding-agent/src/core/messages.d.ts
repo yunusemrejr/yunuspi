@@ -35,6 +35,8 @@ export interface CustomMessage<T = unknown> {
     content: string | (TextContent | ImageContent)[];
     display: boolean;
     details?: T;
+    /** If true, keep the message visible/persisted but omit it from model context. */
+    excludeFromContext?: boolean;
     timestamp: number;
 }
 export interface BranchSummaryMessage {
@@ -64,7 +66,7 @@ export declare function bashExecutionToText(msg: BashExecutionMessage): string;
 export declare function createBranchSummaryMessage(summary: string, fromId: string, timestamp: string): BranchSummaryMessage;
 export declare function createCompactionSummaryMessage(summary: string, tokensBefore: number, timestamp: string): CompactionSummaryMessage;
 /** Convert CustomMessageEntry to AgentMessage format */
-export declare function createCustomMessage(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details: unknown | undefined, timestamp: string): CustomMessage;
+export declare function createCustomMessage(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details: unknown | undefined, timestamp: string | number, excludeFromContext?: boolean): CustomMessage;
 /**
  * Transform AgentMessages (including custom types) to LLM-compatible Messages.
  *

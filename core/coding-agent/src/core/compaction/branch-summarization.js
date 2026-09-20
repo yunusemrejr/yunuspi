@@ -68,6 +68,8 @@ function getMessageFromEntry(entry) {
                 return undefined;
             return entry.message;
         case "custom_message":
+            if (entry.excludeFromContext === true)
+                return undefined;
             return createCustomMessage(entry.customType, entry.content, entry.display, entry.details, entry.timestamp);
         case "branch_summary":
             return createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp);

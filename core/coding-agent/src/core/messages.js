@@ -53,14 +53,15 @@ export function createCompactionSummaryMessage(summary, tokensBefore, timestamp)
         timestamp: new Date(timestamp).getTime(),
     };
 }
-/** Convert CustomMessageEntry to AgentMessage format */
-export function createCustomMessage(customType, content, display, details, timestamp) {
+/** Convert CustomMessageEntry to AgentMessage format, preserving context policy. */
+export function createCustomMessage(customType, content, display, details, timestamp, excludeFromContext = false) {
     return {
         role: "custom",
         customType,
         content,
         display,
         details,
+        ...(excludeFromContext ? { excludeFromContext: true } : {}),
         timestamp: new Date(timestamp).getTime(),
     };
 }
@@ -71,6 +72,9 @@ export function createCustomMessage(customType, content, display, details, times
  * - Agent's transormToLlm option (for prompt calls and queued messages)
  * - Compaction's generateSummary (for summarization)
  * - Custom extensions and tools
+ *
+ * Custom messages marked `excludeFromContext` are retained for UI/session
+ * bookkeeping but intentionally omitted at this provider boundary.
  */
 export function convertToLlm(messages) {
     return messages
@@ -87,6 +91,9 @@ export function convertToLlm(messages) {
                     timestamp: m.timestamp,
                 };
             case "custom": {
+                if (m.excludeFromContext) {
+                    return undefined;
+                }
                 const content = typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content;
                 return {
                     role: "user",
