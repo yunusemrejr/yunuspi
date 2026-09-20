@@ -10,7 +10,7 @@
  */
 import { createHash } from "node:crypto";
 
-export const PROFILE_VERSION = 1;
+export const PROFILE_VERSION = 2;
 export const DEFAULT_RING = 30;
 // Prefix comparison covers the most recent messages. A bounded window keeps the
 // per-request state serialization cheap while still attributing recent breaks;
@@ -75,6 +75,24 @@ export function describeMessage(message) {
   };
 }
 
+/**
+ * Extract the message-like array from the provider payload seen by
+ * `before_provider_request`. That payload is the source of truth for cache
+ * prefix diagnostics: the context hook can contain display-only or otherwise
+ * filtered entries that never reach the provider.
+ */
+export function payloadMessages(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  for (const key of ["messages", "input", "contents"]) {
+    if (Array.isArray(payload[key])) return payload[key];
+  }
+  return null;
+}
+
+export function selectProbeMessages(wireMessages, pendingMessages) {
+  return wireMessages ?? pendingMessages ?? [];
+}
+
 export function compareMessages(previous, current) {
   const max = Math.max(previous.length, current.length);
   let lcpIndex = 0;
@@ -122,7 +140,7 @@ export function compareMessages(previous, current) {
 /** Incremental chain hash over digest hashes: the value identifies exactly the
  * message prefix it covers, cheaply (small fixed-size inputs). */
 export function chainHash(digests, upto = digests.length) {
-  let chain = sha256("context-profile/v1");
+  let chain = sha256("context-profile/v2");
   const end = Math.max(0, Math.min(upto, digests.length));
   for (let i = 0; i < end; i++) chain = sha256(chain + digests[i].hash);
   return sha256(chain);
@@ -179,14 +197,16 @@ export function buildRecord({
  * separately from message digests — the message-only probe cannot see it. */
 export function payloadEnvelope(payload) {
   if (!payload || typeof payload !== "object") return null;
-  const system =
-    typeof payload.system === "string"
-      ? payload.system
-      : typeof payload.systemPrompt === "string"
-        ? payload.systemPrompt
-        : Array.isArray(payload.system)
-          ? JSON.stringify(payload.system)
-          : null;
+  let systemValue = payload.system ?? payload.systemPrompt;
+  if (systemValue === undefined) systemValue = payload.instructions;
+  if (systemValue === undefined) systemValue = payload.systemInstruction;
+  if (systemValue === undefined) systemValue = payload.system_instruction;
+  let system = null;
+  if (systemValue !== undefined && systemValue !== null) {
+    const encoded =
+      typeof systemValue === "string" ? systemValue : JSON.stringify(systemValue);
+    system = typeof encoded === "string" ? encoded : String(systemValue);
+  }
   const tools = Array.isArray(payload.tools)
     ? payload.tools
     : Array.isArray(payload.functions)
@@ -317,6 +337,13 @@ export function changeKey(change) {
   return change.role ?? "unknown";
 }
 
+/** True when a recorded request can invalidate the provider's cached prefix. */
+export function isPrefixBreak(record) {
+  if (!record || record.baseline) return false;
+  if (record.appendedOnly && !record.envelopeChanged) return false;
+  return Boolean(record.firstChange || record.envelopeChanged);
+}
+
 export function prefixSummary(records) {
   const list = Array.isArray(records) ? records : [];
   const offenders = new Map();
@@ -329,9 +356,7 @@ export function prefixSummary(records) {
     // The first recorded request is a baseline, and a pure tail append keeps
     // the cached prefix intact — neither is a prefix break. A changed system
     // prompt or tool list breaks the prefix even when the tail only appended.
-    if (record.baseline) continue;
-    if (!record.firstChange && !record.envelopeChanged) continue;
-    if (record.appendedOnly && !record.envelopeChanged) continue;
+    if (!isPrefixBreak(record)) continue;
     breaks++;
     if (record.envelopeChanged) envelopeBreaks++;
     const key = record.envelopeChanged

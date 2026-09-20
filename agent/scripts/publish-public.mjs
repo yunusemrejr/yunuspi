@@ -207,6 +207,15 @@ export function distributionTestConcurrency(
   return Math.max(1, Math.min(4, Number(cores) - 2 || 1));
 }
 
+/** Required build between script-disabled dependency installation and tests. */
+export function distributionBuildStep() {
+  return {
+    command: "npm",
+    args: ["run", "build:core"],
+    timeoutMs: 600000,
+  };
+}
+
 /** Temp root for the distribution test run.
  *
  * Tests create their fixtures with mkdtemp(os.tmpdir()). The guarded-command
@@ -266,6 +275,12 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
         fixture,
         { timeoutMs: 600000 },
       ),
+    );
+    const build = distributionBuildStep();
+    timed("build-core", () =>
+      run(build.command, build.args, fixture, {
+        timeoutMs: build.timeoutMs,
+      }),
     );
     timed(`tests(concurrency=${testConcurrency})`, () =>
       run("npm", ["test"], fixture, {
