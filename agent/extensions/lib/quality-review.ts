@@ -162,7 +162,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let releaseShared = () => {}, disposeContinuationNotice = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
-  let truncated = false, delivered = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
+  let truncated = false, delivered = '', deliveryInFlight = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
 	let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [], evidenceRejected: string[] = [];
   let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
@@ -461,18 +461,30 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
         const blockedKey = `blocked:${revision}`;
-        if (delivered === blockedKey) return;
+        if (delivered === blockedKey || deliveryInFlight === blockedKey) return;
+        deliveryInFlight = blockedKey;
+        const deliveryGeneration = generation;
+        const deliveryRevision = revision;
         try {
-          pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${dispatchGap || reason}`,display:true},{deliverAs:'followUp',triggerTurn:false});
+          await pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${dispatchGap || reason}`,display:true},{deliverAs:'followUp',triggerTurn:false});
+          if (deliveryGeneration !== generation || !active || paused || deliveryRevision !== revision) return;
           // Two settled hooks can await the same in-flight review. Mark the
           // receipt only after delivery so a failed queue remains retryable.
           delivered = blockedKey; save();
-        } catch {}
+        } catch {} finally { if (deliveryInFlight === blockedKey) deliveryInFlight = ''; }
         return;
       }
       const content = advice(), key = `${revision}:${reviewed}:${status()}`;
-      if (!content || delivered === key) return;
-      try { pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true}); followups++; delivered = key; save(); } catch {}
+      if (!content || delivered === key || deliveryInFlight === key) return;
+      deliveryInFlight = key;
+      const deliveryGeneration = generation;
+      const deliveryRevision = revision;
+      try {
+        await pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true});
+        if (deliveryGeneration !== generation || !active || paused || deliveryRevision !== revision) return;
+        followups++; delivered = key; save();
+      } catch {}
+      finally { if (deliveryInFlight === key) deliveryInFlight = ''; }
     },
     shutdown() { disposeContinuationNotice(); releaseShared(); cancel(); active = false; paused = true; }, snapshot: summary, run,
   };
@@ -501,6 +513,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           if (!test?.disabled && (test?.need || test?.assessment?.disposition === 'blocked')) throw Error('Current project test evidence is unresolved.');
           const blockers = reports.flatMap(r=>r.findings).filter(f=>f.severity === 'blocking');
           for (const finding of blockers) if (!(params.dismissals??[]).some((d:any)=>d.id===finding.id && typeof d.reason==='string' && d.reason.trim().length>=20)) throw Error(`Resolve ${finding.id} through a repair/review or supply an evidence-based dismissal.`);
+        } else {
+          // A blocked disposition is still an assessment of the current
+          // revision. Do not let a caller turn an unreviewed or stale state
+          // into a truthful-looking current review receipt; the exhausted
+          // budget is the one deliberate exception because it is itself the
+          // retained evidence that another round is unavailable.
+          if (!changed.length) throw Error('There is no current changed scope to assess as blocked.');
+          if (disposition === 'accepted') throw Error('The current revision was accepted already; new changes or input require a fresh review before recording blocked.');
+          const currentReview = reviewed === revision && (reports.length > 0 || Boolean(dispatchGap));
+          if (!currentReview && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review before recording blocked.');
         }
         disposition = params.disposition; reason = params.reason.trim().slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
