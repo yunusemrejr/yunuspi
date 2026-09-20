@@ -1294,7 +1294,7 @@ export function checkVisualSourceEvidence(task: string, messages: readonly unkno
 	}
 	if (!required.size) return;
 	if (required.size > 256) return overBudget();
-	const calls = new Map<string, string>();
+	const calls = new Map<string, { source: string; tool: string }>();
 	const duplicateIds = new Set<string>();
 	const seenIds = new Set<string>();
 	const imageReceipts = new Set<string>();
@@ -1302,7 +1302,7 @@ export function checkVisualSourceEvidence(task: string, messages: readonly unkno
 	let inspectedParts = 0;
 	for (const raw of messages) {
 		if (!raw || typeof raw !== "object") continue;
-		const message = raw as { role?: string; content?: unknown; isError?: boolean; toolCallId?: string };
+		const message = raw as { role?: string; content?: unknown; isError?: boolean; toolCallId?: string; toolName?: string };
 		if (!Array.isArray(message.content)) continue;
 		inspectedParts += message.content.length;
 		if (inspectedParts > 20000) return overBudget();
@@ -1315,17 +1315,17 @@ export function checkVisualSourceEvidence(task: string, messages: readonly unkno
 				// Supported observation tools expose one source path. A string in an
 				// unrelated tool's args cannot satisfy an image receipt by itself.
 				const source = args && typeof args === "object" ? args.path ?? args.file_path ?? args.source : undefined;
-				if (["read", "read_file", "view_image", "render_see"].includes(part.name) && typeof source === "string") calls.set(part.id, path.resolve(cwd, source.replace(/^@/, "")));
+				if (["read", "read_file", "view_image", "render_see"].includes(part.name) && typeof source === "string") calls.set(part.id, { source: path.resolve(cwd, source.replace(/^@/, "")), tool: part.name });
 			}
 			if (part.type !== "image" || typeof part.data !== "string" || !part.data.length) continue;
-			if (message.role === "toolResult" && message.isError !== true && message.toolCallId) {
+			if (message.role === "toolResult" && message.isError !== true && message.toolCallId && typeof message.toolName === "string" && calls.get(message.toolCallId)?.tool === message.toolName) {
 				imageReceipts.add(message.toolCallId);
 			}
 		}
 	}
 	for (const id of imageReceipts) {
-		const source = calls.get(id);
-		if (!duplicateIds.has(id) && source && required.has(source)) observed.add(source);
+		const call = calls.get(id);
+		if (!duplicateIds.has(id) && call && required.has(call.source)) observed.add(call.source);
 	}
 	const missing = required.size - observed.size;
 	return {

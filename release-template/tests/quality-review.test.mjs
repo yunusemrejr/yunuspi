@@ -1097,3 +1097,103 @@ test('an explicit retry can recover refunded capacity while later edits do not a
  assert.equal(f.calls.length,2); assert.equal(f.state().rounds,1);
  assert.equal(f.state().reports[0].outcome,'pass'); assert.equal(f.state().status,'awaiting_assessment');
 });
+
+test('malformed report fields preserve valid blockers as unknown and normalization is stable', () => {
+ const finding = {severity:'blocking',file:'src/window.cpp',detail:'The resize handler writes through the previous allocation after replacing its dimensions.'};
+ const raw = {outcome:'failure', evidence:{path:'src/window.cpp'}, findings:[{...finding,file:'../private'},finding], gap:''};
+ const report = parseReviewReport(JSON.stringify(raw),'runtime');
+ assert.equal(report.outcome,'unknown');
+ assert.equal(report.findings.length,1);
+ assert.equal(report.findings[0].detail,finding.detail);
+ assert.match(report.gap,/invalid outcome/);
+ assert.deepEqual(parseReviewReport(JSON.stringify(report),'runtime'),report);
+ const long = parseReviewReport(JSON.stringify({outcome:'changes',evidence:['src/window.cpp:42 retains a stale allocation.'],findings:[{...finding,detail:finding.detail.repeat(15)}],gap:''}),'runtime');
+ assert.equal(long.outcome,'unknown');
+ assert.equal(long.findings.length,1);
+ assert.equal(long.findings[0].detail.length,900);
+ assert.match(long.gap,/detail truncated/);
+ const overflow = parseReviewReport(JSON.stringify({outcome:'changes',evidence:['src/window.cpp:42 retains a stale allocation.'],findings:Array.from({length:7},(_,i)=>({...finding,severity:i===6?'blocking':'improvement'})),gap:''}),'runtime');
+ assert.equal(overflow.findings[0].severity,'blocking');
+ assert.deepEqual(parseReviewReport(JSON.stringify(overflow),'runtime'),overflow);
+});
+
+test('review paths share project-relative validation across findings and evidence', () => {
+ const invalid = [' C:\\private\\shot.png ', 'C:private.png', '\\\\host\\share\\shot.png', ' /tmp/shot.png ', '..\\shot.png', 'shots/../shot.png', 'shots/evil\npath.png'];
+ assert.deepEqual(validReviewEvidence([...invalid,' shots/live.png ']),['shots/live.png']);
+ for (const file of invalid) {
+  const report=parseReviewReport(JSON.stringify({outcome:'changes',evidence:['src/window.cpp:42 retains a stale allocation.'],findings:[{severity:'blocking',file,detail:'The displayed frame does not reflect the current state.'}],gap:''}),'interface');
+  assert.equal(report.outcome,'unknown'); assert.equal(report.findings.length,0);
+ }
+});
+
+test('new outcome evidence reopens an incomplete same-revision review without a source edit', async t => {
+ let ready=false;
+ const f=await fixture(t,{runner:async req=>req.aspects.map(a=>ready?pass(a.id):{aspect:a.id,ok:true,text:JSON.stringify({outcome:'unknown',evidence:['src/value.js:1 implements the requested behavior.'],findings:[],gap:'The normal runtime output has not been observed.'})})});
+ await f.mutate();
+ const revision=f.state().revision;
+ await f.tool({action:'review',evidence:['runtime.log']});
+ await f.tool({action:'assess',disposition:'blocked',reason:'The runtime output is missing and must be observed before acceptance.'});
+ await f.tool({action:'review',evidence:['runtime.log']});
+ await f.settle();
+ assert.equal(f.calls.length,1,'identical missing evidence and settled hooks cannot spend the second round');
+ fs.writeFileSync(path.join(f.dir,'runtime.log'),'normal entrypoint exercised and output captured');
+ ready=true;
+ await f.tool({action:'review',evidence:['runtime.log']});
+ assert.equal(f.calls.length,2);
+ assert.equal(f.state().revision,revision,'gathering evidence must not require a fake source edit');
+ assert.equal(f.state().rounds,2);
+ assert.equal(f.state().reports[0].outcome,'pass');
+ await f.tool({action:'assess',disposition:'accepted',reason:'Current source and the newly observed runtime output have been reviewed.'});
+ assert.equal(f.state().status,'accepted');
+});
+
+test('changed evidence cannot exceed the two-round cap or reopen a complete review', async t => {
+ const f=await fixture(t);
+ await f.mutate(); await f.tool({action:'review'});
+ fs.writeFileSync(path.join(f.dir,'runtime.log'),'additional observation');
+ await f.tool({action:'review',evidence:['runtime.log']});
+ assert.equal(f.calls.length,1);
+ const g=await fixture(t,{runner:async req=>req.aspects.map(a=>({aspect:a.id,ok:true,text:JSON.stringify({outcome:'unknown',evidence:[],findings:[],gap:'The display capture remains unavailable for inspection.'})}))});
+ await g.mutate(); await g.tool({action:'review'});
+ fs.writeFileSync(path.join(g.dir,'runtime.log'),'first observation');
+ await g.tool({action:'review',evidence:['runtime.log']});
+ fs.writeFileSync(path.join(g.dir,'runtime.log'),'second observation');
+ await g.tool({action:'review',evidence:['runtime.log']});
+ assert.equal(g.calls.length,2);
+ assert.equal(g.state().rounds,2);
+ assert.equal(g.state().status,'awaiting_assessment');
+ assert.equal(g.state().reports[0].outcome,'unknown');
+});
+
+test('bounded evidence normalization never turns whitespace into a source citation', () => {
+ const raw={outcome:'pass',evidence:[' '.repeat(701)+'src/value.js:1 has the expected return value.'],findings:[],gap:''};
+ const report=parseReviewReport(JSON.stringify(raw),'correctness');
+ assert.equal(report.outcome,'pass');
+ assert.equal(report.evidence[0],'src/value.js:1 has the expected return value.');
+ assert.deepEqual(parseReviewReport(JSON.stringify(report),'correctness'),report);
+ const spaced=parseReviewReport(JSON.stringify({outcome:'changes',evidence:['source'+' '.repeat(800)+'citation identifies the faulty state'],findings:[{severity:'blocking',file:'src/value.js',detail:'Bug:'+' '.repeat(950)+'the resize callback writes outside its allocation.'}],gap:''}),'correctness');
+ assert.equal(spaced.outcome,'changes');assert.equal(spaced.findings.length,1);
+ assert.deepEqual(parseReviewReport(JSON.stringify(spaced),'correctness'),spaced);
+});
+
+test('outcome artifacts changed during or after review cannot receive current acceptance', async t => {
+ let release,held=true;
+ const f=await fixture(t,{runner:async req=>{
+  if(held)await new Promise(resolve=>{release=resolve;});
+  return req.aspects.map(a=>pass(a.id));
+ }});
+ await f.mutate();
+ const artifact=path.join(f.dir,'runtime.log');fs.writeFileSync(artifact,'old runtime observation');
+ const review=f.tool({action:'review',evidence:['runtime.log']});
+ while(!release)await new Promise(resolve=>setImmediate(resolve));
+ fs.writeFileSync(artifact,'new contradictory observation');release();await review;
+ assert.equal(f.state().reports[0].outcome,'unknown');assert.match(f.state().reports[0].gap,/Outcome evidence changed/);
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'The source report appeared successful but its output artifact changed.'}),/missing evidence/);
+ held=false;await f.tool({action:'review',evidence:['runtime.log']});
+ assert.equal(f.calls.length,2);assert.equal(f.state().reports[0].outcome,'pass');
+ await f.tool({action:'assess',disposition:'accepted',reason:'The second review observes the current source and outcome artifact.'});
+ fs.writeFileSync(artifact,'another contradictory observation');
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'The previous pass must not certify an overwritten outcome artifact.'}),/missing evidence/);
+ assert.equal(f.state().status,'awaiting_assessment');assert.equal(f.state().reports[0].outcome,'unknown');
+ assert.equal(f.state().rounds,2,'freshness invalidation never replenishes the budget');
+});

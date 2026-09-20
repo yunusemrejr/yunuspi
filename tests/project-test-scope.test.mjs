@@ -95,3 +95,51 @@ test('a successful write is still observed when startup discovery was unavailabl
  await api.result({toolName:'write',toolCallId:'write',input:{path:'parser.js'},isError:false},ctx);
  assert.deepEqual(api.snapshot().changed,['parser.js']);assert.equal(api.snapshot().need,'assessment');
 });
+
+test('reload validates dependencies outside changed files before restoring passed checks', async t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-reload-dependency-')),tools={},branch=[],sent=[];
+ const dependency=path.join(cwd,'dependency.js');fs.writeFileSync(dependency,'export const value=1;');
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false,sessionManager:{getBranch:()=>branch}};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],
+  appendEntry:(customType,data)=>branch.push({type:'custom',customType,data:structuredClone(data)}),sendMessage:m=>sent.push(m)});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the application behavior'});
+ fs.writeFileSync(path.join(cwd,'app.js'),'export const app=1;');
+ await api.result({toolName:'write',toolCallId:'write',input:{path:'app.js'},isError:false},ctx);
+ const assess=()=>tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The focused check exercises the app and dependency.',commands:['node --test']},undefined,undefined,ctx);
+ await assess();
+ const event={toolName:'bash',toolCallId:'check',input:{command:'node --test'}};
+ await api.call(event,ctx);await api.result({...event,isError:false,details:{exitCode:0},content:[{type:'text',text:'# tests 1\n# pass 1'}]},ctx);
+ assert.deepEqual(api.snapshot().changed,['app.js']);assert.equal(api.snapshot().need,null);
+ // Metadata-only changes preserve evidence because the source bytes match.
+ const now=new Date(Date.now()+5000);fs.utimesSync(dependency,now,now);
+ await api.restore(ctx);api.input({source:'interactive',text:'Continue'});assert.equal(api.snapshot().need,null);
+ const tree=api.snapshot().tree;
+ fs.writeFileSync(dependency,'export const value=2;');
+ await api.restore(ctx);assert.equal(api.snapshot().paused,true);await api.settled({},ctx);
+ assert.equal(sent.length,0,'reload never wakes the model');assert.notEqual(api.snapshot().tree,tree);
+ api.input({source:'interactive',text:'Continue'});assert.equal(api.snapshot().need,'assessment');
+ await assess();assert.equal(api.snapshot().need,'missing','an old pass cannot verify a changed dependency');
+});
+
+test('background completion observes source writes before accepting the command receipt', async t=>{
+ for(const channel of ['notification','process','bg_status']) await t.test(channel,async t=>{
+  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-background-source-')),tools={};
+  const ctx={cwd},api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash','bg_run'],appendEntry(){}});
+  t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+  await api.restore(ctx);api.input({source:'interactive',text:'Fix and verify the application'});
+  fs.writeFileSync(path.join(cwd,'app.js'),'export const value=1;');
+  await api.result({toolName:'write',toolCallId:'write',input:{path:'app.js'},isError:false},ctx);
+  const assess=()=>tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The check covers the application behavior.',commands:['node --test']},undefined,undefined,ctx);
+  await assess();const event={toolName:'bg_run',toolCallId:'check',input:{command:'node --test'}};
+  await api.call(event,ctx);await api.result({...event,isError:false,details:{task:{id:'job-1',status:'running'}}},ctx);
+  const {tree}=api.snapshot();assert.equal(api.snapshot().need,'running');
+  fs.writeFileSync(path.join(cwd,'generated.js'),'export const value=2;');
+  const task={id:'job-1',status:'completed',exitCode:0};
+  if(channel==='notification')await api.message({message:{role:'custom',customType:'background-task-notification',details:task}},ctx);
+  else await api.result({toolName:channel,details:channel==='process'?{managedJob:task}:{tasks:[task]}},ctx);
+  assert.ok(api.snapshot().changed.includes('generated.js'));assert.equal(api.snapshot().need,'assessment');
+  assert.equal(api.snapshot().checks[0].tree,tree,'the command remains bound to its starting source');
+  await assess();assert.equal(api.snapshot().need,'missing','the modified source needs current verification');
+ });
+});

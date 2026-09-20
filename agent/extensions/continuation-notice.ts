@@ -25,8 +25,8 @@ export default function continuationNoticeExtension(pi: ExtensionAPI): void {
     if (message.stopReason !== "stop" && message.stopReason !== "length")
       return undefined;
     const pendingMessages = ctx.hasPendingMessages();
-    const lines = collectContinuationLines();
-    const verification = collectVerificationLines();
+    const lines = collectContinuationLines(undefined, ctx.sessionManager);
+    const verification = collectVerificationLines(undefined, ctx.sessionManager);
     const key = JSON.stringify({ lines, pendingMessages });
     // Evidence gaps remain attached to every final answer that could otherwise
     // claim success. Deduplication applies only to continuation announcements.

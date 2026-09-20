@@ -42,8 +42,9 @@ function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result
 }
 try {
  const start={role:'assistant',content:[{type:'toolCall',id:'read-1',name:'read',arguments:{path:'src/value.js'}}]};
- const receipt={role:'toolResult',toolCallId:'read-1',toolName:'read',isError:false,content:[]};
- for(const messages of [[start],[{...receipt,toolCallId:'foreign'}],[start,{...receipt,isError:true}],[receipt]])assert.equal(compactForegroundResult({messages}).reviewEvidence.sourceReads,0);
+ const receipt={role:'toolResult',toolCallId:'read-1',toolName:'read',isError:false,content:[{type:'text',text:'export const value = 1;'}]};
+ const imageReceipt={...receipt,content:[{type:'text',text:'Read image file [image/png]'},{type:'image',data:'fixture',mimeType:'image/png'}]};
+ for(const messages of [[start],[{...receipt,toolCallId:'foreign'}],[start,{...receipt,isError:true}],[receipt],[receipt,start],[start,{...receipt,toolName:'bash'}],[start,{...receipt,content:[]}],[start,imageReceipt],[start,{...imageReceipt,content:imageReceipt.content.slice(0,1)}],[start,receipt,start]])assert.equal(compactForegroundResult({messages}).reviewEvidence.sourceReads,0,'source evidence requires unique ordered calls and nonempty source text');
  const compact=compactForegroundResult({messages:[start,receipt,receipt]});assert.equal(compact.messages,undefined);assert.equal(compact.reviewEvidence.sourceReads,1);assert.equal(compactForegroundResult(compact).reviewEvidence.sourceReads,1);
  // One completed reviewer must survive another child's stalled cancellation.
  const stop=new AbortController(), streamed=[];let completed=false;
@@ -59,11 +60,17 @@ try {
  assert.ok(partialResult.some(r=>r.ok),'completed review survives a sibling timeout');
  assert.ok(streamed.some(r=>r.ok),'native results are delivered before the group deadline');
  const f=fixture();const results=await f.run();assert.equal(f.calls.length,3);assert.equal(results.length,6);assert.ok(results.every(r=>r.ok));
+ const missingPixels=JSON.parse(results.find(r=>r.aspect==='interface').text);assert.equal(missingPixels.outcome,'unknown');assert.match(missingPixels.gap,/No captured interface image/,'source-only reviews cannot establish displayed interface behavior');
+ assert.ok(results.filter(r=>r.aspect!=='interface').every(r=>JSON.parse(r.text).outcome==='pass'),'source-only non-interface reviews retain their supported passes');
  assert.equal(new Set(f.calls.map(c=>c.params.model)).size,3);
  for(const {params} of f.calls){assert.equal(params.agent,'automatic-free-assistant');assert.equal(params.context,'fresh');assert.equal(params.toolBudget.hard,12);assert.equal(params.toolBudget.soft,10);assert.equal(params.toolBudget.block,'*');assert.equal(params.timeoutMs,300000);assert.equal(params.usageBudget.tokens.hard,96000);assert.ok(params.usageBudget.costUsd.hard<=.05/3);assert.ok(params.capabilityCeiling.allowedTools.includes('git_info'));assert.ok(!params.capabilityCeiling.allowedTools.includes('bash'));assert.ok(!params.capabilityCeiling.allowedTools.includes('write'));assert.match(params.task,/Current project source graph/);assert.ok(params.task.includes(JSON.stringify(root)));assert.match(params.task,/already committed/);}
  assert.equal(f.entries.filter(e=>e.customType==='subagent-lifecycle-v1').length,3);
  assert.ok(f.calls.every(c=>!c.params.capabilityCeiling.allowedTools.includes('sandbox_run')&&!c.params.capabilityCeiling.allowedTools.includes('artifact_check')),'bounded source reviewers do not spend calls on a second test environment or image headers');
  assert.ok(f.calls.every(c=>c.params.task.includes('at most 6 evidence strings')),'prompt and parser share evidence bounds');
+ const paths=fixture({models:[free('free/a')]});
+ await paths.run({...request,aspects:[aspects[0]],evidence:[' /tmp/private.png ','C:\\private.png','..\\private.png','shots/window.png']});
+ assert.match(paths.calls[0].params.task,/relevant to your assigned aspects[\s\S]*\["shots\/window.png"\]/);
+ assert.ok(!paths.calls[0].params.task.includes('private.png'),'dispatch applies the shared relative-path contract');
  const vision=fixture({models:[free('free/a'),{...free('free/b'),input:['text','image']},free('free/c')]});
  const visionReports=await vision.run({...request,aspects:[aspects[0],aspects[2],aspects[3]],evidence:['shots/window.png']});
  assert.match(JSON.parse(visionReports.find(r=>r.aspect==='interface').text).gap,/image-read receipts/,'source reads and self-reported passes do not verify supplied pixels');
@@ -72,14 +79,26 @@ try {
  assert.match(ui.params.task,/^Visual review/,'native acceptance pixel audit is engaged');
  assert.ok(vision.calls.every(c=>!c.params.task.includes('assigned aspects: [].')),'no empty reviewer after vision assignment');
  const {checkVisualSourceEvidence}=await load('extensions/pi-subagents/src/runs/shared/acceptance.ts');
- const pixel=fixture({models:[{...free('free/a'),input:['text','image']}],result:async params=>{
+ const visualTask='Visual review "./shots/window.png"';
+ const imageCall={role:'assistant',content:[{type:'toolCall',id:'picture',name:'read',arguments:{path:'shots/window.png'}}]};
+ const imageRead={role:'toolResult',toolCallId:'picture',toolName:'read',isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
+ for(const messages of [[imageRead,imageCall],[{...imageRead,toolName:undefined},imageCall],[imageCall,imageRead,imageCall],[imageCall,{...imageRead,toolName:'bash'}]])assert.equal(checkVisualSourceEvidence(visualTask,messages,root).status,'failed','visual receipts require unique preceding calls and matching tool names');
+ const pixelResult=async (params,{source=true,toolName='read'}={})=>{
   const imageStart={role:'assistant',content:[{type:'toolCall',id:'pixels',name:'read',arguments:{path:'shots/window.png'}}]};
-  const imageResult={role:'toolResult',toolCallId:'pixels',toolName:'read',isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
-  const messages=[start,receipt,imageStart,imageResult],check=checkVisualSourceEvidence(params.task,messages,root);
+  const imageResult={role:'toolResult',toolCallId:'pixels',toolName,isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
+  const messages=[...(source?[start,receipt]:[]),imageStart,imageResult],check=checkVisualSourceEvidence(params.task,messages,root);
   return {details:{results:[compactForegroundResult({exitCode:0,messages,acceptance:{runtimeChecks:[check]},output:JSON.stringify({reviews:[{aspect:'interface',outcome:'pass',evidence:['shots/window.png: inspected captured interface pixels'],findings:[],gap:''}]})})]}};
- }});
+ };
+ const pixel=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params)});
  const pixelReports=await pixel.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']});
  assert.equal(JSON.parse(pixelReports[0].text).outcome,'pass');
+ const imageOnly=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params,{source:false})});
+ assert.ok((await imageOnly.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']})).every(r=>!r.ok&&/source-read/.test(r.gap)),'image inspection cannot substitute for current-source review');
+ const wrongTool=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params,{toolName:'bash'})});
+ assert.match(JSON.parse((await wrongTool.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']}))[0].text).gap,/image-read receipts/,'image receipts must match the source-reading tool as well as its ID');
+ const textOnly=fixture({models:[free('free/a')],result:params=>pixelResult(params)});
+ const textOnlyReport=JSON.parse((await textOnly.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']}))[0].text);
+ assert.equal(textOnlyReport.outcome,'unknown');assert.match(textOnlyReport.gap,/cannot receive image input/,'image attachments omitted for a text-only reviewer do not establish visual inspection');
  const overflow=fixture({models:[free('free/a')],result:async params=>({details:{results:[compactForegroundResult({exitCode:0,messages:[start,receipt],output:JSON.stringify({reviews:JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0]+']').map(a=>({aspect:a.id,outcome:'changes',evidence:Array.from({length:9},(_,i)=>`src/value.js:${i+1} verified an actual source boundary`),findings:[{severity:'blocking',file:'src/value.js',detail:'A negative input reaches the unchecked allocation and throws.'}],gap:''}))})})]}})});
  const retained=await overflow.run();assert.ok(retained.every(r=>r.ok&&JSON.parse(r.text).findings.length===1&&JSON.parse(r.text).evidence.length===6));
  const published=[];const streaming=fixture();await streaming.run({...request,onResult:r=>published.push(r)});assert.equal(published.length,6,'completed aspects are delivered without waiting for every peer');assert.ok(published.every(r=>r.ok));
@@ -110,7 +129,7 @@ try {
   return {isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'costUsd'},results:[compactForegroundResult({exitCode:0,messages:[start,receipt],finalOutput:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1 clean terminal report checked against current source'],findings:[],gap:''}))})})]}};
  }});
  const cleanBudgetResults=await cleanBudget.run();
- assert.ok(cleanBudgetResults.every(r=>r.ok&&r.text.includes('"outcome":"pass"')),'clean child completion keeps its validated outcome when the aggregate budget closes');
+ assert.ok(cleanBudgetResults.every(r=>r.ok&&JSON.parse(r.text).outcome===(r.aspect==='interface'?'unknown':'pass')),'clean child completion keeps validated source outcomes when the aggregate budget closes, without inventing interface pixels');
  const budgetInvalid=fixture({models:[free('free/a')],result:async()=>({isError:true,details:{usageBudget:{version:1,source:'reported',exhausted:true,reason:'tokens'},results:[{exitCode:1,error:'Usage budget exhausted.',reviewEvidence:{sourceReads:1},output:'not json'}]}})});
  assert.ok((await budgetInvalid.run()).every(r=>!r.ok),'budget exhaustion never promotes malformed output to review evidence');
  const budgetSignal=fixture({models:[free('free/a')],result:async params=>{
