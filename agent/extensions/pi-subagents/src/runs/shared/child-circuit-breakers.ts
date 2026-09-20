@@ -180,7 +180,9 @@ export function evaluateChildBreakers(
  * Nothing here waits indefinitely: every retry is bounded by the caller's
  * deadline and by this schedule.
  */
-export const CHILD_RETRY_SCHEDULE_MS = [1_000, 5_000] as const;
+// Child startup has one same-route retry. Fallback selection is a separate
+// decision, so do not advertise an unused second delay.
+export const CHILD_RETRY_SCHEDULE_MS = [1_000] as const;
 
 export type ChildRetryDecision =
 	| { action: "attempt"; attempt: number; delayMs: number }

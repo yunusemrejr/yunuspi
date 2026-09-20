@@ -10,6 +10,11 @@ export class SliceNotImplemented extends Error {
 export class Drive {
     operationId;
     completion;
+    /** Resolves only after the installed drive task has actually unwound. */
+    finished;
+    configuration;
+    /** Durable lane model selected when this drive was installed. */
+    model;
     gate;
     context;
     waitForRetry;
@@ -19,9 +24,12 @@ export class Drive {
     closeController;
     resolveCompletion;
     rejectCompletion;
-    constructor(options, context) {
+    resolveFinished;
+    constructor(options, context, configuration, model) {
         this.operationId = options.operationId;
         this.context = withoutAbortSignal(context);
+        this.configuration = configuration;
+        this.model = { ...model };
         this.waitForRetry = options.waitForRetry ?? false;
         this.deferredPermits = options.pollDeferred === true ? 1 : 0;
         let resolveCompletion;
@@ -33,6 +41,9 @@ export class Drive {
         this.resolveCompletion = resolveCompletion;
         this.rejectCompletion = rejectCompletion;
         void this.completion.catch(() => { });
+        this.finished = new Promise((resolve) => {
+            this.resolveFinished = resolve;
+        });
         const { gate, control } = createGate();
         this.gate = gate;
         this.control = control;
@@ -44,6 +55,9 @@ export class Drive {
     }
     fail(error) {
         this.rejectCompletion(error);
+    }
+    finish() {
+        this.resolveFinished();
     }
     beginAbort(cancellation) {
         this.control.beginAbort(cancellation);

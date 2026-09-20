@@ -76,6 +76,11 @@ export type OperationCommand<TResult> = (CommitDecision<TResult> & {
 export declare class Drive {
     readonly operationId: string;
     readonly completion: Promise<DriveOutcome>;
+    /** Resolves after the installed drive task has actually unwound. */
+    readonly finished: Promise<void>;
+    readonly configuration: Config<any>;
+    /** Durable lane model selected when this drive was installed. */
+    readonly model: LaneConfiguration["model"];
     readonly gate: Gate;
     readonly context: Context;
     readonly waitForRetry: boolean;
@@ -85,9 +90,10 @@ export declare class Drive {
     private readonly closeController;
     private readonly resolveCompletion;
     private readonly rejectCompletion;
-    constructor(options: DriveOptions, context: Context);
+    constructor(options: DriveOptions, context: Context, configuration: Config<any>, model: LaneConfiguration["model"]);
     settle(outcome: DriveOutcome): void;
     fail(error: unknown): void;
+    finish(): void;
     beginAbort(cancellation: Promise<void>): void;
     signalAbort(): void;
     closeGate(error: Error): void;

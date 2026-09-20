@@ -200,7 +200,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   let disposeContinuationNotice = () => {};
   let state = fresh(), facts: any, baseline: Record<string, string> | undefined, epoch = 0, active = true;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
-  let scanTail = Promise.resolve(), notedRevision = -1, delivered = '';
+  let scanTail = Promise.resolve(), notedRevision = -1, delivered = '', deliveryInFlight = '', deliveryVersion = 0;
   let hashes: Record<string, string> = {};
   const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number }>();
   const earlyTerminals = new Map<string, any>();
@@ -325,7 +325,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     async restore(ctx: any) {
       disposeContinuationNotice();
       disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length && (projectTestNeed(state) || state.assessment?.disposition === 'blocked') ? [state.assessment?.disposition === 'blocked' ? `Blocked: ${state.assessment.reason}` : `Current checks unresolved (${projectTestNeed(state)}); command exits do not establish user-visible behavior.`] : [], pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
-      epoch++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
+      epoch++; deliveryVersion++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; deliveryInFlight = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
       const ticket = epoch;
       let restoredTree: string | undefined, restoredChecks = false;
       // The session branch remains the only durable owner, and a reload
@@ -383,7 +383,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         const carry = [...state.evidence, ...state.checks.filter(c => c.outcome === 'passed' && typeof c.tree === 'string')].slice(-32);
         const optedOut = state.optedOut; state = fresh(state.root); state.optedOut = optedOut; state.evidence = carry;
       }
-      state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1; delivered = '';
+      deliveryVersion++; state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1; delivered = ''; deliveryInFlight = '';
       if (typeof event.text === 'string') {
         if (userSkipsProjectTests(event.text) || /^\s*(?:please )?(?:review only|read[ -]only(?: review)?)(?:,? (?:do not|don't) (?:edit|modify|change)(?: (?:any )?files)?)?[.!]?\s*$/i.test(event.text)) state.optedOut = true;
         else if (/\b(?:write|add|create|run|update|enable|resume)\b.{0,40}\btests?\b/i.test(event.text)) state.optedOut = false;
@@ -471,11 +471,18 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       // Edge-triggered: the same reason at the same revision with no new
       // evidence never wakes the model again. The follow-up budget still
       // bounds genuinely new reasons.
-      const key = `${state.revision}:${projectTestNeed(state)}`;
-      if (delivered === key) return;
+      const revision = state.revision;
+      const version = deliveryVersion;
+      const key = `${version}:${revision}:${projectTestNeed(state)}`;
+      if (delivered === key || deliveryInFlight === key) return;
+      deliveryInFlight = key;
       // Count only successful delivery, and never replenish on extension turns.
-      try { pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true }); state.followups++; delivered = key; save(); }
-      catch { /* failed delivery may retry at the next native settled event */ }
+      try {
+        await pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true });
+        if (ticket !== epoch || !active || deliveryVersion !== version || state.revision !== revision) return;
+        state.followups++; delivered = key; save();
+      } catch { /* failed delivery may retry at the next native settled event */ }
+      finally { if (deliveryInFlight === key) deliveryInFlight = ''; }
     },
     shutdown() { disposeContinuationNotice(); active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
     snapshot: summary,

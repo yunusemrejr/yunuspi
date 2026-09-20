@@ -536,7 +536,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	let recoveryRoute: { provider: string; model: string } | undefined;
 	let thinkingChars = 0,
 		scannedChars = 0,
-		streamingSteered = false;
+		streamingSteered = false,
+		streamingSteerInFlight = false,
+		turnSteerInFlight = false;
 	const terminatingTools = new Set<string>();
 	// before_agent_start does not carry the input source. Track the real human
 	// input event so an extension wake before the first prompt cannot consume
@@ -856,6 +858,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		recoveryRoute = undefined;
 		loop = createLoopTracker();
+		streamingSteerInFlight = false;
+		turnSteerInFlight = false;
 	});
 	pi.on("model_select", () => {
 		recoveryRoute = undefined;
@@ -874,9 +878,10 @@ export default function remindersExtension(pi: ExtensionAPI) {
 
 	// Streaming detection queues normal Pi steering; never abort/restart the
 	// transport or insert a synthetic user turn. User steering takes priority.
-	pi.on("message_update", (event, ctx) => {
+	pi.on("message_update", async (event, ctx) => {
 		if (
 			loop.nudged ||
+			streamingSteerInFlight ||
 			ctx.signal?.aborted ||
 			ctx.isIdle?.() !== false ||
 			ctx.hasPendingMessages?.()
@@ -903,12 +908,15 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		if (st.lastOverthinkAt && now - st.lastOverthinkAt < OT_GAP_MS) return;
 		const nudge = repeatedReasoningNotice(m);
 		if (!nudge) return;
+		const targetLoop = loop;
+		streamingSteerInFlight = true;
 		try {
-			pi.sendMessage(
+			await pi.sendMessage(
 				{ customType: "reminders", content: nudge, display: false },
 				{ deliverAs: "steer" },
 			);
-			loop.nudged = true;
+			if (targetLoop !== loop) return;
+			targetLoop.nudged = true;
 			streamingSteered = true;
 			if (ctx.model)
 				recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
@@ -917,6 +925,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			writeState(sid, st);
 		} catch (err) {
 			logReminderErr("reasoning steering", err);
+		} finally {
+			streamingSteerInFlight = false;
 		}
 	});
 
@@ -1034,42 +1044,48 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const dueManual = dueManualReminders(st, now);
 			const hints = guidance.candidates();
 			if (!nudge && !hints.length && dueManual.length === 0) return;
-			const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
-			pi.sendMessage(
-				{
-					customType: "reminders",
-					content: reminderText(
-						st,
-						sid,
-						now,
-						{ todo: false, drift: false },
-						dueManual,
-						[
-							...(nudge ? [nudge] : []),
-							...hints.map((h) => `[capability hint] ${h.text}`),
-						],
-						[],
-						traj,
-					),
-					display: dueManual.length > 0,
-				},
-				{ deliverAs: "steer" },
-			);
-			if (dueManual.length > 0) armCompliance(sid, dueManual.length);
-			// A rejected queue operation must not consume the reminder or nudge.
-			// Once the queue accepts the steer, consume the delivered manual
-			// occurrences immediately: a later step throwing must not leave a
-			// delivered occurrence still due and re-fire it on the next turn.
-			for (const r of dueManual) advanceDelivered(r, now);
-			guidance.commit(hints);
-			if (nudge) {
-				loop.nudged = true;
-				if (reasoning && ctx.model)
-					recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
-				st.overthinkReminders += 1;
-				st.lastOverthinkAt = now;
+			if (turnSteerInFlight) return;
+			turnSteerInFlight = true;
+			try {
+				const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
+				await pi.sendMessage(
+					{
+						customType: "reminders",
+						content: reminderText(
+							st,
+							sid,
+							now,
+							{ todo: false, drift: false },
+							dueManual,
+							[
+								...(nudge ? [nudge] : []),
+								...hints.map((h) => `[capability hint] ${h.text}`),
+							],
+							[],
+							traj,
+						),
+						display: dueManual.length > 0,
+					},
+					{ deliverAs: "steer" },
+				);
+				if (dueManual.length > 0) armCompliance(sid, dueManual.length);
+				// A rejected queue operation must not consume the reminder or nudge.
+				// Once the queue accepts the steer, consume the delivered manual
+				// occurrences immediately: a later step throwing must not leave a
+				// delivered occurrence still due and re-fire it on the next turn.
+				for (const r of dueManual) advanceDelivered(r, now);
+				guidance.commit(hints);
+				if (nudge) {
+					loop.nudged = true;
+					if (reasoning && ctx.model)
+						recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
+					st.overthinkReminders += 1;
+					st.lastOverthinkAt = now;
+				}
+				writeState(sid, st);
+			} finally {
+				turnSteerInFlight = false;
 			}
-			writeState(sid, st);
 		} catch (err) {
 			logReminderErr("turn_end", err);
 		}
@@ -1078,6 +1094,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (_event, ctx) => {
 		recoveryRoute = undefined;
 		loop = createLoopTracker();
+		streamingSteerInFlight = false;
+		turnSteerInFlight = false;
 		try {
 			const sid = sidOf(ctx);
 			if (sid) writeState(sid, load(sid));
@@ -1194,7 +1212,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				try {
 					if (typeof pi.sendMessage !== "function")
 						throw new Error("message delivery unavailable");
-					pi.sendMessage(immediateMessage, {
+					await pi.sendMessage(immediateMessage, {
 						deliverAs: "steer",
 						triggerTurn: true,
 					});

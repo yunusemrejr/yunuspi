@@ -124,7 +124,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let releaseShared = () => {}, disposeContinuationNotice = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
-  let truncated = false, delivered = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
+  let truncated = false, delivered = '', deliveryInFlight = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
   let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [];
   let scanning: Promise<void> | undefined;
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
@@ -418,18 +418,30 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.
         const blockedKey = `blocked:${revision}`;
-        if (delivered === blockedKey) return;
+        if (delivered === blockedKey || deliveryInFlight === blockedKey) return;
+        deliveryInFlight = blockedKey;
+        const deliveryGeneration = generation;
+        const deliveryRevision = revision;
         try {
-          pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${dispatchGap || reason}`,display:true},{deliverAs:'followUp',triggerTurn:false});
+          await pi.sendMessage({customType:'quality-review-status',content:`[quality review] ${dispatchGap || reason}`,display:true},{deliverAs:'followUp',triggerTurn:false});
+          if (deliveryGeneration !== generation || !active || paused || deliveryRevision !== revision) return;
           // Two settled hooks can await the same in-flight review. Mark the
           // receipt only after delivery so a failed queue remains retryable.
           delivered = blockedKey; save();
-        } catch {}
+        } catch {} finally { if (deliveryInFlight === blockedKey) deliveryInFlight = ''; }
         return;
       }
       const content = advice(), key = `${revision}:${reviewed}:${status()}`;
-      if (!content || delivered === key) return;
-      try { pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true}); followups++; delivered = key; save(); } catch {}
+      if (!content || delivered === key || deliveryInFlight === key) return;
+      deliveryInFlight = key;
+      const deliveryGeneration = generation;
+      const deliveryRevision = revision;
+      try {
+        await pi.sendMessage({customType:'quality-review-followup',content:`${content}\n${JSON.stringify(summary())}`,display:false},{deliverAs:'followUp',triggerTurn:true});
+        if (deliveryGeneration !== generation || !active || paused || deliveryRevision !== revision) return;
+        followups++; delivered = key; save();
+      } catch {}
+      finally { if (deliveryInFlight === key) deliveryInFlight = ''; }
     },
     shutdown() { disposeContinuationNotice(); releaseShared(); cancel(); active = false; paused = true; }, snapshot: summary, run,
   };

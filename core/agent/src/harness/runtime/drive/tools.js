@@ -234,7 +234,7 @@ function readCheckpoint(lane, drive, call) {
     }, drive.context);
 }
 async function resolveToolContext(lane, drive) {
-    const source = lane.readConfig().toolContext;
+    const source = drive.configuration.toolContext;
     return (typeof source === "function" ? await source(drive.context) : source);
 }
 async function performToolInvocation(lane, drive, batch, call, cleared, toolContext, recovery) {
@@ -437,7 +437,7 @@ export async function runTools(lane, drive, run) {
     if (current.run.control.status === "cancel_requested") {
         return runSequential(lane, drive, current.run, sources, undefined, recovery);
     }
-    const config = lane.readConfig();
+    const config = drive.configuration;
     const active = new Set(batch.configuration.activeToolNames);
     const tools = config.tools.filter((tool) => active.has(tool.name));
     const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));

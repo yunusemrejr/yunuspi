@@ -971,7 +971,7 @@ export interface ExtensionAPI {
     sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
-    }): void;
+    }): Promise<void>;
     /**
      * Send a user message to the agent. Always triggers a turn.
      * When the agent is streaming, use deliverAs to specify how to queue the message.
@@ -980,7 +980,7 @@ export interface ExtensionAPI {
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
         deliverAs?: "steer" | "followUp";
         expandPromptTemplates?: boolean;
-    }): void;
+    }): Promise<void>;
     /** Append a custom entry to the session for state persistence (not sent to LLM). */
     appendEntry<T = unknown>(customType: string, data?: T): void;
     /** Set the session display name (shown in session selector). */
@@ -1185,11 +1185,11 @@ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
     triggerTurn?: boolean;
     deliverAs?: "steer" | "followUp" | "nextTurn";
-}) => void;
+}) => Promise<void>;
 export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {
     deliverAs?: "steer" | "followUp";
     expandPromptTemplates?: boolean;
-}) => void;
+}) => Promise<void>;
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 export type SetSessionNameHandler = (name: string) => void;
 export type GetSessionNameHandler = () => string | undefined;

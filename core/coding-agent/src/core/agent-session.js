@@ -2026,22 +2026,26 @@ export class AgentSession {
         };
         runner.bindCore({
             sendMessage: (message, options) => {
-                this.sendCustomMessage(message, options).catch((err) => {
+                const delivery = this.sendCustomMessage(message, options);
+                void delivery.catch((err) => {
                     runner.emitError({
                         extensionPath: "<runtime>",
                         event: "send_message",
                         error: err instanceof Error ? err.message : String(err),
                     });
                 });
+                return delivery;
             },
             sendUserMessage: (content, options) => {
-                this.sendUserMessage(content, options).catch((err) => {
+                const delivery = this.sendUserMessage(content, options);
+                void delivery.catch((err) => {
                     runner.emitError({
                         extensionPath: "<runtime>",
                         event: "send_user_message",
                         error: err instanceof Error ? err.message : String(err),
                     });
                 });
+                return delivery;
             },
             appendEntry: (customType, data) => {
                 const entryId = this.sessionManager.appendCustomEntry(customType, data);
