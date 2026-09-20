@@ -2679,7 +2679,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 339,
+        "line": 342,
         "kind": "literal"
       },
       {
@@ -2885,7 +2885,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 480,
+        "line": 492,
         "kind": "literal"
       },
       {
@@ -3129,7 +3129,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 339,
+        "line": 342,
         "kind": "literal"
       },
       {
@@ -3231,7 +3231,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 480,
+        "line": 492,
         "kind": "literal"
       },
       {
@@ -4873,6 +4873,12 @@
       }
     ],
     "serviceOwners": [
+      {
+        "source": "agent/extensions/context-profile.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
       {
         "source": "agent/extensions/filesystem-safety.ts",
         "signals": [
