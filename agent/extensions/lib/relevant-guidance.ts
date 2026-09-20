@@ -824,7 +824,7 @@ export function createRelevantGuidance(pi: any) {
       const configured = event.systemPromptOptions?.skills;
       const catalog = Array.isArray(configured) ? '' : [...String(event.systemPrompt ?? '').matchAll(/<available_skills>([\s\S]*?)<\/available_skills>/g)].map(match => match[1]).join('\n');
       const metadata = Array.isArray(configured)
-        ? configured.map(s => ({name:s.name, description:s.description ?? '', file:s.filePath}))
+        ? configured.filter(s => !s.disableModelInvocation).map(s => ({name:s.name, description:s.description ?? '', file:s.filePath}))
         : [...catalog.matchAll(/<skill>\s*<name>([^]*?)<\/name>\s*<description>([^]*?)<\/description>\s*<location>([^]*?)<\/location>\s*<\/skill>/g)]
           .map(m => ({name:decode(m[1]),description:decode(m[2]),file:decode(m[3])}));
       const seenFiles = new Set<string>();

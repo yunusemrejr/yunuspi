@@ -17,7 +17,7 @@ function fixture(optIn=true){
  const api={getActiveTools:()=>['read','edit','subagent','skill_review'],on(name,fn){hooks[name]=fn;},registerTool(tool){registered[tool.name]=tool;},appendEntry(customType,data){entries.push({type:'custom',customType,data});},sendMessage(){wake++;},sendUserMessage(){wake++;}};
  const g=createRelevantGuidance(api);const ctx={cwd:dir,sessionManager:{getEntries:()=>entries,getBranch:()=>entries}};g.restore(ctx);
  const catalog='<available_skills><skill><name>spatial-balance</name><description>Composition proportions hierarchy</description><location>'+file+'</location></skill></available_skills>';
- const start=(prompt='Make this fit better',systemPrompt=catalog)=>g.start({prompt,systemPrompt},ctx);
+ const start=(prompt='Make this fit better',systemPrompt=catalog,skills)=>g.start({prompt,systemPrompt,...(skills?{systemPromptOptions:{skills}}:{})},ctx);
  const read=(relative)=>g.record({toolName:'read',input:{path:relative},isError:false,content:[{type:'text',text:relative===file?fs.readFileSync(file,'utf8'):'SECRET SOURCE BODY'}]});
  const observe=()=>{read('ui/world.css');read('ui/index.html');};
  const finish=()=>calls.at(-1).resolve(JSON.stringify({suggestions:[{name:'spatial-balance',reason:'Observed styles and markup need composition proportion checks.'}]}));
@@ -59,5 +59,41 @@ test('default advisory discovery uses one bounded background request without wak
   assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'ui/world.css'}}),undefined,'discovery never gates normal work');
   f.finish();await tick();f.observe();await tick();assert.equal(f.calls.length,1,'additional observations do not launch repeated helper requests');
   assert.equal(f.wakes(),0);
+ }finally{f.cleanup();}
+});
+
+test('manual-only skills stay out of model discovery and required read gates',async()=>{
+ const f=fixture();try{
+  process.env.PI_SKILL_REVIEW='required';
+  f.start('Debug and fix the failing TypeScript implementation','',[
+   {name:'debugging',description:'Debug failing implementations',filePath:f.file,disableModelInvocation:true},
+  ]);
+  const page=await f.registered.skill_review.execute('search',{action:'search',query:'debugging'});
+  assert.deepEqual(page.details.results,[],'manual-only skills are not offered through the model catalog');
+  assert.equal(f.g.beforeToolCall({toolName:'edit',input:{path:'src/app.ts'}}),undefined,'manual-only skill cannot become a required workflow');
+ }finally{f.cleanup();}
+});
+
+test('automatic discovery excludes manual-only skills while retaining enabled candidates',async()=>{
+ const f=fixture();try{
+  f.start('Make this fit better','',[
+   {name:'manual-secret-workflow',description:'Manual workflow only',filePath:f.file,disableModelInvocation:true},
+   {name:'spatial-balance',description:'Composition proportions hierarchy',filePath:f.file+'.visible',disableModelInvocation:false},
+  ]);
+  f.observe();await tick();assert.equal(f.calls.length,1);
+  assert.deepEqual(f.calls[0].request.candidates.map(skill=>skill.name),['spatial-balance']);
+  assert.doesNotMatch(f.calls[0].request.brief,/manual-secret-workflow|Manual workflow only/);
+ }finally{f.cleanup();}
+});
+
+test('structured skill visibility matches core truthiness and defaults',async()=>{
+ const f=fixture();try{
+  for(const flag of [undefined,false,0,'',null,true,1,'true','false',{},[]]){
+   f.start('Make this fit better','',[
+    {name:'spatial-balance',description:'Composition proportions hierarchy',filePath:f.file,...(flag===undefined?{}:{disableModelInvocation:flag})},
+   ]);
+   const page=await f.registered.skill_review.execute('search',{action:'search',query:'spatial-balance'});
+   assert.equal(page.details.results.length,flag?0:1,`disableModelInvocation=${String(flag)}`);
+  }
  }finally{f.cleanup();}
 });
