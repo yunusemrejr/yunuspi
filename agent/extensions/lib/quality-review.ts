@@ -516,13 +516,19 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         } else {
           // A blocked disposition is still an assessment of the current
           // revision. Do not let a caller turn an unreviewed or stale state
-          // into a truthful-looking current review receipt; the exhausted
-          // budget is the one deliberate exception because it is itself the
-          // retained evidence that another round is unavailable.
-          if (!changed.length) throw Error('There is no current changed scope to assess as blocked.');
+          // into a truthful-looking current review receipt. An explicit
+          // project-test blocker is a deliberate exception: it is already
+          // current, session-owned evidence that the shared verification
+          // boundary cannot be completed, and quality must be able to retain
+          // the same blocked disposition alongside it.
+          const test = options.tests();
+          const verificationBlocked = Boolean(!test?.disabled && test?.changed?.length
+            && test.assessment?.revision === test.revision
+            && test.assessment.disposition === 'blocked');
+          if (!changed.length && !verificationBlocked) throw Error('There is no current changed scope to assess as blocked.');
           if (disposition === 'accepted') throw Error('The current revision was accepted already; new changes or input require a fresh review before recording blocked.');
           const currentReview = reviewed === revision && (reports.length > 0 || Boolean(dispatchGap));
-          if (!currentReview && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review before recording blocked.');
+          if (!currentReview && !verificationBlocked && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review before recording blocked.');
         }
         disposition = params.disposition; reason = params.reason.trim().slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
