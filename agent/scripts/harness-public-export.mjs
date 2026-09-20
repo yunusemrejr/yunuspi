@@ -36,6 +36,24 @@ templates ??= fs.existsSync(path.join(source, "runtime/release-template"))
  ? path.join(source, "public-template")
  : path.resolve(source, "../release-template");
 const within = (p, r) => p === r || p.startsWith(r + path.sep);
+function assertRegularDirectory(dir, label = "Source root") {
+ const resolved = path.resolve(dir);
+ const stat = fs.lstatSync(resolved);
+ if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(resolved) !== resolved)
+  throw Error(`${label} must be a regular directory without symlink ancestors`);
+}
+function readRegularSource(file, label = "Source input") {
+ const resolved = path.resolve(file);
+ const stat = fs.lstatSync(resolved);
+ if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(resolved) !== resolved)
+  throw Error(`${label} must be a regular file without symlink ancestors`);
+ return fs.readFileSync(resolved);
+}
+function copyRegularSource(file, destination, label) {
+ const bytes = readRegularSource(file, label);
+ const mode = fs.lstatSync(path.resolve(file)).mode & 0o111 ? 0o755 : 0o644;
+ fs.writeFileSync(destination, bytes, { mode });
+}
 source = fs.realpathSync(source);
 templates = fs.realpathSync(templates);
 for (let at = output; ; at = path.dirname(at)) {
@@ -56,12 +74,17 @@ if (
 )
  throw Error("Output must be absent or an empty directory.");
 const secrets = new Set();
+const credentialKeys = new Set([
+ "apikey", "apisecret", "key", "secret", "clientsecret", "privatekey",
+ "password", "passwd", "accesstoken", "refreshtoken", "idtoken",
+ "sessiontoken", "access", "refresh", "accountid", "token",
+ "authorization", "cookie",
+]);
 function gather(value, key = "") {
  if (typeof value === "string") {
+  const normalizedKey = key.replace(/[-_]/g, "").toLowerCase();
   if (
-   /^(?:api[_-]?key|api[_-]?secret|key|secret|password|passwd|access[_-]?token|refresh[_-]?token|access|refresh|accountId|token|authorization|cookie)$/i.test(
-    key,
-   ) &&
+   credentialKeys.has(normalizedKey) &&
    value.length >= 8 &&
    !/^[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET)$|^\$|^!/.test(value)
   )
@@ -71,7 +94,7 @@ function gather(value, key = "") {
 }
 for (const name of ["auth.json", "models.json", "settings.json"]) {
  try {
-  gather(JSON.parse(fs.readFileSync(path.join(source, name), "utf8")));
+  gather(JSON.parse(readRegularSource(path.join(source, name), "Private configuration").toString("utf8")));
  } catch (error) {
   if (error.code !== "ENOENT")
    throw Error("Cannot safely read private configuration for leak checking");
@@ -79,15 +102,15 @@ for (const name of ["auth.json", "models.json", "settings.json"]) {
 }
 for (const [key, value] of Object.entries(process.env))
  if (
-  /(?:API_KEY|SECRET|PASSWORD|TOKEN)$/.test(key) &&
+  /(?:^|_)(?:API_KEY|API_SECRET|CLIENT_SECRET|PRIVATE_KEY|SECRET_ACCESS_KEY|SECRET|PASSWORD|PASSWD|ACCESS_TOKEN|REFRESH_TOKEN|ID_TOKEN|SESSION_TOKEN|TOKEN)$/.test(key) &&
   value &&
   value.length >= 12
  )
   secrets.add(value);
-const sourceLive = fs.readFileSync(
+const sourceLive = readRegularSource(
  path.join(source, "extensions/live-models.ts"),
- "utf8",
-);
+ "Live model source",
+).toString("utf8");
 const fallback = /const ORCA_FALLBACK_KEY = ("[^"\r\n]*"|'[^'\r\n]*');/.exec(
  sourceLive,
 );
@@ -149,6 +172,7 @@ function put(rel, data, mode = 0o644) {
  });
 }
 function copyTree(dir, prefix) {
+ assertRegularDirectory(dir, "Export source directory");
  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
   if (omitted.has(entry.name)) continue;
   const p = path.join(dir, entry.name),
@@ -203,6 +227,7 @@ try {
  copyTree(path.join(source, "extensions"), "agent/extensions");
  copyTree(path.join(source, "skills"), "agent/skills");
  // Runtime scripts only. Historical benchmarks/session fixtures never enter a public release.
+ assertRegularDirectory(path.join(source, "scripts"), "Runtime scripts root");
  for (const entry of fs.readdirSync(path.join(source, "scripts"), {
   withFileTypes: true,
  })) {
@@ -213,10 +238,7 @@ try {
   ) {
    const temp = path.join(stage, ".single");
    fs.mkdirSync(temp);
-   fs.copyFileSync(
-    path.join(source, "scripts", entry.name),
-    path.join(temp, entry.name),
-   );
+   copyRegularSource(path.join(source, "scripts", entry.name), path.join(temp, entry.name), "Runtime script");
    copyTree(temp, "agent/scripts");
    fs.rmSync(temp, { recursive: true });
   }
@@ -230,12 +252,12 @@ try {
   const temp = path.join(stage, ".compatibility");
   fs.mkdirSync(temp);
   for (const name of CORE_COMPATIBILITY_TESTS)
-   fs.copyFileSync(path.join(source, "scripts/compatibility", name), path.join(temp, name));
+   copyRegularSource(path.join(source, "scripts/compatibility", name), path.join(temp, name), "Compatibility test");
   copyTree(temp, "agent/scripts/compatibility");
   fs.rmSync(temp, { recursive: true });
  }
  for (const name of ["package.json", "package-lock.json"])
-  put("agent/npm/" + name, fs.readFileSync(path.join(source, "npm", name)));
+  put("agent/npm/" + name, readRegularSource(path.join(source, "npm", name), "Agent npm manifest"));
  // Ship only the portable local-inference unit templates. Authentication,
  // weights, runtime descriptors and unrelated personal units remain private.
  const modelUnits = ["pi-mini-preprocessor.service", "pi-smol-preprocessor.service"];
@@ -247,7 +269,7 @@ try {
    throw Error("Inference unit must be a regular source file");
   const temp = path.join(stage, ".model-unit");
   fs.mkdirSync(temp);
-  fs.copyFileSync(file, path.join(temp, name));
+  copyRegularSource(file, path.join(temp, name), "Inference unit");
   copyTree(temp, "agent/scripts/systemd");
   fs.rmSync(temp, { recursive: true });
   shippedUnits.add(`scripts/systemd/${name}`);
@@ -265,12 +287,14 @@ try {
   const p = path.join(templates, entry.name);
   if (entry.isSymbolicLink()) throw Error("Template symlink");
   if (entry.isDirectory()) copyTree(p, entry.name);
-  else
+  else {
+   if (!entry.isFile()) throw Error("Template input must be a regular file");
    put(
     entry.name,
-    fs.readFileSync(p),
+    readRegularSource(p, "Template input"),
      fs.statSync(p).mode & 0o111 ? 0o755 : 0o644,
    );
+  }
  }
  // Fork source is part of the product, never reconstructed from an upstream package.
  const productFile = path.join(stage, "package.json");
@@ -282,11 +306,7 @@ try {
    .find(dir => fs.existsSync(path.join(dir, "identity.json")));
   if (!coreSource) throw Error("Owned core source missing; export from a complete YunusPi checkout or installation");
   if (fs.realpathSync(coreSource) !== coreSource) throw Error("Owned core source contains a symlink ancestor");
-  const readOwnedFile = file => {
-   const stat = fs.lstatSync(file);
-   if (!stat.isFile() || stat.isSymbolicLink()) throw Error("Owned core input must be a regular source file");
-   return fs.readFileSync(file);
-  };
+  const readOwnedFile = file => readRegularSource(file, "Owned core input");
   const coreIdentity = JSON.parse(readOwnedFile(path.join(coreSource, "identity.json")).toString("utf8"));
   if (coreIdentity.releaseAuthority !== "yunusemrejr/yunuspi") throw Error("Unowned core release authority");
   put("core/identity.json", readOwnedFile(path.join(coreSource, "identity.json")));

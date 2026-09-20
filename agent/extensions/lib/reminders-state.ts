@@ -23,6 +23,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const REMINDERS_STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
@@ -158,11 +159,13 @@ export function writeRemindersState(
 	sidOrEmpty: string,
 	st: ReminderState,
 ): boolean {
+	let tmp: string | undefined;
 	try {
-		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true });
-		const tmp = remindersStateFile(sidOrEmpty) + ".tmp";
-		fs.writeFileSync(tmp, JSON.stringify(st));
+		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
+		tmp = `${remindersStateFile(sidOrEmpty)}.${process.pid}.${randomUUID()}.tmp`;
+		fs.writeFileSync(tmp, JSON.stringify(st), { flag: "wx", mode: 0o600 });
 		fs.renameSync(tmp, remindersStateFile(sidOrEmpty));
+		tmp = undefined;
 		return true;
 	} catch (error) {
 		// Ambient hooks must never break a session, but persistence loss must be
@@ -172,6 +175,10 @@ export function writeRemindersState(
 			error instanceof Error ? error.message : String(error),
 		);
 		return false;
+	} finally {
+		if (tmp) {
+			try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+		}
 	}
 }
 

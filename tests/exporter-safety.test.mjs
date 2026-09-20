@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -12,6 +12,9 @@ const exporter = [
   path.resolve(root, "../scripts/harness-public-export.mjs"),
 ].find((p) => fs.existsSync(p));
 assert.ok(exporter, "exporter must be shipped");
+const { CORE_COMPATIBILITY_TESTS } = await import(
+  pathToFileURL(path.join(path.dirname(exporter), "lib/core-compatibility.mjs")),
+);
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "export-safety-"));
   const source = path.join(dir, "source"),
@@ -70,7 +73,7 @@ test("default installed export uses current runtime templates before legacy temp
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 test("exporter rejects exact OAuth and account canaries without exposing their values", () => {
-  for (const field of ["access", "refresh", "accountId"]) {
+  for (const field of ["access", "refresh", "accountId", "clientSecret", "client_secret", "privateKey", "sessionToken"]) {
     const f = fixture();
     try {
       const value = ["private", field, "export", "canary", "90871"].join("-");
@@ -95,6 +98,37 @@ test("exporter rejects exact OAuth and account canaries without exposing their v
     } finally {
       fs.rmSync(f.dir, { recursive: true, force: true });
     }
+  }
+});
+test("exporter refuses symlinked copy roots and allowlisted compatibility files", () => {
+  const f = fixture();
+  try {
+    const outsideExtensions = path.join(f.dir, "outside-extensions");
+    fs.renameSync(path.join(f.source, "extensions"), outsideExtensions);
+    fs.symlinkSync(outsideExtensions, path.join(f.source, "extensions"));
+    const linkedRoot = f.run();
+    assert.notEqual(linkedRoot.status, 0);
+    assert.equal(fs.existsSync(f.output), false);
+    assert.ok(fs.existsSync(path.join(outsideExtensions, "live-models.ts")));
+    fs.unlinkSync(path.join(f.source, "extensions"));
+    fs.renameSync(outsideExtensions, path.join(f.source, "extensions"));
+
+    const compatibility = path.join(f.source, "scripts/compatibility");
+    fs.mkdirSync(compatibility, { recursive: true });
+    fs.writeFileSync(path.join(f.source, "scripts/core-update.mjs"), "// fixture\n");
+    for (const name of CORE_COMPATIBILITY_TESTS)
+      fs.writeFileSync(path.join(compatibility, name), "// public fixture\n");
+    const outsidePrivate = path.join(f.dir, "PRIVATE-NOTES.mjs");
+    fs.writeFileSync(outsidePrivate, "// private target bytes\n");
+    const linkedName = CORE_COMPATIBILITY_TESTS[0];
+    fs.unlinkSync(path.join(compatibility, linkedName));
+    fs.symlinkSync(outsidePrivate, path.join(compatibility, linkedName));
+    const linkedFile = f.run();
+    assert.notEqual(linkedFile.status, 0);
+    assert.equal(fs.existsSync(f.output), false);
+    assert.equal(fs.readFileSync(outsidePrivate, "utf8"), "// private target bytes\n");
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
   }
 });
 test("exporter refuses nonempty destinations and preserves existing files", () => {

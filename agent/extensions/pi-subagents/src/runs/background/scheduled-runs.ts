@@ -814,13 +814,11 @@ export class ScheduledRunManager {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			run.state = "skipped";
 			run.completedAt = timestamp(now);
-			if (advance) {
-				schedule.trigger.nextRunAt = nextAfter(schedule.trigger, planned, now);
-				schedule.updatedAt = timestamp(now);
-				store.write(schedule);
-			}
+			// Another process acquired the claim after this process read the
+			// schedule. Never persist this stale whole-record snapshot: doing so
+			// can erase the winner's activeRunId, pause state, and lastRunId.
+			// The owner advances and re-arms the schedule it successfully claimed.
 			store.writeRun(schedule, run, "schedule.skipped_overlap");
-			this.arm(schedule, store);
 			return run;
 		}
 		schedule.activeRunId = run.id;

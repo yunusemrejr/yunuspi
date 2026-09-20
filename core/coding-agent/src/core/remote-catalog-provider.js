@@ -52,7 +52,8 @@ function parseCatalog(providerId, value, strict = true) {
 function remoteModels(entry, localGeneratedAt) {
     if (!entry)
         return [];
-    if (localGeneratedAt !== undefined && (entry.lastModified === undefined || entry.lastModified <= localGeneratedAt)) {
+    const freshness = entry.lastModified ?? entry.validatedAt;
+    if (localGeneratedAt !== undefined && (freshness === undefined || freshness <= localGeneratedAt)) {
         return [];
     }
     return entry.models;
@@ -77,7 +78,7 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
                 return;
             if (!context.force &&
                 stored?.checkedAt !== undefined &&
-                stored.lastModified !== undefined &&
+                (stored.lastModified !== undefined || stored.validatedAt !== undefined) &&
                 Date.now() >= stored.checkedAt &&
                 Date.now() - stored.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS &&
                 restored.length > 0) {
@@ -110,6 +111,7 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
                         ...(stored ?? { models: [] }),
                         checkedAt,
                         lastModified: 0,
+                        validatedAt: undefined,
                         etag: undefined,
                     },
                 });
@@ -128,7 +130,10 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
             const entry = {
                 models: refreshed,
                 checkedAt,
-                lastModified: Number.isNaN(lastModified) ? 0 : lastModified,
+                lastModified: Number.isNaN(lastModified) ? undefined : lastModified,
+                validatedAt: Number.isNaN(lastModified)
+                    ? Math.max(checkedAt, (localGeneratedAt ?? 0) + 1)
+                    : undefined,
                 etag: response.headers.get("etag") ?? undefined,
             };
             const published = remoteModels(entry, localGeneratedAt);

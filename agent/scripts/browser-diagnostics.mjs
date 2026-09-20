@@ -71,7 +71,10 @@ export function createBrowserEvents(capacity = 150) {
               }
             : {}),
         })),
-        nextCursor: selected.at(-1)?.seq ?? Math.max(since, sequence),
+        // A cursor from a prior runner can be ahead of this process. Return the
+        // live sequence so the caller can recover instead of remaining pinned
+        // forever to an impossible future cursor.
+        nextCursor: selected.at(-1)?.seq ?? sequence,
         hasMore: available.length > selected.length,
         dropped: Math.max(0, (rows[0]?.seq ?? 1) - since - 1),
         summary: this.summary(),
@@ -123,9 +126,11 @@ export function renderNavigationFailure(error) {
   };
 }
 
-export function browserFailure(error, stage, action) {
+export function browserFailure(error, stage, action, waitKind) {
   const text = String(error?.message ?? error);
-  const kind = /strict mode|resolved to \d+ elements/i.test(text)
+  const kind = /Browser session lease expired/i.test(text)
+    ? "expired"
+    : /strict mode|resolved to \d+ elements/i.test(text)
     ? "ambiguous-target"
     : /selector|Unexpected token|Unknown engine/i.test(text)
       ? "invalid-selector"
@@ -142,13 +147,18 @@ export function browserFailure(error, stage, action) {
                 )
               ? "invalid-request"
               : "action-failed";
-  const mutation = stage !== "validation" && ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate", "back", "forward", "reload", "navigate", "new_tab"].includes(action);
+  const mutation = stage !== "validation" && (
+    ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate", "back", "forward", "reload", "navigate", "new_tab"].includes(action) ||
+    (action === "wait" && waitKind === "function")
+  );
   return {
     stage,
     kind,
     outcome: mutation ? "unknown; effects may have occurred" : "not-completed",
     nextStep:
-      kind === "unreachable"
+      kind === "expired"
+        ? "The lease has expired and cannot be renewed. Open a new session, reacquire current state, and reconcile any pending mutation before continuing."
+        : kind === "unreachable"
         ? "Check the server task and HTTP URL before navigating again."
         : /action limit reached/i.test(text)
           ? "Inspect current state and renew the lease; no action was dispatched."

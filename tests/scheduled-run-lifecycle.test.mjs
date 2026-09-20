@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {syncBuiltinESMExports} from 'node:module';
 import {pathToFileURL} from 'node:url';
 
 const release = path.resolve(import.meta.dirname, '..');
@@ -138,3 +139,27 @@ for (const outcome of ['failure', 'success']) {
   assert.equal(history.find(run => run.id === 'run-1').state, outcome === 'failure' ? 'failed_launch' : 'completed');
  });
 }
+
+test('a losing scheduler cannot overwrite the winner published after its stale read', async t => {
+ const f = await fixture(t, async () => ({content: [], details: {asyncId: 'unused'}}), {every: '1m'});
+ f.clock.now += 60_001;
+ const originalOpen=fs.openSync;let injected=false;
+ fs.openSync=(file,flags,mode)=>{
+  if(!injected && file===path.join(f.scheduleDir,'active.lock') && flags==='wx'){
+   injected=true;
+   const claim=originalOpen(file,'wx',mode);fs.writeFileSync(claim,'winner','utf8');fs.closeSync(claim);
+   const scheduleFile=path.join(f.scheduleDir,'schedule.json');
+   const current=JSON.parse(fs.readFileSync(scheduleFile,'utf8'));
+   current.activeRunId='winner';current.lastRunId='winner';current.paused=true;
+   fs.writeFileSync(scheduleFile,JSON.stringify(current));
+  }
+  return originalOpen(file,flags,mode);
+ };
+ syncBuiltinESMExports();
+ try{
+  const result=await f.call({action:'schedule.run-due'});assert.equal(result.isError,undefined);
+  const persisted=JSON.parse(fs.readFileSync(path.join(f.scheduleDir,'schedule.json'),'utf8'));
+  assert.equal(persisted.activeRunId,'winner');assert.equal(persisted.lastRunId,'winner');assert.equal(persisted.paused,true);
+  assert.equal(fs.readFileSync(path.join(f.scheduleDir,'active.lock'),'utf8'),'winner');
+ }finally{fs.openSync=originalOpen;syncBuiltinESMExports();}
+});

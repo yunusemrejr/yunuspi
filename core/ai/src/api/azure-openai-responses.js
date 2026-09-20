@@ -225,9 +225,8 @@ function buildParams(model, context, options, deploymentName, grammarToolInputPr
     }
     if (model.reasoning) {
         if (options?.reasoningEffort || options?.reasoningSummary) {
-            const effort = options?.reasoningEffort
-                ? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
-                : "medium";
+            const level = options?.reasoningEffort ?? clampThinkingLevel(model, "medium");
+            const effort = model.thinkingLevelMap?.[level] ?? level;
             params.reasoning = {
                 effort: effort,
                 summary: options?.reasoningSummary || "auto",

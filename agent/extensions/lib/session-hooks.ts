@@ -53,6 +53,9 @@ const bashCommand = (args: HookArgs): string =>
 const contains = (pattern: RegExp) => (args: HookArgs) =>
 	pattern.test(bashCommand(args));
 const isExecution = (args: HookArgs) => !args.action;
+const isBrowserMutation = (args: HookArgs) =>
+	["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(String(args.action)) ||
+	(args.action === "wait" && args.kind === "function");
 
 /**
  * Ordered most-specific-first: the fusion rule must win over the generic
@@ -106,7 +109,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	},
 	{
 		key: "browser-session-recovery", tools: ["browser_session"], onError: true,
-		when: (args) => ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(String(args.action)),
+		when: isBrowserMutation,
 		line: "Reconcile current page, account history or submission receipt before retrying an uncertain action. A timeout may follow a successful post. Save the outcome in the existing plan and continue independent work.",
 	},
 	{
@@ -116,7 +119,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "browser-session-workflow", tools: ["browser_session"],
 		line: "Retain task authorization and destination rules; verify exact draft and account before submitting. Record outcomes in todo. Use fresh tab/ref targets after changes; wait for an observed condition. If humanHelp reports a blocking challenge, request_help once instead of retrying. Renew before lease expiry; after restart reacquire state and reconcile pending submissions.",
-		when: (args) => ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "evaluate"].includes(String(args.action)),
+		when: isBrowserMutation,
 	},
 	{
 		key: 'source-check-recovery', tools: ['syntax_check'], onError: true,

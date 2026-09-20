@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { writePrivateAtomicJson } from "../shared/atomic-json.ts";
+import { waitForFileSystemRetry } from "../shared/file-system-retry.ts";
 import { getAgentDir } from "../shared/utils.ts";
 import {
 	MISSION_STATUSES,
@@ -38,6 +40,18 @@ const MISSION_RECEIPT_STATUSES = new Set<MissionReceiptStatus>(["pending", "read
 const MISSION_STATUS_SET = new Set<MissionStatus>(MISSION_STATUSES);
 const TERMINAL_MISSION_STATUSES = new Set<MissionStatus>(["completed", "failed", "cancelled"]);
 const DEFAULT_TERMINAL_MISSION_RETENTION = 200;
+const MISSION_LOCK_WAIT_MS = 10_000;
+const MISSION_LOCK_POLL_MS = 10;
+const MISSION_LOCK_STALE_MS = 60_000;
+
+interface MissionLockOwner {
+	version: 1;
+	pid: number;
+	hostname: string;
+	token: string;
+	createdAt: number;
+	processKey?: string;
+}
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
@@ -328,6 +342,202 @@ function indexPath(location: MissionStoreLocation, record: MissionRecord): strin
 	return path.join(location.globalIndexDir, `${key}.json`);
 }
 
+function processIsAlive(pid: number): boolean | undefined {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ESRCH") return false;
+		if (code === "EPERM") return true;
+		return undefined;
+	}
+}
+
+function linuxProcessStartKey(pid: number): string | undefined {
+	try {
+		const raw = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
+		const tail = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
+		return tail[19] ? `linux:${tail[19]}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function psProcessStartKey(pid: number): string | undefined {
+	try {
+		const raw = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 }).trim();
+		return raw ? `ps:${raw}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function windowsProcessStartKey(pid: number): string | undefined {
+	try {
+		const raw = execFileSync("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\").CreationDate`], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000, windowsHide: true }).trim();
+		return raw ? `win:${raw}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function processStartKey(pid: number): string | undefined {
+	if (process.platform === "linux") return linuxProcessStartKey(pid) ?? psProcessStartKey(pid);
+	if (process.platform === "win32") return windowsProcessStartKey(pid);
+	return psProcessStartKey(pid);
+}
+
+const CURRENT_PROCESS_KEY = processStartKey(process.pid);
+const CURRENT_HOSTNAME = os.hostname();
+
+function readMissionLockOwner(lockDir: string): MissionLockOwner | undefined {
+	try {
+		const value = JSON.parse(fs.readFileSync(path.join(lockDir, "owner.json"), "utf-8")) as Record<string, unknown>;
+		if (value.version !== 1
+			|| !Number.isSafeInteger(value.pid)
+			|| (value.pid as number) <= 0
+			|| typeof value.hostname !== "string"
+			|| !value.hostname
+			|| typeof value.token !== "string"
+			|| !value.token
+			|| !Number.isSafeInteger(value.createdAt)) return undefined;
+		if (value.processKey !== undefined && (typeof value.processKey !== "string" || !value.processKey)) return undefined;
+		return {
+			version: 1,
+			pid: value.pid as number,
+			hostname: value.hostname,
+			token: value.token,
+			createdAt: value.createdAt as number,
+			...(typeof value.processKey === "string" ? { processKey: value.processKey } : {}),
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function missionLockIsStale(lockDir: string, now = Date.now()): boolean {
+	const owner = readMissionLockOwner(lockDir);
+	if (owner) {
+		if (owner.hostname !== CURRENT_HOSTNAME) return false;
+		const alive = processIsAlive(owner.pid);
+		if (alive === false) return true;
+		if (alive === true && owner.processKey) {
+			const currentKey = owner.pid === process.pid ? CURRENT_PROCESS_KEY : processStartKey(owner.pid);
+			if (currentKey !== undefined) return currentKey !== owner.processKey;
+		}
+		return false;
+	}
+	try {
+		return now - fs.statSync(lockDir).mtimeMs >= MISSION_LOCK_STALE_MS;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+function createMissionLock(lockDir: string, owner: MissionLockOwner): boolean {
+	try {
+		fs.mkdirSync(lockDir, { mode: 0o700 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+	try {
+		fs.writeFileSync(path.join(lockDir, "owner.json"), JSON.stringify(owner), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+		return true;
+	} catch (error) {
+		fs.rmSync(lockDir, { recursive: true, force: true });
+		throw error;
+	}
+}
+
+function reclaimStaleMissionLock(lockDir: string, reclaimDir: string): boolean {
+	try {
+		fs.mkdirSync(reclaimDir, { mode: 0o700 });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+	try {
+		if (!missionLockIsStale(lockDir)) return false;
+		const staleDir = `${lockDir}.stale-${randomUUID()}`;
+		try {
+			fs.renameSync(lockDir, staleDir);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+			throw error;
+		}
+		fs.rmSync(staleDir, { recursive: true, force: true });
+		return true;
+	} finally {
+		fs.rmSync(reclaimDir, { recursive: true, force: true });
+	}
+}
+
+function acquireMissionLock(recordPath: string): { lockDir: string; owner: MissionLockOwner } {
+	fs.mkdirSync(path.dirname(recordPath), { recursive: true, mode: 0o700 });
+	const lockDir = `${recordPath}.lock`;
+	const reclaimDir = `${lockDir}.reclaim`;
+	const owner: MissionLockOwner = {
+		version: 1,
+		pid: process.pid,
+		hostname: CURRENT_HOSTNAME,
+		token: randomUUID(),
+		createdAt: Date.now(),
+		...(CURRENT_PROCESS_KEY ? { processKey: CURRENT_PROCESS_KEY } : {}),
+	};
+	const deadline = Date.now() + MISSION_LOCK_WAIT_MS;
+	for (;;) {
+		try {
+			if (Date.now() - fs.statSync(reclaimDir).mtimeMs >= MISSION_LOCK_STALE_MS) {
+				fs.rmSync(reclaimDir, { recursive: true, force: true });
+				continue;
+			}
+			if (Date.now() >= deadline) throw new Error(`Timed out acquiring mission lock '${lockDir}'.`);
+			waitForFileSystemRetry(MISSION_LOCK_POLL_MS);
+			continue;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		if (createMissionLock(lockDir, owner)) return { lockDir, owner };
+		try {
+			if (reclaimStaleMissionLock(lockDir, reclaimDir)) continue;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			if (Date.now() >= deadline) throw new Error(`Timed out acquiring mission lock '${lockDir}'.`, { cause: error });
+		}
+		if (Date.now() >= deadline) throw new Error(`Timed out acquiring mission lock '${lockDir}'.`);
+		waitForFileSystemRetry(MISSION_LOCK_POLL_MS);
+	}
+}
+
+function releaseMissionLock(lockDir: string, owner: MissionLockOwner): void {
+	if (readMissionLockOwner(lockDir)?.token !== owner.token) return;
+	const releasedDir = `${lockDir}.released-${owner.token}`;
+	try {
+		fs.renameSync(lockDir, releasedDir);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	if (readMissionLockOwner(releasedDir)?.token !== owner.token) {
+		try { fs.renameSync(releasedDir, lockDir); } catch { /* Preserve an unexpectedly replaced owner for stale recovery. */ }
+		return;
+	}
+	fs.rmSync(releasedDir, { recursive: true, force: true });
+}
+
+function withMissionLock<T>(location: MissionStoreLocation, missionId: string, operation: () => T): T {
+	const recordPath = missionRecordPath(location, missionId);
+	const lock = acquireMissionLock(recordPath);
+	try {
+		return operation();
+	} finally {
+		releaseMissionLock(lock.lockDir, lock.owner);
+	}
+}
+
 function writeMission(location: MissionStoreLocation, record: MissionRecord): MissionRecord {
 	const validated = parseMissionRecord(record);
 	writePrivateAtomicJson(missionRecordPath(location, validated.id), validated);
@@ -436,8 +646,7 @@ export function listMissions(location: MissionStoreLocation): MissionListResult 
 	return { records, warnings };
 }
 
-export function updateMission(location: MissionStoreLocation, missionId: string, update: MissionUpdateInput, now = new Date(), retainTerminal = location.retainTerminal ?? DEFAULT_TERMINAL_MISSION_RETENTION): MissionRecord {
-	const current = readMission(location, missionId);
+function updateMissionLocked(location: MissionStoreLocation, missionId: string, current: MissionRecord, update: MissionUpdateInput, now: Date, retainTerminal: number): MissionRecord {
 	const runs = [...current.runs];
 	for (const candidate of update.addRuns ?? []) {
 		const run = parseRunLink(candidate, "mission.update.addRuns[]");
@@ -549,6 +758,30 @@ export function updateMission(location: MissionStoreLocation, missionId: string,
 	const updated = writeMission(location, next);
 	if (TERMINAL_MISSION_STATUSES.has(updated.status)) pruneTerminalMissions(location, retainTerminal);
 	return updated;
+}
+
+export function updateMissionFromCurrent(
+	location: MissionStoreLocation,
+	missionId: string,
+	deriveUpdate: (current: MissionRecord) => MissionUpdateInput,
+	now?: Date,
+	retainTerminal = location.retainTerminal ?? DEFAULT_TERMINAL_MISSION_RETENTION,
+): MissionRecord {
+	return withMissionLock(location, missionId, () => {
+		const current = readMission(location, missionId);
+		const update = deriveUpdate(current);
+		return updateMissionLocked(location, missionId, current, update, now ?? new Date(), retainTerminal);
+	});
+}
+
+export function updateMission(
+	location: MissionStoreLocation,
+	missionId: string,
+	update: MissionUpdateInput,
+	now?: Date,
+	retainTerminal = location.retainTerminal ?? DEFAULT_TERMINAL_MISSION_RETENTION,
+): MissionRecord {
+	return updateMissionFromCurrent(location, missionId, () => update, now, retainTerminal);
 }
 
 export function listGlobalMissions(globalIndexDir: string): GlobalMissionListResult {

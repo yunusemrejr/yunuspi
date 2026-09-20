@@ -8,6 +8,7 @@ import { PROMPT_REDACTED, readStatus } from "../../shared/utils.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import type { DynamicRunnerGroup, ParallelStepGroup, RunnerStep, RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import { isDynamicRunnerGroup, isParallelGroup } from "../shared/parallel-utils.ts";
+import { updateGuardedStatus } from "../shared/status-revision.ts";
 
 const APPEND_REQUESTS_DIR = "append-requests";
 
@@ -97,9 +98,12 @@ export function enqueueChainAppendRequest(input: {
 		bookkeepingErrors.push(`pending append count failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	const statusPath = path.join(input.asyncDir, "status.json");
-	const updatedStatus = { ...status, pendingAppends: pendingCount, lastUpdate: request.createdAt };
 	try {
-		writeAtomicJson(statusPath, updatedStatus);
+		updateGuardedStatus(statusPath, (current) => ({
+			...current,
+			pendingAppends: pendingCount,
+			lastUpdate: Math.max(typeof current.lastUpdate === "number" ? current.lastUpdate : 0, request.createdAt),
+		}));
 	} catch (error) {
 		bookkeepingErrors.push(`status update failed: ${error instanceof Error ? error.message : String(error)}`);
 	}

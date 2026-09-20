@@ -12,7 +12,7 @@ const {default:sessionHooks} = await import(pathToFileURL(path.join(agent,"exten
 const {runPool,parseSelection} = await import(pathToFileURL(path.join(agent,"scripts/lib/test-runner.mjs")));
 const {buildSkillIndex,rankSkills} = await import(pathToFileURL(path.join(agent,"extensions/lib/skill-relevance.ts")));
 const {SemanticIndex} = await import(pathToFileURL(path.join(agent,"extensions/pi-lens/semantic-radar/index.mjs")));
-const {assertNoStaleCheckoutPaths} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
+const {assertNoStaleCheckoutPaths,releaseCompletion} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
 const {createHookLedger} = await import(pathToFileURL(path.join(agent,"extensions/lib/hook-ledger.ts")));
 
 test("fresh installations expose built-in search and economical child thinking",()=>{
@@ -120,4 +120,12 @@ test("publication cannot silently retain files removed from the export",()=>{
     assert.throws(()=>assertNoStaleCheckoutPaths(source,checkout),/retired.txt/);
     assert.equal(fs.readFileSync(path.join(checkout,"retired.txt"),"utf8"),"old");
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
+});
+
+test("publication resumes only one clean interrupted release commit",()=>{
+  assert.equal(releaseCompletion({stagedChanges:false,pendingCommits:0}),"nothing");
+  assert.equal(releaseCompletion({stagedChanges:true,pendingCommits:0}),"commit-and-push");
+  assert.equal(releaseCompletion({stagedChanges:false,pendingCommits:1}),"push-pending");
+  assert.throws(()=>releaseCompletion({stagedChanges:false,pendingCommits:2}),/manual review/i);
+  assert.throws(()=>releaseCompletion({stagedChanges:true,pendingCommits:1}),/manual review/i);
 });

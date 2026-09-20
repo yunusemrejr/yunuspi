@@ -34,6 +34,7 @@ export declare class MemorySessionRepo implements SessionRepo {
     private readonly now;
     private readonly sessions;
     private readonly pendingIds;
+    private readonly admitted;
     private closed;
     private closePromise;
     constructor(options?: MemorySessionRepoOptions);
@@ -46,4 +47,5 @@ export declare class MemorySessionRepo implements SessionRepo {
     private openRecord;
     private reserveId;
     private assertOpen;
+    private admit;
 }

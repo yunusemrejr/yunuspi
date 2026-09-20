@@ -3,6 +3,11 @@ export interface ModelsStoreEntry {
     models: readonly Model<Api>[];
     /** Unix timestamp from the remote catalog's Last-Modified header. */
     lastModified?: number;
+    /**
+     * Local freshness watermark for a successfully validated catalog response
+     * that did not provide Last-Modified. This is not an upstream modification time.
+     */
+    validatedAt?: number;
     /** Unix timestamp of the last completed remote check. */
     checkedAt?: number;
     /**

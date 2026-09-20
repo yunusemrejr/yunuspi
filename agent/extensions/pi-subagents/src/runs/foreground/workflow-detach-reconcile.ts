@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { getSingleResultOutput, readStatus } from "../../shared/utils.ts";
 import {
 	DIRS,
@@ -16,6 +15,7 @@ import { resultFilePath, writeAsyncResultFile } from "../background/result-files
 import { resolveAsyncResumeTarget } from "../background/async-resume.ts";
 import { externalCliReceiptMetadata, normalizeExternalCliRunnerStatus } from "../shared/external-cli-contract.ts";
 import { outputPathMappingFromTask } from "../shared/single-output.ts";
+import { writeGuardedStatus } from "../shared/status-revision.ts";
 import { readWorkflowReceipt, workflowReceiptPath, writeWorkflowReceipt, type WorkflowReceipt } from "../../workflows/workflow-receipt.ts";
 import {
 	applyDetachedChildSettlement,
@@ -249,14 +249,15 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 		terminalOutcome: receipt?.terminalOutcome,
 		eventMetadata: { reconciledFromDetachedChild: input.childRunId },
 	});
-	writeAtomicJson(path.join(asyncDir, "status.json"), plan.status);
-	updateActiveRunIndex(asyncDir, plan.status.state, plan.status.toolCallId);
+	writeGuardedStatus(path.join(asyncDir, "status.json"), plan.status);
+	const persistedStatus = readStatus(asyncDir) ?? plan.status;
+	updateActiveRunIndex(asyncDir, persistedStatus.state, persistedStatus.toolCallId);
 	if (job) {
-		job.status = plan.status.state;
-		job.updatedAt = plan.status.lastUpdate;
-		job.activityState = plan.status.activityState;
-		job.steps = plan.status.steps?.map((step, index) => ({ ...step, index }));
-		job.workflow = plan.status.workflow;
+		job.status = persistedStatus.state;
+		job.updatedAt = persistedStatus.lastUpdate;
+		job.activityState = persistedStatus.activityState;
+		job.steps = persistedStatus.steps?.map((step, index) => ({ ...step, index }));
+		job.workflow = persistedStatus.workflow;
 	}
 	writeAsyncResultFile(resultPath, plan.publicResult);
 	if (receiptError) {

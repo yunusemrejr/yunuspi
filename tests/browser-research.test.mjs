@@ -196,6 +196,11 @@ test("diagnostic buffers bound memory, paginate without repeats, expose gaps, an
   );
   assert.equal(events.read({ since: next.nextCursor }).events.length, 0);
   assert.equal(events.summary().counts["console-error"], 5);
+  const future = events.read({ since: 999_999 });
+  assert.equal(future.events.length, 0);
+  assert.equal(future.nextCursor, 5, "future cursors reset to the live sequence");
+  events.record("console-warning");
+  assert.equal(events.read({ since: future.nextCursor }).events[0].seq, 6);
   assert.equal(
     browserFailure(Error("strict mode violation"), "click", "click").kind,
     "ambiguous-target",
@@ -203,6 +208,14 @@ test("diagnostic buffers bound memory, paginate without repeats, expose gaps, an
   assert.match(
     browserFailure(Error("Timeout"), "click", "click").outcome,
     /unknown/,
+  );
+  assert.match(
+    browserFailure(Error("Timeout"), "wait", "wait", "function").outcome,
+    /unknown/,
+  );
+  assert.equal(
+    browserFailure(Error("Timeout"), "wait", "wait", "element").outcome,
+    "not-completed",
   );
 });
 
