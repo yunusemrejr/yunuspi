@@ -12,13 +12,17 @@ const {default:sessionHooks} = await import(pathToFileURL(path.join(agent,"exten
 const {runPool,parseSelection} = await import(pathToFileURL(path.join(agent,"scripts/lib/test-runner.mjs")));
 const {buildSkillIndex,rankSkills} = await import(pathToFileURL(path.join(agent,"extensions/lib/skill-relevance.ts")));
 const {SemanticIndex} = await import(pathToFileURL(path.join(agent,"extensions/pi-lens/semantic-radar/index.mjs")));
-const {assertNoStaleCheckoutPaths,releaseCompletion} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
+const {assertNoStaleCheckoutPaths,distributionBuildStep,releaseCompletion} = await import(pathToFileURL(path.join(agent,"scripts/publish-public.mjs")));
 const {createHookLedger} = await import(pathToFileURL(path.join(agent,"extensions/lib/hook-ledger.ts")));
 
 test("fresh installations expose built-in search and economical child thinking",()=>{
   const settings=JSON.parse(fs.readFileSync(path.join(root,"config/settings.example.json"),"utf8"));
   assert.deepEqual(settings.defaultTools,["read","bash","edit","write","grep","find","ls"]);
   assert.equal(settings.subagents.defaultThinking,"low");
+});
+
+test("publication builds owned core after script-disabled dependency installation",()=>{
+  assert.deepEqual(distributionBuildStep(),{command:"npm",args:["run","build:core"],timeoutMs:600000});
 });
 
 test("diagnostics distinguish model, tool, child and controller evidence",()=>{

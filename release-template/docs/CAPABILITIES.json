@@ -2268,12 +2268,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1176
+        "line": 1519
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 809
+        "line": 1147
       },
       {
         "name": "curator",
@@ -2428,7 +2428,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1134
+        "line": 1472
       },
       {
         "name": "subagent-cost",
@@ -2513,7 +2513,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1139
+        "line": 1477
       },
       {
         "name": "tasks",
@@ -2523,7 +2523,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1158
+        "line": 1496
       },
       {
         "name": "websearch",
@@ -2915,7 +2915,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1268,
+        "line": 1611,
         "kind": "literal"
       },
       {
@@ -2927,7 +2927,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1205,
+        "line": 1548,
         "kind": "literal"
       },
       {
@@ -3261,7 +3261,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1268,
+        "line": 1611,
         "kind": "literal"
       },
       {
@@ -3273,7 +3273,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1205,
+        "line": 1548,
         "kind": "literal"
       },
       {
