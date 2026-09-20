@@ -145,7 +145,8 @@ export function readMemoryFile(memoryDir: string): MemoryFileResult {
 	let fd: number;
 	try {
 		const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
-		fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+		// Special files must reach the fstat check without blocking on a FIFO writer.
+		fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow | (fs.constants.O_NONBLOCK ?? 0));
 	} catch (error) {
 		const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
 		return code === "ELOOP" ? "unsafe" : null;

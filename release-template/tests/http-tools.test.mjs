@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,3 +61,23 @@ try {
     'a DNS deadline is a retryable timeout, not user cancellation',
   );
 } finally { clearTimeout(keepAlive); }
+
+// Binary response truncation must preserve complete, decodable base64 blocks.
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'content-type': 'application/octet-stream' });
+  res.end(Buffer.alloc(Number(req.url.slice(1)), 0xff));
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+try {
+  for (const size of [1, 761, 762, 763, 1024, 2048]) {
+    const result = await performHttp({ url: `http://127.0.0.1:${server.address().port}/${size}`, maxBytes: 1024 });
+    assert.equal(result.encoding, 'base64');
+    assert.ok(result.body.startsWith('base64:'));
+    const encoded = result.body.slice('base64:'.length);
+    const decoded = Buffer.from(encoded, 'base64');
+    assert.equal(decoded.toString('base64'), encoded, 'binary truncation remains canonical base64');
+    assert.deepEqual(decoded, Buffer.alloc(Math.min(size, 762), 0xff));
+    assert.equal(result.truncated, size > 762);
+    assert.ok(Buffer.byteLength(result.body) <= 1024);
+  }
+} finally { await new Promise(resolve => server.close(resolve)); }

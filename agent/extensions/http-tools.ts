@@ -383,7 +383,10 @@ export async function performHttp(
     ) {
       text = raw.toString("utf8");
     } else {
-      text = `base64:${raw.toString("base64")}`;
+      // Reserve the prefix and whole base64 blocks before encoding the byte cap.
+      const binaryLimit = Math.floor((maxBytes - "base64:".length) / 4) * 3;
+      truncated ||= raw.length > binaryLimit;
+      text = `base64:${raw.subarray(0, binaryLimit).toString("base64")}`;
       encoding = "base64";
     }
 
