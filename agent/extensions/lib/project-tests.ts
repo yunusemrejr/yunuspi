@@ -197,6 +197,7 @@ export function userSkipsProjectTests(input: string): boolean {
 }
 
 export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts; onFacts?: (facts: any, observeChanges: boolean) => void } = {}) {
+  let disposeContinuationNotice = () => {};
   let state = fresh(), facts: any, baseline: Record<string, string> | undefined, epoch = 0, active = true;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1, delivered = '';
@@ -317,9 +318,16 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       : ['failed', 'killed', 'timed_out'].includes(status) || typeof task.exitCode === 'number' && task.exitCode !== 0 ? 'failed' : 'unknown';
     save();
   };
+  const completesOwnedCheck = (task: any) => task?.id
+    && !/^(?:running|pending|queued|starting)$/.test(task.status ?? task.state ?? '')
+    && state.checks.some(c => c.handle === task.id && c.outcome === 'running');
   const api = {
     async restore(ctx: any) {
+      disposeContinuationNotice();
+      disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length && (projectTestNeed(state) || state.assessment?.disposition === 'blocked') ? [state.assessment?.disposition === 'blocked' ? `Blocked: ${state.assessment.reason}` : `Current checks unresolved (${projectTestNeed(state)}); command exits do not establish user-visible behavior.`] : [], pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
       epoch++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
+      const ticket = epoch;
+      let restoredTree: string | undefined, restoredChecks = false;
       // The session branch remains the only durable owner, and a reload
       // never wakes work on its own. Restored receipts never resume as live
       // checks, but passed tree-bound evidence survives: the next scan
@@ -342,6 +350,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         const restoredChanged = data.changed.filter((p: any) => typeof p === 'string').slice(-128);
         const verified = verifyRestoredTree(data.root, restoredChanged, (data as any)?.hashes);
         if (verified) {
+          restoredChecks = true;
+          restoredTree = data.treeComplete === true && typeof data.tree === 'string' ? data.tree : undefined;
           hashes = verified;
           state = { ...fresh(data.root), revision: data.revision, changed: restoredChanged,
             assessment: sanitizeRestoredAssessment((data as any)?.assessment, data.revision),
@@ -354,6 +364,11 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         pauseReason = 'reload';
       }
       await scan(ctx);
+      // A dependency outside changed[] may have changed while this session was
+      // down. Its old command receipts cannot verify the newly observed tree.
+      if (ticket === epoch && restoredChecks && state.root === data.root && (!restoredTree || !state.treeComplete || state.tree !== restoredTree)) {
+        state.revision++; state.assessment = undefined; state.checks = []; save();
+      }
     },
     input(event: any) {
       if (event.source === 'extension') return;
@@ -428,8 +443,8 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           receipt(start, event.toolCallId, failed ? 'failed' : noTests || facts?.unavailable || event.isError !== false ? 'unknown' : 'passed');
         }
       }
-      if (event.toolName === 'process') { await scan(ctx); terminal(event.details?.managedJob); }
-      if (event.toolName === 'bg_status') { await scan(ctx); for (const task of event.details?.tasks ?? []) terminal(task); }
+      if (event.toolName === 'process') { await scan(ctx, completesOwnedCheck(event.details?.managedJob)); terminal(event.details?.managedJob); }
+      if (event.toolName === 'bg_status') { await scan(ctx, (event.details?.tasks ?? []).some(completesOwnedCheck)); for (const task of event.details?.tasks ?? []) terminal(task); }
     },
     async message(event: any, ctx: any) {
       const message = event.message;
@@ -441,7 +456,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       } else if (message?.role === 'assistant' && ['stop', 'toolUse', 'length'].includes(message.stopReason) && pauseReason === 'error') {
         pauseReason = undefined; state.paused = false; save();
       }
-      if (message?.customType === 'background-task-notification') { await scan(ctx); terminal(message.details); }
+      if (message?.customType === 'background-task-notification') { await scan(ctx, completesOwnedCheck(message.details)); terminal(message.details); }
     },
     notice() {
       if (!enabled() || !active || options.shadow || !capable() || notedRevision === state.revision) return '';
@@ -462,10 +477,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       try { pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true }); state.followups++; delivered = key; save(); }
       catch { /* failed delivery may retry at the next native settled event */ }
     },
-    shutdown() { active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
+    shutdown() { disposeContinuationNotice(); active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
     snapshot: summary,
   };
-  registerContinuationSource({ name: 'project tests', verification: () => enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length && (projectTestNeed(state) || state.assessment?.disposition === 'blocked') ? [state.assessment?.disposition === 'blocked' ? `Blocked: ${state.assessment.reason}` : `Current checks unresolved (${projectTestNeed(state)}); command exits do not establish user-visible behavior.`] : [], pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
   pi.registerTool({
     name: 'project_tests', label: 'Project Test Checkpoint',
     description: 'Inspect bounded local test setup, observed code changes and actual execution receipts; choose focused verification proportional to the change, reusing existing checks and current receipts. Add regression tests for changed behavior or demonstrated defects. No project scripts are executed by this tool. disposition required keeps a bounded verification follow-up pending until planned commands pass after the latest edit; not_needed or blocked requires a concrete reason. Outcomes come only from observed bash/bg_run/process results. Reassess after edits; never report coverage solely from exit zero.',

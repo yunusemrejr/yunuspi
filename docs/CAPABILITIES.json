@@ -2413,7 +2413,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1086
+        "line": 1092
       },
       {
         "name": "run",
@@ -2600,7 +2600,7 @@
       {
         "name": "artifact_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 101,
+        "line": 105,
         "kind": "factory"
       },
       {
@@ -2715,7 +2715,7 @@
       {
         "name": "data_query",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 123,
+        "line": 127,
         "kind": "factory"
       },
       {
@@ -2771,13 +2771,13 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 406,
+        "line": 409,
         "kind": "literal"
       },
       {
         "name": "math_check",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 88,
+        "line": 92,
         "kind": "factory"
       },
       {
@@ -2879,13 +2879,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 469,
+        "line": 483,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 409,
+        "line": 437,
         "kind": "literal"
       },
       {
@@ -2970,7 +2970,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 740,
+        "line": 741,
         "kind": "definition"
       },
       {
@@ -2994,7 +2994,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 246,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -3012,7 +3012,7 @@
       {
         "name": "value_convert",
         "source": "agent/extensions/lib/small-tools.ts",
-        "line": 119,
+        "line": 123,
         "kind": "factory"
       },
       {
@@ -3159,7 +3159,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 406,
+        "line": 409,
         "kind": "literal"
       },
       {
@@ -3225,13 +3225,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 469,
+        "line": 483,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 409,
+        "line": 437,
         "kind": "literal"
       },
       {
@@ -3303,7 +3303,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 246,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -3344,7 +3344,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          71
+          75
         ],
         "knownNames": [
           "artifact_check",
@@ -3414,7 +3414,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          790
+          791
         ],
         "knownNames": [
           "subagent"
@@ -3511,7 +3511,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 558,
+      "sourceFiles": 559,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,

@@ -16,6 +16,7 @@ import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } fr
 
 import { randomUUID } from "node:crypto";
 import { registerAutonomousRecovery } from "./autonomous-recovery.ts";
+import { registerSubagentContinuation } from "./continuation-notice.ts";
 import { noteSessionTurnover } from "../../../lib/intervention-shared.ts";
 import { ACTIVITY_MESSAGE_TYPE, ACTIVITY_TAGS, type ActivityDetails } from "../../../lib/activity-indicators.ts";
 import * as fs from "node:fs";
@@ -990,12 +991,14 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 
 	let runtimeCleaned = false;
+	let disposeContinuationNotice = () => {};
 	const runtimeEntry: SubagentRuntimeEntry = {
 		sessionManager: null,
 		visibleControlNotices,
 		cleanup() {
 			if (runtimeCleaned) return;
 			runtimeCleaned = true;
+			disposeContinuationNotice();
 			const shuttingDownParentSession = parentSessionEnvValue;
 			// Workflow continuations retain their launch context; abort them before
 			// teardown so a reload cannot launch through a stale context.
@@ -1059,6 +1062,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			throw new Error("Cannot restart a cleaned pi-subagents extension runtime; register a new extension instance.");
 		}
 		const sessionManager = ctx.sessionManager as object;
+		disposeContinuationNotice();
+		disposeContinuationNotice = registerSubagentContinuation(state, sessionManager);
 		const previousRuntime = runtimeRegistry.bySessionManager.get(sessionManager);
 		const existingVisibleControlNotices = runtimeRegistry.visibleControlNoticesBySessionManager.get(sessionManager);
 		if (existingVisibleControlNotices) {

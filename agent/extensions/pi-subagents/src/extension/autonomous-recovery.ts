@@ -25,7 +25,7 @@ import { readJournalQuotaEvents } from "../runs/shared/quota-journal.ts";
 // (or child) has on cooldown is not a failover option.
 import { fetchEndpoints, rankRecoveryEndpoints, endpointRecoveryRouting, type Endpoint } from "../runs/shared/openrouter-endpoints.ts";
 import { classifyFailure, evaluateRoute, recordFailure, openRouterUpstream, readHealth } from "../runs/shared/provider-health.ts";
-import { parseReviewReport, REVIEW_REPORT_INSTRUCTIONS } from '../shared/quality-review-report.ts';
+import { normalizeReviewPath, parseReviewReport, REVIEW_REPORT_INSTRUCTIONS } from '../shared/quality-review-report.ts';
 import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
 import { askJev, tooShort } from "../../../lib/jev-client.ts";
@@ -271,8 +271,9 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			let status = 'failed';
 			const finishActivity = beginHarnessActivity('review');
 			let nativeRunId: string | undefined;
-			const evidencePaths = Array.isArray(request.evidence) ? request.evidence.filter((f: unknown): f is string => typeof f === 'string' && f.length > 0 && f.length <= 256 && !f.startsWith('/') && !f.split('/').includes('..')).slice(0, 8) : [];
+			const evidencePaths = Array.isArray(request.evidence) ? request.evidence.map(normalizeReviewPath).filter((f: unknown): f is string => typeof f === 'string').slice(0, 8) : [];
 			const visualPaths = assigned.some((a:any) => a.id === 'interface') ? evidencePaths.filter((file:string) => /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file)) : [];
+			const reviewerCanSeeImages = models.some(m => route(m) === splitKnownThinkingSuffix(member.route).baseModel && m.input?.includes('image'));
 			// Reuse native acceptance's source-correlated pixel audit, including
 			// when the general parent-assessed acceptance level is none.
 			const visualTask = visualPaths.length ? `Visual review ${visualPaths.map((file:string) => JSON.stringify('./' + file)).join(' ')}.\n` : '';
@@ -352,7 +353,13 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 						? {...matches[0], outcome:'unknown', gap:[typeof matches[0].gap === 'string' ? matches[0].gap.trim() : '', 'Reviewer output was finalized after its usage budget was exhausted; review completeness is unknown.'].filter(Boolean).join(' ').slice(0,900)}
 						: matches[0];
 					const normalized = parseReviewReport(JSON.stringify(report), a.id);
-					if (a.id === 'interface' && visualPaths.length && !childResult.acceptance?.runtimeChecks?.some((check:any) => check.id === 'visual-source-evidence' && check.status === 'passed')) {
+					if (a.id === 'interface' && !visualPaths.length) {
+						normalized.outcome = 'unknown';
+						normalized.gap = ('No captured interface image was supplied for independent review; displayed pixels remain unverified. Capture the normal user-visible view and supply its project-relative image path. ' + normalized.gap).slice(0, 900);
+					} else if (a.id === 'interface' && !reviewerCanSeeImages) {
+						normalized.outcome = 'unknown';
+						normalized.gap = ('The selected reviewer cannot receive image input; supplied screenshot pixels remain unverified. ' + normalized.gap).slice(0, 900);
+					} else if (a.id === 'interface' && visualPaths.length && !childResult.acceptance?.runtimeChecks?.some((check:any) => check.id === 'visual-source-evidence' && check.status === 'passed')) {
 						normalized.outcome = 'unknown';
 						normalized.gap = ('Supplied screenshots lack successful source-correlated image-read receipts; pixels remain unverified. ' + normalized.gap).slice(0, 900);
 					}

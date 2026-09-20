@@ -386,12 +386,22 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
 	const toolCalls = result.toolCalls?.length ? result.toolCalls : extractToolCallSummaries(result.messages);
 	// Keep successful source-read evidence after transcript compaction. Tool
 	// starts and model-authored claims alone never establish completed reads.
-	const sourceCalls = new Map<string,string>();
-	for (const message of result.messages ?? []) if (message.role === 'assistant') {
-		for (const part of message.content) if (part.type === 'toolCall' && ['read','context_slice','symbol_expand'].includes(part.name)) sourceCalls.set(part.id,part.name);
-	}
+	const sourceCalls = new Map<string,string>(), seenIds = new Set<string>(), duplicateIds = new Set<string>();
 	const completed = new Set<string>();
-	for (const message of result.messages ?? []) if (message.role === 'toolResult' && message.isError === false && sourceCalls.get(message.toolCallId) === message.toolName) completed.add(message.toolCallId);
+	for (const message of result.messages ?? []) {
+		if (message.role === 'assistant') for (const part of message.content) if (part.type === 'toolCall') {
+			if (seenIds.has(part.id)) duplicateIds.add(part.id);
+			seenIds.add(part.id);
+			if (['read','context_slice','symbol_expand'].includes(part.name)) sourceCalls.set(part.id,part.name);
+		}
+		// Image attachments and their metadata notes are visual evidence, not
+		// source-code reads. Empty payloads and mismatched/reordered receipts
+		// cannot establish that the reviewer received source either.
+		if (message.role === 'toolResult' && message.isError === false && typeof message.toolName === 'string' && sourceCalls.get(message.toolCallId) === message.toolName
+			&& !message.content.some(part => part.type === 'image')
+			&& message.content.some(part => part.type === 'text' && part.text.trim().length > 0 && !/^Read image file \[/i.test(part.text))) completed.add(message.toolCallId);
+	}
+	for (const id of duplicateIds) completed.delete(id);
 	const sourceReads = result.messages ? completed.size : result.reviewEvidence?.sourceReads ?? 0;
 	return {
 		...result,
