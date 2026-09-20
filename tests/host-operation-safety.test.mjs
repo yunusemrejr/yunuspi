@@ -49,6 +49,24 @@ test('dangerous host commands are blocked before execution, including wrappers a
     'find . -name fixture -exec sudo --user root rfkill block wifi \\;',
     'printf node | xargs -n 1 pkill',
     'printf 12345 | xargs kill',
+    'env --split-string="nmcli radio wifi off"', "env -S'nmcli radio wifi off'",
+    'env --argv0 fixture nmcli radio wifi off', 'env -- "MODE=off" sh -c \'nmcli radio wifi "$MODE"\'',
+    'exec -a fixture nmcli radio wifi off', 'sudo "-u" root nmcli radio wifi off',
+    'printf fixture | xargs sudo nmcli radio wifi off',
+    'printf fixture | xargs env -S "nmcli radio wifi off"',
+    'printf fixture | xargs -E STOP nmcli radio wifi off',
+    'ip link s dev wlan0 down', 'ip route d default', 'ip -n fixture link s wlan0 down',
+    'ip link property a dev wlan0 altname fixture', 'ip -batch fixture.commands', 'ip -b fixture.commands',
+    'wipefs -o0 /dev/fixture', 'service networking --full-restart', 'service networking try-restart',
+    'systemctl --property --help stop NetworkManager', 'systemctl -p --version stop NetworkManager',
+    'nft -f --help', 'nft --file --version', 'ip -batch --help',
+    'nmcli --wait --help radio wifi off',
+    'sudo -ublack nmcli radio wifi off', 'sudo -gblack nmcli radio wifi off',
+    'sudo -uhello nmcli networking off', 'sudo -phello nmcli networking off',
+    'wipefs -tminix -a /dev/fixture', 'wipefs -t minix -a /dev/fixture',
+    'wipefs --types minix --all /dev/fixture', 'wipefs --output --no-act --all /dev/fixture',
+    'command -v "$(nmcli radio wifi off)"',
+    'env LABEL="$UNRESOLVED" nmcli networking off', 'env -- LABEL="$UNRESOLVED" nmcli networking off',
   ]) assert.equal(assess(command)?.level, 'block', command);
 });
 
@@ -71,10 +89,59 @@ test('diagnostics, quoted data, ordinary app operations and managed process sign
     'find . -name "*.tmp" -exec nmcli dev show {} \\;',
     'setsid nmcli dev status', 'busybox true', 'sudo --user root nmcli dev status',
     'printf wlan0 | xargs nmcli device show',
+    'command -v reboot', 'command -pV reboot', 'sudo -l reboot', 'sudo -nl reboot', 'sudo --list nmcli radio wifi off',
+    'ip link show dev set', 'ip route show table flush', 'ip route s', 'ip addr s',
+    'wipefs -an /dev/fixture', 'wipefs -na /dev/fixture',
+    'env --split-string="nmcli device status"', 'env --argv0 fixture nmcli device status',
+    'exec -a fixture nmcli device status', 'sudo "-u" root nmcli device status',
+    'printf fixture | xargs sudo nmcli device show', 'printf fixture | xargs env nmcli device show',
+    'env -- MODE=status sh -c \'nmcli device "$MODE"\'', 'nft --help', 'systemctl -q --help',
+    'service networking stop --help',
+    'env LABEL="$UNRESOLVED" nmcli device status', 'env -- LABEL="$UNRESOLVED" nmcli device status',
   ]) assert.equal(assess(command), undefined, command);
   assert.equal(hostOperationRisk('kill', ['-TERM', '424242'], [1, 123, 456]), undefined);
   assert.equal(hostOperationRisk('kill', ['-0', '123'], [123]), undefined);
   assert.ok(sessionAncestorPids().includes(process.pid));
+});
+
+test('wrapper parsing retains ordinary filesystem scope and option terminators', () => {
+  for (const command of [
+    'env --split-string="rm /etc/host-safety-fixture"',
+    'env -- FILE=/etc/host-safety-fixture sh -c \'rm "$FILE"\'',
+    'exec -a fixture rm /etc/host-safety-fixture',
+    'timeout --signal TERM 5 nice -n 5 rm /etc/host-safety-fixture',
+    'command -- rm /etc/host-safety-fixture',
+    'sudo -- rm /etc/host-safety-fixture',
+  ]) assert.equal(assess(command)?.level, 'block', command);
+  for (const command of [
+    'env -- FILE=/tmp/host-safety-fixture/output.txt sh -c \'rm "$FILE"\'',
+    'env --split-string="rm /tmp/host-safety-fixture/output.txt"',
+    'exec -a fixture rm /tmp/host-safety-fixture/output.txt',
+    'timeout 5 nice --adjustment 5 rm /tmp/host-safety-fixture/output.txt',
+    'command -- rm /tmp/host-safety-fixture/output.txt',
+  ]) assert.equal(assess(command), undefined, command);
+  assert.equal(assess('env -- "MODE=$UNKNOWN" sh -c \'nmcli radio wifi "$MODE"\'')?.level, 'review');
+  assert.equal(assessShellMutation('env -u "TARGET" sh -c \'rm -rf "${TARGET:-/}"\'', '/tmp/host-safety-fixture', { TARGET: '/tmp/host-safety-fixture/output' })?.level, 'block', 'quoted env unset keys must not preserve stale safe values');
+});
+
+test('nested ip object families classify their operation and preserve read-only selectors', () => {
+  for (const command of [
+    'ip xfrm state flush', 'ip xfrm policy flush', 'ip x s f', 'ip x p d dir out',
+    'ip xfrm policy setdefault in block', 'ip xfrm state deleteall',
+    'ip mptcp endpoint flush', 'ip mpt e f', 'ip mptcp limits set subflows 1', 'ip mpt l s subflows 1',
+    'ip sr tunsrc set 2001:db8::1', 'ip s t s 2001:db8::1', 'ip sr hmac set 1 sha256',
+    'ip ioam namespace set 1 schema none', 'ip io n s 1 schema none', 'ip ioam schema del 1',
+    'ip --netns fixture -6 xfrm state flush', 'ip -n fixture -f inet6 sr tunsrc set 2001:db8::1',
+  ]) assert.equal(assess(command)?.level, 'block', command);
+  for (const command of [
+    'ip xfrm state list', 'ip xfrm state count', 'ip x s c', 'ip xfrm policy getdefault',
+    'ip x p l dev set', 'ip xfrm policy count', 'ip mptcp endpoint show', 'ip mpt e sh',
+    'ip mptcp limits show', 'ip mpt l sh', 'ip sr hmac show', 'ip sr tunsrc show', 'ip s t sh',
+    'ip ioam namespace show', 'ip io schema show', 'ip nexthop bucket list dev set',
+    'ip nexthop bucket get id 1 index 0', 'ip next b l dev flush',
+    'ip --netns fixture -6 xfrm state count', 'ip -n fixture -f inet6 sr tunsrc show',
+  ]) assert.equal(assess(command), undefined, command);
+  assert.equal(assess('ip xfrm state "$ACTION"')?.level, 'review');
 });
 
 test('firmware mutations and elevated test entrypoints require exact-invocation review', () => {

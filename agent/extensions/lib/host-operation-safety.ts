@@ -40,9 +40,10 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
   const risk = (reason: string, level: 'block' | 'review' = 'block'): HostOperationRisk => ({level, reason, target: name, resolved: values.every(value => value !== undefined)});
   const unresolved = () => risk('A host-control operation is unresolved. Establish its exact operation and target from read-only evidence before running it', 'review');
   const network = () => risk('Host connectivity could be lost, including provider access and remote control. Inspect sys_probe host and the active route first; test in a disposable network namespace or use an operator-controlled recovery path outside this session');
-  // These flags exit before mutation for the command families below. A flag on
-  // an enclosing shell is handled by the shell owner, never granted globally.
-  if (name !== 'kill' && flag('--help', '--version')) return;
+  // Only an unambiguous leading diagnostic is a generic exemption: later
+  // --help may be an option value (e.g. nft -f --help), not a help request.
+  // The service script itself recognizes these flags in every argument slot.
+  if (name !== 'kill' && ['--help','--version'].includes(args[0]) || name === 'service' && flag('--help','--version')) return;
   if (/^(?:reboot|poweroff|halt|shutdown|suspend|hibernate)$/.test(name)) {
     if (name === 'shutdown' && flag('-c', '--show')) return;
     return risk('Power or sleep operations interrupt the harness and other work. Keep this session running; use a separate operator workflow after saving work');
@@ -59,7 +60,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
       return network();
     if (values.includes(undefined)) return unresolved();
   }
-  if (name === 'service' && has('stop', 'restart', 'force-reload') && /^(?:network|NetworkManager|wpa_supplicant|iwd|ssh|sshd|dbus|gdm|sddm|lightdm)/i.test(args[0])) return network();
+  if (name === 'service' && has('stop', 'restart', 'try-restart', 'force-reload', '--full-restart') && /^(?:network|NetworkManager|wpa_supplicant|iwd|ssh|sshd|dbus|gdm|sddm|lightdm)/i.test(args[0])) return network();
   if (name === 'loginctl' && args.some(arg => /^(?:terminate|kill)-(?:session|user|seat)$/.test(arg)))
     return risk('Terminating a login session can kill the harness, desktop and remote access');
   if (name === 'nmcli') {
@@ -79,7 +80,36 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     if (values.includes(undefined)) return unresolved();
   }
   if (name === 'rfkill' && has('block', 'toggle')) return network();
-  if (name === 'ip' && has('add', 'change', 'replace', 'delete', 'del', 'flush', 'set', '-batch', '-b')) return network();
+  if (name === 'ip') {
+    if (options.some(arg => /^--?(?:b|ba|bat|batc|batch)(?:=|$)/.test(arg))) return network();
+    const [object, verb, action] = commandArgs(['-n','-netns','--netns','-f','-family','--family','-rcvbuf','-l','-loops']);
+    // These documented families put the operation after a sub-object. Keep
+    // their verbs scoped so a selector/device called `set` stays ordinary data.
+    const nested = [
+      ['xfrm', ['state'], ['add','update','allocspi','delete','deleteall','flush']],
+      ['xfrm', ['policy'], ['add','update','delete','deleteall','flush','set','setdefault']],
+      ['mptcp', ['endpoint'], ['add','delete','change','flush']],
+      ['mptcp', ['limits'], ['set']],
+      ['sr', ['hmac','tunsrc'], ['set']],
+      ['ioam', ['namespace'], ['add','delete','set']],
+      ['ioam', ['schema'], ['add','delete']],
+      ['nexthop', ['bucket'], []],
+      ['link', ['property'], ['add','delete']],
+    ] as const;
+    const family = nested.find(([kind, children]) => object && kind.startsWith(object) && verb && children.some(child => child.startsWith(verb)));
+    if (family) {
+      if (action && family[2].some(operation => operation.startsWith(action))) return network();
+      if (action && ['show','list','get','getdefault','count','help'].some(operation => operation.startsWith(action))) return;
+      if (values.includes(undefined)) return unresolved();
+      return;
+    }
+    const link = Boolean(object) && 'link'.startsWith(object);
+    // ip accepts abbreviated verbs. In `ip link`, `s` means set; for
+    // route/address it means show. Only command positions are operations.
+    if (verb && (['show','list','get','help'].includes(verb) || !link && 'show'.startsWith(verb))) return;
+    if (verb && ['add','change','replace','delete','flush','set','restore'].some(word => word.startsWith(verb))) return network();
+    if (values.includes(undefined)) return unresolved();
+  }
   if (name === 'ifdown' || name === 'netplan' && has('apply', 'try') || name === 'networkctl' && has('down', 'delete', 'reconfigure', 'reload', 'renew')) return network();
   if (name === 'ifconfig' && args.filter(arg => !['-a','-s','-v'].includes(arg)).length > 1) return network();
   if (name === 'iwconfig' && args.length > 1) return network();
@@ -118,8 +148,22 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     if (signals.length && signals.every(signal => signal === '0') || name === 'killall' && flag('-l','--list')) return;
     return risk('Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect sys_probe processes and use an exact unrelated PID or the owning managed-job tool');
   }
-  if (name === 'wipefs' && !flag('-n', '--no-act') && (flag('-a', '--all', '-o', '--offset') || options.some(arg => arg.startsWith('--offset=') || /^-[a-z]*a/.test(arg))))
-    return risk('Erasing device signatures can destroy mounted storage. Use a read-only listing or --no-act and a separate operator-controlled device workflow');
+  if (name === 'wipefs') {
+    let noAct = false, erases = false;
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+      if (option === '--no-act') noAct = true;
+      if (option === '--all' || option === '--offset' || option.startsWith('--offset=')) erases = true;
+      if (['--offset','--output','--types'].includes(option)) { i++; continue; }
+      if (/^-[^-]/.test(option)) for (let at = 1; at < option.length; at++) {
+        if (option[at] === 'n') noAct = true;
+        if (option[at] === 'a' || option[at] === 'o') erases = true;
+        // Offset/output/type consume the remaining cluster or next operand.
+        if ('oOt'.includes(option[at])) { if (at === option.length - 1) i++; break; }
+      }
+    }
+    if (erases && !noAct) return risk('Erasing device signatures can destroy mounted storage. Use a read-only listing or --no-act and a separate operator-controlled device workflow');
+  }
   if (name === 'modprobe' && flag('-c','--showconfig','--show-config','--show-depends','--show-modversions','--dump-modversions')) return;
   if (['blkdiscard', 'mkswap', 'swapon', 'swapoff', 'modprobe', 'rmmod'].includes(name) && !flag('--show', '--list', '--dry-run', '-n'))
     return risk('Raw storage, swap or kernel-driver changes can damage the host or interrupt its active devices; inspect the device and use an isolated or operator-controlled workflow');

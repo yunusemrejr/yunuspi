@@ -37,14 +37,17 @@ async function run(command: string, args: string[], signal?: AbortSignal): Promi
       timeout: 5000,
       maxBuffer: 4 * 1024 * 1024,
       signal,
-      env: { ...process.env, LC_ALL: "C" },
+      // These fixed Linux inspection commands must not execute project PATH
+      // shims or inherited dynamic-loader hooks. Toolchain discovery below
+      // still describes the user's PATH without executing its candidates.
+      env: { PATH: "/usr/sbin:/usr/bin:/sbin:/bin", LC_ALL: "C" },
     });
     return String(result.stdout ?? "");
   } catch (error: any) {
     signal?.throwIfAborted();
     if (error?.code === "ENOENT")
       throw new Error(
-        `${command} is not installed; this action needs it on PATH`,
+        `${command} is not installed; this action needs it on the system PATH`,
       );
     if (error?.killed || error?.signal)
       throw new Error(`${command} timed out after 5s`);
@@ -90,6 +93,7 @@ export async function hostSafetyFacts(signal?: AbortSignal, root = "/") {
         signal?.throwIfAborted();
         if (++visited > limit) { truncated = true; break; }
         if (/^[\w.:-]{1,64}$/.test(entry.name)) found.push(entry.name);
+        else truncated = true;
       }
       return found;
     } catch { signal?.throwIfAborted(); return null; }

@@ -156,11 +156,11 @@ export async function workspaceFacts(cwd, signal) {
       "No persistent manifest or authority declarations are created. Use existing workspace documentation/memory for explicit declarations.",
     ],
   };
-  const exists = async (rel) => {
+  const exists = async (rel, kind) => {
     operationSignal.throwIfAborted();
     try {
       const s = await fs.lstat(path.join(root, rel));
-      return !s.isSymbolicLink() && (s.isFile() || s.isDirectory());
+      return !s.isSymbolicLink() && (kind === 'file' ? s.isFile() : kind === 'directory' ? s.isDirectory() : s.isFile() || s.isDirectory());
     } catch (e) {
       if (e.code === "ENOENT") return false;
       result.truncated = true;
@@ -168,13 +168,13 @@ export async function workspaceFacts(cwd, signal) {
     }
   };
   for (const name of MARKERS)
-    if (await exists(name))
+    if (await exists(name, 'file'))
       result.manifests.push({ path: name, source: "lstat" });
   for (const name of DIRS)
     if (
       name.includes("/")
-        ? (await exists(".github")) && (await exists(name))
-        : await exists(name)
+        ? (await exists(".github", 'directory')) && (await exists(name, 'directory'))
+        : await exists(name, 'directory')
     )
       result.directories.push(name);
   for (const name of RUNTIME)
@@ -254,12 +254,14 @@ export async function workspaceFacts(cwd, signal) {
       await handle?.close();
     }
   }
-  // Strip inherited Git routing/config overrides; never inherit GIT_DIR pointing
-  // somewhere other than the explicit cwd. fsmonitor is the status hook seam.
+  // Keep normal config discovery, but never run project PATH shims, loader
+  // hooks or inherited Git routing overrides instead of this explicit cwd.
   const env = Object.fromEntries(
-    Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")),
+    ['HOME', 'XDG_CONFIG_HOME'].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]),
   );
   Object.assign(env, {
+    PATH: "/usr/sbin:/usr/bin:/sbin:/bin",
+    LC_ALL: "C",
     GIT_OPTIONAL_LOCKS: "0",
     GIT_TERMINAL_PROMPT: "0",
     GIT_NO_LAZY_FETCH: "1",

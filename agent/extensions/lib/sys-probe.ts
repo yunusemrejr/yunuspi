@@ -32,16 +32,29 @@ export function deviceKind(name: string): string | null {
 
 /** Routing-table input stays local; only interface names leave this parser. */
 export function defaultRouteInterfaces(text: string | null, ipv6 = false): string[] | null {
-  if (text === null) return null;
+  if (text === null || text.length > 4096) return null;
   const names = new Set<string>();
+  let header = false, records = 0;
   for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
     const fields = line.trim().split(/\s+/);
+    if (!ipv6 && fields.join(' ') === 'Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT') { header = true; continue; }
+    records++;
     if (ipv6) {
-      if (fields.length === 10 && /^0{32}$/.test(fields[0]) && fields[1] === "00" && (parseInt(fields[8], 16) & 1) && !(parseInt(fields[8], 16) & 0x200)) names.add(fields[9]);
-    } else if (fields.length >= 8 && fields[1] === "00000000" && fields[7] === "00000000" && (parseInt(fields[3], 16) & 1) && !(parseInt(fields[3], 16) & 0x200)) names.add(fields[0]);
+      if (fields.length !== 10 || ![0,2,4].every(i => /^[a-f\d]{32}$/i.test(fields[i])) ||
+        ![1,3].every(i => /^[a-f\d]{2}$/i.test(fields[i]) && parseInt(fields[i],16) <= 128) ||
+        ![5,6,7,8].every(i => /^[a-f\d]{8}$/i.test(fields[i])) || !/^[\w.:-]{1,64}$/.test(fields[9])) return null;
+      if (/^0{32}$/.test(fields[0]) && fields[1] === "00" && (parseInt(fields[8], 16) & 1) && !(parseInt(fields[8], 16) & 0x200)) names.add(fields[9]);
+    } else {
+      if (fields.length !== 11 || !/^[\w.:-]{1,64}$/.test(fields[0]) ||
+        ![1,2,7].every(i => /^[a-f\d]{8}$/i.test(fields[i])) || !/^[a-f\d]{1,8}$/i.test(fields[3]) ||
+        ![4,5,6,8,9,10].every(i => /^\d+$/.test(fields[i]))) return null;
+      if (fields[1] === "00000000" && fields[7] === "00000000" && (parseInt(fields[3], 16) & 1) && !(parseInt(fields[3], 16) & 0x200)) names.add(fields[0]);
+    }
   }
+  if (!ipv6 && !header && !records) return null;
   if (names.size > 32) return null;
-  return [...names].filter((name) => /^[\w.:-]{1,64}$/.test(name));
+  return [...names];
 }
 
 /** Parse `ss -tulpn` / `ss -tulpnH` listener lines. */
