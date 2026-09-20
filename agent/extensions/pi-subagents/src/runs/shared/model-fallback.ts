@@ -15,7 +15,7 @@ import {
 import { isProvenFreeRoute, catalogRouteCapabilities, readFreeEvidence } from "./free-route-evidence.ts";
 import { taskQuality } from "./model-quality.ts";
 import { isAutonomousMeteredEligible } from "./model-economy.ts";
-import { selectAffordableModel } from "./model-selection.ts";
+import { formatAffordableSelectionDiagnostics, selectAffordableModel } from "./model-selection.ts";
 import { evaluateQuotaHealth, type QuotaEvent } from "./quota-health.ts";
 import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
@@ -655,7 +655,7 @@ export function resolveSubagentModelOverride(
      }
      const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels)});
      if (pick) { enforceModelScopes(pick.model,options?.scope,"inherited",options?.onWarn); return pick.model; }
-     if (["expensive","zero-placeholder"].includes(classification.verdict) || constraints.freeOnly && !isProvenFreeRoute(info)) throw new Error(`${formatEconomyNoRouteMessage(resolved,cfg)} No affordable route passed the task quality/route constraints; keep this work in the parent or supply verified benchmark evidence.`);
+     if (["expensive","zero-placeholder"].includes(classification.verdict) || constraints.freeOnly && !isProvenFreeRoute(info)) throw new Error(`${formatEconomyNoRouteMessage(resolved,cfg)} No affordable route passed the task quality/route constraints. ${formatAffordableSelectionDiagnostics(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels)})} Keep this work in the parent or supply verified benchmark evidence.`);
 				} else if (explicit === undefined && (classification.verdict === "expensive" || classification.verdict === "zero-placeholder")) {
 					const preferredExpensive = selectLlmPreferredModel(inferPreferenceRole(options?.task), availableModels, {});
 					if (preferredExpensive) { const preferredRoute = withLlmThinkingSuffix(preferredExpensive); enforceModelScopes(preferredRoute, options?.scope, "inherited", options?.onWarn); return preferredRoute; }
@@ -1044,7 +1044,7 @@ function applyCandidateEconomy(
 	let result = kept;
 	if (primaryDropped) {
 		const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels, cfg, { task, freeOnly:constraints.freeOnly, preferredModel: candidates[0]!, exclude: [candidates[0]!, ...kept], exhaustedProviders: exhaustedProvidersOf(availableModels) });
-		if (!pick) throw new Error(`${formatEconomyNoRouteMessage(candidates[0]!, cfg)}${task ? " No route passed the task quality gate; keep this work in the parent or supply verified model evidence." : ""}`);
+		if (!pick) throw new Error(`${formatEconomyNoRouteMessage(candidates[0]!, cfg)}${task ? ` No route passed the task quality gate. ${formatAffordableSelectionDiagnostics(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0]!,exclude:[candidates[0]!,...kept],exhaustedProviders:exhaustedProvidersOf(availableModels)})} Keep this work in the parent or supply verified model evidence.` : ""}`);
 		result = [pick.model, ...kept.filter((route) => route !== pick.model)];
 	}
 	return constraints.fixed ? result.slice(0,1) : result;

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
-import { decideStatusWrite } from "../shared/status-revision.ts";
+import { updateGuardedStatus } from "../shared/status-revision.ts";
 import {
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
 	type AsyncStatus,
@@ -225,22 +225,22 @@ function stepProcessTerminalProof(
 function overlayStatus(asyncDir: string, proof: ProcessTerminalV1, candidate?: ProcessTerminalCandidate): void {
 	const statusPath = path.join(asyncDir, "status.json");
 	try {
-		const status = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as AsyncStatus;
-		// Guarded read-modify-write: a newer writer (reconciler repair or the
-		// runner's final state) must survive our proof overlay instead of
-		// being clobbered by the stale copy we just read.
-		const next = { ...status, processTerminal: proof } as AsyncStatus;
-		if (status.steps) {
-			next.steps = status.steps.map((step, index) => {
-				const records = candidate?.writers[String(index)] ?? [];
-				const expected = candidate?.expectedWriters?.[String(index)] ?? (records.length > 0 ? records.length : 0);
-				const stepState = expected === 0 ? "not-started" : proof.state === "observed" && records.length === expected ? "observed" : proof.state === "pending" ? "pending" : "unknown";
-				return { ...step, processTerminal: stepProcessTerminalProof(proof, index, stepState as never, records, resumeDisposition(step.status, step.sessionFile ?? candidate?.sessionFile)) };
-			});
-		}
-		const decision = decideStatusWrite(status, next);
-		if (decision.action !== "write") return;
-		writeAtomicJson(statusPath, { ...next, revision: decision.revision });
+		// The overlay must derive from and replace the same revision. Holding the
+		// shared status lock across both operations prevents a runner/reconciler
+		// write from landing between our read and rename.
+		updateGuardedStatus(statusPath, (current) => {
+			const status = current as AsyncStatus;
+			const next = { ...status, processTerminal: proof } as AsyncStatus;
+			if (status.steps) {
+				next.steps = status.steps.map((step, index) => {
+					const records = candidate?.writers[String(index)] ?? [];
+					const expected = candidate?.expectedWriters?.[String(index)] ?? (records.length > 0 ? records.length : 0);
+					const stepState = expected === 0 ? "not-started" : proof.state === "observed" && records.length === expected ? "observed" : proof.state === "pending" ? "pending" : "unknown";
+					return { ...step, processTerminal: stepProcessTerminalProof(proof, index, stepState as never, records, resumeDisposition(step.status, step.sessionFile ?? candidate?.sessionFile)) };
+				});
+			}
+			return next;
+		});
 	} catch {
 		// The proof sidecar remains authoritative when terminal status is unavailable.
 	}

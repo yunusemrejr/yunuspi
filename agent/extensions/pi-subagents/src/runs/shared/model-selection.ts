@@ -257,6 +257,83 @@ export function selectAffordableModel(
 	return undefined;
 }
 
+/**
+ * Explain a failed autonomous selection without changing the selection or
+ * performing any refresh/network work. This is intentionally candidate-level:
+ * an aggregate "no route" message is not actionable when a catalog contains
+ * many free routes that were rejected by different gates.
+ */
+export function formatAffordableSelectionDiagnostics(
+	models: ModelInfo[] | undefined,
+	cfg: ModelEconomyConfig,
+	options: AffordableSelectionOptions = {},
+): string {
+	const candidates = models ?? [];
+	if (!candidates.length) return "No registered candidates were available for inspection.";
+	const now = Date.now();
+	const evidence = readFreeEvidence();
+	const preferredBase = options.preferredModel ? splitKnownThinkingSuffix(options.preferredModel).baseModel : undefined;
+	const reference = candidates.find(model => model.fullId === preferredBase);
+	const required = options.requirements;
+	const capacityReasons = (model: ModelInfo): string[] => {
+		const reasons: string[] = [];
+		if (required?.minContextWindow !== undefined && (!Number.isSafeInteger(required.minContextWindow) || required.minContextWindow <= 0 || !(typeof model.contextWindow === "number" && model.contextWindow >= required.minContextWindow))) reasons.push("context-below-required");
+		if (required?.minOutputTokens !== undefined && (!Number.isSafeInteger(required.minOutputTokens) || required.minOutputTokens <= 0 || !(typeof model.maxTokens === "number" && model.maxTokens >= required.minOutputTokens))) reasons.push("output-below-required");
+		if (required?.reasoning === true && model.reasoning !== true) reasons.push("missing-reasoning");
+		if (required?.inputModalities?.some(input => !model.input?.includes(input))) reasons.push("missing-input-modality");
+		if (required?.toolCalling && catalogRouteCapabilities(model, evidence)?.toolCalling !== true) reasons.push("missing-tool-calling");
+		if (required?.minContextWindow === undefined && reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow)) reasons.push("context-below-parent");
+		if (required?.minOutputTokens === undefined && reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens)) reasons.push("output-below-parent");
+		if (required?.inputModalities === undefined && reference?.input?.includes("image") && !model.input?.includes("image")) reasons.push("missing-parent-image-input");
+		if (required?.reasoning === undefined && reference?.reasoning === true && model.reasoning !== true) reasons.push("missing-parent-reasoning");
+		return reasons;
+	};
+	const freeReport = describeFreeRoutes(candidates, {
+		evidence,
+		requirements: { minContextWindow: MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling: required?.toolCalling !== false },
+		now,
+	});
+	const freeById = new Map(freeReport.candidates.map(candidate => [candidate.route, candidate]));
+	const health = readHealth();
+	const histories = new Map(candidates.map(model => [model.fullId, recoveryPerformance(health.providers[model.provider]?.models[model.id], model, now)]));
+	const hardReasons = new Map<string, string[]>();
+	for (const model of candidates) {
+		const reasons = capacityReasons(model);
+		const route = evaluateRoute({ provider: model.provider, model: model.id, now }, health);
+		if (!route.allowed) reasons.push(`route-${route.boundBy ?? "health"}-cooldown`);
+		const history = histories.get(model.fullId)!;
+		if (history.effectiveSamples >= 4 && history.failureRate > .65) reasons.push("failure-history");
+		if (options.exclude?.includes(model.fullId)) reasons.push("excluded-by-caller");
+		if (findModelExclusion(model.fullId)) reasons.push("model-exclusion");
+		if (options.exhaustedProviders?.includes(model.provider)) reasons.push("provider-quota-exhausted");
+		hardReasons.set(model.fullId, reasons);
+	}
+	const hardPool = candidates.filter(model => !(hardReasons.get(model.fullId)?.length));
+	const freeIds = new Set(freeReport.candidates.filter(candidate => candidate.eligible).map(candidate => candidate.route));
+	const { cache } = readRankCache();
+	const qualityTask = options.quality ?? (options.task ? taskQuality(options.task) : undefined);
+	const qualityPool = hardPool.filter(model => freeIds.has(model.fullId) || !options.freeOnly && (isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg)));
+	const quality = qualityTask ? assessModelQuality(qualityPool, cache?.observations ?? [], qualityTask, reference, now) : undefined;
+	const rows = candidates.map(model => {
+		const reasons = [...(hardReasons.get(model.fullId) ?? [])];
+		const free = freeById.get(model.fullId);
+		if (free?.free && !free.eligible) reasons.push(...free.reasons.slice(0, 3).map(reason => `free-${reason}`));
+		const verdict = quality?.get(model.fullId);
+		if (verdict && !verdict.eligible) reasons.push(verdict.confidence === "unknown" ? "quality-unknown" : "quality-gate");
+		if (!options.freeOnly && !contextTooSmall(model) && !isAutonomousMeteredEligible(model, cfg) && !subscriptionEligible(model, cfg) && !free?.eligible) reasons.push("no-known-affordable-price");
+		if (options.freeOnly && free && !free.eligible) reasons.push("free-only");
+		return { model, reasons: [...new Set(reasons)] };
+	});
+	const freeRows = rows.filter(row => freeById.get(row.model.fullId)?.free);
+	const render = (row: { model: ModelInfo; reasons: string[] }) => `${row.model.fullId}: ${row.reasons.length ? row.reasons.join(", ") : "passed local gates; another compounded constraint rejected the pool"}`;
+	const shown = freeRows.slice(0, 12).map(render);
+	const more = freeRows.length > shown.length ? `; +${freeRows.length - shown.length} more free candidates` : "";
+	const freeSummary = freeRows.length
+		? `${freeRows.length} candidate(s) had free-route evidence${shown.length ? ` — ${shown.join("; ")}` : ""}${more}`
+		: "no candidate had current free-route evidence";
+	return `Free-route diagnostics (${freeReport.state}): ${freeSummary}. Catalog category: ${freeReport.category ?? "none"}. Selection gates are offline; quality labels distinguish unknown evidence from measured rejection.`;
+}
+
 function isRankCacheValid(cache: unknown): cache is ModelRankCache {
 	if (!cache || typeof cache !== "object" || Array.isArray(cache)) return false;
 	const candidate = cache as ModelRankCache;

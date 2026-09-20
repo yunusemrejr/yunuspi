@@ -33,7 +33,13 @@ export const JEV_REQUEST_TIMEOUT_MS = 15_000;
 export const JEV_DISCOVERY_TTL_MS = 10 * 60 * 1000;
 export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
 const JEV_CACHE_MAX = 500;
-const JEV_MAX_INPUT_CHARS = 32768;
+export const JEV_MAX_INPUT_CHARS = 32768;
+export const JEV_REMOTE_PROVIDER = "OpenRouter";
+export const JEV_INPUT_POLICY = `When Jev is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off to disable remote Jev calls.`;
+
+export function jevEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return !['off', '0'].includes((env.PI_JEV ?? 'on').toLowerCase());
+}
 
 const agentDir = (): string =>
   process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -133,7 +139,13 @@ let lastError = "";
 let discovered: { at: number; slugs: string[] } = { at: 0, slugs: [] };
 let discoveryInflight: Promise<string[]> | null = null;
 const cache = new Map<string, { answers: Record<string, JevAnswer>; inputTokens: number; model: string; at: number }>();
-const inflight = new Map<string, Promise<JevAskResult>>();
+type InflightEntry = {
+  promise: Promise<JevAskResult>;
+  controller: AbortController;
+  waiters: number;
+  settled: boolean;
+};
+const inflight = new Map<string, InflightEntry>();
 
 /** Test seam: reset every module singleton. */
 export function resetJevClient(): void {
@@ -145,6 +157,7 @@ export function resetJevClient(): void {
   discovered = { at: 0, slugs: [] };
   discoveryInflight = null;
   cache.clear();
+  for (const entry of inflight.values()) entry.controller.abort(new DOMException('Jev client reset', 'AbortError'));
   inflight.clear();
 }
 
@@ -386,23 +399,62 @@ export async function askJev(
   questions: Record<string, unknown>,
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
-  // Independently cancellable calls keep their own transport. Concurrent
-  // uncancelled advisory requests with identical evidence share one payment.
-  if (opts.signal || (process.env.PI_JEV ?? '').toLowerCase() === 'off') return boundedAsk(site,state,questions,opts);
+  // A caller can leave its own wait without cancelling an identical shared
+  // transport. The last cancelled waiter aborts the underlying request so a
+  // stale advisory cannot keep consuming network/provider time.
+  if (!jevEnabled() || opts.signal?.aborted) return boundedAsk(site,state,questions,opts);
   let identity: string;
   try { identity=cacheKey(site,'inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
-  const pending=inflight.get(identity);
-  if(pending){
-    const result=await pending;
-    if(!result.ok)return result;
+  let entry=inflight.get(identity);
+  let leader=false;
+  if (!entry) {
+    if(inflight.size>=64)return {ok:false,skipped:'busy'};
+    leader=true;
+    const controller=new AbortController();
+    entry={controller,waiters:0,settled:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
+    entry.promise=(async()=>{
+      try { return await boundedAsk(site,state,questions,{...opts,signal:controller.signal}); }
+      catch { return {ok:false,skipped:'unavailable'}; }
+      finally {
+        entry!.settled=true;
+        if(inflight.get(identity)===entry)inflight.delete(identity);
+      }
+    })();
+    inflight.set(identity,entry);
+  }
+  entry.waiters++;
+  let aborted=false;
+  let waiterReleased=false;
+  const releaseWaiter=()=>{
+    if(waiterReleased)return;
+    waiterReleased=true;
+    entry!.waiters=Math.max(0,entry!.waiters-1);
+    if(entry!.waiters===0&&!entry!.settled){
+      if(inflight.get(identity)===entry)inflight.delete(identity);
+      entry!.controller.abort(new DOMException('All Jev callers cancelled', 'AbortError'));
+    }
+  };
+  try {
+    const waited=await waitForInflight(entry,opts.signal,releaseWaiter);
+    aborted=waited.aborted;
+    if (aborted) return {ok:false,skipped:'aborted'};
+    const result=waited.result!;
+    if(leader || !result.ok)return result;
     const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
     ledger(opts.pi,{site,...usage});
     return {ok:true,answers:structuredClone(result.answers),usage};
+  } finally {
+    if(!waiterReleased)entry.waiters=Math.max(0,entry.waiters-1);
   }
-  if(inflight.size>=64)return {ok:false,skipped:'busy'};
-  const work=boundedAsk(site,state,questions,opts);
-  inflight.set(identity,work);
-  try{return await work;}finally{if(inflight.get(identity)===work)inflight.delete(identity);}
+}
+
+async function waitForInflight(entry: InflightEntry, signal?: AbortSignal, onAbort?:()=>void): Promise<{result?:JevAskResult;aborted:boolean}> {
+  if (!signal) return {result:await entry.promise,aborted:false};
+  if (signal.aborted) { onAbort?.(); return {aborted:true}; }
+  let abort!: () => void;
+  const cancelled=new Promise<{aborted:true}>(resolve=>{abort=()=>{onAbort?.();resolve({aborted:true});};signal.addEventListener('abort',abort,{once:true});});
+  try { return await Promise.race([entry.promise.then(result=>({result,aborted:false})),cancelled]); }
+  finally { signal.removeEventListener('abort',abort); }
 }
 
 /** One deadline covers the entire alias cascade and discovery, not each

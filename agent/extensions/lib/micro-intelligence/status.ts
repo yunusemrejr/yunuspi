@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { needleHealth, needleHandle } from "../needle-runtime.ts";
-import { jevHealth, openRouterKey } from "../jev-client.ts";
+import { jevHealth, jevEnabled, JEV_INPUT_POLICY, JEV_MAX_INPUT_CHARS, JEV_REMOTE_PROVIDER, openRouterKey } from "../jev-client.ts";
 import { microMetrics } from "./metrics.ts";
 import { microHealthSnapshot, needleStatus, jevStatus, type LayerHealth } from "./health.ts";
 
@@ -124,7 +124,18 @@ export function microStatusSnapshot(request?: {
       p95: stats.p95,
       skipReasons: stats.skipReasons,
     },
-    jev: { state: jev.state, slug: jev.slug ?? null, lastError: jev.lastError, key: hasKey },
+    jev: {
+      state: jev.state,
+      slug: jev.slug ?? null,
+      lastError: jev.lastError,
+      key: hasKey,
+      enabled: jevEnabled(),
+      provider: JEV_REMOTE_PROVIDER,
+      transport: "remote",
+      inputPolicy: JEV_INPUT_POLICY,
+      maxInputChars: JEV_MAX_INPUT_CHARS,
+      disable: "PI_JEV=off",
+    },
     smol,
     kompress,
     metrics: microMetrics().summaryLines(),

@@ -773,7 +773,8 @@ function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<stri
 		if (agent.modelProvider && !agent.model.includes("/")) model = `${agent.modelProvider}/${agent.model}`;
 	}
 	const thinking = agent.thinking === false ? "off" : agent.thinking ?? "default";
-	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: ${model}; Thinking: ${thinking}`;
+	const constraints = agentCapabilityConstraints(agent);
+	return `- ${agent.name} (${agentListMetadata(agent, providerNames)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: ${model}; Thinking: ${thinking}${constraints.length ? `; Constraints: ${constraints.join(", ")}` : ""}`;
 }
 
 const EXTERNAL_JOB_CAPABILITIES = { stop: false, steer: false, resume: false, structuredOutput: false, toolEvents: false } as const;
@@ -796,8 +797,14 @@ function agentCapabilityTools(agent: AgentConfig): AgentCapabilityRow["tools"] {
 		names: listOrEmpty(agent.tools),
 		...(agent.excludeTools !== undefined ? { excludeTools: [...agent.excludeTools] } : {}),
 		mcpDirectTools: listOrEmpty(agent.mcpDirectTools),
-		mutationTools: agent.mutationTools,
+		mutationTools: agent.mutationTools ?? (agent.name === "automatic-free-assistant" ? [] : undefined),
 	};
+}
+
+function agentCapabilityConstraints(agent: AgentConfig): string[] {
+	if (agent.name === "automatic-free-assistant") return ["read-only: no bash/write/edit or mutation-capable tools", "host shell unavailable"];
+	if (agent.mutationTools?.length === 0) return ["no configured mutation tools"];
+	return [];
 }
 
 function agentCapabilityRow(agent: AgentConfig, options: { executable: boolean; providerNames?: Set<string>; restrictionSources?: string[] }): AgentCapabilityRow {
@@ -809,6 +816,7 @@ function agentCapabilityRow(agent: AgentConfig, options: { executable: boolean; 
 		restrictionSources: options.executable ? undefined : options.restrictionSources ?? [],
 		aliases: agent.aliases ? [...agent.aliases] : undefined,
 		runner: agentCapabilityRunner(agent, options.providerNames),
+		...(agentCapabilityConstraints(agent).length ? { constraints: agentCapabilityConstraints(agent) } : {}),
 		tools: agentCapabilityTools(agent),
 		model: presentDetails({ value: agent.model, fallbackModels: agent.fallbackModels, thinking: agent.thinking }),
 		execution: presentDetails({ defaultAsync: agent.defaultAsync, timeoutMs: agent.defaultTimeoutMs }),
@@ -935,6 +943,8 @@ function formatAgentDetail(agent: AgentConfig): string {
 	if (agent.extensions !== undefined) lines.push(`Extensions: ${agent.extensions.length ? agent.extensions.join(", ") : "(none)"}`);
 	if (agent.subagentOnlyExtensions !== undefined) lines.push(`Subagent-only extensions: ${agent.subagentOnlyExtensions.length ? agent.subagentOnlyExtensions.join(", ") : "(none)"}`);
 	if (agent.mutationTools !== undefined) lines.push(`Mutation tools: ${agent.mutationTools.length ? agent.mutationTools.join(", ") : "(none)"}`);
+	const constraints = agentCapabilityConstraints(agent);
+	if (constraints.length) lines.push(`Hard constraints: ${constraints.join("; ")}`);
 	if (agent.thinking) lines.push(`Thinking: ${agent.thinking}`);
 	if (agent.output) lines.push(`Output: ${agent.output}`);
 	if (agent.outputMode) lines.push(`Output mode: ${agent.outputMode}`);
@@ -954,6 +964,20 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	let scopedAgents = effectiveAgentsForScope(scope, d, ctx.runtimeAgentOwner);
 	scopedAgents = scopedAgents
 		.sort((a, b) => a.name.localeCompare(b.name));
+	const requestedAgent = params.agent?.trim();
+	if (requestedAgent) {
+		const matches = findAgentsInDiscovery(requestedAgent, d, scope, ctx.runtimeAgentOwner);
+		const diagnostics = diagnosticsForScope(d.agentDiagnostics, scope);
+		const normalizedName = sanitizeName(requestedAgent);
+		const diagnostic = findBlockingAgentDiagnostic(requestedAgent, matches, diagnostics)
+			?? (normalizedName !== requestedAgent ? findBlockingAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
+		if (diagnostic) return result(`Agent '${requestedAgent}' has invalid configuration: ${diagnostic.error}`, true);
+		const distinctNames = [...new Set(matches.map((agent) => agent.name))];
+		if (distinctNames.length > 1) return result(`Ambiguous agent alias or name '${requestedAgent}': ${distinctNames.sort((a, b) => a.localeCompare(b)).join(", ")}`, true);
+		if (!matches.length) return result(`Agent '${requestedAgent}' not found. Available: ${availableAgentNamesFromDiscovery(d, ctx.runtimeAgentOwner).join(", ") || "none"}.`, true);
+		const selectedName = matches[0]!.name;
+		scopedAgents = scopedAgents.filter((agent) => agent.name === selectedName);
+	}
 	const capabilityCeiling = resolveCurrentSubagentCapabilityCeiling(ctx.currentSessionId);
 	const visibleAgents = scopedAgents.filter((a) => !a.disabled);
 	const agents = visibleAgents.filter((a) => isAgentAllowedByCapabilityCeiling(a.name, capabilityCeiling));

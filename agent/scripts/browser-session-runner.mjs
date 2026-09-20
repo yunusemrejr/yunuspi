@@ -20,6 +20,7 @@ import { collectBrowserTargets, readBrowserPage, browserHumanHelp } from "./brow
 export { safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
+export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
 
 export function browserUrl(raw) {
   const url = new URL(raw);
@@ -72,14 +73,34 @@ export async function runBrowserSession(input, output) {
   const lines = createInterface({ input, crlfDelay: Infinity });
   try {
     for await (const line of lines) {
-      if (line.length > 32_768) throw Error("Browser request exceeds limit");
+      if (Buffer.byteLength(line, "utf8") > BROWSER_REQUEST_MAX_BYTES) {
+        // Frames emitted by browser-session.ts always lead with this bounded id.
+        // Keep the failure correlated and structured instead of crashing the
+        // runner if versions ever disagree about their transport cap.
+        const match = /^\{"id":"([a-f0-9-]{1,64})"/.exec(line);
+        if (!match) throw Error("Uncorrelated browser request exceeds limit");
+        output.write(JSON.stringify({
+          id: match[1],
+          result: {
+            ok: false,
+            failure: {
+              stage: "transport",
+              kind: "request-limit",
+              outcome: "not-dispatched",
+              nextStep: `Reduce the browser request below ${BROWSER_REQUEST_MAX_BYTES} UTF-8 bytes; no browser action was dispatched.`,
+            },
+          },
+        }) + "\n");
+        continue;
+      }
       let id,
         action,
+        waitKind,
         stage = "validation";
       try {
         const request = JSON.parse(line);
         id = request.id;
-        ({ action } = request);
+        ({ action, kind: waitKind } = request);
         const p = request;
         lease.consume(action);
         const timeout = p.timeoutMs ?? 5000;
@@ -585,12 +606,12 @@ export async function runBrowserSession(input, output) {
         };
         output.write(JSON.stringify({ id, result }) + "\n");
       } catch (error) {
-        const failure = browserFailure(error, stage, action);
+        const failure = browserFailure(error, stage, action, waitKind);
         if (
           stage === "observation" &&
-          ["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "navigate", "new_tab", "back", "forward", "reload"].includes(
+          (["click", "fill", "press", "select", "check", "hover", "scroll", "drag", "navigate", "new_tab", "back", "forward", "reload"].includes(
             action,
-          )
+          ) || (action === "wait" && waitKind === "function"))
         )
           failure.outcome = "action completed; subsequent observation failed";
         record("action-error", { failure });

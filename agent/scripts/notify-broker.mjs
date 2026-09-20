@@ -78,6 +78,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { acquireDirectoryLock } from "./lib/directory-lock.mjs";
 
 const DEFAULT_STATE = path.join(
   os.homedir(),
@@ -171,35 +172,17 @@ function parseArgs(argv) {
 
 function withStateLock(statePath, fn) {
   const lockDir = `${statePath}.lock`;
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      fs.mkdirSync(lockDir);
-      break;
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-      try {
-        if (Date.now() - fs.statSync(lockDir).mtimeMs > STALE_LOCK_MS) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-          continue;
-        }
-      } catch {
-        continue; /* vanished */
-      }
-      if (Date.now() > deadline)
-        throw new Error(`state lock timeout: ${lockDir}`);
-      spawnSync("sleep", ["0.05"]);
-    }
-  }
-  // Note: two waiters can both stale-break a dead lock in the same instant
-  // and interleave; the worst case is one duplicate desktop event in a rare
-  // race, never lost state.
+  const release = acquireDirectoryLock(lockDir, {
+    staleAfterMs: STALE_LOCK_MS,
+    waitMs: LOCK_WAIT_MS,
+    label: "state lock",
+  });
+  // The acquired directory spans the complete read-modify-write transaction;
+  // stale takeover is reserved for a crashed owner.
   try {
     return fn();
   } finally {
-    try {
-      fs.rmSync(lockDir, { recursive: true, force: true });
-    } catch {}
+    release();
   }
 }
 

@@ -9,9 +9,10 @@
  * become transcript lines, deduplicated and budgeted so indicators stay
  * tiny and never disturb the turn.
  *
- * Context cost is deliberate: `content` stays under ~64 chars (details carry
- * display data and never enter LLM context). Sends always use
- * `{ triggerTurn: false }` so a line defers to end-of-turn while streaming.
+ * These lines are display-only: `details` carry renderer data and
+ * `excludeFromContext` keeps the compact label out of LLM context. Sends
+ * always use `{ triggerTurn: false }` so a line defers to end-of-turn while
+ * streaming.
  * Pure module: no pi imports, safe for offline tests. The renderer lives
  * next to the other custom renderers in pi-subagents extension/index.ts.
  */
@@ -184,7 +185,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
       const blockers = typeof data.count === "number" && Number.isFinite(data.count) ? Math.max(0, Math.round(data.count)) : 0;
       return {
         label: clean(decision || "review", 24),
-        status: decision === "accepted" ? "ok" : "error",
+        status: decision === "accepted" ? "ok" : decision === "blocked" ? "skip" : "error",
         detail: blockers ? `${blockers} blocking` : undefined,
       };
     }
@@ -195,7 +196,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
 }
 
 export type ActivitySender = (
-  message: { customType: string; content: string; display: boolean; details: Record<string, unknown> },
+  message: { customType: string; content: string; display: boolean; details: Record<string, unknown>; excludeFromContext: true },
   options: { triggerTurn: boolean },
 ) => unknown;
 
@@ -294,6 +295,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
             customType: ACTIVITY_MESSAGE_TYPE,
             content,
             display: true,
+            excludeFromContext: true,
             details: {
               kind: rec.kind, label: rec.label, status: rec.status,
               ...(rec.ms !== undefined ? { ms: rec.ms } : {}),
@@ -339,8 +341,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
   };
 }
 
-/** Transcript-line payload. `content` stays tiny for context; the renderer
- * paints from these details, which never enter LLM context. */
+/** Transcript-line payload. The renderer paints from these details; the
+ * corresponding custom message is explicitly excluded from LLM context. */
 export interface ActivityDetails {
   kind: string;
   label: string;

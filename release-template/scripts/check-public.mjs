@@ -45,7 +45,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const runtimeDirs =
   /^(?:agent\/)?(?:sessions|memory|logs|backups|tasks|work|artifacts|worktrees|missions|local-models|project-intelligence|npm|node_modules)(?:\/|$)/i;
 const sensitiveNames =
-  /(?:^|\/)(?:\.env(?:\..*)?|auth\.json|settings\.json|models(?:-store)?\.json|provider-health\.json|free-route-evidence\.json|live-model-catalog\.json|run-history\.jsonl|api-key|credentials(?:\..*)?|id_rsa|id_ed25519|.*\.(?:pem|p12|pfx|key|sqlite|db|jsonl|tar|tgz|zip|onnx|safetensors))$/i;
+  /(?:^|\/)(?:\.env(?:\..*)?|auth\.json|settings\.json|models(?:-store)?\.json|provider-health\.json|free-route-evidence\.json|live-model-catalog\.json|run-history\.jsonl|yunuspi-session-[^/]+\.html|pi-session-[^/]+-diagnostics\.json|api-key|credentials(?:\..*)?|id_rsa|id_ed25519|.*\.(?:pem|p12|pfx|key|sqlite|db|jsonl|tar|tgz|zip|onnx|safetensors))$/i;
 const placeholder =
   /^(?:|UNKNOWN|REDACTED|CHANGEME|YOUR[_ -].*|EXAMPLE[_ -].*|TEST[_ -].*|DUMMY[_ -].*|PLACEHOLDER|\$\{[^}]+\}|<[^>]+>|test|fake|dummy|example|none|null|undefined)$/i;
 
@@ -121,13 +121,14 @@ export function scanPath(name) {
     normalized.startsWith("/") || normalized.split("/").some((p) => p === "..");
   if (bad || normalized.split("/").includes(".git"))
     return [{ path: name, rule: "unsafe-path" }];
+  const scoped = normalized.replace(/^(?:release-template|public-template)\//i, "");
   const packageOnly =
     /^(?:agent\/)?npm(?:\/(?:package\.json|package-lock\.json))?$/.test(
-      normalized,
+      scoped,
     );
   if (
     normalized.split("/").includes("node_modules") ||
-    (runtimeDirs.test(normalized) && !packageOnly) ||
+    (runtimeDirs.test(scoped) && !packageOnly) ||
     sensitiveNames.test(normalized)
   )
     return [{ path: name, rule: "private-runtime-file" }];

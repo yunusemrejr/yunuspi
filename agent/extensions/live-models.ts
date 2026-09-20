@@ -388,7 +388,7 @@ interface OrLiveModel {
 	id: string;
 	/** Official API: Unix seconds when added to this catalog, not released. */
 	created?: number;
-	name: string;
+	name?: string;
 	context_length?: number;
 	architecture?: { input_modalities?: string[]; output_modalities?: string[] };
 	pricing?: Record<string, string>;
@@ -401,6 +401,39 @@ interface OrLiveModel {
 	};
 	expiration_date?: string;
 	deprecation?: { deprecation_date?: string };
+}
+
+function openRouterCost(
+	pricing: OrLiveModel["pricing"],
+	fallback: PiModel["cost"] | undefined,
+): PiModel["cost"] {
+	if ((!pricing || Object.keys(pricing).length === 0) && fallback) return { ...fallback };
+	const cost: PiModel["cost"] = {
+		...(fallback ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+	};
+	const missing = new Set(fallback?.missing ?? (fallback ? [] : ["input", "output"]));
+	const has = (key: string) => pricing !== undefined && Object.prototype.hasOwnProperty.call(pricing, key);
+	const apply = (key: string, target: "input" | "output" | "cacheRead" | "cacheWrite", missingKey?: "input" | "output") => {
+		if (!has(key)) return false;
+		const raw = pricing?.[key];
+		const valid = raw !== undefined && raw !== null && raw !== "" && Number.isFinite(Number(raw)) && Number(raw) >= 0;
+		cost[target] = valid ? toPerMillion(raw) : 0;
+		if (missingKey) {
+			if (valid) missing.delete(missingKey);
+			else missing.add(missingKey);
+		}
+		return valid;
+	};
+	if (apply("prompt", "input", "input")) {
+		cost.cacheRead = cost.input;
+		cost.cacheWrite = cost.input;
+	}
+	apply("completion", "output", "output");
+	apply("input_cache_read", "cacheRead");
+	apply("input_cache_write", "cacheWrite");
+	cost.missing = [...missing];
+	cost.knownFree = !missing.has("input") && !missing.has("output") && cost.input === 0 && cost.output === 0;
+	return cost;
 }
 
 /** Catalog-derived capability facts for the free-route evidence row. */
@@ -436,39 +469,40 @@ function openRouterCapabilities(m: OrLiveModel): FreeRouteCapabilities {
 	};
 }
 
-function mapOpenRouterModel(m: OrLiveModel): PiModel {
+function mapOpenRouterModel(m: OrLiveModel, fallback?: PiModel): PiModel {
 	const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : Object.keys(m.supported_parameters ?? {}).filter(key => m.supported_parameters[key] === true);
-	const reasoning =
+	const liveReasoning =
 		params.includes("reasoning") ||
 		(m.reasoning?.mandatory ?? false) ||
 		(m.reasoning?.default_enabled ?? false);
-	const ctx = boundedContextLimit(m.top_provider?.context_length, m.context_length) ?? 128_000;
+	const reasoning = m.supported_parameters !== undefined || m.reasoning !== undefined
+		? liveReasoning
+		: fallback?.reasoning ?? liveReasoning;
+	const liveContext = boundedContextLimit(m.top_provider?.context_length, m.context_length);
+	const ctx = liveContext ?? fallback?.contextWindow ?? 128_000;
 	const maxTokens = clampMaxTokens(
 		ctx,
-		m.top_provider?.max_completion_tokens ?? Math.min(131_072, ctx),
+		m.top_provider?.max_completion_tokens ?? fallback?.maxTokens ?? Math.min(131_072, ctx),
 	);
 	return {
 		id: m.id,
-		name: m.name ?? m.id,
+		name: m.name ?? fallback?.name ?? m.id,
 		api: "openai-completions",
 		reasoning,
-        thinkingLevelMap: openrouterEffortMap(m.reasoning?.supported_efforts, m.reasoning?.mandatory),
-		input: modalitiesToInput(m.architecture?.input_modalities),
+		thinkingLevelMap: m.reasoning?.supported_efforts !== undefined || m.reasoning?.mandatory !== undefined
+			? openrouterEffortMap(m.reasoning?.supported_efforts, m.reasoning?.mandatory)
+			: fallback?.thinkingLevelMap ?? openrouterEffortMap(undefined),
+		input: m.architecture?.input_modalities !== undefined
+			? modalitiesToInput(m.architecture.input_modalities)
+			: fallback?.input ?? ["text"],
 		contextWindow: ctx,
 		maxTokens,
-		cost: {
-			input: toPerMillion(m.pricing?.prompt),
-			output: toPerMillion(m.pricing?.completion),
-			missing: ['input','output'].filter((_,i) => {const value=m.pricing?.[i===0?'prompt':'completion'];return value === undefined || value === null || value === '' || !Number.isFinite(Number(value)) || Number(value)<0;}),
-			knownFree: ['prompt','completion'].every(key=>m.pricing?.[key] !== undefined && m.pricing[key] !== null && m.pricing[key] !== '' && Number(m.pricing[key]) === 0),
-			cacheRead: toPerMillion(m.pricing?.input_cache_read ?? m.pricing?.prompt),
-			cacheWrite: toPerMillion(m.pricing?.input_cache_write ?? m.pricing?.prompt),
-		},
+		cost: openRouterCost(m.pricing, fallback?.cost),
 	};
 }
 
 async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
-	models: PiModel[];
+	models: OrLiveModel[];
 	effortsById: Map<string, string[] | undefined>;
 }> {
 	const raw = (await fetchJson(
@@ -505,7 +539,7 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 		FREE_CATALOG_URL,
 		now,
 	);
-	return { models: models.map(mapOpenRouterModel), effortsById };
+	return { models, effortsById };
 }
 
 async function refreshOpenRouter(
@@ -513,8 +547,9 @@ async function refreshOpenRouter(
 ): Promise<PiModel[]> {
 	const { models: live, effortsById } = await fetchOpenRouterLive(context);
 	const store = storeModels("openrouter");
-	const projected = live.map((m) => {
-		const fromStore = store.get(m.id);
+	const projected = live.map((raw) => {
+		const fromStore = store.get(raw.id);
+		const m = mapOpenRouterModel(raw, fromStore);
 		if (!fromStore) {
 			// Live-only model: derive the effort map from OpenRouter's live
 			// reasoning metadata (see openrouterEffortMap) instead of a fixed

@@ -207,6 +207,15 @@ export function distributionTestConcurrency(
   return Math.max(1, Math.min(4, Number(cores) - 2 || 1));
 }
 
+/** Required build between script-disabled dependency installation and tests. */
+export function distributionBuildStep() {
+  return {
+    command: "npm",
+    args: ["run", "build:core"],
+    timeoutMs: 600000,
+  };
+}
+
 /** Temp root for the distribution test run.
  *
  * Tests create their fixtures with mkdtemp(os.tmpdir()). The guarded-command
@@ -267,6 +276,12 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
         { timeoutMs: 600000 },
       ),
     );
+    const build = distributionBuildStep();
+    timed("build-core", () =>
+      run(build.command, build.args, fixture, {
+        timeoutMs: build.timeoutMs,
+      }),
+    );
     timed(`tests(concurrency=${testConcurrency})`, () =>
       run("npm", ["test"], fixture, {
         timeoutMs: 1200000,
@@ -276,6 +291,10 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
           TMPDIR: tempRoot,
           TMP: tempRoot,
           TEMP: tempRoot,
+          // Optional local-inference weights are deliberately not part of the
+          // sanitized export. Keep a host installation's private asset store
+          // from changing which asset-gated public tests run.
+          PI_NEEDLE_ASSETS: path.join(fixture, ".needle-assets-not-shipped"),
         },
       }),
     );
@@ -376,9 +395,30 @@ export function pendingReleaseCommits(checkout, branch, runner = run) {
  * reporting "nothing to publish" there would silently strand a verified commit
  * that origin never received, so it must push instead. */
 export function releaseCompletion({ stagedChanges, pendingCommits }) {
+  if (pendingCommits > 1 || (stagedChanges && pendingCommits > 0))
+    throw new Error(
+      "Ambiguous ahead release history requires manual review before publication.",
+    );
   if (stagedChanges) return "commit-and-push";
-  if (pendingCommits > 0) return "push-pending";
+  if (pendingCommits === 1) return "push-pending";
   return "nothing";
+}
+
+/** A resumable release is one direct child of the current remote branch.
+ * Multiple-parent or rebased history is not release attestation and must be
+ * reviewed manually even when its final tree happens to match the export. */
+export function assertSinglePendingRelease(checkout, branch, runner = run) {
+  const remote = runner("git", ["rev-parse", `refs/remotes/origin/${branch}`], checkout, {
+    capture: true,
+  }).stdout.trim();
+  const row = runner("git", ["rev-list", "--parents", "-n", "1", "HEAD"], checkout, {
+    capture: true,
+  }).stdout.trim().split(/\s+/);
+  if (row.length !== 2 || row[1] !== remote)
+    throw new Error(
+      "Pending release is not one direct commit above origin; manual review required.",
+    );
+  return row[0];
 }
 
 /** Push, then require the remote branch to actually carry the local HEAD.
@@ -568,11 +608,12 @@ function main() {
       return;
     }
     guard.begin();
-    if (action === "push-pending")
+    if (action === "push-pending") {
+      assertSinglePendingRelease(opt.checkout, branch);
       console.log(
         `[publish] finishing an interrupted release: pushing ${pending.length} commit(s) already committed to the checkout but absent from origin/${branch}`,
       );
-    else {
+    } else {
       const message =
         opt.message ||
         `Harness update ${new Date().toISOString().slice(0, 10)}`;

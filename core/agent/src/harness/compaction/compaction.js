@@ -170,6 +170,9 @@ function estimateTextAndImageContentChars(content) {
 }
 /** Estimate token count for one message using a conservative character heuristic. */
 export function estimateTokens(message) {
+    if ((message.role === "bashExecution" || message.role === "custom") && message.excludeFromContext) {
+        return 0;
+    }
     let chars = 0;
     switch (message.role) {
         case "user": {
@@ -218,6 +221,9 @@ function findValidCutPoints(entries, startIndex, endIndex) {
                 switch (role) {
                     case "bashExecution":
                     case "custom":
+                        if (!entry.message.excludeFromContext)
+                            cutPoints.push(i);
+                        break;
                     case "branchSummary":
                     case "compactionSummary":
                     case "user":

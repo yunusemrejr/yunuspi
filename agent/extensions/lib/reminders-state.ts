@@ -23,6 +23,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export const REMINDERS_STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
@@ -38,6 +39,15 @@ export interface ManualReminder {
 	nextFireAt: number; // wall-clock ms of the NEXT scheduled occurrence
 	active: boolean; // false = completed/cleared (retained, never fires)
 	delivered: number; // delivery count (0 = full text next, >0 = digest refresher)
+}
+
+/** A bounded receipt of an observed mutation. Shell mutations may remain
+ * unresolved; the caution text says so instead of pretending this is an audit. */
+export interface MutationAudit {
+	path: string;
+	tool: string;
+	sha256?: string;
+	observedAt: number;
 }
 
 export interface ReminderState {
@@ -58,6 +68,8 @@ export interface ReminderState {
 	mutPending: boolean; // armed by a completed mutating action, cleared on fire
 	lastMutAt: number; // wall-clock ms of the most recent mutating action
 	runMutCount: number; // mutating tool calls in the current/most-recent run
+	mutationAudit: MutationAudit[]; // bounded actual target/path receipts
+	workspaceWarnings: string[]; // bounded Git drift/overlap warnings
 	manual: ManualReminder[];
 	shownCtx: string[]; // contextual rule tags already injected (once per session each)
 }
@@ -88,6 +100,8 @@ export function defaultRemindersState(): ReminderState {
 		mutPending: false,
 		lastMutAt: 0,
 		runMutCount: 0,
+		mutationAudit: [],
+		workspaceWarnings: [],
 		manual: [],
 		shownCtx: [],
 	};
@@ -121,6 +135,15 @@ function readValidatedRemindersState(sidOrEmpty: string): ReminderState {
 	// the next check-in. Atomic tmp+rename already prevents partial writes.
 	if (!Array.isArray(st.manual)) st.manual = [];
 	if (!Array.isArray(st.shownCtx)) st.shownCtx = [];
+	if (!Array.isArray(st.mutationAudit)) st.mutationAudit = [];
+	if (!Array.isArray(st.workspaceWarnings)) st.workspaceWarnings = [];
+	st.mutationAudit = st.mutationAudit.filter((entry) =>
+		entry && typeof entry.path === "string" && typeof entry.tool === "string" &&
+		Number.isFinite(entry.observedAt) && (entry.sha256 === undefined || typeof entry.sha256 === "string"),
+	).slice(-32);
+	st.workspaceWarnings = st.workspaceWarnings
+		.filter((warning): warning is string => typeof warning === "string" && warning.trim().length > 0)
+		.slice(-16);
 	// Drop any record the scheduler cannot trust: a non-finite nextFireAt
 	// would compare false against every `now` and the reminder would
 	// silently never fire; a non-number createdAt/nextFireAt would corrupt
@@ -158,11 +181,13 @@ export function writeRemindersState(
 	sidOrEmpty: string,
 	st: ReminderState,
 ): boolean {
+	let tmp: string | undefined;
 	try {
-		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true });
-		const tmp = remindersStateFile(sidOrEmpty) + ".tmp";
-		fs.writeFileSync(tmp, JSON.stringify(st));
+		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
+		tmp = `${remindersStateFile(sidOrEmpty)}.${process.pid}.${randomUUID()}.tmp`;
+		fs.writeFileSync(tmp, JSON.stringify(st), { flag: "wx", mode: 0o600 });
 		fs.renameSync(tmp, remindersStateFile(sidOrEmpty));
+		tmp = undefined;
 		return true;
 	} catch (error) {
 		// Ambient hooks must never break a session, but persistence loss must be
@@ -172,6 +197,10 @@ export function writeRemindersState(
 			error instanceof Error ? error.message : String(error),
 		);
 		return false;
+	} finally {
+		if (tmp) {
+			try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+		}
 	}
 }
 

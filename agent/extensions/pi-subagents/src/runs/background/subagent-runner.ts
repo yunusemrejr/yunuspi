@@ -153,7 +153,7 @@ import { CHILD_BREAKER_EVAL_INTERVAL_MS } from "../shared/child-circuit-breakers
 import { assembleRunnerSpawnPreflight, buildChildRouteProvenance, formatSpawnPreflightBlocked } from "../shared/child-spawn-preflight.ts";
 import { evaluateRoute, readHealth } from "../shared/provider-health.ts";
 import { evaluateChildBreakers, resolveChildBreakerPolicy, type ChildBreakerReason } from "../shared/child-circuit-breakers.ts";
-import { decideStatusWrite, type RevisionedStatus } from "../shared/status-revision.ts";
+import { writeGuardedStatus, type RevisionedStatus } from "../shared/status-revision.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writePendingParallelHandoff } from "../shared/parallel-handoff.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, PI_AGGREGATE_EVENT_PROJECTOR, projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
@@ -2822,6 +2822,18 @@ async function runSubagent(
 		outputFile: path.join(asyncDir, "output-0.log"),
 	});
 
+	let statusRevision = 0;
+	let lastStatusWriteAccepted = false;
+	const persistGuardedStatus = (filePath: string, payload: object): void => {
+		const next = payload as RevisionedStatus;
+		const result = writeGuardedStatus(filePath, {
+			...next,
+			revision: Math.max(statusRevision, typeof next.revision === "number" ? next.revision : 0),
+		});
+		lastStatusWriteAccepted = result.written;
+		statusRevision = Math.max(statusRevision, result.revision);
+		statusPayload.revision = statusRevision;
+	};
 	let lastIndexedStatusState: AsyncStatus["state"] | undefined;
 	const indexPersistence = createCapacityResilientJsonWriter({
 		keepAlive: true,
@@ -2841,7 +2853,7 @@ async function runSubagent(
 	const runPersistence = createCapacityResilientJsonWriter({
 		keepAlive: true,
 		onSuccess: (filePath) => {
-			if (filePath === statusPath) queueActiveRunIndex();
+			if (filePath === statusPath && lastStatusWriteAccepted) queueActiveRunIndex();
 		},
 		onError: (error, filePath) => console.error(`Failed to persist async run state '${filePath}':`, error),
 	});
@@ -2851,7 +2863,7 @@ async function runSubagent(
 		if (!isStorageCapacityError(error)) throw error;
 		console.error(`Failed to prepare async run storage '${asyncDir}' while storage is full:`, error);
 	}
-	runPersistence.write(statusPath, statusPayload);
+	runPersistence.write(statusPath, statusPayload, persistGuardedStatus);
 
 	let pendingParallelUsageCost: CostSummary = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
 	const currentUsageTotals = (): CostSummary => {
@@ -2987,23 +2999,12 @@ async function runSubagent(
 	const writeStatusPayloadNow = (): void => {
 		refreshWorkflowGraph();
 		writeRecoverableStatusResult();
-		// Monotonic guard: the coalescer can flush a payload that a newer writer
-		// (reconciler repair, process-terminal overlay) already superseded. Decide
-		// first, then persist through the ENOSPC-resilient writer.
-		const decision = decideStatusWrite(readPersistedStatus(), { ...statusPayload, revision: Math.max(statusRevision, statusPayload.revision ?? 0) });
-		statusRevision = Math.max(statusRevision, decision.revision);
-		statusPayload.revision = statusRevision;
-		if (decision.action === "write") runPersistence.write(statusPath, statusPayload);
+		// The guarded write owns the full read-decide-rename transaction. Capacity
+		// retries invoke the same operation, so a delayed retry cannot bypass the
+		// monotonic check and overwrite a terminal repair.
+		statusPayload.revision = Math.max(statusRevision, statusPayload.revision ?? 0);
+		runPersistence.write(statusPath, statusPayload, persistGuardedStatus);
 		emitNestedSelfEvent(statusPayload.state === "running" || statusPayload.state === "queued" ? "subagent.nested.updated" : "subagent.nested.completed");
-	};
-	let statusRevision = 0;
-	const readPersistedStatus = (): RevisionedStatus | undefined => {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as unknown;
-			return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as RevisionedStatus : undefined;
-		} catch {
-			return undefined;
-		}
 	};
 	const statusWriteCoalescer = createFileCoalescer(writeStatusPayloadNow, 100);
 	const writeStatusPayload = (immediate = true): void => {
@@ -3363,7 +3364,7 @@ async function runSubagent(
 		step.breakerReason = reason;
 		step.terminalCause = reason === "provider_failure_streak" ? "provider_failure"
 			: reason === "tool_failure_streak" || reason === "no_useful_progress" ? "tool_failure"
-				: reason === "excessive_turns" || reason === "runaway_cost" ? "budget_exhausted"
+				: reason === "excessive_tool_calls" || reason === "excessive_turns" || reason === "runaway_cost" ? "budget_exhausted"
 				: "timeout";
 		appendJsonl(eventsPath, JSON.stringify({
 			type: "subagent.step.breaker_tripped",
@@ -3912,6 +3913,7 @@ async function runSubagent(
 				lastActivityAt,
 				currentTool: step.currentTool,
 				thinking: step.thinking,
+				taskPreview: step.description,
 				now,
 			}));
 			if (idleState === "needs_attention") {

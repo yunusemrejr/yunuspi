@@ -68,7 +68,7 @@ export default function (pi: any, deps = { classify: needleClassify, warmup: nee
 
   pi.registerTool({
     name: "micro_status",
-    description: "Read-only micro-intelligence status: current request classification, advisory verdict, helper health and utilization. Runs no inference and changes nothing.",
+    description: "Read-only micro-intelligence status: current request classification, advisory verdict, helper health and utilization. Runs no inference and changes nothing. Jev is a remote OpenRouter advisory; bounded task/request excerpts may be sent there when enabled (PI_JEV=off disables it).",
     parameters: Type.Object({}),
     async execute() {
       const snapshot = microStatusSnapshot(

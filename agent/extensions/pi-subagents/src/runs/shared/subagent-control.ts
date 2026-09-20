@@ -79,18 +79,25 @@ export function resolveControlConfig(
 	};
 }
 
-function scaledNeedsAttentionAfterMs(config: ResolvedControlConfig, thinking?: string | false): number {
+export function taskWeightMultiplier(taskPreview?: string): number {
+	if (!taskPreview?.trim()) return 1;
+	const heavy = taskPreview.length >= 120 || /\b(?:read|inspect|review|audit|investigate|analy[sz]e|trace|compare|search|source|repository|codebase|test|verify)\b/i.test(taskPreview);
+	return heavy ? 3 : 1;
+}
+
+function scaledNeedsAttentionAfterMs(config: ResolvedControlConfig, thinking?: string | false, taskPreview?: string): number {
 	if (config.needsAttentionAfterMsIsExplicit !== false) return config.needsAttentionAfterMs;
+	const weight = taskWeightMultiplier(taskPreview);
 	switch (thinking) {
 		case "medium":
-			return config.needsAttentionAfterMs * 2;
+			return config.needsAttentionAfterMs * 2 * weight;
 		case "high":
-			return config.needsAttentionAfterMs * 5;
+			return config.needsAttentionAfterMs * 5 * weight;
 		case "xhigh":
 		case "max":
-			return config.needsAttentionAfterMs * 10;
+			return config.needsAttentionAfterMs * 10 * weight;
 		default:
-			return config.needsAttentionAfterMs;
+			return config.needsAttentionAfterMs * weight;
 	}
 }
 
@@ -100,13 +107,14 @@ export function deriveActivityState(input: {
 	lastActivityAt?: number;
 	currentTool?: string;
 	thinking?: string | false;
+	taskPreview?: string;
 	now?: number;
 }): ActivityState | undefined {
 	if (!input.config.enabled || input.currentTool) return undefined;
 	const now = input.now ?? Date.now();
 	const lastActivity = input.lastActivityAt ?? input.startedAt;
 	const ageMs = Math.max(0, now - lastActivity);
-	return ageMs > scaledNeedsAttentionAfterMs(input.config, input.thinking) ? "needs_attention" : undefined;
+	return ageMs > scaledNeedsAttentionAfterMs(input.config, input.thinking, input.taskPreview) ? "needs_attention" : undefined;
 }
 
 export function shouldEmitOpenToolAttention(input: {

@@ -46,6 +46,10 @@ import {
 import { hasRequestBodyLimit } from "../scripts/compatibility/legacy-transforms/request-body-gate.mjs";
 
 const MIN_DEDUP_CHARS = 400;
+// Small tool results are already cheap and exact. Preserve them byte-for-byte
+// in the model context so an extractive observation cannot silently replace a
+// useful `ls`, diff, status or short log with an unverified paraphrase.
+export const RAW_PASSTHROUGH_CHARS = 1024;
 const MAX_ENTRIES = 64;
 // Sealed renderings hold only a receipt or a reference to one, never a copy of
 // the raw output, so the bound can be far larger than the observation index.
@@ -389,6 +393,10 @@ export default function piObservationsExtension(
 		// The deterministic distiller runs first and its win ends ML routing.
 		// Computed once and shared by every gate below (pure function).
 		const distilled = distillOutput(event.toolName, text, ref.searchOutput);
+		// Keep short successful output byte-for-byte. Error receipts still pass
+		// through the bounded failure-family matcher so a small repeated error can
+		// retain its related-failure cue.
+		const preserveRaw = !event.isError && text.length < RAW_PASSTHROUGH_CHARS;
 		// Evidence routing: deterministic content-shape classification decides
 		// which ML stages deserve an opportunity. Routing is observability;
 		// each gate below still enforces its own eligibility.
@@ -450,6 +458,7 @@ export default function piObservationsExtension(
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
 			miniSource(text) &&
+			!preserveRaw &&
 			!distilled
 		) {
 			let statusSize = Infinity;
@@ -477,6 +486,7 @@ export default function piObservationsExtension(
 				event.isError === true,
 				event.details,
 			) &&
+			!preserveRaw &&
 			!distilled
 		) {
 			smol.offer(
@@ -498,6 +508,7 @@ export default function piObservationsExtension(
 			pi.getActiveTools().includes("obs_read") &&
 			!miniSource(text) &&
 			!safeSmolOutput(event.toolName, text, false, event.details) &&
+			!preserveRaw &&
 			!distilled
 		) {
 			(smol as { offerWindowed: (...args: [string, string, unknown, string, string, unknown]) => void }).offerWindowed(
@@ -522,6 +533,7 @@ export default function piObservationsExtension(
 			text.length <= MAX_OUTPUT_CHARS &&
 			!miniSource(text) &&
 			!safeSmolOutput(event.toolName, text, false, event.details) &&
+			!preserveRaw &&
 			!distilled
 		) {
 			offerJevDistill(`${ref.id}:${ref.signature}`, event.toolName, text);
@@ -606,6 +618,7 @@ export default function piObservationsExtension(
 					return;
 				const raw = textOf(message.content);
 				if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return;
+				if (raw.length < RAW_PASSTHROUGH_CHARS) return;
 				pending.push(
 					smol
 						.takeAsync(`${ref.id}:${ref.signature}`, raw)
@@ -642,6 +655,13 @@ export default function piObservationsExtension(
 				return message;
 			const raw = textOf(message.content);
 			if (raw.length > MAX_OUTPUT_CHARS || raw.includes("\0")) return message;
+			// The transcript itself is authoritative for small results. Keep the
+			// original message and seal a null projection so later context passes
+			// cannot introduce a summary after a cache becomes ready.
+			if (raw.length < RAW_PASSTHROUGH_CHARS && !message.isError) {
+				sealFirstRender(ref.id, ref.resultHash, null, []);
+				return message;
+			}
 			// Carry all foreign status/provenance details verbatim into the visible
 			// receipt as well as retaining them on the original toolResult object.
 			const {

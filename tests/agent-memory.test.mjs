@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..'), path.resolve(root, '../..')]
   .find(dir => fs.existsSync(path.join(dir, 'extensions/pi-subagents/src/agents/agent-memory.ts')));
 const moduleUrl = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/agents/agent-memory.ts')).href;
-const {readMemoryFile} = await import(moduleUrl);
+const {readMemoryFile,resolveMemoryDir} = await import(moduleUrl);
 
 test('role memory keeps bounded regular reads and refuses symlink aliases', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-memory-'));
@@ -37,4 +37,15 @@ test('a FIFO memory file cannot block child-agent startup', {skip: process.platf
   const child = spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', code, dir], {encoding: 'utf8', timeout: 3000});
   assert.ifError(child.error);
   assert.equal(child.status, 0, child.stderr);
+});
+
+test('a missing memory root beneath a symlinked parent cannot escape containment', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-memory-root-'));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const trusted = path.join(dir, 'trusted'), outside = path.join(dir, 'outside');
+  fs.mkdirSync(trusted);fs.mkdirSync(outside);
+  fs.symlinkSync(outside, path.join(trusted, 'alias'));
+  const result = resolveMemoryDir(path.join(trusted, 'alias/not-created/agent-memory'), 'security-reviewer');
+  assert.ok('error' in result, 'a missing descendant must still verify every existing ancestor');
+  assert.deepEqual(fs.readdirSync(outside), []);
 });

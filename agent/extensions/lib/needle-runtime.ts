@@ -6,7 +6,7 @@
 import { Worker } from "node:worker_threads";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { beginHarnessActivity } from "./harness-activity.ts";
 import type {
   NeedleClassifyInput,
@@ -24,6 +24,7 @@ import type {
   NeedleWorkerResponse,
 } from "./needle-types.ts";
 import { needlePolicy, needleText, needleHash, type NeedlePolicy, type NeedleSkipReason } from "./needle-policy.ts";
+import { NEEDLE_MANIFEST_VERSION, NEEDLE_PINNED_FILES, NEEDLE_REVISION } from "./needle-assets.mjs";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 const SHARED_RUNTIME = Symbol.for("yunus-pi.needle-runtime.v1");
@@ -144,15 +145,22 @@ export function createNeedleRuntime(options: {
     manifest: join(assets, "manifest.json"),
   });
 
-  const assetsPresent = (): boolean => {
+  /** Match the worker's cheap integrity gate before spawning a thread. Full
+   * hashes still run inside the worker, but a missing/mismatched manifest or
+   * truncated asset must not consume a worker restart before that check. */
+  const assetPreflight = (): string | undefined => {
     try {
-      for (const file of NEEDLE_ASSET_FILES) {
-        const info = statSync(join(assets, file));
-        if (!info.isFile() || info.size < 1024) return false;
+      const manifest = JSON.parse(readFileSync(join(assets, "manifest.json"), "utf8")) as { version?: unknown; revision?: unknown };
+      if (!manifest || manifest.version !== NEEDLE_MANIFEST_VERSION || manifest.revision !== NEEDLE_REVISION)
+        return `asset integrity failed: manifest version/revision does not match pinned ${NEEDLE_REVISION}`;
+      for (const file of NEEDLE_PINNED_FILES) {
+        const info = statSync(join(assets, file.local));
+        if (!info.isFile()) return `asset integrity failed: ${file.local} is not a regular file`;
+        if (info.size !== file.bytes) return `asset integrity failed: ${file.local} size ${info.size} != pinned ${file.bytes}`;
       }
-      return true;
+      return undefined;
     } catch {
-      return false;
+      return "asset integrity failed: manifest or pinned asset is missing/unreadable";
     }
   };
 
@@ -185,11 +193,12 @@ export function createNeedleRuntime(options: {
         scheduleReprobe();
         return;
       }
-      if (assetsPresent()) {
+      const preflightError = assetPreflight();
+      if (!preflightError) {
         degraded = restarts > 0;
         startWorker();
       } else {
-        setState("unavailable", "assets missing");
+        setState("unavailable", preflightError);
         scheduleReprobe();
       }
     }, Math.min(Math.max(1000, wait), policy.cooldownMs));
@@ -234,8 +243,9 @@ export function createNeedleRuntime(options: {
 
   const startWorker = (): void => {
     if (!policy.enabled || closed || worker || starting) return;
-    if (!assetsPresent()) {
-      setState("unavailable", `assets missing in ${assets}`);
+    const preflightError = assetPreflight();
+    if (preflightError) {
+      setState("unavailable", `${preflightError} in ${assets}`);
       scheduleReprobe();
       return;
     }

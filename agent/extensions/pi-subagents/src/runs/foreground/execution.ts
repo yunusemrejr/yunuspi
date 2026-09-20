@@ -1040,6 +1040,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 				lastActivityAt: progress.lastActivityAt,
 				currentTool: progress.currentTool,
 				thinking: resolvedThinking,
+				taskPreview: task,
 				now,
 			});
 			if (idleState === "needs_attention") {

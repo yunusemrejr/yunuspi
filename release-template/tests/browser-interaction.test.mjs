@@ -44,6 +44,9 @@ test("stale node references request a fresh observation without echoing page con
   const { browserFailure } = await load("scripts/browser-diagnostics.mjs");
   const stale = browserFailure(Error("Stale browser reference; capture snapshot or markers again"), "click", "click");
   assert.match(stale.nextStep, /Capture snapshot or markers again/);
+  const expired = browserFailure(Error("Browser session lease expired; open a new session"), "validation", "snapshot");
+  assert.equal(expired.kind, "expired");
+  assert.match(expired.nextStep, /cannot be renewed.*Open a new session.*reconcile/i);
 });
 
 test("lease keeps new reads free and budgets new mutations", () => {
@@ -59,10 +62,67 @@ test("guidance treats new mutations like clicks and new reads like inspection", 
     assert.equal(matchHook("browser_session", { action }, true).key, "browser-session-recovery");
     assert.equal(matchHook("browser_session", { action }).key, "browser-session-workflow");
   }
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }, true).key, "browser-session-recovery");
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }).key, "browser-session-workflow");
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }, true).key, "browser-session-read-recovery");
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }), null);
   for (const action of ["markers", "observe", "html", "tabs", "read", "navigate", "new_tab", "back", "forward", "reload"]) {
     assert.equal(matchHook("browser_session", { action }, true).key, "browser-session-read-recovery");
     assert.equal(matchHook("browser_session", { action }), null);
   }
+});
+
+test("parent transport accepts every bounded string field and budgets complete action pipelines", async () => {
+  const {
+    BROWSER_REQUEST_MAX_BYTES,
+    browserRequestDeadlineMs,
+    handleBrowserTransportDisconnect,
+    prepareBrowserRequest,
+  } = await load("extensions/lib/browser-session.ts");
+  const runner = await load("scripts/browser-session-runner.mjs");
+  assert.equal(BROWSER_REQUEST_MAX_BYTES, runner.BROWSER_REQUEST_MAX_BYTES);
+  assert.equal(browserRequestDeadlineMs({ action: "open", timeoutMs: 15000 }), 60_000);
+  assert.ok(browserRequestDeadlineMs({ action: "wait", kind: "function", timeoutMs: 15000 }) >= 45_000);
+  assert.ok(browserRequestDeadlineMs({ action: "wait", kind: "element", timeoutMs: 15000 }) >= 45_000);
+
+  const escaped = (length) => "\0".repeat(length);
+  const maximal = prepareBrowserRequest({
+    action: "wait",
+    session: escaped(64),
+    tab: escaped(40),
+    ref: escaped(40),
+    kind: "function",
+    query: escaped(256),
+    reason: escaped(500),
+    url: escaped(8192),
+    selector: escaped(256),
+    role: escaped(50),
+    name: escaped(256),
+    text: escaped(8000),
+    option: escaped(256),
+    key: escaped(80),
+    frame: escaped(256),
+    properties: Array(20).fill(escaped(50)),
+    script: escaped(8000),
+  }, "00000000-0000-0000-0000-000000000000");
+  assert.equal(maximal.ok, true, "schema-bounded inputs fit the runner frame");
+
+  const oversized = prepareBrowserRequest(
+    { action: "fill", text: escaped(BROWSER_REQUEST_MAX_BYTES) },
+    "00000000-0000-0000-0000-000000000000",
+  );
+  assert.equal(oversized.ok, false);
+  assert.equal(oversized.failure.kind, "request-limit");
+  assert.equal(oversized.failure.outcome, "not-dispatched");
+
+  let rejected, closes = 0;
+  handleBrowserTransportDisconnect(
+    { pending: { reject: (error) => { rejected = error; } } },
+    async () => { closes++; },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(rejected.message, /disconnected; session closed/);
+  assert.equal(closes, 1);
 });
 
 test("tool surface registers the new actions and parameters", async () => {
@@ -85,5 +145,6 @@ test("tool surface registers the new actions and parameters", async () => {
   for (const param of ["script", "marker", "x", "y", "toX", "toY", "dx", "dy", "maxChars", "tab", "ref", "kind", "reason", "query", "offset", "mode", "button", "clickCount"]) {
     assert.ok(tool.parameters.properties?.[param], `param registered: ${param}`);
   }
+  assert.equal(tool.parameters.properties?.session?.maxLength, 64);
   assert.ok(!tool.description.includes("arbitrary JS") || tool.description.includes("evaluate"));
 });

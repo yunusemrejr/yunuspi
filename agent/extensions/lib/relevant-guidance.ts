@@ -45,6 +45,7 @@ const action = /\b(add|publish|export|convert|render|build|make|design|create|im
  * "propagate", "simulate", "compute" — so the cue is the framing itself.
  * Tool-driven calls re-run the same owner with real execution evidence. */
 const narrativeCue = /\b(?:tell|write|read|recite)\b[^\n]{0,40}\b(?:stor(?:y|ies)|tales?|poems?|essays?|novels?|blog posts?|books?)\b|\b(?:explain|describe|summari[sz]e|illustrate|narrate)\b|\b(?:what|who|when|where|why|how)\s+(?:is|are|was|were|does|do|did|would|should|can|could)\b|\btell me about\b/i;
+const explicitReadOnlyCue = /\b(?:read[- ]only|just|only)\s+(?:inspect|review|audit|check|explain|summari[sz]e|report)\b|\b(?:do not|don't|never|without)\s+(?:edit|change|modify|write|touch|alter)\b/i;
 const ui = /\b(ui|interface|frontend|front-end|layout|styles?|responsive|website|component|page|aesthetics|animations?)\b/i;
 const env = /\b(production|deploy(?:ment)?|ci\/cd|server|migration|database|postgres|mysql|sqlite)\b/i;
 const uiFile = /\.(?:tsx|jsx|vue|svelte|html|css|scss|sass|less)$/i;
@@ -78,7 +79,7 @@ export function createRelevantGuidance(pi: any) {
   const sourceReads = new Set<string>();
   let ordinarySteps = 0;
   let requestNumber = 0, topicSeen = new Map<string, number>(), topicCount = 0, toolStep = 0;
-  let matchingPrompt = false, requestDisabled = false;
+  let matchingPrompt = false, requestDisabled = false, readOnlyPrompt = false;
   let skillReviewDisabled = false;
   // A generic advisory sentence is useful once per discovery kind in a user
   // request. This local cooldown keeps different route keys from repeating
@@ -202,6 +203,12 @@ export function createRelevantGuidance(pi: any) {
     const invited = advisoryInvitation(hint);
     if (!invited) return;
     hint = invited;
+    // Explicitly read-only turns may still use concrete read tools, but they
+    // should not accumulate workflow, skill or generic practice invitations.
+    // Signal hints remain available because they report actual failures or
+    // safety state rather than asking the user to start extra work.
+    const passive = Boolean(hint.skill || hint.discovery || hint.key.startsWith("practice:") || hint.key.startsWith("topic:") || hint.key.startsWith("aid:") || hint.key.startsWith("harness:"));
+    if (readOnlyPrompt && passive && !hint.key.startsWith("signal:")) return;
     // Task-level suggestions remain relevant until the next prompt. File/edit
     // cues still expire quickly so stale local observations cannot linger.
     if (!matchingPrompt && !hint.key.startsWith("signal:") && hint.expiresAt === undefined) hint = {...hint, expiresAt:toolStep+4};
@@ -748,6 +755,7 @@ export function createRelevantGuidance(pi: any) {
       bulkFiles.clear();
       requestNumber = topicCount = toolStep = 0; topicSeen.clear();
       matchingPrompt = requestDisabled = false;
+      readOnlyPrompt = false;
       advisoryDiscoveryDelivered.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear();
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
@@ -845,6 +853,7 @@ export function createRelevantGuidance(pi: any) {
       const rawPrompt = String(event.prompt ?? "");
       const taskPrompt = skillTaskText(rawPrompt);
       const prompt = skillIntentSegments(taskPrompt).join('\n');
+      readOnlyPrompt = narrativeCue.test(prompt) || explicitReadOnlyCue.test(taskPrompt);
       skillReviewDisabled = /\b(?:no skills|without skills|(?:do not|don't|never) (?:use|load|read) (?:(?:any|the) )?skills)\b/i.test(taskPrompt);
       discovery.start(event, ctx);
       utilityHints(taskPrompt);

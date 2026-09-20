@@ -4,7 +4,7 @@ import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
-export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 45000, contextChars: 6200 });
+export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200 });
 /** One owner for the automatic-council policy so the lifecycle, the registered
  * runner and the published documentation cannot disagree about when it is
  * active. The native automatic-assistance master switch applies to this council
@@ -169,6 +169,21 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       // Synthetic continuation wakes need not restate the user's task. Real
       // input already invalidated this brief in input().
       if(!request){if(owner!==identity(ctx))cancel();owner=identity(ctx);evaluated=true;return;}
+      // Project sessions share the filesystem authority with the parent and
+      // do not expose workflowScript. A council without the native subagent
+      // capability would otherwise spend history/workflow work and publish a
+      // brief that cannot be backed by its advertised executor.
+      const runner=options.runner ?? (globalThis as any)[SCOPE_COUNCIL_RUNNER];
+      let activeTools: Set<string> | undefined;
+      try {
+        const listed=pi.getActiveTools?.();
+        if (Array.isArray(listed)) activeTools=new Set(listed.filter((tool:any)=>typeof tool==='string'));
+      } catch {}
+      if (typeof runner !== 'function' || activeTools && !activeTools.has('subagent')) {
+        if(owner!==identity(ctx)) cancel();
+        owner=identity(ctx);evaluated=true;
+        return;
+      }
       const nextKey=digest(`${identity(ctx)}\0${inputSerial}\0${prompt}`);
       cancel();key=nextKey;owner=identity(ctx);evaluated=true;
       turnSerial=inputSerial;
@@ -176,7 +191,6 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       // The registered runner publishes its own limits. Reading them here keeps
       // one source of truth for the shared deadline; an explicit option still
       // wins and an older registration falls back to the bounded local default.
-      const runner=options.runner ?? (globalThis as any)[SCOPE_COUNCIL_RUNNER];
       const published=runner?.limits?.deadlineMs;
       const councilDeadlineMs=options.deadlineMs ?? (typeof published==='number' && Number.isFinite(published) && published>0 ? published : SCOPE_LIMITS.deadlineMs);
       const signal=AbortSignal.any([own.signal,AbortSignal.timeout(councilDeadlineMs),...(ctx.signal?[ctx.signal]:[])]);

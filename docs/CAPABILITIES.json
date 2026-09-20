@@ -426,7 +426,7 @@
         },
         {
           "name": "deadlineMs",
-          "summary": "Shared council deadline; default 45000."
+          "summary": "Shared council deadline; default 240000."
         },
         {
           "name": "tokens",
@@ -438,7 +438,11 @@
         },
         {
           "name": "costUsd",
-          "summary": "Aggregate runtime ceiling; default 0.01."
+          "summary": "Aggregate runtime ceiling; default 0.03."
+        },
+        {
+          "name": "nativeSubagent",
+          "summary": "The council runs only when the native subagent capability is active; project sessions do not provide workflowScript."
         },
         {
           "name": "fixedRoute|sameModel|freeOnly|noDelegation",
@@ -2192,7 +2196,7 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, evidence triage, intent pre-screening and request advisories; deterministic owners keep authority and missing helpers degrade to documented skips.",
+      "summary": "Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, evidence triage, intent pre-screening and request advisories; Jev is a bounded remote OpenRouter advisory and deterministic owners keep authority when helpers are unavailable.",
       "entrypoints": [
         "micro_status"
       ],
@@ -2211,6 +2215,10 @@
         {
           "name": "PI_MICRO_ADVISORY",
           "summary": "Set to off to skip the per-request Jev advisory batch."
+        },
+        {
+          "name": "PI_JEV",
+          "summary": "Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter."
         }
       ],
       "related": [
@@ -2222,6 +2230,7 @@
       "sourceFiles": [
         "agent/extensions/micro-intelligence.ts",
         "agent/extensions/lib/needle-runtime.ts",
+        "agent/extensions/lib/jev-client.ts",
         "agent/extensions/lib/micro-intelligence/metrics.ts"
       ],
       "doc": "docs/MICRO-INTELLIGENCE.md",
@@ -2238,27 +2247,27 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 466
+        "line": 473
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 508
+        "line": 515
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 500
+        "line": 507
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 516
+        "line": 523
       },
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1521
+        "line": 1556
       },
       {
         "name": "claude-cache",
@@ -2298,7 +2307,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 821
+        "line": 831
       },
       {
         "name": "harness-backup",
@@ -2313,12 +2322,12 @@
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 546
+        "line": 553
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 593
+        "line": 600
       },
       {
         "name": "lens-allow-edit",
@@ -2373,7 +2382,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 561
+        "line": 568
       },
       {
         "name": "memory-prime",
@@ -2388,7 +2397,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 872
+        "line": 892
       },
       {
         "name": "or-provider",
@@ -2413,7 +2422,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1092
+        "line": 1168
       },
       {
         "name": "run",
@@ -2518,7 +2527,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 492
+        "line": 499
       },
       {
         "name": "used",
@@ -2625,25 +2634,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 797,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 744,
+        "line": 751,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 629,
+        "line": 636,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 713,
+        "line": 720,
         "kind": "literal"
       },
       {
@@ -2655,7 +2664,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 55,
+        "line": 102,
         "kind": "literal"
       },
       {
@@ -2795,37 +2804,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2487,
+        "line": 2506,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2347,
+        "line": 2366,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2630,
+        "line": 2649,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2729,
+        "line": 2748,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2873,
+        "line": 2892,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1999,
+        "line": 2018,
         "kind": "literal"
       },
       {
@@ -2849,7 +2858,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 819,
+        "line": 839,
         "kind": "literal"
       },
       {
@@ -2873,19 +2882,19 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 697,
+        "line": 707,
         "kind": "literal"
       },
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 483,
+        "line": 511,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 437,
+        "line": 492,
         "kind": "literal"
       },
       {
@@ -2909,7 +2918,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2160,
+        "line": 2179,
         "kind": "literal"
       },
       {
@@ -2939,7 +2948,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 642,
+        "line": 649,
         "kind": "literal"
       },
       {
@@ -3087,31 +3096,31 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 790,
+        "line": 797,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 744,
+        "line": 751,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 629,
+        "line": 636,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 713,
+        "line": 720,
         "kind": "literal"
       },
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 55,
+        "line": 102,
         "kind": "literal"
       },
       {
@@ -3165,37 +3174,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2487,
+        "line": 2506,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2347,
+        "line": 2366,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2630,
+        "line": 2649,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2729,
+        "line": 2748,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2873,
+        "line": 2892,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 1999,
+        "line": 2018,
         "kind": "literal"
       },
       {
@@ -3207,7 +3216,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 819,
+        "line": 839,
         "kind": "literal"
       },
       {
@@ -3219,19 +3228,19 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 697,
+        "line": 707,
         "kind": "literal"
       },
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 483,
+        "line": 511,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 437,
+        "line": 492,
         "kind": "literal"
       },
       {
@@ -3255,7 +3264,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2160,
+        "line": 2179,
         "kind": "literal"
       },
       {
@@ -3285,7 +3294,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 642,
+        "line": 649,
         "kind": "literal"
       },
       {
@@ -3511,7 +3520,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 559,
+      "sourceFiles": 560,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,

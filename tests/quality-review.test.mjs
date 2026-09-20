@@ -1018,6 +1018,8 @@ test("review evidence reaches the runner brief", async (t) => {
   },
  });
  await f.mutate();
+ fs.mkdirSync(path.join(f.dir, "shots"), { recursive: true });
+ fs.writeFileSync(path.join(f.dir, "shots/a.png"), "reviewed screenshot bytes");
  await f.tool({ action: "review", evidence: ["shots/a.png", "/abs/x", "../evil"] });
  assert.deepEqual(seen, ["shots/a.png"]);
 });
@@ -1130,6 +1132,7 @@ test('new outcome evidence reopens an incomplete same-revision review without a 
  let ready=false;
  const f=await fixture(t,{runner:async req=>req.aspects.map(a=>ready?pass(a.id):{aspect:a.id,ok:true,text:JSON.stringify({outcome:'unknown',evidence:['src/value.js:1 implements the requested behavior.'],findings:[],gap:'The normal runtime output has not been observed.'})})});
  await f.mutate();
+ fs.writeFileSync(path.join(f.dir,'runtime.log'),'initial runtime observation');
  const revision=f.state().revision;
  await f.tool({action:'review',evidence:['runtime.log']});
  await f.tool({action:'assess',disposition:'blocked',reason:'The runtime output is missing and must be observed before acceptance.'});

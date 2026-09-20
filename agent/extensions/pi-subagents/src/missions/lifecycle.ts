@@ -7,7 +7,7 @@ import { PROMPT_REDACTED } from "../shared/utils.ts";
 import type { Details, SubagentRunMode } from "../shared/types.ts";
 import { validateMissionLaunch } from "./actions.ts";
 import type { MissionArtifact, MissionRecord, MissionRunLink, MissionRunMode, MissionStatus, MissionStoreConfig, MissionStoreLocation } from "./types.ts";
-import { createMission, MissionNotFoundError, missionRecordPath, readMission, resolveMissionStoreLocation, updateMission, validateMissionId } from "./store.ts";
+import { createMission, MissionNotFoundError, missionRecordPath, readMission, resolveMissionStoreLocation, updateMission, updateMissionFromCurrent, validateMissionId } from "./store.ts";
 
 export const MISSION_BINDING_FILE = "mission.json";
 
@@ -168,14 +168,12 @@ export function attachMissionToLaunchResult(input: {
 }): AgentToolResult<Details> {
 	const runId = input.result.details.runId ?? input.result.details.asyncId;
 	if (!runId) {
-		const current = readMission(input.binding.location, input.binding.missionId);
-		const activeRunExists = current.runs.some((run) => run.status === "active" || run.status === "queued" || run.status === "running");
 		const mission = toolResultIsError(input.result)
-			? updateMission(input.binding.location, input.binding.missionId, {
-					status: activeRunExists ? "active" : "failed",
+			? updateMissionFromCurrent(input.binding.location, input.binding.missionId, (current) => ({
+					status: current.runs.some((run) => run.status === "active" || run.status === "queued" || run.status === "running") ? "active" : "failed",
 					...(firstText(input.result) ? { summary: firstText(input.result)! } : {}),
-				})
-			: current;
+				}))
+			: readMission(input.binding.location, input.binding.missionId);
 		return {
 			...input.result,
 			details: {
@@ -187,7 +185,6 @@ export function attachMissionToLaunchResult(input: {
 		};
 	}
 	const runStatus = runStatusForResult(input.result);
-	const current = readMission(input.binding.location, input.binding.missionId);
 	const startedAt = new Date().toISOString();
 	const usage = usageForResult(input.result);
 	const run: MissionRunLink = {
@@ -200,13 +197,13 @@ export function attachMissionToLaunchResult(input: {
 		...(runStatus !== "active" ? { completedAt: startedAt } : {}),
 		...(usage ? { usage } : {}),
 	};
-	let mission = updateMission(input.binding.location, input.binding.missionId, {
+	let mission = updateMissionFromCurrent(input.binding.location, input.binding.missionId, (current) => ({
 		status: missionStatusForRun(current, runId, runStatus),
 		addRuns: [run],
 		addArtifacts: artifactsForResult(input.result),
 		...(firstText(input.result) && runStatus !== "active" ? { summary: firstText(input.result)! } : {}),
 		...(input.result.details.results.length === 1 && input.result.details.results[0]?.acceptance ? { acceptance: input.result.details.results[0].acceptance } : {}),
-	});
+	}));
 	if (input.result.details.asyncDir) {
 		writeMissionAsyncBinding(input.result.details.asyncDir, input.binding);
 		const statusPath = path.join(input.result.details.asyncDir, "status.json");
@@ -290,9 +287,8 @@ export function syncMissionFromAsyncCompletion(value: unknown): MissionRecord | 
 	const runId = typeof event.runId === "string" ? event.runId : typeof event.id === "string" ? event.id : undefined;
 	if (!runId) throw new Error("Async mission completion is missing runId");
 	const runStatus = typeof event.state === "string" ? event.state : event.success === true ? "completed" : "failed";
-	let current: MissionRecord;
 	try {
-		current = readMission(binding.location, binding.missionId);
+		readMission(binding.location, binding.missionId);
 	} catch (error) {
 		if (!(error instanceof MissionNotFoundError)) throw error;
 		const reason = "mission-record-missing";
@@ -349,7 +345,7 @@ export function syncMissionFromAsyncCompletion(value: unknown): MissionRecord | 
 				? "stopped"
 				: "failed";
 	const workflowChildTerminal = !["running", "queued", "active", "paused"].includes(workflowChildStatus);
-	return updateMission(binding.location, binding.missionId, {
+	return updateMissionFromCurrent(binding.location, binding.missionId, (current) => ({
 		status: missionStatusForRun(current, runId, runStatus),
 		addRuns: [{ runId, mode: typeof event.mode === "string" && ["single", "parallel", "chain", "workflow"].includes(event.mode) ? event.mode as SubagentRunMode : "external", asyncDir: event.asyncDir, status: runStatus, completedAt, ...(usage && usage.tokens > 0 ? { usage } : {}) }],
 		addArtifacts: artifacts,
@@ -363,5 +359,5 @@ export function syncMissionFromAsyncCompletion(value: unknown): MissionRecord | 
 			heartbeat: { status: workflowChildStatus, ...(summary ? { message: summary } : {}) },
 		}] } : {}),
 		...(summary ? { summary } : {}),
-	});
+	}));
 }

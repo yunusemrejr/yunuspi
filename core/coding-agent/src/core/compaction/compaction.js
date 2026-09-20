@@ -203,6 +203,9 @@ function estimateTextAndImageContentChars(content) {
  * This is conservative (overestimates tokens).
  */
 export function estimateTokens(message) {
+    if ((message.role === "bashExecution" || message.role === "custom") && message.excludeFromContext) {
+        return 0;
+    }
     let chars = 0;
     switch (message.role) {
         case "user": {

@@ -72,6 +72,7 @@ import { usageBudgetState } from "../shared/usage-budget.ts";
 import type { ImportedAsyncRoot } from "./chain-root-attachment.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { finalizeProcessTerminal, initializeProcessTerminal, readProcessTerminal } from "./process-terminal.ts";
+import { writePrivateGuardedStatus } from "../shared/status-revision.ts";
 import type { ActiveAsyncCapacityHandle } from "./active-async-capacity.ts";
 import { statusStepDescription } from "./chain-append.ts";
 import { SUBAGENT_PROCESS_TERMINAL_EVENT } from "../../shared/types.ts";
@@ -475,7 +476,7 @@ function persistPreProceedStartupFailure(asyncDir: string, runId: string, runner
 		try {
 			status = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as Partial<AsyncStatus>;
 		} catch {}
-		writePrivateAtomicJson(statusPath, {
+		writePrivateGuardedStatus(statusPath, {
 			...status,
 			runId,
 			...(sessionId ? { sessionId } : {}),
@@ -634,11 +635,12 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			return { error: `async runner did not produce a pid for cwd: ${cwd}` };
 		}
 		try {
-			writePrivateAtomicJson(initialStatusPath, {
+			const guarded = writePrivateGuardedStatus(initialStatusPath, {
 				...initialStatus,
 				pid: proc.pid,
 				processTerminal: { version: 1, state: "pending", runId: initialStatus.runId, runnerProcessInstanceId },
 			});
+			if (!guarded.written) throw new Error(`initial status was superseded (${guarded.reason ?? "newer status"})`);
 		} catch (error) {
 			const message = `Failed to persist initial async status: ${error instanceof Error ? error.message : String(error)}`;
 			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);

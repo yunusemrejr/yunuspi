@@ -4,10 +4,12 @@ import * as path from "node:path";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
 import type { AsyncStatus, WorkflowGraphNode, WorkflowGraphSnapshot } from "../../shared/types.ts";
-import { PROMPT_REDACTED, readStatus } from "../../shared/utils.ts";
+import { readStatus } from "../../shared/utils.ts";
+import { previewDisplayText } from "../../shared/display-text.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import type { DynamicRunnerGroup, ParallelStepGroup, RunnerStep, RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import { isDynamicRunnerGroup, isParallelGroup } from "../shared/parallel-utils.ts";
+import { updateGuardedStatus } from "../shared/status-revision.ts";
 
 const APPEND_REQUESTS_DIR = "append-requests";
 
@@ -97,9 +99,12 @@ export function enqueueChainAppendRequest(input: {
 		bookkeepingErrors.push(`pending append count failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	const statusPath = path.join(input.asyncDir, "status.json");
-	const updatedStatus = { ...status, pendingAppends: pendingCount, lastUpdate: request.createdAt };
 	try {
-		writeAtomicJson(statusPath, updatedStatus);
+		updateGuardedStatus(statusPath, (current) => ({
+			...current,
+			pendingAppends: pendingCount,
+			lastUpdate: Math.max(typeof current.lastUpdate === "number" ? current.lastUpdate : 0, request.createdAt),
+		}));
 	} catch (error) {
 		bookkeepingErrors.push(`status update failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
@@ -153,10 +158,12 @@ const MAX_STATUS_STEP_DESCRIPTION_CHARS = 160;
 /** Bounded one-line per-step task description persisted into status.json for fleet display. */
 export function statusStepDescription(task: string | undefined): string | undefined {
 	if (!task?.trim()) return undefined;
-	const description = PROMPT_REDACTED;
-	return description.length > MAX_STATUS_STEP_DESCRIPTION_CHARS
-		? `${description.slice(0, MAX_STATUS_STEP_DESCRIPTION_CHARS - 1)}…`
-		: description;
+	const firstUsefulLine = task
+		.replace(/\r/g, "")
+		.split("\n")
+		.map((line) => line.trim())
+		.find((line) => line && !line.startsWith("```")) ?? task.trim();
+	return previewDisplayText(firstUsefulLine, MAX_STATUS_STEP_DESCRIPTION_CHARS);
 }
 
 function statusStepForTask(task: RunnerSubagentStep): StatusStep {

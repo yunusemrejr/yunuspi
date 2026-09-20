@@ -17,6 +17,7 @@ const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
 const load = (rel) => import(pathToFileURL(path.join(agent, rel)));
 const runtime = await load("extensions/lib/needle-runtime.ts");
 const policy = await load("extensions/lib/needle-policy.ts");
+const assets = await load("extensions/lib/needle-assets.mjs");
 
 test("isolated extension imports share Needle and shutdown releases the shared handle", async () => {
   const isolated = await import(pathToFileURL(path.join(agent, "extensions/lib/needle-runtime.ts")) + "?extension-isolate");
@@ -41,9 +42,11 @@ test("isolated extension imports share Needle and shutdown releases the shared h
 
 const fixtureAssets = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-rt-"));
-  for (const name of ["needle.js", "needle.wasm", "needle3.cact"]) {
-    fs.writeFileSync(path.join(dir, name), Buffer.alloc(2048, 7));
+  for (const file of assets.NEEDLE_PINNED_FILES) {
+    fs.writeFileSync(path.join(dir, file.local), Buffer.alloc(0));
+    fs.truncateSync(path.join(dir, file.local), file.bytes);
   }
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(assets.expectedManifest()));
   return dir;
 };
 
@@ -460,7 +463,7 @@ test("real worker refuses corrupt executable assets before loading them", async 
     assert.equal(result.ok, false);
     assert.match(handle.health().lastError, /asset integrity failed/);
     assert.doesNotMatch(handle.health().lastError, /UNVERIFIED_LOADER_EXECUTED/);
-    assert.equal(handle.health().state, "cooling");
+    assert.equal(handle.health().state, "unavailable");
   } finally { await handle.shutdown(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

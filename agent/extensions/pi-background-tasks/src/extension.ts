@@ -187,6 +187,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   let currentCtx: ExtensionContext | undefined;
   let dockOpen = false;
   let statusInterval: NodeJS.Timeout | undefined;
+  let disposeContinuationNotice: (() => void) | undefined;
 
   const completionNotifier = createCompletionNotifier(pi, () => currentCtx);
   const registry = new BackgroundTaskRegistry({
@@ -206,15 +207,18 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       isShuttingDown: () => registry.isShuttingDown(),
     });
 
-  // Continuation notice: report only tasks that will resume this session by themselves.
-  registerContinuationSource({
-    name: "background tasks",
-    pending: () =>
-      registry
-        .allTasks()
-        .filter((task) => task.status === "running" && taskTriggersCompletion(task))
-        .map((task) => `${task.name || task.id} (${task.id}) will automatically resume this session when it finishes`),
-  });
+  const registerContinuationNotice = (ctx: ExtensionContext): void => {
+    disposeContinuationNotice?.();
+    disposeContinuationNotice = registerContinuationSource({
+      session: ctx.sessionManager,
+      name: "background tasks",
+      pending: () =>
+        registry
+          .allTasks()
+          .filter((task) => task.status === "running" && taskTriggersCompletion(task))
+          .map((task) => `${task.name || task.id} (${task.id}) will automatically resume this session when it finishes`),
+    });
+  };
 
   function unseenFinishedTasks(): BgTask[] {
     return registry
@@ -413,6 +417,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     registry.setShuttingDown(false);
     currentCtx = ctx;
+    registerContinuationNotice(ctx);
     await registry.ensureRuntimeDir(ctx);
     updateUi(ctx);
     if (statusInterval) clearInterval(statusInterval);
@@ -424,6 +429,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     registry.setShuttingDown(true);
     currentCtx = undefined;
+    disposeContinuationNotice?.();
+    disposeContinuationNotice = undefined;
     if (statusInterval) {
       clearInterval(statusInterval);
       statusInterval = undefined;
