@@ -3,14 +3,16 @@ import { SessionInvariantError } from "../../session/session.js";
 import { branchTip, deleteValue, pendingEntry, setValue } from "../../session/values.js";
 import { committedEntryEvents, entryLifecycleEvents, readBoundedContext, readLaneQueues } from "../transcript.js";
 import { operationCleanupWrites, operationResultRecord } from "./terminal.js";
-export function normalizedRetryPolicy(lane) {
-    const retry = lane.readConfig().retryPolicy;
+export function normalizedRetryPolicy(configurationOrLane) {
+    const configuration = typeof configurationOrLane.readConfig === "function"
+        ? configurationOrLane.readConfig()
+        : configurationOrLane;
+    const retry = configuration.retryPolicy;
     return retry.enabled
         ? { maxAttempts: retry.maxRetries + 1, baseDelayMs: retry.baseDelayMs }
         : { maxAttempts: 1, baseDelayMs: retry.baseDelayMs };
 }
-export function assistantReadyAtBoundary(lane, state, scope, triggerEntryId, overflowRecoveryUsed) {
-    const config = lane.readConfig();
+export function assistantReadyAtBoundary(lane, state, scope, triggerEntryId, overflowRecoveryUsed, configuration = lane.readConfig()) {
     return {
         ...scope,
         at: "assistant.ready",
@@ -18,8 +20,8 @@ export function assistantReadyAtBoundary(lane, state, scope, triggerEntryId, ove
             stepId: lane.session.idGenerator.next(),
             triggerEntryId,
             configuration: state.configuration,
-            streamOptions: config.streamOptions,
-            retryPolicy: normalizedRetryPolicy(lane),
+            streamOptions: configuration.streamOptions,
+            retryPolicy: normalizedRetryPolicy(configuration),
             overflowRecoveryUsed,
         },
         nextAttempt: 1,
@@ -41,7 +43,7 @@ export async function planBoundaryInbox(lane, drive, state, scope, reader, tipId
         return { item, pending: stored.value };
     }));
     let pending = await load(selected);
-    const projects = (value) => value.type === "message" || lane.readConfig().entryProjectors[value.customType] !== undefined;
+    const projects = (value) => value.type === "message" || drive.configuration.entryProjectors[value.customType] !== undefined;
     if (followUpWhenNoTrigger && !pending.some(({ pending: value }) => projects(value))) {
         const followUp = state.inbox.filter((item) => item.kind === "followUp");
         const selectedFollowUp = scope.settings.followUpMode === "all" ? followUp : followUp.slice(0, 1);
@@ -105,7 +107,7 @@ export async function finishRunBoundary(lane, drive, capability, continuation, p
             return {
                 kind: "commit",
                 writes: placement.writes,
-                operationState: assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId, false),
+                operationState: assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId, false, drive.configuration),
                 lane: { tipId: placement.tipId, inbox: placement.inbox },
                 materialize: () => ({ kind: "continue" }),
                 events: (commit) => [
@@ -127,7 +129,7 @@ export async function finishRunBoundary(lane, drive, capability, continuation, p
             return {
                 kind: "commit",
                 writes: [...placement.writes, insertEntry(entry), setValue(branchTip(lane.name), followUp.id)],
-                operationState: assistantReadyAtBoundary(lane, state, current, followUp.id, false),
+                operationState: assistantReadyAtBoundary(lane, state, current, followUp.id, false, drive.configuration),
                 lane: { tipId: followUp.id, inbox: placement.inbox },
                 materialize: () => ({ kind: "continue" }),
                 events: (commit) => [

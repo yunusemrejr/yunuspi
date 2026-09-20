@@ -699,7 +699,12 @@ export class Lane {
                 }
                 if (state.operation?.meta.operationId === options.operationId) {
                     if (this.activeDrive === undefined) {
-                        const drive = new Drive(options, context);
+                        // Capture one live configuration object for this
+                        // process-local drive pass. Durable operation state
+                        // still owns the model/tool selection; this snapshot
+                        // keeps definitions, prompts, converters, and retry
+                        // inputs from changing halfway through one pass.
+                        const drive = new Drive(options, context, this.readConfig(), this.state.configuration.model);
                         this.activeDrive = drive;
                         this.signalStateChange();
                         return { kind: "return", result: { kind: "observe", drive, installed: true } };
@@ -737,6 +742,7 @@ export class Lane {
                         this.signalStateChange();
                     }
                     claim.drive.settle(outcome);
+                    claim.drive.finish();
                 }, (error) => {
                     let failure = this.closedError;
                     if (failure === undefined) {
@@ -752,6 +758,7 @@ export class Lane {
                         this.signalStateChange();
                     }
                     claim.drive.fail(failure);
+                    claim.drive.finish();
                 });
             }
             return Result.ok(await awaitWithContext(claim.drive.completion, context));
@@ -1304,10 +1311,11 @@ export class Lane {
     }
     async getActiveTools(_context) {
         this.assertOpen();
-        return this.state.configuration.activeToolNames;
+        return [...this.state.configuration.activeToolNames];
     }
     setActiveTools(activeToolNames, context) {
-        return this.setConfiguration((configuration) => ({ ...configuration, activeToolNames }), (previous, value) => ({
+        const names = [...activeToolNames];
+        return this.setConfiguration((configuration) => ({ ...configuration, activeToolNames: names }), (previous, value) => ({
             type: "config_update",
             property: "activeTools",
             previous: previous.activeToolNames,
@@ -1555,9 +1563,13 @@ export class Lane {
     }
     seal(error) {
         this.closedError ??= error;
-        this.activeDrive?.closeGate(error);
+        const activeDrive = this.activeDrive;
+        activeDrive?.closeGate(error);
         this.signalStateChange();
-        return this.idleOwner ?? Promise.resolve();
+        return Promise.all([
+            this.idleOwner ?? Promise.resolve(),
+            activeDrive?.finished ?? Promise.resolve(),
+        ]).then(() => undefined);
     }
     signalStateChange() {
         this.resolveStateChange();

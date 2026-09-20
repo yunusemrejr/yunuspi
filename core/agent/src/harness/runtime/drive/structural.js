@@ -109,12 +109,12 @@ async function readStructuralPreparation(lane, drive, deciding) {
         };
     }, drive.context);
 }
-function summaryContext(lane, resultEntryId, configuration) {
+function summaryContext(lane, drive, resultEntryId, configuration) {
     return {
         resultEntryId,
         configuration,
-        streamOptions: { ...lane.readConfig().streamOptions, deferred: false },
-        retryPolicy: normalizedRetryPolicy(lane),
+        streamOptions: { ...drive.configuration.streamOptions, deferred: false },
+        retryPolicy: normalizedRetryPolicy(drive.configuration),
     };
 }
 function usageEvent(row, writeIndex, commit, lane) {
@@ -250,7 +250,7 @@ async function publishStructuralOutcome(lane, drive, capability, outcome) {
                         const overflowRecoveryUsed = placement.triggerEntryId === undefined && continuation.kind === "need_assistant"
                             ? continuation.overflowRecoveryUsed
                             : false;
-                        operationState = assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId ?? current.task.boundary.resumeAfter.triggerEntryId, overflowRecoveryUsed);
+                        operationState = assistantReadyAtBoundary(lane, state, current, placement.triggerEntryId ?? current.task.boundary.resumeAfter.triggerEntryId, overflowRecoveryUsed, drive.configuration);
                     }
                     else {
                         operationState = {
@@ -444,7 +444,7 @@ async function publishStructuralReady(lane, drive, deciding) {
             ...operationScopeOf(current),
             at: "summary.ready",
             task: current.task,
-            summaryContext: summaryContext(lane, resultEntryId, state.configuration),
+            summaryContext: summaryContext(lane, drive, resultEntryId, state.configuration),
             nextAttempt: 1,
         };
         return {
@@ -836,7 +836,7 @@ export async function recoverStructuralGeneration(lane, drive, effect) {
 /** Prepare threshold compaction only when no newer compaction already guards this trigger. */
 export async function prepareCompactionThreshold(lane, drive, checkpoint) {
     const settings = checkpoint.settings.compaction;
-    const identity = lane.state.configuration.model;
+    const identity = drive.model;
     const model = lane.models.getModel(identity.provider, identity.modelId);
     if (!settings.enabled || model === undefined)
         return { kind: "result", value: undefined };

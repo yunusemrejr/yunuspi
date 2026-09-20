@@ -51,10 +51,15 @@ export function handleSubagentSteeringNotice(input: {
 		if (oldest !== undefined) seen.delete(oldest);
 	}
 	const noticeText = input.details.noticeText ?? formatSteeringNotice(input.details);
-	input.pi.sendMessage({
-		customType: SUBAGENT_STEERING_MESSAGE_TYPE,
-		content: noticeText,
-		display: true,
-		details: { ...input.details, noticeText },
-	}, { triggerTurn: true });
+	try {
+		const acceptance = input.pi.sendMessage({
+			customType: SUBAGENT_STEERING_MESSAGE_TYPE,
+			content: noticeText,
+			display: true,
+			details: { ...input.details, noticeText },
+		}, { triggerTurn: true });
+		void Promise.resolve(acceptance).catch(() => seen?.delete(key));
+	} catch {
+		seen.delete(key);
+	}
 }

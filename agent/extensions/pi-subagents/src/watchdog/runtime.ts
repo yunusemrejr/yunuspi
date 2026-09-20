@@ -681,12 +681,17 @@ export class MainWatchdogRuntime {
 		].join("\n");
 		this.pendingAutoFollowPrompts.push(prompt);
 		if (this.pendingAutoFollowPrompts.length > 8) this.pendingAutoFollowPrompts.shift();
-		void Promise.resolve(this.sendUserMessage(prompt)).catch((error) => {
+		const failed = (error: unknown): void => {
 			this.autoFollowQueued = false;
 			const index = this.pendingAutoFollowPrompts.indexOf(prompt);
 			if (index >= 0) this.pendingAutoFollowPrompts.splice(index, 1);
 			this.lastError = `Watchdog auto-follow failed: ${errorMessage(error)}`;
-		});
+		};
+		try {
+			void Promise.resolve(this.sendUserMessage(prompt)).catch(failed);
+		} catch (error) {
+			failed(error);
+		}
 	}
 
 	private currentRepoChangeSignature(cwd = this.cwd): WatchdogRepoChangeSignature | undefined {

@@ -30,15 +30,20 @@ function deliverControlNotice(input: {
 	if (input.visibleControlNotices.has(key)) return;
 	input.visibleControlNotices.add(key);
 	const noticeText = input.details.noticeText ?? formatControlNoticeMessage(input.details.event, childIntercomTarget);
-	input.pi.sendMessage(
-		{
-			customType: SUBAGENT_CONTROL_MESSAGE_TYPE,
-			content: noticeText,
-			display: true,
-			details: { ...input.details, childIntercomTarget, noticeText },
-		},
-		{ triggerTurn: input.details.source === "async" },
-	);
+	try {
+		const acceptance = input.pi.sendMessage(
+			{
+				customType: SUBAGENT_CONTROL_MESSAGE_TYPE,
+				content: noticeText,
+				display: true,
+				details: { ...input.details, childIntercomTarget, noticeText },
+			},
+			{ triggerTurn: input.details.source === "async" },
+		);
+		void Promise.resolve(acceptance).catch(() => input.visibleControlNotices.delete(key));
+	} catch {
+		input.visibleControlNotices.delete(key);
+	}
 }
 
 export function handleSubagentControlNotice(input: {

@@ -20,19 +20,22 @@ export function createCompletionNotifier(
     pending = 0;
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   const clearWake = () => { if (wakeTimer) clearTimeout(wakeTimer); wakeTimer = undefined; };
-  const flush = () => {
+  const flush = async () => {
     if (!active || flushing || !pending || blocked || compactionBlocked || context()?.signal?.aborted || !context()?.isIdle()) return;
     const count = pending;
     flushing = true;
-    try { pi.sendMessage(
+    try {
+      await pi.sendMessage(
       {
         customType: "background-completion-wake",
         content: `${count} background task completion(s) were recorded above. Use their durable terminal results; do not rerun completed work.`,
         display: false,
       },
       { deliverAs: "followUp", triggerTurn: true },
-    );
-    pending = Math.max(0, pending - count);
+      );
+      // A completion is consumed only after the queue accepts the wake. A
+      // rejected delivery remains pending for the next settled boundary.
+      pending = Math.max(0, pending - count);
     } catch {
       console.warn("[background-tasks] Completion wake deferred: message delivery failed.");
     } finally { flushing = false; }
@@ -68,7 +71,7 @@ export function createCompletionNotifier(
     // Core emits this before releasing its compaction busy flag. One deferred
     // check bridges that lifecycle boundary without polling or a second queue.
     clearWake();
-    wakeTimer = setTimeout(() => { wakeTimer = undefined; flush(); }, 0);
+    wakeTimer = setTimeout(() => { wakeTimer = undefined; void flush(); }, 0);
     wakeTimer.unref?.();
   });
   pi.on("agent_settled", flush);
@@ -86,7 +89,18 @@ export function createCompletionNotifier(
     }
     // triggerTurn:false also bypasses the follow-up queue during an active run.
     // Thus completions queued before a later invalid request cannot re-wake it.
-    pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false });
+    // Older test doubles and third-party hosts may still return void here.
+    // Normalize that compatibility shape while retaining rejection telemetry
+    // for the Promise-returning extension API.
+    try {
+      void Promise.resolve(pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false })).catch(() => {
+        // The durable task record remains authoritative when a UI/session queue
+        // is already closing; the next session_start will rediscover it.
+      });
+    } catch {
+      // The durable task record remains authoritative when a UI/session queue
+      // is already closing; the next session_start will rediscover it.
+    }
     if (options.triggerTurn) {
       pending++;
       flush();

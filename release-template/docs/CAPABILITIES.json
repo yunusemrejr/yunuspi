@@ -2277,12 +2277,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1176
+        "line": 1519
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 809
+        "line": 1147
       },
       {
         "name": "curator",
@@ -2422,7 +2422,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1168
+        "line": 1186
       },
       {
         "name": "run",
@@ -2437,7 +2437,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1134
+        "line": 1472
       },
       {
         "name": "subagent-cost",
@@ -2522,7 +2522,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1139
+        "line": 1477
       },
       {
         "name": "tasks",
@@ -2532,7 +2532,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1158
+        "line": 1496
       },
       {
         "name": "websearch",
@@ -2688,7 +2688,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 339,
+        "line": 342,
         "kind": "literal"
       },
       {
@@ -2888,7 +2888,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 511,
+        "line": 518,
         "kind": "literal"
       },
       {
@@ -2924,7 +2924,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1268,
+        "line": 1611,
         "kind": "literal"
       },
       {
@@ -2936,7 +2936,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1205,
+        "line": 1548,
         "kind": "literal"
       },
       {
@@ -2967,7 +2967,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 829,
+        "line": 837,
         "kind": "literal"
       },
       {
@@ -3138,7 +3138,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 339,
+        "line": 342,
         "kind": "literal"
       },
       {
@@ -3234,7 +3234,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 511,
+        "line": 518,
         "kind": "literal"
       },
       {
@@ -3270,7 +3270,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1268,
+        "line": 1611,
         "kind": "literal"
       },
       {
@@ -3282,7 +3282,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1205,
+        "line": 1548,
         "kind": "literal"
       },
       {
@@ -3300,7 +3300,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 829,
+        "line": 837,
         "kind": "literal"
       },
       {
@@ -4882,6 +4882,12 @@
       }
     ],
     "serviceOwners": [
+      {
+        "source": "agent/extensions/context-profile.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
       {
         "source": "agent/extensions/filesystem-safety.ts",
         "signals": [

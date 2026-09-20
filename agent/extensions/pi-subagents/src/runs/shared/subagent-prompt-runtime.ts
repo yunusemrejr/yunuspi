@@ -574,14 +574,22 @@ export function registerSteeringInbox(
 				}
 				const formatted = formatSteerMessage(request);
 				const entries = pending.get(formatted) ?? [];
-				entries.push({ request, deliveryStatus: delivery === "followUp" ? "queued" : "delivered" });
+				const entry = { request, deliveryStatus: delivery === "followUp" ? "queued" as const : "delivered" as const };
+				entries.push(entry);
 				pending.set(formatted, entries);
-				try {
-					sendUserMessage(formatted, autoCanUseIdle ? undefined : { deliverAs: delivery });
-				} catch (error) {
-					entries.pop();
-					if (entries.length === 0) pending.delete(formatted);
+				const failDelivery = (error: unknown): void => {
+					const current = pending.get(formatted);
+					const index = current?.indexOf(entry) ?? -1;
+					if (index < 0) return; // The correlated input already arrived.
+					current!.splice(index, 1);
+					if (current!.length === 0) pending.delete(formatted);
 					acknowledge(request, "failed", error instanceof Error ? error.message : String(error));
+				};
+				try {
+					const acceptance = sendUserMessage(formatted, autoCanUseIdle ? undefined : { deliverAs: delivery });
+					void Promise.resolve(acceptance).catch(failDelivery);
+				} catch (error) {
+					failDelivery(error);
 					for (const retry of requests.slice(index + 1)) writeSteerRequestToDir(steerInbox, retry);
 					break;
 				}

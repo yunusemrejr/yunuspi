@@ -46,23 +46,56 @@ export function escapeHtml(text: unknown): string {
 
 const POPUP_CSS = [
   ":root{color-scheme:dark}",
-  "body{margin:0;background:#14161a;color:#e8e6e1;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif}",
-  "main{max-width:760px;margin:0 auto;padding:20px 22px 34px}",
-  "h1{font-size:17px;margin:0 0 4px}",
+  "body{margin:0;background:#14161a;color:#e8e6e1;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Color Emoji','Apple Color Emoji','Segoe UI Emoji',sans-serif;text-align:left;word-spacing:normal;letter-spacing:normal}",
+  "main{max-width:860px;margin:0 auto;padding:24px 22px 40px}",
+  "h1{font-size:20px;line-height:1.25;margin:0 0 5px}",
   "h2{font-size:14px;margin:20px 0 6px;color:#ffd479}",
+  "h3{font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:14px 0 5px;color:#9aa0a8}",
   "p.sub{margin:0 0 8px;color:#9aa0a8;font-size:12px}",
+  "p.note{margin:7px 0 10px;color:#b4b8bf;font-size:12px}",
   "ul{list-style:none;margin:0;padding:0}",
   "li{padding:3px 0;border-bottom:1px solid #26292f;display:flex;gap:8px;align-items:baseline}",
   "li:last-child{border-bottom:0}",
   "code.row{flex:1;overflow-wrap:anywhere}",
   "b.count{color:#8fd0ff;white-space:nowrap}",
   "span.dim{color:#9aa0a8;font-size:12px}",
+  ".overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0 10px}",
+  ".stat{background:#1b1e23;border:1px solid #2b2f36;border-radius:9px;padding:10px 11px;min-width:0}",
+  ".stat strong{display:block;color:#f7f4ed;font-size:19px;line-height:1.15;overflow-wrap:anywhere}",
+  ".stat span{display:block;color:#9aa0a8;font-size:11px;margin-top:3px}",
+  "details.group{margin:10px 0;border:1px solid #2b2f36;border-radius:10px;background:#191b20;overflow:hidden}",
+  "details.group>summary{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 13px;list-style:none;user-select:none}",
+  "details.group>summary::-webkit-details-marker,details.item>summary::-webkit-details-marker{display:none}",
+  "details.group>summary::before,details.item>summary::before{content:'›';color:#ffd479;font-size:18px;line-height:1;transform-origin:center;transition:transform .12s ease}",
+  "details[open]>summary::before{transform:rotate(90deg)}",
+  "details.group>summary:hover,details.group>summary:focus-visible,details.item>summary:hover,details.item>summary:focus-visible{background:#22252b;outline:none}",
+  "details.group>summary:focus-visible,details.item>summary:focus-visible{box-shadow:inset 0 0 0 2px #8fd0ff}",
+  ".group-title{font-weight:700;color:#f7f4ed;white-space:nowrap}",
+  ".group-meta{margin-left:auto;color:#aeb3ba;font-size:12px;text-align:right}",
+  ".group-body{border-top:1px solid #2b2f36;padding:9px 13px 13px}",
+  "details.item{border-bottom:1px solid #292c32}",
+  "details.item:last-child{border-bottom:0}",
+  "details.item>summary{display:flex;align-items:center;gap:8px;cursor:pointer;padding:7px 3px;list-style:none}",
+  ".item-name{min-width:0;flex:1;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;overflow-wrap:anywhere}",
+  ".item-meta{color:#9aa0a8;font-size:12px;text-align:right}",
+  ".badge{display:inline-block;border:1px solid #3a3f48;border-radius:999px;padding:0 7px;color:#c8ccd2;font-size:11px;line-height:1.7;white-space:nowrap}",
+  ".badge.current,.badge.complete,.badge.read{border-color:#315d4a;color:#9de1bd;background:#192a23}",
+  ".badge.active,.badge.partial{border-color:#715d2a;color:#ffd479;background:#2b2518}",
+  ".badge.failed{border-color:#743d43;color:#ff9da7;background:#2c1c20}",
+  ".badge.info{border-color:#31566d;color:#8fd0ff;background:#182630}",
+  ".facts-grid{display:grid;grid-template-columns:minmax(105px,auto) 1fr;gap:3px 12px;margin:2px 0 10px;padding:0 0 0 23px;font-size:12px}",
+  ".facts-grid dt{color:#858b94}",
+  ".facts-grid dd{margin:0;overflow-wrap:anywhere;color:#d4d2cd}",
+  ".empty{color:#777d86;padding:4px 0}",
+  ".status-line{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}",
   "pre{background:#0d0e11;border:1px solid #26292f;border-radius:8px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}",
   "div.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}",
   "div.chips span{background:#23262c;border-radius:6px;padding:1px 8px;font-size:12px}",
   "table.facts{border-collapse:collapse;margin:8px 0;font-size:13px}",
   "table.facts td{padding:2px 10px 2px 0;vertical-align:top}",
   "table.facts td:first-child{color:#9aa0a8;white-space:nowrap}",
+  "@media(max-width:640px){main{padding:18px 12px 30px}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.group-meta{white-space:normal}.item-meta{display:none}}",
+  "@media(prefers-reduced-motion:reduce){details.group>summary::before,details.item>summary::before{transition:none}}",
 ].join("\n");
 
 export function renderPopupHtml(title: string, bodyHtml: string): string {
@@ -239,18 +272,91 @@ export function extractSysSnapshot(payload: unknown): SysSnapshot | undefined {
 }
 
 export type UsedSummary = {
-  tools: { name: string; count: number }[];
+  tools: { name: string; count: number; errors: number }[];
+  toolDistinctTotal: number;
+  toolsOmitted: number;
   skillsRead: { name: string; count: number }[];
   skillsPartial: { name: string; count: number }[];
   skillsSuggested: string[];
+  skillsSuggestedOnly: string[];
+  skillTotals: { read: number; partial: number; suggested: number; suggestedOnly: number; omitted: number };
   routes: { route: string; thinking?: string; nested?: string; endpoint?: string; source?: string }[];
-  runs: { runId: string; mode?: string; status: string; provider?: string; model?: string; thinking?: string }[];
+  models: {
+    route: string;
+    current: boolean;
+    turns: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    reasoning: number;
+    errors: number;
+    selections: number;
+    thinking: string[];
+    routing: string[];
+    endpoints: string[];
+    sources: string[];
+  }[];
+  modelsOmitted: number;
+  runs: {
+    runId: string;
+    childRunId?: string;
+    index?: number;
+    mode?: string;
+    status: string;
+    provider?: string;
+    model?: string;
+    thinking?: string;
+    tokens: number;
+    turns?: number;
+    costUsd?: number;
+    usageRecorded: boolean;
+  }[];
+  agents: {
+    total: number;
+    active: number;
+    completed: number;
+    failed: number;
+    stopped: number;
+    paused: number;
+    unknown: number;
+    shown: number;
+    omitted: number;
+  };
+  session: {
+    responses: number;
+    toolCalls: number;
+    toolResults: number;
+    parentErrors: number;
+    blockedTools: number;
+    compactions: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    reasoning: number;
+    cacheRate: number | null;
+    childTokens: number;
+    hookCalls: number | null;
+    hookChanged: number | null;
+    hookErrors: number | null;
+    cost: string;
+    costUnknown: boolean;
+    costPending: number;
+  };
+  hooks: { name: string; calls: number; errors: number; ms: number; changed: number }[];
   swarms: number;
   fusions: number;
   recoveries: number;
   councils: { status: string; evidence: number; incomplete: boolean }[];
   reviews: { rounds: number; disposition: string; aspects: { aspect: string; outcome: string }[] } | null;
   inspected: number;
+};
+
+export type UsedLiveModel = {
+  provider?: unknown;
+  id?: unknown;
+  thinking?: unknown;
 };
 
 const SKILL_READ = /(?:^|[\\/])SKILL\.md$/i;
@@ -261,9 +367,13 @@ const skillName = (p: string) =>
  * selection-boundary routes, child runs, council deliberations and review
  * state. Unknown provider/thinking/nested values stay absent — the renderer
  * shows a dash rather than a guess. */
-export function buildUsedSummary(entries: unknown): UsedSummary {
+export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): UsedSummary {
   const list = Array.isArray(entries) ? entries : [];
   const metrics = collectSessionMetrics(list);
+  const cost = collectSessionCost(list);
+  const isNonnegative = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  const finite = (value: unknown) => isNonnegative(value) ? value : 0;
+  const bounded = (value: unknown, max = 160) => typeof value === "string" && value ? value.slice(0, max) : undefined;
   const calls = new Map<string, { name?: string; input?: any }>();
   for (const entry of list) {
     const message = (entry as any)?.type === "message" ? (entry as any).message : undefined;
@@ -276,8 +386,10 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
   // Launch-level spawn args (model/thinking) keyed by every id a cost row
   // may carry. Management actions (status/stop/...) are not launches.
   const spawnArgs = new Map<string, any>();
+  const launches: { data: any; args: any; fallback: string }[] = [];
   const readCounts = new Map<string, number>();
   const partialCounts = new Map<string, number>();
+  const toolErrors = new Map<string, number>();
   for (const entry of list) {
     const message = (entry as any)?.type === "message" ? (entry as any).message : undefined;
     if (message?.role !== "toolResult" || typeof message.toolCallId !== "string") continue;
@@ -286,7 +398,10 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
       for (const key of [message.details?.asyncId, message.details?.runId, message.toolCallId]) {
         if (typeof key === "string" && key && !spawnArgs.has(key)) spawnArgs.set(key, call.input);
       }
+      launches.push({ data: message.details ?? {}, args: call.input, fallback: message.toolCallId });
     }
+    if (message.isError || message.toolName === "web_search" && message.details?.queryCount > 0 && message.details?.successfulQueries === 0)
+      toolErrors.set(message.toolName, (toolErrors.get(message.toolName) ?? 0) + 1);
     const target = call?.input?.path ?? call?.input?.file_path;
     if (!message.isError && call?.name === "read" && typeof target === "string" && SKILL_READ.test(target)) {
       const full = (call.input?.offset === undefined || call.input?.offset === 1) &&
@@ -299,12 +414,25 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
   }
   const byCount = (a: { count: number }, b: { count: number }) => b.count - a.count;
   const tools = Object.entries(metrics.tools ?? {})
-    .map(([name, count]) => ({ name: String(name).slice(0, 120), count: Number(count) || 0 }))
+    .map(([name, count]) => ({
+      name: String(name).slice(0, 120),
+      count: Number(count) || 0,
+      errors: toolErrors.get(name) ?? 0,
+    }))
     .sort(byCount)
     .slice(0, 80);
-  const counted = (bucket: Map<string, number>) =>
-    [...bucket].map(([name, count]) => ({ name, count })).sort(byCount).slice(0, 40);
+  const counted = (names: unknown, bucket: Map<string, number>) =>
+    (Array.isArray(names) ? names : [])
+      .map((name) => ({ name: String(name).slice(0, 120), count: bucket.get(String(name)) ?? 0 }))
+      .sort((a, b) => byCount(a, b) || a.name.localeCompare(b.name))
+      .slice(0, 40);
+  const allReadNames = [...(metrics.skillsRead ?? [])].map((name) => String(name).slice(0, 120)).sort();
+  const allPartialNames = [...(metrics.skillsPartial ?? [])].map((name) => String(name).slice(0, 120)).sort();
+  const allSuggestedNames = [...(metrics.skillsRouted ?? [])].map((name) => String(name).slice(0, 120)).sort();
+  const openedNames = new Set([...allReadNames, ...allPartialNames]);
+  const allSuggestedOnly = allSuggestedNames.filter((name) => !openedNames.has(name));
   const routes: UsedSummary["routes"] = [];
+  const routeConfig = new Map<string, { selections: number; thinking: Set<string>; routing: Set<string>; endpoints: Set<string>; sources: Set<string> }>();
   for (const entry of list) {
     if ((entry as any)?.type !== "custom" || (entry as any)?.customType !== "model-config-v1") continue;
     const data = (entry as any)?.data;
@@ -318,8 +446,9 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
         nested = undefined;
       }
     }
+    const route = data.route.trim().slice(0, 160);
     routes.push({
-      route: data.route.trim().slice(0, 160),
+      route,
       ...(typeof data.thinking === "string" && data.thinking ? { thinking: data.thinking.slice(0, 16) } : {}),
       ...(nested ? { nested } : {}),
       ...(typeof data.recoveryEndpointName === "string" && data.recoveryEndpointName
@@ -327,34 +456,118 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
         : {}),
       ...(typeof data.source === "string" && data.source ? { source: data.source.slice(0, 64) } : {}),
     });
-    if (routes.length >= 24) break;
+    if (routes.length > 48) routes.shift();
+    const aggregate = routeConfig.get(route) ?? { selections: 0, thinking: new Set(), routing: new Set(), endpoints: new Set(), sources: new Set() };
+    aggregate.selections++;
+    if (typeof data.thinking === "string" && data.thinking) aggregate.thinking.add(data.thinking.slice(0, 16));
+    if (nested) aggregate.routing.add(nested);
+    if (typeof data.recoveryEndpointName === "string" && data.recoveryEndpointName) aggregate.endpoints.add(data.recoveryEndpointName.slice(0, 160));
+    if (typeof data.source === "string" && data.source) aggregate.sources.add(data.source.slice(0, 64));
+    routeConfig.set(route, aggregate);
   }
-  const runs: UsedSummary["runs"] = [];
+
+  const liveId = bounded(liveModel?.id, 160);
+  const liveProvider = bounded(liveModel?.provider, 80);
+  const currentRoute = liveId ? (liveProvider ? `${liveProvider}/${liveId}` : liveId) : undefined;
+  const modelRows = new Map<string, UsedSummary["models"][number]>();
+  for (const row of metrics.modelsUsed ?? []) {
+    if (!row || typeof row.route !== "string" || !row.route) continue;
+    modelRows.set(row.route, {
+      route: row.route.slice(0, 160),
+      current: row.route === currentRoute,
+      turns: finite(row.turns), input: finite(row.input), cacheRead: finite(row.cacheRead), cacheWrite: finite(row.cacheWrite),
+      output: finite(row.output), reasoning: finite(row.reasoning), errors: finite(row.errors), selections: 0,
+      thinking: Array.isArray(row.thinking) ? row.thinking.map((value: unknown) => String(value).slice(0, 16)).slice(0, 12) : [],
+      routing: Array.isArray(row.routing) ? row.routing.map((value: unknown) => String(value).slice(0, 200)).slice(0, 12) : [],
+      endpoints: Array.isArray(row.endpoints) ? row.endpoints.map((value: unknown) => String(value).slice(0, 160)).slice(0, 12) : [],
+      sources: [],
+    });
+  }
+  for (const [route, config] of routeConfig) {
+    const row = modelRows.get(route) ?? {
+      route, current: route === currentRoute, turns: 0, input: 0, cacheRead: 0, cacheWrite: 0,
+      output: 0, reasoning: 0, errors: 0, selections: 0, thinking: [], routing: [], endpoints: [], sources: [],
+    };
+    row.selections = config.selections;
+    row.thinking = [...new Set([...row.thinking, ...config.thinking])];
+    row.routing = [...new Set([...row.routing, ...config.routing])];
+    row.endpoints = [...new Set([...row.endpoints, ...config.endpoints])];
+    row.sources = [...config.sources];
+    modelRows.set(route, row);
+  }
+  if (currentRoute) {
+    const liveThinking = bounded(liveModel?.thinking, 16);
+    const current = modelRows.get(currentRoute);
+    if (current) {
+      current.current = true;
+      if (liveThinking && !current.thinking.includes(liveThinking)) current.thinking.push(liveThinking);
+      if (!current.sources.includes("live session")) current.sources.push("live session");
+    } else {
+      modelRows.set(currentRoute, {
+        route: currentRoute, current: true, turns: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0,
+        reasoning: 0, errors: 0, selections: 0,
+        thinking: liveThinking ? [liveThinking] : [],
+        routing: [], endpoints: [], sources: ["live session"],
+      });
+    }
+  }
+  const allModels = [...modelRows.values()].sort((a, b) => Number(b.current) - Number(a.current) || b.turns - a.turns || b.input - a.input || a.route.localeCompare(b.route));
+  const models = allModels.slice(0, 64);
+
+  const runRows = new Map<string, UsedSummary["runs"][number]>();
+  const terminal = new Set(["completed", "failed", "stopped"]);
+  const statusOf = (data: any, result: any) => {
+    let status = String(result?.status ?? result?.state ?? data?.state ?? "unknown").slice(0, 32);
+    if (result?.stopped) status = "stopped";
+    else if (result?.interrupted) status = "paused";
+    else if (result?.error || result?.timedOut || Number.isInteger(result?.exitCode) && result.exitCode !== 0) status = "failed";
+    else if (result?.exitCode === 0 || result?.success === true) status = "completed";
+    return status === "complete" ? "completed" : status || "unknown";
+  };
+  const recordRun = (data: any, result: any, index: number, args: any, fallback: string) => {
+    if (!data || typeof data !== "object") data = {};
+    if (!result || typeof result !== "object") result = {};
+    const parent = String(data.runId ?? data.asyncId ?? data.id ?? fallback ?? "unknown").slice(0, 80);
+    const childIndex = Number.isInteger(result.index) ? result.index : index;
+    const childKey = String(result.workflowKey ?? result.childId ?? childIndex).slice(0, 80);
+    const key = `${parent}:${childKey}`;
+    const previous = runRows.get(key);
+    const modelText = bounded(result.model, 240) ?? bounded(args?.model, 240) ?? (previous?.provider && previous?.model ? `${previous.provider}/${previous.model}` : previous?.model);
+    const slash = modelText?.indexOf("/") ?? -1;
+    const usage = result.usage && typeof result.usage === "object" ? result.usage : result.evidence?.usage && typeof result.evidence.usage === "object" ? result.evidence.usage : undefined;
+    const tokens = usage ? ["input", "output", "cacheRead", "cacheWrite"].reduce((sum, field) => sum + finite(usage[field]), 0) : 0;
+    const rawCost = result.totalCost?.costUsd ?? usage?.cost?.total ?? usage?.cost;
+    let status = statusOf(data, result);
+    if (previous && terminal.has(previous.status) && !terminal.has(status)) status = previous.status;
+    runRows.set(key, {
+      runId: parent,
+      ...(bounded(result.runId, 80) ? { childRunId: bounded(result.runId, 80) } : previous?.childRunId ? { childRunId: previous.childRunId } : {}),
+      ...(Number.isInteger(childIndex) ? { index: childIndex } : {}),
+      ...(bounded(data.mode, 32) ? { mode: bounded(data.mode, 32) } : previous?.mode ? { mode: previous.mode } : {}),
+      status,
+      ...(slash > 0 ? { provider: modelText!.slice(0, slash).slice(0, 80), model: modelText!.slice(slash + 1).slice(0, 160) } : modelText ? { model: modelText.slice(0, 160) } : previous?.model ? { ...(previous.provider ? { provider: previous.provider } : {}), model: previous.model } : {}),
+      ...(bounded(args?.thinking ?? args?.thinkingOverride, 16) ? { thinking: bounded(args?.thinking ?? args?.thinkingOverride, 16) } : previous?.thinking ? { thinking: previous.thinking } : {}),
+      tokens: Math.max(previous?.tokens ?? 0, tokens),
+      ...(finite(usage?.turns) || previous?.turns ? { turns: Math.max(previous?.turns ?? 0, finite(usage?.turns)) } : {}),
+      ...(isNonnegative(rawCost) || previous?.costUsd !== undefined ? { costUsd: Math.max(previous?.costUsd ?? 0, finite(rawCost)) } : {}),
+      usageRecorded: previous?.usageRecorded === true || usage !== undefined,
+    });
+  };
+  for (const launch of launches) {
+    const data = launch.data ?? {};
+    const rows = Array.isArray(data.results) && data.results.length ? data.results : data.asyncId || data.runId ? [{ index: 0, status: data.state ?? "queued" }] : [];
+    rows.forEach((result: any, index: number) => recordRun(data, result, index, launch.args, launch.fallback));
+  }
   for (const entry of list) {
     if ((entry as any)?.type !== "custom" || (entry as any)?.customType !== "subagent-cost-v1") continue;
     const data = (entry as any)?.data ?? {};
-    for (const result of data.results ?? []) {
+    for (const [index, result] of (Array.isArray(data.results) ? data.results : []).entries()) {
       const args = spawnArgs.get(data.runId) ?? spawnArgs.get(result?.runId);
-      const modelText = typeof result?.model === "string" && result.model
-        ? result.model
-        : typeof args?.model === "string"
-          ? args.model
-          : "";
-      const slash = modelText.indexOf("/");
-      runs.push({
-        runId: String(data.runId ?? result?.runId ?? "?").slice(0, 48),
-        ...(typeof data.mode === "string" ? { mode: data.mode.slice(0, 32) } : {}),
-        status: String(result?.status ?? data.state ?? "?").slice(0, 32),
-        ...(slash > 0 ? { provider: modelText.slice(0, slash).slice(0, 80), model: modelText.slice(slash + 1).slice(0, 120) } : {}),
-        ...(slash <= 0 && modelText ? { model: modelText.slice(0, 120) } : {}),
-        ...(typeof (args?.thinking ?? args?.thinkingOverride) === "string" && (args.thinking ?? args.thinkingOverride)
-          ? { thinking: String(args.thinking ?? args.thinkingOverride).slice(0, 16) }
-          : {}),
-      });
-      if (runs.length >= CHILD_ROW_LIMIT) break;
+      recordRun(data, result, index, args, String((entry as any)?.id ?? "unknown"));
     }
-    if (runs.length >= CHILD_ROW_LIMIT) break;
   }
+  const allRuns = [...runRows.values()];
+  const runs = allRuns.slice(-CHILD_ROW_LIMIT);
   const councils: UsedSummary["councils"] = [];
   let reviews: UsedSummary["reviews"] = null;
   for (const entry of list) {
@@ -362,12 +575,12 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
     const data = (entry as any)?.data;
     if (!data || typeof data !== "object") continue;
     if ((entry as any).customType === "scope-deliberation-v1") {
-      if (councils.length >= 24) continue;
       councils.push({
         status: String(data.status ?? "?").slice(0, 32),
         evidence: Number.isSafeInteger(data.evidenceCount) ? data.evidenceCount : 0,
         incomplete: data.incomplete !== false,
       });
+      if (councils.length > 24) councils.shift();
     } else if ((entry as any).customType === "quality-review-v1") {
       reviews = {
         rounds: Number.isSafeInteger(data.rounds) ? data.rounds : 0,
@@ -381,13 +594,61 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
       };
     }
   }
+  const totalAgents = metrics.agents > 0 ? metrics.agents : allRuns.length;
   return {
     tools,
-    skillsRead: counted(readCounts),
-    skillsPartial: counted(partialCounts),
-    skillsSuggested: [...(metrics.skillsRouted ?? [])].map((name) => String(name).slice(0, 120)).sort().slice(0, 40),
+    toolDistinctTotal: metrics.distinctTools ?? tools.length,
+    toolsOmitted: Math.max(0, (metrics.distinctTools ?? tools.length) - tools.length),
+    skillsRead: counted(allReadNames, readCounts),
+    skillsPartial: counted(allPartialNames, partialCounts),
+    skillsSuggested: allSuggestedNames.slice(0, 40),
+    skillsSuggestedOnly: allSuggestedOnly.slice(0, 40),
+    skillTotals: {
+      read: allReadNames.length,
+      partial: allPartialNames.length,
+      suggested: allSuggestedNames.length,
+      suggestedOnly: allSuggestedOnly.length,
+      omitted: Math.max(0, allReadNames.length - 40) + Math.max(0, allPartialNames.length - 40) + Math.max(0, allSuggestedOnly.length - 40),
+    },
     routes,
+    models,
+    modelsOmitted: Math.max(0, allModels.length - models.length),
     runs,
+    agents: {
+      total: totalAgents,
+      active: metrics.agentsActive ?? 0,
+      completed: metrics.agentsCompleted ?? 0,
+      failed: metrics.agentFailures ?? 0,
+      stopped: metrics.agentsStopped ?? 0,
+      paused: metrics.agentsPaused ?? 0,
+      unknown: metrics.agentOutcomeUnknown ?? 0,
+      shown: runs.length,
+      omitted: Math.max(0, totalAgents - runs.length, allRuns.length - runs.length),
+    },
+    session: {
+      responses: metrics.responses ?? 0,
+      toolCalls: metrics.toolCalls ?? 0,
+      toolResults: metrics.toolResults ?? 0,
+      parentErrors: (metrics.errors ?? 0) + (metrics.modelErrors ?? 0),
+      blockedTools: metrics.blocked ?? 0,
+      compactions: metrics.compactions ?? 0,
+      input: metrics.input ?? 0,
+      output: metrics.output ?? 0,
+      cacheRead: metrics.cacheRead ?? 0,
+      cacheWrite: metrics.cacheWrite ?? 0,
+      reasoning: metrics.reasoning ?? 0,
+      cacheRate: typeof metrics.cacheRate === "number" ? metrics.cacheRate : null,
+      childTokens: metrics.childTokens ?? 0,
+      hookCalls: metrics.telemetry ? metrics.hookCalls ?? 0 : null,
+      hookChanged: metrics.telemetry ? metrics.hookChanged ?? 0 : null,
+      hookErrors: metrics.telemetry ? metrics.hookErrors ?? 0 : null,
+      cost: cost.formatted,
+      costUnknown: cost.unknown === true,
+      costPending: cost.pending ?? 0,
+    },
+    hooks: Object.entries(metrics.hooks ?? {}).sort((a: any, b: any) => b[1].calls - a[1].calls).slice(0, 24).map(([name, value]: [string, any]) => ({
+      name: name.slice(0, 200), calls: finite(value.calls), errors: finite(value.errors), ms: finite(value.ms), changed: finite(value.changed),
+    })),
     swarms: metrics.swarms ?? 0,
     fusions: metrics.fusions ?? 0,
     recoveries: metrics.recoveries ?? 0,
@@ -397,43 +658,120 @@ export function buildUsedSummary(entries: unknown): UsedSummary {
   };
 }
 
-const usedRow = (label: string, count: number | undefined, detail?: string) =>
-  `<li><code class="row">${escapeHtml(label)}${detail ? ` <span class="dim">${escapeHtml(detail)}</span>` : ""}</code>${count === undefined ? "" : `<b class="count">x${count}</b>`}</li>`;
+const formatCount = (value: number | undefined) => Number(value ?? 0).toLocaleString("en-US");
+const plural = (value: number, singular: string, pluralForm = `${singular}s`) => `${formatCount(value)} ${value === 1 ? singular : pluralForm}`;
+const usedRow = (label: string, badge?: string, detail?: string, tone = "info") =>
+  `<li><code class="row">${escapeHtml(label)}${detail ? ` <span class="dim">${escapeHtml(detail)}</span>` : ""}</code>${badge ? `<span class="badge ${tone}">${escapeHtml(badge)}</span>` : ""}</li>`;
+const factGrid = (rows: [string, unknown][]) => `<dl class="facts-grid">${rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`;
+const statusTone = (status: string) => status === "completed" || status === "complete" || status === "accepted" || status === "pass" ? "complete" : status === "failed" || status === "rejected" || status === "error" ? "failed" : ["queued", "running", "detached", "paused", "pending"].includes(status) ? "active" : "info";
+const group = (title: string, meta: string, body: string, open = false) => `<details class="group"${open ? " open" : ""}><summary><span class="group-title">${title}</span><span class="group-meta">${escapeHtml(meta)}</span></summary><div class="group-body">${body}</div></details>`;
 
 export function usedSummaryHtml(summary: UsedSummary): string {
-  const sections: string[] = [];
-  sections.push(`<h1>📊 Session usage</h1><p class="sub">${summary.inspected} retained branch entries inspected</p>`);
-  if (summary.routes.length) {
-    sections.push(`<h2>🧠 Main routes</h2><ul>${summary.routes.map((route) => {
-      const bits = [
-        route.thinking ? `thinking ${route.thinking}` : "",
-        route.endpoint ? `endpoint ${route.endpoint}` : "",
-        route.nested ? `openrouter ${route.nested}` : "",
-      ].filter(Boolean).join(" · ");
-      return `<li><code class="row">${escapeHtml(route.route)}${bits ? ` <span class="dim">${escapeHtml(bits)}</span>` : ""}</code></li>`;
-    }).join("")}</ul>`);
-  }
-  sections.push(`<h2>🔧 Tools</h2><ul>${summary.tools.length ? summary.tools.map((tool) => usedRow(tool.name, tool.count)).join("") : "<li><span class=\"dim\">—</span></li>"}</ul>`);
-  const skills: string[] = [
-    ...summary.skillsRead.map((skill) => usedRow(`📖 ${skill.name}`, skill.count)),
-    ...summary.skillsPartial.map((skill) => usedRow(`📄 ${skill.name} (partial)`, skill.count)),
-    ...summary.skillsSuggested.filter((name) => !summary.skillsRead.some((read) => read.name === name)).map((name) => usedRow(`💡 ${name} (suggested)`, undefined)),
+  const tools = Array.isArray(summary.tools) ? summary.tools : [];
+  const reads = Array.isArray(summary.skillsRead) ? summary.skillsRead : [];
+  const partial = Array.isArray(summary.skillsPartial) ? summary.skillsPartial : [];
+  const suggested = Array.isArray(summary.skillsSuggested) ? summary.skillsSuggested : [];
+  const readNames = new Set(reads.map((skill) => skill.name));
+  const partialNames = new Set(partial.map((skill) => skill.name));
+  const suggestedOnly = Array.isArray(summary.skillsSuggestedOnly) ? summary.skillsSuggestedOnly : suggested.filter((name) => !readNames.has(name) && !partialNames.has(name));
+  const skillTotals = summary.skillTotals ?? { read: reads.length, partial: partial.length, suggested: suggested.length, suggestedOnly: suggestedOnly.length, omitted: 0 };
+  const models = Array.isArray(summary.models) ? summary.models : (summary.routes ?? []).map((route) => ({
+    route: route.route, current: false, turns: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0,
+    reasoning: 0, errors: 0, selections: 1, thinking: route.thinking ? [route.thinking] : [],
+    routing: route.nested ? [route.nested] : [], endpoints: route.endpoint ? [route.endpoint] : [], sources: route.source ? [route.source] : [],
+  }));
+  const runs = Array.isArray(summary.runs) ? summary.runs : [];
+  const agents = summary.agents ?? { total: runs.length, active: 0, completed: 0, failed: 0, stopped: 0, paused: 0, unknown: 0, shown: runs.length, omitted: 0 };
+  const session = summary.session ?? { responses: 0, toolCalls: 0, toolResults: tools.reduce((sum, tool) => sum + tool.count, 0), parentErrors: 0, blockedTools: 0, compactions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cacheRate: null, childTokens: 0, hookCalls: null, hookChanged: null, hookErrors: null, cost: "$?", costUnknown: true, costPending: 0 };
+  const hooks = Array.isArray(summary.hooks) ? summary.hooks : [];
+  const sections: string[] = [
+    `<h1>📊 What this session used</h1><p class="sub">Snapshot of ${formatCount(summary.inspected)} retained branch entries. Select any section or row to expand its details.</p>`,
+    `<div class="overview"><div class="stat"><strong>${formatCount(models.length + (summary.modelsOmitted ?? 0))}</strong><span>model routes recorded</span></div><div class="stat"><strong>${formatCount(summary.toolDistinctTotal ?? tools.length)}</strong><span>distinct tools used</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child agents observed</span></div></div>`,
+    `<p class="note">Counts describe recorded session activity. “Suggested” is not the same as opened or applied; missing model or usage data stays explicitly unknown.</p>`,
   ];
-  sections.push(`<h2>📚 Skills</h2><ul>${skills.length ? skills.join("") : "<li><span class=\"dim\">—</span></li>"}</ul>`);
-  sections.push(`<h2>🤖 Subagent runs</h2><ul>${summary.runs.length ? summary.runs.map((run) => {
-    const detail = [
-      run.mode ? run.mode : "",
-      run.provider ? run.provider : "–",
-      run.model ? run.model : "–",
-      run.thinking ? `thinking ${run.thinking}` : "thinking –",
-      run.status,
-    ].join(" · ");
-    return `<li><code class="row">${escapeHtml(run.runId)} <span class="dim">${escapeHtml(detail)}</span></code></li>`;
-  }).join("") : "<li><span class=\"dim\">—</span></li>"}</ul>`);
-  sections.push(`<h2>⚡ Activity</h2><ul>${usedRow("🐝 Swarms", summary.swarms)}${usedRow("🌀 Fusions", summary.fusions)}${usedRow("🛟 Recoveries", summary.recoveries)}</ul>`);
-  sections.push(`<h2>🏛️ Council deliberations</h2><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`deliberation ${index + 1}`, undefined, `${council.status} · ${council.evidence} evidence${council.incomplete ? " · incomplete" : ""}`)).join("") : "<li><span class=\"dim\">—</span></li>"}</ul>`);
+
+  const modelTurns = models.reduce((sum, model) => sum + model.turns, 0);
+  const modelBody = models.length ? models.map((model) => {
+    const traffic = model.input + model.cacheRead + model.cacheWrite + model.output;
+    const badges = [
+      ...(model.current ? [`<span class="badge current">● current</span>`] : []),
+      `<span class="badge info">${plural(model.turns, "turn")}</span>`,
+      ...(model.errors ? [`<span class="badge failed">${plural(model.errors, "error")}</span>`] : []),
+    ].join(" ");
+    return `<details class="item"${model.current ? " open" : ""}><summary><span class="item-name">${escapeHtml(model.route)}</span><span class="item-meta">${badges}</span></summary>${factGrid([
+      ["Current route", model.current ? "yes" : "no"],
+      ["Recorded use", model.turns ? plural(model.turns, "usage-bearing assistant turn") : "no assistant response usage recorded"],
+      ["Token traffic", `${formatCount(traffic)} total · ${formatCount(model.input)} input · ${formatCount(model.cacheRead)} cache read · ${formatCount(model.cacheWrite)} cache write · ${formatCount(model.output)} output`],
+      ["Reasoning", `${formatCount(model.reasoning)} tokens (included in output)`],
+      ["Errors", formatCount(model.errors)],
+      ["Selections", model.selections ? plural(model.selections, "recorded selection") : "none recorded"],
+      ["Thinking levels", model.thinking.length ? model.thinking.join(", ") : "not recorded"],
+      ["OpenRouter routing", model.routing.length ? model.routing.join(" · ") : "not recorded"],
+      ["Recovery endpoints", model.endpoints.length ? model.endpoints.join(", ") : "none recorded"],
+      ["Selection sources", model.sources.length ? model.sources.join(", ") : "not recorded"],
+    ])}</details>`;
+  }).join("") + ((summary.modelsOmitted ?? 0) ? `<p class="note">${plural(summary.modelsOmitted, "older model route")} omitted from this bounded view.</p>` : "") : `<div class="empty">No model route was recorded.</div>`;
+  sections.push(group("🧠 Models used", `${plural(models.length + (summary.modelsOmitted ?? 0), "route")} · ${plural(modelTurns, "turn")}`, `<p class="note">A selected route can appear before it produces a response. Token totals come only from recorded usage.</p>${modelBody}`, true));
+
+  const skillsBody = reads.length || partial.length || suggestedOnly.length
+    ? `${reads.length ? `<h3>Fully opened (${reads.length})</h3><ul>${reads.map((skill) => usedRow(`📖 ${skill.name}`, skill.count ? plural(skill.count, "full read") : "recorded", suggested.includes(skill.name) ? "also suggested" : undefined, "read")).join("")}</ul>` : ""}` +
+      `${partial.length ? `<h3>Partially opened only (${partial.length})</h3><ul>${partial.map((skill) => usedRow(`📄 ${skill.name}`, skill.count ? plural(skill.count, "partial read") : "recorded", "not fully read in the retained branch", "partial")).join("")}</ul>` : ""}` +
+      `${suggestedOnly.length ? `<h3>Suggested, not opened (${suggestedOnly.length})</h3><ul>${suggestedOnly.map((name) => usedRow(`💡 ${name}`, "suggested", "no read recorded", "info")).join("")}</ul>` : ""}`
+    : `<div class="empty">No skill activity was recorded.</div>`;
+  sections.push(group("📚 Skills", `${skillTotals.read} fully opened · ${skillTotals.partial} partial only · ${skillTotals.suggestedOnly} suggested only`, `<p class="note">“Fully opened” means the complete SKILL.md was recorded as read. It does not prove every instruction was applied.</p>${skillsBody}${skillTotals.omitted ? `<p class="note">${plural(skillTotals.omitted, "older skill detail")} omitted from this bounded list; the totals above include them.</p>` : ""}`, true));
+
+  const agentBadges = [
+    `<span class="badge info">${agents.total} total</span>`,
+    ...(agents.active ? [`<span class="badge active">${agents.active} active</span>`] : []),
+    ...(agents.completed ? [`<span class="badge complete">${agents.completed} completed</span>`] : []),
+    ...(agents.failed ? [`<span class="badge failed">${agents.failed} failed</span>`] : []),
+    ...(agents.stopped ? [`<span class="badge info">${agents.stopped} stopped</span>`] : []),
+    ...(agents.paused ? [`<span class="badge active">${agents.paused} paused</span>`] : []),
+    ...(agents.unknown ? [`<span class="badge info">${agents.unknown} unknown</span>`] : []),
+  ].join("");
+  const runBody = runs.length ? runs.map((run, index) => {
+    const route = run.provider && run.model ? `${run.provider}/${run.model}` : run.model ?? "model not recorded";
+    return `<details class="item"><summary><span class="item-name">Agent ${index + 1} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(run.status)}</span></summary>${factGrid([
+      ["Parent run", run.runId],
+      ["Child run", run.childRunId ?? "not recorded"],
+      ["Child position", Number.isInteger(run.index) ? `#${Number(run.index) + 1}` : "not recorded"],
+      ["Launch mode", run.mode ?? "not recorded"],
+      ["Provider", run.provider ?? "not recorded"],
+      ["Model", run.model ?? "not recorded"],
+      ["Thinking", run.thinking ?? "not recorded"],
+      ["Last status", run.status],
+      ["Token traffic", run.usageRecorded ? formatCount(run.tokens) : "not recorded"],
+      ["Turns", run.turns === undefined ? "not recorded" : formatCount(run.turns)],
+      ["Cost", run.costUsd === undefined ? "not recorded" : `$${run.costUsd.toFixed(6)}`],
+    ])}</details>`;
+  }).join("") : `<div class="empty">No child-agent run was recorded.</div>`;
+  sections.push(group("🤖 Child agents", `${agents.total} observed · ${agents.active} active · ${agents.failed} failed`, `<div class="status-line">${agentBadges}</div>${runBody}${agents.omitted ? `<p class="note">${plural(agents.omitted, "agent detail row")} omitted from this bounded view.</p>` : ""}`, true));
+
+  const toolErrorsTotal = tools.reduce((sum, tool) => sum + (tool.errors ?? 0), 0);
+  sections.push(group("🔧 Tools", `${summary.toolDistinctTotal ?? tools.length} distinct · ${session.toolResults} results · ${toolErrorsTotal} failed`, tools.length ? `<p class="note">Counts are returned tool-result records, not a quality score.</p><ul>${tools.map((tool) => usedRow(tool.name, plural(tool.count, "result"), tool.errors ? `${plural(tool.errors, "failed result")}` : "no recorded failures", tool.errors ? "failed" : "info")).join("")}</ul>${summary.toolsOmitted ? `<p class="note">${plural(summary.toolsOmitted, "lower-volume tool")} omitted from this bounded list; the distinct total includes them.</p>` : ""}` : `<div class="empty">No tool result was recorded.</div>`));
+
   const review = summary.reviews;
-  sections.push(`<h2>🔍 Quality reviews</h2><ul>${review ? usedRow(`${review.rounds} round(s) · ${review.disposition}`, undefined, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}:${aspect.outcome}`).join(", ") : "no reports") : "<li><span class=\"dim\">—</span></li>"}</ul>`);
+  const activityBody = `<ul>${usedRow("🐝 Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("🌀 Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("🛟 Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
+    `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`🏛️ Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>` +
+    `<h3>Quality review</h3><ul>${review ? usedRow(`🔍 ${plural(review.rounds, "round")}`, review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
+  sections.push(group("⚡ Harness activity", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, activityBody));
+
+  const promptTokens = session.input + session.cacheRead + session.cacheWrite;
+  const sessionFactsHtml = factGrid([
+    ["Retained branch entries", formatCount(summary.inspected)],
+    ["Main responses", formatCount(session.responses)],
+    ["Tool traffic", `${formatCount(session.toolCalls)} calls · ${formatCount(session.toolResults)} results`],
+    ["Parent failures", `${formatCount(session.parentErrors)} total · ${formatCount(session.blockedTools)} blocked tools`],
+    ["Compactions", formatCount(session.compactions)],
+    ["Prompt traffic", `${formatCount(promptTokens)} tokens · ${formatCount(session.input)} uncached input · ${formatCount(session.cacheRead)} cache read · ${formatCount(session.cacheWrite)} cache write`],
+    ["Output", `${formatCount(session.output)} tokens · ${formatCount(session.reasoning)} reported reasoning (included in output)`],
+    ["Prompt cache reuse", session.cacheRate === null ? "unknown" : `${session.cacheRate.toFixed(2)}% cumulative`],
+    ["Child token traffic", formatCount(session.childTokens)],
+    ["Recorded cost", `${session.cost}${session.costUnknown ? " · incomplete/unknown coverage" : ""}${session.costPending ? ` · ${plural(session.costPending, "child operation")} pending` : ""}`],
+    ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
+  ]);
+  const hookHtml = hooks.length ? `<h3>Most active measured hooks</h3><ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${Math.round(hook.ms)} ms`, hook.errors ? "failed" : "info")).join("")}</ul>` : "";
+  sections.push(group("🧾 Session totals", `${session.responses} responses · ${session.compactions} compactions · ${session.cost}`, `${sessionFactsHtml}${hookHtml}`));
   return sections.join("");
 }
 
@@ -1106,7 +1444,7 @@ export default function (pi: any) {
         : {}),
     };
   });
-  pi.on("turn_end", (e: any, ctx: any) => {
+  pi.on("turn_end", async (e: any, ctx: any) => {
     // A pressure notice is useful only while normal tool execution continues.
     // Queuing a steer into a stopped/failed run can revive work the user ended.
     if (
@@ -1121,7 +1459,7 @@ export default function (pi: any) {
     const n = notice(ctx);
     if (n) lines.push(n);
     if (lines.length)
-      pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
+      await pi.sendMessage(pressureSignal(lines.join("\n")), { deliverAs: "steer" });
   });
   const self = (ctx: any) => sessionFacts(ctx.sessionManager.getEntries());
   // Bounded, newest-first failure read: diagnose without re-running any work.
@@ -1157,7 +1495,7 @@ export default function (pi: any) {
   });
   pi.registerCommand("used", {
     description:
-      "Show session usage (tools, skills, runs, reviews) in a separate window.",
+      "Open expandable session details for models, tools, skills, child agents and Harness activity.",
     handler: (_args: string, ctx: any) => {
       void (async () => {
         let entries: unknown;
@@ -1168,8 +1506,13 @@ export default function (pi: any) {
             `Session usage is unavailable: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        await openHtmlPopup("used", "Session usage", usedSummaryHtml(buildUsedSummary(entries)), ctx);
-        ctx.ui?.notify?.("Session usage opened.", "info");
+        const summary = buildUsedSummary(entries, {
+          provider: ctx?.model?.provider,
+          id: ctx?.model?.id,
+          thinking: ctx?.thinkingLevel,
+        });
+        await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
+        ctx.ui?.notify?.("Detailed session usage opened.", "info");
       })().catch((error) => popupError("used", error, ctx));
     },
   });
