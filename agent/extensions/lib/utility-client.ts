@@ -33,7 +33,7 @@ export class UtilityClient {
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       buffer += chunk;
-      if (Buffer.byteLength(buffer) > 512 * 1024) { child.kill('SIGKILL'); return; }
+      if (Buffer.byteLength(buffer) > 512 * 1024) { this.disconnected(child); child.kill('SIGKILL'); return; }
       let at: number;
       while ((at = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, at); buffer = buffer.slice(at + 1);
@@ -43,7 +43,7 @@ export class UtilityClient {
           this.pending.delete(msg.id); clearTimeout(job.timer);
           if (msg.error) job.reject(Error('Utility MCP protocol error'));
           else job.resolve(msg.result);
-        } catch { child.kill('SIGKILL'); }
+        } catch { this.disconnected(child); child.kill('SIGKILL'); return; }
       }
     });
     child.stderr.resume(); // No source snippets, secrets or unbounded stderr retention.
@@ -80,6 +80,7 @@ export class UtilityClient {
   private request(method: string, params: unknown, timeout: number, signal?: AbortSignal): Promise<any> {
     if (signal?.aborted) return Promise.reject(Error('Utility request cancelled'));
     if (!this.child || this.pending.size >= 16) return Promise.reject(Error('Utility unavailable or busy'));
+    const child = this.child;
     const id = ++this.sequence;
     const line = JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
     if (Buffer.byteLength(line) > 512 * 1024) return Promise.reject(Error('Utility request byte limit exceeded'));
@@ -93,11 +94,11 @@ export class UtilityClient {
       const timer = setTimeout(() => {
         this.pending.delete(id); cleanup(); this.notify('notifications/cancelled', { requestId: id });
         // A stuck protocol owner is replaced; the next call performs a fresh handshake.
-        this.child?.kill('SIGKILL'); reject(Error('Utility request deadline exceeded'));
+        this.disconnected(child); child.kill('SIGKILL'); reject(Error('Utility request deadline exceeded'));
       }, timeout);
       this.pending.set(id, { timer, resolve: value => { cleanup(); resolve(value); }, reject: error => { cleanup(); reject(error); } });
       signal?.addEventListener('abort', cancel, { once: true });
-      this.child!.stdin.write(line);
+      child.stdin.write(line);
     });
   }
   // The server owns two workers. Queue a bounded native-tool batch here so

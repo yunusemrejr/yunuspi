@@ -456,7 +456,13 @@ function cleanupStale(currentSid: string): void {
 			const p = path.join(STATE_DIR, name);
 			if (p === currentFile) continue;
 			const stat = fs.lstatSync(p);
-			if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(p);
+			if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
+			// Idle time is not consent to clear the user's recurring instructions.
+			// Require explicit cleared state; scheduler validation drops invalid records.
+			let manual: unknown;
+			try { manual = JSON.parse(fs.readFileSync(p, "utf8"))?.manual; }
+			catch { continue; }
+			if (Array.isArray(manual) && manual.every((reminder) => reminder?.active === false)) fs.unlinkSync(p);
 		}
 	} catch {
 		/* no dir yet — fine */

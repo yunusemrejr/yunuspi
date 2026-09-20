@@ -201,7 +201,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       if (slots.size <= 32) break;
       if (slot.state !== 'pending') slots.delete(key);
     }
-    while (windows.size > 32) windows.delete(windows.keys().next().value!);
+    for (const [key, entry] of windows) if (!slots.has(entry.slotKey)) windows.delete(key);
   }
   /** Shared seal: whatever is taken first is frozen. Late inference can only
    * warm the cache for identical future observations, never rewrite a seal. */
@@ -389,18 +389,23 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
      * lease, sealing and cache rules as a direct offer. */
     offerWindowed(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash', details?: unknown) {
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
-      if (windows.has(key) || windows.size >= 32) return;
+      if (windows.has(key) || windows.size >= 64) return;
       if (!safeSmolOutput(tool, raw, false, details, 32768)) { noteHealth('ml.smol.offer', {decision:'ineligible-source'}); return; }
-      const scores = process.env.PI_LOCAL_INTELLIGENCE === 'off' ? [] : relevanceScores(raw.split('\n'), task);
+      const lines = raw.split('\n');
+      const taskAware = process.env.PI_LOCAL_INTELLIGENCE !== 'off';
+      const scores = taskAware ? relevanceScores(lines, task) : [];
+      // An exhausted scorer budget is not evidence that no source line matches.
+      if (taskAware && scores.length !== lines.length) { noteHealth('ml.smol.offer', {decision:'task-budget'}); return; }
       const window = prepareSmolWindow(raw, scores.flatMap((score: number, index: number) => score > 0 ? [index + 1] : []));
       if (!window) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       if (!safeSmolOutput(tool, window.text, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       const source = prepareSmolExtraction(window.text);
       if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
       const slotKey = `${key}:window`;
+      api.offer(slotKey, window.text, mainInputUsdPerMillion, task, tool);
+      if (!slots.has(slotKey)) return;
       windows.set(key, {window, source, slotKey});
       stats.windowed++;
-      api.offer(slotKey, window.text, mainInputUsdPerMillion, task, tool);
     },
     async takeWindowed(key: string, waitMs?: number, raw?: string): Promise<string | undefined> {
       const entry = windows.get(key);

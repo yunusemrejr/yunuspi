@@ -167,6 +167,34 @@ test('queued utility calls are cancelled or closed without dispatch', async () =
   } finally { f.cleanup(); }
 });
 
+for (const failure of ['deadline', 'invalid JSON', 'oversized frame']) {
+test(`a utility ${failure} retires its child before queued work is dispatched`, async () => {
+  const f = fixture({ holdCalls: true, virtualTimers: true });
+  const calls = Array.from({ length: 3 }, () => f.client.call('fixture', {}));
+  const settled = Promise.allSettled(calls);
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    const old = f.children[0];
+    assert.equal(old.messages.filter(m => m.method === 'tools/call').length, 2);
+    if (failure === 'deadline') {
+      const timer = [...f.timers].find(timer => timer.ms === 7500);
+      f.timers.delete(timer); timer.fn();
+    } else old.stdout.emit('data', failure === 'invalid JSON' ? 'broken\n' : 'x'.repeat(512 * 1024 + 1));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.children.length, 2, 'queued work starts a new initialized child before the old exit event');
+    assert.equal(old.messages.filter(m => m.method === 'tools/call').length, 2);
+    assert.ok(old.kills.includes('SIGKILL'));
+    const replacement = f.children[1];
+    old.emit('exit', 1);
+    const request = replacement.messages.find(m => m.method === 'tools/call');
+    assert.ok(request, 'replacement handshake completed before dispatch');
+    replacement.respond(request.id, { ok: true });
+    assert.deepEqual((await settled).map(result => result.status), ['rejected', 'rejected', 'fulfilled']);
+    assert.equal(replacement.kills.length, 0, 'late exit leaves the replacement alive');
+  } finally { f.cleanup(); await settled; }
+});
+}
+
 test('a native batch of three real utility requests completes without a capacity error', async () => {
   const { UtilityClient } = await import(pathToFileURL(filename));
   const client = new UtilityClient(template);

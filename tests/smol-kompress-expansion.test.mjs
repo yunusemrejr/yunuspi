@@ -174,6 +174,38 @@ test("windowed take remaps to original lines and revalidates", async () => {
   assert.equal(await sp.takeWindowed("missing", 10), undefined);
 });
 
+test("window slots keep serving across turns and failed offers consume no capacity", async () => {
+  const raw = ["first line of the build output", ...Array(300).fill("Background compilation activity ...................."), "last line of the build output"].join("\n");
+  let calls = 0;
+  const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
+    fetch: async () => { calls++; return new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })); },
+  });
+  for (let index = 0; index < 40; index++) {
+    helper.offerWindowed(`window-${index}`, raw, 0, "summarize output");
+    assert.ok(await helper.takeWindowed(`window-${index}`, 500), `observation ${index} retains a usable window`);
+    helper.endTurn();
+    assert.ok(helper.inspect().windowedSlots <= 32, "turn cleanup bounds retained windows");
+  }
+  assert.equal(calls, 1, "identical evidence reuses the validated cache");
+  const before = helper.inspect().windowedSlots;
+  helper.offerWindowed("cooldown", raw.replace("first line", "opening line"), 0, "summarize output");
+  assert.equal(helper.inspect().windowedSlots, before, "a cooldown refusal allocates no window");
+});
+
+test("windowed selection preserves raw output when its task-scoring budget is exceeded", async () => {
+  const rows = Array(1050).fill("background foliage grows green");
+  rows[524] = "quartz target lives amid foliage";
+  const raw = rows.join("\n");
+  assert.ok(raw.length < 32768);
+  let calls = 0;
+  const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
+    fetch: async () => { calls++; return new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })); },
+  });
+  helper.offerWindowed("dense", raw, 0, "quartz");
+  assert.equal(await helper.takeWindowed("dense", 500), undefined, "an unscored middle match cannot be omitted");
+  assert.equal(calls, 0, "a retention budget failure spends no inference");
+});
+
 test("windowed render rejects mismatched sources and ids", () => {
   const big = Array(200).fill("y".repeat(60)).join("\n");
   const window = ext.prepareSmolWindow(big);
