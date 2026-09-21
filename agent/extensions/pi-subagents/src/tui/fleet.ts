@@ -160,14 +160,10 @@ function trackedJobSummary(job: AsyncJobState): AsyncRunSummary {
 	};
 }
 
-function asyncItems(run: AsyncRunSummary, description?: string): FleetItem[] {
-	const updatedAt = run.lastUpdate ?? run.endedAt ?? run.startedAt;
-	if (run.steps.length === 0 || run.mode === "workflow") {
-		return [{ key: `async:${run.id}`, kind: "async", runId: run.id, agent: run.mode, state: run.state, updatedAt, run, ...(description ? { description } : {}) }];
-	}
-	return run.steps.map((step) => ({
+function asyncStepItem(run: AsyncRunSummary, step: AsyncStep, updatedAt: number, description?: string): FleetItem {
+	return {
 		key: `async:${run.id}:${step.index}`,
-		kind: "async" as const,
+		kind: "async",
 		runId: run.id,
 		index: step.index,
 		agent: step.label ? `${step.label} (${step.agent})` : step.agent,
@@ -176,7 +172,22 @@ function asyncItems(run: AsyncRunSummary, description?: string): FleetItem[] {
 		run,
 		step,
 		...(description ? { description } : {}),
-	}));
+	};
+}
+
+const EMPTY_TWIN_RUN_IDS: ReadonlySet<string> = new Set();
+
+function asyncItems(run: AsyncRunSummary, description?: string, twinRunIds: ReadonlySet<string> = EMPTY_TWIN_RUN_IDS): FleetItem[] {
+	const updatedAt = run.lastUpdate ?? run.endedAt ?? run.startedAt;
+	const wrapper: FleetItem = { key: `async:${run.id}`, kind: "async", runId: run.id, agent: run.mode, state: run.state, updatedAt, run, ...(description ? { description } : {}) };
+	if (run.mode !== "workflow") {
+		if (run.steps.length === 0) return [wrapper];
+		return run.steps.map((step) => asyncStepItem(run, step, updatedAt, description));
+	}
+	// Workflow swarms/fusions expand like parallel runs. Steps with a visible
+	// live-foreground twin stay single-represented by that richer row.
+	const steps = run.steps.filter((step) => step.runId === undefined || !twinRunIds.has(step.runId));
+	return [wrapper, ...steps.map((step) => asyncStepItem(run, step, updatedAt, description))];
 }
 
 function orderFleetAsyncRuns(runs: AsyncRunSummary[], terminalLimit: number): AsyncRunSummary[] {
@@ -193,6 +204,7 @@ export function collectFleetSnapshot(
 ): FleetSnapshot {
 	const items: FleetItem[] = [];
 	const activeForegroundIds = new Set<string>();
+	const displayedForegroundRunIds = new Set<string>();
 	const trackedJobs = state.fleetJobs ?? state.asyncJobs;
 	const workflowParentIds = new Set([...trackedJobs.values()]
 		.filter((job) => job.mode === "workflow" && belongsToCurrentSession(job.sessionId, state.currentSessionId))
@@ -213,6 +225,7 @@ export function collectFleetSnapshot(
 		activeForegroundIds.add(control.runId);
 		if (control.parentWorkflowRunId && workflowParentIds.has(control.parentWorkflowRunId)
 			&& ((workflowForegroundChildCounts.get(control.parentWorkflowRunId) ?? 0) <= 1 || !liveWorkflowForegroundControls.has(control))) continue;
+		displayedForegroundRunIds.add(control.runId);
 		if (control.activeChildren) {
 			for (const child of [...control.activeChildren.values()].sort((left, right) => left.index - right.index)) {
 				items.push({
@@ -274,7 +287,7 @@ export function collectFleetSnapshot(
 			runs = trackedRuns;
 		}
 		for (const run of orderFleetAsyncRuns(runs, options.limit ?? MAX_RECENT_ASYNC_RUNS)) {
-			items.push(...asyncItems(run, descriptions.get(run.id)));
+			items.push(...asyncItems(run, descriptions.get(run.id), displayedForegroundRunIds));
 		}
 	} catch (cause) {
 		error = cause instanceof Error ? cause.message : String(cause);

@@ -477,16 +477,21 @@ function projectWorkflowGraphRow(node: WorkflowGraphSnapshot["nodes"][number], p
 	};
 }
 
-/** Project loaded workflow child facts plus stored preflight hints into compact rows. */
+/** Project loaded workflow child facts plus stored preflight hints into compact rows.
+ * excludeKeys (workflowKey/runId identities) skips members already rendered
+ * as entries, across loaded steps, graph stages and preflight lanes. */
 export function projectAsyncWorkflowRows(
 	steps: readonly AsyncJobStep[] | undefined,
 	hostStepsOrPreflight?: readonly HostStepNodeV1[] | WorkflowGraphSnapshot | WorkflowPreflightV1,
 	preflightOverride?: WorkflowPreflightV1,
+	excludeKeys?: ReadonlySet<string>,
 ): AsyncStatusWorkflowRow[] {
 	const preflight = preflightOverride ?? (isWorkflowPreflight(hostStepsOrPreflight) ? hostStepsOrPreflight : undefined);
 	const graph = isWorkflowGraph(hostStepsOrPreflight) ? hostStepsOrPreflight : undefined;
 	const hostSteps = isWorkflowPreflight(hostStepsOrPreflight) || graph ? undefined : hostStepsOrPreflight;
-	const loaded = steps ?? [];
+	const loaded = (steps ?? []).filter((step) =>
+		(step.workflowKey === undefined || !excludeKeys?.has(step.workflowKey))
+		&& (step.runId === undefined || !excludeKeys?.has(step.runId)));
 	const declared = new Map<string, WorkflowPreflightLaneV1>();
 	if (graph) {
 		const loadedIndexesByKey = new Map<string, number[]>();
@@ -499,7 +504,7 @@ export function projectAsyncWorkflowRows(
 		const consumed = new Set<number>();
 		const childRows: AsyncStatusWorkflowRow[] = [];
 		for (const lane of preflight?.lanes ?? []) declared.set(lane.key, lane);
-		const graphStages = workflowGraphStageNodes(graph);
+		const graphStages = workflowGraphStageNodes(graph).filter((node) => !excludeKeys?.has(node.id));
 		const graphKeys = new Set(graphStages.map((node) => node.id));
 		const graphPhaseByNodeId = new Map<string, string>();
 		for (const phase of graph.phases) {
@@ -524,7 +529,7 @@ export function projectAsyncWorkflowRows(
 			}
 		}
 		for (const lane of preflight?.lanes ?? []) {
-			if (graphKeys.has(lane.key) || graphLaneKeys.has(lane.key)) continue;
+			if (excludeKeys?.has(lane.key) || graphKeys.has(lane.key) || graphLaneKeys.has(lane.key)) continue;
 			const indexes = (loadedIndexesByKey.get(lane.key) ?? []).filter((index) => !consumed.has(index));
 			if (indexes.length > 0) {
 				for (const index of indexes) {
@@ -547,6 +552,7 @@ export function projectAsyncWorkflowRows(
 	const consumed = new Set<number>();
 	const childRows: AsyncStatusWorkflowRow[] = [];
 	for (const lane of preflight?.lanes ?? []) {
+		if (excludeKeys?.has(lane.key)) continue;
 		declared.set(lane.key, lane);
 		const index = loadedIndexByKey.get(lane.key);
 		if (index === undefined) {
