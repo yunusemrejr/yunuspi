@@ -103,14 +103,14 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/commands`
+**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`
 
 **Options:**
 
 - `pi.getCommands()`: Read the live command registry; command availability can depend on loaded extensions and configuration.
 - `/self`: Current-session diagnostics.
 - `/cost|/metrics|/obs`: Session accounting, metrics and observations.
-- `/sys-prompt|/used|/commands`: Separate-window popups: opening system prompt, session usage, command list.
+- `/sys-prompt|/used|/errors|/commands`: Separate-window popups: opening system prompt, session usage, detailed error JSON, command list.
 - `/effort`: Thinking control alias owned by the extension.
 - `/graph`: Open the project intelligence viewer.
 - `/todos`: Show the hierarchical action plan.
@@ -178,11 +178,11 @@ Coordinate independent Pi sessions sharing one checkout through voluntary object
 
 Inspect selected-model full-window context occupancy and 80% automatic compaction threshold alongside separate runtime, failure, efficiency and past-session diagnostics.
 
-**Entrypoints:** `session_self`, `session_audit`, `self`, `cost`, `metrics`, `sys-prompt`, `used`, `commands`
+**Entrypoints:** `session_self`, `session_audit`, `self`, `cost`, `metrics`, `sys-prompt`, `used`, `errors`, `commands`
 
 **Catalog tool pointers:** `session_self`, `session_audit`
 
-**Commands:** `/self`, `/cost`, `/metrics`, `/sys-prompt`, `/used`, `/commands`
+**Commands:** `/self`, `/cost`, `/metrics`, `/sys-prompt`, `/used`, `/errors`, `/commands`
 
 **Options:**
 
@@ -930,9 +930,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 9; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2179; literal)
-- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1679; literal)
+- `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1760; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 584; literal)
-- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1616; literal)
+- `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1697; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 361; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 651; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 191; configured-default)
@@ -978,10 +978,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 523)
 - /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1612)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
-- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1587)
-- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1215)
+- /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1668)
+- /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1270)
 - /curator — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3374)
 - /effort — [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts) (line 48)
+- /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1642)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 49)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3416)
 - /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 860)
@@ -1010,7 +1011,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1186)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3464)
-- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1540)
+- /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1595)
 - /subagent-cost — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 914)
 - /subagents — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 869)
 - /subagents-check-profile — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1278)
@@ -1027,9 +1028,9 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /subagents-steer — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1052)
 - /subagents-stop — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 1004)
 - /subagents-watchdog — [`agent/extensions/pi-subagents/src/watchdog/register-main.ts`](../agent/extensions/pi-subagents/src/watchdog/register-main.ts) (line 405)
-- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1545)
+- /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1600)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 499)
-- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1564)
+- /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1619)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3113)
 
 ### Dynamic command owners
@@ -1218,6 +1219,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/session-audit.ts`](../agent/extensions/lib/session-audit.ts)
 - [`agent/extensions/lib/session-cost.ts`](../agent/extensions/lib/session-cost.ts)
 - [`agent/extensions/lib/session-diagnostics.ts`](../agent/extensions/lib/session-diagnostics.ts)
+- [`agent/extensions/lib/session-errors.ts`](../agent/extensions/lib/session-errors.ts)
 - [`agent/extensions/lib/session-export-json.ts`](../agent/extensions/lib/session-export-json.ts)
 - [`agent/extensions/lib/session-hooks.ts`](../agent/extensions/lib/session-hooks.ts)
 - [`agent/extensions/lib/session-metrics.ts`](../agent/extensions/lib/session-metrics.ts)
