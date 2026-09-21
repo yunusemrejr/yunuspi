@@ -40,7 +40,10 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
  const cheap = {...config,subscriptionProviders:[],maxInputPerMillion:Math.min(config.maxInputPerMillion,.2),maxOutputPerMillion:Math.min(config.maxOutputPerMillion,.5),operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
  const requiresTools = options.requiresTools !== false;
- const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && (!requiresTools || catalogRouteCapabilities(m)?.toolCalling===true));
+ // Unknown tool support passes the pool: explicit preferences carry their own
+ // positive evidence (see resolveLlmPreferenceChain), and the autonomous
+ // fill below re-applies the strict positive-proof gate internally.
+ const pool = models.filter(m=>(m.contextWindow??0)>=16384 && (m.maxTokens??0)>=minOutputTokens && (!requiresTools || catalogRouteCapabilities(m)?.toolCalling!==false));
  const team: AssistanceMember[] = [];
  const used = new Set<string>();
  // Explicit preferences first: distribute viable configured routes across
