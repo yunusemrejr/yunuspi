@@ -14,6 +14,7 @@ import {
   type LogicalChildTask,
 } from "./pi-subagents/src/runs/shared/child-ledger.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
+import { collectSessionErrors, type SessionErrorsReport } from "./lib/session-errors.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
 import { StringEnum } from "@yunuspi/ai";
@@ -89,6 +90,10 @@ const POPUP_CSS = [
   ".badge.active,.badge.partial{border-color:#715d2a;color:#ffd479;background:#2b2518}",
   ".badge.failed{border-color:#743d43;color:#ff9da7;background:#2c1c20}",
   ".badge.info{border-color:#31566d;color:#8fd0ff;background:#182630}",
+  "button#copy-errors{background:#2b6cb0;border:0;border-radius:8px;color:#fff;font:600 13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:7px 16px;cursor:pointer}",
+  "button#copy-errors:hover,button#copy-errors:focus-visible{background:#3580cc;outline:none}",
+  "button#copy-errors:focus-visible{box-shadow:0 0 0 2px #8fd0ff}",
+  ".copy-row{display:flex;align-items:center;gap:10px;margin:12px 0}",
   ".facts-grid{display:grid;grid-template-columns:minmax(105px,auto) 1fr;gap:3px 12px;margin:2px 0 10px;padding:0 0 0 23px;font-size:12px}",
   ".facts-grid dt{color:#858b94}",
   ".facts-grid dd{margin:0;overflow-wrap:anywhere;color:#d4d2cd}",
@@ -866,6 +871,56 @@ export function commandsHtml(commands: { name: string; description?: string; sou
   }</ul>`;
 }
 
+const COPY_SCRIPT = `<script>(function(){var btn=document.getElementById('copy-errors'),status=document.getElementById('copy-status');if(!btn)return;btn.addEventListener('click',function(){var el=document.getElementById('errors-json');var text=el?el.textContent:'';function done(msg){if(status)status.textContent=msg;}function fallback(){try{var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);done('Copied.');}catch(e){done('Copy failed — select the JSON manually.');}}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){done('Copied.');},fallback);}else{fallback();}});})();</script>`;
+
+/** Deep session errors: per-error drill-down plus the full bounded JSON with a copy button. Newest first. */
+export function errorsHtml(report: SessionErrorsReport): string {
+  const errors = Array.isArray(report?.errors) ? report.errors : [];
+  const groups = Array.isArray(report?.groups) ? report.groups : [];
+  const hookErrors = Array.isArray(report?.hookErrors) ? report.hookErrors : [];
+  const byKind = report?.byKind && typeof report.byKind === "object" ? report.byKind : {};
+  const oneLine = (text: unknown) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "no excerpt";
+  const sections: string[] = [
+    `<h1>🚨 Session errors</h1><p class="sub">${formatCount(report?.total ?? 0)} errors in ${formatCount(report?.inspected ?? 0)} retained branch entries. Newest first. The JSON block is the copy source.</p>`,
+    `<div class="copy-row"><button id="copy-errors" type="button">Copy JSON</button><span id="copy-status" class="dim"></span></div>`,
+    `<div class="overview"><div class="stat"><strong>${formatCount(report?.total ?? 0)}</strong><span>errors recorded</span></div><div class="stat"><strong>${formatCount(byKind.tool ?? 0)}</strong><span>tool failures</span></div><div class="stat"><strong>${formatCount((byKind.model ?? 0) + (byKind.child ?? 0) + (byKind.workflow ?? 0))}</strong><span>model / child / workflow</span></div><div class="stat"><strong>${formatCount(hookErrors.reduce((sum, row) => sum + row.errors, 0))}</strong><span>hook errors</span></div></div>`,
+  ];
+  sections.push(group("🧮 Groups", `${groups.length} groups`, groups.length ? `<ul>${groups.map((item) => usedRow(`${item.kind} / ${item.tool} / ${item.category}`, plural(item.count, "error"), undefined, "failed")).join("")}</ul>${report?.omittedGroups ? `<p class="note">${plural(report.omittedGroups, "group")} omitted.</p>` : ""}` : `<div class="empty">No error groups.</div>`));
+  const body = errors.length ? errors.map((item) => {
+    const usage = item.usage ? `${formatCount(item.usage.input ?? 0)} in · ${formatCount(item.usage.output ?? 0)} out${item.usage.turns !== undefined ? ` · ${formatCount(item.usage.turns)} turns` : ""}` : undefined;
+    return `<details class="item"><summary><span class="item-name">#${item.seq} · ${escapeHtml(item.kind)} / ${escapeHtml(item.tool)} · ${escapeHtml(oneLine(item.error))}</span><span class="badge failed">${escapeHtml(item.category)}</span></summary>${factGrid([
+      ["Incident", item.incident],
+      ["Module", item.module],
+      ["Timestamp", item.timestamp ?? "not recorded"],
+      ["Call", item.callId ?? "—"],
+      ["Run", item.runId ?? "—"],
+      ["Provider", item.provider ?? (item.kind === "model" || item.kind === "child" ? "not recorded" : "—")],
+      ["Model", item.model ?? (item.kind === "model" || item.kind === "child" ? "not recorded" : "—")],
+      ["Backend", item.backend ?? "—"],
+      ["Route", item.route ?? "—"],
+      ["Stop reason", item.stopReason ?? "—"],
+      ["Status code", item.statusCode ?? "—"],
+      ["Exit code", item.exitCode === undefined ? "—" : String(item.exitCode)],
+      ["Attempts", item.attempts === undefined ? "—" : formatCount(item.attempts)],
+      ["Output", item.outputPresence ?? "—"],
+      ["Execution", item.execution ?? "—"],
+      ["Acceptance", item.acceptance ?? "—"],
+      ["Usage", usage ?? "—"],
+      ["Error chars", `${formatCount(item.errorChars)}${item.truncated ? " · truncated" : ""}`],
+    ])}<p class="note">${escapeHtml(item.why)}</p><h3>Error</h3><pre>${escapeHtml(item.error) || "—"}</pre>${item.payload !== undefined ? `<h3>Failed payload (redacted)</h3><pre>${escapeHtml(JSON.stringify(item.payload, null, 2))}</pre>` : ""}${item.details !== undefined ? `<h3>Details (redacted)</h3><pre>${escapeHtml(JSON.stringify(item.details, null, 2))}</pre>` : ""}</details>`;
+  }).join("") : `<div class="empty">No tool, model, child or workflow failures in this window. This does not certify task quality.</div>`;
+  sections.push(group("📋 Errors (newest first)", `${errors.length} shown${report?.omitted ? ` · ${report.omitted} omitted` : ""}`, body, true));
+  sections.push(group("🪝 Hook errors", `${hookErrors.length} hooks`, hookErrors.length ? `<ul>${hookErrors.map((row) => usedRow(`${row.owner}:${row.hook}`, plural(row.errors, "error"), `${plural(row.calls, "call")} · ${Math.round(row.ms)} ms`, "failed")).join("")}</ul><p class="note">Telemetry summaries without excerpts; inspect the named owner.</p>` : `<div class="empty">No hook errors recorded.</div>`));
+  let json = "[]";
+  try {
+    json = JSON.stringify(report, null, 2);
+  } catch {
+    json = JSON.stringify({ total: report?.total ?? 0, errors: [], note: "report was not serializable" });
+  }
+  sections.push(`<h2>JSON (copy source)</h2><pre id="errors-json">${escapeHtml(json)}</pre>${COPY_SCRIPT}`);
+  return sections.join("");
+}
+
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -1582,6 +1637,32 @@ export default function (pi: any) {
         await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
         ctx.ui?.notify?.("Detailed session usage opened.", "info");
       })().catch((error) => popupError("used", error, ctx));
+    },
+  });
+  pi.registerCommand("errors", {
+    description:
+      "Open a detailed JSON list of this session's errors (payloads, modules, causes) with a copy button.",
+    handler: (_args: string, ctx: any) => {
+      void (async () => {
+        let entries: unknown;
+        try {
+          entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+        } catch (error) {
+          throw new Error(
+            `Session errors are unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        const list = Array.isArray(entries) ? entries : [];
+        let ledgerTasks;
+        try {
+          ledgerTasks = reduceChildEvents(projectTranscriptChildren(list)).tasks;
+        } catch {
+          ledgerTasks = undefined;
+        }
+        const report = collectSessionErrors(list, { ledgerTasks });
+        await openHtmlPopup("errors", "Session errors", errorsHtml(report), ctx);
+        ctx.ui?.notify?.("Detailed session errors opened.", "info");
+      })().catch((error) => popupError("errors", error, ctx));
     },
   });
   pi.registerCommand("commands", {

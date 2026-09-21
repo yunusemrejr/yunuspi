@@ -261,6 +261,26 @@ function verifyDistribution(exportDir, { testConcurrency, timings }) {
   };
   try {
     copyTree(exportDir, fixture);
+    // Provenance tests pin the exact code under test via git identity, but a
+    // bare temp copy has no .git. Commit the verified bytes so the sha the
+    // suite observes identifies precisely what it executed. Fully pinned
+    // identity (no global config, signing, or hooks) keeps this hermetic.
+    timed("fixture-git", () => {
+      run("git", ["init", "-q"], fixture, { timeoutMs: 60000 });
+      run("git", ["add", "-A"], fixture, { timeoutMs: 120000 });
+      run(
+        "git",
+        [
+          "-c", "user.name=yunuspi-distribution",
+          "-c", "user.email=distribution@localhost",
+          "-c", "commit.gpgsign=false",
+          "-c", "core.hooksPath=/dev/null",
+          "commit", "-qm", "verified export",
+        ],
+        fixture,
+        { timeoutMs: 120000 },
+      );
+    });
     // --prefer-offline keeps a warm npm cache from being re-fetched from scratch.
     timed("deps", () =>
       run(

@@ -292,6 +292,115 @@ test('stop-all proves session ownership and dedupes shared jobs', () => {
   assert.deepEqual(aborted, ['a1']);
 });
 
+const errorsLib = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-errors.ts')));
+const diagnosticsLib = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-diagnostics.ts')));
+
+const errorResult = (toolCallId, toolName, text, details = {}) => ({
+  type: 'message', message: { role: 'toolResult', toolCallId, toolName, details, content: [{ type: 'text', text }], isError: true },
+});
+
+test('errors collector captures deep tool failure with payload, module and stable incident', () => {
+  const branch = [
+    toolCall('e1', 'http_request', { url: 'https://example.com/api', apiKey: 'TEST_SYNTHETIC_API_KEY_VALUE' }),
+    errorResult('e1', 'http_request', 'transport failure: fetch failed 503 for Bearer TEST_SYNTHETIC_BEARER_TOKEN (socket hang up)', { status: 503 }),
+  ];
+  const report = errorsLib.collectSessionErrors(branch);
+  assert.equal(report.total, 1);
+  assert.equal(report.inspected, 2);
+  const item = report.errors[0];
+  assert.equal(item.seq, 1);
+  assert.equal(item.kind, 'tool');
+  assert.equal(item.tool, 'http_request');
+  assert.equal(item.module, 'agent/extensions/http-tools.ts');
+  assert.equal(item.category, 'transport');
+  assert.equal(item.callId, 'e1');
+  assert.equal(item.statusCode, '503');
+  assert.ok(item.error.includes('socket hang up'));
+  assert.ok(!item.error.includes('TEST_SYNTHETIC_BEARER_TOKEN'), 'bearer token is redacted from error text');
+  assert.equal(item.payload.url, 'https://example.com/api');
+  assert.equal(item.payload['apiKey'], '[redacted]');
+  assert.ok(item.why.includes('http_request'));
+  // Same stable incident id the /metrics diagnostics show for this cause.
+  const diag = diagnosticsLib.collectSessionDiagnostics(branch);
+  assert.equal(diag.failures.length, 1);
+  assert.equal(item.incident, diag.failures[0].incident);
+});
+
+test('errors collector captures model failure with route, usage and status code', () => {
+  const branch = [
+    { type: 'message', message: { role: 'assistant', provider: 'friendli', model: 'mixtral-x', stopReason: 'error', errorMessage: 'request failed with status 429: quota exceeded for quota group', content: [], usage: { input: 100, output: 5 } } },
+  ];
+  const report = errorsLib.collectSessionErrors(branch);
+  assert.equal(report.total, 1);
+  const item = report.errors[0];
+  assert.equal(item.kind, 'model');
+  assert.equal(item.provider, 'friendli');
+  assert.equal(item.model, 'mixtral-x');
+  assert.equal(item.category, 'capacity');
+  assert.equal(item.statusCode, '429');
+  assert.deepEqual(item.usage, { input: 100, output: 5 });
+  assert.ok(item.module.includes('provider-gate'));
+  assert.ok(item.why.includes('friendli/mixtral-x'));
+});
+
+test('errors collector captures child failure with launch payload and ledger cause', () => {
+  const branch = [
+    toolCall('s1', 'subagent', { agent: 'worker', model: 'friendli/child-model', task: 'do the thing' }),
+    toolResult('s1', 'subagent', { asyncId: 'run-9' }),
+    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'run-9', mode: 'single', state: 'failed', results: [{ index: 0, runId: 'run-9', status: 'failed', model: 'friendli/child-model', backend: 'native', exitCode: 1, error: 'Child timed out after 20000ms', usage: { input: 50, output: 10 }, evidence: { version: 1, outcomeReason: 'timeout', attemptCount: 2, output: 'absent' } }] } },
+  ];
+  const ledgerTasks = [{
+    taskId: 't1', label: 'thing', state: 'failed',
+    execution: { status: 'failed' }, acceptance: { status: 'none' },
+    attempts: [{
+      attempt: 1, runId: 'run-9', route: 'friendli/child-model', backend: 'native', state: 'failed',
+      execution: { status: 'failed', cause: { stage: 'execute', category: 'timeout', retryable: true, deterministicShape: false, outputPresent: false, truncation: 'none', acceptance: 'none' } },
+      acceptance: { status: 'none' },
+    }],
+  }];
+  const report = errorsLib.collectSessionErrors(branch, { ledgerTasks });
+  assert.equal(report.total, 1);
+  const item = report.errors[0];
+  assert.equal(item.kind, 'child');
+  assert.equal(item.runId, 'run-9');
+  assert.equal(item.category, 'timeout');
+  assert.equal(item.exitCode, 1);
+  assert.equal(item.attempts, 2);
+  assert.equal(item.outputPresence, 'absent');
+  assert.equal(item.execution, 'failed (execute/timeout)');
+  assert.equal(item.module, 'agent/extensions/pi-subagents (native · friendli/child-model)');
+  assert.equal(item.payload.agent, 'worker');
+  assert.equal(item.payload.model, 'friendli/child-model');
+  assert.deepEqual(item.usage, { input: 50, output: 10 });
+});
+
+test('errors collector does not mistake bare counts for status codes', () => {
+  const report = errorsLib.collectSessionErrors([
+    toolCall('c1', 'bash', { command: 'ls' }),
+    errorResult('c1', 'bash', 'processed 500 items then broke: boom'),
+  ]);
+  assert.equal(report.total, 1);
+  assert.equal(report.errors[0].statusCode, undefined);
+});
+
+test('errors popup escapes content and carries JSON plus copy button', () => {
+  const report = errorsLib.collectSessionErrors([
+    toolCall('x1', 'bash', { command: 'false' }),
+    errorResult('x1', 'bash', '<script>alert("x")</script> boom'),
+  ]);
+  const html = signals.errorsHtml(report);
+  assert.ok(!html.includes('<script>alert("x")</script>'));
+  assert.ok(html.includes('&lt;script&gt;'));
+  assert.ok(html.includes('id="copy-errors"'));
+  assert.ok(html.includes('id="errors-json"'));
+  assert.ok(html.includes('navigator.clipboard'));
+  assert.ok(html.includes('core (native)'));
+  assert.ok(html.includes('Failed payload (redacted)'));
+  const empty = signals.errorsHtml(errorsLib.collectSessionErrors([]));
+  assert.ok(empty.includes('id="copy-errors"'));
+  assert.ok(empty.includes('No tool, model, child or workflow failures'));
+});
+
 test('stop-all fails closed and captures delivery errors', () => {
   assert.deepEqual(stopAllSessionRuns(undefined, 'session-1').stopped, []);
   assert.deepEqual(stopAllSessionRuns({ asyncJobs: new Map() }, '').stopped, []);

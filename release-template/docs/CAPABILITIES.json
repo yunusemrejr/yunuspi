@@ -1007,6 +1007,7 @@
         "google-account",
         "sys-prompt",
         "used",
+        "errors",
         "commands"
       ],
       "options": [
@@ -1023,8 +1024,8 @@
           "summary": "Session accounting, metrics and observations."
         },
         {
-          "name": "/sys-prompt|/used|/commands",
-          "summary": "Separate-window popups: opening system prompt, session usage, command list."
+          "name": "/sys-prompt|/used|/errors|/commands",
+          "summary": "Separate-window popups: opening system prompt, session usage, detailed error JSON, command list."
         },
         {
           "name": "/effort",
@@ -1719,6 +1720,7 @@
         "metrics",
         "sys-prompt",
         "used",
+        "errors",
         "commands"
       ],
       "tools": [
@@ -1731,6 +1733,7 @@
         "metrics",
         "sys-prompt",
         "used",
+        "errors",
         "commands"
       ],
       "options": [
@@ -2280,12 +2283,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1587
+        "line": 1668
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1215
+        "line": 1270
       },
       {
         "name": "curator",
@@ -2296,6 +2299,11 @@
         "name": "effort",
         "source": "agent/extensions/thinking.ts",
         "line": 48
+      },
+      {
+        "name": "errors",
+        "source": "agent/extensions/session-signals.ts",
+        "line": 1642
       },
       {
         "name": "export-json",
@@ -2440,7 +2448,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1540
+        "line": 1595
       },
       {
         "name": "subagent-cost",
@@ -2525,7 +2533,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1545
+        "line": 1600
       },
       {
         "name": "tasks",
@@ -2535,7 +2543,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1564
+        "line": 1619
       },
       {
         "name": "websearch",
@@ -2933,7 +2941,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1679,
+        "line": 1760,
         "kind": "literal"
       },
       {
@@ -2945,7 +2953,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1616,
+        "line": 1697,
         "kind": "literal"
       },
       {
@@ -3279,7 +3287,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1679,
+        "line": 1760,
         "kind": "literal"
       },
       {
@@ -3291,7 +3299,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1616,
+        "line": 1697,
         "kind": "literal"
       },
       {
@@ -3530,7 +3538,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 581,
+      "sourceFiles": 582,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 82,
@@ -3957,6 +3965,10 @@
       },
       {
         "path": "agent/extensions/lib/session-diagnostics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-errors.ts",
         "exists": true
       },
       {

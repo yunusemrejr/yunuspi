@@ -78,8 +78,8 @@ function fnv1aHex(value) {
 function normalizeIncidentError(error) {
   return String(error ?? '').toLowerCase().replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>').replace(/\b\d{4,}\b/g, '<n>').replace(/\/[^\s:;,]{3,}/g, ' <path>').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
-/** Stable incident id: same category + same normalized cause + same linkage (call/run) is one incident, however many records describe it. */
-function incidentId(category, error, link) {
+/** Stable incident id: same category + same normalized cause + same linkage (call/run) is one incident, however many records describe it. Exported so /errors shares the exact incident ids /metrics shows. */
+export function incidentId(category, error, link) {
   return `inc-${fnv1aHex(`${category}|${normalizeIncidentError(error)}|${link ?? ''}`).slice(0, 8)}`;
 }
 
