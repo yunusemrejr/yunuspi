@@ -1131,8 +1131,8 @@ function applyCandidateEconomy(
 	const cfg = loadModelEconomyConfig();
 	if (!cfg.enabled || !registryHasPricing(availableModels) || candidates.length === 0) return candidates;
  const constraints=taskRouteConstraints(task);
+ const child = origin === "inherited" && task ? childFor(task) : undefined;
  if (origin === "inherited" && task) {
-  const child=childFor(task);
   const pick=constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0],exhaustedProviders:exhaustedProvidersOf(availableModels),...(child ? {child} : {})});
   if (pick) candidates=[pick.model,...candidates.slice(1).filter(route=>route!==pick.model)];
   else if (constraints.freeOnly && !isProvenFreeRoute(economyRouteInfo(candidates[0],availableModels).info)) throw new Error("No eligible free route satisfies this task; keep the work in the parent. Paid assistance was not admitted.");

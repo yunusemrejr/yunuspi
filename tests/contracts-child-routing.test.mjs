@@ -23,6 +23,7 @@ const { loadModelEconomyConfig } = await import(shared + 'model-economy.ts');
 const req = await import(shared + 'child-route-requirements.ts');
 const { confidentValue, checkCapabilityProvenance } = await import(shared + 'catalog-confidence.ts');
 const { formatCandidateRejection, recoveryHintForDimension, recordRouteDecision } = await import(shared + 'route-decision-record.ts');
+const { buildModelCandidates } = await import(shared + 'model-fallback.ts');
 
 const cfg = loadModelEconomyConfig();
 const parent = { provider: 'p', id: 'big', fullId: 'p/big', contextWindow: 200000, maxTokens: 32000, reasoning: true, input: ['text', 'image'], cost: { input: 5, output: 20, cacheRead: 5, cacheWrite: 5 } };
@@ -143,4 +144,9 @@ test('preferred reasoning never hard-gates; required always does', () => {
     const required = req.buildChildRouteRequirements({ estimatedPromptTokens: 1000, reasoning: 'required' }, { requestedAction: action });
     assert.equal(required.reasoning, true, `${action}: required must gate`);
   }
+});
+
+test('inherited expensive primary without replacement fails closed, not ReferenceError', () => {
+  const pricey = [{ provider: 'p', id: 'big', fullId: 'p/big', contextWindow: 200000, maxTokens: 32000, cost: { input: 5, output: 20, cacheRead: 5, cacheWrite: 5 } }];
+  assert.throws(() => buildModelCandidates('p/big', [], pricey, undefined, { origin: 'inherited' }), /no route with a known price/);
 });
