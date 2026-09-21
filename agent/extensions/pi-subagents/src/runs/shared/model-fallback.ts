@@ -460,6 +460,7 @@ export function resolveLlmPreferenceChain(
 	options?: LlmPreferenceOptions,
 ): LlmPreferenceRoute[] {
 	const loaded = loadLlmPreferences();
+	if (!loaded.ok && !loaded.missing) warnOnceEconomy(`${loaded.path}::${loaded.reason ?? "unknown"}`, "preference-load", `[pi-subagents] llm_preferences (${role}): ignoring preference file (${loaded.reason ?? "unknown reason"}); autonomous selection applies`);
 	if (!loaded.ok || !loaded.config || !availableModels || availableModels.length === 0) return [];
 	const entries = preferenceEntriesFor(role, loaded.config);
 	if (!entries.length) return [];
