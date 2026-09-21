@@ -210,11 +210,13 @@ function stripNegationWindows(span: string): string {
 
 function negatedVerbsIn(span: string): string[] {
 	const verbs: string[] = [];
+	NEGATION_WINDOW.lastIndex = 0;
 	for (const match of span.matchAll(NEGATION_WINDOW)) {
 		for (const verb of verbsIn(match[1] ?? "")) {
 			if (!verbs.includes(verb)) verbs.push(verb);
 		}
 	}
+	NEGATION_WINDOW.lastIndex = 0;
 	return verbs;
 }
 
