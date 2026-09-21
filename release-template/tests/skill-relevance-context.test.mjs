@@ -38,6 +38,15 @@ test('native file and tool evidence supplies domain context without arbitrary ou
  assert.equal(skillEvidenceContext({files:['src/old.css',...Array(32).fill('unknown.zzz')]}),'','old evidence outside bound is ignored');
 });
 
+test('configuration, documentation and shell files supply domain context',()=>{
+ const context=skillEvidenceContext({files:['package.json','values.yaml','README.md','deploy.sh']});
+ assert.match(context,/configuration schema/);
+ assert.match(context,/documentation/);
+ assert.match(context,/shell scripting/);
+ assert.ok(!context.includes('package') && !context.includes('values') && !context.includes('readme') && !context.includes('deploy'));
+ assert.match(skillEvidenceContext({files:['compose.yaml']}),/containers deployment/);
+});
+
 test('local routing indexes skills beyond the model discovery packet limit',()=>{
  const tail=skill('tail-workflow','Tail-only workflow for orbital ephemeris propagation');
  const prefix=Array.from({length:256},(_,i)=>skill(`prefix-${i}`,'Unrelated installed workflow'));
