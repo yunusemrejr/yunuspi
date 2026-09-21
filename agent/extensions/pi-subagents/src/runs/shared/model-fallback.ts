@@ -21,6 +21,21 @@ import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
 import { modelIdentity } from "./model-quality.ts";
 import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting } from "./llm-preferences.ts";
+import { childRequirementsFromTask, type ChildRouteRequirements } from "./child-route-requirements.ts";
+import { extractTaskIntent } from "./task-intent-model.ts";
+
+/** Child-scoped route bounds for fallback selection, memoized per task text. */
+const childBoundsCache = new Map<string, ChildRouteRequirements>();
+function childFor(task: string | undefined): ChildRouteRequirements | undefined {
+	if (!task) return undefined;
+	const key = task.slice(0, 512);
+	const hit = childBoundsCache.get(key);
+	if (hit) return hit;
+	const bounds = childRequirementsFromTask(task);
+	if (childBoundsCache.size >= 64) childBoundsCache.clear();
+	childBoundsCache.set(key, bounds);
+	return bounds;
+}
 
 export type { AvailableModelInfo };
 
@@ -32,7 +47,14 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
 }
 
 function taskRouteConstraints(task = ""): { fixed: boolean; freeOnly: boolean } {
- const text=task.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
+ // Segmented first: quoted/example spans ("the docs say 'use only free'")
+ // are never routing directives.
+ let text=task.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
+ try {
+  for (const span of extractTaskIntent(text).segments.quotedSpans) {
+   if (span) text = text.split(span).join(" ");
+  }
+ } catch { /* segmentation is advisory; raw text still gates */ }
  return {
   fixed:/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(text),
   freeOnly:/\bfree[- ]only\b|\b(?:only use|use only)\s+(?:the\s+)?free\b|\b(?:no|never use|do not use|don't use)\s+paid\b/i.test(text),
@@ -469,6 +491,8 @@ export interface ResolveSubagentModelOverrideOptions {
 	/** Session id enabling the preferred/free session mixer (rotation +
 	 * seeded variety). Omitted callers keep deterministic legacy order. */
 	sessionId?: string;
+	/** Child-specific route bounds; derived from `task` when omitted. */
+	child?: ChildRouteRequirements;
 }
 
 function defaultScopeWarn(violation: ModelScopeViolation): void {
@@ -582,7 +606,7 @@ export function selectMixedSubagentModel(
 	availableModels: AvailableModelInfo[] | undefined,
 	cfg: ReturnType<typeof loadModelEconomyConfig>,
 	task: string,
-	opts: { freeOnly?: boolean; sessionId?: string; preferredModel?: string; exhaustedProviders?: string[] },
+	opts: { freeOnly?: boolean; sessionId?: string; preferredModel?: string; exhaustedProviders?: string[]; child?: ChildRouteRequirements },
 ): string | undefined {
 	const chain = resolveLlmPreferenceChain(inferPreferenceRole(task), availableModels, { freeOnly: opts.freeOnly });
 	const seen = new Set<string>();
@@ -595,8 +619,9 @@ export function selectMixedSubagentModel(
 		pool.push({ route: withLlmThinkingSuffix(c), preferred: true, free: info ? isProvenFreeRoute(info) : false });
 	}
 	const exclude = pool.map((p) => splitThinkingSuffix(p.route).baseModel);
+	const child = opts.child ?? childFor(task);
 	for (let i = 0; i < 3; i++) {
-		const pick = selectAffordableModel(availableModels, cfg, { task, freeOnly: opts.freeOnly, preferredModel: opts.preferredModel, exclude, exhaustedProviders: opts.exhaustedProviders });
+		const pick = selectAffordableModel(availableModels, cfg, { task, freeOnly: opts.freeOnly, preferredModel: opts.preferredModel, exclude, exhaustedProviders: opts.exhaustedProviders, ...(child ? { child } : {}) });
 		if (!pick) break;
 		exclude.push(splitThinkingSuffix(pick.model).baseModel);
 		const key = pick.model.toLowerCase();
@@ -653,7 +678,8 @@ export function resolveSubagentModelOverride(
       const preferred = selectLlmPreferredModel(inferPreferenceRole(options.task), availableModels, { freeOnly: constraints.freeOnly });
       if (preferred) { const preferredRoute = withLlmThinkingSuffix(preferred); enforceModelScopes(preferredRoute, options?.scope, "inherited", options?.onWarn); return preferredRoute; }
      }
-     const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels)});
+     const child = options?.child ?? childFor(options?.task);
+     const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels),...(child ? {child} : {})});
      if (pick) { enforceModelScopes(pick.model,options?.scope,"inherited",options?.onWarn); return pick.model; }
      if (["expensive","zero-placeholder"].includes(classification.verdict) || constraints.freeOnly && !isProvenFreeRoute(info)) throw new Error(`${formatEconomyNoRouteMessage(resolved,cfg)} No affordable route passed the task quality/route constraints. ${formatAffordableSelectionDiagnostics(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels)})} Keep this work in the parent or supply verified benchmark evidence.`);
 				} else if (explicit === undefined && (classification.verdict === "expensive" || classification.verdict === "zero-placeholder")) {
@@ -1002,7 +1028,8 @@ function applyCandidateEconomy(
 	if (!cfg.enabled || !registryHasPricing(availableModels) || candidates.length === 0) return candidates;
  const constraints=taskRouteConstraints(task);
  if (origin === "inherited" && task) {
-  const pick=constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0],exhaustedProviders:exhaustedProvidersOf(availableModels)});
+  const child=childFor(task);
+  const pick=constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0],exhaustedProviders:exhaustedProvidersOf(availableModels),...(child ? {child} : {})});
   if (pick) candidates=[pick.model,...candidates.slice(1).filter(route=>route!==pick.model)];
   else if (constraints.freeOnly && !isProvenFreeRoute(economyRouteInfo(candidates[0],availableModels).info)) throw new Error("No eligible free route satisfies this task; keep the work in the parent. Paid assistance was not admitted.");
  }
@@ -1043,7 +1070,7 @@ function applyCandidateEconomy(
 	}
 	let result = kept;
 	if (primaryDropped) {
-		const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels, cfg, { task, freeOnly:constraints.freeOnly, preferredModel: candidates[0]!, exclude: [candidates[0]!, ...kept], exhaustedProviders: exhaustedProvidersOf(availableModels) });
+		const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels, cfg, { task, freeOnly:constraints.freeOnly, preferredModel: candidates[0]!, exclude: [candidates[0]!, ...kept], exhaustedProviders: exhaustedProvidersOf(availableModels), ...(child ? {child} : {}) });
 		if (!pick) throw new Error(`${formatEconomyNoRouteMessage(candidates[0]!, cfg)}${task ? ` No route passed the task quality gate. ${formatAffordableSelectionDiagnostics(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0]!,exclude:[candidates[0]!,...kept],exhaustedProviders:exhaustedProvidersOf(availableModels)})} Keep this work in the parent or supply verified model evidence.` : ""}`);
 		result = [pick.model, ...kept.filter((route) => route !== pick.model)];
 	}

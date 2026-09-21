@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { readHealth, recoveryPerformance, evaluateRoute } from "./provider-health.ts";
+import { readHealth, recoveryPerformance, evaluateRoute, type ProviderHealthState } from "./provider-health.ts";
 import * as path from "node:path";
 import { splitKnownThinkingSuffix, type ModelInfo } from "../../shared/model-info.ts";
 import { getAgentDir } from "../../shared/utils.ts";
@@ -16,6 +16,8 @@ import {
 	loadModelEconomyConfig,
 	type ModelEconomyConfig,
 } from "./model-economy.ts";
+import type { ChildRouteRequirements } from "./child-route-requirements.ts";
+import { recordRouteDecision, type CandidateRejection, type RejectionDimension, type RouteDecisionRecord } from "./route-decision-record.ts";
 
 /**
  * Deterministic autonomous model selection. Capability and task quality gates
@@ -61,6 +63,17 @@ export interface AffordableSelectionOptions {
  workload?: EconomyWorkload;
  /** Task requirements may narrow the pool; unspecified requirements retain parent capacity. */
  requirements?: { minContextWindow?: number; minOutputTokens?: number; reasoning?: boolean; inputModalities?: string[]; toolCalling?: boolean };
+	/**
+	 * Child-specific requirements built from the actual launch (see
+	 * child-route-requirements.ts). When present, the child is routed against
+	 * its own workload: parent capacity is a quality/reference baseline only
+	 * and never a capacity gate. Explicit `requirements` still win where set.
+	 */
+	child?: ChildRouteRequirements;
+	/** Backend/tool-wire compatibility evidence per route, when preflighted. */
+	toolWire?: { backend?: string; tools?: string[]; compatible?: (route: string) => { ok: boolean; reason?: string } };
+	/** Decision-record envelope for observability (bounded, persisted by caller). */
+	decision?: { taskHash?: string; preferenceRole?: string };
 
 	/** Prefer the same model identity within eligible routes, without lifting caps. */
 	preferredModel?: string;
@@ -79,6 +92,8 @@ export interface AffordableSelection {
 	explanation: string[];
 	/** True when the local ranking cache was absent/invalid (offline rule applied). */
 	offline?: boolean;
+	/** Bounded structured decision record (pool, rejections, choice). Always attached. */
+	decision?: RouteDecisionRecord;
 }
 
 export interface RankRefreshResult {
@@ -117,6 +132,107 @@ function subscriptionEligible(model: ModelInfo, cfg: ModelEconomyConfig): boolea
 	return cfg.subscriptionProviders.includes(model.provider);
 }
 
+export interface SelectionGateContext {
+	timestamp: number;
+	health: ProviderHealthState;
+	evidence: ReturnType<typeof readFreeEvidence>;
+	histories: Map<string, ReturnType<typeof recoveryPerformance>>;
+	reference?: ModelInfo;
+	effectiveRequirements?: { minContextWindow?: number; minOutputTokens?: number; reasoning?: boolean; inputModalities?: string[]; toolCalling?: boolean };
+	/** True when child-specific bounds were supplied: the parent reference is a
+	 * quality baseline only and never a capacity gate on any dimension. */
+	childScoped?: boolean;
+	options?: AffordableSelectionOptions;
+}
+
+/** Shared hard-gate evaluation: selection and diagnostics cannot disagree. */
+export function buildSelectionGateContext(
+	models: ModelInfo[] | undefined,
+	options: AffordableSelectionOptions | undefined,
+	timestamp = Date.now(),
+	health: ProviderHealthState = readHealth(),
+): SelectionGateContext {
+	const preferredBase = options?.preferredModel ? splitKnownThinkingSuffix(options.preferredModel).baseModel : undefined;
+	const reference = models?.find(m => m.fullId === preferredBase);
+	const childBounds = options?.child ? {
+		minContextWindow: options.child.minContextWindow,
+		minOutputTokens: options.child.minOutputTokens,
+		reasoning: options.child.reasoning,
+		inputModalities: options.child.inputModalities,
+		toolCalling: options.child.toolCalling,
+	} : undefined;
+	const effectiveRequirements = options?.requirements ? { ...childBounds, ...options.requirements } : childBounds;
+	return {
+		timestamp,
+		health,
+		evidence: readFreeEvidence(),
+		histories: new Map((models ?? []).map(m => [m.fullId, recoveryPerformance(health.providers[m.provider]?.models[m.id], m, timestamp)])),
+		reference,
+		effectiveRequirements,
+		...(options?.child ? { childScoped: true as const } : {}),
+		options,
+	};
+}
+
+/**
+ * Orthogonal hard-gate dimensions for one candidate: capacity, tool-wire,
+ * provider cooling, reliability history, exclusions, quota. Empty dimensions
+ * means the candidate passes the hard gates. Quality, free-proof, and price
+ * gates layer on top (see describeSelectionRejections).
+ */
+export function evaluateCandidateGates(model: ModelInfo, ctx: SelectionGateContext): CandidateRejection {
+	const dimensions: RejectionDimension[] = [];
+	const detail: CandidateRejection["detail"] = {};
+	const required = ctx.effectiveRequirements;
+	const reference = ctx.reference;
+	// Malformed bounds fail closed (reject every candidate), matching the
+	// historical gate: a nonsense requirement must never silently pass.
+	const saneInt = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+	if (required?.minContextWindow !== undefined && !saneInt(required.minContextWindow)) {
+		dimensions.push("context"); detail.context = "invalid minContextWindow requirement";
+	} else if (required?.minContextWindow !== undefined && !(typeof model.contextWindow === "number" && model.contextWindow >= required.minContextWindow)) {
+		dimensions.push("context"); detail.context = `needs ${required.minContextWindow}, has ${model.contextWindow ?? "unknown"}`;
+	}
+	if (required?.minOutputTokens !== undefined && !saneInt(required.minOutputTokens)) {
+		dimensions.push("output"); detail.output = "invalid minOutputTokens requirement";
+	} else if (required?.minOutputTokens !== undefined && !(typeof model.maxTokens === "number" && model.maxTokens >= required.minOutputTokens)) {
+		dimensions.push("output"); detail.output = `needs ${required.minOutputTokens}, has ${model.maxTokens ?? "unknown"}`;
+	}
+	if (required?.reasoning === true && model.reasoning !== true) { dimensions.push("modality"); detail.modality = "reasoning required"; }
+	if (required?.inputModalities?.some(input => !model.input?.includes(input))) {
+		dimensions.push("modality"); detail.modality = `missing ${required.inputModalities.filter(input => !model.input?.includes(input)).join(",")}`;
+	}
+	if (required?.toolCalling && catalogRouteCapabilities(model, ctx.evidence)?.toolCalling !== true) {
+		dimensions.push("tool-schema"); detail["tool-schema"] = "tool calling not advertised";
+	}
+	if (ctx.options?.toolWire?.compatible) {
+		const wire = ctx.options.toolWire.compatible(model.fullId);
+		if (!wire.ok) { dimensions.push("backend-compat"); detail["backend-compat"] = wire.reason ?? `incompatible with ${ctx.options.toolWire.backend ?? "backend"}`; }
+	}
+	if (!ctx.childScoped && required?.minContextWindow === undefined && reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow)) {
+		dimensions.push("context"); detail.context = `below parent baseline ${reference.contextWindow}`;
+	}
+	if (!ctx.childScoped && required?.minOutputTokens === undefined && reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens)) {
+		dimensions.push("output"); detail.output = `below parent baseline ${reference.maxTokens}`;
+	}
+	if (!ctx.childScoped && required?.inputModalities === undefined && reference?.input?.includes("image") && !model.input?.includes("image")) {
+		dimensions.push("modality"); detail.modality = "below parent baseline: image input";
+	}
+	if (!ctx.childScoped && required?.reasoning === undefined && reference?.reasoning === true && model.reasoning !== true) {
+		dimensions.push("modality"); detail.modality = "below parent baseline: reasoning";
+	}
+	const route = evaluateRoute({ provider: model.provider, model: model.id, now: ctx.timestamp }, ctx.health);
+	if (!route.allowed) { dimensions.push("provider-cooling"); detail["provider-cooling"] = route.boundBy ?? "cooldown"; }
+	const history = ctx.histories.get(model.fullId);
+	if (history && history.effectiveSamples >= 4 && history.failureRate > .65) {
+		dimensions.push("reliability-history"); detail["reliability-history"] = `${Math.round(history.failureRate * 100)}% recent failures`;
+	}
+	if (ctx.options?.exclude?.includes(model.fullId)) { dimensions.push("excluded"); detail.excluded = "excluded by caller"; }
+	if (findModelExclusion(model.fullId)) { dimensions.push("excluded"); detail.excluded = "model exclusion"; }
+	if (ctx.options?.exhaustedProviders?.includes(model.provider)) { dimensions.push("quota"); detail.quota = "provider quota exhausted"; }
+	return { route: model.fullId, dimensions: [...new Set(dimensions)], detail };
+}
+
 /**
  * Deterministically pick the affordable route for an autonomous subagent.
  * Returns `undefined` when no known-affordable route remains in the pool.
@@ -126,46 +242,78 @@ export function selectAffordableModel(
 	cfg: ModelEconomyConfig,
 	options?: AffordableSelectionOptions,
 ): AffordableSelection | undefined {
-	const preferredBase = options?.preferredModel ? splitKnownThinkingSuffix(options.preferredModel).baseModel : undefined;
-	const reference = models?.find(m=>m.fullId===preferredBase);
- const evidence = readFreeEvidence();
-	const hasCapacity = (model:ModelInfo) => {
-        const required = options?.requirements;
-        if (required?.minContextWindow !== undefined && (!Number.isSafeInteger(required.minContextWindow) || required.minContextWindow <= 0 || !(typeof model.contextWindow === "number" && model.contextWindow >= required.minContextWindow))) return false;
-        if (required?.minOutputTokens !== undefined && (!Number.isSafeInteger(required.minOutputTokens) || required.minOutputTokens <= 0 || !(typeof model.maxTokens === "number" && model.maxTokens >= required.minOutputTokens))) return false;
-        if (required?.reasoning === true && model.reasoning !== true) return false;
-        if (required?.inputModalities?.some(input => !model.input?.includes(input))) return false;
-        if (required?.toolCalling && catalogRouteCapabilities(model,evidence)?.toolCalling !== true) return false;
-
-		if(required?.minContextWindow === undefined && reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow))return false;
-		if(required?.minOutputTokens === undefined && reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens))return false;
-		if(required?.inputModalities === undefined && reference?.input?.includes("image") && !model.input?.includes("image"))return false;
-		if(required?.reasoning === undefined && reference?.reasoning === true && model.reasoning !== true)return false;
-		return true;
+	const gate = buildSelectionGateContext(models, options);
+	const reference = gate.reference;
+	const evidence = gate.evidence;
+	const timestamp = gate.timestamp;
+	const health = gate.health;
+	const histories = gate.histories;
+	// Structured per-candidate rejections, keyed by route. Dimensions stay
+	// orthogonal: capacity, tool-wire, cooling, history, exclusion, quota here;
+	// free-proof, quality, and price layer on below.
+	const rejectionMap = new Map<string, CandidateRejection>();
+	const noteRejection = (rejection: CandidateRejection) => {
+		if (!rejection.dimensions.length) return;
+		const prior = rejectionMap.get(rejection.route);
+		if (!prior) { rejectionMap.set(rejection.route, rejection); return; }
+		rejectionMap.set(rejection.route, {
+			route: rejection.route,
+			dimensions: [...new Set([...prior.dimensions, ...rejection.dimensions])],
+			detail: { ...prior.detail, ...rejection.detail },
+		});
 	};
- const timestamp = Date.now();
- const health = readHealth();
  const { cache, offline } = readRankCache();
  const qualityTask = options?.quality ?? (options?.task ? taskQuality(options.task) : undefined);
- const histories = new Map((models ?? []).map(m=>[m.fullId,recoveryPerformance(health.providers[m.provider]?.models[m.id],m,timestamp)]));
 	let pool = (models ?? []).filter((model) => {
-		if (!hasCapacity(model)) return false;
-  if (!evaluateRoute({provider:model.provider,model:model.id,now:timestamp},health).allowed) return false;
-  const history = histories.get(model.fullId)!;
-  if (history.effectiveSamples >= 4 && history.failureRate > .65) return false;
-		if (options?.exclude?.includes(model.fullId) || findModelExclusion(model.fullId)) return false;
-		if (options?.exhaustedProviders?.length) {
-			const provider = model.fullId.slice(0, model.fullId.indexOf("/"));
-			if (provider && options.exhaustedProviders.includes(provider)) return false;
-		}
-		return true;
+		const gates = evaluateCandidateGates(model, gate);
+		noteRejection(gates);
+		return gates.dimensions.length === 0;
 	});
 	// One evidence snapshot for the whole selection, rather than disk I/O per model.
-	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:options?.requirements?.toolCalling !== false}});
+	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:gate.effectiveRequirements?.toolCalling !== false}});
  const freeIds = new Set(freeReport.candidates.filter(c=>c.eligible).map(c=>c.route));
  const qualityPool = pool.filter(m=>freeIds.has(m.fullId) || !options?.freeOnly && (isAutonomousMeteredEligible(m,cfg) || subscriptionEligible(m,cfg)));
  const quality = qualityTask ? assessModelQuality(qualityPool,cache?.observations ?? [],qualityTask,reference,timestamp) : undefined;
- if (quality) pool = pool.filter(m=>quality.get(m.fullId)?.eligible);
+ const freeByRoute = new Map(freeReport.candidates.map(candidate => [candidate.route, candidate]));
+ if (quality) {
+	for (const model of pool) {
+		const verdict = quality.get(model.fullId);
+		if (verdict && !verdict.eligible) {
+			noteRejection({ route: model.fullId, dimensions: ["quality-evidence"], detail: { "quality-evidence": verdict.reason } });
+		} else if (!verdict && !qualityPool.some(m => m.fullId === model.fullId)) {
+			noteRejection({ route: model.fullId, dimensions: ["price"], detail: { price: options?.freeOnly ? "no proven free route" : "no known-affordable price" } });
+		}
+	}
+	pool = pool.filter(m=>quality.get(m.fullId)?.eligible);
+ }
+	// Bounded decision record for /used, /metrics, and deterministic recovery.
+	// Candidates show independent gates (free proof, price, quality, health);
+	// rejections carry the orthogonal dimensions collected above.
+	const buildDecision = (choice?: string, choiceReason?: string): RouteDecisionRecord => recordRouteDecision({
+		...(options?.decision?.taskHash ? { taskHash: options.decision.taskHash } : {}),
+		...(options?.decision?.preferenceRole ? { preferenceRole: options.decision.preferenceRole } : {}),
+		...(options?.freeOnly === undefined ? {} : { freeOnly: options.freeOnly }),
+		...(gate.effectiveRequirements ? { requiredCapabilities: {
+			...(gate.effectiveRequirements.minContextWindow === undefined ? {} : { minContextWindow: gate.effectiveRequirements.minContextWindow }),
+			...(gate.effectiveRequirements.minOutputTokens === undefined ? {} : { minOutputTokens: gate.effectiveRequirements.minOutputTokens }),
+			...(gate.effectiveRequirements.reasoning === undefined ? {} : { reasoning: gate.effectiveRequirements.reasoning }),
+			...(options?.child?.contextMode ? { contextMode: options.child.contextMode } : {}),
+		} } : {}),
+		candidates: (models ?? []).slice(0, 64).map(model => ({
+			route: model.fullId,
+			free: freeByRoute.get(model.fullId)?.eligible === true,
+			...(freeByRoute.get(model.fullId) && !freeByRoute.get(model.fullId)!.eligible ? { freeProof: freeByRoute.get(model.fullId)!.reasons.slice(0, 2).join(", ") } : {}),
+			paidEligible: isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg),
+			...(quality?.get(model.fullId) ? { qualityEvidence: quality.get(model.fullId)!.reason } : {}),
+			...(options?.toolWire?.backend ? { backend: options.toolWire.backend } : {}),
+			...(options?.toolWire?.compatible ? { toolCompatible: options.toolWire.compatible(model.fullId).ok } : {}),
+			healthy: evaluateRoute({ provider: model.provider, model: model.id, now: timestamp }, health).allowed,
+		})),
+		rejections: [...rejectionMap.values()],
+		...(choice ? { choice } : {}),
+		...(choiceReason ? { choiceReason } : {}),
+		...(reference ? { parentBaseline: reference.fullId } : {}),
+	});
 	const preferred = reference;
 	const preferredId = preferred?.id ?? options?.preferredModel?.slice((options.preferredModel.indexOf("/") ?? -1)+1);
  const qualityRank = (id:string) => quality?.get(id)?.confidence === "measured" ? 0 : quality?.get(id)?.confidence === "reference" ? 1 : 2;
@@ -182,14 +330,22 @@ export function selectAffordableModel(
         const anchor=pool.find(model=>model.fullId===free[0]!.route);
         const speed=new Map(free.map(candidate=>{const model=pool.find(m=>m.fullId===candidate.route);return [candidate.route,anchor&&model?Math.min(0,compareObservedEconomySpeed(model,anchor)):0];}));
         free.sort((a,b)=>qualityCompare(a.route,b.route) || same(b.id)-same(a.id) || histories.get(a.route)!.failureRate-histories.get(b.route)!.failureRate || (speed.get(a.route)??0)-(speed.get(b.route)??0)||(a.rank??Infinity)-(b.rank??Infinity)||a.route.localeCompare(b.route));
-        return {model:free[0]!.route,explanation:["free-first after task quality, verified free pricing, tool support, capacity and route-health gates",...(quality ? [quality.get(free[0]!.route)!.reason] : ["task quality unspecified; catalog capacity is not a quality measurement"]),"provider reliability and observed response speed do not establish model intelligence"]};
+        return {model:free[0]!.route,explanation:["free-first after task quality, verified free pricing, tool support, capacity and route-health gates",...(quality ? [quality.get(free[0]!.route)!.reason] : ["task quality unspecified; catalog capacity is not a quality measurement"]),"provider reliability and observed response speed do not establish model intelligence"],decision:buildDecision(free[0]!.route,"free-first after task quality gates")};
     }
 	if (options?.freeOnly) return undefined;
 	const explanation: string[] = [];
 	const eligible = pool.filter((model) => {
-		if (contextTooSmall(model)) return false;
-		if (isAutonomousMeteredEligible(model, cfg)) return Number.isFinite(economyComparisonCost(model, options?.workload));
+		if (contextTooSmall(model)) {
+			noteRejection({ route: model.fullId, dimensions: ["context"], detail: { context: `below autonomous floor ${MIN_AUTONOMOUS_CONTEXT_TOKENS}` } });
+			return false;
+		}
+		if (isAutonomousMeteredEligible(model, cfg)) {
+			const comparable = Number.isFinite(economyComparisonCost(model, options?.workload));
+			if (!comparable) noteRejection({ route: model.fullId, dimensions: ["price"], detail: { price: "no finite comparison cost" } });
+			return comparable;
+		}
 		if (subscriptionEligible(model, cfg)) return true;
+		noteRejection({ route: model.fullId, dimensions: ["price"], detail: { price: "no known-affordable price" } });
 		return false;
 	});
 	if (eligible.length === 0) return undefined;
@@ -245,16 +401,84 @@ export function selectAffordableModel(
         if(qualification)explanation.push(qualification.reason);
 		explanation.push(`offline cheapest-member rule with observed speed tie-break within 10% cost: pick an eligible metered route (${chosen.fullId})`);
 		if (options?.workload) explanation.push("comparison uses caller-supplied token buckets and worst-case tiers; cache reuse is conditional, not guaranteed");
-		return { model: chosen.fullId, explanation, ...(offline ? { offline: true } : {}) };
+		return { model: chosen.fullId, explanation, ...(offline ? { offline: true } : {}), decision: buildDecision(chosen.fullId, "cheapest eligible metered route after quality gates") };
 	}
 	const subscription = eligible
 		.filter((model) => subscriptionEligible(model, cfg))
 		.sort((a, b) => a.fullId.localeCompare(b.fullId))[0];
 	if (subscription) {
 		explanation.push(`no metered route within the automatic budget remains; using the declared subscription route ${subscription.fullId}`);
-		return { model: subscription.fullId, explanation, ...(offline ? { offline: true } : {}) };
+		return { model: subscription.fullId, explanation, ...(offline ? { offline: true } : {}), decision: buildDecision(subscription.fullId, "declared subscription fallback") };
 	}
 	return undefined;
+}
+
+/**
+ * Structured rejections for a failed (or hypothetical) selection: the same
+ * shared hard gates plus free-proof, quality, and price layers. Recovery
+ * reads these dimensions instead of parsing prose.
+ */
+export function describeSelectionRejections(
+	models: ModelInfo[] | undefined,
+	cfg: ModelEconomyConfig,
+	options: AffordableSelectionOptions = {},
+): { rejections: CandidateRejection[]; decision: RouteDecisionRecord } {
+	const gate = buildSelectionGateContext(models, options);
+	const candidates = models ?? [];
+	const rejectionMap = new Map<string, CandidateRejection>();
+	const note = (rejection: CandidateRejection) => {
+		if (!rejection.dimensions.length) return;
+		const prior = rejectionMap.get(rejection.route);
+		rejectionMap.set(rejection.route, prior ? {
+			route: rejection.route,
+			dimensions: [...new Set([...prior.dimensions, ...rejection.dimensions])],
+			detail: { ...prior.detail, ...rejection.detail },
+		} : rejection);
+	};
+	for (const model of candidates) note(evaluateCandidateGates(model, gate));
+	const hardPool = candidates.filter(model => !rejectionMap.has(model.fullId));
+	const freeReport = describeFreeRoutes(candidates, {
+		evidence: gate.evidence,
+		requirements: { minContextWindow: MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling: gate.effectiveRequirements?.toolCalling !== false },
+		now: gate.timestamp,
+	});
+	const freeByRoute = new Map(freeReport.candidates.map(candidate => [candidate.route, candidate]));
+	const freeIds = new Set(freeReport.candidates.filter(candidate => candidate.eligible).map(candidate => candidate.route));
+	const { cache } = readRankCache();
+	const qualityTask = options.quality ?? (options.task ? taskQuality(options.task) : undefined);
+	const qualityPool = hardPool.filter(model => freeIds.has(model.fullId) || !options.freeOnly && (isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg)));
+	const quality = qualityTask ? assessModelQuality(qualityPool, cache?.observations ?? [], qualityTask, gate.reference, gate.timestamp) : undefined;
+	for (const model of hardPool) {
+		const verdict = quality?.get(model.fullId);
+		if (verdict && !verdict.eligible) {
+			note({ route: model.fullId, dimensions: ["quality-evidence"], detail: { "quality-evidence": verdict.reason } });
+		}
+		const free = freeByRoute.get(model.fullId);
+		if (free?.free && !free.eligible) {
+			note({ route: model.fullId, dimensions: ["price"], detail: { price: `free proof failed: ${free.reasons.slice(0, 2).join(", ")}` } });
+		}
+		if (!options.freeOnly && !contextTooSmall(model) && !isAutonomousMeteredEligible(model, cfg) && !subscriptionEligible(model, cfg) && !free?.eligible) {
+			note({ route: model.fullId, dimensions: ["price"], detail: { price: "no known-affordable price" } });
+		}
+		if (options.freeOnly && free && !free.eligible) {
+			note({ route: model.fullId, dimensions: ["price"], detail: { price: "free-only selection without proven free route" } });
+		}
+	}
+	const decision = recordRouteDecision({
+		...(options.decision?.taskHash ? { taskHash: options.decision.taskHash } : {}),
+		...(options.decision?.preferenceRole ? { preferenceRole: options.decision.preferenceRole } : {}),
+		...(options.freeOnly === undefined ? {} : { freeOnly: options.freeOnly }),
+		candidates: candidates.slice(0, 64).map(model => ({
+			route: model.fullId,
+			free: freeIds.has(model.fullId),
+			paidEligible: isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg),
+			...(quality?.get(model.fullId) ? { qualityEvidence: quality.get(model.fullId)!.reason } : {}),
+			healthy: evaluateRoute({ provider: model.provider, model: model.id, now: gate.timestamp }, gate.health).allowed,
+		})),
+		rejections: [...rejectionMap.values()],
+		...(gate.reference ? { parentBaseline: gate.reference.fullId } : {}),
+	});
+	return { rejections: [...rejectionMap.values()], decision };
 }
 
 /**
@@ -270,58 +494,23 @@ export function formatAffordableSelectionDiagnostics(
 ): string {
 	const candidates = models ?? [];
 	if (!candidates.length) return "No registered candidates were available for inspection.";
-	const now = Date.now();
-	const evidence = readFreeEvidence();
-	const preferredBase = options.preferredModel ? splitKnownThinkingSuffix(options.preferredModel).baseModel : undefined;
-	const reference = candidates.find(model => model.fullId === preferredBase);
-	const required = options.requirements;
-	const capacityReasons = (model: ModelInfo): string[] => {
-		const reasons: string[] = [];
-		if (required?.minContextWindow !== undefined && (!Number.isSafeInteger(required.minContextWindow) || required.minContextWindow <= 0 || !(typeof model.contextWindow === "number" && model.contextWindow >= required.minContextWindow))) reasons.push("context-below-required");
-		if (required?.minOutputTokens !== undefined && (!Number.isSafeInteger(required.minOutputTokens) || required.minOutputTokens <= 0 || !(typeof model.maxTokens === "number" && model.maxTokens >= required.minOutputTokens))) reasons.push("output-below-required");
-		if (required?.reasoning === true && model.reasoning !== true) reasons.push("missing-reasoning");
-		if (required?.inputModalities?.some(input => !model.input?.includes(input))) reasons.push("missing-input-modality");
-		if (required?.toolCalling && catalogRouteCapabilities(model, evidence)?.toolCalling !== true) reasons.push("missing-tool-calling");
-		if (required?.minContextWindow === undefined && reference?.contextWindow && !(typeof model.contextWindow === "number" && model.contextWindow >= reference.contextWindow)) reasons.push("context-below-parent");
-		if (required?.minOutputTokens === undefined && reference?.maxTokens && !(typeof model.maxTokens === "number" && model.maxTokens >= reference.maxTokens)) reasons.push("output-below-parent");
-		if (required?.inputModalities === undefined && reference?.input?.includes("image") && !model.input?.includes("image")) reasons.push("missing-parent-image-input");
-		if (required?.reasoning === undefined && reference?.reasoning === true && model.reasoning !== true) reasons.push("missing-parent-reasoning");
-		return reasons;
-	};
+	// Shared gates: the prose below renders the same structured dimensions
+	// that selection recorded, so diagnostics cannot drift from the verdict.
+	const { rejections } = describeSelectionRejections(models, cfg, options);
+	const byRoute = new Map(rejections.map(rejection => [rejection.route, rejection]));
+	const gate = buildSelectionGateContext(models, options);
 	const freeReport = describeFreeRoutes(candidates, {
-		evidence,
-		requirements: { minContextWindow: MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling: required?.toolCalling !== false },
-		now,
+		evidence: gate.evidence,
+		requirements: { minContextWindow: MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling: gate.effectiveRequirements?.toolCalling !== false },
+		now: gate.timestamp,
 	});
 	const freeById = new Map(freeReport.candidates.map(candidate => [candidate.route, candidate]));
-	const health = readHealth();
-	const histories = new Map(candidates.map(model => [model.fullId, recoveryPerformance(health.providers[model.provider]?.models[model.id], model, now)]));
-	const hardReasons = new Map<string, string[]>();
-	for (const model of candidates) {
-		const reasons = capacityReasons(model);
-		const route = evaluateRoute({ provider: model.provider, model: model.id, now }, health);
-		if (!route.allowed) reasons.push(`route-${route.boundBy ?? "health"}-cooldown`);
-		const history = histories.get(model.fullId)!;
-		if (history.effectiveSamples >= 4 && history.failureRate > .65) reasons.push("failure-history");
-		if (options.exclude?.includes(model.fullId)) reasons.push("excluded-by-caller");
-		if (findModelExclusion(model.fullId)) reasons.push("model-exclusion");
-		if (options.exhaustedProviders?.includes(model.provider)) reasons.push("provider-quota-exhausted");
-		hardReasons.set(model.fullId, reasons);
-	}
-	const hardPool = candidates.filter(model => !(hardReasons.get(model.fullId)?.length));
-	const freeIds = new Set(freeReport.candidates.filter(candidate => candidate.eligible).map(candidate => candidate.route));
-	const { cache } = readRankCache();
-	const qualityTask = options.quality ?? (options.task ? taskQuality(options.task) : undefined);
-	const qualityPool = hardPool.filter(model => freeIds.has(model.fullId) || !options.freeOnly && (isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg)));
-	const quality = qualityTask ? assessModelQuality(qualityPool, cache?.observations ?? [], qualityTask, reference, now) : undefined;
 	const rows = candidates.map(model => {
-		const reasons = [...(hardReasons.get(model.fullId) ?? [])];
-		const free = freeById.get(model.fullId);
-		if (free?.free && !free.eligible) reasons.push(...free.reasons.slice(0, 3).map(reason => `free-${reason}`));
-		const verdict = quality?.get(model.fullId);
-		if (verdict && !verdict.eligible) reasons.push(verdict.confidence === "unknown" ? "quality-unknown" : "quality-gate");
-		if (!options.freeOnly && !contextTooSmall(model) && !isAutonomousMeteredEligible(model, cfg) && !subscriptionEligible(model, cfg) && !free?.eligible) reasons.push("no-known-affordable-price");
-		if (options.freeOnly && free && !free.eligible) reasons.push("free-only");
+		const structured = byRoute.get(model.fullId);
+		const reasons = structured?.dimensions.map(dimension => {
+			const text = structured.detail[dimension];
+			return text ? `${dimension} (${text})` : dimension;
+		}) ?? [];
 		return { model, reasons: [...new Set(reasons)] };
 	});
 	const freeRows = rows.filter(row => freeById.get(row.model.fullId)?.free);

@@ -71,7 +71,31 @@ type ShellState = {
 };
 type ShellToken = { raw: string; operator: boolean };
 
+/**
+ * Pure-syntax memo: shell tokenization is a deterministic function of the
+ * command string, so the tool_call handlers in this extension share one
+ * bounded parse per distinct command. Authorization DECISIONS
+ * (assessShellMutation, isPathProtected) are never cached — they read mutable
+ * filesystem state and are re-evaluated on every event, including the
+ * post-confirm TOCTOU recheck.
+ */
+const shellTokenCache = new Map<string, ShellToken[]>();
+const SHELL_TOKEN_CACHE_MAX = 512;
+const SHELL_TOKEN_CACHE_CHARS = 16384;
+
 function shellTokens(source: string): ShellToken[] {
+	const cacheable = source.length <= SHELL_TOKEN_CACHE_CHARS;
+	const hit = cacheable ? shellTokenCache.get(source) : undefined;
+	if (hit) return hit.map((token) => ({ ...token }));
+	const tokens = shellTokensUncached(source);
+	if (cacheable) {
+		if (shellTokenCache.size >= SHELL_TOKEN_CACHE_MAX) shellTokenCache.delete(shellTokenCache.keys().next().value!);
+		shellTokenCache.set(source, tokens.map((token) => ({ ...token })));
+	}
+	return tokens;
+}
+
+function shellTokensUncached(source: string): ShellToken[] {
 	const tokens: ShellToken[] = [];
 	let word = "",
 		quote = "",

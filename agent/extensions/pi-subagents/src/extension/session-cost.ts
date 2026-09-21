@@ -1,7 +1,7 @@
 import { sumResultsCost } from "../shared/utils.ts";
 import { readCostEvidence } from "../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
-import { projectRunEvidence } from "../runs/shared/run-history.ts";
+import { failureOf, projectRunEvidence } from "../runs/shared/run-history.ts";
 
 /** Persist compact accounting evidence, never prompts or tool output. Footer
  * owns summation/deduplication; this bridges detached completion into history. */
@@ -14,7 +14,7 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     ...(typeof r?.workflowKey === 'string' ? {workflowKey:r.workflowKey} : {}),
     ...(typeof r?.status === 'string' ? {status:r.status} : typeof r?.state === 'string' ? {status:r.state} : typeof r?.success === 'boolean' ? {status:r.success?'completed':'failed'} : payload.success === true ? {status:'completed'} : payload.results.length === 1 && ['complete','completed','failed','paused','stopped'].includes(payload.state) ? {status:payload.state} : {}),
     ...(typeof r?.exitCode === 'number' ? {exitCode:r.exitCode} : {}),
-    ...(r?.error ? {error:'child-error'} : {}),
+    ...(r?.error ? {error:'child-error', cause:failureOf(r ?? {}).cause} : {}),
     ...(r?.stopped ? {stopped:true} : {}),
     ...(r?.interrupted ? {interrupted:true} : {}),
     ...(r?.detached ? {detached:true} : {}),

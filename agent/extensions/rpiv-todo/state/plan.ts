@@ -7,6 +7,12 @@ export const EXECUTIONS = ['self', 'subagent', 'swarm', 'fusion'] as const;
 export function planFieldError(task: Partial<Task>): string | undefined {
   if (task.parentId != null && (!Number.isSafeInteger(task.parentId) || task.parentId < 1)) return 'parentId must be a positive task id or null';
   if (task.execution !== undefined && !EXECUTIONS.includes(task.execution)) return 'Unknown execution mode';
+  // Ownership coherence: a task recovered in the parent cannot still claim
+  // delegated execution. Recovery sets owner/execution/evidence/refs/runId
+  // together (see lib/todo-linkage.ts); partial states are rejected here.
+  if (task.owner === 'parent' && task.execution !== undefined && task.execution !== 'self') {
+    return "owner 'parent' requires execution 'self': set execution, evidence, refs and runId together when recovering delegated work";
+  }
   for (const key of ['files', 'refs'] as const) {
     const value = task[key];
     if (value !== undefined && (!Array.isArray(value) || value.length > 32 || value.some(x => typeof x !== 'string' || !x.trim() || x.length > 512))) return `${key} requires at most 32 nonempty strings of at most 512 characters`;

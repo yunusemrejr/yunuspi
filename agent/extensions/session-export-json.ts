@@ -25,6 +25,7 @@ import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { buildSessionJsonExport } from "./lib/session-export-json.ts";
 import { shadowReport } from "./lib/intervention-registry.ts";
 import { activityView } from "./lib/activity-indicators.ts";
+import { collectRuntimeProvenance } from "./lib/diagnostic-provenance.ts";
 
 const USAGE =
   "Usage: /export-json [path] [--all] [--no-raw] [--min]\n" +
@@ -96,6 +97,10 @@ export default function (pi: ExtensionAPI) {
       } catch { currentRouting = undefined; }
       const currentEndpoint = typeof ctx.model?.compat?.recoveryEndpointName === "string" && ctx.model.compat.recoveryEndpointName.trim()
         ? ctx.model.compat.recoveryEndpointName.trim().slice(0, 160) : undefined;
+      let provenance = null;
+      try {
+        provenance = collectRuntimeProvenance({});
+      } catch { /* provenance is best-effort diagnostics */ }
       const report = buildSessionJsonExport({
         header,
         sessionFile,
@@ -113,6 +118,7 @@ export default function (pi: ExtensionAPI) {
         includeRaw: options.includeRaw,
         controlPlaneShadow,
         activity,
+        provenance,
       });
       const sessionTag = typeof header?.id === "string" && header.id
         ? header.id.slice(0, 8)

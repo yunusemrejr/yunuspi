@@ -7,6 +7,12 @@ import {
 } from "./lib/session-report.ts";
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
+import {
+  reduceChildEvents,
+  projectTranscriptChildren,
+  summarizeLedger,
+  type LogicalChildTask,
+} from "./pi-subagents/src/runs/shared/child-ledger.ts";
 import { scanSessionAudit } from "./lib/session-audit.ts";
 import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
@@ -351,6 +357,12 @@ export type UsedSummary = {
   councils: { status: string; evidence: number; incomplete: boolean }[];
   reviews: { rounds: number; disposition: string; aspects: { aspect: string; outcome: string }[] } | null;
   inspected: number;
+  /** Canonical logical child tasks from the shared child ledger (aggregate-first). */
+  logicalTasks: LogicalChildTask[];
+  attemptsTotal: number;
+  /** Linkage gaps: missing task ids / orphan accounting. Never called "omitted". */
+  unresolvedLinkage: number;
+  linkageNotes: string[];
 };
 
 export type UsedLiveModel = {
@@ -594,7 +606,13 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
       };
     }
   }
-  const totalAgents = metrics.agents > 0 ? metrics.agents : allRuns.length;
+  // Canonical child state: /used projects the shared ledger — the same reducer
+  // /metrics, recovery, and diagnostics read — instead of inferring child rows
+  // a second time. Forensic run rows below stay for launch-args detail.
+  const ledger = reduceChildEvents(projectTranscriptChildren(list));
+  const ledgerSummary = summarizeLedger(ledger);
+  const logicalTasks = ledger.tasks.slice(-CHILD_ROW_LIMIT);
+  const totalAgents = ledger.tasks.length > 0 ? ledger.tasks.length : metrics.agents > 0 ? metrics.agents : allRuns.length;
   return {
     tools,
     toolDistinctTotal: metrics.distinctTools ?? tools.length,
@@ -616,14 +634,16 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     runs,
     agents: {
       total: totalAgents,
-      active: metrics.agentsActive ?? 0,
-      completed: metrics.agentsCompleted ?? 0,
-      failed: metrics.agentFailures ?? 0,
-      stopped: metrics.agentsStopped ?? 0,
-      paused: metrics.agentsPaused ?? 0,
+      active: ledger.tasks.length > 0 ? ledgerSummary.running : metrics.agentsActive ?? 0,
+      completed: ledger.tasks.length > 0 ? ledgerSummary.completed : metrics.agentsCompleted ?? 0,
+      failed: ledger.tasks.length > 0 ? ledgerSummary.failed : metrics.agentFailures ?? 0,
+      stopped: ledger.tasks.length > 0 ? ledgerSummary.stopped : metrics.agentsStopped ?? 0,
+      paused: ledger.tasks.length > 0 ? ledgerSummary.paused : metrics.agentsPaused ?? 0,
       unknown: metrics.agentOutcomeUnknown ?? 0,
       shown: runs.length,
-      omitted: Math.max(0, totalAgents - runs.length, allRuns.length - runs.length),
+      // Display limit only: rows that exist but were cut by CHILD_ROW_LIMIT.
+      // Missing linkage is reported separately as unresolved linkage.
+      omitted: Math.max(0, allRuns.length - runs.length, ledger.tasks.length - logicalTasks.length),
     },
     session: {
       responses: metrics.responses ?? 0,
@@ -655,6 +675,10 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     councils,
     reviews,
     inspected: list.length,
+    logicalTasks,
+    attemptsTotal: ledgerSummary.attempts,
+    unresolvedLinkage: ledger.unresolved.length + ledger.tasks.filter((task) => task.unresolvedLinkage === true).length,
+    linkageNotes: ledger.unresolved.slice(0, 8).map((item) => `${item.kind}: ${item.detail}`),
   };
 }
 
@@ -682,6 +706,10 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   }));
   const runs = Array.isArray(summary.runs) ? summary.runs : [];
   const agents = summary.agents ?? { total: runs.length, active: 0, completed: 0, failed: 0, stopped: 0, paused: 0, unknown: 0, shown: runs.length, omitted: 0 };
+  const logicalTasks = Array.isArray((summary as Record<string, unknown>).logicalTasks) ? (summary as unknown as { logicalTasks: LogicalChildTask[] }).logicalTasks : [];
+  const attemptsTotal = typeof (summary as Record<string, unknown>).attemptsTotal === "number" ? (summary as unknown as { attemptsTotal: number }).attemptsTotal : 0;
+  const unresolvedLinkage = typeof (summary as Record<string, unknown>).unresolvedLinkage === "number" ? (summary as unknown as { unresolvedLinkage: number }).unresolvedLinkage : 0;
+  const linkageNotes = Array.isArray((summary as Record<string, unknown>).linkageNotes) ? (summary as unknown as { linkageNotes: string[] }).linkageNotes : [];
   const session = summary.session ?? { responses: 0, toolCalls: 0, toolResults: tools.reduce((sum, tool) => sum + tool.count, 0), parentErrors: 0, blockedTools: 0, compactions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cacheRate: null, childTokens: 0, hookCalls: null, hookChanged: null, hookErrors: null, cost: "$?", costUnknown: true, costPending: 0 };
   const hooks = Array.isArray(summary.hooks) ? summary.hooks : [];
   const sections: string[] = [
@@ -745,33 +773,73 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       ["Cost", run.costUsd === undefined ? "not recorded" : `$${run.costUsd.toFixed(6)}`],
     ])}</details>`;
   }).join("") : `<div class="empty">No child-agent run was recorded.</div>`;
-  sections.push(group("🤖 Child agents", `${agents.total} observed · ${agents.active} active · ${agents.failed} failed`, `<div class="status-line">${agentBadges}</div>${runBody}${agents.omitted ? `<p class="note">${plural(agents.omitted, "agent detail row")} omitted from this bounded view.</p>` : ""}`, true));
+  const taskBody = logicalTasks.length ? logicalTasks.map((task) => {
+    const attemptRows = task.attempts.map((attempt) => {
+      const cause = attempt.execution.cause;
+      return `<details class="item"><summary><span class="item-name">Attempt ${attempt.attempt}${attempt.route ? ` · ${escapeHtml(attempt.route)}` : ""}</span><span class="badge ${statusTone(attempt.state)}">${escapeHtml(attempt.state)}</span></summary>${factGrid([
+        ["Run", attempt.runId ?? "not recorded"],
+        ["Route", attempt.route ?? "not recorded"],
+        ["Backend", attempt.backend ?? "not recorded"],
+        ["Execution", cause ? `${attempt.execution.status} (${cause.category}${cause.truncation !== "none" ? `, ${cause.truncation}` : ""})` : attempt.execution.status],
+        ["Acceptance", attempt.acceptance.status + (attempt.acceptance.reason ? ` · ${attempt.acceptance.reason}` : "")],
+        ["Usage", attempt.usage ? `${formatCount(attempt.usage.input ?? 0)} in · ${formatCount(attempt.usage.output ?? 0)} out` : "not recorded"],
+        ["Exit code", attempt.exitCode === undefined ? "not recorded" : String(attempt.exitCode)],
+      ])}</details>`;
+    }).join("");
+    return `<details class="item"><summary><span class="item-name">${escapeHtml(task.label)}</span><span class="badge ${statusTone(task.state)}">${escapeHtml(task.state)}</span></summary>${factGrid([
+      ["Task", task.taskId],
+      ["Todo", task.todoId ?? "not linked"],
+      ["Scope", task.scopeId ?? "not recorded"],
+      ["Agent", task.agent ?? "not recorded"],
+      ["Execution", task.execution.cause ? `${task.execution.status} (${task.execution.cause.category})` : task.execution.status],
+      ["Acceptance", task.acceptance.status],
+      ["Attempts", plural(task.attempts.length, "attempt")],
+    ])}${attemptRows}</details>`;
+  }).join("") : `<div class="empty">No logical child task was recorded.</div>`;
+  const linkageNote = unresolvedLinkage ? `<p class="note">${plural(unresolvedLinkage, "evidence item")} with unresolved linkage (missing lifecycle evidence) — not omitted rows. ${linkageNotes.length ? escapeHtml(linkageNotes.slice(0, 3).join(" · ")) : ""}</p>` : "";
+  sections.push(group("🧩 Logical child tasks", `${agents.total} tasks · ${attemptsTotal} attempts`, `<p class="note">One logical task per delegated scope; retries are attempts under it, never anonymous new runs.</p>${taskBody}${linkageNote}`, true));
+  sections.push(group("🤖 Child agent runs", `${agents.total} observed · ${agents.active} active · ${agents.failed} failed`, `<div class="status-line">${agentBadges}</div><p class="note">Forensic run rows (launch-level detail). Canonical state lives in Logical child tasks above.</p>${runBody}${agents.omitted ? `<p class="note">${plural(agents.omitted, "agent detail row")} omitted from this bounded view.</p>` : ""}${linkageNote}`, true));
 
   const toolErrorsTotal = tools.reduce((sum, tool) => sum + (tool.errors ?? 0), 0);
   sections.push(group("🔧 Tools", `${summary.toolDistinctTotal ?? tools.length} distinct · ${session.toolResults} results · ${toolErrorsTotal} failed`, tools.length ? `<p class="note">Counts are returned tool-result records, not a quality score.</p><ul>${tools.map((tool) => usedRow(tool.name, plural(tool.count, "result"), tool.errors ? `${plural(tool.errors, "failed result")}` : "no recorded failures", tool.errors ? "failed" : "info")).join("")}</ul>${summary.toolsOmitted ? `<p class="note">${plural(summary.toolsOmitted, "lower-volume tool")} omitted from this bounded list; the distinct total includes them.</p>` : ""}` : `<div class="empty">No tool result was recorded.</div>`));
 
   const review = summary.reviews;
-  const activityBody = `<ul>${usedRow("🐝 Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("🌀 Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("🛟 Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
-    `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`🏛️ Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>` +
-    `<h3>Quality review</h3><ul>${review ? usedRow(`🔍 ${plural(review.rounds, "round")}`, review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
-  sections.push(group("⚡ Harness activity", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, activityBody));
+  const coordinationBody = `<ul>${usedRow("🐝 Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("🌀 Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("🛟 Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
+    `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`🏛️ Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>`;
+  sections.push(group("⚡ Coordination", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, coordinationBody));
+  const reviewBody = `<ul>${review ? usedRow(`🔍 ${plural(review.rounds, "round")}`, review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
+  sections.push(group("🔍 Reviews", review ? `${plural(review.rounds, "round")} · ${review.disposition}` : "none recorded", `<p class="note">Reviews consume evidence; a review count is never a quality signal.</p>${reviewBody}`));
 
   const promptTokens = session.input + session.cacheRead + session.cacheWrite;
+  sections.push(group("💰 Cost", session.cost, factGrid([
+    ["Recorded cost", `${session.cost}${session.costUnknown ? " · incomplete/unknown coverage" : ""}${session.costPending ? ` · ${plural(session.costPending, "child operation")} pending` : ""}`],
+    ["Child token traffic", formatCount(session.childTokens)],
+  ]) + `<p class="note">Unknown cost is never rendered as $0. Verified zero and missing evidence are distinct states.</p>`));
+  sections.push(group("🧠 Context/cache", session.cacheRate === null ? "reuse unknown" : `${session.cacheRate.toFixed(2)}% reuse`, factGrid([
+    ["Prompt traffic", `${formatCount(promptTokens)} tokens · ${formatCount(session.input)} uncached input · ${formatCount(session.cacheRead)} cache read · ${formatCount(session.cacheWrite)} cache write`],
+    ["Output", `${formatCount(session.output)} tokens · ${formatCount(session.reasoning)} reported reasoning (included in output)`],
+    ["Prompt cache reuse", session.cacheRate === null ? "unknown" : `${session.cacheRate.toFixed(2)}% cumulative`],
+    ["Compactions", formatCount(session.compactions)],
+  ])));
+  const hookHtml = hooks.length ? `<ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${Math.round(hook.ms)} ms`, hook.errors ? "failed" : "info")).join("")}</ul>` : `<div class="empty">No hook measurement was recorded.</div>`;
+  sections.push(group("🪝 Hooks", session.hookCalls === null ? "unknown before telemetry" : plural(session.hookCalls, "call"), factGrid([
+    ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
+  ]) + hookHtml));
+  const failuresTotal = session.parentErrors + toolErrorsTotal;
+  sections.push(group("🚨 Failures/recovery", `${failuresTotal} recorded · ${summary.recoveries} recoveries`, factGrid([
+    ["Parent failures", `${formatCount(session.parentErrors)} total · ${formatCount(session.blockedTools)} blocked tools`],
+    ["Tool failures", formatCount(toolErrorsTotal)],
+    ["Child failures", formatCount(agents.failed)],
+    ["Recovery plans", formatCount(summary.recoveries)],
+    ["Unresolved linkage", unresolvedLinkage ? `${formatCount(unresolvedLinkage)} (missing lifecycle evidence)` : "none"],
+  ]) + `<p class="note">Recovery is cause-specific; see Logical child tasks for per-attempt causes.</p>`));
   const sessionFactsHtml = factGrid([
     ["Retained branch entries", formatCount(summary.inspected)],
     ["Main responses", formatCount(session.responses)],
     ["Tool traffic", `${formatCount(session.toolCalls)} calls · ${formatCount(session.toolResults)} results`],
-    ["Parent failures", `${formatCount(session.parentErrors)} total · ${formatCount(session.blockedTools)} blocked tools`],
     ["Compactions", formatCount(session.compactions)],
-    ["Prompt traffic", `${formatCount(promptTokens)} tokens · ${formatCount(session.input)} uncached input · ${formatCount(session.cacheRead)} cache read · ${formatCount(session.cacheWrite)} cache write`],
-    ["Output", `${formatCount(session.output)} tokens · ${formatCount(session.reasoning)} reported reasoning (included in output)`],
-    ["Prompt cache reuse", session.cacheRate === null ? "unknown" : `${session.cacheRate.toFixed(2)}% cumulative`],
-    ["Child token traffic", formatCount(session.childTokens)],
-    ["Recorded cost", `${session.cost}${session.costUnknown ? " · incomplete/unknown coverage" : ""}${session.costPending ? ` · ${plural(session.costPending, "child operation")} pending` : ""}`],
-    ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
   ]);
-  const hookHtml = hooks.length ? `<h3>Most active measured hooks</h3><ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${Math.round(hook.ms)} ms`, hook.errors ? "failed" : "info")).join("")}</ul>` : "";
-  sections.push(group("🧾 Session totals", `${session.responses} responses · ${session.compactions} compactions · ${session.cost}`, `${sessionFactsHtml}${hookHtml}`));
+  sections.push(group("🧾 Session totals", `${session.responses} responses · ${session.compactions} compactions · ${session.cost}`, sessionFactsHtml));
   return sections.join("");
 }
 
