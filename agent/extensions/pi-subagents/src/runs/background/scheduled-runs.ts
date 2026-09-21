@@ -297,7 +297,7 @@ function parseSchedule(value: unknown, file: string): ScheduleRecord {
 	if (record.trigger.kind === "once") {
 		if (typeof record.trigger.at !== "string" || (record.trigger.nextRunAt !== undefined && typeof record.trigger.nextRunAt !== "string")) throw new Error(`Schedule record '${file}' has an invalid one-shot trigger.`);
 	} else if (record.trigger.kind === "interval") {
-		if (typeof record.trigger.every !== "string" || typeof record.trigger.everyMs !== "number" || typeof record.trigger.anchorAt !== "string" || typeof record.trigger.nextRunAt !== "string") throw new Error(`Schedule record '${file}' has an invalid interval trigger.`);
+		if (typeof record.trigger.every !== "string" || !Number.isSafeInteger(record.trigger.everyMs) || record.trigger.everyMs < 1 || typeof record.trigger.anchorAt !== "string" || typeof record.trigger.nextRunAt !== "string") throw new Error(`Schedule record '${file}' has an invalid interval trigger.`);
 	} else throw new Error(`Schedule record '${file}' has an unsupported trigger.`);
 	if (record.sessionOnly !== undefined && typeof record.sessionOnly !== "boolean") throw new Error(`Schedule record '${file}' has invalid sessionOnly.`);
 	if (record.sessionOnly === true && (typeof record.ownerSessionFile !== "string" || !record.ownerSessionFile.trim())) throw new Error(`Schedule record '${file}' is session-only but has no owner session file.`);
@@ -868,7 +868,7 @@ export class ScheduledRunManager {
 		try {
 			const status = readJson(path.join(run.asyncDir, "status.json"), "async status") as Partial<AsyncStatus>;
 			if (status.runId !== run.asyncId) throw new Error(`Async status does not match scheduled child '${run.asyncId}'.`);
-			if (["complete", "failed", "stopped", "rejected"].includes(String(status.state))) this.finishRun(store, schedule, run, status.state === "complete", typeof status.error === "string" ? status.error : undefined);
+			if (["complete", "failed", "partial", "stopped", "rejected"].includes(String(status.state))) this.finishRun(store, schedule, run, status.state === "complete", typeof status.error === "string" ? status.error : undefined);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof Error && /ENOENT/.test(error.message))) throw error;
 		}
