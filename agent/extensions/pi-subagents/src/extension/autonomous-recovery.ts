@@ -732,9 +732,12 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
                 && primary.baseUrl?.replace(/\/+$/, "") === "https://openrouter.ai/api/v1" && endpointAttempts < 2
                 && failure && (failure.kind !== "quota-rate" || upstream) && evaluateRoute({provider:primary.provider,model:primary.id,now:now()}).allowed) {
                 const existingCaps = routing.max_price ?? {};
-                const cap = (key:string, price:number) => existingCaps[key] !== undefined && Number.isFinite(Number(existingCaps[key])) ? Math.min(price,Number(existingCaps[key])) : price;
+                const cap = (key:string, price:number|undefined) => existingCaps[key] !== undefined && Number.isFinite(Number(existingCaps[key])) ? Math.min(price ?? NaN,Number(existingCaps[key])) : price;
                 // Keep endpoint price at or below the selected model's rates.
-                const caps = {prompt:cap("prompt",primary.cost.input),completion:cap("completion",primary.cost.output)};
+                // Cost metadata is optional at runtime: a missing price skips
+                // the endpoint path via the finiteness check below instead of
+                // throwing and pausing the whole recovery.
+                const caps = {prompt:cap("prompt",primary.cost?.input),completion:cap("completion",primary.cost?.output)};
                 if (Number.isFinite(caps.prompt) && caps.prompt>=0 && Number.isFinite(caps.completion) && caps.completion>=0) {
                     if (!endpointCatalog) {
                         try { endpointCatalog = process.env.PI_OFFLINE === "1" && !deps.endpoints ? [] : await (deps.endpoints ?? fetchEndpoints)(primary.id,signal); }
