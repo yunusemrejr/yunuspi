@@ -133,13 +133,14 @@ function reasoningFromIntent(intent: TaskIntent | undefined, explicit: Reasoning
 	if (explicit === "required") return { need: true, note: "caller-required reasoning" };
 	if (explicit === "unneeded") return { need: false, note: "caller-marked non-reasoning workload" };
 	const action = intent?.requestedAction;
+	if (explicit === "preferred") return { need: false, note: "reasoning preferred by caller; not a hard gate" };
 	if (action === "implement" || action === "plan" || action === "operate") {
-		return { need: explicit !== "preferred" ? false : true, note: explicit === "preferred" ? "preferred by caller" : "implementation workloads prefer reasoning but do not require it" };
+		return { need: false, note: "implementation workloads prefer reasoning but do not require it" };
 	}
 	if (action === "investigate" || action === "review") {
 		return { need: false, note: "read-only investigation routes without a reasoning gate" };
 	}
-	return { need: false, note: explicit === "preferred" ? "preferred by caller" : "no reasoning requirement" };
+	return { need: false, note: "no reasoning requirement" };
 }
 
 /**
