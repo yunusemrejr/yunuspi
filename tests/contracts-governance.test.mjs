@@ -53,6 +53,10 @@ test('execution evidence envelope is minimal and mergeable', () => {
   const review = buildExecutionEvidence({ identity: { id: 'qr-1', todoId: 'todo-9' }, owner: 'review', state: 'completed', producer: 'review-coordinator' });
   const merged = mergeEvidenceLists([child], [review, child]);
   assert.equal(merged.length, 2, 'same evidence merges, distinct owners coexist');
+  const priced = buildExecutionEvidence({ identity: { id: 'task-5' }, producer: 'probe', usage: { input: 10, costUsd: 1.5 } });
+  assert.equal(priced.usage.costUsd, 1.5);
+  const unpriced = buildExecutionEvidence({ identity: { id: 'task-6' }, producer: 'probe', usage: { input: 10, costUsd: NaN } });
+  assert.ok(!('costUsd' in unpriced.usage), 'non-finite cost is dropped, not recorded');
 });
 
 test('fail policy: safety closed, guidance open, routing blocked-state', () => {

@@ -139,7 +139,7 @@ export function buildExecutionEvidence(input: EvidenceInput): ExecutionEvidence 
 			...(cleanNumber(input.usage.cacheWrite) === undefined ? {} : { cacheWrite: cleanNumber(input.usage.cacheWrite) }),
 			...(cleanNumber(input.usage.reasoning) === undefined ? {} : { reasoning: cleanNumber(input.usage.reasoning) }),
 			...(cleanNumber(input.usage.turns) === undefined ? {} : { turns: cleanNumber(input.usage.turns) }),
-			...(input.usage.costUsd === undefined ? {} : { costUsd: input.usage.costUsd }),
+			...(cleanNumber(input.usage.costUsd) === undefined ? {} : { costUsd: cleanNumber(input.usage.costUsd) }),
 			...(input.usage.costState ? { costState: input.usage.costState } : {}),
 		}
 		: undefined;
