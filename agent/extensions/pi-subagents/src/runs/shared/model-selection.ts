@@ -41,6 +41,7 @@ import { recordRouteDecision, type CandidateRejection, type RejectionDimension, 
 const MIN_AUTONOMOUS_CONTEXT_TOKENS = 8192;
 const RANK_CACHE_FILE = "subagents-model-rank.json";
 const RANK_CACHE_VERSION = 2;
+const PUBLISH_LOCK_STALE_MS = 60_000;
 
 export interface ModelRankCache {
 	version: number;
@@ -378,7 +379,7 @@ export function selectAffordableModel(
     const compareCost=(a:ModelInfo,b:ModelInfo)=>{
         const left=economyComparisonCost(a,options?.workload),right=economyComparisonCost(b,options?.workload);
         const group=Number(left>cheapestCost*1.1)-Number(right>cheapestCost*1.1);
-        return qualityCompare(a.fullId,b.fullId) || group || (process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? retryCost(a)-retryCost(b) : 0) || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right || qualityCompare(a.fullId,b.fullId);
+        return qualityCompare(a.fullId,b.fullId) || group || (process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? retryCost(a)-retryCost(b) : 0) || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right;
     };
 
 	const metered = eligible
@@ -585,9 +586,25 @@ export async function refreshModelRankingCache(
 	try {
 		fs.mkdirSync(path.dirname(filePath), { recursive: true });
   // Atomic replacement plus exclusive publication; a slow refresh cannot
-  // overwrite newer evidence produced by another live session.
+  // overwrite newer evidence produced by another live session. A stale lock
+  // is dead (a crash between acquire and release) and is taken over so one
+  // crashed publisher cannot wedge every later refresh.
   const lockPath = `${filePath}.publish-lock`;
-  fs.mkdirSync(lockPath); lock = lockPath;
+  try {
+    fs.mkdirSync(lockPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    let lockAgeMs = Number.POSITIVE_INFINITY;
+    try { lockAgeMs = Date.now() - fs.statSync(lockPath).mtimeMs; } catch { /* vanished: retry below */ }
+    if (lockAgeMs <= PUBLISH_LOCK_STALE_MS) return { ok: false, reason: "another session is publishing model ranking evidence" };
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    try { fs.mkdirSync(lockPath); }
+    catch (retryError) {
+      if ((retryError as NodeJS.ErrnoException).code !== "EEXIST") throw retryError;
+      return { ok: false, reason: "another session is publishing model ranking evidence" };
+    }
+  }
+  lock = lockPath;
   const prior = readRankCache().cache;
   if (prior && Date.parse(prior.fetchedAt) > Date.parse(result.body.fetchedAt)) return {ok:false,reason:"newer model evidence already published"};
   writePrivateAtomicJson(filePath,result.body);
