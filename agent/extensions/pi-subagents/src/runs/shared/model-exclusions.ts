@@ -142,6 +142,9 @@ function deduplicate(items: ModelExclusion[]): ModelExclusion[] {
  * removes matching candidates from fallback lists.
  */
 export function recordModelFailure(options: RecordModelFailureOptions): void {
+	if (options.ttlMs !== undefined && (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0 || options.ttlMs > MAX_MODEL_EXCLUSION_TTL_MS)) {
+		throw new Error(`Model exclusion TTL must be a finite positive number no greater than ${MAX_MODEL_EXCLUSION_TTL_MS}.`);
+	}
 	ensureLoaded();
 	// The store is per-process but the file is per-user: re-read and merge
 	// before append+flush, or sequential cross-session records silently drop
