@@ -63,6 +63,9 @@ export function skillEvidenceContext(evidence: { files?: readonly string[]; tool
     c:'c-systems native memory', cpp:'c++ native memory', cc:'c++ native memory', hpp:'c++ native memory', sql:'database transactions queries',
     csv:'tabular dataset', parquet:'tabular dataset', xlsx:'spreadsheet workbook', ipynb:'python notebook',
     docx:'document authoring', pptx:'presentation slides', pdf:'document pdf', wasm:'webassembly',
+    json:'configuration schema', jsonl:'configuration schema', yaml:'configuration schema', yml:'configuration schema', toml:'configuration schema',
+    md:'documentation', markdown:'documentation',
+    sh:'shell scripting', bash:'shell scripting',
   };
   for (const file of (evidence.files ?? []).slice(-32)) {
     if (typeof file !== 'string' || file.length > 4096) continue;

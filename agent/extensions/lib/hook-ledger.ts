@@ -43,6 +43,16 @@ function dispatchRegistry(): DispatchRegistry {
 		registry = { seq: 0, cursors: new WeakMap() };
 		g[DISPATCH_REGISTRY] = registry;
 	}
+	// The production hook-metrics wrapper (V3, byte-frozen in the owned core)
+	// creates this same registry with its cursor map named `ctxs`. Adopt that
+	// map so the once-per-event guard shares dispatch identity with the live
+	// session instead of throwing on a missing `cursors` field.
+	const shaped = registry as DispatchRegistry & {
+		ctxs?: WeakMap<object, DispatchCursor>;
+	};
+	if (!shaped.cursors || typeof shaped.cursors.get !== "function") {
+		shaped.cursors = shaped.ctxs instanceof WeakMap ? shaped.ctxs : new WeakMap();
+	}
 	return registry;
 }
 
