@@ -177,7 +177,7 @@ export default function (pi: any) {
             });
           } else {
             details.visualInterpretation =
-              "Unavailable: current model does not advertise vision. PNG saved, not delivered as pixels. For a visual question, discover routes with subagent({action:'models',model:'input:image'}), then use a permitted image model explicitly for a fresh read-only child to read this output path and return observations with uncertainty. Respect delegation limits; do not claim to have seen it.";
+              "Unavailable: current model does not advertise vision. PNG saved, not delivered as pixels. If you only need printed text from this capture, run image_ocr on the output path instead of delegating. For other visual questions, discover routes with subagent({action:'models',model:'input:image'}), then use a permitted image model explicitly for a fresh read-only child to read this output path and return observations with uncertainty. Respect delegation limits; do not claim to have seen it.";
           }
         }
         return {

@@ -1198,7 +1198,8 @@
       "related": [
         "scope-council",
         "quality-review",
-        "todo-planning"
+        "todo-planning",
+        "source-intelligence"
       ],
       "sourceFiles": [
         "agent/extensions/project-intelligence.ts",
@@ -1931,7 +1932,8 @@
         "video_frames",
         "audio_analyze",
         "media_edit",
-        "music_compose"
+        "music_compose",
+        "image_ocr"
       ],
       "tools": [
         "web_search",
@@ -1947,7 +1949,8 @@
         "video_frames",
         "audio_analyze",
         "media_edit",
-        "music_compose"
+        "music_compose",
+        "image_ocr"
       ],
       "commands": [
         "websearch",
@@ -2621,7 +2624,7 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 161,
+        "line": 215,
         "kind": "factory"
       },
       {
@@ -2784,6 +2787,12 @@
         "kind": "literal"
       },
       {
+        "name": "image_ocr",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 214,
+        "kind": "factory"
+      },
+      {
         "name": "math_check",
         "source": "agent/extensions/lib/small-tools.ts",
         "line": 92,
@@ -2792,13 +2801,13 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 162,
+        "line": 216,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 159,
+        "line": 212,
         "kind": "factory"
       },
       {
@@ -2846,7 +2855,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 165,
+        "line": 219,
         "kind": "factory"
       },
       {
@@ -3027,7 +3036,7 @@
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 160,
+        "line": 213,
         "kind": "factory"
       },
       {
@@ -3381,10 +3390,11 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          149
+          202
         ],
         "knownNames": [
           "audio_analyze",
+          "image_ocr",
           "media_edit",
           "media_info",
           "music_compose",
@@ -3523,8 +3533,8 @@
       "sourceFiles": 581,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 81,
-      "uniqueStableTools": 80,
+      "stableRegistrationRows": 82,
+      "uniqueStableTools": 81,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",

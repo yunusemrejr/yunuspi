@@ -287,6 +287,13 @@ function reduceTaskMutation(
 
 /** Atomic plan edits use the existing reducer and persisted snapshot. */
 export function applyTaskMutation(state: TaskState, action: TaskAction, params: TaskMutationParams): ApplyResult {
+ // The schema carries `operations` alongside every action, so a
+ // create/update/delete call may arrive with an operations array instead of
+ // action=batch. Honor the unambiguous batch intent rather than failing on
+ // the single-mutation discriminator and silently dropping the operations.
+ if (action !== "batch" && ["create", "update", "delete"].includes(action) && Array.isArray(params.operations) && params.operations.length > 0) {
+  return applyTaskMutation(state, "batch", params);
+ }
  if (action === "batch") {
   if (!Array.isArray(params.operations) || !params.operations.length || params.operations.length > 32) return errorResult(state, "batch requires 1..32 operations");
   let next = state; const ids: Record<string, number> = {};

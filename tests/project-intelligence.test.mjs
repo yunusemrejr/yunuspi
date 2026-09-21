@@ -907,3 +907,111 @@ test("retrieval distinguishes missing evidence, directed reachability and paged 
     "response budgets cannot mutate cached evidence",
   );
 });
+
+test("an unscoped agent query returns a category-diverse overview like the viewer", () => {
+  const nodes = [{ id: "proj", type: "project", label: "P", key: "p" }];
+  const types = [
+    ...Array.from({ length: 12 }, () => "file"),
+    "dependency",
+    "pipeline",
+    "database",
+    "decision",
+    "api",
+    "configuration",
+    "external",
+  ];
+  types.forEach((type, i) =>
+    nodes.push({ id: `n${i}`, type, label: `${type}${i}`, key: `k${i}` }),
+  );
+  // One high-level member is disconnected: overviews still surface it.
+  nodes.push({
+    id: "orphan",
+    type: "constraint",
+    label: "orphan",
+    key: "orphan",
+  });
+  const edges = types.map((type, i) => ({
+    id: `e${i}`,
+    source: "proj",
+    target: `n${i}`,
+    type: "contains",
+    status: "verified",
+  }));
+  const snapshot = {
+    revision: 3,
+    project: { rootNodeId: "proj" },
+    nodes,
+    edges,
+    facts: [],
+    sources: [],
+    health: {},
+    activity: [],
+  };
+  const overview = queryGraph(snapshot, { limit: 10, maxChars: 6000 });
+  assert.equal(overview.nodes[0].id, "proj");
+  const seen = new Set(overview.nodes.map((node) => node.type));
+  for (const type of [
+    "dependency",
+    "pipeline",
+    "database",
+    "decision",
+    "api",
+    "configuration",
+    "external",
+    "constraint",
+  ])
+    assert.ok(seen.has(type), `overview reserves ${type}`);
+  assert.ok(
+    overview.nodes.filter((node) => node.type === "file").length <= 1,
+    "implementation files cannot crowd out the map",
+  );
+  assert.equal(overview.truncated, true);
+  // Focusing the project node is the same overview; explicit filters stay exact.
+  assert.deepEqual(
+    queryGraph(snapshot, { focus: "proj", limit: 10, maxChars: 6000 }).nodes.map(
+      (node) => node.id,
+    ),
+    overview.nodes.map((node) => node.id),
+  );
+  const filtered = queryGraph(snapshot, {
+    types: ["file"],
+    limit: 8,
+    maxChars: 6000,
+  });
+  assert.ok(filtered.nodes.length > 0);
+  assert.ok(filtered.nodes.every((node) => node.type === "file"));
+  // Reachable members keep traversal distance; disconnected ones omit it.
+  const wide = queryGraph(snapshot, { limit: 40, maxChars: 20000 });
+  const orphan = wide.nodes.find((node) => node.id === "orphan");
+  assert.ok(orphan, "disconnected categories stay visible");
+  assert.ok(!("distance" in orphan));
+  assert.equal(wide.nodes.find((node) => node.id === "proj").distance, 0);
+});
+
+test("health reports entity and relationship shape for orientation", () =>
+  fixture(async ({ cwd, client }) => {
+    await fs.writeFile(
+      path.join(cwd, "package.json"),
+      JSON.stringify({ name: "shaped", dependencies: { react: "1.0.0" } }),
+    );
+    await fs.mkdir(path.join(cwd, "src"));
+    await fs.writeFile(
+      path.join(cwd, "src", "index.ts"),
+      'import "./helper";\n',
+    );
+    await fs.writeFile(path.join(cwd, "src", "helper.ts"), "export {};\n");
+    const c = client();
+    await c.ready;
+    await c.request("refresh");
+    const { health, shape } = await c.request("health");
+    assert.ok(health.nodeCount >= 3);
+    assert.equal(typeof shape.byType.file, "number");
+    assert.ok(shape.byType.file >= 2);
+    assert.equal(shape.byType.project, 1);
+    assert.ok(Object.keys(shape.byRelation).length > 0);
+    assert.ok(
+      Object.values(shape.byRelation).every(
+        (count) => Number.isInteger(count) && count > 0,
+      ),
+    );
+  }));

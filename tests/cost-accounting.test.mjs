@@ -183,3 +183,23 @@ test('detached completion replay retains nested inclusive costs and run identiti
  close(collect([receipt('run',saved.results),receipt('other',[child('leaf',.5)])]).total,.7);
  assert.doesNotMatch(JSON.stringify(saved),/never-copy/);
 });
+
+test('helper wrapper accounting settles linked native runs without unattributed rows',()=>{
+ const NATIVE='690ef1a3-410e-4c1e-ae81-7dc6de94c4d8';
+ const file=`/sessions/parent/${NATIVE}/run-0/session.jsonl`;
+ const lifecycle=(runId,state)=>({type:'custom',customType:'subagent-lifecycle-v1',data:{runId,mode:'single',state,results:[{index:0,status:state}]}});
+ const entries=[
+  receipt('auto-assist-1',[{index:0,status:'running'}]),
+  lifecycle(NATIVE,'running'),
+  lifecycle(NATIVE,'failed'),
+  receipt('auto-assist-1',[{index:0,exitCode:1,error:'child-error',timedOut:true,sessionFile:file,model:'openrouter/free/model',usage:usage(.003),totalCost:{costUsd:.003}}]),
+  lifecycle('auto-assist-1','failed'),
+ ];
+ const result=collect(entries);
+ close(result.total,.003);assert.equal(result.pending,0);assert.equal(result.unknown,false);
+ assert.ok(result.rows.every(r=>r.route!=='unattributed child'));
+ // An in-flight wrapper (placeholder only) still leaves honest pending state.
+ const flying=collect(entries.slice(0,2));
+ assert.equal(flying.unknown,true);assert.equal(flying.pending,2);
+ assert.ok(flying.rows.every(r=>r.route!=='unattributed child'));
+});

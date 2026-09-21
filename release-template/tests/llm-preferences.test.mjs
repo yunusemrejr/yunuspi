@@ -162,3 +162,73 @@ test("role names normalize and task inference stays conservative", () => {
 	assert.equal(prefs.inferPreferenceRole("convene a council on the API shape"), "council");
 	assert.equal(prefs.inferPreferenceRole("implement the widget and fix the bug"), "subagents");
 });
+
+test("fuzzy resolution tolerates owner renames and bare ids without switching providers", () => {
+	const live = [
+		model("zai-org/GLM-5.3-Flash", "friendli", { baseUrl: "https://api.friendli.ai/serverless/v1" }),
+		model("zai-org/GLM-5.3-Flash", "runinfra", { baseUrl: "https://api.runinfra.ai/v1" }),
+		model("qwen/qwen3.8-flash", "orcarouter", { baseUrl: "https://api.orcarouter.ai/v1" }),
+	];
+	// Owner rename with preferred provider: z-ai/ spelled, zai-org/ live.
+	assert.equal(fallback.fuzzyResolveModel("z-ai/glm-5.3-flash", live, "friendli"), "friendli/zai-org/GLM-5.3-Flash");
+	// Bare id against a qualified provider query.
+	assert.equal(fallback.fuzzyResolveModel("runinfra/glm-5-3-flash", live), "runinfra/zai-org/GLM-5.3-Flash");
+	// Qualified queries never switch providers.
+	assert.equal(fallback.fuzzyResolveModel("orcarouter/glm-5-3-flash", live), undefined);
+	// Unqualified cross-owner matches stay ambiguous across providers.
+	assert.equal(fallback.fuzzyResolveModel("z-ai/glm-5.3-flash", live), undefined);
+	// Exact behavior unchanged.
+	assert.equal(fallback.fuzzyResolveModel("zai-org/GLM-5.3-Flash", live, "friendli"), "friendli/zai-org/GLM-5.3-Flash");
+	assert.equal(fallback.fuzzyResolveModel("no/such-model-anywhere", live, "friendli"), undefined);
+});
+
+test("unresolved chain entries diagnose the true gate", () => {
+	const live = [model("zai-org/GLM-5.3-Flash", "friendli", { baseUrl: "https://api.friendli.ai/serverless/v1" })];
+	const warnings = [];
+	const origWarn = console.warn;
+	console.warn = (msg) => { warnings.push(String(msg)); };
+	try {
+		writePrefs({
+			version: 1,
+			models: {
+				paused: { provider: "runinfra", model: "glm-5-3-flash" },
+				typo: { provider: "friendli", model: "zai-org/GLM-nope-9" },
+			},
+			preferences: { subagents: { models: ["paused", "typo"] } },
+		});
+		assert.deepEqual(fallback.resolveLlmPreferenceChain("subagents", live), []);
+		const paused = warnings.find((w) => w.includes("runinfra/glm-5-3-flash"));
+		assert.ok(paused, "paused entry warns");
+		assert.match(paused, /has no models in this session's registry/);
+		const typo = warnings.find((w) => w.includes("GLM-nope-9"));
+		assert.ok(typo, "unknown-id entry warns");
+		assert.match(typo, /among 1 live "friendli" model/);
+	} finally {
+		console.warn = origWarn;
+	}
+});
+
+test("vendor-paused ids surface the vendor reason in chain diagnostics", () => {
+	const live = [model("nemotron-3-5-lightning-30b", "runinfra", { baseUrl: "https://api.runinfra.ai/v1" })];
+	const warnings = [];
+	const origWarn = console.warn;
+	console.warn = (msg) => { warnings.push(String(msg)); };
+	try {
+		writePrefs({
+			version: 1,
+			models: { paused: { provider: "runinfra", model: "glm-5-3-flash-v2" } },
+			preferences: { subagents: { models: ["paused"] } },
+		});
+		fs.writeFileSync(
+			path.join(root, "live-model-catalog.json"),
+			JSON.stringify({ version: 1, providers: { runinfra: { ts: Date.now(), models: [], unavailable: { "glm-5-3-flash-v2": 'vendor availability "paused"' } } } }),
+		);
+		assert.deepEqual(fallback.resolveLlmPreferenceChain("subagents", live), []);
+		const paused = warnings.find((w) => w.includes("glm-5-3-flash-v2"));
+		assert.ok(paused, "paused entry warns");
+		assert.match(paused, /vendor reports: vendor availability "paused"/);
+	} finally {
+		console.warn = origWarn;
+		try { fs.unlinkSync(path.join(root, "live-model-catalog.json")); } catch {}
+	}
+});

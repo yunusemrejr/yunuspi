@@ -9,9 +9,15 @@ export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) 
   const action = params.action ?? "probe";
   if (action === "capabilities") {
     const binaries: Record<string, any> = {};
-    for (const binary of ["ffmpeg", "ffprobe"]) {
-      try { const r = await run(binary, ["-version"], signal, 10000); binaries[binary] = { available: true, version: r.stdout.split("\n")[0] }; }
+    for (const [binary, flag] of [["ffmpeg", "-version"], ["ffprobe", "-version"], ["tesseract", "--version"]]) {
+      try { const r = await run(binary, [flag], signal, 10000); binaries[binary] = { available: true, version: r.stdout.split("\n")[0] }; }
       catch (e: any) { if (signal?.aborted) throw e; binaries[binary] = { available: false, reason: e.message }; }
+    }
+    if (binaries.tesseract.available) {
+      try {
+        const langs = (await run("tesseract", ["--list-langs"], signal, 10000)).stdout;
+        binaries.tesseract.languages = langs.split("\n").slice(1).map((s: string) => s.trim()).filter(Boolean).slice(0, 32);
+      } catch { binaries.tesseract.languages = []; }
     }
     if (binaries.ffmpeg.available) {
       const filters = (await run("ffmpeg", ["-hide_banner", "-filters"], signal, 10000)).stdout;
@@ -139,6 +145,53 @@ export async function mediaEdit(params: any, cwd: string, signal?: AbortSignal) 
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }
 
+/** Parse one tesseract TSV run into text plus word-confidence evidence. Pure. */
+export function parseTesseractTsv(tsv: string, maxChars: number) {
+  const lines = new Map<string, { page: number; words: { text: string; conf: number; left: number; top: number; width: number; height: number }[] }>();
+  let pages = 0;
+  for (const row of tsv.split("\n").slice(1)) {
+    const cols = row.split("\t");
+    if (cols[0] === "1" && Number.isFinite(Number(cols[1]))) { pages = Math.max(pages, Number(cols[1])); continue; }
+    if (cols.length < 12 || cols[0] !== "5") continue;
+    const nums = cols.slice(1, 11).map(Number);
+    if (nums.some(n => !Number.isFinite(n))) continue;
+    const [page, block, par, line] = nums as [number, number, number, number];
+    const text = (cols[11] ?? "").trim();
+    if (!text) continue;
+    const key = `${page}/${block}/${par}/${line}`;
+    let entry = lines.get(key);
+    if (!entry) { entry = { page, words: [] }; lines.set(key, entry); }
+    entry.words.push({ text, conf: nums[9] as number, left: nums[5] as number, top: nums[6] as number, width: nums[7] as number, height: nums[8] as number });
+  }
+  const ordered = [...lines.values()];
+  const words = ordered.flatMap(l => l.words);
+  const scored = words.filter(w => w.conf >= 0);
+  const full = ordered.map(l => l.words.map(w => w.text).join(" ")).join("\n");
+  const truncated = full.length > maxChars;
+  return {
+    pages, words: words.length,
+    meanConfidence: scored.length ? Math.round(scored.reduce((n, w) => n + w.conf, 0) / scored.length * 10) / 10 : null,
+    text: truncated ? full.slice(0, maxChars) : full, truncated,
+    lowConfidence: words.filter(w => w.conf >= 0 && w.conf < 80).slice(0, 20)
+      .map(w => ({ text: w.text, confidence: Math.round(w.conf * 10) / 10, box: { left: w.left, top: w.top, width: w.width, height: w.height } })),
+  };
+}
+
+export async function imageOcr(params: any, cwd: string, signal?: AbortSignal) {
+  const file = await inputFile(params.path, cwd);
+  if ((await fs.stat(file)).size > 20 * 1024 * 1024) throw new Error("Input exceeds 20 MiB");
+  const language = params.language ?? "eng";
+  if (typeof language !== "string" || !/^[A-Za-z]{2,3}([+][A-Za-z]{2,3})*$/.test(language)) throw new Error("language must look like eng or eng+deu");
+  const psm = integer(params.psm, 3, 0, 13, "psm");
+  const maxChars = integer(params.maxChars, 20000, 100, 100000, "maxChars");
+  const r = await run("tesseract", [file, "stdout", "-l", language, "--psm", String(psm), "tsv"], signal, 60000);
+  const parsed = parseTesseractTsv(r.stdout, maxChars);
+  return {
+    path: file, engine: "tesseract", language, psm, ...parsed,
+    note: "OCR text is a recognition hypothesis with engine confidence, not verified reading. Boxes are stored-pixel left/top/width/height from the upper-left origin. Verify names, numbers and dates against the source image when a decision depends on them; layout, color, composition and meaning need visual inspection instead.",
+  };
+}
+
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const windowSchema = { start: Type.Optional(Type.Number({ minimum: 0, maximum: 86400 })), duration: Type.Optional(Type.Number({ minimum: 0.05, maximum: 600, description: "Window seconds; default 30, maximum 600" })) };
 const outputSchema = { outputDir: Type.Optional(localPath) };
@@ -156,8 +209,9 @@ export default function mediaTools(pi: any) {
       },
     });
   }
-  register("media_info", "Probe local media streams, check installed FFmpeg capabilities or find approximate scene cuts in a bounded window. No uploads. Probe is the default action.", Type.Object({ action: Type.Optional(choices(["probe", "capabilities", "scenes"])), path: Type.Optional(localPath), ...windowSchema, threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })) }), mediaInfo);
-  register("video_frames", "Extract 1..12 PNG frames at explicit seconds or evenly spaced timestamps (default 6). Returns frame paths and timing manifest. Fresh output folder inside cwd; originals preserved. Use read/vision to inspect returned images.", Type.Object({ path: localPath, times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 86400 }), { minItems: 1, maxItems: 12 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), ...outputSchema }), videoFrames);
+  register("media_info", "Probe local media streams, check installed FFmpeg/Tesseract capabilities or find approximate scene cuts in a bounded window. No uploads. Probe is the default action.", Type.Object({ action: Type.Optional(choices(["probe", "capabilities", "scenes"])), path: Type.Optional(localPath), ...windowSchema, threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })) }), mediaInfo);
+  register("video_frames", "Extract 1..12 PNG frames at explicit seconds or evenly spaced timestamps (default 6). Returns frame paths and timing manifest. Fresh output folder inside cwd; originals preserved. Use read/vision to inspect returned images, or image_ocr for printed text in them.", Type.Object({ path: localPath, times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 86400 }), { minItems: 1, maxItems: 12 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), ...outputSchema }), videoFrames);
+  register("image_ocr", "Extract printed text from a local image or PDF with on-device Tesseract (default English, see media_info capabilities for installed languages). Text only: it cannot judge layout, color, composition or meaning — use a vision model for those. Fast local path for text questions; no uploads, no delegation.", Type.Object({ path: localPath, language: Type.Optional(Type.String({ minLength: 3, maxLength: 31, pattern: "^[A-Za-z]{2,3}([+][A-Za-z]{2,3})*$" })), psm: Type.Optional(Type.Integer({ minimum: 0, maximum: 13 })), maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 100000 })) }), imageOcr);
   register("audio_analyze", "Measure windowed LUFS, true/sample peak, RMS, DC offset and silence; optionally render a spectrum PNG. Default first 30 seconds, maximum 600. Numeric evidence, no speech transcription or music recognition.", Type.Object({ path: localPath, ...windowSchema, silenceDb: Type.Optional(Type.Number({ minimum: -100, maximum: -1 })), silenceDuration: Type.Optional(Type.Number({ minimum: 0.05, maximum: 10 })), spectrum: Type.Optional(Type.Boolean()), ...outputSchema }), audioAnalyze);
   register("media_edit", "Create a bounded SDR H.264/AAC clip, extract WAV audio, or perform measured two-pass loudness normalization to WAV. Default first 30 seconds, maximum 600. Fresh output folder; probe and decode validation included. For long/complex edits use FFmpeg through existing background tools.", Type.Object({ action: choices(["clip", "audio", "normalize"]), path: localPath, ...windowSchema, width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), crf: Type.Optional(Type.Integer({ minimum: 0, maximum: 40 })), sampleRate: Type.Optional(Type.Integer({ minimum: 8000, maximum: 96000 })), targetLufs: Type.Optional(Type.Number({ minimum: -36, maximum: -5 })), ...outputSchema }), mediaEdit);
   const note = Type.Object({ pitch: Type.Integer({ minimum: 0, maximum: 127 }), start: Type.Number({ minimum: 0, maximum: 256 }), duration: Type.Number({ minimum: 1 / 480, maximum: 256 }), velocity: Type.Optional(Type.Integer({ minimum: 1, maximum: 127 })) });

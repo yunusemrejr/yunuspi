@@ -549,7 +549,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("types|relations", "Entity or relationship filters."),
 			option("expectedVersion", "Required optimistic version for updates."),
 		],
-		related: ["scope-council", "quality-review", "todo-planning"],
+		related: ["scope-council", "quality-review", "todo-planning", "source-intelligence"],
 		sourceFiles: [
 			"agent/extensions/project-intelligence.ts",
 			"agent/extensions/lib/project-intelligence/query.mjs",
@@ -792,8 +792,8 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		id: "web-and-media",
 		group: "web_media",
 		summary: "Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.",
-		entrypoints: ["web_search", "source_check", "fetch_content", "get_search_content", "web_research", "web_probe", "browser_session", "wait_for", "render_see", "media_info", "video_frames", "audio_analyze", "media_edit", "music_compose"],
-		tools: ["web_search", "source_check", "fetch_content", "get_search_content", "web_research", "web_probe", "browser_session", "wait_for", "render_see", "media_info", "video_frames", "audio_analyze", "media_edit", "music_compose"],
+		entrypoints: ["web_search", "source_check", "fetch_content", "get_search_content", "web_research", "web_probe", "browser_session", "wait_for", "render_see", "media_info", "video_frames", "audio_analyze", "media_edit", "music_compose", "image_ocr"],
+		tools: ["web_search", "source_check", "fetch_content", "get_search_content", "web_research", "web_probe", "browser_session", "wait_for", "render_see", "media_info", "video_frames", "audio_analyze", "media_edit", "music_compose", "image_ocr"],
 		commands: ["websearch", "search", "curator", "google-account"],
 		options: [
 			option("query|queries", "One or several search angles."),

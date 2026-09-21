@@ -462,10 +462,24 @@ export function queryGraph(snapshot, options = {}) {
   const limit = clampInteger(safeOptions.limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
   const maxChars = clampInteger(safeOptions.maxChars, DEFAULT_MAX_CHARS, 96, 200000);
   const graph = filteredGraph(snapshot ?? {}, safeOptions);
+  const projectNodeId = graph.nodes.find(node => node.id === snapshot?.project?.rootNodeId)?.id
+    ?? graph.nodes.find(node => node.type === 'project')?.id;
   const candidates = resolveRoots({ ...graph, projectNodeId: snapshot?.project?.rootNodeId }, safeOptions, query, queryTokens);
   const roots = query && !safeOptions.focus ? candidates.slice(0, Math.min(4, limit)) : candidates;
   const traversed = traverse(graph, roots, safeOptions, query, queryTokens);
-  const selectedNodes = traversed.nodes.slice(0, limit);
+  // An unscoped request is a whole-project overview, not a degree sample: mirror
+  // the viewer by reserving high-level categories before filling by connectivity.
+  // Explicit type/relation filters stay exact slices. Members outside the query
+  // traversal serialize without a distance.
+  const overview = !query && !stringSet(safeOptions.types).size && !stringSet(safeOptions.relations).size
+    && (!asArray(safeOptions.focus).some(Boolean) || (roots.length === 1 && roots[0] === projectNodeId && projectNodeId !== undefined));
+  let ranked = null;
+  if (overview) {
+    const degree = stableDegree(graph.edges);
+    ranked = graph.nodes.slice().sort((a, b) => Number(b.id === projectNodeId) - Number(a.id === projectNodeId) ||
+      (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.id.localeCompare(b.id));
+  }
+  const selectedNodes = overview ? selectOverviewNodes(ranked, projectNodeId, limit) : traversed.nodes.slice(0, limit);
   const selectedIds = new Set(selectedNodes.map(node => node.id));
   const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
   const edges = graph.edges.filter(edge => selectedIds.has(edge.source) && selectedIds.has(edge.target)).sort((a, b) => {
@@ -479,10 +493,11 @@ export function queryGraph(snapshot, options = {}) {
     return scoreB - scoreA || String(a.id ?? '').localeCompare(String(b.id ?? ''));
   }).slice(0, limit);
   const relevantFacts = graph.facts.filter(fact => selectedIds.has(fact.subject));
-  const omittedByLimit = candidates.length > roots.length || traversed.nodes.length > selectedNodes.length || relevantFacts.length > facts.length;
+  const poolSize = overview ? ranked.length : traversed.nodes.length;
+  const omittedByLimit = candidates.length > roots.length || poolSize > selectedNodes.length || relevantFacts.length > facts.length;
   const result = {
     revision: Number(snapshot?.revision ?? 0),
-    nodes: selectedNodes.map(node => ({ ...node, distance: traversed.distances.get(node.id), ...(traversed.via.has(node.id) ? { via: traversed.via.get(node.id) } : {}) })),
+    nodes: selectedNodes.map(node => ({ ...node, ...(traversed.distances.has(node.id) ? { distance: traversed.distances.get(node.id) } : {}), ...(traversed.via.has(node.id) ? { via: traversed.via.get(node.id) } : {}) })),
     edges: edges.map(edge => compactEvidence(edge, graph.sources, Boolean(safeOptions.includeInactive))),
     facts: facts.map(fact => compactEvidence(fact, graph.sources, Boolean(safeOptions.includeInactive))),
     health: compactHealth(snapshot?.health),
