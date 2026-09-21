@@ -9,7 +9,7 @@ import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets
 import { normalizeReviewPath, parseReviewReport, type ReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 export { parseReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 export type { ReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
-import { registerSharedQualityReview } from './quality-review-owner.ts';
+import { noteQualityReviewCompleted, registerSharedQualityReview } from './quality-review-owner.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
 import { reviewRoundIntent } from './intervention-intents.ts';
@@ -309,6 +309,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         reviewed = rev; save(); return summary();
       }
       reports = received; reviewed = rev;
+      // A decisive round suppresses near-term stuck-signal review suggestions;
+      // an all-unknown round stays suggestible since no review evidence exists.
+      if (received.some(r => r.outcome !== 'unknown')) { try { noteQualityReviewCompleted(ctx); } catch {} }
       if (received.every(r => r.outcome === 'unknown' && !r.evidence.length && !r.findings.length)) {
         disposition = 'blocked';
         reason = 'Independent review unavailable: ' + [...new Set(received.map(r => r.gap))].join(' ').slice(0,1000);

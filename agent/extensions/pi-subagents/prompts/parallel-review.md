@@ -2,6 +2,8 @@
 description: Parallel subagents review
 ---
 
+Do not run this on a revision already covered by `quality_review` at a completion checkpoint: pick one review per revision. `quality_review` owns bounded aspect approval (accepted/blocked); this workflow is the deliberate deep-review alternative (P0/P1/P2 + Merge verdict).
+
 Launch parallel reviewers for an adversarial review of the current work.
 
 Use fresh context, not forked context, unless I explicitly ask for forked context. Reviewers should inspect the repository, relevant instructions, and current diff directly from files and commands. Do not rely on the main conversation history.

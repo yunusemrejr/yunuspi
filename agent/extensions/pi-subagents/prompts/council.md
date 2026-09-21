@@ -9,7 +9,8 @@ decide which feedback is valid, and write the final memo. Advisors do not talk
 directly or see peer transcripts by default. This is not free-form agent chat.
 
 Before you orchestrate, read `skills/council-mode/SKILL.md` and
-`skills/pi-subagents/references/execution-controls.md`.
+`skills/pi-subagents/references/execution-controls.md` when they are installed.
+If either is missing, follow the fallback protocol below instead of improvising.
 
 Parse the invocation yourself. The flags below are conventions, not runtime
 options. Record a brief with the question, scope, non-goals, evidence targets,
@@ -48,9 +49,33 @@ path if the run is not resumable.
 ## Run the protocol
 
 Use the canonical workflow, structured advisor contracts, aggregate pass receipts,
-and memo requirements in `skills/council-mode/SKILL.md`. Keep the parent as the
+and memo requirements in `skills/council-mode/SKILL.md` (or the fallback protocol
+below when that skill is missing). Keep the parent as the
 only synthesizer and decision maker. Do not introduce a chair advisor, peer chat,
 or transcript sharing.
+
+## Fallback protocol (only when the council-mode skill is missing)
+
+- Pass 1: one async `workflowScript` with `runs.all` for independent read-only
+  advisor reports (at most ~600 words each): recommendation, evidence as
+  claim-plus-sources, assumptions marked verified/unverified, risks, confidence
+  (high/medium/low with reason), up to 3 challenge claims, owner decisions, and
+  what would change the advisor's mind. Same contract for every advisor; ask
+  external runners for compact JSON text with the same fields. Return one
+  aggregate receipt (advisor key, agent, run id, report) and record every run id.
+- The parent synthesizes a claim matrix in session: agreements, disputed claims,
+  missing proof, owner decisions, and at most five high-impact relayed claims per
+  advisor. Do not delegate this synthesis.
+- Pass 2: one async `workflowScript` with resume calls carrying curated challenge
+  packets (disputed claims and conflicting evidence only; attribute peer content
+  as "another advisor", never paste full peer reports). When an advisor is not
+  resumable, rerun its profile in fresh context with its own pass-1 report plus
+  the packet, and label the response a fresh-context fallback, not a cross-exam.
+- Stop at convergence, the pass cap, failed fallback, or interruption. The parent
+  writes the final memo: question and scope, recommendation, rationale, accepted
+  and rejected feedback with reasons, owner decisions, evidence and run ids,
+  confidence, what would change the decision, and the roster, passes, fallbacks,
+  and known advisor context modes. Do not delegate the memo.
 
 Use its required boundary checkpoints, yield for each async workflow without
 polling, and write its required final memo.

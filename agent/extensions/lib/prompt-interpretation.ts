@@ -6,7 +6,10 @@
  * the main agent must otherwise read alone: an unclear follow-up ("handle
  * it", a bare "continue" after a pivot) with no explicit direction cues.
  * Initial prompts keep the existing auto-assist group; clear additive and
- * redirect follow-ups need no second opinion. Pure module: no I/O.
+ * redirect follow-ups need no second opinion. Non-stacking is owned by the
+ * caller (autonomous-recovery): a qualifying change-scope request preempts
+ * this sidecar, and the sidecar shares the single-assist budget with the
+ * auto-assist group. Pure module: no I/O.
  */
 import {
   isPromptPivot,
@@ -35,10 +38,12 @@ export function requestExcerpt(text: string, maxChars: number): string {
 const REDIRECT_CUES =
   /\b(?:instead|rather|scratch that|forget (?:it|that|this|about)|revert|undo|never mind|no[,.]?\s+(?:do|make|use|let|stop)|don'?t (?:do|bother|continue)|change (?:it|that|this) to|replace .* with)\b/i;
 
-/** Explicit do-both cues. "too" only counts at the end ("fix this too") since
- * mid-sentence "too" usually grades ("too slow"). */
+/** Explicit do-both cues. "too" only counts at the true end ("fix this too")
+ * since mid-sentence "too" usually grades ("too slow"); it is tested against
+ * the prompt tail, not the bounded cue window, so long requests keep it. */
 const ADDITIVE_CUES =
-  /\b(?:also|additionally|plus|as well|another|and then|on top of that|while you(?:'re| are) at it|besides|in addition)\b|(?:\btoo\b[.!?]*\s*)$/i;
+  /\b(?:also|additionally|plus|as well|another|and then|on top of that|while you(?:'re| are) at it|besides|in addition)\b/i;
+const ADDITIVE_TOO_END = /\btoo\b[.!?]*\s*$/i;
 
 export function classifyFollowup(prompt: unknown): FollowupClass {
   if (typeof prompt !== "string" || !prompt.trim()) return "initial";
@@ -46,6 +51,7 @@ export function classifyFollowup(prompt: unknown): FollowupClass {
   if (isPromptPivot(text) || isPromptRefusal(text)) return "redirect";
   if (REDIRECT_CUES.test(text)) return "redirect";
   if (ADDITIVE_CUES.test(text)) return "additive";
+  if (ADDITIVE_TOO_END.test(prompt.slice(-32))) return "additive";
   if (isReferentialFollowup(prompt)) return "unclear-followup";
   return "initial";
 }
@@ -58,7 +64,7 @@ export function parseInterpRead(text: unknown): { read: InterpRead; why: string 
   if (typeof text !== "string") return undefined;
   const head = text.trim();
   if (head.length > 2000) return undefined;
-  const parsed = /^READ:\s*(additive|redirect|unclear)[ \t]*\r?\nWHY:[ \t]*([^\r\n]*)$/i.exec(head);
+  const parsed = /^READ:\s*(additive|redirect|unclear)[ \t]*\r?\n(?:[ \t]*\r?\n)*WHY:[ \t]*([^\r\n]*)$/i.exec(head);
   const read = parsed?.[1]?.toLowerCase();
   if (read !== "additive" && read !== "redirect" && read !== "unclear") return undefined;
   const why = (parsed?.[2] ?? "")
