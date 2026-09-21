@@ -22,7 +22,7 @@ const { selectAffordableModel, describeSelectionRejections } = await import(shar
 const { loadModelEconomyConfig } = await import(shared + 'model-economy.ts');
 const req = await import(shared + 'child-route-requirements.ts');
 const { confidentValue, checkCapabilityProvenance } = await import(shared + 'catalog-confidence.ts');
-const { formatCandidateRejection, recoveryHintForDimension } = await import(shared + 'route-decision-record.ts');
+const { formatCandidateRejection, recoveryHintForDimension, recordRouteDecision } = await import(shared + 'route-decision-record.ts');
 
 const cfg = loadModelEconomyConfig();
 const parent = { provider: 'p', id: 'big', fullId: 'p/big', contextWindow: 200000, maxTokens: 32000, reasoning: true, input: ['text', 'image'], cost: { input: 5, output: 20, cacheRead: 5, cacheWrite: 5 } };
@@ -126,4 +126,12 @@ test('catalog confidence gates high-stakes evidence selectively', () => {
   assert.ok(strict.misses[0].includes('maxOutput'));
   const unknown = checkCapabilityProvenance({}, { requireKnown: ['toolCalling'] });
   assert.equal(unknown.ok, false);
+});
+
+test('decision records bound required capabilities', () => {
+  const big = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`capability-${i}`, 'x'.repeat(500)]));
+  const record = recordRouteDecision({ candidates: [{ route: 'p/m', free: true }], requiredCapabilities: big });
+  assert.ok(Object.keys(record.requiredCapabilities).length <= 16, 'capability keys capped');
+  assert.ok(Object.values(record.requiredCapabilities).every((v) => String(v).length <= 160), 'capability values truncated');
+  assert.ok(JSON.stringify(record).length < 20000, 'record stays bounded');
 });

@@ -73,6 +73,7 @@ export interface RouteDecisionRecord {
 
 const MAX_CANDIDATES = 64;
 const MAX_DETAIL = 160;
+const MAX_CAPABILITIES = 16;
 
 function truncate(value: string): string {
 	return value.length > MAX_DETAIL ? `${value.slice(0, MAX_DETAIL - 1)}…` : value;
@@ -80,6 +81,15 @@ function truncate(value: string): string {
 
 function sanitizeRoute(route: string): string {
 	return /^[a-z0-9_.:/@+-]{1,200}$/i.test(route) ? route : "invalid-route";
+}
+
+function boundCapabilities(caps: Record<string, string | number | boolean>): Record<string, string | number | boolean> {
+	return Object.fromEntries(
+		Object.entries(caps).slice(0, MAX_CAPABILITIES).map(([key, value]) => [
+			truncate(String(key)),
+			typeof value === "string" ? truncate(value) : value,
+		]),
+	);
 }
 
 export interface DecisionInput {
@@ -121,7 +131,7 @@ export function recordRouteDecision(input: DecisionInput): RouteDecisionRecord {
 		...(input.taskHash ? { taskHash: truncate(String(input.taskHash)) } : {}),
 		...(input.preferenceRole ? { preferenceRole: truncate(String(input.preferenceRole)) } : {}),
 		...(input.freeOnly === undefined ? {} : { freeOnly: input.freeOnly === true }),
-		...(input.requiredCapabilities ? { requiredCapabilities: input.requiredCapabilities } : {}),
+		...(input.requiredCapabilities ? { requiredCapabilities: boundCapabilities(input.requiredCapabilities) } : {}),
 		candidates,
 		rejections,
 		...(input.choice ? { choice: sanitizeRoute(input.choice) } : {}),
