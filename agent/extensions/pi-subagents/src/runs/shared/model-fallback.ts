@@ -31,7 +31,8 @@ import { extractTaskIntent } from "./task-intent-model.ts";
 const childBoundsCache = new Map<string, ChildRouteRequirements>();
 function childFor(task: string | undefined): ChildRouteRequirements | undefined {
 	if (!task) return undefined;
-	const key = task.slice(0, 512);
+	// ponytail: length + head + tail key; same-prefix swarm briefs must not share bounds.
+	const key = `${task.length}:${task.slice(0, 512)}:${task.slice(-128)}`;
 	const hit = childBoundsCache.get(key);
 	if (hit) return hit;
 	const bounds = childRequirementsFromTask(task);
