@@ -96,6 +96,15 @@ const NEGATION_HEAD = /\b(?:never|do not|don't|does not|doesn't|must not|mustn't
 const NEGATION_WINDOW = /\b(?:never|do not|don't|does not|doesn't|must not|mustn't|shall not|should not|shouldn't|cannot|can't|could not|couldn't|will not|won't|would not|wouldn't|forbid(?:den|s)?|prohibit(?:ed|s)?|disallow(?:ed|s)?|avoid|prevent)\b([^.;:!?()\n]{0,160})/gi;
 /** "but/and/then <verb>" after a prohibition re-opens requested intent. */
 const CONTRAST_REOPEN = /\b(?:but|and then|then|however|instead)\b\s+([a-z][^.;:!?()\n]{0,120})/gi;
+/** "not just X, Y" / "don't just X, Y": Y is requested, not negated. */
+const NOT_JUST_REOPEN = /\b(?:not|do not|don't)\s+just\b[^,;:.!?()]{0,80},\s*([^,;:.!?()\n]{1,120})/gi;
+/**
+ * File paths are never instructions: verb stems inside filenames ("fix.py",
+ * "deploy.yaml", "build.sh") must not flip intent. Paths are masked before
+ * verb extraction; a bare filename without a path shape still reads
+ * literally ("review the deploy script" keeps its nominal cue).
+ */
+const FILE_PATH = /\b[\w.~$-][\w.~$/-]*\.(py|ts|tsx|jsx|js|mjs|cjs|go|rs|java|rb|php|swift|kt|scala|c|h|cpp|hpp|cs|md|mdx|json|yaml|yml|toml|ini|cfg|conf|sh|bash|zsh|sql|html|css|scss|xml|txt|log|csv|tsv|png|jpg|jpeg|gif|svg|pdf|zip|wasm|lock)\b|\b(?:src|lib|app|tests?|docs?|bin|scripts?|agent|core|config|dist|build|node_modules)(?:\/[\w.~$-]+)+/gi;
 
 const VERB_FORMS: Record<string, string> = {
 	investigate: "investigate", investigating: "investigate", investigation: "investigate", trace: "investigate", tracing: "investigate",
@@ -103,7 +112,7 @@ const VERB_FORMS: Record<string, string> = {
 	audit: "review", auditing: "review", review: "review", reviewing: "review", inspect: "review", inspecting: "review",
 	implement: "implement", implementing: "implement", implementation: "implement", build: "implement", building: "implement",
 	fix: "implement", fixing: "implement", patch: "implement", patching: "implement", edit: "implement", editing: "implement",
-	modify: "implement", modifying: "implement", refactor: "implement", refactoring: "implement", write: "implement", writing: "implement",
+	modify: "implement", modifying: "implement", refactor: "implement", refactoring: "implement", write: "implement", writing: "implement", touch: "implement", touching: "implement",
 	create: "implement", creating: "implement", add: "implement", adding: "implement", remove: "implement", removing: "implement",
 	delete: "implement", deleting: "implement", update: "implement", updating: "implement", change: "implement", changing: "implement",
 	migrate: "implement", migrating: "implement", merge: "implement", merging: "implement", commit: "implement", committing: "implement",
@@ -112,7 +121,7 @@ const VERB_FORMS: Record<string, string> = {
 	summarize: "summarize", summarizing: "summarize", summarise: "summarize", summarising: "summarize", extract: "summarize", extracting: "summarize",
 	list: "summarize", listing: "summarize", report: "summarize", reporting: "summarize",
 	answer: "answer", answering: "answer", explain: "answer", explaining: "answer", describe: "answer", describing: "answer",
-	deploy: "operate", deploying: "operate", deployment: "operate", release: "operate", releasing: "operate", publish: "operate", publishing: "operate",
+	deploy: "operate", deploying: "operate", deployment: "operate", release: "operate", releasing: "operate", publish: "operate", publishing: "operate", ship: "operate", shipping: "operate",
 	restart: "operate", restarting: "operate", rollback: "operate", approve: "operate", approving: "operate", execute: "operate", executing: "operate",
 	run: "operate", running: "operate",
 };
@@ -122,7 +131,7 @@ const ENV_TERMS = /\b(production|prod\b|staging|live environment|live site|custo
  * directly ("restart prod", "migrate the production database") or through a
  * preposition ("deploy the build to production"). Bare co-occurrence inside a
  * wide window ("fix the deploy script so staging releases work") is a mention. */
-const ENV_TARGET_GOVERNED = /\b(deploy(?:ing|ment)?|release|publish|push|ship|roll\s?out|migrate|modify|change|edit|update|delete|drop|truncate|restart|reboot|scale|configure)\b[^,.;:!?()]{0,48}\b(?:to|in|on|for|of|into|onto|against)\s+(?:the\s+)?(production|prod|staging|live environment|live site|customer data|user data|payment data)\b|\b(modify|change|edit|update|delete|drop|truncate|restart|reboot|scale|configure|migrate)\s+(?:the\s+)?(production|prod|staging|live environment|live site)\b/i;
+const ENV_TARGET_GOVERNED = /\b(deploy(?:ing|ment)?|release|publish|push|ship|roll\s?out|migrate|modify|change|edit|update|delete|drop|truncate|restart|reboot|scale|configure)\b[^,;:!?()\n]{0,64}\b(?:to|in|on|for|of|into|onto|against)\s+(?:the\s+)?(production|prod|staging|live environment|live site|customer data|user data|payment data)\b|\b(modify|change|edit|update|delete|drop|truncate|restart|reboot|scale|configure|migrate)\s+(?:the\s+)?(production|prod|staging|live environment|live site)\b/i;
 const SAFETY_DOMAIN = /\b(security|auth(?:entication|orization)?|oauth|login|password|secret|credential|cryptograph\w*|payment|billing|invoice|charge|refund|pii|phi|hipaa|pci|sox|safety-critical|concurrency|race condition|deadlock|migration|schema migration)\b/i;
 
 const READ_ONLY_DELIVERABLE = /\b(review only|suggest fixes only|return findings only|only return findings|findings? only|no file (?:edits?|changes?)|leave (?:files?|code) unchanged|read[- ]only (?:review|audit|inspection|pass|investigation|analysis))\b/i;
@@ -161,13 +170,22 @@ function verbsIn(span: string): string[] {
 }
 
 function collectReopenedSpans(span: string): string[] {
-	CONTRAST_REOPEN.lastIndex = 0;
 	const spans: string[] = [];
-	for (const match of span.matchAll(CONTRAST_REOPEN)) {
-		if (match[1]) spans.push(match[1]);
+	for (const pattern of [CONTRAST_REOPEN, NOT_JUST_REOPEN]) {
+		pattern.lastIndex = 0;
+		for (const match of span.matchAll(pattern)) {
+			if (match[1]) spans.push(match[1]);
+		}
+		pattern.lastIndex = 0;
 	}
-	CONTRAST_REOPEN.lastIndex = 0;
 	return spans;
+}
+
+function maskFilePaths(text: string): string {
+	FILE_PATH.lastIndex = 0;
+	const masked = text.replace(FILE_PATH, " ");
+	FILE_PATH.lastIndex = 0;
+	return masked;
 }
 
 function requestedVerbsIn(span: string): string[] {
@@ -258,7 +276,7 @@ function environmentRefsIn(clause: string): Array<{ term: string; role: "mention
 export function extractTaskIntent(task: string, options: ExtractOptions = {}): TaskIntent {
 	const text = (task ?? "").slice(0, MAX_TEXT);
 	const quotedSpans = collectQuotedSpans(text);
-	const masked = maskSpans(text, quotedSpans);
+	const masked = maskFilePaths(maskSpans(text, quotedSpans));
 	const clauses = splitClauses(masked);
 
 	const requestedVerbs: string[] = [];
@@ -340,17 +358,20 @@ export function extractTaskIntent(task: string, options: ExtractOptions = {}): T
 function requestedActionFrom(verbs: string[], deliverable: DeliverableType, hasEnvTarget: boolean, agent?: string): RequestedAction {
 	const reviewer = agent ? /\b(?:advisor|reviewer|oracle)\b/i.test(agent) : false;
 	const researcher = agent ? /\b(?:investigate|scout|research(?:er)?)\b/i.test(agent) : false;
-	// "operate" dominates only when the environment is actually targeted or the
-	// deliverable is an operation; otherwise "fix the deploy script" (a code
-	// change mentioning deployment) must stay an implementation task.
-	if (verbs.includes("operate") && (hasEnvTarget || deliverable === "operation")) return "operate";
+	// "operate" dominates only when the environment is actually targeted.
+	// Nominal mentions ("the deployment failed", "fix the deploy script",
+	// "update the deployment documentation") are reports and code work, not
+	// operations — the deliverable cue alone must not promote them.
+	if (verbs.includes("operate") && hasEnvTarget) return "operate";
 	if (verbs.includes("implement")) return "implement";
-	if (verbs.includes("operate")) return "operate";
 	if (verbs.includes("review")) return "review";
 	if (verbs.includes("investigate")) return "investigate";
 	if (verbs.includes("plan")) return "plan";
 	if (verbs.includes("summarize")) return "summarize";
 	if (verbs.includes("answer")) return "answer";
+	// Bare "operate" without an environment target is the weakest claim: a
+	// nominal mention ("the deployment failed") loses to any concrete action.
+	if (verbs.includes("operate")) return "operate";
 	if (researcher) return "investigate";
 	if (reviewer) return "review";
 	if (agent === "worker") return "implement";

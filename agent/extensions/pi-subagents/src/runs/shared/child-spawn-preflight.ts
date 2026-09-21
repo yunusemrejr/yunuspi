@@ -170,7 +170,10 @@ export function toolWirePreflightProbe(input: {
 		return { state: "fail", detail: `backend ${report.backend} rejects ${report.incompatible.length} tool schema(s): ${names}` };
 	}
 	const dropped = report.results.reduce((sum, result) => sum + result.dropped.length, 0);
-	if (dropped) return { state: "warn", detail: `${dropped} schema keyword(s) projected for backend ${report.backend}; local validation keeps the canonical schema` };
+	if (dropped) {
+		const named = report.results.filter((result) => result.dropped.length > 0).slice(0, 4).map((result) => `${result.tool}: ${result.dropped.slice(0, 3).join(", ")}${result.dropped.length > 3 ? ", …" : ""}`).join("; ");
+		return { state: "warn", detail: `${dropped} schema keyword(s) projected for backend ${report.backend} (${named}); local validation keeps the canonical schema` };
+	}
 	return { state: "pass", detail: `all ${report.results.length} tool schema(s) wire-compatible with ${report.backend}` };
 }
 

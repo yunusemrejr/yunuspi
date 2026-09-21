@@ -178,6 +178,15 @@ export function buildChildRouteRequirements(
 	};
 }
 
+const IMAGE_CUES = /\b(screenshots?|images?|pictures?|photos?|vision|multimodal|png|jpe?g|gif|webp|svg|bmp|attached (?:files?|images?|media))\b/i;
+const NON_VISUAL_IMAGE = /\b(docker|disk|container|iso|vm|machine|factory|system|base)\s+image/i;
+
+/** Detect vision input needs from task text. Container/disk images are not vision. */
+export function detectImageNeed(task: string): boolean {
+	const text = (task ?? "").slice(0, 8192).replace(NON_VISUAL_IMAGE, " ");
+	return IMAGE_CUES.test(text);
+}
+
 export interface ChildRequirementsFromTaskExtras {
 	contextMode?: ChildContextMode;
 	toolCount?: number;
@@ -215,13 +224,14 @@ export function childRequirementsFromTask(task: string, extras: ChildRequirement
 	const shape = extras.reportShape ?? (intent.requestedAction === "implement" ? "implementation"
 		: intent.requestedAction === "review" || intent.requestedAction === "investigate" ? "findings"
 			: intent.requestedAction === "operate" ? "verdict" : "findings");
+	const modalities = extras.modalities ?? (detectImageNeed(task) ? ["text", "image"] : ["text"]);
 	return buildChildRouteRequirements({
 		estimatedPromptTokens: prompt,
 		contextMode: mode,
 		expectedEvidenceTokens: Math.ceil((extras.evidenceChars ?? 0) / CHARS_PER_TOKEN),
 		toolSchemaTokens: (extras.toolCount ?? 6) * (extras.avgToolSchemaTokens ?? 220),
 		outputReserveTokens: estimateOutputReserve({ reportShape: shape, fileCount: extras.fileCount ?? 0, structuredOutput: extras.structuredOutput }),
-		modalities: extras.modalities,
+		modalities,
 		toolCalling: extras.toolCalling,
 		reasoning: extras.reasoning,
 		structuredOutput: extras.structuredOutput,

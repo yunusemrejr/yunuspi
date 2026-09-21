@@ -147,3 +147,11 @@ test('incompatible backend fails preflight before any inference spend', () => {
   assert.ok(['warn', 'fail', 'pass'].includes(strictBackend.checks.tool_wire.state));
   assert.ok(strictBackend.checks.tool_wire.detail && strictBackend.checks.tool_wire.detail.length > 0);
 });
+
+test('audit: projection warnings name the dropped keywords per tool',()=>{
+ const wire=[{name:'read_file',schema:{type:'object',properties:{path:{type:'string',minLength:1}},required:['path']}}];
+ const check=runChildSpawnPreflight({requestedModel:'o/m',backend:'openrouter',tools:wire,structuredOutput:true,probes:{toolWire:toolWirePreflightProbe}});
+ assert.equal(check.checks.tool_wire.state,'warn',JSON.stringify(check.checks.tool_wire));
+ assert.ok(check.checks.tool_wire.detail.includes('minLength'),'detail names the projected keyword: '+check.checks.tool_wire.detail);
+ assert.ok(check.checks.tool_wire.detail.includes('read_file'),'Detail names the tool: '+check.checks.tool_wire.detail);
+});

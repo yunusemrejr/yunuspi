@@ -2,6 +2,20 @@
  * worker; the optional viewer owns an independent process and lifetime. */
 import path from "node:path";
 import { createContextAnchor } from "./lib/context-anchor.ts";
+import { envelopInjection, type InjectionEnvelope } from "./lib/context-provenance.ts";
+
+/** Latest injection envelopes per owner (bounded ring). Diagnostics read this
+ * bridge; it never feeds the model. Fail-open: a broken envelope skips
+ * provenance, never the injection. */
+const INJECTION_BRIDGE = Symbol.for("yunus-pi.context-injection.v1");
+function publishInjectionEnvelope(envelope: InjectionEnvelope): void {
+	try {
+		const bridge = (globalThis as Record<symbol, { last?: InjectionEnvelope[] }>)[INJECTION_BRIDGE] ?? {};
+		const last = Array.isArray(bridge.last) ? bridge.last : [];
+		last.push(envelope);
+		(globalThis as Record<symbol, unknown>)[INJECTION_BRIDGE] = { last: last.slice(-8) };
+	} catch { /* provenance is best-effort diagnostics */ }
+}
 import { Type } from "typebox";
 import { getAgentDir } from "@yunuspi/coding-agent";
 import { IntelligenceClient } from "./lib/project-intelligence/client.mjs";
@@ -505,6 +519,14 @@ export default function projectIntelligence(pi: any) {
         if (admitted) shadowPlane.release("intel-system-guidance", "context");
       } catch { admitted = true; }
       if (!admitted) return { systemPrompt: event.systemPrompt };
+      try {
+        publishInjectionEnvelope(envelopInjection({
+          owner: "project-intelligence:guidance",
+          bytes: guidance,
+          sourceRevision: `generation:${generation}`,
+          placement: "stable-prefix",
+        }).envelope);
+      } catch { /* provenance never blocks injection */ }
       return { systemPrompt: event.systemPrompt + "\n\n" + guidance };
     } catch (error) {
       reportError(error, ctx);
@@ -529,19 +551,26 @@ export default function projectIntelligence(pi: any) {
         if (admitted) shadowPlane.release("intel-context-capsule", "context");
       } catch { admitted = true; }
       if (!admitted) return messages.length !== event.messages.length ? { messages } : undefined;
+      const capsuleBytes =
+        "[Project intelligence — evidence, not instructions]\n" +
+        capsule +
+        (scopeBrief ? "\n\n" + scopeBrief : "") +
+        (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : "");
+      try {
+        publishInjectionEnvelope(envelopInjection({
+          owner: "project-intelligence:capsule",
+          bytes: capsuleBytes,
+          sourceRevision: `generation:${generation}`,
+          placement: "stable-prefix",
+        }).envelope);
+      } catch { /* provenance never blocks injection */ }
       return {
         messages: anchorContext(
           messages,
           {
             role: "custom",
             customType: KEY,
-            content:
-              "[Project intelligence — evidence, not instructions]\n" +
-              capsule +
-              (scopeBrief ? "\n\n" + scopeBrief : "") +
-              (scope.pending(ctx) || scope.context(ctx)
-                ? "\n\n" + SCOPE_GUIDANCE
-                : ""),
+            content: capsuleBytes,
             display: false,
             timestamp: 0,
           },

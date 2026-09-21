@@ -16,7 +16,28 @@ import { collectSessionMetrics } from "./session-metrics.ts";
 import { collectSessionDiagnostics, failureCategory } from "./session-diagnostics.ts";
 import { collectSessionCost } from "./session-cost.ts";
 import type { ActivityCounters } from "./activity-indicators.ts";
-import { reduceChildEvents, projectTranscriptChildren, summarizeLedger } from "../pi-subagents/src/runs/shared/child-ledger.ts";
+import { reduceChildEvents, projectTranscriptChildren, summarizeLedger, childTaskToEvidence } from "../pi-subagents/src/runs/shared/child-ledger.ts";
+
+/** Latest context-injection envelopes from the live bridge (best-effort, no I/O). */
+function readInjectionBridge(): unknown[] {
+  try {
+    const bridge = (globalThis as Record<symbol, { last?: unknown[] }>)[Symbol.for("yunus-pi.context-injection.v1")];
+    const last = Array.isArray(bridge?.last) ? bridge.last : [];
+    return last.filter((entry) => entry && typeof entry === "object").slice(-8).map((entry) => {
+      const record = entry as Record<string, unknown>;
+      return {
+        owner: typeof record.owner === "string" ? record.owner.slice(0, 80) : "unknown",
+        hash: typeof record.hash === "string" ? record.hash.slice(0, 32) : "unknown",
+        sourceRevision: typeof record.sourceRevision === "string" ? record.sourceRevision.slice(0, 128) : "unknown",
+        estimatedTokens: typeof record.estimatedTokens === "number" ? record.estimatedTokens : 0,
+        materiallyNew: record.materiallyNew === true,
+        placement: record.placement === "late-bound" ? "late-bound" : "stable-prefix",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
 import { classifyCostState } from "./cost-states.ts";
 import type { RuntimeProvenance } from "./diagnostic-provenance.ts";
 
@@ -461,6 +482,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
         executionCause: task.execution.cause?.category ?? null,
         acceptance: task.acceptance.status,
         attempts: task.attempts.length,
+        evidence: childTaskToEvidence(task),
       })),
       unresolved: childLedger.unresolved,
     },
@@ -504,6 +526,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       compactions,
       invalidationTurns: (metrics as any)?.invalidationTurns ?? 0,
       invalidationExcessTokens: (metrics as any)?.invalidationExcessTokens ?? 0,
+      injections: readInjectionBridge(),
     },
     reviews: reviewRounds,
   });

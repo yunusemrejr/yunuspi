@@ -33,19 +33,29 @@ export function failureCategory(error: string) {
     return {category:"navigation",recovery:"Check the browser's navigation cause and the server task/URL. Localhost is supported; this does not establish a provider failure."};
   if (/Command exited with code (?:137|143)\b/.test(error))
     return {category:"process",recovery:"The command reported a signal-style exit (137/143). Inspect cancellation, timeout and process ownership evidence before restarting; the exit alone does not establish the cause."};
-  if (/outside.{0,30}(?:scope|workspace)|permission denied|\bEPERM\b|not authorized/i.test(error))
+  // Output truncation is its own family: length stops, max_tokens, answer
+  // budgets, and structured-output cut-offs are neither provider-health nor
+  // acceptance failures. Framed reports only — bare "length" or "budget"
+  // nouns in data never match.
+  if (/finish.{0,24}reason.{0,12}length|stop.{0,24}reason.{0,12}length|\bmax_tokens\b.{0,48}(?:exceeded|reached|exhausted)|response.{0,24}truncat|answer.{0,24}budget.{0,24}exhaust|output.{0,24}(?:cut off|truncat)/i.test(error))
+    return {category:"truncated",recovery:"Resume the retained session and synthesize only the missing output; do not restart the investigation. Without retained state, split the work or narrow the scope."};
+  // Framed reports only below: bare nouns ("budget", "quota", "contract",
+  // "timeout", "deadline") also appear in SQL columns, filenames, and quoted
+  // data, so every branch requires failure verbs, provider codes, or harness
+  // gate phrasing. Structured child evidence bypasses text via reasonText.
+  if (/(?:path|file|request|access|operation).{0,24}outside.{0,24}(?:scope|workspace)|outside.{0,24}(?:scope|workspace).{0,24}(?:denied|blocked|refused|not permitted)|permission denied|\bEPERM\b|not authorized/i.test(error))
     return { category: "permission", recovery: "Check the declared scope and execution environment; retain the guard and request missing authority if required." };
-  if (/budget|economy|price cap|cost limit/i.test(error))
+  if (/(?:budget|economy|price cap|cost limit).{0,48}(?:exceeded|exhausted|blocked|denied|failure|limit\b)|exceeded.{0,48}(?:budget|cost limit)/i.test(error))
     return { category: "budget", recovery: "Use an eligible route within the existing budget; do not increase caps or substitute an unauthorized model." };
-  if (/\b429\b|rate.?limit|quota|cooldown/i.test(error))
+  if (/\b429\b|rate.?limit.{0,32}(?:exceeded|reached|hit)|quota.{0,32}(?:exceeded|exhausted|reached|hit|insufficient)|cooldown.{0,32}(?:active|until|remaining|in effect)/i.test(error))
     return { category: "capacity", recovery: "Honor retry-after or shared cooldown evidence; preserve successful work and avoid immediate fan-out retries." };
-  if (/context.{0,30}(?:limit|exceed|large)|too many tokens|request.{0,20}(?:large|size)|\b413\b/i.test(error))
+  if (/context.{0,30}(?:limit|exceed)|too many tokens|request.{0,24}(?:too large|exceeds|too big|maximum)|\b413\b/i.test(error))
     return { category: "context", recovery: "Reduce the failed request's payload or compact retained evidence before retrying that scope." };
-  if (/timed?\s*out|timeout|deadline/i.test(error))
+  if (/timed?\s+out|timedout|deadline exceeded|exceeded.{0,24}timeout|timeout.{0,24}(?:exceeded|after|reached)/i.test(error))
     return { category: "timeout", recovery: "Inspect the owned task status and partial artifacts before retrying; do not duplicate work that may still be running." };
   if (/Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND|ENOENT|command not found/i.test(error))
     return { category: "dependency", recovery: "Check the exact missing path or executable and its loader environment before relaunching." };
-  if (/acceptance|verification|outside.{0,20}file|contract/i.test(error))
+  if (/acceptance.{0,32}(?:failed|rejected|missing|required|unresolved|not met)|verification.{0,32}(?:failed|missing|required|unresolved)|outside.{0,20}file|contract.{0,32}(?:violation|breach|failed|mismatch|required|not met)/i.test(error))
     return { category: "verification", recovery: "Inspect the changed files and failed acceptance condition; repair the specific result before treating the child as complete." };
   if (/invalid.{0,20}(?:argument|parameter|schema)|validation|unknown (?:tool|action)/i.test(error))
     return { category: "input", recovery: "Read the active tool schema and correct the rejected arguments before retrying." };
@@ -97,8 +107,9 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
     }
   }
   const reasonText: Record<string, string> = { budget: 'budget limit', context: 'context limit', capacity: '429 capacity',
-    timeout: 'timeout', permission: 'permission denied', dependency: 'ERR_MODULE_NOT_FOUND',
-    'invalid-output': 'invalid-output', acceptance: 'acceptance verification', transport: 'transport failure', 'process-signal': 'process-signal' };
+    timeout: 'timed out', permission: 'permission denied', dependency: 'ERR_MODULE_NOT_FOUND',
+    'invalid-output': 'invalid-output', acceptance: 'acceptance failed', transport: 'transport failure', 'process-signal': 'process-signal',
+    truncated: 'response truncated (length)' };
   const failures: any[] = [], seen = new Set(), groups = new Map();
   const incidents = new Map();
   let total = 0;

@@ -81,6 +81,39 @@ test('successful selections attach bounded decision records', () => {
   assert.ok(JSON.stringify(pick.decision).length < 20000, 'record is bounded');
 });
 
+test('image needs route image-capable models; container images do not', () => {
+  const { childRequirementsFromTask, detectImageNeed } = req;
+  assert.equal(detectImageNeed('Review the attached screenshot for UI bugs'), true);
+  assert.equal(detectImageNeed('Compare these two images'), true);
+  assert.equal(detectImageNeed('Review the docker image build'), false);
+  assert.equal(detectImageNeed('Review the login code'), false);
+  assert.deepEqual(childRequirementsFromTask('Review the attached screenshot').inputModalities, ['text', 'image']);
+  assert.equal(childRequirementsFromTask('Review the login code').inputModalities, undefined);
+});
+
+test('same model through two backends fails only where the payload is rejected', async () => {
+  const { buildSelectionGateContext, evaluateCandidateGates } = await import(shared + 'model-selection.ts');
+  const a = { provider: 'pa', id: 'm', fullId: 'pa/m', contextWindow: 64000, maxTokens: 8192, input: ['text'], cost: { input: 0.2, output: 0.8, cacheRead: 0.02, cacheWrite: 0.1 } };
+  const b = { ...a, provider: 'pb', fullId: 'pb/m' };
+  const gate = buildSelectionGateContext([a, b], {
+    toolWire: { backend: 'deepseek', compatible: (route) => route.startsWith('pa/') ? { ok: false, reason: 'union rejected' } : { ok: true } },
+  });
+  const rejected = evaluateCandidateGates(a, gate);
+  assert.ok(rejected.dimensions.includes('backend-compat'));
+  assert.deepEqual(evaluateCandidateGates(b, gate).dimensions, [], 'same model stays eligible on the compatible backend');
+});
+
+test('auth-bound routes reject as authorization, not cooldown', async () => {
+  const { buildSelectionGateContext, evaluateCandidateGates } = await import(shared + 'model-selection.ts');
+  const model = { provider: 'pa', id: 'm', fullId: 'pa/m', contextWindow: 64000, maxTokens: 8192, input: ['text'], cost: { input: 0.2, output: 0.8, cacheRead: 0.02, cacheWrite: 0.1 } };
+  const authHealth = { version: 1, providers: { pa: { cooldownUntil: Date.now() + 60000, failure: { kind: 'provider-auth', scope: 'provider' }, models: {} } } };
+  const gate = buildSelectionGateContext([model], {}, Date.now(), authHealth);
+  const verdict = evaluateCandidateGates(model, gate);
+  assert.ok(verdict.dimensions.includes('authorization'));
+  assert.ok(!verdict.dimensions.includes('provider-cooling'));
+  assert.ok(verdict.detail.authorization.includes('dead credentials'));
+});
+
 test('catalog confidence gates high-stakes evidence selectively', () => {
   const facts = {
     contextWindow: confidentValue(32000, 'stored-cache', Date.now()),

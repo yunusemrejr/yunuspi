@@ -77,6 +77,31 @@ test('mutation classifier masks quoted spans before cue matching', () => {
   assert.equal(taskMayMutate('Implement the fix and update tests.'), true);
 });
 
+test('adversarial: filenames, nominals, and not-just constructions', () => {
+  const fix = extractTaskIntent('Review fix.py for style issues');
+  assert.equal(fix.requestedAction, 'review');
+  assert.equal(fix.mutationPermission, 'forbidden');
+
+  const nominal = extractTaskIntent('The deployment failed; investigate the cause');
+  assert.equal(nominal.requestedAction, 'investigate');
+  assert.equal(nominal.mutationPermission, 'forbidden');
+
+  const notJust = extractTaskIntent("Don't just review it, implement the fix");
+  assert.equal(notJust.requestedAction, 'implement');
+  assert.equal(notJust.mutationPermission, 'required');
+  assert.ok(notJust.segments.requestedVerbs.includes('implement'), 'Y clause is requested, not swallowed');
+
+  const docs = extractTaskIntent('Update the deployment documentation');
+  assert.equal(docs.requestedAction, 'implement', 'docs edit is code work, not an operation');
+
+  const scoped = extractTaskIntent('Audit config.json; the file deploy.yaml is out of scope');
+  assert.equal(scoped.requestedAction, 'review');
+
+  const versioned = extractTaskIntent('Release v2.3 to staging now');
+  assert.equal(versioned.requestedAction, 'operate');
+  assert.equal(versioned.environmentSensitivity, 'production-target');
+});
+
 test('required evidence follows the deliverable', () => {
   const review = extractTaskIntent('Audit the login flow and report findings.');
   assert.ok(review.requiredEvidence.includes('source-refs'));

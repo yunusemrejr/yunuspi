@@ -86,6 +86,36 @@ test('logical state reflects the latest terminal attempt', () => {
   assert.equal(state, 'completed');
 });
 
+test('ledger agrees with embedded metrics counters on shared fixtures', async () => {
+  // session-metrics.ts is embedded verbatim in footer builds and cannot import
+  // the ledger. This conformance test is the sharing contract: same entries,
+  // same child counts. Detached launches are the one principled vocabulary
+  // difference (metrics: active; ledger: queued = accepted but not started).
+  const { collectSessionMetrics } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-metrics.ts')));
+  const entries = [
+    { type: 'message', message: { role: 'toolResult', toolName: 'subagent', details: { runId: 'p1', results: [
+      { index: 0, status: 'completed', exitCode: 0, model: 'q/m', label: 'audit login' },
+      { index: 1, status: 'failed', exitCode: 1, error: 'HTTP 503 flap', model: 'q/m', label: 'probe api' },
+    ] } } },
+    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'p1', results: [
+      { index: 0, status: 'completed', exitCode: 0, model: 'q/m', usage: { input: 20, output: 5 } },
+      { index: 1, status: 'failed', exitCode: 1, error: 'HTTP 503 flap', model: 'q/m', usage: { input: 8, output: 1 } },
+    ] } },
+    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'p2', results: [
+      { index: 0, status: 'stopped', stopped: true, model: 'q/m' },
+      { index: 1, status: 'running', model: 'q/m' },
+    ] } },
+  ];
+  const metrics = collectSessionMetrics(entries);
+  const ledger = reduceChildEvents(projectTranscriptChildren(entries));
+  const summary = summarizeLedger(ledger);
+  assert.equal(summary.tasks, metrics.agents, 'duplicate receipts dedupe to the same child count');
+  assert.equal(summary.completed, metrics.agentsCompleted);
+  assert.equal(summary.failed, metrics.agentFailures);
+  assert.equal(summary.stopped, metrics.agentsStopped);
+  assert.equal(summary.running + summary.queued, metrics.agentsActive);
+});
+
 test('transcript projection feeds the reducer deterministically', () => {
   const entries = [
     { type: 'message', message: { role: 'toolResult', toolName: 'subagent', details: { runId: 'p1', results: [{ index: 0, status: 'completed', exitCode: 0, model: 'q/m', label: 'audit login' }] } } },
@@ -98,4 +128,27 @@ test('transcript projection feeds the reducer deterministically', () => {
   assert.equal(first.tasks[0].state, 'completed');
   assert.equal(first.tasks[0].attempts[0].usage.input, 20);
   assert.equal(summarizeLedger(first).completed, 1);
+});
+
+test('audit: detached children are live (running), never queued',()=>{
+ for(const row of [{status:'detached'},{detached:true},{state:'detached'}]){
+  const outcome=deriveAttemptOutcome(row);
+  assert.equal(outcome.state,'running',JSON.stringify(row));
+  assert.equal(outcome.execution.status,'running',JSON.stringify(row));
+ }
+ const ledger=reduceChildEvents([
+  {type:'launch',taskId:'t-det',label:'detached job',attempt:1,runId:'r-det'},
+  {type:'completion',taskId:'t-det',runId:'r-det',row:{status:'detached'}},
+ ]);
+ assert.equal(ledger.tasks[0].state,'running');
+});
+
+test('audit: ledger and /metrics agree a detached child is outstanding',async ()=>{
+ const {collectSessionMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/session-metrics.ts')));
+ const entries=[{type:'custom',customType:'subagent-cost-v1',data:{runId:'dx',mode:'single',state:'detached',results:[{index:0,status:'detached'}]}}];
+ const ledger=reduceChildEvents(projectTranscriptChildren(entries));
+ assert.equal(ledger.tasks[0].state,'running');
+ const m=collectSessionMetrics(entries);
+ assert.equal(m.agentsActive,1);
+ assert.equal(m.agentOutcomeUnknown,0);
 });

@@ -29,6 +29,7 @@ export type RejectionDimension =
 	| "backend-compat"
 	| "provider-cooling"
 	| "quota"
+	| "authorization"
 	| "reliability-history"
 	| "excluded"
 	| "structured-output";
@@ -153,6 +154,7 @@ export function recoveryHintForDimension(dimension: RejectionDimension): string 
 		case "backend-compat": return "switch to an already-authorized compatible backend";
 		case "provider-cooling": return "wait out the cooldown or use a healthy provider for the same model";
 		case "quota": return "use a non-exhausted provider or authorize more quota";
+		case "authorization": return "re-authorize the provider credentials; never reroute silently past dead keys";
 		case "reliability-history": return "prefer a route with healthier recent outcomes";
 		case "excluded": return "remove the exclusion or pick a non-excluded route";
 		case "structured-output": return "relax the structured-output contract or pick a route advertising it";

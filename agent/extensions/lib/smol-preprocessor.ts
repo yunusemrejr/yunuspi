@@ -225,16 +225,16 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     offer(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash') {
       microMetrics().offer('smol');
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') { microMetrics().skip('smol','disabled'); return; }
-      if (!safeSmolOutput(tool, raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
-      if (!validSmolRuntime(runtime)) { noteHealth('ml.smol.offer', {decision:'no-runtime'}); return; }
+      if (!safeSmolOutput(tool, raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'protected-content'}); return; }
+      if (!validSmolRuntime(runtime)) { noteHealth('ml.smol.offer', {decision:'no-runtime',reason:'model-unavailable'}); return; }
       if (slots.has(key) || slots.size >= 64) { microMetrics().skip('smol',slots.has(key)?'existing-slot':'slot-capacity'); return; }
       const background = runtime.version === 2;
       const signal = process.env.PI_LOCAL_INTELLIGENCE === 'off' ? '' : taskTerms(task).sort().join(' ');
       const cacheKey = createHash('sha256').update(raw).update('\0').update(signal).digest('hex');
       const cached = background ? cache.get(cacheKey) : undefined;
       if (cached) { beginHarnessActivity('smol')('cached'); stats.cacheHits++; microMetrics().cacheHit('smol'); slots.set(key,{state:'ready',value:cached}); noteHealth('ml.smol.offer', {decision:'cache-hit',count:1}); return; }
-      if (busy || now() - lastCall < 60_000) { noteHealth('ml.smol.offer', {decision:busy?'busy':'cooldown'}); return; }
-      if (!background && raw.length < runtime.calibrated.minInputChars) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (busy || now() - lastCall < 60_000) { noteHealth('ml.smol.offer', {decision:busy?'busy':'cooldown',reason:'latency-budget-exceeded'}); return; }
+      if (!background && raw.length < runtime.calibrated.minInputChars) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'too-small-to-benefit'}); return; }
       // Background mode uses a context-saving floor even on zero/unknown-price
       // routes; its CPU bound is one five-second request per minute fleet-wide.
       if (!background && (typeof mainInputUsdPerMillion !== 'number' || !Number.isFinite(mainInputUsdPerMillion) || mainInputUsdPerMillion <= 0)) return;
@@ -243,7 +243,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       const savings = (projectedChars: number) => Math.max(0, raw.length - projectedChars - 800) / 6 * price / 1e6;
       if (!background && savings(Math.floor(raw.length / 4)) < budget) return;
       const source = prepareSmolExtraction(raw);
-      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
       // The model cannot delete boundary context or explicit status/negation evidence.
       // Retention deduplicates exact repeated status text only; changing a
       // number or qualification creates a distinct mandatory fact.
@@ -255,9 +255,9 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
         else if (smolProtectedLine(line.text) || lineCritical.test(line.text) || statusLine.test(line.text)) critical.push({ id: line.id, reason: 'status', text: line.text });
       });
       const required = compressRequired(critical);
-      if (!required) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!required) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'already-compact'}); return; }
       const prepared = prepareSmolExtraction(raw, required);
-      if (!prepared) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!prepared) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
       const modelInput = background ? smolModelInput(prepared, signal) : undefined;
       if (background && !modelInput) { noteHealth('ml.smol.offer', {decision:'prompt-budget'}); return; }
       noteHealth('ml.smol.offer', {decision:'accepted',count:1});
@@ -390,17 +390,17 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     offerWindowed(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash', details?: unknown) {
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
       if (windows.has(key) || windows.size >= 64) return;
-      if (!safeSmolOutput(tool, raw, false, details, 32768)) { noteHealth('ml.smol.offer', {decision:'ineligible-source'}); return; }
+      if (!safeSmolOutput(tool, raw, false, details, 32768)) { noteHealth('ml.smol.offer', {decision:'ineligible-source',reason:'protected-content'}); return; }
       const lines = raw.split('\n');
       const taskAware = process.env.PI_LOCAL_INTELLIGENCE !== 'off';
       const scores = taskAware ? relevanceScores(lines, task) : [];
       // An exhausted scorer budget is not evidence that no source line matches.
       if (taskAware && scores.length !== lines.length) { noteHealth('ml.smol.offer', {decision:'task-budget'}); return; }
       const window = prepareSmolWindow(raw, scores.flatMap((score: number, index: number) => score > 0 ? [index + 1] : []));
-      if (!window) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
-      if (!safeSmolOutput(tool, window.text, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!window) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
+      if (!safeSmolOutput(tool, window.text, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'protected-content'}); return; }
       const source = prepareSmolExtraction(window.text);
-      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible'}); return; }
+      if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
       const slotKey = `${key}:window`;
       api.offer(slotKey, window.text, mainInputUsdPerMillion, task, tool);
       if (!slots.has(slotKey)) return;

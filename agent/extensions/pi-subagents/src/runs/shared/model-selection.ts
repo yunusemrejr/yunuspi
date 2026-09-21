@@ -222,7 +222,17 @@ export function evaluateCandidateGates(model: ModelInfo, ctx: SelectionGateConte
 		dimensions.push("modality"); detail.modality = "below parent baseline: reasoning";
 	}
 	const route = evaluateRoute({ provider: model.provider, model: model.id, now: ctx.timestamp }, ctx.health);
-	if (!route.allowed) { dimensions.push("provider-cooling"); detail["provider-cooling"] = route.boundBy ?? "cooldown"; }
+	if (!route.allowed) {
+		// Auth-bound routes are authorization failures, not cooldowns: dead
+		// keys need re-authorization, never a wait-and-retry.
+		if (route.kind === "provider-auth") {
+			dimensions.push("authorization"); detail.authorization = `dead credentials (${route.boundBy ?? "provider"})`;
+		} else if (route.kind === "quota-rate") {
+			dimensions.push("quota"); detail.quota = `rate/quota cooldown (${route.boundBy ?? "provider"})`;
+		} else {
+			dimensions.push("provider-cooling"); detail["provider-cooling"] = route.boundBy ?? "cooldown";
+		}
+	}
 	const history = ctx.histories.get(model.fullId);
 	if (history && history.effectiveSamples >= 4 && history.failureRate > .65) {
 		dimensions.push("reliability-history"); detail["reliability-history"] = `${Math.round(history.failureRate * 100)}% recent failures`;

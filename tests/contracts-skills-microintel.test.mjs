@@ -63,6 +63,37 @@ test('micro-intel usefulness rewards correct skips, not invocations', () => {
   assert.ok(smol.usefulness > jev.usefulness, 'correct skips beat empty invocations');
 });
 
+test('smol offers carry structured skip reasons on the live gates', async () => {
+  const smol = await import(pathToFileURL(path.join(agent, 'extensions/lib/smol-preprocessor.ts')));
+  const seen = [];
+  const key = Symbol.for('yunus-pi.health.v1');
+  const prior = globalThis[key];
+  globalThis[key] = (kind, data) => { if (kind === 'ml.smol.offer') seen.push(data); };
+  try {
+    const clean = 'Routine output line with ordinary words. '.repeat(90);
+    // No runtime: model unavailable.
+    smol.createSmolPreprocessor({}).offer('k1', clean, 1);
+    // Unsafe content: protected.
+    smol.createSmolPreprocessor({}).offer('k2', `${clean} the password is hunter2`.slice(0, 4100), 1);
+    // Valid v1 runtime but below its floor: too small to benefit.
+    const v1 = {
+      version: 1, enabled: true, model: 'SmolLM2-135M-Instruct', endpoint: 'http://127.0.0.1:18735/completion',
+      calibrated: { eligible: true, p95LatencyMs: 100, outputReductionRatio: 8, minInputChars: 8000, localCostUsdPerSecondCeiling: 0.0001, minSavedChars: 1500 },
+    };
+    smol.createSmolPreprocessor({ runtime: v1 }).offer('k3', clean, 1);
+  } finally {
+    if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior;
+  }
+  const byKey = Object.fromEntries(seen.map((s, i) => [i, s]));
+  assert.equal(seen[0].decision, 'no-runtime');
+  assert.equal(seen[0].reason, 'model-unavailable');
+  assert.equal(seen[1].decision, 'ineligible');
+  assert.equal(seen[1].reason, 'protected-content');
+  assert.equal(seen[2].decision, 'ineligible');
+  assert.equal(seen[2].reason, 'too-small-to-benefit');
+  assert.ok(byKey, 'hook observed all offers');
+});
+
 test('smol/kompress ineligibility is structured', () => {
   let ledger = { version: 1, samples: [] };
   for (const reason of ['input-shape-unsupported', 'protected-content', 'already-compact', 'latency-budget-exceeded', 'confidence-too-low', 'model-unavailable']) {

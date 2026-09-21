@@ -111,7 +111,10 @@ function sanitizeId(value: string | undefined, max = 160): string | undefined {
  */
 export function buildChildTaskIdentity(input: ChildTaskIdentityInput): ChildTaskIdentity {
 	const attempt = Number.isSafeInteger(input.attempt) && (input.attempt as number) > 0 ? (input.attempt as number) : 1;
-	const explicit = sanitizeId(input.childId) ?? sanitizeId(input.workflowKey);
+	// Legacy contract (session-metrics record()): workflowKey binds before
+	// childId. Transcript-derived identity must key identically or ledger
+	// aggregates diverge from footer/metrics counters on the same rows.
+	const explicit = sanitizeId(input.workflowKey) ?? sanitizeId(input.childId);
 	const runId = sanitizeId(input.runId, 128);
 	const index = Number.isSafeInteger(input.index) ? (input.index as number) : undefined;
 	const taskId = explicit

@@ -60,6 +60,23 @@ test('injections carry owner, hash, revision, ttl, tokens, and newness', () => {
   assert.equal(repeat.envelope.materiallyNew, false, 'repeated churn is flagged, not mistaken for new intel');
 });
 
+test('injection envelopes reach diagnostic exports through the bridge', async () => {
+  const { buildSessionJsonExport } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-export-json.ts')));
+  const key = Symbol.for('yunus-pi.context-injection.v1');
+  const prior = globalThis[key];
+  const { envelope } = envelopInjection({ owner: 'project-intelligence:capsule', bytes: 'capsule bytes here', sourceRevision: 'generation:7' });
+  globalThis[key] = { last: [envelope] };
+  try {
+    const report = buildSessionJsonExport({ header: {}, scope: 'branch', branch: [], retained: [] });
+    assert.equal(report.normalized.context.injections.length, 1);
+    assert.equal(report.normalized.context.injections[0].owner, 'project-intelligence:capsule');
+    assert.equal(report.normalized.context.injections[0].hash, envelope.hash);
+    assert.equal(report.normalized.context.injections[0].materiallyNew, true);
+  } finally {
+    if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior;
+  }
+});
+
 test('late-bound blocks keep stable prefixes byte-identical', () => {
   const { stable, lateBound } = splitLateBound('STABLE PREFIX', { turn: '42', model: 'q/m' });
   assert.equal(stable, 'STABLE PREFIX');

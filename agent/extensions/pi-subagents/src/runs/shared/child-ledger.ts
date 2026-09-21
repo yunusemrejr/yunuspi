@@ -3,17 +3,19 @@
  *
  * ONE normalized reducer for child state, keyed by stable task identity and
  * attempt identity. Launch, lifecycle, progress, completion, accounting,
- * recovery, resume, stop, and failure evidence all merge here. `/used`,
- * `/metrics`, footer counters, recovery logic, notifications, cost accounting,
- * and diagnostics read from this ledger — they never independently reconstruct
- * child rows from launch receipts.
+ * recovery, resume, stop, and failure evidence all merge here. `/used`
+ * (session-signals) and session export read from this ledger — they never
+ * independently reconstruct child rows from launch receipts. `/metrics`
+ * (session-metrics) still keeps its own transcript reducer for agent/workflow
+ * counters; the cross-surface invariant is liveness agreement (a live child is
+ * never terminal/queued in either surface), not identical state labels.
  *
  * Precedence (explicit terminal states win; secondary flags never overwrite):
  *   intentional stop    -> stopped
  *   interrupted/recoverable -> paused
  *   completed acceptance    -> completed
  *   execution failed        -> failed
- *   still running           -> running
+ *   still running           -> running (detached folds here: live elsewhere)
  *   launch accepted, idle   -> queued
  * Exit codes and generic error markers are secondary flags, kept separately.
  *
@@ -30,6 +32,7 @@
  */
 import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
 import { buildChildTaskIdentity } from "./child-identity.ts";
+import { buildExecutionEvidence, type ExecutionEvidence } from "../../../../lib/execution-evidence.ts";
 
 export type ChildLifecycleState = "queued" | "running" | "paused" | "stopped" | "completed" | "failed";
 
@@ -135,6 +138,10 @@ function stateRank(state: ChildLifecycleState): number {
 function normalizeState(value: unknown): ChildLifecycleState | undefined {
 	if (value === "complete") return "completed";
 	if (value === "rejected") return "failed";
+	// A detached child is live elsewhere — never queued, never terminal.
+	// /metrics keeps "detached" as its own display label; the ledger folds it
+	// to running so both surfaces agree the child is outstanding.
+	if (value === "detached") return "running";
 	if (value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "stopped" || value === "paused") {
 		return value;
 	}
@@ -166,6 +173,7 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 } {
 	const stopped = row.stopped === true || row.status === "stopped" || row.state === "stopped";
 	const paused = row.interrupted === true || row.status === "paused" || row.state === "paused";
+	const detached = row.detached === true || row.status === "detached" || row.state === "detached";
 	const acceptanceRow = asRecord(row.acceptance);
 	const acceptanceStatus = acceptanceRow.status ?? row.acceptanceStatus;
 	const acceptance: AcceptanceOutcome =
@@ -210,7 +218,7 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 	if (stopped || paused) {
 		execution = { status: "failed", cause };
 	} else if (cause.category === "none") {
-		const running = row.status === "running" || row.state === "running";
+		const running = detached || row.status === "running" || row.state === "running";
 		execution = { status: running ? "running" : "succeeded" };
 	} else {
 		execution = { status: "failed", cause };
@@ -224,7 +232,7 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 	else if (execution.status === "failed") state = "failed";
 	else if (acceptance.status === "failed") state = "failed";
 	else if (row.status === "completed" || row.state === "completed" || row.state === "complete" || row.status === "complete" || row.success === true || row.exitCode === 0) state = "completed";
-	else if (row.status === "running" || row.state === "running") state = "running";
+	else if (detached || row.status === "running" || row.state === "running") state = "running";
 	else state = normalizeState(row.status ?? row.state) ?? "queued";
 
 	const exitCode = typeof row.exitCode === "number" && Number.isSafeInteger(row.exitCode) ? row.exitCode : undefined;
@@ -534,6 +542,16 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 			const details = asRecord(message.details);
 			const runId = asString(details.runId ?? details.asyncId ?? details.id, 160);
 			const rows = Array.isArray(details.results) ? details.results : [];
+			// Legacy parity (session-metrics record()): a detached single launch
+			// has no completed results yet. Count its accepted child
+			// immediately as queued (or its stated lifecycle state) instead
+			// of dropping the receipt. Other receipt shapes stay uninferred.
+			if (!rows.length && runId && details.mode === "single" && details.asyncId) {
+				const identity = buildChildTaskIdentity({ runId, index: 0, attempt: 1 });
+				push({ type: "launch", taskId: identity.taskId, attempt: 1, runId, label: identity.label });
+				const state = asString(details.state ?? details.status, 32);
+				push({ type: "lifecycle", taskId: identity.taskId, attempt: 1, runId, state: state ?? "queued" });
+			}
 			rows.slice(0, 128).forEach((rowValue, position) => {
 				const row = asRecord(rowValue);
 				const index = Number.isSafeInteger(row.index) ? (row.index as number) : position;
@@ -664,6 +682,53 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 		}
 	}
 	return events;
+}
+
+/**
+ * Project a logical task into the unified ExecutionEvidence envelope. This is
+ * a pure projection of canonical ledger state — not a second source — so
+ * cross-module merging (cost, reviews, diagnostics) never re-infers it.
+ */
+export function childTaskToEvidence(task: LogicalChildTask): ExecutionEvidence {
+	const latest = [...task.attempts].sort((a, b) => b.attempt - a.attempt)[0];
+	const usage = latest?.usage;
+	return buildExecutionEvidence({
+		identity: {
+			id: task.taskId,
+			...(latest ? { attempt: latest.attempt } : {}),
+			...(task.todoId ? { todoId: task.todoId } : {}),
+			...(task.label ? { label: task.label } : {}),
+		},
+		owner: "subagent",
+		...(latest?.startedAt === undefined ? {} : { startedAt: latest.startedAt }),
+		...(latest?.endedAt === undefined ? {} : { endedAt: latest.endedAt }),
+		state: task.state,
+		...(task.execution.cause ? { cause: `child/${task.execution.cause.category}` } : task.state === "completed" ? { cause: "child/ok" } : {}),
+		artifacts: task.attempts.flatMap((attempt) => attempt.artifacts ?? []).slice(0, 32),
+		...(usage ? {
+			usage: {
+				...(usage.input === undefined ? {} : { input: usage.input }),
+				...(usage.output === undefined ? {} : { output: usage.output }),
+				...(usage.cacheRead === undefined ? {} : { cacheRead: usage.cacheRead }),
+				...(usage.cacheWrite === undefined ? {} : { cacheWrite: usage.cacheWrite }),
+				...(usage.reasoning === undefined ? {} : { reasoning: usage.reasoning }),
+				...(usage.turns === undefined ? {} : { turns: usage.turns }),
+			},
+		} : {}),
+		...(task.acceptance.status === "none" ? {} : {
+			verification: {
+				method: "acceptance",
+				passed: task.acceptance.status === "passed" ? true : task.acceptance.status === "failed" ? false : undefined,
+			},
+		}),
+		producer: "child-ledger",
+		detail: {
+			attempts: task.attempts.length,
+			route: latest?.route,
+			execution: task.execution.status,
+			acceptance: task.acceptance.status,
+		},
+	});
 }
 
 /** Count logical tasks by state (aggregate first; attempts stay expandable). */

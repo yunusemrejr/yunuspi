@@ -11,7 +11,7 @@ import { sourceCheckSupported } from "./source-check.ts";
 import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review.ts";
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
-import { routeSkills, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
+import { routeSkills, routeSkillsPrecise, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
@@ -702,7 +702,7 @@ export function createRelevantGuidance(pi: any) {
       if (file && excluded(file)) return;
       const suppliedFiles = event.toolName === 'bulk_edit' ? bulkFiles.get(event.input?.token) ?? event.input?.files : event.input?.paths;
       const files = [file, ...(Array.isArray(suppliedFiles) ? suppliedFiles.slice(0,200).filter((p: any) => typeof p === 'string').map((p: string) => checkpointPath(p,cwd)) : [])].filter(p => p && !excluded(p));
-      const applicable = mutation ? files.flatMap(file => routeSkills('',file).sort((a,b) => b.priority-a.priority).slice(0,2))
+      const applicable = mutation ? files.flatMap(file => routeSkillsPrecise('',file).slice(0,2))
         .map(route => ({skill:skills.find(s => s.name === route.name), reason:route.check}))
         .filter((entry): entry is {skill:Skill;reason:string} => !!entry.skill) : [];
       for (const entry of applicable) trackReview(entry.skill,entry.reason,'file');
@@ -882,7 +882,11 @@ export function createRelevantGuidance(pi: any) {
       const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
       if (!continuation) { context = []; reviewTargets.clear(); }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
-      for (const route of promptRoutes.filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).sort((a,b) => b.priority-a.priority || a.name.localeCompare(b.name)).slice(0,3)) {
+      // Precision order (action intent + file/domain evidence) picks the
+      // surfaced three; .sort() by raw priority would undo it. Advisory:
+      // routedSkills() above still sees every candidate.
+      const preciseRoutes = routeSkillsPrecise(prompt).filter(route => route.priority >= 60 && skills.some(skill => skill.name === route.name)).slice(0,3);
+      for (const route of preciseRoutes) {
         const skill = skills.find(s => s.name === route.name);
         if (skill) trackReview(skill,route.check,'task');
       }
