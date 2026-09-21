@@ -12,7 +12,7 @@
  * Producers that learn about 429s can record those markers; until then the
  * journal cannot classify exhaustion and selection behaves exactly as before.
  */
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { QuotaEvent } from "./quota-health.ts";
@@ -60,12 +60,27 @@ export function mapJournalLinesToQuotaEvents(lines: string[]): QuotaEvent[] {
 	return events.slice(-JOURNAL_MAX_EVENTS);
 }
 
-/** Read the journal tail; missing or unreadable journal yields []. */
+/** Read the journal tail (bounded bytes from disk, never the whole file);
+ * missing or unreadable journal yields []. A mid-line slice start parses as
+ * a skippable partial line, same as before. */
 export function readJournalQuotaEvents(path: string = REQUEST_JOURNAL_PATH): QuotaEvent[] {
 	let raw: string;
 	try {
-		const handle = readFileSync(path, "utf8");
-		raw = handle.length > JOURNAL_TAIL_BYTES ? handle.slice(-JOURNAL_TAIL_BYTES) : handle;
+		const size = statSync(path).size;
+		const want = Math.min(Math.max(0, size), JOURNAL_TAIL_BYTES);
+		const fd = openSync(path, "r");
+		try {
+			const buf = Buffer.alloc(want);
+			let read = 0;
+			while (read < want) {
+				const n = readSync(fd, buf, read, want - read, size - want + read);
+				if (n <= 0) break;
+				read += n;
+			}
+			raw = buf.subarray(0, read).toString("utf8");
+		} finally {
+			closeSync(fd);
+		}
 	} catch {
 		return [];
 	}
