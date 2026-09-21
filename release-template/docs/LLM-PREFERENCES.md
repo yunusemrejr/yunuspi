@@ -23,6 +23,13 @@ An explicit free-only task constraint filters preference chains to
 proven-free routes. Automatic council and review rounds keep honoring
 configured routes while their autonomous fill stays free-only.
 
+Tool-calling capability is proven by catalog facts that exist only for
+OpenRouter and OrcaRouter with fresh evidence. A configured route whose
+tool support is unknown (another provider, or stale/missing evidence)
+still passes validation — the explicit configuration is the positive
+evidence — and only a known-negative blocks it. Autonomous selection
+without configured preferences keeps requiring positive tool proof.
+
 ## State vs policy
 
 Harness persistence records the main model/provider/thinking configuration

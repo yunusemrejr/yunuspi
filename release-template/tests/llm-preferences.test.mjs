@@ -232,3 +232,25 @@ test("vendor-paused ids surface the vendor reason in chain diagnostics", () => {
 		try { fs.unlinkSync(path.join(root, "live-model-catalog.json")); } catch {}
 	}
 });
+
+test("explicit preferences pass tool requirements when catalog capability is unknown", () => {
+	writePrefs({
+		version: 1,
+		models: {
+			or_route: { provider: "openrouter", model: "google/gemini-2.5-flash" },
+			other_provider: { provider: "deepseek", model: "deepseek-chat" },
+		},
+		preferences: { swarm: { models: ["or_route", "other_provider"] } },
+	});
+	// No free-route evidence is published in this file: catalog tool facts are
+	// unknown for every route (and unknowable for non-OpenRouter/OrcaRouter
+	// providers). Explicit configuration is the positive evidence, so the
+	// chain keeps both entries instead of dropping to autonomous selection.
+	const chain = fallback.resolveLlmPreferenceChain("swarm", registry, {
+		requirements: { minContextWindow: 16384, minOutputTokens: 1024, toolCalling: true },
+	});
+	assert.deepEqual(chain.map((c) => c.route), [
+		"openrouter/google/gemini-2.5-flash",
+		"deepseek/deepseek-chat",
+	]);
+});

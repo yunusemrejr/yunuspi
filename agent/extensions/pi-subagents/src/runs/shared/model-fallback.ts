@@ -446,9 +446,13 @@ export interface LlmPreferenceOptions {
  * against the live registry (fuzzy resolution), cached exclusions, shared
  * provider-health cooldowns and capability requirements; unusable entries
  * are skipped and the chain continues. Explicit user preferences bypass
- * economy price caps but never health, exclusion or capability gates.
- * Returns [] when the file is missing, malformed or has no viable entry,
- * in which case callers use the existing autonomous selection.
+ * economy price caps but never health, exclusion or capability gates —
+ * except tool-calling proof: catalog facts exist only for OpenRouter and
+ * OrcaRouter with fresh evidence, so unknown tool support passes here (the
+ * user's explicit configuration is the positive evidence) and only a
+ * known-negative blocks. Autonomous selection keeps requiring positive
+ * tool proof. Returns [] when the file is missing, malformed or has no
+ * viable entry, in which case callers use the existing autonomous selection.
  */
 export function resolveLlmPreferenceChain(
 	role: string,
@@ -498,7 +502,7 @@ export function resolveLlmPreferenceChain(
 		if (req?.minOutputTokens !== undefined && !(typeof info.maxTokens === "number" && info.maxTokens >= req.minOutputTokens)) continue;
 		if (req?.reasoning === true && info.reasoning !== true) continue;
 		if (req?.inputModalities?.some((input) => !info.input?.includes(input))) continue;
-		if (req?.toolCalling && catalogRouteCapabilities(info)?.toolCalling !== true) continue;
+		if (req?.toolCalling && catalogRouteCapabilities(info)?.toolCalling === false) continue;
 		if (options?.freeOnly && !isProvenFreeRoute(info)) continue;
 		const wanted = suffix.thinkingSuffix ? suffix.thinkingSuffix.slice(1) : entry.thinking;
 		const norm = normalizeThinking(wanted);
