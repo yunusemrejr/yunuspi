@@ -180,7 +180,7 @@ export function buildChildRouteRequirements(
 }
 
 const IMAGE_CUES = /\b(screenshots?|images?|pictures?|photos?|vision|multimodal|png|jpe?g|gif|webp|svg|bmp|attached (?:files?|images?|media))\b/i;
-const NON_VISUAL_IMAGE = /\b(docker|disk|container|iso|vm|machine|factory|system|base)\s+image/i;
+const NON_VISUAL_IMAGE = /\b(docker|disk|container|iso|vm|machine|factory|system|base)\s+image/gi;
 
 /** Detect vision input needs from task text. Container/disk images are not vision. */
 export function detectImageNeed(task: string): boolean {
