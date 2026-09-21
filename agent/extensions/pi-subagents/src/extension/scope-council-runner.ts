@@ -455,6 +455,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			// routes are still honored; autonomous paid spend is not.
 			team = selectAssistanceTeam(models.map(toModelInfo), loadModelEconomyConfig(), plan, {
 				freeOnly: true,
+				honorPaidPreferences: true,
 				task: request.task,
 				minOutputTokens: 512,
 				role: "council",
