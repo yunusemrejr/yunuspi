@@ -314,6 +314,7 @@ export type UsedSummary = {
     childRunId?: string;
     index?: number;
     mode?: string;
+    agent?: string;
     status: string;
     provider?: string;
     model?: string;
@@ -541,6 +542,24 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     else if (result?.exitCode === 0 || result?.success === true) status = "completed";
     return status === "complete" ? "completed" : status || "unknown";
   };
+  // Launch args name the agent; result rows rarely do. tasks[i].agent maps
+  // positionally for parallel launches, else the single-launch agent.
+  const launchAgent = (args: any, childIndex: unknown): string | undefined => {
+    if (!args || typeof args !== "object") return undefined;
+    if (Array.isArray(args.tasks)) {
+      const step = Number.isInteger(childIndex) ? args.tasks[childIndex as number] : undefined;
+      return bounded(step?.agent, 80);
+    }
+    return bounded(args.agent, 80);
+  };
+  const launchModel = (args: any, childIndex: unknown): string | undefined => {
+    if (!args || typeof args !== "object") return undefined;
+    if (Array.isArray(args.tasks)) {
+      const step = Number.isInteger(childIndex) ? args.tasks[childIndex as number] : undefined;
+      return bounded(step?.model, 240) ?? bounded(args.model, 240);
+    }
+    return bounded(args.model, 240);
+  };
   const recordRun = (data: any, result: any, index: number, args: any, fallback: string) => {
     if (!data || typeof data !== "object") data = {};
     if (!result || typeof result !== "object") result = {};
@@ -549,18 +568,20 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     const childKey = String(result.workflowKey ?? result.childId ?? childIndex).slice(0, 80);
     const key = `${parent}:${childKey}`;
     const previous = runRows.get(key);
-    const modelText = bounded(result.model, 240) ?? bounded(args?.model, 240) ?? (previous?.provider && previous?.model ? `${previous.provider}/${previous.model}` : previous?.model);
+    const modelText = bounded(result.model, 240) ?? launchModel(args, childIndex) ?? (previous?.provider && previous?.model ? `${previous.provider}/${previous.model}` : previous?.model);
     const slash = modelText?.indexOf("/") ?? -1;
     const usage = result.usage && typeof result.usage === "object" ? result.usage : result.evidence?.usage && typeof result.evidence.usage === "object" ? result.evidence.usage : undefined;
     const tokens = usage ? ["input", "output", "cacheRead", "cacheWrite"].reduce((sum, field) => sum + finite(usage[field]), 0) : 0;
     const rawCost = result.totalCost?.costUsd ?? usage?.cost?.total ?? usage?.cost;
     let status = statusOf(data, result);
     if (previous && terminal.has(previous.status) && !terminal.has(status)) status = previous.status;
+    const agent = launchAgent(args, childIndex) ?? previous?.agent;
     runRows.set(key, {
       runId: parent,
       ...(bounded(result.runId, 80) ? { childRunId: bounded(result.runId, 80) } : previous?.childRunId ? { childRunId: previous.childRunId } : {}),
       ...(Number.isInteger(childIndex) ? { index: childIndex } : {}),
       ...(bounded(data.mode, 32) ? { mode: bounded(data.mode, 32) } : previous?.mode ? { mode: previous.mode } : {}),
+      ...(agent ? { agent } : {}),
       status,
       ...(slash > 0 ? { provider: modelText!.slice(0, slash).slice(0, 80), model: modelText!.slice(slash + 1).slice(0, 160) } : modelText ? { model: modelText.slice(0, 160) } : previous?.model ? { ...(previous.provider ? { provider: previous.provider } : {}), model: previous.model } : {}),
       ...(bounded(args?.thinking ?? args?.thinkingOverride, 16) ? { thinking: bounded(args?.thinking ?? args?.thinkingOverride, 16) } : previous?.thinking ? { thinking: previous.thinking } : {}),
@@ -764,11 +785,13 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   ].join("");
   const runBody = runs.length ? runs.map((run, index) => {
     const route = run.provider && run.model ? `${run.provider}/${run.model}` : run.model ?? "model not recorded";
-    return `<details class="item"><summary><span class="item-name">Agent ${index + 1} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(run.status)}</span></summary>${factGrid([
+    const who = run.agent ? run.agent : `Agent ${index + 1}`;
+    return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(run.status)}</span></summary>${factGrid([
       ["Parent run", run.runId],
       ["Child run", run.childRunId ?? "not recorded"],
       ["Child position", Number.isInteger(run.index) ? `#${Number(run.index) + 1}` : "not recorded"],
       ["Launch mode", run.mode ?? "not recorded"],
+      ["Agent", run.agent ?? "not recorded"],
       ["Provider", run.provider ?? "not recorded"],
       ["Model", run.model ?? "not recorded"],
       ["Thinking", run.thinking ?? "not recorded"],
@@ -877,6 +900,7 @@ const COPY_SCRIPT = `<script>(function(){var btn=document.getElementById('copy-e
 export function errorsHtml(report: SessionErrorsReport): string {
   const errors = Array.isArray(report?.errors) ? report.errors : [];
   const groups = Array.isArray(report?.groups) ? report.groups : [];
+  const signatures = Array.isArray(report?.signatures) ? report.signatures : [];
   const hookErrors = Array.isArray(report?.hookErrors) ? report.hookErrors : [];
   const byKind = report?.byKind && typeof report.byKind === "object" ? report.byKind : {};
   const oneLine = (text: unknown) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "no excerpt";
@@ -886,14 +910,17 @@ export function errorsHtml(report: SessionErrorsReport): string {
     `<div class="overview"><div class="stat"><strong>${formatCount(report?.total ?? 0)}</strong><span>errors recorded</span></div><div class="stat"><strong>${formatCount(byKind.tool ?? 0)}</strong><span>tool failures</span></div><div class="stat"><strong>${formatCount((byKind.model ?? 0) + (byKind.child ?? 0) + (byKind.workflow ?? 0))}</strong><span>model / child / workflow</span></div><div class="stat"><strong>${formatCount(hookErrors.reduce((sum, row) => sum + row.errors, 0))}</strong><span>hook errors</span></div></div>`,
   ];
   sections.push(group("🧮 Groups", `${groups.length} groups`, groups.length ? `<ul>${groups.map((item) => usedRow(`${item.kind} / ${item.tool} / ${item.category}`, plural(item.count, "error"), undefined, "failed")).join("")}</ul>${report?.omittedGroups ? `<p class="note">${plural(report.omittedGroups, "group")} omitted.</p>` : ""}` : `<div class="empty">No error groups.</div>`));
+  sections.push(group("🔁 Recurring signatures", `${signatures.length} signatures`, signatures.length ? `<ul>${signatures.map((item) => usedRow(`${item.tool} / ${item.category}`, plural(item.count, "occurrence"), `${item.signature} · entries ${formatCount(item.firstEntry)}–${formatCount(item.lastEntry)}${item.precedingTools?.length ? ` · after: ${item.precedingTools.map((row) => `${row.tool} ×${row.count}`).join(", ")}` : " · no preceding tool context"}`, "failed")).join("")}</ul>${report?.omittedSignatures ? `<p class="note">${plural(report.omittedSignatures, "signature")} omitted.</p>` : ""}<p class="note">One signature is one recurring cause across calls, counted over the full window — not one row per failure. “After” lists the tools most often seen just before it.</p>` : `<div class="empty">No recurring signatures.</div>`));
   const body = errors.length ? errors.map((item) => {
     const usage = item.usage ? `${formatCount(item.usage.input ?? 0)} in · ${formatCount(item.usage.output ?? 0)} out${item.usage.turns !== undefined ? ` · ${formatCount(item.usage.turns)} turns` : ""}` : undefined;
     return `<details class="item"><summary><span class="item-name">#${item.seq} · ${escapeHtml(item.kind)} / ${escapeHtml(item.tool)} · ${escapeHtml(oneLine(item.error))}</span><span class="badge failed">${escapeHtml(item.category)}</span></summary>${factGrid([
       ["Incident", item.incident],
+      ["Signature", item.signature ?? "—"],
       ["Module", item.module],
       ["Timestamp", item.timestamp ?? "not recorded"],
       ["Call", item.callId ?? "—"],
       ["Run", item.runId ?? "—"],
+      ["Agent", item.agent ?? (item.kind === "child" ? "not recorded" : "—")],
       ["Provider", item.provider ?? (item.kind === "model" || item.kind === "child" ? "not recorded" : "—")],
       ["Model", item.model ?? (item.kind === "model" || item.kind === "child" ? "not recorded" : "—")],
       ["Backend", item.backend ?? "—"],
@@ -1207,6 +1234,19 @@ export default function (pi: any) {
     // identifies it.
     if (!snapshot.model && typeof ctx?.model?.id === "string" && ctx.model.id)
       snapshot.model = ctx.model.id.slice(0, 200);
+    // Some envelopes omit the wire tool list; fall back to the live registry
+    // so the snapshot still names what the session could call.
+    if (!snapshot.toolCount) {
+      try {
+        const active = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+        if (Array.isArray(active) && active.length) {
+          snapshot.tools = active.map((tool) => String(tool).slice(0, 160)).slice(0, 300);
+          snapshot.toolCount = active.length;
+        }
+      } catch {
+        // Wire truth stands without the fallback.
+      }
+    }
     storeSysSnapshot(sid, snapshot);
     provisionalSys.delete(sid);
   };

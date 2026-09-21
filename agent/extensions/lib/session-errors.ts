@@ -1,5 +1,5 @@
 import { collectSessionMetrics } from "./session-metrics.ts";
-import { failureCategory, incidentId } from "./session-diagnostics.ts";
+import { errorSignature, failureCategory, incidentId } from "./session-diagnostics.ts";
 import type { LogicalChildTask } from "../pi-subagents/src/runs/shared/child-ledger.ts";
 
 export type SessionErrorKind = "tool" | "model" | "child" | "workflow" | "hook";
@@ -9,6 +9,8 @@ export type SessionErrorDetail = {
   seq: number;
   /** Stable incident id shared with /metrics diagnostics. */
   incident: string;
+  /** Recurring-failure signature shared with the report's signatures table. */
+  signature: string;
   kind: SessionErrorKind;
   tool: string;
   /** Owning harness module: extension path, provider route, or hook owner. Never guessed beyond the recorded evidence. */
@@ -21,6 +23,7 @@ export type SessionErrorDetail = {
   entryId?: string;
   callId?: string;
   runId?: string;
+  agent?: string;
   provider?: string;
   model?: string;
   backend?: string;
@@ -56,6 +59,13 @@ export type SessionErrorsReport = {
   errors: SessionErrorDetail[];
   groups: { kind: string; tool: string; category: string; count: number }[];
   omittedGroups: number;
+  /** Recurring signatures across the full inspected window (not the shown limit): same normalized cause counted once with preceding-tool context. */
+  signatures: {
+    signature: string; count: number; kind: string; tool: string; category: string;
+    module: string; recovery: string; firstEntry: number; lastEntry: number;
+    exampleIncident: string; precedingTools: { tool: string; count: number }[];
+  }[];
+  omittedSignatures: number;
   byKind: Record<string, number>;
   hookErrors: { hook: string; owner: string; calls: number; errors: number; ms: number }[];
   scope: string;
@@ -204,12 +214,13 @@ export function collectSessionErrors(
   const limit = Number.isSafeInteger(options.limit) && (options.limit as number) > 0 ? Math.min(options.limit as number, 200) : DEFAULT_ERROR_LIMIT;
   const errorChars = Number.isSafeInteger(options.errorChars) && (options.errorChars as number) > 0 ? Math.min(options.errorChars as number, 8000) : ERROR_CHARS;
   const entries = Array.isArray(allEntries) ? allEntries.slice(-LIMIT) : [];
-  const ledgerByRun = new Map<string, { route?: string; backend?: string; execution: string; acceptance: string }>();
+  const ledgerByRun = new Map<string, { agent?: string; route?: string; backend?: string; execution: string; acceptance: string }>();
   for (const task of options.ledgerTasks ?? []) {
     for (const attempt of task?.attempts ?? []) {
       if (!attempt?.runId || ledgerByRun.has(attempt.runId)) continue;
       const cause = attempt.execution?.cause;
       ledgerByRun.set(attempt.runId, {
+        agent: attempt.agent ?? task.agent,
         route: attempt.route,
         backend: attempt.backend,
         execution: cause ? `${attempt.execution.status} (${cause.stage}/${cause.category})` : attempt.execution.status,
@@ -259,12 +270,28 @@ export function collectSessionErrors(
     acceptance: "acceptance failed", transport: "transport failure", "process-signal": "process-signal",
     truncated: "response truncated (length)",
   };
-  type Found = { order: number; key: string; error: Omit<SessionErrorDetail, "seq"> };
+  // Preceding-tool context per entry position: the tool-result names seen
+  // before this entry (the failing call itself excluded).
+  const precedingByOrder = new Map<number, string[]>();
+  {
+    const recent: string[] = [];
+    entries.forEach((entry, order) => {
+      precedingByOrder.set(order, recent.slice(-5));
+      const message = (entry as Record<string, unknown>)?.type === "message"
+        ? ((entry as { message: Record<string, unknown> }).message)
+        : undefined;
+      if (message?.role === "toolResult" && typeof message.toolName === "string") {
+        recent.push(String(message.toolName).slice(0, 120));
+        if (recent.length > 8) recent.shift();
+      }
+    });
+  }
+  type Found = { order: number; key: string; error: Omit<SessionErrorDetail, "seq">; preceding: string[] };
   const found = new Map<string, Found>();
   const push = (order: number, key: string, error: Omit<SessionErrorDetail, "seq">): void => {
     // Same failure described by several records (launch receipt + cost ledger):
     // the newest description wins, counted once.
-    found.set(key, { order, key, error });
+    found.set(key, { order, key, error, preceding: precedingByOrder.get(order) ?? [] });
   };
 
   const usageOf = (value: unknown): SessionErrorDetail["usage"] | undefined => {
@@ -297,12 +324,15 @@ export function collectSessionErrors(
       const statusCode = statusCodeOf(raw);
       push(order, `model:${entryId ?? order}`, {
         incident: incidentId(classification.category, raw, link),
+        signature: errorSignature("model", "provider", classification.category, raw),
         kind: "model",
         tool: "provider",
         module: provider ? `provider:${provider} via agent/extensions/provider-gate.ts` : "agent/extensions/provider-gate.ts",
         category: classification.category,
         recovery: classification.recovery,
-        why: `provider ${provider ?? "unknown"}/${model ?? "unknown"} request failed (${classification.category}); ${classification.recovery}`,
+        why: raw.trim()
+          ? `provider ${provider ?? "unknown"}/${model ?? "unknown"} request failed (${classification.category}); ${classification.recovery}`
+          : `provider ${provider ?? "unknown"}/${model ?? "unknown"} request failed with no message text (${classification.category}); ${classification.recovery}`,
         ...(timestamp ? { timestamp } : {}),
         ...(entryId ? { entryId } : {}),
         ...(provider ? { provider } : {}),
@@ -326,26 +356,43 @@ export function collectSessionErrors(
       const tool = String(message.toolName ?? "unknown").slice(0, 120);
       const callId = typeof message.toolCallId === "string" ? (message.toolCallId as string) : undefined;
       const raw = contentText(message.content).slice(0, 16000);
-      const classification = failureCategory(raw);
-      const bounded = boundText(raw, errorChars);
-      const statusCode = statusCodeOf(raw);
+      // Failures with no message text: mine the structured details for a
+      // cause (exit codes, states) instead of reporting an empty error.
+      const detailsRecord = message.details && typeof message.details === "object" && !Array.isArray(message.details)
+        ? (message.details as Record<string, unknown>) : undefined;
+      const clueParts: string[] = [];
+      if (detailsRecord) {
+        for (const field of ["status", "state", "code", "error", "message"] as const) {
+          const value = detailsRecord[field];
+          if (typeof value === "string" && value.trim()) clueParts.push(`${field}: ${value.trim().slice(0, 200)}`);
+        }
+        if (Number.isInteger(detailsRecord.exitCode)) clueParts.push(`exitCode: ${detailsRecord.exitCode}`);
+      }
+      const causeText = raw.trim() ? raw : clueParts.join(" · ");
+      const classification = failureCategory(causeText || raw);
+      const bounded = boundText(causeText, errorChars);
+      const statusCode = statusCodeOf(causeText || raw);
       const call = callId ? calls.get(callId) : undefined;
       const payloadFlag = { truncated: false };
       const payload = call?.args !== undefined ? boundValue(call.args, "", 0, payloadFlag) : undefined;
       const detailsFlag = { truncated: false };
       const details = message.details !== undefined ? boundValue(message.details, "", 0, detailsFlag) : undefined;
       push(order, `tool:${callId ?? entryId ?? order}`, {
-        incident: incidentId(classification.category, raw, callId ?? `${entryId ?? order}`),
+        incident: incidentId(classification.category, causeText || raw, callId ?? `${entryId ?? order}`),
+        signature: errorSignature("tool", tool, classification.category, causeText || raw),
         kind: "tool",
         tool,
         module: moduleForTool(tool),
         category: classification.category,
         recovery: classification.recovery,
-        why: `tool ${tool} returned an error (${classification.category}); ${classification.recovery}`,
+        why: raw.trim()
+          ? `tool ${tool} returned an error (${classification.category}); ${classification.recovery}`
+          : `tool ${tool} failed with no message text (${classification.category}); inspect the failed payload and details; ${classification.recovery}`,
         ...(timestamp ? { timestamp } : {}),
         ...(entryId ? { entryId } : {}),
         ...(callId ? { callId } : {}),
         ...(statusCode ? { statusCode } : {}),
+        ...(Number.isInteger(detailsRecord?.exitCode) ? { exitCode: detailsRecord?.exitCode as number } : {}),
         error: bounded.text,
         errorChars: bounded.chars,
         truncated: bounded.truncated,
@@ -372,6 +419,7 @@ export function collectSessionErrors(
         const bounded = boundText(raw, errorChars);
         push(order, `workflow:${root}`, {
           incident: incidentId(classification.category, raw, root),
+          signature: errorSignature("workflow", "subagent", classification.category, raw),
           kind: "workflow",
           tool: "subagent",
           module: "agent/extensions/pi-subagents/workflows",
@@ -408,6 +456,15 @@ export function collectSessionErrors(
       const backend = typeof typed.backend === "string" ? (typed.backend as string).slice(0, 80) : undefined;
       const ledger = typeof typed.runId === "string" ? ledgerByRun.get(typed.runId) : undefined;
       const launchArgs = (spawnArgs.get(root) ?? (typeof typed.runId === "string" ? spawnArgs.get(typed.runId) : undefined)) as Record<string, unknown> | undefined;
+      // Agent name: canonical ledger first, then launch args (tasks[i]
+      // positionally for parallel launches, else the single-launch agent).
+      const childPos = Number(childKey.slice(childKey.lastIndexOf(":") + 1));
+      const positionalAgent = Array.isArray(launchArgs?.tasks) && Number.isInteger(childPos) && childPos >= 0
+        ? ((launchArgs?.tasks as unknown[])[childPos] as Record<string, unknown> | undefined)?.agent
+        : undefined;
+      const agent = ledger?.agent
+        ?? (typeof positionalAgent === "string" && positionalAgent ? positionalAgent.slice(0, 80) : undefined)
+        ?? (!launchArgs?.tasks && typeof launchArgs?.agent === "string" && launchArgs.agent ? (launchArgs.agent as string).slice(0, 80) : undefined);
       const payloadFlag = { truncated: false };
       const payload =
         launchArgs && typeof launchArgs === "object"
@@ -420,18 +477,23 @@ export function collectSessionErrors(
           : undefined;
       const attempts = Number.isSafeInteger(evidence?.attemptCount) && (evidence?.attemptCount as number) >= 0 ? (evidence?.attemptCount as number) : undefined;
       const outputPresence = ["present", "absent", "unknown"].includes(evidence?.output as string) ? (evidence?.output as string) : undefined;
+      const noCause = !typed.error && !typed.errorMessage && !typed.timedOut && typed.exitCode === undefined && !ledger && !status;
       push(order, `child:${childKey}:${raw.toLowerCase().slice(0, 120)}`, {
         incident: incidentId(classification.category, raw, childKey),
+        signature: errorSignature("child", "subagent", classification.category, raw),
         kind: "child",
         tool: "subagent",
         module: `agent/extensions/pi-subagents (${backend ?? ledger?.backend ?? "native"}${modelText ?? ledger?.route ? ` · ${modelText ?? ledger?.route}` : ""})`,
         category: classification.category,
         recovery: classification.recovery,
-        why: `child ${childKey} failed${ledger ? ` [${ledger.execution} / acceptance ${ledger.acceptance}]` : status ? ` (${status})` : ""} (${classification.category}); ${classification.recovery}`,
+        why: noCause
+          ? `child ${childKey}${agent ? ` (${agent})` : ""} failed with no recorded cause (${classification.category}); inspect the run ledger; ${classification.recovery}`
+          : `child ${childKey}${agent ? ` (${agent})` : ""} failed${ledger ? ` [${ledger.execution} / acceptance ${ledger.acceptance}]` : status ? ` (${status})` : ""} (${classification.category}); ${classification.recovery}`,
         ...(timestamp ? { timestamp } : {}),
         ...(entryId ? { entryId } : {}),
         ...(callId ? { callId } : {}),
         runId: String(typed.runId ?? root).slice(0, 80),
+        ...(agent ? { agent } : {}),
         ...(slash > 0 && modelText ? { provider: modelText.slice(0, slash).slice(0, 80), model: modelText.slice(slash + 1).slice(0, 160) } : modelText ? { model: modelText.slice(0, 160) } : {}),
         ...(backend ?? ledger?.backend ? { backend: (backend ?? ledger?.backend as string).slice(0, 80) } : {}),
         ...(modelText ?? ledger?.route ? { route: (modelText ?? ledger?.route as string).slice(0, 240) } : {}),
@@ -453,13 +515,43 @@ export function collectSessionErrors(
   const all = [...found.values()].sort((a, b) => b.order - a.order);
   const groups = new Map<string, { kind: string; tool: string; category: string; count: number }>();
   const byKind: Record<string, number> = {};
+  const signatures = new Map<string, {
+    signature: string; count: number; kind: string; tool: string; category: string;
+    module: string; recovery: string; firstEntry: number; lastEntry: number;
+    exampleIncident: string; preceding: Map<string, number>;
+  }>();
   for (const item of all) {
     byKind[item.error.kind] = (byKind[item.error.kind] ?? 0) + 1;
     const key = JSON.stringify([item.error.kind, item.error.tool, item.error.category]);
     const group = groups.get(key) ?? { kind: item.error.kind, tool: item.error.tool, category: item.error.category, count: 0 };
     group.count++;
     groups.set(key, group);
+    // Same normalized cause across linkages counts once here, over the full
+    // window (not the shown limit), with preceding-tool co-occurrence.
+    const sig = signatures.get(item.error.signature) ?? {
+      signature: item.error.signature, count: 0, kind: item.error.kind, tool: item.error.tool,
+      category: item.error.category, module: item.error.module, recovery: item.error.recovery,
+      firstEntry: item.order + 1, lastEntry: item.order + 1,
+      exampleIncident: item.error.incident, preceding: new Map<string, number>(),
+    };
+    sig.count++;
+    sig.firstEntry = Math.min(sig.firstEntry, item.order + 1);
+    sig.lastEntry = Math.max(sig.lastEntry, item.order + 1);
+    for (const tool of item.preceding.slice(0, 5)) sig.preceding.set(tool, (sig.preceding.get(tool) ?? 0) + 1);
+    signatures.set(item.error.signature, sig);
   }
+  const signatureRows = [...signatures.values()]
+    .sort((a, b) => b.count - a.count || a.signature.localeCompare(b.signature))
+    .slice(0, 16)
+    .map((sig) => ({
+      signature: sig.signature, count: sig.count, kind: sig.kind, tool: sig.tool,
+      category: sig.category, module: sig.module, recovery: sig.recovery,
+      firstEntry: sig.firstEntry, lastEntry: sig.lastEntry, exampleIncident: sig.exampleIncident,
+      precedingTools: [...sig.preceding.entries()]
+        .map(([tool, count]) => ({ tool, count }))
+        .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
+        .slice(0, 6),
+    }));
   const errors = all.slice(0, limit).map((item, index) => ({ ...item.error, seq: index + 1 }));
 
   let hookErrors: SessionErrorsReport["hookErrors"] = [];
@@ -493,8 +585,10 @@ export function collectSessionErrors(
     errors,
     groups: [...groups.values()].sort((a, b) => b.count - a.count).slice(0, 16),
     omittedGroups: Math.max(0, groups.size - 16),
+    signatures: signatureRows,
+    omittedSignatures: Math.max(0, signatures.size - 16),
     byKind,
     hookErrors,
-    scope: "Newest failures within the last 2000 branch entries; hook rows are telemetry summaries without excerpts. Records sharing one incident id are one incident — the same stable id /metrics shows. Missing payload or usage stays absent, never guessed.",
+    scope: "Newest failures within the last 2000 branch entries; hook rows are telemetry summaries without excerpts. Records sharing one incident id are one incident — the same stable id /metrics shows. Signatures dedup one recurring cause across linkages over the full window with preceding-tool co-occurrence. Missing payload or usage stays absent, never guessed.",
   };
 }
