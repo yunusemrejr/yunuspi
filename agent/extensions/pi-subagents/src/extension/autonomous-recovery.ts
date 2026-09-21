@@ -54,6 +54,24 @@ export function assistanceWidth(prompt: string): number {
 }
 export function usefulFreeAssistance(prompt: string): boolean { return assistanceWidth(prompt) > 0; }
 
+/**
+ * Resolve a team route to a registry model. Team routes may carry a
+ * `:thinking` suffix (`provider/id:level`) that is not part of the registry
+ * `fullId`, so the base route is compared. Returns undefined when the model
+ * left the registry between selection and launch.
+ */
+export function findGroupLaunchModel<T extends { provider: string; id: string }>(models: readonly T[], route: string): T | undefined {
+	const base = splitKnownThinkingSuffix(route).baseModel;
+	return models.find((m) => `${m.provider}/${m.id}` === base);
+}
+
+/** Provider/id fallback parsed from a route string for route-level failure accounting. */
+export function splitRouteForAccounting(route: string): { provider: string; model: string } {
+	const base = splitKnownThinkingSuffix(route).baseModel;
+	const slash = base.indexOf("/");
+	return slash > 0 ? { provider: base.slice(0, slash), model: base.slice(slash + 1) } : { provider: route, model: base };
+}
+
 /** Advisory prose only: report envelopes are accounting, not review evidence. */
 export function automaticHelperBody(result: any, options: { maxChars?: number } = {}): string {
  const clean = (value: unknown) => typeof value === "string"
@@ -470,8 +488,18 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		let activityOutcome: ActivityOutcome = 'error';
 		try {
 		const results = await Promise.all(routes.map(async (candidate, index) => {
-			const model = models.find(m => `${m.provider}/${m.id}` === candidate.route)!;
 			const key = candidate.route;
+			// Team routes may carry a thinking suffix or name a model that left
+			// the registry between selection and launch: skip (recording at
+			// route level) instead of throwing inside the failure handler.
+			const model = findGroupLaunchModel(models, key);
+			if (!model) {
+				const fallback = splitRouteForAccounting(key);
+				try { recordFailure({ provider: fallback.provider, model: fallback.model, errorMessage: `route ${key} not in registry at launch`, source: "free-group-child" }); } catch { /* health classification is best-effort */ }
+				exhausted.add(key);
+				console.warn(`[autonomous-recovery] ${key} skipped: route not in registry at launch`);
+				return { key, ok: false, output: "" };
+			}
 			const brief = prompt.length <= 16_000 ? prompt : `${prompt.slice(0, 8_000)}\n[Middle omitted from bounded helper brief; do not search session history.]\n${prompt.slice(-8_000)}`;
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			const launchId = `auto-assist-${randomUUID()}`, epoch = generation;
@@ -509,7 +537,8 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 					// one free route's quota failure must not discard every alternative
 					// behind the same provider. Provider-wide exhaustion only when the
 					// failure classifies as provider-scoped (outage / shared-pool quota).
-					const recorded = recordFailure({ provider: model.provider, model: model.id, errorMessage: errorText, source: "free-group-child" });
+					let recorded: ReturnType<typeof recordFailure>;
+					try { recorded = recordFailure({ provider: model.provider, model: model.id, errorMessage: errorText, source: "free-group-child" }); } catch { recorded = undefined; /* health classification is best-effort */ }
 					if (!recorded || recorded.scope === "route") exhausted.add(key); else exhausted.add(model.provider);
 					console.warn(`[autonomous-recovery] ${key} failed: ${errorText}`);
 				}
@@ -518,7 +547,8 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				settle(signal.aborted ? "stopped" : "failed");
 				if (signal.aborted) return { key, ok: false, output: "" };
 				const text = String(error).slice(0, 500);
-				const recorded = recordFailure({ provider: model.provider, model: model.id, errorMessage: text, source: "free-group-child" });
+				let recorded: ReturnType<typeof recordFailure>;
+				try { recorded = recordFailure({ provider: model.provider, model: model.id, errorMessage: text, source: "free-group-child" }); } catch { recorded = undefined; /* health classification is best-effort */ }
 				if (!recorded || recorded.scope === "route") exhausted.add(key); else exhausted.add(model.provider);
 				console.warn(`[autonomous-recovery] ${key}: ${text}`);
 				return { key, ok: false, output: "" };

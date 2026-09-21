@@ -2267,7 +2267,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1556
+        "line": 1612
       },
       {
         "name": "claude-cache",
@@ -2894,7 +2894,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 492,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -2948,7 +2948,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 649,
+        "line": 651,
         "kind": "literal"
       },
       {
@@ -3240,7 +3240,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 492,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -3294,7 +3294,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 649,
+        "line": 651,
         "kind": "literal"
       },
       {

@@ -115,6 +115,18 @@ interface CacheEntry {
 	rawCompat?: true;
 	/** together reasoning probes: id -> { r: reasoning, ts } */
 	probes?: Record<string, { r: boolean; ts: number }>;
+	/** Vendor-listed ids withheld from publication, with short reasons (paused, deprecated, wrong modality). */
+	unavailable?: Record<string, string>;
+}
+
+/** Vendor-listed ids withheld from publication, with short reasons. */
+type UnavailableMap = Record<string, string>;
+function noteUnavailable(into: Map<string, string> | undefined, id: string, reason: string): void {
+	if (!into || !id || into.size >= 512) return;
+	if (!into.has(id)) into.set(id, reason);
+}
+function unavailableRecord(into: Map<string, string>): UnavailableMap | undefined {
+	return into.size ? Object.fromEntries(into) : undefined;
 }
 
 interface CacheFile {
@@ -209,12 +221,27 @@ function loadCache(): CacheFile {
 						),
 					) as CacheEntry["probes"])
 				: undefined;
+			const unavailable = isRecord(entry.unavailable)
+				? (Object.fromEntries(
+						Object.entries(entry.unavailable)
+							.filter(
+								([key, reason]) =>
+									typeof key === "string" &&
+									key.length > 0 &&
+									key.length <= 256 &&
+									typeof reason === "string" &&
+									reason.length > 0,
+							)
+							.slice(0, 512),
+					) as Record<string, string>)
+				: undefined;
 			Object.defineProperty(cache.providers, id, {
 				value: {
 					ts,
 					models,
 					...(entry.rawCompat === true ? { rawCompat: true } : {}),
 					...(probes ? { probes } : {}),
+					...(unavailable && Object.keys(unavailable).length ? { unavailable } : {}),
 				},
 				enumerable: true,
 				writable: true,
@@ -504,6 +531,7 @@ function mapOpenRouterModel(m: OrLiveModel, fallback?: PiModel): PiModel {
 async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 	models: OrLiveModel[];
 	effortsById: Map<string, string[] | undefined>;
+	unavailable?: UnavailableMap;
 }> {
 	const raw = (await fetchJson(
 		"https://openrouter.ai/api/v1/models",
@@ -513,16 +541,24 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 		},
 	)) as { data?: OrLiveModel[] };
 	const now = Date.now();
+	const dropped = new Map<string, string>();
 	const models = modelRows<OrLiveModel>(raw.data).filter((m) => {
-		if (m.expiration_date && Date.parse(m.expiration_date) <= now) return false;
+		if (m.expiration_date && Date.parse(m.expiration_date) <= now) {
+			noteUnavailable(dropped, m.id, "expired");
+			return false;
+		}
 		if (
 			m.deprecation?.deprecation_date &&
 			Date.parse(m.deprecation.deprecation_date) <= now
 		) {
+			noteUnavailable(dropped, m.id, "deprecated");
 			return false;
 		}
 		const out = m.architecture?.output_modalities;
-		if (out && !out.includes("text")) return false;
+		if (out && !out.includes("text")) {
+			noteUnavailable(dropped, m.id, "non-text output modality");
+			return false;
+		}
 		return true;
 	});
 	const effortsById = new Map<string, string[] | undefined>(
@@ -539,13 +575,13 @@ async function fetchOpenRouterLive(context: RefreshModelContext): Promise<{
 		FREE_CATALOG_URL,
 		now,
 	);
-	return { models, effortsById };
+	return { models, effortsById, unavailable: unavailableRecord(dropped) };
 }
 
 async function refreshOpenRouter(
 	context: RefreshModelContext,
-): Promise<PiModel[]> {
-	const { models: live, effortsById } = await fetchOpenRouterLive(context);
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
+	const { models: live, effortsById, unavailable } = await fetchOpenRouterLive(context);
 	const store = storeModels("openrouter");
 	const projected = live.map((raw) => {
 		const fromStore = store.get(raw.id);
@@ -573,7 +609,7 @@ async function refreshOpenRouter(
 	const keepStoreOnly = [...store.values()].filter(
 		(m) => m.id.startsWith("~") && !live.some((x) => x.id === m.id),
 	);
-	return [...projected, ...keepStoreOnly];
+	return { models: [...projected, ...keepStoreOnly], ...(unavailable ? { unavailable } : {}) };
 }
 
 // ── OrcaRouter ─────────────────────────────────────────────────────────
@@ -792,7 +828,7 @@ function mapOrcaModel(
 
 async function refreshOrcaRouter(
 	context: RefreshModelContext,
-): Promise<PiModel[]> {
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey("orcarouter", context) || ORCA_FALLBACK_KEY;
 	const raw = (await fetchJson(
 		"https://api.orcarouter.ai/v1/models",
@@ -823,7 +859,7 @@ async function refreshOrcaRouter(
 		// catalog is enrichment; live list alone remains valid
 	}
 	publishOrcaFreeEvidence(live, catalogById, authoritativePricing);
-	return live.map((m) => mapOrcaModel(m, catalogById.get(m.id), groupRatio));
+	return { models: live.map((m) => mapOrcaModel(m, catalogById.get(m.id), groupRatio)) };
 }
 
 // ── Together ───────────────────────────────────────────────────────────
@@ -931,7 +967,7 @@ function scheduleTogetherProbes(
 async function refreshTogether(
 	context: RefreshModelContext,
 	_cached: CacheEntry | undefined,
-): Promise<PiModel[]> {
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey("together", context) ?? "";
 	const raw = await fetchJson(
 		"https://api.together.xyz/v1/models",
@@ -979,7 +1015,7 @@ async function refreshTogether(
 		}
 		return { ...base, compat: { thinkingFormat: "together" } };
 	});
-	return models;
+	return { models };
 }
 
 // ── Friendli ───────────────────────────────────────────────────────────
@@ -1051,8 +1087,9 @@ function friendliThinkingWiring(id: string, options?: FriendliLiveModel["reasoni
 	return { compat: { supportsReasoningEffort: false } };
 }
 
-function mapFriendliModel(m: FriendliLiveModel): PiModel | undefined {
+function mapFriendliModel(m: FriendliLiveModel, dropped?: Map<string, string>): PiModel | undefined {
 	if (m.deprecation_date && Date.parse(m.deprecation_date) <= Date.now()) {
+		noteUnavailable(dropped, m.id, "deprecated");
 		return undefined;
 	}
 	const ctx = m.context_length ?? 128_000;
@@ -1077,7 +1114,7 @@ function mapFriendliModel(m: FriendliLiveModel): PiModel | undefined {
 
 async function refreshFriendli(
 	context: RefreshModelContext,
-): Promise<PiModel[]> {
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
 	const raw = (await fetchJson(
 		"https://api.friendli.ai/serverless/v1/models",
 		context.signal,
@@ -1087,9 +1124,11 @@ async function refreshFriendli(
 			},
 		},
 	)) as { data?: FriendliLiveModel[] };
-	return modelRows<FriendliLiveModel>(raw.data)
-		.map(mapFriendliModel)
+	const dropped = new Map<string, string>();
+	const models = modelRows<FriendliLiveModel>(raw.data)
+		.map((m) => mapFriendliModel(m, dropped))
 		.filter((m): m is PiModel => m !== undefined);
+	return { models, unavailable: unavailableRecord(dropped) };
 }
 
 // ── RunInfra ──────────────────────────────────────────────────────────
@@ -1135,11 +1174,17 @@ function runinfraThinkingLevels(): Record<string, string | null> {
 	};
 }
 
-function mapRunInfraModel(m: RunInfraLiveModel): PiModel | undefined {
-	if (m.availability && m.availability !== "available") return undefined;
+function mapRunInfraModel(m: RunInfraLiveModel, dropped?: Map<string, string>): PiModel | undefined {
+	if (m.availability && m.availability !== "available") {
+		noteUnavailable(dropped, m.id, `vendor availability "${m.availability}"`);
+		return undefined;
+	}
 	const modality = m.modality ?? "llm";
 	// Chat models only: keep llm/vlm/chat, skip embeddings/rerank/audio.
-	if (!/llm|vlm|chat/.test(modality)) return undefined;
+	if (!/llm|vlm|chat/.test(modality)) {
+		noteUnavailable(dropped, m.id, `non-chat modality "${modality}"`);
+		return undefined;
+	}
 	const ctx = m.context_window ?? m.context_length ?? 131_072;
 	return {
 		id: m.id,
@@ -1166,7 +1211,7 @@ function mapRunInfraModel(m: RunInfraLiveModel): PiModel | undefined {
 
 async function refreshRunInfra(
 	context: RefreshModelContext,
-): Promise<PiModel[]> {
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
 	// WHY: stored auth.json credential first — resolveConfigValueOrThrow makes
 	// a models.json "$VAR" key THROW when the env var is missing (old shells,
 	// IDE/systemd launches), which is what surfaced as "Could not refresh
@@ -1178,9 +1223,11 @@ async function refreshRunInfra(
 		context.signal,
 		key ? { headers: { Authorization: `Bearer ${key}` } } : undefined,
 	)) as { data?: RunInfraLiveModel[] };
-	return modelRows<RunInfraLiveModel>(raw.data)
-		.map(mapRunInfraModel)
+	const dropped = new Map<string, string>();
+	const models = modelRows<RunInfraLiveModel>(raw.data)
+		.map((m) => mapRunInfraModel(m, dropped))
 		.filter((m): m is PiModel => m !== undefined);
+	return { models, unavailable: unavailableRecord(dropped) };
 }
 
 // ── Id-only catalogs (cerebras, deepseek) ─────────────────────────────
@@ -1321,7 +1368,7 @@ async function refreshIdOnlyCatalog(
 	url: string,
 	context: RefreshModelContext,
 	facts: Record<string, IdOnlyFacts> = {},
-): Promise<PiModel[]> {
+): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
 	const key = resolvedCatalogApiKey(providerId, context);
 	const raw = (await fetchJson(url, context.signal, {
 		headers: key ? { Authorization: `Bearer ${key}` } : undefined,
@@ -1329,25 +1376,32 @@ async function refreshIdOnlyCatalog(
 	const liveIds = modelRows<{ id: string }>(raw.data).map((m) => m.id);
 	const store = storeModels(providerId);
 	const ids = [...new Set([...liveIds, ...store.keys(), ...Object.keys(facts)])];
-	return ids.map((id) => {
-		const stored = store.get(id);
-		if (stored) return stored;
-		const f = facts[id];
-		const config = providerConfigJson(providerId);
-		const override =
-			config?.modelOverrides?.[id]?.maxTokens ??
-			config?.models?.find((m) => m.id === id)?.maxTokens;
-		return minimalModel(id, providerId, override);
-	});
+	return {
+		models: ids.map((id) => {
+			const stored = store.get(id);
+			if (stored) return stored;
+			const f = facts[id];
+			const config = providerConfigJson(providerId);
+			const override =
+				config?.modelOverrides?.[id]?.maxTokens ??
+				config?.models?.find((m) => m.id === id)?.maxTokens;
+			return minimalModel(id, providerId, override);
+		}),
+	};
 }
 
-async function refreshCerebras(context: RefreshModelContext): Promise<PiModel[]> {
+async function refreshCerebras(context: RefreshModelContext): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
     // Default public format has actual prices; /v1/models can be ID-only.
     try {
         const raw = await fetchJson("https://api.cerebras.ai/public/v1/models", context.signal);
         const store = storeModels("cerebras");
         const rows = modelRows<any>((raw as any)?.data);
-        const models = rows.filter(m => m.deprecated !== true).map((m) => {
+        const dropped = new Map<string, string>();
+        const models = rows.filter(m => {
+            if (m.deprecated !== true) return true;
+            noteUnavailable(dropped, m.id, "deprecated");
+            return false;
+        }).map((m) => {
             const base = store.get(m.id) ?? minimalModel(m.id, "cerebras");
             const liveFields: string[] = [];
             const live: Partial<PiModel> = {};
@@ -1369,8 +1423,8 @@ async function refreshCerebras(context: RefreshModelContext): Promise<PiModel[]>
                 cacheRead: p.input_cache_read !== undefined ? toPerMillion(p.input_cache_read) : input,
                 cacheWrite: p.input_cache_write !== undefined ? toPerMillion(p.input_cache_write) : input } });
         });
-        if (models.length) return models;
-    } catch { if (context.signal.aborted) return []; }
+        if (models.length) return { models, unavailable: unavailableRecord(dropped) };
+    } catch { if (context.signal.aborted) return { models: [] }; }
     return refreshIdOnlyCatalog("cerebras", "https://api.cerebras.ai/v1/models", context, idOnlyFacts("cerebras"));
 }
 
@@ -1390,7 +1444,7 @@ const REFRESHER_IDS = [
 type Fetcher = (
 	context: RefreshModelContext,
 	cached: CacheEntry | undefined,
-) => Promise<PiModel[]>;
+) => Promise<{ models: PiModel[]; unavailable?: UnavailableMap }>;
 
 // Raw cache rows do not embed expiring snapshot overrides. Apply current
 // registry facts at publication so an old cache cannot extend their lifetime.
@@ -1511,7 +1565,8 @@ function refreshFor(
         }
 		const startedAt = Date.now();
 		try {
-			const models = validModels(await REFRESHERS[providerId](context, cached));
+			const fetched = await REFRESHERS[providerId](context, cached);
+			const models = validModels(fetched.models);
 			if (context.signal.aborted) return previousModels();
 			if (models.length === 0)
 				throw new Error(`${providerId} live catalog is empty`);
@@ -1521,6 +1576,7 @@ function refreshFor(
 					models,
 					rawCompat: true,
 					...(cached?.probes ? { probes: cached.probes } : {}),
+					...(fetched.unavailable && Object.keys(fetched.unavailable).length ? { unavailable: fetched.unavailable } : {}),
 				},
 				providerId,
 				context.signal,

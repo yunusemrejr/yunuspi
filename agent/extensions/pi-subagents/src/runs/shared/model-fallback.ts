@@ -1,5 +1,8 @@
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { getSupportedThinkingLevels, splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
 import type { Usage } from "../../shared/types.ts";
+import { getAgentDir } from "../../shared/utils.ts";
 import { filterFallbackCandidates, findModelExclusion, parseModelKey, recordModelFailure } from "./model-exclusions.ts";
 import { checkModelScope, type ModelScopeCheckRule, type ModelScopeViolation, type ModelSource } from "./model-scope.ts";
 import { redactSecretValues } from "./permissions.ts";
@@ -243,15 +246,23 @@ function resolveBaseModelCandidate(
 	return fuzzyResolveModel(baseModel, availableModels, preferredProvider);
 }
 
+/** Last "/" segment (owner-agnostic leaf) of a normalized id. */
+function leafSegment(normalizedId: string): string {
+	const idx = normalizedId.lastIndexOf("/");
+	return idx === -1 ? normalizedId : normalizedId.slice(idx + 1);
+}
+
 /**
  * Fuzzy-resolve a base model id (thinking suffix already stripped) against the
  * registry, tolerating separator, case, and optional date-stamp differences so
  * users do not have to spell provider/model exactly. A slash is a provider
  * prefix only when that prefix is a registered provider; otherwise the whole
- * string is the model id (Hugging Face `owner/name`). A qualified provider
- * query only matches within the named provider — this never silently switches
- * providers for security/cost-sensitive configs. Returns the matched `fullId`,
- * or `undefined` when there is no match or the match is ambiguous across
+ * string is the model id (Hugging Face `owner/name`). When full ids differ,
+ * an owner-agnostic leaf comparison rescues vendor owner renames (`z-ai/` vs
+ * `zai-org/`) and bare-id configs. A qualified provider query only matches
+ * within the named provider — this never silently switches providers for
+ * security/cost-sensitive configs. Returns the matched `fullId`, or
+ * `undefined` when there is no match or the match is ambiguous across
  * providers (and no `preferredProvider` disambiguates).
  */
 export function fuzzyResolveModel(
@@ -262,10 +273,15 @@ export function fuzzyResolveModel(
 	const { queryProvider, queryIdRaw } = splitQualifiedModelQuery(baseModel, availableModels);
 	const queryId = normalizeModelSegment(queryIdRaw);
 	const queryIdNoDate = stripTrailingDateStamp(queryId);
+	const queryLeaf = leafSegment(queryIdNoDate);
 
 	const candidates = availableModels.filter((entry) => {
 		const entryId = normalizeModelSegment(entry.id);
-		if (entryId !== queryId && stripTrailingDateStamp(entryId) !== queryIdNoDate) return false;
+		const entryNoDate = stripTrailingDateStamp(entryId);
+		if (entryId !== queryId && entryNoDate !== queryIdNoDate) {
+			const entryLeaf = leafSegment(entryNoDate);
+			if (!queryLeaf || entryLeaf !== queryLeaf) return false;
+		}
 		if (queryProvider !== undefined && normalizeModelSegment(entry.provider) !== queryProvider) return false;
 		return true;
 	});
@@ -310,11 +326,93 @@ function resolveSubagentModelCandidate(
 	preferredProvider?: string,
 ): string | undefined {
 	if (!availableModels || availableModels.length === 0) return model;
+	// An explicit entry provider is a hard constraint, not a preference: a
+	// leaf/owner-tolerant match must never silently resolve to a different
+	// provider (cost/security-sensitive configs).
+	const constrain = (route: string | undefined): string | undefined => {
+		if (!route || !preferredProvider) return route;
+		const winner = availableModels.find((entry) => entry.fullId === route);
+		if (winner && normalizeModelSegment(winner.provider) !== normalizeModelSegment(preferredProvider)) return undefined;
+		return route;
+	};
 	const resolvedWhole = resolveBaseModelCandidate(model, availableModels, preferredProvider);
-	if (resolvedWhole) return resolvedWhole;
+	if (resolvedWhole) return constrain(resolvedWhole);
 	const { baseModel, thinkingSuffix } = splitThinkingSuffix(model);
 	const resolvedBase = thinkingSuffix ? resolveBaseModelCandidate(baseModel, availableModels, preferredProvider) : undefined;
-	return resolvedBase ? `${resolvedBase}${thinkingSuffix}` : undefined;
+	if (!resolvedBase || !constrain(resolvedBase)) return undefined;
+	return `${resolvedBase}${thinkingSuffix}`;
+}
+
+/**
+ * Vendor-known-but-unpublished ids from the live catalog sidecar
+ * (`live-model-catalog.json` per-provider `unavailable` map): models the
+ * vendor lists but gates (paused, deprecated, wrong modality), so the
+ * preference chain can report the true gate instead of "no match".
+ * Best-effort and mtime-memoized; a missing/unreadable cache degrades to
+ * the generic message.
+ */
+let unavailableSidecar: { stamp: string; byProvider: Map<string, Map<string, string>> } | undefined;
+function readUnavailableSidecar(): Map<string, Map<string, string>> {
+	let stamp = "";
+	try {
+		const file = join(getAgentDir(), "live-model-catalog.json");
+		const stat = statSync(file);
+		stamp = `${stat.mtimeMs}:${stat.size}`;
+		if (unavailableSidecar && unavailableSidecar.stamp === stamp) return unavailableSidecar.byProvider;
+		const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+		const providers = (parsed as { providers?: unknown })?.providers;
+		const byProvider = new Map<string, Map<string, string>>();
+		if (providers && typeof providers === "object") {
+			for (const [providerId, entry] of Object.entries(providers as Record<string, unknown>)) {
+				const unavailable = (entry as { unavailable?: unknown })?.unavailable;
+				if (!unavailable || typeof unavailable !== "object") continue;
+				const reasons = new Map<string, string>();
+				for (const [id, reason] of Object.entries(unavailable as Record<string, unknown>)) {
+					if (typeof id !== "string" || !id || typeof reason !== "string" || !reason) continue;
+					if (reasons.size >= 512) break;
+					reasons.set(id, reason.slice(0, 160));
+				}
+				if (reasons.size) byProvider.set(providerId, reasons);
+			}
+		}
+		unavailableSidecar = { stamp, byProvider };
+		return byProvider;
+	} catch {
+		if (unavailableSidecar && unavailableSidecar.stamp === stamp) return unavailableSidecar.byProvider;
+		return new Map();
+	}
+}
+
+function vendorUnavailableReason(provider: string, vendorId: string): string | undefined {
+	if (!vendorId) return undefined;
+	const reasons = readUnavailableSidecar().get(provider);
+	if (!reasons) return undefined;
+	const direct = reasons.get(vendorId);
+	if (direct) return direct;
+	const lowered = vendorId.toLowerCase();
+	for (const [id, reason] of reasons) {
+		if (id.toLowerCase() === lowered) return reason;
+	}
+	return undefined;
+}
+
+/** Drop a leading `provider/` segment so vendor ids compare cleanly. */
+function stripProviderPrefix(query: string, provider: string): string {
+	const prefix = `${provider.toLowerCase()}/`;
+	return query.toLowerCase().startsWith(prefix) ? query.slice(prefix.length) : query;
+}
+
+function describeUnresolvedPreference(query: string, provider: string | undefined, availableModels: AvailableModelInfo[]): string {
+	const trimmed = provider?.trim();
+	if (trimmed) {
+		const live = availableModels.filter((m) => normalizeModelSegment(m.provider) === normalizeModelSegment(trimmed));
+		if (live.length === 0) {
+			return `provider ${JSON.stringify(trimmed)} from llm_preferences has no models in this session's registry (not configured, not refreshed, or unavailable here) for ${JSON.stringify(query)}`;
+		}
+		const vendor = vendorUnavailableReason(trimmed, stripProviderPrefix(query, trimmed));
+		return `no live registry match for ${JSON.stringify(query)} among ${live.length} live ${JSON.stringify(trimmed)} model${live.length === 1 ? "" : "s"}${vendor ? ` (vendor reports: ${vendor})` : ""}`;
+	}
+	return `no live registry match for ${JSON.stringify(query)}`;
 }
 
 export interface LlmPreferenceRequirements {
@@ -371,7 +469,7 @@ export function resolveLlmPreferenceChain(
 		const suffix = splitThinkingSuffix(query);
 		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, entry.provider);
 		if (!resolved) {
-			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): no live registry match for ${JSON.stringify(query)}; continuing chain`);
+			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): ${describeUnresolvedPreference(query, entry.provider, availableModels)}; continuing chain`);
 			noteHealth("model.skip", { route: query, outcome: "unresolved" });
 			continue;
 		}
