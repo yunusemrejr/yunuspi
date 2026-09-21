@@ -108,20 +108,20 @@ export function classifyChildTerminal(facts: ChildTerminalFacts | undefined): Ch
 	// Stopped and interrupted (paused) children are terminal for completion
 	// accounting: they no longer advance this group. An explicit resume re-opens
 	// the child as a new epoch instead of silently reviving a counted one.
-	if (truthy(facts.stopped) || status === "stopped") return "cancelled";
+	if (truthy(facts.stopped) || status === "stopped" || status === "paused") return "cancelled";
 	if (truthy(facts.interrupted)) return "cancelled";
 	// A detached child left this group's supervision: terminal here, recorded as
 	// cancelled unless it already carries an explicit success (checked below).
 	if ((truthy(facts.detached) || status === "detached") && facts.ok !== true && facts.success !== true) return "cancelled";
 	if (isTerminalStateValue(status)) return status;
 	let ended = status === "completed" || status === "complete" || status === "failed" || status === "partial" || status === "paused" || status === "detached" || truthy(facts.detached) || outcomeState === "partial" || outcomeState === "failed" || outcomeState === "complete";
-	if (typeof facts.exitCode === "number" && facts.exitCode !== null) ended = true;
+	if (typeof facts.exitCode === "number") ended = true;
 	if (!ended && facts.exitCode === undefined && facts.ok === undefined && facts.success === undefined) return undefined;
 	const succeeded = facts.ok === true || facts.success === true || status === "completed" || status === "complete" || outcomeState === "complete";
 	if (succeeded && !truthy(facts.timedOut) && !truthy(facts.stopped)) return "succeeded";
 	if (truthy(facts.detached) || status === "detached") return "cancelled";
 	if (ended) return "failed";
-	if (typeof facts.exitCode === "number" && facts.exitCode !== null) return facts.exitCode === 0 ? "succeeded" : "failed";
+	if (typeof facts.exitCode === "number") return facts.exitCode === 0 ? "succeeded" : "failed";
 	if (facts.ok === false || facts.success === false) return "failed";
 	return undefined;
 }
