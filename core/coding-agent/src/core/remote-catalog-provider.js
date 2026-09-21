@@ -19,7 +19,11 @@ function mergeModels(baseline, dynamic) {
 // malformed rows cannot replace working built-ins or poison the next session.
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const positiveLimit = value => Number.isSafeInteger(value) && value > 0;
-function validCatalogModel(model) {
+// Providers whose built-in catalogs intentionally ship an empty baseUrl because
+// the endpoint comes from user config (e.g. an Azure resource URL). Their
+// remote rows may carry "" too; every other provider must ship http(s).
+const EMPTY_BASE_URL_PROVIDERS = new Set(["azure-openai-responses"]);
+function validCatalogModel(model, providerId) {
     if (!isRecord(model) || typeof model.id !== "string" || !model.id.trim() || /[\u0000-\u001f\u007f-\u009f]/u.test(model.id) ||
         typeof model.name !== "string" || typeof model.api !== "string" || !model.api || typeof model.baseUrl !== "string" ||
         typeof model.reasoning !== "boolean" || !Array.isArray(model.input) || !model.input.length ||
@@ -34,6 +38,7 @@ function validCatalogModel(model) {
     if (model.compat !== undefined && (!isRecord(model.compat) || !Object.entries(model.compat).every(([key, value]) =>
         !/^(supports|requires|sendSession)/.test(key) || typeof value === "boolean"))) return false;
     if (model.samplingParams !== undefined && !isRecord(model.samplingParams)) return false;
+    if (model.baseUrl === "" && EMPTY_BASE_URL_PROVIDERS.has(providerId)) return true;
     try { if (!["https:", "http:"].includes(new URL(model.baseUrl).protocol)) return false; } catch { return false; }
     return true;
 }
@@ -43,7 +48,7 @@ function parseCatalog(providerId, value, strict = true) {
         : isRecord(value) ? Object.values(value) : [];
     const models = new Map();
     for (const model of entries) {
-        if (validCatalogModel(model) && !models.has(model.id))
+        if (validCatalogModel(model, providerId) && !models.has(model.id))
             models.set(model.id, { ...model, provider: providerId, maxTokens: Math.min(model.maxTokens, model.contextWindow) });
     }
     if (strict && models.size === 0) throw new Error(`Invalid or empty model catalog for provider "${providerId}"`);

@@ -18,6 +18,7 @@ import { googleVertexProvider } from "./google-vertex.js";
 import { groqProvider } from "./groq.js";
 import { huggingfaceProvider } from "./huggingface.js";
 import { kimiCodingProvider } from "./kimi-coding.js";
+import { metaProvider } from "./meta.js";
 import { minimaxProvider } from "./minimax.js";
 import { minimaxCnProvider } from "./minimax-cn.js";
 import { mistralProvider } from "./mistral.js";
@@ -34,6 +35,9 @@ import { qwenTokenPlanProvider } from "./qwen-token-plan.js";
 import { qwenTokenPlanCnProvider } from "./qwen-token-plan-cn.js";
 import { qwenTokenPlanIndividualProvider } from "./qwen-token-plan-individual.js";
 import { radiusProvider } from "./radius.js";
+import { stepfunProvider } from "./stepfun.js";
+import { stepfunAiStepPlanProvider } from "./stepfun-ai-step-plan.js";
+import { stepfunStepPlanProvider } from "./stepfun-step-plan.js";
 import { togetherProvider } from "./together.js";
 import { vercelAIGatewayProvider } from "./vercel-ai-gateway.js";
 import { xaiProvider } from "./xai.js";
@@ -82,6 +86,7 @@ export function builtinProviders() {
         groqProvider(),
         huggingfaceProvider(),
         kimiCodingProvider(),
+        metaProvider(),
         minimaxProvider(),
         minimaxCnProvider(),
         mistralProvider(),
@@ -97,6 +102,9 @@ export function builtinProviders() {
         qwenTokenPlanCnProvider(),
         qwenTokenPlanIndividualProvider(),
         radiusProvider(),
+        stepfunProvider(),
+        stepfunAiStepPlanProvider(),
+        stepfunStepPlanProvider(),
         togetherProvider(),
         vercelAIGatewayProvider(),
         xaiProvider(),
