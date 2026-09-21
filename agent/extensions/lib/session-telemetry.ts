@@ -57,7 +57,7 @@ export function registerSessionTelemetry(pi:any) {
     ...(typeof model.compat?.recoveryEndpointName==='string'&&model.compat.recoveryEndpointName?{endpoint:model.compat.recoveryEndpointName.slice(0,160)}:{})};
   }
   const report=buildSessionReport(entries,ctx.sessionManager.getBranch?.()??entries,snapshot(),pi.getActiveTools?.(),current);
-  if(!ctx.hasUI)return;
+  if(!ctx.hasUI){ctx.ui?.notify?.(report.lines.slice(0,80).join('\n'),'info');return;}
   await ctx.ui.custom((tui:any,theme:any,_keys:any,done:any)=>{
    return createMetricsPanel(report.lines,tui,theme,done);
   }, {overlay:true, overlayOptions:{width:"100%",maxHeight:"100%",anchor:"top-left"}});

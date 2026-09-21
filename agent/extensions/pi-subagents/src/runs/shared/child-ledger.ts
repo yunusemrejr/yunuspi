@@ -112,7 +112,7 @@ export type ChildLedgerEvent =
 	| { type: "lifecycle"; taskId?: string; runId?: string; attempt?: number; state?: string; at?: number; ref?: string }
 	| { type: "progress"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
 	| { type: "completion"; taskId?: string; runId?: string; attempt?: number; row?: Record<string, unknown>; at?: number; ref?: string }
-	| { type: "accounting"; taskId?: string; runId?: string; attempt?: number; usage?: AttemptUsage; route?: string; at?: number; ref?: string }
+	| { type: "accounting"; taskId?: string; runId?: string; attempt?: number; usage?: AttemptUsage; route?: string; agent?: string; at?: number; ref?: string }
 	| { type: "recovery"; taskId?: string; runId?: string; attempt?: number; reason?: string; replacementAttempt?: number; at?: number; ref?: string }
 	| { type: "resume"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
 	| { type: "stop"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
@@ -472,6 +472,8 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 					if (Object.keys(merged).length) attempt.usage = merged;
 				}
 				if (event.route && !attempt.route) attempt.route = event.route.slice(0, 200);
+				if (event.agent && !attempt.agent) attempt.agent = event.agent.slice(0, 80);
+				if (event.agent && !draft.task.agent) draft.task.agent = event.agent.slice(0, 80);
 				break;
 			}
 			case "recovery":
@@ -533,6 +535,60 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 	const push = (event: ChildLedgerEvent) => {
 		if (events.length < 4096) events.push(event);
 	};
+	// Result rows and cost ledgers rarely name the agent; the launch toolCall
+	// args do (agent for single launches, tasks[i].agent positionally for
+	// parallel launches). Index them by toolCallId (receipt linkage) and by
+	// run/async id (cost-ledger linkage). Management actions
+	// (status/stop/...) are not launches; chain steps and nested groups have
+	// no stable positional mapping and stay unattributed.
+	type LaunchArgs = { agent?: string; model?: string; agents?: (string | undefined)[]; models?: (string | undefined)[] };
+	const launchByCall = new Map<string, LaunchArgs>();
+	for (const entry of entries) {
+		const message = asRecord(asRecord(entry).message);
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (const part of message.content.slice(0, 256)) {
+			const call = asRecord(part);
+			if (call.type !== "toolCall" || call.name !== "subagent" || typeof call.id !== "string" || launchByCall.has(call.id)) continue;
+			const args = asRecord(call.arguments);
+			if (args.action !== undefined) continue;
+			// Positional arrays keep holes (no filter): tasks[i] maps to row
+			// index i even when earlier siblings omit the field.
+			const positional = (pick: (step: Record<string, unknown>) => string | undefined): (string | undefined)[] | undefined => {
+				if (!Array.isArray(args.tasks)) return undefined;
+				const names = (args.tasks as unknown[]).slice(0, 64).map((step) => pick(asRecord(step)));
+				return names.some((name) => !!name) ? names : undefined;
+			};
+			launchByCall.set(call.id, {
+				...(typeof args.agent === "string" && args.agent ? { agent: args.agent.slice(0, 80) } : {}),
+				...(typeof args.model === "string" && args.model ? { model: args.model.slice(0, 200) } : {}),
+				...(positional((step) => asString(step.agent, 80)) ? { agents: positional((step) => asString(step.agent, 80)) } : {}),
+				...(positional((step) => asString(step.model, 200)) ? { models: positional((step) => asString(step.model, 200)) } : {}),
+			});
+		}
+	}
+	const launchByRun = new Map<string, LaunchArgs>();
+	for (const entry of entries) {
+		const message = asRecord(asRecord(entry).message);
+		if (message.role !== "toolResult" || message.toolName !== "subagent" || typeof message.toolCallId !== "string") continue;
+		const launch = launchByCall.get(message.toolCallId);
+		if (!launch) continue;
+		const details = asRecord(message.details);
+		for (const key of [details.asyncId, details.runId]) {
+			if (typeof key === "string" && key && !launchByRun.has(key)) launchByRun.set(key, launch);
+		}
+	}
+	// Positional agent/model for one result row: tasks[i] wins for parallel
+	// launches, else the single-launch agent/model. The top-level model is a
+	// documented child override so it stays a fallback; the top-level agent
+	// names one-child execution only and never backfills parallel rows.
+	const launchFor = (callId: unknown, runId: string | undefined, index: number): LaunchArgs | undefined => {
+		const launch = (typeof callId === "string" ? launchByCall.get(callId) : undefined) ?? (runId ? launchByRun.get(runId) : undefined);
+		if (!launch) return undefined;
+		const agent = launch.agents?.[index] ?? (launch.agents ? undefined : launch.agent);
+		const model = launch.models?.[index] ?? launch.model;
+		if (!agent && !model) return undefined;
+		return { ...(agent ? { agent } : {}), ...(model ? { model } : {}) };
+	};
 	for (const entry of entries) {
 		if (!entry || typeof entry !== "object") continue;
 		const record = entry as Record<string, unknown>;
@@ -548,7 +604,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 			// of dropping the receipt. Other receipt shapes stay uninferred.
 			if (!rows.length && runId && details.mode === "single" && details.asyncId) {
 				const identity = buildChildTaskIdentity({ runId, index: 0, attempt: 1 });
-				push({ type: "launch", taskId: identity.taskId, attempt: 1, runId, label: identity.label });
+				const solo = launchFor(message.toolCallId, runId, 0);
+				push({ type: "launch", taskId: identity.taskId, attempt: 1, runId, label: identity.label, ...(solo?.agent ? { agent: solo.agent } : {}), ...(solo?.model ? { route: solo.model } : {}) });
 				const state = asString(details.state ?? details.status, 32);
 				push({ type: "lifecycle", taskId: identity.taskId, attempt: 1, runId, state: state ?? "queued" });
 			}
@@ -567,6 +624,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					workflowKey: asString(row.workflowKey, 160),
 					childId: asString(row.childId, 160),
 				});
+				// Row-named agent/route wins; launch args fill rows that omit them.
+				const launch = launchFor(message.toolCallId, runId, index);
 				push({
 					type: "launch",
 					taskId: identity.taskId,
@@ -576,8 +635,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					...(identity.todoId ? { todoId: identity.todoId } : {}),
 					...(identity.scopeId ? { scopeId: identity.scopeId } : {}),
 					...(identity.description ? { description: identity.description } : {}),
-					...(typeof row.agent === "string" ? { agent: row.agent.slice(0, 80) } : {}),
-					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : {}),
+					...(typeof row.agent === "string" ? { agent: row.agent.slice(0, 80) } : launch?.agent ? { agent: launch.agent } : {}),
+					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : launch?.model ? { route: launch.model } : {}),
 				});
 				push({ type: "completion", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), row: row as Record<string, unknown> });
 			});
@@ -604,6 +663,7 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					childId: asString(row.childId, 160),
 				});
 				const usage = asRecord(row.usage);
+				const costLaunch = launchFor(undefined, runId, index);
 				push({
 					type: "accounting",
 					taskId: identity.taskId,
@@ -619,7 +679,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 							...(asNumber(usage.turns) === undefined ? {} : { turns: asNumber(usage.turns) }),
 						},
 					} : {}),
-					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : {}),
+					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : costLaunch?.model ? { route: costLaunch.model } : {}),
+					...(typeof row.agent === "string" ? { agent: row.agent.slice(0, 80) } : costLaunch?.agent ? { agent: costLaunch.agent } : {}),
 				});
 				push({ type: "completion", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), row });
 			});
@@ -630,7 +691,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 			const rows = Array.isArray(data.results) ? data.results : [];
 			if (!rows.length && (data.mode === "single" || typeof data.state === "string")) {
 				const identity = buildChildTaskIdentity({ runId, index: 0, attempt: 1 });
-				push({ type: "launch", taskId: identity.taskId, attempt: 1, ...(runId ? { runId } : {}), label: identity.label });
+				const soloLaunch = launchFor(undefined, runId, 0);
+				push({ type: "launch", taskId: identity.taskId, attempt: 1, ...(runId ? { runId } : {}), label: identity.label, ...(soloLaunch?.agent ? { agent: soloLaunch.agent } : {}), ...(soloLaunch?.model ? { route: soloLaunch.model } : {}) });
 				if (typeof data.state === "string") {
 					push({ type: "lifecycle", taskId: identity.taskId, attempt: 1, ...(runId ? { runId } : {}), state: data.state });
 				}
@@ -650,7 +712,8 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					workflowKey: asString(row.workflowKey, 160),
 					childId: asString(row.childId, 160),
 				});
-				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), label: identity.label });
+				const lifeLaunch = launchFor(undefined, runId, index);
+				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), label: identity.label, ...(typeof row.agent === "string" && row.agent ? { agent: row.agent.slice(0, 80) } : lifeLaunch?.agent ? { agent: lifeLaunch.agent } : {}), ...(typeof row.model === "string" && row.model ? { route: row.model.slice(0, 200) } : lifeLaunch?.model ? { route: lifeLaunch.model } : {}) });
 				const state = asString(row.status ?? row.state, 32);
 				if (state) push({ type: "lifecycle", taskId: identity.taskId, attempt: identity.attempt, state });
 			});

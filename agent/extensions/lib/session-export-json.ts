@@ -14,6 +14,7 @@
 import { createHash } from "node:crypto";
 import { collectSessionMetrics } from "./session-metrics.ts";
 import { collectSessionDiagnostics, failureCategory } from "./session-diagnostics.ts";
+import { collectSessionErrors } from "./session-errors.ts";
 import { collectSessionCost } from "./session-cost.ts";
 import type { ActivityCounters } from "./activity-indicators.ts";
 import { reduceChildEvents, projectTranscriptChildren, summarizeLedger, childTaskToEvidence } from "../pi-subagents/src/runs/shared/child-ledger.ts";
@@ -86,6 +87,17 @@ const timestampMsOf = (entry: any): number | null => {
 
 const routeOf = (provider: unknown, model: unknown): string =>
   `${provider ?? "unknown"}/${model ?? "unknown"}`.slice(0, 160);
+
+// Area root of a touched path for the workdirs rollup: first two segments
+// for relative paths, last two directory segments for absolute ones
+// (top-level system prefixes carry no project signal).
+const fileRoot = (file: string): string | null => {
+  const clean = file.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  const segments = clean.split("/").filter(Boolean);
+  if (segments.length < 2) return null;
+  const root = clean.startsWith("/") ? segments.slice(-3, -1).join("/") : segments.slice(0, 2).join("/");
+  return root && root.length <= 120 ? root : null;
+};
 
 const stableArgsKey = (name: unknown, args: unknown): string | null => {
   if (typeof name !== "string" || !args || typeof args !== "object") return null;
@@ -256,7 +268,10 @@ function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
     };
   }
   if (entry?.type === "session_info" || entry?.type === "label") {
-    return { ...base, kind: entry.type, ...(includeRaw ? { raw: entry } : {}) };
+    const labelText = entry?.type === "label" && typeof (entry.label ?? entry.text) === "string"
+      ? String(entry.label ?? entry.text).slice(0, 300)
+      : null;
+    return { ...base, kind: entry.type, ...(labelText ? { label: labelText } : {}), ...(includeRaw ? { raw: entry } : {}) };
   }
   return { ...base, kind: entry?.type ?? "unknown", ...(includeRaw ? { raw: entry } : {}) };
 }
@@ -299,18 +314,31 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
   let userTurnCount = 0, assistantTurns = 0, toolCalls = 0, toolResults = 0;
   let toolErrors = 0, modelErrors = 0, thinkingBlocks = 0, thinkingChars = 0;
   let compactions = 0, modelChanges = 0, thinkingChanges = 0;
+  let turnsWithToolUse = 0, maxCallsInTurn = 0, burstTurns = 0;
+  let assistantTextChars = 0, resultChars = 0, userChars = 0;
+  let lastLabel: string | null = null;
+  const bashCwds = new Set<string>();
+  const fileRoots = new Map<string, number>();
   let largestThinking: { seq: number; id: string | null; chars: number; excerpt: string } | null = null;
   const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
 
   for (const event of events) {
     if (event.kind === "user") {
       userTurnCount++;
+      userChars += event.chars ?? 0;
       userTurns.push({
         seq: event.seq, id: event.id, timestamp: event.timestamp,
         chars: event.chars, preview: String(event.text ?? "").slice(0, 300),
       });
     } else if (event.kind === "assistant") {
       assistantTurns++;
+      assistantTextChars += event.textChars ?? 0;
+      const callCount = (event.toolCalls ?? []).length;
+      if (callCount > 0) {
+        turnsWithToolUse++;
+        maxCallsInTurn = Math.max(maxCallsInTurn, callCount);
+        if (callCount >= 5) burstTurns++;
+      }
       const stop = event.stopReason ?? "unknown";
       stopReasons[stop] = (stopReasons[stop] ?? 0) + 1;
       if (stop === "error") modelErrors++;
@@ -353,9 +381,22 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
           if (group.callIds.length < 10) group.callIds.push(call.id);
           repeats.set(key, group);
         }
+        const callArgs = call?.arguments;
+        if (callArgs && typeof callArgs === "object") {
+          const record = callArgs as Record<string, unknown>;
+          if ((call?.name === "bash" || call?.name === "process") && typeof record.cwd === "string" && record.cwd && bashCwds.size < 16) {
+            bashCwds.add(record.cwd.slice(0, 256));
+          }
+          const file = record.path ?? record.file_path ?? record.file;
+          if (typeof file === "string" && file) {
+            const root = fileRoot(file);
+            if (root && (fileRoots.has(root) || fileRoots.size < 32)) fileRoots.set(root, (fileRoots.get(root) ?? 0) + 1);
+          }
+        }
       }
     } else if (event.kind === "tool_result") {
       toolResults++;
+      resultChars += event.chars ?? 0;
       const row = ensureTool(event.toolName);
       row.results++;
       row.chars += event.chars;
@@ -367,6 +408,8 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
         toolErrors++;
         row.errors++;
       }
+    } else if (event.kind === "label") {
+      if (typeof event.label === "string" && event.label) lastLabel = event.label;
     } else if (event.kind === "signal") {
       const key = event.customType ?? "unknown";
       signals[key] = (signals[key] ?? 0) + 1;
@@ -427,6 +470,9 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
   // Raw events stay below for forensics; debugging operates on these.
   const childLedger = reduceChildEvents(projectTranscriptChildren(accounted));
   const childSummary = summarizeLedger(childLedger);
+  // Error rollup for the normal export: counts plus top recurring
+  // signatures — the same dedup /errors shows, not per-error depth.
+  const errorReport = collectSessionErrors(accounted, { limit: 5, ledgerTasks: childLedger.tasks });
   const costState = classifyCostState({
     reported: cost?.reported ?? 0,
     estimated: cost?.estimated ?? 0,
@@ -475,6 +521,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       tasks: childLedger.tasks.map((task) => ({
         taskId: task.taskId,
         label: task.label,
+        agent: task.agent ?? null,
         todoId: task.todoId ?? null,
         scopeId: task.scopeId ?? null,
         state: task.state,
@@ -490,6 +537,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       taskId: task.taskId,
       attempt: attempt.attempt,
       runId: attempt.runId ?? null,
+      agent: attempt.agent ?? null,
       route: attempt.route ?? null,
       backend: attempt.backend ?? null,
       state: attempt.state,
@@ -564,6 +612,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       id: input.header?.id ?? null,
       file: input.sessionFile ?? null,
       leafId: input.leafId ?? null,
+      label: lastLabel,
       cwd: input.cwd ?? input.header?.cwd ?? null,
       startedAt: input.header?.timestamp ?? null,
       parentSession: input.header?.parentSession ?? null,
@@ -611,6 +660,42 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       routes: routeRows,
       repeats: repeatRows,
       failureGroups: diagnostics?.groups ?? [],
+      communication: {
+        userTurns: userTurnCount,
+        assistantTurns,
+        turnsWithToolUse,
+        avgCallsPerToolTurn: turnsWithToolUse ? Math.round((toolCalls / turnsWithToolUse) * 100) / 100 : 0,
+        maxCallsInTurn,
+        burstTurns,
+        userChars,
+        assistantTextChars,
+        resultChars,
+      },
+      topic: {
+        label: lastLabel,
+        firstPrompt: userTurns[0]?.preview ?? null,
+        promptChars: userChars,
+      },
+      workdirs: {
+        sessionCwd: input.cwd ?? input.header?.cwd ?? null,
+        bashCwds: [...bashCwds].sort(),
+        fileRoots: [...fileRoots.entries()]
+          .map(([root, count]) => ({ root, count }))
+          .sort((a, b) => b.count - a.count || a.root.localeCompare(b.root))
+          .slice(0, 16),
+      },
+      errorSummary: {
+        toolErrors,
+        modelErrors,
+        childFailures: diagnostics?.activity?.childFailures ?? 0,
+        uniqueIncidents: diagnostics?.uniqueIncidents ?? 0,
+        byKind: errorReport.byKind,
+        topSignatures: errorReport.signatures.slice(0, 8).map((sig) => ({
+          ...sig,
+          precedingTools: sig.precedingTools.slice(0, 5),
+        })),
+        omittedSignatures: errorReport.omittedSignatures + Math.max(0, errorReport.signatures.length - 8),
+      },
     },
     modelTrail,
     userTurns,

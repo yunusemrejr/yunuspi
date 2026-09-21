@@ -82,6 +82,10 @@ function normalizeIncidentError(error) {
 export function incidentId(category, error, link) {
   return `inc-${fnv1aHex(`${category}|${normalizeIncidentError(error)}|${link ?? ''}`).slice(0, 8)}`;
 }
+/** Recurring-failure signature: same kind + tool + category + normalized cause across linkages, so one flaky call repeating 200 times reads as one signature with a count. Shared by /errors and /export-json so both surfaces dedup identically. */
+export function errorSignature(kind, tool, category, error) {
+  return `sig-${fnv1aHex(`${kind}|${tool}|${category}|${normalizeIncidentError(error)}`).slice(0, 8)}`;
+}
 
 /** Bounded branch diagnostics shared by session_self and the offline auditor. */
 export function collectSessionDiagnostics(allEntries: any[], { excerpts = true } = {}) {
