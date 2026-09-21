@@ -70,6 +70,26 @@ test("malformed preference file never throws and yields no chain", () => {
 	assert.equal(prefs.loadLlmPreferences().ok, false);
 });
 
+test("malformed preference file warns with the reason; missing file stays silent", () => {
+	const warnings = [];
+	const orig = console.warn;
+	console.warn = (msg) => warnings.push(String(msg));
+	try {
+		try { fs.unlinkSync(prefsFile); } catch {}
+		clearLlmPreferencesCache();
+		fallback.resolveLlmPreferenceChain("subagents", registry);
+		assert.equal(warnings.length, 0, "missing file stays silent");
+		fs.writeFileSync(prefsFile, JSON.stringify({ version: 1, models: [] }));
+		clearLlmPreferencesCache();
+		assert.deepEqual(fallback.resolveLlmPreferenceChain("swarm", registry), []);
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0], /ignoring preference file/);
+		assert.match(warnings[0], /\(swarm\)/);
+	} finally {
+		console.warn = orig;
+	}
+});
+
 test("ordered aliases resolve in declared order with partial failure", () => {
 	writePrefs({
 		version: 1,
