@@ -19,6 +19,10 @@ Resolution hierarchy:
 One bad alias, unavailable provider, unsupported thinking level or invalid
 model skips that entry only. It never invalidates the whole file.
 
+An explicit free-only task constraint filters preference chains to
+proven-free routes. Automatic council and review rounds keep honoring
+configured routes while their autonomous fill stays free-only.
+
 ## State vs policy
 
 Harness persistence records the main model/provider/thinking configuration

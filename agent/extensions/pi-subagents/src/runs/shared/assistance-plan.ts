@@ -35,7 +35,7 @@ export interface AssistanceMember {route:string;proof:string;role:string;free:bo
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a swarm. */
-export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string} = {}): AssistanceMember[] {
+export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  const cheap = {...config,subscriptionProviders:[],maxInputPerMillion:Math.min(config.maxInputPerMillion,.2),maxOutputPerMillion:Math.min(config.maxOutputPerMillion,.5),operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
@@ -46,7 +46,11 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
  // Explicit preferences first: distribute viable configured routes across
  // the team (distinct identities), then fill gaps with autonomous picks.
  const slots = plan.roles.slice(0,3);
- const distributed = distributeLlmPreferredModels(options.role ?? plan.mode, slots.length, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools}});
+ // A user free-only constraint filters configured preferences to proven-free
+ // routes, matching the single-subagent path. Automatic council/review
+ // rounds opt out via honorPaidPreferences: their freeOnly bounds only the
+ // autonomous fill while configured routes stay honored.
+ const distributed = distributeLlmPreferredModels(options.role ?? plan.mode, slots.length, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
  const distinct = distributed.filter((item,index,self)=>self.findIndex(other=>modelIdentity(other.route)===modelIdentity(item.route))===index);
  slots.forEach((role,index)=>{
   const pick = distinct[index];

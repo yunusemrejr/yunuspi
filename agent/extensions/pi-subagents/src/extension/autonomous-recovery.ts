@@ -244,7 +244,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 		// capacity gap (the round is refunded for a later attempt). Explicit
 		// llm_preferences routes are still honored; explicit user-invoked
 		// reviews keep full economy choice.
-		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:request.automatic === true ? true : constraints.freeOnly,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens,role:"quality_review"});
+		const team = selectAssistanceTeam(models.map(toModelInfo),loadModelEconomyConfig(),plan,{freeOnly:request.automatic === true ? true : constraints.freeOnly,honorPaidPreferences:request.automatic === true,task:request.task,minOutputTokens:REVIEW_LIMITS.outputTokens,role:"quality_review"});
 		if (!team.length) return unavailable(rejectedRoutes.size ? 'No permitted reviewer remains after a tool-protocol failure in this session; no automatic retry was made.' : 'No healthy permitted reviewer has the required tool/context/output capacity within the economy policy.');
 		// Marked harness flow (step 21; D-010): one assistance unit per
 		// review fan-out per cycle, shared by all reviewers under the grant.

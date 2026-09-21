@@ -41,6 +41,9 @@ const { artificialAnalysisEvidence, modelCardEvidence, refreshModelResearch } =
  await import(shared + "model-research.ts");
 const { loadModelEconomyConfig } = await import(shared + "model-economy.ts");
 const { buildModelCandidates } = await import(shared + "model-fallback.ts");
+const { clearLlmPreferencesCache } = await import(
+ shared + "llm-preferences.ts"
+);
 const cfg = loadModelEconomyConfig(),
  at = Date.now();
 const model = (id, provider = "openrouter", price = 0) => ({
@@ -521,6 +524,49 @@ try {
    ).length,
    1,
   );
+ });
+ check("team freeOnly filters paid preferences unless explicitly honored", () => {
+  const prefsFile = path.join(root, "llm-prefs-team-freeonly.json");
+  fs.writeFileSync(
+   prefsFile,
+   JSON.stringify({
+    version: 1,
+    models: {
+     paid_one: {
+      provider: "openrouter",
+      model: "lab/paid-1.0",
+      thinking: "low",
+     },
+    },
+    preferences: { swarm: { models: ["paid_one"] } },
+   }),
+  );
+  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
+  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
+  clearLlmPreferencesCache();
+  try {
+   const p = planAssistance(
+    "Migrate the billing and auth subsystems end to end",
+    true,
+   );
+   assert.equal(p.mode, "swarm");
+   const strict = selectAssistanceTeam([paid], cfg, p, {
+    freeOnly: true,
+    requiresTools: false,
+   });
+   assert.equal(strict.length, 0, "strict freeOnly drops the paid pref");
+   const honored = selectAssistanceTeam([paid], cfg, p, {
+    freeOnly: true,
+    honorPaidPreferences: true,
+    requiresTools: false,
+   });
+   assert.equal(honored.length, 1, "opt-out keeps the configured route");
+   assert.equal(honored[0].proof, "explicit llm_preferences");
+  } finally {
+   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
+   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
+   clearLlmPreferencesCache();
+  }
  });
  check(
   "schema rejects forged sources, corrupt values and future research timestamps",
