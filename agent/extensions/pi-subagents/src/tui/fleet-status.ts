@@ -299,6 +299,7 @@ function projectPaneEntries(state: SubagentState): FleetStatusEntry[] {
 
 export function collectFleetStatusEntries(state: SubagentState): FleetStatusEntry[] {
 	const entries: FleetStatusEntry[] = [];
+	const twinRunIds = new Set(state.foregroundControls.keys());
 	const activeWorkflowKeys = new Set([...state.asyncJobs.values()]
 		.filter((job) => job.mode === "workflow" && isActiveState(job.status))
 		.map((job) => `async:${job.asyncId}`));
@@ -361,11 +362,22 @@ export function collectFleetStatusEntries(state: SubagentState): FleetStatusEntr
 		const startedAt = job.startedAt ?? job.updatedAt ?? Date.now();
 		const linkedParentKey = linkedWorkflowParentKey(job.parentWorkflowRunId, activeWorkflowKeys);
 		if (job.mode === "workflow") {
+			const wrapperKey = `async:${job.asyncId}`;
+			// Active members render as selectable child entries like parallel
+			// steps. Live-foreground twins stay single-represented there, and
+			// emitted members leave the planned-stage projection.
+			const emittedSteps: Array<{ step: AsyncJobStep; index: number }> = [];
+			for (const [offset, step] of (job.steps ?? []).entries()) {
+				if (!isActiveState(step.status)) continue;
+				if (step.runId !== undefined && twinRunIds.has(step.runId)) continue;
+				emittedSteps.push({ step, index: step.index ?? offset });
+			}
+			const emittedStepIds = new Set(emittedSteps.flatMap(({ step }) => workflowIdentityCandidates(step)));
 			const latestEmit = job.workflow?.emits?.length ? formatWorkflowJsonPreview(job.workflow.emits.at(-1), 120) : undefined;
-			const workflowSteps = workflowStepsWithoutMaterializedChildren(job.steps, materializedChildrenByWorkflow.get(`async:${job.asyncId}`));
-			const workflowRows = projectAsyncWorkflowRows(workflowSteps, job.workflowGraph ?? job.hostSteps, job.preflight);
+			const workflowSteps = workflowStepsWithoutMaterializedChildren(job.steps, materializedChildrenByWorkflow.get(wrapperKey));
+			const workflowRows = projectAsyncWorkflowRows(workflowSteps, job.workflowGraph ?? job.hostSteps, job.preflight, emittedStepIds);
 			entries.push({
-				key: `async:${job.asyncId}`,
+				key: wrapperKey,
 				...(linkedParentKey ? { parentKey: linkedParentKey } : {}),
 				workflowWrapper: true,
 				agent: "workflow",
@@ -377,6 +389,20 @@ export function collectFleetStatusEntries(state: SubagentState): FleetStatusEntr
 				...(workflowRows.length ? { workflowRows } : {}),
 				...(job.nestedChildren?.length ? { nestedChildren: job.nestedChildren } : {}),
 			});
+			for (const { step, index } of emittedSteps) {
+				const modelThinking = formatModelThinking(step.model, step.thinking) || undefined;
+				entries.push({
+					key: `${wrapperKey}:${index}`,
+					parentKey: wrapperKey,
+					agent: step.label ? `${step.label} (${step.agent})` : step.agent,
+					...(modelThinking ? { modelThinking } : {}),
+					description: step.description ?? job.description,
+					startedAt: step.startedAt ?? startedAt,
+					tokens: step.tokens?.total ?? 0,
+					...(step.tokens?.window !== undefined ? { window: step.tokens.window } : {}),
+					state: step.status,
+				});
+			}
 			continue;
 		}
 		const steps: AsyncJobStep[] | undefined = job.steps?.length
