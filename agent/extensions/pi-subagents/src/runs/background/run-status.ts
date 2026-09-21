@@ -667,7 +667,7 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				: [];
 			const status = data.state === "stopped" || data.stopped === true || childStatuses.includes("stopped")
 				? "stopped"
-				: data.success ? "complete" : data.state === "paused" || data.exitCode === 0 ? "paused" : "failed";
+				: data.success ? "complete" : data.state === "paused" || data.exitCode === 0 ? "paused" : data.state === "partial" ? "partial" : data.state === "rejected" ? "rejected" : "failed";
 			const runId = data.runId ?? data.id ?? resolvedId;
 			const lines = [`Run: ${runId}`, data.toolCallId ? `Tool call: ${data.toolCallId}` : undefined, `State: ${status}`, `Result: ${resultPath}`].filter((line): line is string => Boolean(line));
 			if (data.parallelHandoff?.path) lines.push(`Parallel handoff: ${data.parallelHandoff.path}`);
