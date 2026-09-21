@@ -166,7 +166,7 @@ test('used summary joins child runs with launch-level model and thinking', () =>
   ];
   const summary = signals.buildUsedSummary(branch, { provider: 'openrouter', id: 'main-model', thinking: 'medium' });
   assert.equal(summary.runs.length, 1);
-  assert.deepEqual(summary.runs[0], { runId: 'run-async-1', index: 0, mode: 'single', status: 'completed', provider: 'openrouter', model: 'big-model', thinking: 'high', tokens: 0, usageRecorded: false });
+  assert.deepEqual(summary.runs[0], { runId: 'run-async-1', index: 0, mode: 'single', agent: 'worker', status: 'completed', provider: 'openrouter', model: 'big-model', thinking: 'high', tokens: 0, usageRecorded: false });
   assert.equal(summary.routes.length, 1);
   assert.equal(summary.routes[0].thinking, 'medium');
   assert.ok(summary.routes[0].nested.includes('DeepInfra'));
