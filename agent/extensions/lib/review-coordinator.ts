@@ -41,13 +41,13 @@ export const REVIEW_KINDS: Record<ReviewKind, ReviewKindSpec> = {
 		purpose: "Evaluate implementation quality and regressions in observed changes.",
 		owner: "quality-review lifecycle (lib/quality-review.ts) with the native review runner.",
 		workflow: "Bounded aspect reviews (correctness, security, interface, content, runtime, delivery) with strict evidence parsing; two rounds; parent assesses.",
-		invoke: "quality_review({action:\"review\"}), then quality_review({action:\"assess\",disposition,reason}). Automatic at completion checkpoints.",
+		invoke: "quality_review({action:\"review\"}), then quality_review({action:\"assess\",disposition,reason}). Automatic at completion checkpoints. Do not also run prompt-workflow parallel-review/review-loop on the same revision: those are the deliberate deep-review alternative (P0/P1/P2 + Merge verdict), not a second approval.",
 	},
 	project: {
 		kind: "project",
 		purpose: "Assess architecture, goals, consistency, debt and project direction.",
 		owner: "One bounded advisory helper via the native subagent executor; no dedicated launcher.",
-		invoke: "Deliberate: subagent worker with a project-review brief (scope, decisions, debt, direction). Suggested only for broad architectural stuck signals.",
+		invoke: "Deliberate only: subagent worker with a project-review brief (scope, decisions, debt, direction). No automatic suggestion path exists; the stuck-signal suggester proposes error reviews, never project reviews.",
 		workflow: "Single read-only investigation with a concise findings report; parent owns decisions.",
 	},
 	error: {
@@ -124,7 +124,7 @@ export interface StuckSignalInput {
 }
 
 export interface StuckSignalVerdict {
-	kind: "error" | "council" | "none";
+	kind: "error" | "none";
 	reason: string;
 }
 

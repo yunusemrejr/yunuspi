@@ -10,6 +10,7 @@ import { taskTerms } from "../local-intelligence.mjs";
 import { isPromptPivot, isPromptRefusal, isReferentialFollowup } from "../intent-context.ts";
 import type { NeedleResult, NeedleClassifyResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
+import { COUNCIL_PERSPECTIVES } from "./review.ts";
 import { requestExcerpt } from '../prompt-interpretation.ts';
 
 export type RequestFamily =
@@ -135,14 +136,9 @@ export interface AdvisoryResult {
   skipped?: string;
 }
 
-export const REVIEW_PERSPECTIVES = [
-  "architecture",
-  "correctness",
-  "security",
-  "performance",
-  "maintainability",
-  "testing",
-] as const;
+/** Single council-perspective vocabulary, shared with the review helpers and
+ * the scope-council focus cue; a second list here would drift silently. */
+export const REVIEW_PERSPECTIVES: readonly string[] = COUNCIL_PERSPECTIVES.map((entry) => entry.id);
 
 /** Build ONE compact batched advisory question set (<= 7 questions). */
 export function buildAdvisoryQuestions(context: AdvisoryContext): Record<string, unknown> {
@@ -178,14 +174,7 @@ export function buildAdvisoryQuestions(context: AdvisoryContext): Record<string,
     questions.perspective = {
       type: "choice",
       instructions: "Which review perspective matters most for this request?",
-      criteria: {
-        architecture: "structure, boundaries, contracts, and design tradeoffs",
-        correctness: "logic errors, edge cases, and behavioral regressions",
-        security: "authorization, injection, secrets, and trust boundaries",
-        performance: "latency, cost, complexity, and resource use",
-        maintainability: "clarity, coupling, debt, and future change cost",
-        testing: "coverage, verification evidence, and reproducibility",
-      },
+      criteria: Object.fromEntries(COUNCIL_PERSPECTIVES.map((entry) => [entry.id, entry.text])),
     };
   }
   if (candidates.length >= 2) {
@@ -256,7 +245,7 @@ export function runAdvisory(
         .filter(([, probability]) => unit(probability) && probability >= 0.15)
         .sort((a, b) => b[1] - a[1])
         .map(([name]) => name)
-        .filter((name) => (REVIEW_PERSPECTIVES as readonly string[]).includes(name))
+        .filter((name) => REVIEW_PERSPECTIVES.includes(name))
         .slice(0, 3);
       consume({
         preferred: typeof fit === "string" && fitCriteria && Object.hasOwn(fitCriteria, fit) && confident(judged.answers.fit?.probabilities?.[fit]) ? fitCriteria[fit] : undefined,

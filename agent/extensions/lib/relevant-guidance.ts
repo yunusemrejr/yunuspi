@@ -14,7 +14,8 @@ import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, routeSkillsPrecise, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
 import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
-import { evaluateStuckSignal, isTrivialChangeRequest } from "./review-coordinator.ts";
+import { evaluateStuckSignal, isTrivialChangeRequest, shouldSuggestReview } from "./review-coordinator.ts";
+import { lastQualityReviewCompletedAt } from "./quality-review-owner.ts";
 import { failureCategory } from "./session-diagnostics.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
@@ -75,6 +76,7 @@ export function createRelevantGuidance(pi: any) {
   const outlines = new Map<string, { mtimeMs: number; headings: Array<{ text: string; line: number }>; links: string[] }>();
   let lastFailure = "", failures = 0, urgentCount = 0;
   let recentTools: string[] = [], errorRun = 0, recentErrorKinds: string[] = [], diagnosticCount = 0, trivialPrompt = false;
+  let diagSuggestedAt = 0, lastReviewAt: number | undefined;
   let searches = 0, polling = "", polls = 0, runCount = 0, codeSeen = false;
   const sourceReads = new Set<string>();
   let ordinarySteps = 0;
@@ -554,7 +556,7 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
-  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), topicOffers: [...topicOffers].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills] });
+  const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), topicOffers: [...topicOffers].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills], diag:[diagnosticCount,diagSuggestedAt] });
   // A workflow checkpoint, not a correctness verdict or a security boundary.
   // Deterministic task/file routes qualify; weak lexical suggestions never gate.
   // Reading remains the native tool's job so delivery cannot masquerade as use.
@@ -761,7 +763,7 @@ export function createRelevantGuidance(pi: any) {
       context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
-      recentTools = []; errorRun = 0; recentErrorKinds = []; diagnosticCount = 0; trivialPrompt = false;
+      recentTools = []; errorRun = 0; recentErrorKinds = []; diagnosticCount = 0; trivialPrompt = false; diagSuggestedAt = 0; lastReviewAt = undefined;
       // Entries are local session metadata, not instructions or a new state file.
       const rawEntries = ctx.sessionManager?.getBranch?.() ?? ctx.sessionManager?.getEntries?.() ?? [];
       // A long-lived session can contain many thousands of tool events. Only
@@ -813,6 +815,9 @@ export function createRelevantGuidance(pi: any) {
         topicOffers = new Map((Array.isArray(d.topicOffers) ? d.topicOffers : []).slice(-64).filter((pair: any) =>
           Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && /^topic:\S{1,200}(?:\0[a-z0-9_-]{1,64})?$/.test(pair[0]) &&
           Number.isSafeInteger(pair[1]) && pair[1] >= 0 && pair[1] <= 99).map((pair: any) => [pair[0], pair[1]] as [string, number]));
+        if (Array.isArray(d.diag) && Number.isSafeInteger(d.diag[0]) && d.diag[0] >= 0 && d.diag[0] <= 99 && Number.isSafeInteger(d.diag[1]) && d.diag[1] >= 0) {
+          diagnosticCount = d.diag[0]; diagSuggestedAt = d.diag[1];
+        }
         break;
       }
     },
@@ -823,6 +828,7 @@ export function createRelevantGuidance(pi: any) {
       pending.clear(); releaseAllHints(); used.clear(); searches = polls = runCount = topicCount = toolStep = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
       recentTools = []; errorRun = 0; recentErrorKinds = [];
       trivialPrompt = isTrivialChangeRequest(String(event.prompt ?? ""));
+      try { lastReviewAt = lastQualityReviewCompletedAt(ctx); } catch { lastReviewAt = undefined; }
       matchingPrompt = false;
       advisoryDiscoveryDelivered.clear();
       requestDisabled = /\b(no tools|without tools|do not use tools|don't use tools)\b/i.test(skillTaskText(String(event.prompt ?? "")));
@@ -981,10 +987,10 @@ export function createRelevantGuidance(pi: any) {
           recentErrorKinds.push(failureCategory(excerpt).category);
           if (recentErrorKinds.length > 4) recentErrorKinds.shift();
         } catch { /* classification is advisory */ }
-        if (errorRun >= 4 && diagnosticCount < 2 && !trivialPrompt && (codeSeen || ordinarySteps >= 4)) {
+        if (errorRun >= 4 && !trivialPrompt && (codeSeen || ordinarySteps >= 4)) {
           const verdict = evaluateStuckSignal({ consecutiveErrors: errorRun, sameFixRepeats: failures, errorKinds: recentErrorKinds, meaningfulWork: true });
-          if (verdict.kind === "error") {
-            diagnosticCount++;
+          if (verdict.kind === "error" && shouldSuggestReview("error", { suggestionsThisSession: diagnosticCount, lastSuggestedAt: diagSuggestedAt || undefined, lastReviewAt })) {
+            diagnosticCount++; diagSuggestedAt = Date.now();
             add({ key: "topic:diagnostic-error-review", priority: 74, text: "Stuck pattern: repeated errors without progress. Consider one bounded error review (subagent worker: root cause plus a discriminating check) before repeating the fix." });
           }
         }

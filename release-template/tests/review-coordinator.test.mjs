@@ -23,6 +23,9 @@ test("every review kind has a distinct purpose, owner and workflow", () => {
 	const purposes = Object.values(coordinator.REVIEW_KINDS).map((s) => s.purpose);
 	assert.equal(new Set(purposes).size, purposes.length);
 	assert.match(coordinator.describeReviewKind("quality"), /implementation quality/);
+	assert.match(coordinator.REVIEW_KINDS.quality.invoke, /parallel-review/);
+	assert.match(coordinator.REVIEW_KINDS.project.invoke, /Deliberate only/);
+	assert.doesNotMatch(coordinator.REVIEW_KINDS.project.invoke, /[Ss]uggested only/);
 });
 
 test("trivial formatting/lint work is detected, real work is not", () => {
@@ -62,6 +65,13 @@ test("stuck signals fire only on strong patterns", () => {
 		coordinator.evaluateStuckSignal({ consecutiveErrors: 6, sameFixRepeats: 0, errorKinds: ["input"], meaningfulWork: false }).kind,
 		"none",
 	);
+	for (const input of [
+		{ consecutiveErrors: 9, sameFixRepeats: 9, errorKinds: ["input", "output"], debuggingLoop: true },
+		{ consecutiveErrors: 4, sameFixRepeats: 2, errorKinds: ["input", "output", "tool"] },
+		undefined,
+	]) {
+		assert.ok(["error", "none"].includes(coordinator.evaluateStuckSignal(input).kind));
+	}
 });
 
 test("suggestion gating honors cooldowns, caps and recent runs", () => {
