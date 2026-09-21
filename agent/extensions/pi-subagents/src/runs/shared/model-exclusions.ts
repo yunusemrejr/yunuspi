@@ -143,6 +143,13 @@ function deduplicate(items: ModelExclusion[]): ModelExclusion[] {
  */
 export function recordModelFailure(options: RecordModelFailureOptions): void {
 	ensureLoaded();
+	// The store is per-process but the file is per-user: re-read and merge
+	// before append+flush, or sequential cross-session records silently drop
+	// each other's exclusions (last-writer-wins).
+	const pending = exclusions;
+	loaded = false;
+	ensureLoaded();
+	exclusions = deduplicate([...exclusions, ...pending]);
 	const ttl = options.ttlMs ?? defaultTTLMs;
 	const now = Date.now();
 	const target: ModelExclusionTarget = options.modelId !== undefined
