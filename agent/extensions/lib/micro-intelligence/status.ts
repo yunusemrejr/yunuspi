@@ -74,6 +74,7 @@ export function microStatusSnapshot(request?: {
   needlePending?: boolean;
   advisory?: MicroStatusRequest["advisory"];
   advisoryPending?: boolean;
+  advisoryFamily?: string;
 }): Record<string, unknown> {
   const needle = needleHealth();
   const stats = needleHandle().stats();
@@ -108,6 +109,7 @@ export function microStatusSnapshot(request?: {
           terms: request.terms.slice(0, 16),
           needle: request.needle ?? (request.needlePending ? { pending: true } : undefined),
           advisory: request.advisory ?? (request.advisoryPending ? { pending: true } : undefined),
+          ...(request.advisoryFamily ? { advisoryFamily: request.advisoryFamily } : {}),
         }
       : null,
     needle: {

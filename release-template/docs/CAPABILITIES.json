@@ -2283,17 +2283,17 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1668
+        "line": 1708
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1270
+        "line": 1310
       },
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3374
+        "line": 3392
       },
       {
         "name": "effort",
@@ -2303,7 +2303,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1642
+        "line": 1682
       },
       {
         "name": "export-json",
@@ -2313,7 +2313,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3416
+        "line": 3434
       },
       {
         "name": "graph",
@@ -2443,12 +2443,12 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3464
+        "line": 3482
       },
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1595
+        "line": 1635
       },
       {
         "name": "subagent-cost",
@@ -2533,7 +2533,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1600
+        "line": 1640
       },
       {
         "name": "tasks",
@@ -2543,12 +2543,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1619
+        "line": 1659
       },
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3113
+        "line": 3131
       }
     ],
     "commandDynamicOwners": [
@@ -2765,14 +2765,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 192,
+        "line": 193,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 193,
+        "line": 194,
         "kind": "configured-default",
         "configurable": true
       },
@@ -2791,7 +2791,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 409,
+        "line": 432,
         "kind": "literal"
       },
       {
@@ -2857,7 +2857,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 69,
+        "line": 72,
         "kind": "literal"
       },
       {
@@ -2941,7 +2941,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1760,
+        "line": 1800,
         "kind": "literal"
       },
       {
@@ -2953,7 +2953,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1697,
+        "line": 1737,
         "kind": "literal"
       },
       {
@@ -2971,7 +2971,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 191,
+        "line": 192,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3068,7 +3068,7 @@
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 190,
+        "line": 191,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3185,7 +3185,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 409,
+        "line": 432,
         "kind": "literal"
       },
       {
@@ -3227,7 +3227,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 69,
+        "line": 72,
         "kind": "literal"
       },
       {
@@ -3287,7 +3287,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1760,
+        "line": 1800,
         "kind": "literal"
       },
       {
@@ -3299,7 +3299,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1697,
+        "line": 1737,
         "kind": "literal"
       },
       {
@@ -3493,10 +3493,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1655,
-          2243,
-          2388,
-          2779
+          1656,
+          2244,
+          2398,
+          2797
         ],
         "knownNames": [
           "fetch_content",
@@ -3764,6 +3764,14 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/context-profile.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/context-provenance.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/continuation-notice.ts",
         "exists": true
       },
@@ -3772,11 +3780,27 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/cost-states.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/data-query.ts",
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/diagnostic-provenance.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/effort-policy.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/execution-evidence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/fail-policy.ts",
         "exists": true
       },
       {
@@ -3804,11 +3828,19 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/harness-invariants.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/harness-orientation.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/health-log.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/hook-events.ts",
         "exists": true
       },
       {
@@ -3849,6 +3881,10 @@
       },
       {
         "path": "agent/extensions/lib/jev-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/local-intelligence.mjs",
         "exists": true
       },
       {
@@ -3940,6 +3976,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/request-compat.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/review-coordinator.ts",
         "exists": true
       },
@@ -4016,6 +4056,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/skill-telemetry.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/slop-guidance-signals.ts",
         "exists": true
       },
@@ -4052,11 +4096,19 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/todo-linkage.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/tool-discovery.ts",
         "exists": true
       },
       {
         "path": "agent/extensions/lib/utility-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/workspace-write-lease.ts",
         "exists": true
       }
     ],

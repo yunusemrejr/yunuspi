@@ -60,6 +60,7 @@ import {
 	type ResearchArtifact,
 } from "./source-check.ts";
 import { askJev, jevMark, tooShort } from "../lib/jev-client.ts";
+import { microMetrics } from "../lib/micro-intelligence/metrics.ts";
 
 type ExtensionTheme = ExtensionContext["ui"]["theme"];
 
@@ -2336,6 +2337,8 @@ export default function (pi: ExtensionAPI) {
 							.join("\n\n")
 							.slice(0, 6000);
 						if (!tooShort(evidence, 100)) {
+							const metrics = microMetrics();
+							metrics.offer("jev");
 							const judged = await askJev("verify", { claim, evidence }, {
 								verdict: {
 									type: "choice",
@@ -2347,7 +2350,12 @@ export default function (pi: ExtensionAPI) {
 									},
 								},
 							}, { pi, signal });
-							if (judged.ok) {
+							if (!judged.ok) {
+								metrics.skip("jev", judged.skipped);
+							} else {
+								metrics.run("jev");
+								metrics.jevUsage("verify", 1, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
+								if (judged.usage.cached) metrics.cacheHit("jev");
 								const answer = judged.answers.verdict;
 								const verdict = answer?.choice ?? "says_nothing";
 								const confidence = typeof answer?.confidence === "number" ? answer.confidence : 0;
@@ -2358,9 +2366,11 @@ export default function (pi: ExtensionAPI) {
 									assessment.candidate_passages = undefined;
 									assessment.rationale = `Jev semantic verdict over ${candidates.length} candidate passage(s); inspect them for qualifications.`;
 									assessment.confidence = confidence;
+									metrics.accept("jev");
 								} else {
 									assessment.rationale = `Jev could not establish support or contradiction (verdict ${verdict}, confidence ${confidence.toFixed(2)}); inspect the candidate passages.`;
 									assessment.confidence = confidence;
+									metrics.skip("jev", "low-confidence");
 								}
 								jevVerifyMark = jevMark("verify", `${verdict} ${confidence.toFixed(2)}`, judged.usage);
 							}
@@ -2563,8 +2573,16 @@ export default function (pi: ExtensionAPI) {
 									type: "noul",
 									instructions: `Is this text relevant to: ${params.prompt.slice(0, 500)}`,
 								};
+							const metrics = microMetrics();
+							metrics.offer("jev");
 							const judged = await askJev("screen", output.slice(0, 8000), questions, { pi, signal });
-							if (judged.ok) {
+							if (!judged.ok) {
+								metrics.skip("jev", judged.skipped);
+							} else {
+								metrics.run("jev");
+								metrics.jevUsage("screen", Object.keys(questions).length, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
+								if (judged.usage.cached) metrics.cacheHit("jev");
+								metrics.accept("jev");
 								const injection = judged.answers.injection?.noul ?? 0;
 								const substance = judged.answers.substance?.noul ?? 1;
 								if (injection >= 0.75)

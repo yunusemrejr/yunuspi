@@ -344,9 +344,13 @@ test("status snapshot reports health without running inference", async () => {
       family: "implementation", substantive: true, terms: ["auth"],
       needle: { score: 0.9, margin: 0.02, accepted: true },
       advisory: { ok: true, needsVerification: false, reviewWorthy: true, multiPerspective: false, perspectives: ["security"] },
+      advisoryFamily: "lookup",
     });
     assert.equal(snapshot.health.layers.length, 5);
     assert.equal(snapshot.request.family, "implementation");
+    assert.equal(snapshot.request.advisoryFamily, "lookup");
+    const unstarted = statusMod.microStatusSnapshot({ family: "lookup", substantive: true, terms: ["show"] });
+    assert.ok(!("advisoryFamily" in unstarted.request));
     assert.ok(snapshot.needle && typeof snapshot.needle === "object");
     assert.ok(Array.isArray(snapshot.metrics));
     assert.ok(snapshot.smol && typeof snapshot.smol === "object");

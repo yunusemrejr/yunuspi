@@ -29,6 +29,7 @@ import { normalizeReviewPath, parseReviewReport, REVIEW_REPORT_INSTRUCTIONS } fr
 import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
 import { askJev, tooShort } from "../../../lib/jev-client.ts";
+import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
 import { buildInterpBrief, classifyFollowup, parseInterpRead } from "../../../lib/prompt-interpretation.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
@@ -584,6 +585,8 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		try {
 			const names = [...wanted].slice(0, 15);
 			if (!tooShort(prompt, 20) && names.length >= 2) {
+				const metrics = microMetrics();
+				metrics.offer("jev");
 				const judged = await (deps.judge ?? askJev)("route", { task: prompt.slice(0, 2000) }, {
 					skill: {
 						type: "choice",
@@ -591,7 +594,12 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 						criteria: Object.fromEntries(names.map((name) => [name, null])),
 					},
 				}, { pi });
-				if (judged.ok) {
+				if (!judged.ok) {
+					metrics.skip("jev", judged.skipped);
+				} else {
+					metrics.run("jev");
+					metrics.jevUsage("route", 1, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
+					if (judged.usage.cached) metrics.cacheHit("jev");
 					const order = judged.answers.skill?.probabilities ?? {};
 					const top = judged.answers.skill?.choice;
 					if (top && names.includes(top) && Number.isFinite(order[top]) && order[top] >= 0.35 && order[top] <= 1
@@ -599,10 +607,14 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 						const remainder = [...wanted].filter(name => !names.includes(name));
 						wanted.clear();
 						for (const name of [...names].sort((a, b) => (order[b] ?? 0) - (order[a] ?? 0)).concat(remainder)) wanted.add(name);
+						metrics.accept("jev");
+					} else {
+						metrics.skip("jev", "low-confidence");
 					}
 				}
 			}
 		} catch {
+			microMetrics().skip("jev", "unavailable");
 			// Lexical order stands.
 		}
 		const paths = [...wanted].flatMap(name=>catalog.has(name)?[catalog.get(name)!]:[]).slice(0,2);

@@ -154,6 +154,7 @@ function describeHttpFailure(error: unknown, signal?: AbortSignal): {
   kind: HttpFailureKind;
   retryable: boolean;
   nextStep: string;
+  decidedBy: string;
 } {
   const message = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 240) || "HTTP request failed";
   const lower = message.toLowerCase();
@@ -175,7 +176,29 @@ function describeHttpFailure(error: unknown, signal?: AbortSignal): {
         : kind === "network"
           ? "Check endpoint and proxy/network access, then retry once or use fetch_content for readable pages."
           : "Check the endpoint and request inputs; retry only after correcting the cause.";
-  return { error: message, kind, retryable: kind === "timeout" || kind === "network", nextStep };
+  return { error: message, kind, retryable: kind === "timeout" || kind === "network", nextStep, decidedBy: "regex" };
+}
+
+/** Causes that rewrite the failure kind; auth/quota/server add guidance only.
+ * Shared by the Needle and Jev refinements so the twins cannot drift. */
+const KIND_REWRITE = new Set(["timeout", "network", "validation", "cancelled"]);
+
+/** Apply one ML cause verdict to a regex-leftover failure. Returns true when
+ * the verdict decided the kind (recorded as `decidedBy` provenance). */
+function applyHttpCause(
+  failure: { kind: HttpFailureKind; retryable: boolean; nextStep: string },
+  cause: string,
+): boolean {
+  let decided = false;
+  if (KIND_REWRITE.has(cause)) {
+    (failure as { kind: string }).kind = cause;
+    decided = true;
+  }
+  if (cause === "server") failure.retryable = true;
+  if (cause === "auth") failure.nextStep = "Provide or refresh credentials, then retry.";
+  if (cause === "quota") failure.nextStep = "Back off for the provider cooldown window, then retry.";
+  if (cause === "server") failure.nextStep = "Retry once; the failure is server-side.";
+  return decided;
 }
 
 function validateHeaders(
@@ -440,21 +463,16 @@ export default function httpTools(pi: any) {
       } catch (error) {
         const failure = describeHttpFailure(error, signal);
         // Needle first: an accepted local classification refines the regex
-        // leftover without a network call. Application mirrors the Jev twin
-        // below: only timeout/network/validation/cancelled rewrite the kind;
-        // auth/quota/server add next-step guidance. A Needle kind verdict
-        // skips Jev; guidance-only causes still get Jev validation.
+        // leftover without a network call. Application is shared with the Jev
+        // refinement below via applyHttpCause: only kind-rewrite causes change
+        // the kind; auth/quota/server add next-step guidance. A Needle kind
+        // verdict skips Jev; guidance-only causes still get Jev validation.
         if (failure.kind === "unknown" && !tooShort(failure.error, 40)) {
           try {
             const ranked = await needleClassify({ text: failure.error.slice(0, 1024), labels: HTTP_CAUSE_LABELS });
             if (ranked.ok && !ranked.shadow && ranked.value.accepted) {
               const cause = ranked.value.label;
-              if ((["timeout", "network", "validation", "cancelled"] as string[]).includes(cause))
-                (failure as { kind: string }).kind = cause;
-              if (cause === "server") failure.retryable = true;
-              if (cause === "auth") failure.nextStep = "Provide or refresh credentials, then retry.";
-              if (cause === "quota") failure.nextStep = "Back off for the provider cooldown window, then retry.";
-              if (cause === "server") failure.nextStep = "Retry once; the failure is server-side.";
+              if (applyHttpCause(failure, cause)) failure.decidedBy = "needle";
               (failure as unknown as Record<string, unknown>).needle = {
                 cause,
                 score: ranked.value.score,
@@ -491,14 +509,9 @@ export default function httpTools(pi: any) {
             if (judged.ok) {
               const cause = judged.answers.kind?.choice;
               const confidence = judged.answers.kind?.confidence ?? 0;
-              const known = ["timeout", "network", "validation", "auth", "quota", "server", "cancelled"];
+              const known = HTTP_CAUSE_LABELS.map((label) => label.id);
               if (cause && known.includes(cause) && confidence >= 0.7) {
-                if ((["timeout", "network", "validation", "cancelled"] as string[]).includes(cause))
-                  (failure as { kind: string }).kind = cause;
-                if (cause === "server") failure.retryable = true;
-                if (cause === "auth") failure.nextStep = "Provide or refresh credentials, then retry.";
-                if (cause === "quota") failure.nextStep = "Back off for the provider cooldown window, then retry.";
-                if (cause === "server") failure.nextStep = "Retry once; the failure is server-side.";
+                if (applyHttpCause(failure, cause)) failure.decidedBy = "jev";
                 (failure as unknown as Record<string, unknown>).jev = {
                   mark: jevMark("classify", `${cause} ${confidence.toFixed(2)}`, judged.usage),
                   cause,

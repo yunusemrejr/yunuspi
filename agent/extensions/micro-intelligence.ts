@@ -46,6 +46,9 @@ export interface MicroRequestState {
   advisory?: AdvisoryResult;
   advisoryPending: boolean;
   family: RequestFamily;
+  /** Family actually sent with the advisory batch; the 500ms race means it
+   * can lag `family` when Needle arrives after the advisory started. */
+  advisoryFamily?: RequestFamily;
   at: number;
 }
 
@@ -81,6 +84,7 @@ export default function (pi: any, deps = { classify: needleClassify, warmup: nee
               needlePending: lastRequest.needlePending,
               advisory: lastRequest.advisory,
               advisoryPending: lastRequest.advisoryPending,
+              advisoryFamily: lastRequest.advisoryFamily,
             }
           : undefined,
       );
@@ -146,6 +150,7 @@ export default function (pi: any, deps = { classify: needleClassify, warmup: nee
       if (!isCurrent() || advisoryStarted || !shouldAdvise(pass, 0)) return;
       advisoryStarted = true;
       state.advisoryPending = true;
+      state.advisoryFamily = state.family;
       // One compact batched call, consumed at later checkpoints.
       runAdvisory(
         { prompt, family: state.family, terms: pass.terms, candidates: [] },
@@ -161,6 +166,7 @@ export default function (pi: any, deps = { classify: needleClassify, warmup: nee
                 : advisory.reviewWorthy
                   ? "review-worthy"
                   : "routine",
+              family: state.advisoryFamily ?? state.family,
               count: 1,
             });
           }
