@@ -16,6 +16,21 @@ import {
   normalizeWorkflow,
 } from "./workflow-record.mjs";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+function shapeSummary(snap) {
+  const tally = (items, key) => {
+    const counts = new Map();
+    for (const item of items ?? []) {
+      const name = typeof item?.[key] === "string" && item[key] ? item[key].slice(0, 64) : "other";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return Object.fromEntries(
+      [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 24),
+    );
+  };
+  return { byType: tally(snap.nodes, "type"), byRelation: tally(snap.edges, "type") };
+}
 function compactStats(stats) {
   return Object.fromEntries(
     Object.entries(stats).flatMap(([key, value]) =>
@@ -434,13 +449,16 @@ async function run(op, payload, signal) {
     }
     case "view":
       return simplifyGraph(store.snapshot(), payload);
-    case "health":
+    case "health": {
+      const snap = store.snapshot({ scope: payload.allScopes ? undefined : identity.checkoutId });
       return {
         project: identity,
         revision: store.revision(),
-        health: store.snapshot({ scope: payload.allScopes ? undefined : identity.checkoutId }).health,
+        health: snap.health,
+        shape: shapeSummary(snap),
         discovery: store.getMeta(`discovery-stats:${identity.checkoutId}`),
       };
+    }
     case "history":
       return store.history({ limit: Math.min(30, payload.limit ?? 20), sourceId: payload.sourceId, scope: payload.allScopes ? undefined : identity.checkoutId });
     case "review_history": {

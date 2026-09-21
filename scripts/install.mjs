@@ -250,7 +250,7 @@ try {
   fs.writeFileSync(path.join(stage, 'bin/yunuspi'), `#!/usr/bin/env bash
 set -euo pipefail
 AGENT="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-export PI_CODING_AGENT_DIR="$AGENT"
+export PI_CODING_AGENT_DIR="\${PI_CODING_AGENT_DIR:-$AGENT}"
 export PATH="$AGENT/bin:$PATH"
 export PI_SUBAGENT_PI_BINARY="$AGENT/bin/yunuspi"
 export YUNUSPI_CORE_ROOT="$AGENT/runtime/core/coding-agent"

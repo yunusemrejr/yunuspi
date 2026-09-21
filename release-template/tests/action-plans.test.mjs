@@ -96,3 +96,16 @@ test('active plans share scopes and stale direct writes require a fresh read',as
   bus.emit('todo-plan-changed',{sessionId:'alpha',cwd:root,tasks:tasks.map(t=>({...t,status:'completed'}))});assert.deepEqual((await b.status()).peers[0].coordination.plan.files,[]);
  }finally{for(const s of opened)await s.call('session_shutdown');if(previous===undefined)delete process.env.HOME;else process.env.HOME=previous;fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('single-mutation actions carrying operations apply as an atomic batch',()=>{
+ const empty={tasks:[],nextId:1};
+ // A create call may arrive with an operations array instead of action=batch;
+ // the batch intent wins rather than failing on the missing subject.
+ const made=applyTaskMutation(empty,'create',{operations:[{action:'create',id:-1,subject:'Outcome'},{action:'create',id:-2,parentId:-1,subject:'Step'}]});
+ assert.equal(made.op.kind,'batch');assert.equal(made.state.tasks.length,2);assert.equal(made.state.tasks[1].parentId,1);
+ assert.deepEqual(made.op.ids,{'-1':1,'-2':2});
+ const bad=applyTaskMutation(empty,'create',{operations:[{action:'create',subject:'temporary'},{action:'update',id:99,subject:'ghost'}]});
+ assert.equal(bad.op.kind,'error');assert.equal(bad.state,empty);
+ assert.equal(applyTaskMutation(empty,'create',{}).op.kind,'error');
+ assert.equal(applyTaskMutation(empty,'update',{id:1,operations:[{action:'create',subject:'late'}]}).op.kind,'batch');
+});

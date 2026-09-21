@@ -704,7 +704,7 @@ Query and maintain project-scoped architecture and dependency evidence, inspect 
 - `types|relations`: Entity or relationship filters.
 - `expectedVersion`: Required optimistic version for updates.
 
-**Related records:** `scope-council`, `quality-review`, `todo-planning`
+**Related records:** `scope-council`, `quality-review`, `todo-planning`, `source-intelligence`
 
 **Source:** [`agent/extensions/project-intelligence.ts`](../../agent/extensions/project-intelligence.ts), [`agent/extensions/lib/project-intelligence/query.mjs`](../../agent/extensions/lib/project-intelligence/query.mjs), [`agent/extensions/lib/project-intelligence/store.mjs`](../../agent/extensions/lib/project-intelligence/store.mjs)
 
@@ -809,9 +809,9 @@ Inspect host/session dependencies and device candidates before guarded operation
 
 Search and read web sources, operate browser tabs with DOM refs, screenshots, console JavaScript and condition waits, ask for CAPTCHA help, and analyze local media through bounded tools.
 
-**Entrypoints:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`
+**Entrypoints:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`, `image_ocr`
 
-**Catalog tool pointers:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`
+**Catalog tool pointers:** `web_search`, `source_check`, `fetch_content`, `get_search_content`, `web_research`, `web_probe`, `browser_session`, `wait_for`, `render_see`, `media_info`, `video_frames`, `audio_analyze`, `media_edit`, `music_compose`, `image_ocr`
 
 **Commands:** `/websearch`, `/search`, `/curator`, `/google-account`
 
@@ -879,7 +879,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 105; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
-- `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 161; factory)
+- `audio_analyze` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 215; factory)
 - `bash` — [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) (line 556; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 797; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 751; literal)
@@ -906,9 +906,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 189; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 10; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 409; literal)
+- `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 214; factory)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 92; factory)
-- `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 162; factory)
-- `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 159; factory)
+- `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 216; factory)
+- `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 212; factory)
 - `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2506; literal)
 - `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2366; literal)
 - `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2649; literal)
@@ -916,7 +917,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2892; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2018; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 69; literal)
-- `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 165; factory)
+- `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 219; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 839; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
@@ -946,7 +947,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
 - `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 220; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 123; factory)
-- `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 160; factory)
+- `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 213; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../../agent/extensions/render-and-wait.ts) (line 59; literal)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
@@ -957,7 +958,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 - [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 75)
 - [`agent/extensions/managed-bash.ts`](../../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 559)
-- [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `media_edit`, `media_info`, `music_compose`, `video_frames` (lines 149)
+- [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `image_ocr`, `media_edit`, `media_info`, `music_compose`, `video_frames` (lines 202)
 - [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
 - [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 791)

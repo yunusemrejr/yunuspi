@@ -1200,3 +1200,36 @@ test('outcome artifacts changed during or after review cannot receive current ac
  assert.equal(f.state().status,'awaiting_assessment');assert.equal(f.state().reports[0].outcome,'unknown');
  assert.equal(f.state().rounds,2,'freshness invalidation never replenishes the budget');
 });
+
+test("accepted assessment names the open aspects and gaps instead of failing blind", async (t) => {
+ const gappy = (aspect) => ({
+  aspect,
+  ok: true,
+  text: JSON.stringify({
+   outcome: "pass",
+   evidence: [
+    "src/value.js:1 preserves zero and negative inputs; source checked.",
+   ],
+   findings: [],
+   gap: "Prior content unavailable without a Git history; judged against current source only.",
+  }),
+ });
+ const f = await fixture(t, {
+  runner: async (req) => req.aspects.map((a) => gappy(a.id)),
+ });
+ await f.mutate();
+ await f.tool({ action: "review" });
+ const err = await f
+  .tool({
+   action: "assess",
+   disposition: "accepted",
+   reason: "Reviewed current source and the relevant behavior.",
+  })
+  .then(
+   () => null,
+   (e) => e,
+  );
+ assert.ok(err, "a pass with an open gap must not be accepted");
+ assert.match(err.message, /Current independent reviews.*missing evidence/);
+ assert.match(err.message, /Open: .*\(gap: Prior content unavailable/);
+});

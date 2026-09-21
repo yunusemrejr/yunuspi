@@ -510,7 +510,17 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (params.action === 'assess') {
         if (!['accepted','blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 20) throw Error('Assessment requires a concrete rationale of at least 20 characters.');
         if (params.disposition === 'accepted') {
-          if (reviewed !== revision || !reports.length || reports.some(r=>r.outcome === 'unknown' || r.gap.trim())) throw Error('Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.');
+          if (reviewed !== revision || !reports.length || reports.some(r=>r.outcome === 'unknown' || r.gap.trim())) {
+            // Name the open items so the caller can resolve them (repair and
+            // re-review within the round budget) instead of repeating an
+            // accepted assessment blind. The leading sentence is pinned: the
+            // diagnostics classifier matches it for the verification category.
+            const flat = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim();
+            const open = reports.map(r => r.outcome === 'unknown' ? `${r.aspect} (unknown outcome${r.gap.trim() ? `: ${flat(r.gap).slice(0, 180)}` : ''})` : r.gap.trim() ? `${r.aspect} (gap: ${flat(r.gap).slice(0, 180)})` : '').filter(Boolean);
+            if (reviewed !== revision || !reports.length) open.unshift(!reports.length ? 'no independent report retained' : `review is stale (reviewed r${reviewed}, current r${revision})`);
+            const detail = open.join('; ').slice(0, 600);
+            throw Error(`Current independent reviews and their missing evidence must be resolved; record blocked when unavailable.${detail ? ` Open: ${detail}.` : ''}`);
+          }
           if (truncated || scopeOverflow) throw Error('Change discovery is incomplete; narrow the workspace or record the uncovered scope as blocked.');
           const test = options.tests();
           if (!test?.disabled && (test?.need || test?.assessment?.disposition === 'blocked')) throw Error('Current project test evidence is unresolved.');

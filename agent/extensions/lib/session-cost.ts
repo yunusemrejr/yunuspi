@@ -49,19 +49,42 @@ export function collectSessionCost(entries, subscription = false) {
     } else for (const child of nested) old.nested.add(child);
     return key;
   };
+  // A bare running placeholder carries lifecycle, not accounting: no usage,
+  // no inclusive total, no nested graph, no completion markers. It must
+  // neither mint an unattributed cost node nor settle the run.
+  const isPlaceholderResult = (node) => node && typeof node === 'object' &&
+    !node.usage && node.totalCost === undefined && !Array.isArray(node.children) && !Array.isArray(node.steps) &&
+    !node.error && typeof node.exitCode !== 'number' && !node.stopped && !node.interrupted && !node.detached;
   const record = (data, terminal) => {
     if (!data || typeof data !== 'object') return;
     const root = data.runId ?? data.asyncId ?? data.id;
     if (typeof root !== 'string') return;
-    if (terminal) { pending.delete(root); settled.add(root); }
+    const results = Array.isArray(data.results) ? data.results : [];
+    const informative = results.length > 0 && results.every((node) => !isPlaceholderResult(node));
+    if (terminal && informative) { pending.delete(root); settled.add(root); }
     else if (!settled.has(root)) pending.add(root);
     if (!Array.isArray(data.results)) return;
-    data.results.forEach((node,i) => recordNode(node,`${root}:${node?.index ?? i}`));
+    data.results.forEach((node,i) => { if (!isPlaceholderResult(node)) recordNode(node,`${root}:${node?.index ?? i}`); });
   };
   for (const entry of entries) {
     const m = entry.type === 'message' ? entry.message : undefined;
     if (m?.role === 'toolResult' && m.toolName === 'subagent') record(m.details, !m.details?.asyncId && Array.isArray(m.details?.results) && m.details.results.length > 0);
-    if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') record(entry.data,true);
+    if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') {
+      record(entry.data,true);
+      // Helper wrappers (auto-assist, quality-review, ...) carry the native
+      // run's usage inside their own cost record; the native id never gets a
+      // record of its own. Settle the linked native id so pending/unknown
+      // reflect genuinely missing accounting, not the wrapper/native split.
+      // Same linkage discipline as the metrics helper-run repair: exact
+      // run-0 session paths only, never model, timing or neighbors.
+      for (const node of entry.data?.results ?? []) {
+        if (!node || typeof node !== 'object' || !node.usage) continue;
+        const file = node.sessionFile;
+        if (typeof file !== 'string' || file.length > 4096 || file.split('/').some((p) => p === '.' || p === '..')) continue;
+        const native = file.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];
+        if (native) { pending.delete(native); settled.add(native); }
+      }
+    }
     if (entry.type === 'custom' && entry.customType === 'subagent-lifecycle-v1') {
       const data = entry.data;
       // Terminal lifecycle without cost remains pending until accounting arrives.

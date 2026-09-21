@@ -24,7 +24,7 @@ The `project_intel` tool supports:
 | `record` | A concise durable decision, constraint, finding or relationship |
 | `retract` | Withdraw an observed agent record using its source ID and version |
 | `refresh` | Refresh evidence, including Git and configuration changes |
-| `health` | Coverage, conflicts, stale evidence and discovery statistics |
+| `health` | Coverage, conflicts, stale evidence, discovery statistics and entity/relationship shape (`byType`/`byRelation`) |
 | `history` | Bounded source revision history |
 
 Example queries:
@@ -35,11 +35,17 @@ Example queries:
 {"action":"query","query":"production","allScopes":true}
 ```
 
+An empty query with no focus returns a category-diverse project overview
+(project, dependencies, pipelines, configuration, decisions and more), mirroring
+the viewer's whole-project map; focusing the project node returns the same
+overview. Narrow it with `types`/`relations` or drill down with `focus`.
+
 Use `focus` for an exact entity ID, stable key or label. An unknown focus or
 unmatched search returns an empty result. `direction: "incoming"` follows
 consumers; `outgoing` follows dependencies, following the actual relation arrows.
 `hops` (0–6), `types`, `relations`, `limit` (1–40), and `maxChars` (400–6,000)
-bound retrieval. Returned nodes carry their distance from the matched roots.
+bound retrieval. Returned nodes carry their distance from the matched roots;
+overview members outside the query traversal omit it.
 A bounded result marks omitted evidence; unrelated project data is not treated
 as omitted search results. `includeInactive` includes retained stale or expired
 evidence. Retracted claims leave the graph; inspect their source and history for

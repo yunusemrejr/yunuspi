@@ -299,7 +299,7 @@ export default function piObservationsExtension(
 			event.toolName === "read" &&
 			!visionHintSent &&
 			ctx?.model &&
-			!ctx.model.input.includes("image") &&
+			!ctx.model.input?.includes("image") &&
 			event.content.some((part) => part.type === "image")
 		) {
 			visionHintSent = true;
@@ -310,9 +310,9 @@ export default function piObservationsExtension(
 					{
 						type: "text" as const,
 						text:
-							"[visual capability] Your current model cannot see this image. Reading source or capturing another screenshot does not provide visual evidence. " +
+							"[visual capability] Your current model cannot see this image. Reading source or capturing another screenshot does not provide visual evidence. If your question is only about printed text in the image, use image_ocr on the local path instead (fast, no delegation). " +
 							(canDelegate
-								? 'For a visual task, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
+								? 'For layout, color, composition or meaning, use subagent({action:"list",capabilities:true}) to resolve an existing reviewer profile, then subagent({action:"models",model:"input:image"}). Choose a permitted image route (check economy labels), then launch a fresh read-only reviewer with that exact model, the absolute image paths, and your visual question. The child must read the images; do not inherit this text-only model. Respect user limits on delegation. If no route is permitted, report the limitation.'
 								: "No subagent tool is active here. Report the visual limitation; do not claim to have inspected the pixels."),
 					},
 				],

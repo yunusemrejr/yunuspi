@@ -68,7 +68,7 @@ The capability index explains entry points, supported options, related abilities
 | Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) |
 | Inspect and experiment | Structured-data and API tools, local utility MCP tools, and disposable sandboxes with resource limits. [Utility tools](agent/extensions/lib/utility-mcp/README.md) · [Sandboxes](docs/SANDBOXES.md) |
 
-Some capabilities need additional software or provider access. Browser rendering requires its browser runtime; media processing needs tools such as FFmpeg. Optional local preprocessing requires a separately installed model environment. Model weights, paid subscriptions and credentials are not bundled.
+Some capabilities need additional software or provider access. Browser rendering requires its browser runtime; media processing needs tools such as FFmpeg, and text extraction needs Tesseract. Optional local preprocessing requires a separately installed model environment. Model weights, paid subscriptions and credentials are not bundled.
 
 ## Context, cost and automatic assistance
 
