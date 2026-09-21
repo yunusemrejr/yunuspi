@@ -1,0 +1,686 @@
+/**
+ * Canonical child lifecycle ledger.
+ *
+ * ONE normalized reducer for child state, keyed by stable task identity and
+ * attempt identity. Launch, lifecycle, progress, completion, accounting,
+ * recovery, resume, stop, and failure evidence all merge here. `/used`,
+ * `/metrics`, footer counters, recovery logic, notifications, cost accounting,
+ * and diagnostics read from this ledger — they never independently reconstruct
+ * child rows from launch receipts.
+ *
+ * Precedence (explicit terminal states win; secondary flags never overwrite):
+ *   intentional stop    -> stopped
+ *   interrupted/recoverable -> paused
+ *   completed acceptance    -> completed
+ *   execution failed        -> failed
+ *   still running           -> running
+ *   launch accepted, idle   -> queued
+ * Exit codes and generic error markers are secondary flags, kept separately.
+ *
+ * Execution outcome and acceptance outcome are independent: a child can
+ * execute successfully but fail acceptance, or fail execution and never reach
+ * acceptance. Transport failures, truncation, schema failures, and budget
+ * exhaustion are execution causes — never rewritten as "verification".
+ *
+ * Retries form attempt trees: one logical child/task with expandable attempt
+ * history. Top-level status reflects the logical task; route-level failures
+ * stay visible beneath it.
+ *
+ * Dependency-free and pure (node:crypto only, via failure-cause).
+ */
+import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
+import { buildChildTaskIdentity } from "./child-identity.ts";
+
+export type ChildLifecycleState = "queued" | "running" | "paused" | "stopped" | "completed" | "failed";
+
+export type ExecutionStatus = "none" | "running" | "succeeded" | "failed";
+export type AcceptanceStatus = "none" | "pending" | "passed" | "failed";
+
+export interface ExecutionOutcome {
+	status: ExecutionStatus;
+	cause?: FailureCause;
+}
+
+export interface AcceptanceOutcome {
+	status: AcceptanceStatus;
+	reason?: string;
+}
+
+export interface AttemptUsage {
+	input?: number;
+	output?: number;
+	cacheRead?: number;
+	cacheWrite?: number;
+	reasoning?: number;
+	turns?: number;
+}
+
+export interface AttemptRecord {
+	attempt: number;
+	runId?: string;
+	route?: string;
+	backend?: string;
+	agent?: string;
+	state: ChildLifecycleState;
+	execution: ExecutionOutcome;
+	acceptance: AcceptanceOutcome;
+	usage?: AttemptUsage;
+	artifacts?: string[];
+	sessionFile?: string;
+	startedAt?: number;
+	endedAt?: number;
+	exitCode?: number;
+	diagnosticRef?: string;
+}
+
+export interface LogicalChildTask {
+	/** Stable task identity: retries/resumes/recovery stay bound to it. */
+	taskId: string;
+	/** Human-readable label, generated from the child-specific task. */
+	label: string;
+	todoId?: string;
+	scopeId?: string;
+	parentGoal?: string;
+	description?: string;
+	agent?: string;
+	attempts: AttemptRecord[];
+	/** Logical-task status derived from the attempt tree. */
+	state: ChildLifecycleState;
+	execution: ExecutionOutcome;
+	acceptance: AcceptanceOutcome;
+	/** True when identity linkage is incomplete (never silently "omitted"). */
+	unresolvedLinkage?: boolean;
+}
+
+export interface UnresolvedEvidence {
+	kind: "missing-task-id" | "missing-attempt" | "orphan-accounting" | "conflict";
+	detail: string;
+	ref?: string;
+}
+
+export interface ChildLedger {
+	version: 1;
+	tasks: LogicalChildTask[];
+	unresolved: UnresolvedEvidence[];
+}
+
+export type ChildLedgerEvent =
+	| { type: "launch"; taskId?: string; attempt?: number; runId?: string; label?: string; todoId?: string; scopeId?: string; parentGoal?: string; description?: string; agent?: string; route?: string; backend?: string; at?: number; ref?: string }
+	| { type: "lifecycle"; taskId?: string; runId?: string; attempt?: number; state?: string; at?: number; ref?: string }
+	| { type: "progress"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
+	| { type: "completion"; taskId?: string; runId?: string; attempt?: number; row?: Record<string, unknown>; at?: number; ref?: string }
+	| { type: "accounting"; taskId?: string; runId?: string; attempt?: number; usage?: AttemptUsage; route?: string; at?: number; ref?: string }
+	| { type: "recovery"; taskId?: string; runId?: string; attempt?: number; reason?: string; replacementAttempt?: number; at?: number; ref?: string }
+	| { type: "resume"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
+	| { type: "stop"; taskId?: string; runId?: string; attempt?: number; at?: number; ref?: string }
+	| { type: "failure"; taskId?: string; runId?: string; attempt?: number; evidence?: StructuredFailureEvidence; at?: number; ref?: string };
+
+const MAX_TASKS = 512;
+const MAX_ATTEMPTS = 32;
+
+const TERMINAL: ReadonlySet<ChildLifecycleState> = new Set(["stopped", "completed", "failed"]);
+
+/** Precedence rank: higher wins when merging states for one attempt. */
+function stateRank(state: ChildLifecycleState): number {
+	switch (state) {
+		case "stopped": return 60;
+		case "failed": return 50;
+		case "completed": return 40;
+		case "paused": return 30;
+		case "running": return 20;
+		case "queued": return 10;
+	}
+}
+
+function normalizeState(value: unknown): ChildLifecycleState | undefined {
+	if (value === "complete") return "completed";
+	if (value === "rejected") return "failed";
+	if (value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "stopped" || value === "paused") {
+		return value;
+	}
+	return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function asString(value: unknown, max = 256): string | undefined {
+	return typeof value === "string" && value.length > 0 && value.length <= 4096 ? value.slice(0, max) : undefined;
+}
+
+/**
+ * Derive attempt state from a completion/accounting row under strict
+ * precedence. Explicit lifecycle markers win; exit codes and error flags are
+ * secondary evidence only.
+ */
+export function deriveAttemptOutcome(row: Record<string, unknown>): {
+	state: ChildLifecycleState;
+	execution: ExecutionOutcome;
+	acceptance: AcceptanceOutcome;
+	exitCode?: number;
+} {
+	const stopped = row.stopped === true || row.status === "stopped" || row.state === "stopped";
+	const paused = row.interrupted === true || row.status === "paused" || row.state === "paused";
+	const acceptanceRow = asRecord(row.acceptance);
+	const acceptanceStatus = acceptanceRow.status ?? row.acceptanceStatus;
+	const acceptance: AcceptanceOutcome =
+		acceptanceStatus === "passed" || acceptanceStatus === "accepted"
+			? { status: "passed", ...(asString(acceptanceRow.reason ?? row.acceptanceReason, 160) ? { reason: asString(acceptanceRow.reason ?? row.acceptanceReason, 160) } : {}) }
+			: acceptanceStatus === "failed" || acceptanceStatus === "rejected"
+				? { status: "failed", ...(asString(acceptanceRow.reason ?? row.acceptanceReason, 160) ? { reason: asString(acceptanceRow.reason ?? row.acceptanceReason, 160) } : {}) }
+				: acceptanceStatus === "pending"
+					? { status: "pending" }
+					: { status: "none" };
+
+	const evidence: StructuredFailureEvidence = {
+		...(typeof row.validatorCode === "string" ? { validatorCode: row.validatorCode } : {}),
+		...(typeof row.toolName === "string" ? { toolName: row.toolName } : {}),
+		...(typeof row.schemaField === "string" ? { schemaField: row.schemaField } : {}),
+		...(typeof row.exitCode === "number" ? { exitCode: row.exitCode } : {}),
+		...(typeof row.signal === "string" ? { signal: row.signal } : {}),
+		...(row.providerCode !== undefined ? { providerCode: row.providerCode as string | number } : {}),
+		...(typeof row.backend === "string" ? { backend: row.backend } : {}),
+		...(typeof row.parserError === "string" ? { parserError: row.parserError } : {}),
+		...(row.toolBudgetBlocked === true || row.turnBudgetExceeded === true || row.budgetExhausted === true ? { budgetExhausted: true } : {}),
+		...(row.timedOut === true ? { timedOut: true } : {}),
+		...(row.contextOverflow === true ? { contextOverflow: true } : {}),
+		...(typeof row.stopReason === "string" ? { stopReason: row.stopReason } : typeof row.finishReason === "string" ? { stopReason: row.finishReason } : {}),
+		...(row.structuredOutputFailed === true ? { structuredOutputFailed: true } : {}),
+		// Acceptance is assessed independently below; it must not leak into
+		// the EXECUTION cause. A child that ran cleanly but failed acceptance
+		// reports execution succeeded + acceptance failed — never a rewritten
+		// transport/truncation cause, and never execution failed "because".
+		...(stopped ? { stopped: true } : {}),
+		...(paused ? { interrupted: true } : {}),
+		...(typeof row.status === "string" ? { status: row.status } : typeof row.state === "string" ? { status: row.state } : {}),
+		...(row.error !== undefined && row.error !== false && row.error !== null ? { error: true } : {}),
+		...(Number.isSafeInteger(row.attempt) ? { attempt: row.attempt as number } : {}),
+		...(row.outputState === "present" || row.output === "present" ? { outputPresent: true } : {}),
+		...(typeof row.diagnosticRef === "string" ? { diagnosticRef: row.diagnosticRef } : {}),
+		...(typeof row.error === "string" ? { message: row.error } : {}),
+	};
+	const cause = classifyFailure(evidence);
+
+	let execution: ExecutionOutcome;
+	if (stopped || paused) {
+		execution = { status: "failed", cause };
+	} else if (cause.category === "none") {
+		const running = row.status === "running" || row.state === "running";
+		execution = { status: running ? "running" : "succeeded" };
+	} else {
+		execution = { status: "failed", cause };
+	}
+
+	// Strict precedence: intentional stop > interruption > execution failure >
+	// acceptance failure > explicit completion > running > queued.
+	let state: ChildLifecycleState;
+	if (stopped) state = "stopped";
+	else if (paused) state = "paused";
+	else if (execution.status === "failed") state = "failed";
+	else if (acceptance.status === "failed") state = "failed";
+	else if (row.status === "completed" || row.state === "completed" || row.state === "complete" || row.status === "complete" || row.success === true || row.exitCode === 0) state = "completed";
+	else if (row.status === "running" || row.state === "running") state = "running";
+	else state = normalizeState(row.status ?? row.state) ?? "queued";
+
+	const exitCode = typeof row.exitCode === "number" && Number.isSafeInteger(row.exitCode) ? row.exitCode : undefined;
+	return { state, execution, acceptance, ...(exitCode === undefined ? {} : { exitCode }) };
+}
+
+/** Logical-task status from the attempt tree: latest terminal attempt wins; running beats queued. */
+export function deriveLogicalState(attempts: AttemptRecord[]): {
+	state: ChildLifecycleState;
+	execution: ExecutionOutcome;
+	acceptance: AcceptanceOutcome;
+} {
+	if (!attempts.length) {
+		return { state: "queued", execution: { status: "none" }, acceptance: { status: "none" } };
+	}
+	const ordered = [...attempts].sort((a, b) => a.attempt - b.attempt);
+	const latest = ordered[ordered.length - 1]!;
+	if (TERMINAL.has(latest.state)) {
+		return { state: latest.state, execution: latest.execution, acceptance: latest.acceptance };
+	}
+	// A non-terminal latest attempt with a terminal sibling (parallel fan-out)
+	// still reports the live state; history stays under attempts.
+	if (ordered.some((attempt) => attempt.state === "running")) {
+		const running = ordered.filter((attempt) => attempt.state === "running").sort((a, b) => b.attempt - a.attempt)[0]!;
+		return { state: "running", execution: running.execution, acceptance: running.acceptance };
+	}
+	if (ordered.some((attempt) => attempt.state === "paused")) {
+		return { state: "paused", execution: latest.execution, acceptance: latest.acceptance };
+	}
+	return { state: latest.state, execution: latest.execution, acceptance: latest.acceptance };
+}
+
+interface TaskDraft {
+	task: LogicalChildTask;
+	byRunId: Map<string, AttemptRecord>;
+}
+
+function taskKey(event: ChildLedgerEvent): string | undefined {
+	if (event.taskId && typeof event.taskId === "string") return event.taskId.slice(0, 160);
+	return undefined;
+}
+
+/** Reduce a redacted event sequence into the canonical child ledger. Deterministic: same events, same ledger. */
+export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLedger {
+	const tasks = new Map<string, TaskDraft>();
+	const unresolved: UnresolvedEvidence[] = [];
+	const runToTask = new Map<string, string>();
+	let anonymous = 0;
+
+	const ensureTask = (event: ChildLedgerEvent, fallbackLabel: string): TaskDraft | undefined => {
+		let key = taskKey(event);
+		if (!key && event.runId && runToTask.has(event.runId)) key = runToTask.get(event.runId);
+		if (!key) {
+			if (event.type === "launch") {
+				anonymous += 1;
+				key = `anonymous-${anonymous}`;
+				unresolved.push({ kind: "missing-task-id", detail: "launch without a stable task id; recovery cannot bind retries", ...(event.ref ? { ref: event.ref } : {}) });
+			} else {
+				unresolved.push({
+					kind: event.type === "accounting" ? "orphan-accounting" : "missing-task-id",
+					detail: `${event.type} references no known task`,
+					...(event.ref ? { ref: event.ref } : {}),
+				});
+				return undefined;
+			}
+		}
+		let draft = tasks.get(key);
+		if (!draft) {
+			if (tasks.size >= MAX_TASKS) {
+				unresolved.push({ kind: "conflict", detail: `task overflow; ledger capped at ${MAX_TASKS}` });
+				return undefined;
+			}
+			draft = {
+				task: {
+					taskId: key,
+					label: fallbackLabel,
+					attempts: [],
+					state: "queued",
+					execution: { status: "none" },
+					acceptance: { status: "none" },
+				},
+				byRunId: new Map(),
+			};
+			tasks.set(key, draft);
+		}
+		if (event.runId && !runToTask.has(event.runId)) runToTask.set(event.runId, key);
+		return draft;
+	};
+
+	const ensureAttempt = (draft: TaskDraft, event: ChildLedgerEvent): AttemptRecord | undefined => {
+		const declared = Number.isSafeInteger(event.attempt) && (event.attempt as number) > 0 ? (event.attempt as number) : undefined;
+		if (event.runId && draft.byRunId.has(event.runId)) {
+			const attempt = draft.byRunId.get(event.runId)!;
+			if (declared !== undefined && declared !== attempt.attempt) {
+				unresolved.push({ kind: "conflict", detail: `run ${event.runId} re-declared as attempt ${declared} (was ${attempt.attempt})` });
+			}
+			return attempt;
+		}
+		// A recovery can pre-declare the replacement attempt before its launch
+		// arrives; the later launch binds to it instead of forking a twin.
+		if (declared !== undefined) {
+			const existing = draft.task.attempts.find((attempt) => attempt.attempt === declared);
+			if (existing) {
+				if (event.runId && !existing.runId) {
+					existing.runId = event.runId.slice(0, 160);
+					draft.byRunId.set(event.runId, existing);
+				}
+				return existing;
+			}
+		}
+		const next = declared ?? (draft.task.attempts.length ? Math.max(...draft.task.attempts.map((attempt) => attempt.attempt)) + 1 : 1);
+		if (draft.task.attempts.length >= MAX_ATTEMPTS) {
+			unresolved.push({ kind: "conflict", detail: `task ${draft.task.taskId} exceeded ${MAX_ATTEMPTS} attempts` });
+			return undefined;
+		}
+		const attempt: AttemptRecord = {
+			attempt: next,
+			state: "queued",
+			execution: { status: "none" },
+			acceptance: { status: "none" },
+		};
+		if (event.runId) {
+			attempt.runId = event.runId.slice(0, 160);
+			draft.byRunId.set(event.runId, attempt);
+		}
+		draft.task.attempts.push(attempt);
+		draft.task.attempts.sort((a, b) => a.attempt - b.attempt);
+		return attempt;
+	};
+
+	for (const event of events) {
+		switch (event.type) {
+			case "launch": {
+				const draft = ensureTask(event, event.label ?? event.description?.slice(0, 80) ?? "child task");
+				if (!draft) break;
+				if (event.label) draft.task.label = event.label.slice(0, 160);
+				if (event.todoId) draft.task.todoId = event.todoId.slice(0, 160);
+				if (event.scopeId) draft.task.scopeId = event.scopeId.slice(0, 160);
+				if (event.parentGoal) draft.task.parentGoal = event.parentGoal.slice(0, 280);
+				if (event.description) draft.task.description = event.description.slice(0, 280);
+				if (event.agent) draft.task.agent = event.agent.slice(0, 80);
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				if (event.route) attempt.route = event.route.slice(0, 200);
+				if (event.backend) attempt.backend = event.backend.slice(0, 128);
+				if (event.agent) attempt.agent = event.agent.slice(0, 80);
+				if (event.at !== undefined && attempt.startedAt === undefined) attempt.startedAt = event.at;
+				if (event.ref) attempt.diagnosticRef = event.ref.slice(0, 256);
+				break;
+			}
+			case "lifecycle": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				const state = normalizeState(event.state);
+				if (state && stateRank(state) >= stateRank(attempt.state)) {
+					// Terminal states never move backwards; explicit stop wins.
+					if (!TERMINAL.has(attempt.state) || state === "stopped") attempt.state = state;
+				}
+				if (event.at !== undefined) {
+					if (state === "running" && attempt.startedAt === undefined) attempt.startedAt = event.at;
+					if (state && TERMINAL.has(state)) attempt.endedAt = event.at;
+				}
+				break;
+			}
+			case "progress": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				if (!TERMINAL.has(attempt.state)) attempt.state = "running";
+				break;
+			}
+			case "completion":
+			case "failure": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				if (event.type === "completion") {
+					const outcome = deriveAttemptOutcome(asRecord(event.row));
+					// Completion evidence outranks earlier lifecycle guesses, but
+					// an explicit stop already recorded stays stopped.
+					if (attempt.state === "stopped" && outcome.state !== "stopped") {
+						attempt.execution = outcome.execution;
+						attempt.acceptance = outcome.acceptance;
+						if (outcome.exitCode !== undefined) attempt.exitCode = outcome.exitCode;
+					} else {
+						attempt.state = outcome.state;
+						attempt.execution = outcome.execution;
+						attempt.acceptance = outcome.acceptance;
+						if (outcome.exitCode !== undefined) attempt.exitCode = outcome.exitCode;
+					}
+					const row = asRecord(event.row);
+					const usageRow = asRecord(row.usage);
+					if (Object.keys(usageRow).length) {
+						attempt.usage = {
+							...(asNumber(usageRow.input) === undefined ? {} : { input: asNumber(usageRow.input) }),
+							...(asNumber(usageRow.output) === undefined ? {} : { output: asNumber(usageRow.output) }),
+							...(asNumber(usageRow.cacheRead) === undefined ? {} : { cacheRead: asNumber(usageRow.cacheRead) }),
+							...(asNumber(usageRow.cacheWrite) === undefined ? {} : { cacheWrite: asNumber(usageRow.cacheWrite) }),
+							...(asNumber(usageRow.reasoning) === undefined ? {} : { reasoning: asNumber(usageRow.reasoning) }),
+							...(asNumber(usageRow.turns) === undefined ? {} : { turns: asNumber(usageRow.turns) }),
+						};
+					}
+					if (typeof row.sessionFile === "string") attempt.sessionFile = row.sessionFile.slice(0, 512);
+					if (Array.isArray(row.artifacts)) {
+						attempt.artifacts = row.artifacts.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.slice(0, 512)).slice(0, 32);
+					}
+					if (typeof row.model === "string" && !attempt.route) attempt.route = row.model.slice(0, 200);
+				} else {
+					const cause = classifyFailure(event.evidence ?? {});
+					if (cause.category !== "none") {
+						attempt.execution = { status: "failed", cause };
+						if (!TERMINAL.has(attempt.state) || attempt.state === "completed") attempt.state = "failed";
+					}
+				}
+				if (event.at !== undefined && TERMINAL.has(attempt.state)) attempt.endedAt = event.at;
+				if (event.ref) attempt.diagnosticRef = event.ref.slice(0, 256);
+				break;
+			}
+			case "accounting": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				// Accounting never moves lifecycle state by itself; it only
+				// enriches usage. Late receipts cannot resurrect terminals.
+				if (event.usage) {
+					const merged = { ...(attempt.usage ?? {}) };
+					for (const [key, value] of Object.entries(event.usage)) {
+						if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+							(merged as Record<string, number>)[key] = Math.max((merged as Record<string, number>)[key] ?? 0, value);
+						}
+					}
+					if (Object.keys(merged).length) attempt.usage = merged;
+				}
+				if (event.route && !attempt.route) attempt.route = event.route.slice(0, 200);
+				break;
+			}
+			case "recovery":
+			case "resume": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				if (event.type === "recovery" && event.reason && event.replacementAttempt !== undefined) {
+					const attempt = ensureAttempt(draft, { ...event, attempt: event.replacementAttempt });
+					if (attempt && attempt.attempt === event.replacementAttempt) {
+						if (event.runId) {
+							attempt.runId = event.runId.slice(0, 160);
+							draft.byRunId.set(event.runId, attempt);
+						}
+					}
+				} else {
+					const attempt = ensureAttempt(draft, event);
+					if (attempt && !TERMINAL.has(attempt.state)) attempt.state = "running";
+				}
+				if (event.ref) draft.task.attempts[draft.task.attempts.length - 1]!.diagnosticRef = event.ref.slice(0, 256);
+				break;
+			}
+			case "stop": {
+				const draft = ensureTask(event, "child task");
+				if (!draft) break;
+				const attempt = ensureAttempt(draft, event);
+				if (!attempt) break;
+				attempt.state = "stopped";
+				attempt.execution = { status: "failed", cause: classifyFailure({ stopped: true }) };
+				if (event.at !== undefined) attempt.endedAt = event.at;
+				break;
+			}
+		}
+	}
+
+	for (const draft of tasks.values()) {
+		const derived = deriveLogicalState(draft.task.attempts);
+		draft.task.state = derived.state;
+		draft.task.execution = derived.execution;
+		draft.task.acceptance = derived.acceptance;
+		if (draft.task.taskId.startsWith("anonymous-")) draft.task.unresolvedLinkage = true;
+	}
+
+	return {
+		version: 1,
+		tasks: [...tasks.values()].map((draft) => draft.task),
+		unresolved: unresolved.slice(0, 64),
+	};
+}
+
+/**
+ * Project session transcript entries into canonical ledger events. Consumes
+ * the same evidence every surface already persists (toolResult subagent rows,
+ * subagent-cost-v1, subagent-lifecycle-v1, recovery/compaction-resume
+ * notices) and normalizes them into ONE event stream for reduceChildEvents.
+ * Bounded and pure; unknown shapes are skipped, never inferred.
+ */
+export function projectTranscriptChildren(entries: readonly unknown[]): ChildLedgerEvent[] {
+	const events: ChildLedgerEvent[] = [];
+	const push = (event: ChildLedgerEvent) => {
+		if (events.length < 4096) events.push(event);
+	};
+	for (const entry of entries) {
+		if (!entry || typeof entry !== "object") continue;
+		const record = entry as Record<string, unknown>;
+		if (record.type === "message") {
+			const message = asRecord(record.message);
+			if (message.role !== "toolResult" || message.toolName !== "subagent") continue;
+			const details = asRecord(message.details);
+			const runId = asString(details.runId ?? details.asyncId ?? details.id, 160);
+			const rows = Array.isArray(details.results) ? details.results : [];
+			rows.slice(0, 128).forEach((rowValue, position) => {
+				const row = asRecord(rowValue);
+				const index = Number.isSafeInteger(row.index) ? (row.index as number) : position;
+				const identity = buildChildTaskIdentity({
+					runId,
+					index,
+					childTask: asString(row.task ?? row.label ?? row.description, 1024),
+					label: asString(row.label, 160),
+					todoId: asString(row.todoId, 160),
+					scopeId: asString(row.scopeId, 160),
+					description: asString(row.description ?? row.task, 280),
+					attempt: Number.isSafeInteger(row.attempt) ? (row.attempt as number) : 1,
+					workflowKey: asString(row.workflowKey, 160),
+					childId: asString(row.childId, 160),
+				});
+				push({
+					type: "launch",
+					taskId: identity.taskId,
+					attempt: identity.attempt,
+					...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : runId ? { runId } : {}),
+					label: identity.label,
+					...(identity.todoId ? { todoId: identity.todoId } : {}),
+					...(identity.scopeId ? { scopeId: identity.scopeId } : {}),
+					...(identity.description ? { description: identity.description } : {}),
+					...(typeof row.agent === "string" ? { agent: row.agent.slice(0, 80) } : {}),
+					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : {}),
+				});
+				push({ type: "completion", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), row: row as Record<string, unknown> });
+			});
+			continue;
+		}
+		if (record.type !== "custom" || typeof record.customType !== "string") continue;
+		const data = asRecord(record.data);
+		if (record.customType === "subagent-cost-v1") {
+			const runId = asString(data.runId, 160);
+			const rows = Array.isArray(data.results) ? data.results : [];
+			rows.slice(0, 128).forEach((rowValue, position) => {
+				const row = asRecord(rowValue);
+				const index = Number.isSafeInteger(row.index) ? (row.index as number) : position;
+				const identity = buildChildTaskIdentity({
+					runId,
+					index,
+					childTask: asString(row.task ?? row.label ?? row.description, 1024),
+					label: asString(row.label, 160),
+					todoId: asString(row.todoId, 160),
+					scopeId: asString(row.scopeId, 160),
+					description: asString(row.description ?? row.task, 280),
+					attempt: Number.isSafeInteger(row.attempt) ? (row.attempt as number) : 1,
+					workflowKey: asString(row.workflowKey, 160),
+					childId: asString(row.childId, 160),
+				});
+				const usage = asRecord(row.usage);
+				push({
+					type: "accounting",
+					taskId: identity.taskId,
+					attempt: identity.attempt,
+					...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}),
+					...(Object.keys(usage).length ? {
+						usage: {
+							...(asNumber(usage.input) === undefined ? {} : { input: asNumber(usage.input) }),
+							...(asNumber(usage.output) === undefined ? {} : { output: asNumber(usage.output) }),
+							...(asNumber(usage.cacheRead) === undefined ? {} : { cacheRead: asNumber(usage.cacheRead) }),
+							...(asNumber(usage.cacheWrite) === undefined ? {} : { cacheWrite: asNumber(usage.cacheWrite) }),
+							...(asNumber(usage.reasoning) === undefined ? {} : { reasoning: asNumber(usage.reasoning) }),
+							...(asNumber(usage.turns) === undefined ? {} : { turns: asNumber(usage.turns) }),
+						},
+					} : {}),
+					...(typeof row.model === "string" ? { route: row.model.slice(0, 200) } : {}),
+				});
+				push({ type: "completion", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), row });
+			});
+			continue;
+		}
+		if (record.customType === "subagent-lifecycle-v1") {
+			const runId = asString(data.runId, 160);
+			const rows = Array.isArray(data.results) ? data.results : [];
+			if (!rows.length && (data.mode === "single" || typeof data.state === "string")) {
+				const identity = buildChildTaskIdentity({ runId, index: 0, attempt: 1 });
+				push({ type: "launch", taskId: identity.taskId, attempt: 1, ...(runId ? { runId } : {}), label: identity.label });
+				if (typeof data.state === "string") {
+					push({ type: "lifecycle", taskId: identity.taskId, attempt: 1, ...(runId ? { runId } : {}), state: data.state });
+				}
+				continue;
+			}
+			rows.slice(0, 128).forEach((rowValue, position) => {
+				const row = asRecord(rowValue);
+				const index = Number.isSafeInteger(row.index) ? (row.index as number) : position;
+				const identity = buildChildTaskIdentity({
+					runId,
+					index,
+					childTask: asString(row.task ?? row.label ?? row.description, 1024),
+					label: asString(row.label, 160),
+					todoId: asString(row.todoId, 160),
+					scopeId: asString(row.scopeId, 160),
+					attempt: Number.isSafeInteger(row.attempt) ? (row.attempt as number) : 1,
+					workflowKey: asString(row.workflowKey, 160),
+					childId: asString(row.childId, 160),
+				});
+				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), label: identity.label });
+				const state = asString(row.status ?? row.state, 32);
+				if (state) push({ type: "lifecycle", taskId: identity.taskId, attempt: identity.attempt, state });
+			});
+			continue;
+		}
+		if (record.customType === "subagent-recover-evidence") {
+			const taskId = asString(data.taskId ?? data.childId ?? data.workflowKey, 160);
+			const attempt = Number.isSafeInteger(data.replacementAttempt) ? (data.replacementAttempt as number)
+				: Number.isSafeInteger(data.attempt) ? (data.attempt as number) + 1 : undefined;
+			push({
+				type: "recovery",
+				...(taskId ? { taskId } : {}),
+				...(typeof data.runId === "string" ? { runId: data.runId.slice(0, 160) } : {}),
+				...(Number.isSafeInteger(data.attempt) ? { attempt: data.attempt as number } : {}),
+				...(asString(data.reason, 280) ? { reason: asString(data.reason, 280) } : {}),
+				...(attempt !== undefined ? { replacementAttempt: attempt } : {}),
+			});
+			continue;
+		}
+		if (record.customType === "subagent-compaction-resume") {
+			const taskId = asString(data.taskId ?? data.childId, 160);
+			push({
+				type: "resume",
+				...(taskId ? { taskId } : {}),
+				...(typeof data.runId === "string" ? { runId: data.runId.slice(0, 160) } : {}),
+				...(Number.isSafeInteger(data.attempt) ? { attempt: data.attempt as number } : {}),
+			});
+			continue;
+		}
+	}
+	return events;
+}
+
+/** Count logical tasks by state (aggregate first; attempts stay expandable). */
+export function summarizeLedger(ledger: ChildLedger): Record<ChildLifecycleState, number> & { tasks: number; attempts: number } {
+	const summary: Record<ChildLifecycleState, number> & { tasks: number; attempts: number } = {
+		queued: 0,
+		running: 0,
+		paused: 0,
+		stopped: 0,
+		completed: 0,
+		failed: 0,
+		tasks: ledger.tasks.length,
+		attempts: 0,
+	};
+	for (const task of ledger.tasks) {
+		summary[task.state] += 1;
+		summary.attempts += task.attempts.length;
+	}
+	return summary;
+}

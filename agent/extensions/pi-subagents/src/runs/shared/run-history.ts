@@ -4,6 +4,75 @@ import * as path from "node:path";
 import { getAgentDir } from "../../shared/utils.ts";
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
+import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
+
+/** Legacy outcomeReason strings are preserved for existing consumers; the
+ * structured `cause` beside them carries the full machine-readable detail. */
+const LEGACY_REASON: Record<string, string> = {
+	"invalid-request": "invalid-output",
+	"schema-incompatible": "invalid-output",
+	"unsupported-field": "invalid-output",
+	quota: "capacity",
+	"rate-limit": "capacity",
+	overload: "capacity",
+	transport: "transport",
+	timeout: "timeout",
+	"context-overflow": "context",
+	"output-truncated": "truncated",
+	"budget-exhausted": "budget",
+	permission: "permission",
+	dependency: "dependency",
+	"process-signal": "process-signal",
+	acceptance: "acceptance",
+	interrupted: "interrupted",
+	stopped: "stopped",
+	unknown: "unknown",
+};
+
+function structuredEvidenceOf(r: any): StructuredFailureEvidence {
+	const text = (value: unknown, max = 128): string | undefined =>
+		typeof value === "string" && value.length <= 4096 ? value.slice(0, max) : undefined;
+	return {
+		...(typeof r?.stage === "string" ? { stage: r.stage } : {}),
+		...(text(r?.validatorCode ?? r?.toolValidation?.code ?? r?.validationCode, 64) ? { validatorCode: text(r?.validatorCode ?? r?.toolValidation?.code ?? r?.validationCode, 64) } : {}),
+		...(text(r?.toolName ?? r?.tool, 128) ? { toolName: text(r?.toolName ?? r?.tool, 128) } : {}),
+		...(text(r?.schemaField ?? r?.field, 256) ? { schemaField: text(r?.schemaField ?? r?.field, 256) } : {}),
+		...(typeof r?.exitCode === "number" ? { exitCode: r.exitCode } : {}),
+		...(typeof r?.signal === "string" ? { signal: r.signal.slice(0, 32) } : r?.processSignal ? { signal: typeof r.processSignal === "string" ? r.processSignal.slice(0, 32) : "terminated" } : {}),
+		...(r?.providerCode !== undefined || r?.statusCode !== undefined || r?.httpStatus !== undefined
+			? { providerCode: String(r?.providerCode ?? r?.statusCode ?? r?.httpStatus).slice(0, 64) } : {}),
+		...(text(r?.backend, 128) ? { backend: text(r.backend, 128) } : {}),
+		...(text(r?.parserError ?? r?.parser, 64) ? { parserError: text(r?.parserError ?? r?.parser, 64) } : {}),
+		...(r?.toolBudgetBlocked || r?.turnBudgetExceeded || r?.budgetExhausted ? { budgetExhausted: true } : {}),
+		...(r?.timedOut ? { timedOut: true } : {}),
+		...(r?.contextOverflow ? { contextOverflow: true } : {}),
+		...(text(r?.stopReason ?? r?.finishReason ?? r?.completionReason, 64) ? { stopReason: text(r?.stopReason ?? r?.finishReason ?? r?.completionReason, 64) } : {}),
+		...(typeof r?.maxTokens === "number" ? { maxTokens: r.maxTokens } : {}),
+		...(typeof r?.usage?.output === "number" ? { outputTokens: r.usage.output } : {}),
+		...(r?.structuredOutputFailed ? { structuredOutputFailed: true } : {}),
+		...(r?.acceptance?.status === "rejected" || r?.acceptance?.status === "failed" ? { acceptanceStatus: "failed" as const }
+			: r?.acceptance?.status === "passed" ? { acceptanceStatus: "passed" as const } : {}),
+		...(r?.stopped ? { stopped: true } : {}),
+		...(r?.interrupted ? { interrupted: true } : {}),
+		...(typeof r?.status === "string" ? { status: r.status.slice(0, 32) } : {}),
+		...(r?.error || r?.success === false || r?.status === "failed" || (r?.exitCode !== undefined && r?.exitCode !== 0) ? { error: true } : {}),
+		...(r?.requestShape !== undefined ? { requestShape: r.requestShape } : {}),
+		...(Number.isSafeInteger(r?.attempt) ? { attempt: r.attempt } : {}),
+		...(r?.outputState === "present" || r?.output === "present" ? { outputPresent: true } : {}),
+		...(text(r?.diagnosticRef ?? r?.eventId, 256) ? { diagnosticRef: text(r?.diagnosticRef ?? r?.eventId, 256) } : {}),
+		...(typeof r?.error === "string" ? { message: r.error.slice(0, 4000) } : {}),
+	};
+}
+
+/** Structured cause plus its legacy outcomeReason projection. */
+export function failureOf(result: any): { cause: FailureCause; reason: string | undefined } {
+	if (result?.detached || result?.status === "detached") {
+		return { cause: classifyFailure({ status: "detached" }), reason: undefined };
+	}
+	const cause = classifyFailure(structuredEvidenceOf(result));
+	if (cause.category === "none") return { cause, reason: undefined };
+	return { cause, reason: LEGACY_REASON[cause.category] ?? "unknown" };
+}
 
 export type RunOutcome = "completed" | "failed" | "timed_out" | "stopped" | "interrupted";
 
@@ -25,38 +94,21 @@ export interface RunEntry {
 export function projectRunEvidence(result: any = {}) {
 	const count = (v: unknown): number | undefined => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined;
 	const route = (v: unknown): string | undefined => typeof v === "string" && /^[a-z0-9_.:/@+-]{1,200}$/i.test(v) ? v : undefined;
-	const category = (r: any): string | undefined => {
-		if (r.stopped || r.status === "stopped") return "stopped";
-		if (r.interrupted || r.status === "paused") return "interrupted";
-		if (r.detached || r.status === "detached") return undefined;
-		if (r.timedOut) return "timeout";
-		if (r.toolBudgetBlocked || r.turnBudgetExceeded) return "budget";
-		if (r.contextOverflow) return "context";
-		if (r.structuredOutputFailed) return "invalid-output";
-		if (r.acceptance?.status === "rejected") return "acceptance";
-		if (!(r.error || r.exitCode !== undefined && r.exitCode !== 0 || r.success === false || r.status === "failed")) return undefined;
-		if (r.processSignal) return "process-signal";
-		const error = typeof r.error === "string" ? r.error.slice(0, 16000) : "";
-		if (/budget|economy|price cap|cost limit/i.test(error)) return "budget";
-		if (/\b429\b|rate.?limit|quota|cooldown/i.test(error)) return "capacity";
-		if (/context.{0,30}(?:limit|exceed|large)|too many tokens|\b413\b/i.test(error)) return "context";
-		if (/timed?\s*out|timeout|deadline/i.test(error)) return "timeout";
-		if (/blocked:|permission denied|not authorized|unauthorized|\b(?:401|403|EPERM)\b/i.test(error)) return "permission";
-		if (/Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND|ENOENT|command not found/i.test(error)) return "dependency";
-		if (/structured.?output|invalid.?json|schema|no (?:final|useful) output/i.test(error)) return "invalid-output";
-		if (/acceptance|completed without making edits|required output/i.test(error)) return "acceptance";
-		if (/\b(?:502|503|504|524|529)\b|service.?unavailable|fetch failed|socket hang up|stream.{0,30}(?:error|ended|closed)|connection.{0,20}(?:reset|closed|error)/i.test(error)) return "transport";
-		return "unknown";
-	};
+	// Structured evidence first, regex over free-form text last. The legacy
+	// reason string is preserved for existing consumers; the full cause rides
+	// alongside for recovery, health scoping, and diagnostics.
+	const category = (r: any): string | undefined => failureOf(r).reason;
 	const usage = (u: any) => Object.fromEntries(["input", "output", "cacheRead", "cacheWrite", "reasoning", "turns"].flatMap(k => count(u?.[k]) === undefined ? [] : [[k, u[k]]]));
 	const modelAttempts = Array.isArray(result.modelAttempts) ? result.modelAttempts.filter((a: any) => a && typeof a === "object") : undefined;
 	const progress = parseProgressEvidence(result.progressSummary?.progressEvidence ?? result.progress?.progressEvidence);
 	const failure = category(result);
+	const cause = failure ? failureOf(result).cause : undefined;
 	return {
 		version: 1,
 		...(typeof result.task === "string" ? { taskHash: hashTask(result.task) } : {}),
 		...(route(result.model) ? { model: route(result.model) } : {}),
 		...(failure ? { outcomeReason: failure } : {}),
+		...(cause ? { cause } : {}),
 		...(count(result.progressSummary?.durationMs) === undefined ? {} : { durationMs: result.progressSummary.durationMs }),
 		output: ["present", "absent"].includes(result.outputState) ? result.outputState : "unknown",
 		...(progress ? { progress } : {}),

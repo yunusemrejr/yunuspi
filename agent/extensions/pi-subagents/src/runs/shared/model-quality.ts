@@ -1,4 +1,5 @@
 import type { ModelInfo } from "../../shared/model-info.ts";
+import { extractTaskIntent, intentDomain, intentQualityLevel } from "./task-intent-model.ts";
 
 /** Quality evidence describes a model, never the reputation of its serving API.
  * No model-name lists, price proxies, popularity scores or inferred releases. */
@@ -26,13 +27,14 @@ export const QUALITY_TTL_MS = 7 * 24 * 60 * 60_000;
 export const modelIdentity = (id: string) => id.toLowerCase().replace(/:free$/, "");
 
 export function taskQuality(task = ""): QualityTask {
- const text = task.slice(0, 32768).replace(/```[\s\S]*?```/g, " ").replace(/^\s*>.*$/gm, " ");
- const domain = /\b(code|coding|implement|refactor|debug|tests?|repository|function|typescript|python|api|harness)\b/i.test(text) ? "coding"
-  : /\b(math|proof|reasoning|architecture|trade.?offs|analysis)\b/i.test(text) ? "reasoning" : "general";
- const advisory = /\b(read.only|advisory|brainstorm|propose|suggest|investigate|review|trace|summarize|extract|list)\b/i.test(text)
-  && !/\b(implement|modify|write|edit|deploy|merge|approve|final verdict)\b/i.test(text.replace(/\b(?:do not|don't|never)\s+(?:modify|write|edit)\b/gi, ""));
- const critical = /\b(security|auth(?:entication|orization)?|cryptograph\w*|migration|payments?|billing|concurrency|production|critical|safety)\b/i.test(text);
- return { domain, level: advisory ? "advisory" : critical ? "critical" : "standard" };
+ // Structured intent first: prohibitions ("never deploy"), quoted examples,
+ // and background mentions of production must not retype the requested work.
+ const intent = extractTaskIntent(task);
+ const legacyDomain = /\b(code|coding|implement|refactor|debug|tests?|repository|function|typescript|python|api|harness)\b/i.test(task) ? "coding"
+  : /\b(math|proof|reasoning|architecture|trade.?offs|analysis)\b/i.test(task) ? "reasoning" : undefined;
+ const domain = intent.requestedAction === "unknown" ? (legacyDomain ?? "general") : intentDomain(intent);
+ const level = intentQualityLevel(intent);
+ return { domain, level };
 }
 
 export function validBenchmark(value: unknown, now = Date.now()): value is BenchmarkEvidence {

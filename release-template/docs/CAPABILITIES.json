@@ -2277,12 +2277,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1519
+        "line": 1587
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1147
+        "line": 1215
       },
       {
         "name": "curator",
@@ -2297,7 +2297,7 @@
       {
         "name": "export-json",
         "source": "agent/extensions/session-export-json.ts",
-        "line": 48
+        "line": 49
       },
       {
         "name": "google-account",
@@ -2437,7 +2437,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1472
+        "line": 1540
       },
       {
         "name": "subagent-cost",
@@ -2522,7 +2522,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1477
+        "line": 1545
       },
       {
         "name": "tasks",
@@ -2532,7 +2532,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1496
+        "line": 1564
       },
       {
         "name": "websearch",
@@ -2924,7 +2924,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1611,
+        "line": 1679,
         "kind": "literal"
       },
       {
@@ -2936,7 +2936,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1548,
+        "line": 1616,
         "kind": "literal"
       },
       {
@@ -3270,7 +3270,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1611,
+        "line": 1679,
         "kind": "literal"
       },
       {
@@ -3282,7 +3282,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1548,
+        "line": 1616,
         "kind": "literal"
       },
       {
@@ -3520,7 +3520,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 560,
+      "sourceFiles": 581,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 81,

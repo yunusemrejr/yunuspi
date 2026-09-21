@@ -19,6 +19,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ChildTelemetry } from "./group-reliability.ts";
+import { checkToolWire } from "../../../../lib/request-compat.ts";
 
 export type PreflightCheckState = "pass" | "warn" | "fail" | "unknown";
 
@@ -27,9 +28,9 @@ export interface PreflightCheck {
 	detail?: string;
 }
 
-export type PreflightCheckName = "route" | "credentials" | "provider_health" | "economy" | "budget";
+export type PreflightCheckName = "route" | "credentials" | "provider_health" | "economy" | "budget" | "tool_wire";
 
-export const PREFLIGHT_CHECK_NAMES: readonly PreflightCheckName[] = ["route", "credentials", "provider_health", "economy", "budget"];
+export const PREFLIGHT_CHECK_NAMES: readonly PreflightCheckName[] = ["route", "credentials", "provider_health", "economy", "budget", "tool_wire"];
 
 export interface ChildSpawnPreflight {
 	version: 1;
@@ -54,11 +55,23 @@ export interface SpawnPreflightProbes {
 	providerHealth?: (input: { provider?: string; model?: string }) => PreflightCheck;
 	economy?: (input: { provider?: string; model?: string }) => PreflightCheck;
 	budget?: (input: { requestedModel?: string }) => PreflightCheck;
+	/**
+	 * Tool-wire compatibility for {model, backend, active child tools,
+	 * structured-output}. A fail here blocks the launch before any inference
+	 * spend: narrow the tool subset or switch backend instead.
+	 */
+	toolWire?: (input: { provider?: string; model?: string; backend?: string; tools?: Array<{ name?: string; schema?: unknown }>; strict?: boolean }) => PreflightCheck;
 }
 
 export interface SpawnPreflightInput {
 	requestedModel?: string;
 	fallbackRoutes?: string[];
+	/** Backend that will receive the request (defaults to the route provider). */
+	backend?: string;
+	/** Active child tools serialized into the request (subset, not inventory). */
+	tools?: Array<{ name?: string; schema?: unknown }>;
+	/** Structured output contractually required for this launch. */
+	structuredOutput?: boolean;
 	now?: number;
 	probes?: SpawnPreflightProbes;
 }
@@ -94,6 +107,18 @@ export function runChildSpawnPreflight(input: SpawnPreflightInput = {}): ChildSp
 				return { state: result.state, ...(result.detail ? { detail: result.detail } : {}) };
 			})()
 			: unknownCheck(UNKNOWN_DETAIL),
+		tool_wire: probes.toolWire
+			? (() => {
+				const result = probes.toolWire!({
+					provider,
+					model,
+					backend: input.backend ?? provider,
+					...(input.tools ? { tools: input.tools } : {}),
+					...(input.structuredOutput === true ? { strict: true } : {}),
+				});
+				return { state: result.state, ...(result.detail ? { detail: result.detail } : {}) };
+			})()
+			: unknownCheck(UNKNOWN_DETAIL),
 	};
 	const blockers: string[] = [];
 	const warnings: string[] = [];
@@ -118,6 +143,36 @@ export function runChildSpawnPreflight(input: SpawnPreflightInput = {}): ChildSp
 
 /** Beyond this cooldown the request-time gate stops deferring and denies; spawning into it only burns the slot. */
 export const PREFLIGHT_HEALTH_FAIL_AFTER_MS = 90_000;
+
+/**
+ * Canonical tool-wire probe: preflight {model, backend, active child tools,
+ * structured-output} against the exact backend before launch. Incompatible
+ * tools fail the launch — narrow the subset or switch backend instead of
+ * spending an inference request. Projected (dropped-keyword) tools warn.
+ */
+export function toolWirePreflightProbe(input: {
+	provider?: string;
+	model?: string;
+	backend?: string;
+	tools?: Array<{ name?: string; schema?: unknown }>;
+	strict?: boolean;
+}): PreflightCheck {
+	const tools = Array.isArray(input.tools) ? input.tools : [];
+	if (!tools.length) return { state: "pass", detail: "no tools serialized into this launch" };
+	let report: ReturnType<typeof checkToolWire>;
+	try {
+		report = checkToolWire(tools, input.backend ?? input.provider, input.strict === true ? { strict: true } : {});
+	} catch (error) {
+		return { state: "unknown", detail: `compatibility service unavailable: ${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}` };
+	}
+	if (!report.ok) {
+		const names = report.incompatible.slice(0, 4).map((entry) => `${entry.tool} (${entry.reason}${entry.field ? ` at ${entry.field}` : ""})`).join("; ");
+		return { state: "fail", detail: `backend ${report.backend} rejects ${report.incompatible.length} tool schema(s): ${names}` };
+	}
+	const dropped = report.results.reduce((sum, result) => sum + result.dropped.length, 0);
+	if (dropped) return { state: "warn", detail: `${dropped} schema keyword(s) projected for backend ${report.backend}; local validation keeps the canonical schema` };
+	return { state: "pass", detail: `all ${report.results.length} tool schema(s) wire-compatible with ${report.backend}` };
+}
 
 /** Default automatic-budget caps ($/1M tokens) used when the selection-time policy is unavailable at the spawn seam. */
 export const PREFLIGHT_DEFAULT_MAX_INPUT_PER_MILLION = 1;

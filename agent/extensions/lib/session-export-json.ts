@@ -16,6 +16,9 @@ import { collectSessionMetrics } from "./session-metrics.ts";
 import { collectSessionDiagnostics, failureCategory } from "./session-diagnostics.ts";
 import { collectSessionCost } from "./session-cost.ts";
 import type { ActivityCounters } from "./activity-indicators.ts";
+import { reduceChildEvents, projectTranscriptChildren, summarizeLedger } from "../pi-subagents/src/runs/shared/child-ledger.ts";
+import { classifyCostState } from "./cost-states.ts";
+import type { RuntimeProvenance } from "./diagnostic-provenance.ts";
 
 export const SESSION_EXPORT_JSON_VERSION = 1;
 export const SESSION_EXPORT_JSON_FORMAT = "yunuspi-session-export-json";
@@ -92,6 +95,8 @@ export interface SessionJsonExportInput {
   controlPlaneShadow?: { at: number; sources: Record<string, unknown> } | null;
   /** Live harness-activity counters at export time (null when unavailable). */
   activity?: ActivityCounters | null;
+  /** Stable harness/runtime provenance, collected by the extension (no I/O here). */
+  provenance?: RuntimeProvenance | null;
 }
 
 function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
@@ -397,6 +402,111 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
   const diagnostics = collectSessionDiagnostics(accounted);
   const metrics = collectSessionMetrics(accounted);
   const cost = collectSessionCost(accounted);
+  // Normalized sections: the same canonical reducers every surface reads.
+  // Raw events stay below for forensics; debugging operates on these.
+  const childLedger = reduceChildEvents(projectTranscriptChildren(accounted));
+  const childSummary = summarizeLedger(childLedger);
+  const costState = classifyCostState({
+    reported: cost?.reported ?? 0,
+    estimated: cost?.estimated ?? 0,
+    unknown: cost?.unknown === true,
+    subscription: (cost as any)?.subscription === true,
+    seen: (cost as any)?.seen === true,
+    estimatedUsage: (cost as any)?.estimatedUsage === true,
+    pending: cost?.pending ?? 0,
+  });
+  const todoSnapshots: any[] = [];
+  const reviewRounds: any[] = [];
+  const skillLedger: { read: string[]; partial: string[]; suggested: string[] } = {
+    read: Array.isArray((metrics as any)?.skillsRead) ? [...(metrics as any).skillsRead] : [],
+    partial: Array.isArray((metrics as any)?.skillsPartial) ? [...(metrics as any).skillsPartial] : [],
+    suggested: Array.isArray((metrics as any)?.skillsRouted) ? [...(metrics as any).skillsRouted] : [],
+  };
+  for (const entry of accounted) {
+    const message = (entry as any)?.type === "message" ? (entry as any).message : undefined;
+    if (message?.role === "toolResult" && message.toolName === "todo" && message.details?.tasks && todoSnapshots.length < 4) {
+      todoSnapshots.push({
+        action: message.details.action ?? null,
+        tasks: (message.details.tasks ?? []).slice(0, 64).map((task: any) => ({
+          id: task?.id ?? null,
+          status: task?.status ?? null,
+          owner: task?.owner ?? null,
+          execution: task?.execution ?? null,
+          refs: Array.isArray(task?.refs) ? task.refs.slice(0, 32) : [],
+          runId: task?.runId ?? null,
+        })),
+        nextId: message.details.nextId ?? null,
+      });
+    }
+    if ((entry as any)?.type === "custom" && (entry as any)?.customType === "quality-review-v1" && reviewRounds.length < 16) {
+      const data = (entry as any)?.data ?? {};
+      reviewRounds.push({
+        rounds: data.rounds ?? null,
+        disposition: data.disposition ?? null,
+        evidenceIds: Array.isArray(data.evidenceIds) ? data.evidenceIds.slice(0, 128) : [],
+        coverage: data.coverage ?? "unknown",
+      });
+    }
+  }
+  const buildNormalized = (costSummary: any) => ({
+    children: {
+      summary: childSummary,
+      tasks: childLedger.tasks.map((task) => ({
+        taskId: task.taskId,
+        label: task.label,
+        todoId: task.todoId ?? null,
+        scopeId: task.scopeId ?? null,
+        state: task.state,
+        execution: task.execution.status,
+        executionCause: task.execution.cause?.category ?? null,
+        acceptance: task.acceptance.status,
+        attempts: task.attempts.length,
+      })),
+      unresolved: childLedger.unresolved,
+    },
+    attempts: childLedger.tasks.flatMap((task) => task.attempts.map((attempt) => ({
+      taskId: task.taskId,
+      attempt: attempt.attempt,
+      runId: attempt.runId ?? null,
+      route: attempt.route ?? null,
+      backend: attempt.backend ?? null,
+      state: attempt.state,
+      execution: attempt.execution.status,
+      cause: attempt.execution.cause?.category ?? null,
+      truncation: attempt.execution.cause?.truncation ?? "none",
+      acceptance: attempt.acceptance.status,
+    }))).slice(0, 512),
+    routes: routeRows,
+    failures: {
+      groups: diagnostics?.groups ?? [],
+      causes: childLedger.tasks.flatMap((task) => task.attempts
+        .filter((attempt) => attempt.execution.cause && attempt.execution.cause.category !== "none")
+        .map((attempt) => ({
+          taskId: task.taskId,
+          attempt: attempt.attempt,
+          stage: attempt.execution.cause!.stage,
+          category: attempt.execution.cause!.category,
+          retryable: attempt.execution.cause!.retryable,
+          deterministicShape: attempt.execution.cause!.deterministicShape,
+        }))).slice(0, 256),
+    },
+    todos: todoSnapshots,
+    skills: skillLedger,
+    microIntel: {
+      jev: (metrics as any)?.jev ?? null,
+      note: "per-helper usefulness lives in the micro-intelligence ledger when present",
+    },
+    hooks: (metrics as any)?.hooks ?? {},
+    cost: { ...costSummary, state: costState },
+    context: {
+      tokens,
+      cacheRate: (metrics as any)?.cacheRate ?? null,
+      compactions,
+      invalidationTurns: (metrics as any)?.invalidationTurns ?? 0,
+      invalidationExcessTokens: (metrics as any)?.invalidationExcessTokens ?? 0,
+    },
+    reviews: reviewRounds,
+  });
   const costSummary = {
     total: cost?.formatted ?? null,
     reported: cost?.reported ?? null,
@@ -415,10 +525,14 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
       : [],
   };
 
+  const normalized = buildNormalized(costSummary);
+
   return {
     format: SESSION_EXPORT_JSON_FORMAT,
     version: SESSION_EXPORT_JSON_VERSION,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
+    provenance: input.provenance ?? null,
+    normalized,
     notice:
       "Local diagnostics archive: unredacted prompts, reasoning, tool I/O and harness metadata. " +
       "Never share or publish; it may contain secrets. Request payloads are not persisted by pi — " +

@@ -1,4 +1,6 @@
 import {localIntent} from "./local-intent.ts";
+import {extractTaskIntent} from "./task-intent-model.ts";
+import {precisionRankSkill} from "../../../../lib/skill-telemetry.ts";
 /** Narrow advisory routing. No skill-body loading, I/O or tool-output scanning.
  * The reminder owner applies catalog availability, delivery and lifecycle limits. */
 export type Route = { name: string; intent: RegExp; file?: RegExp; check: string; priority?: number; scopedIntent?: boolean; pathIntent?: boolean };
@@ -143,4 +145,23 @@ export function routeSkills(prompt = '', file = '') {
   }
   try { for(const m of matches) (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("skill.route",{route:m.name}); } catch {}
   return matches;
+}
+/**
+ * Precision re-ranked routing. Action intent + file/domain evidence outrank
+ * bare keyword overlap, so overbroad triggers ("GitHub", "presentation
+ * layer", "AI assistant") demote without evidence instead of displacing the
+ * real match. Advisory only: nothing is removed, order gains precision.
+ */
+export function routeSkillsPrecise(prompt = '', file = '', files: string[] = []) {
+  const matches = routeSkills(prompt, file);
+  if (matches.length <= 1) return matches.map(match => ({...match, precision: 1, precisionReason: 'single candidate'}));
+  let action: string | undefined;
+  try { action = extractTaskIntent(prompt).requestedAction; } catch { action = undefined; }
+  const knownFiles = [...new Set([file, ...files].filter(Boolean))].slice(0, 16);
+  return matches
+    .map(match => {
+      const ranked = precisionRankSkill({skill: match.name, requestedAction: action, text: prompt, files: knownFiles, keywordScore: Math.min(1, match.priority / 100)});
+      return {...match, precision: ranked.score, precisionReason: ranked.reason};
+    })
+    .sort((a, b) => b.precision - a.precision || b.priority - a.priority || a.name.localeCompare(b.name));
 }

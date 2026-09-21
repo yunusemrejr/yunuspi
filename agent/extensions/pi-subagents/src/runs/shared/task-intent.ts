@@ -15,7 +15,20 @@
  * intent only when no write imperative survives outside those phrases. A task
  * like "Do not modify tests; implement the fix" is an implementation task with
  * a scoped constraint, not a read-only task.
+ *
+ * Segmentation comes first: the structured intent model
+ * (`task-intent-model.ts`) masks quoted/example spans and separates requested
+ * verbs from negated verbs before any cue pattern below runs. The patterns
+ * here are low-level cue detectors over normalized segments, not top-level
+ * verdicts over the raw prompt.
  */
+import { extractTaskIntent, type TaskIntent } from "./task-intent-model.ts";
+
+export type { TaskIntent };
+/** Structured task intent for new consumers (routing, budgets, tool subsets). */
+export function classifyTaskIntent(task: string, agent?: string): TaskIntent {
+	return extractTaskIntent(task, agent === undefined ? {} : { agent });
+}
 
 const REVIEW_ONLY_PATTERNS = [
 	/\breview only\b/i,
@@ -114,11 +127,19 @@ const GENERAL_IMPLEMENTATION_PATTERNS = [
 export type TaskMutationIntent = { kind: "implementation" } | { kind: "read-only" } | { kind: "unknown" };
 
 function stripFrameworkInstructions(task: string): string {
-	return task
+	const withoutFramework = task
 		.split("\n")
 		.filter((line) => !/^\s*\[(?:Write to|Read from):/i.test(line))
 		.filter((line) => !/^\s*(?:Create and maintain progress at:|Update progress at:|\*\*Output:\*\*|Write your findings to(?: exactly this path)?:|Return the complete artifact in your final response\.|The runtime will persist it to exactly this path:|Do not call contact_supervisor merely because no write-capable tool is available\.|This path is authoritative for this run\.|Ignore any other output filename or output path mentioned elsewhere)/i.test(line))
 		.join("\n");
+	// Structured segmentation first: quoted/example spans are never intent,
+	// so verbs inside them ("the prompt says 'implement x'") cannot flip the
+	// verdict. Cue patterns below run over normalized segments only.
+	let masked = withoutFramework;
+	for (const span of extractTaskIntent(withoutFramework).segments.quotedSpans) {
+		if (span) masked = masked.split(span).join(" ");
+	}
+	return masked;
 }
 
 function stripPatterns(task: string, patterns: RegExp[]): string {
