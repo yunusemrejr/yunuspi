@@ -386,7 +386,7 @@ export function buildChildRouteProvenance(source: ProvenanceSource): ChildRouteP
 	return {
 		version: 1,
 		...(source.requestedModel ? { requestedModel: source.requestedModel } : {}),
-		...(origin !== "unknown" || !source.requestedModel ? { origin } : { origin: "unknown" }),
+		origin,
 		...(selectedRoute ? { selectedRoute: { ...splitRoute(selectedRoute), model: splitRoute(selectedRoute).model ?? selectedRoute } } : {}),
 		attempts,
 		fallbackUsed,
