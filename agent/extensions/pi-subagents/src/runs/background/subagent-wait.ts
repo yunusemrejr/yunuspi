@@ -206,7 +206,7 @@ function waitForWake(ms: number, signal: AbortSignal | undefined, deps: Subagent
 		}
 		// Poll-interval fallback so we still reconcile even if no event arrives.
 		// The local signal cancels that fallback timer when an event wakes us first.
-		void sleep(ms, wakeController.signal).then(done);
+		void sleep(ms, wakeController.signal).then(done, done);
 	});
 }
 
@@ -304,7 +304,7 @@ function runsForIds(runIds: Iterable<string>, deps: SubagentWaitDeps): AsyncRunS
 
 function summarizeTerminalRuns(runs: AsyncRunSummary[], providerFinishedCount = 0): string {
 	if (runs.length === 0 && providerFinishedCount === 0) return "";
-	const counts = { complete: 0, failed: 0, paused: 0 } as Record<string, number>;
+	const counts = { complete: 0, failed: 0, paused: 0, partial: 0, stopped: 0, rejected: 0 } as Record<string, number>;
 	for (const run of runs) {
 		const count = counts[run.state];
 		if (count !== undefined) counts[run.state] = count + 1;
@@ -313,6 +313,9 @@ function summarizeTerminalRuns(runs: AsyncRunSummary[], providerFinishedCount = 
 	if (counts.complete) parts.push(`${counts.complete} complete`);
 	if (counts.failed) parts.push(`${counts.failed} failed`);
 	if (counts.paused) parts.push(`${counts.paused} paused`);
+	if (counts.partial) parts.push(`${counts.partial} partial`);
+	if (counts.stopped) parts.push(`${counts.stopped} stopped`);
+	if (counts.rejected) parts.push(`${counts.rejected} rejected`);
 	if (providerFinishedCount > 0) parts.push(`${providerFinishedCount} provider item(s) finished`);
 	return parts.join(", ");
 }
