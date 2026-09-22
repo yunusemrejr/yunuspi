@@ -750,12 +750,27 @@ export class ExtensionRunner {
             if (!handlers || handlers.length === 0)
                 continue;
             for (const handler of handlers) {
-                const handlerResult = await handler(event, ctx);
-                if (handlerResult) {
-                    result = handlerResult;
-                    if (result.block) {
-                        return result;
+                // Isolate like every other emit*: a throw in one observer must not
+                // abort the chain or fail the tool. Intentional blocks return
+                // {block:true}; throws are reported via emitError and skipped.
+                try {
+                    const handlerResult = await handler(event, ctx);
+                    if (handlerResult) {
+                        result = handlerResult;
+                        if (result.block) {
+                            return result;
+                        }
                     }
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    const stack = err instanceof Error ? err.stack : undefined;
+                    this.emitError({
+                        extensionPath: ext.path,
+                        event: "tool_call",
+                        error: message,
+                        stack,
+                    });
                 }
             }
         }

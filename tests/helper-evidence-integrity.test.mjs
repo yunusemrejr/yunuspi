@@ -102,7 +102,7 @@ test('a read-only prefix cannot rescue a mutation requested after the embedding 
   assert.equal(result, 'defer');
 });
 
-test('soft-wrapped prose retains exact paragraphs and works on an unknown-price provider', async () => {
+test('soft-wrapped prose retains exact paragraphs through mini selection', async () => {
   const filler = 'General background prose describes an ordinary workspace with assorted familiar concepts\nand broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.';
   const raw = ['Deployment remains blocked until verification.', ...Array(9).fill(filler)].join('\n\n');
   const source = mini.miniSource(raw);

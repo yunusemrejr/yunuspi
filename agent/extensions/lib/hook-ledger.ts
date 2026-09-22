@@ -19,7 +19,7 @@
  * missing paired execution, reload duplication and first-prefix-mutator
  * ordering are answerable with bounded memory.
  *
- * Records arrive from the metrics wrapper (scripts/compatibility/legacy-transforms/hook-metrics-wrapper.js)
+ * Records arrive from the owned metrics wrapper (runtime core hook metrics)
  * through extensions/lib/session-telemetry.ts. Nothing here is model-visible.
  */
 

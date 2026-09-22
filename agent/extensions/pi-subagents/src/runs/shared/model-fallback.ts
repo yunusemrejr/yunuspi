@@ -1172,7 +1172,7 @@ function applyCandidateEconomy(
 		if (isPrimary && origin === "configured" && unaffordable) {
 			warnOnceEconomy(base, "configured-expensive", formatEconomyConfiguredWarning(base, cfg));
 		}
-		if (!isPrimary && (unaffordable || classification.verdict === "unknown-price")) continue;
+		if (!isPrimary && unaffordable) continue;
 		if (classification.verdict === "unknown-price") warnOnceEconomy(base, "unknown", formatEconomyUnknownWarning(base, cfg));
 		kept.push(route);
 	}

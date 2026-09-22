@@ -14,6 +14,12 @@ export function agentLoop(prompts, context, config, signal, streamFn) {
         stream.push(event);
     }, signal, streamFn).then((messages) => {
         stream.end(messages);
+    }, (error) => {
+        // Hard failure before/without agent_end: end so result()/iteration
+        // never hang and the rejection is not left unhandled. AgentEvent has
+        // no error variant — terminate with empty messages.
+        stream.end([]);
+        console.warn(`agentLoop failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     return stream;
 }
@@ -37,6 +43,10 @@ export function agentLoopContinue(context, config, signal, streamFn) {
         stream.push(event);
     }, signal, streamFn).then((messages) => {
         stream.end(messages);
+    }, (error) => {
+        // Same terminal guarantee as agentLoop: never leave awaiters hung.
+        stream.end([]);
+        console.warn(`agentLoopContinue failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     return stream;
 }

@@ -49,7 +49,8 @@ export interface ChildBreakerPolicy {
 	maxToolCalls: number;
 	/** No activity at all (no event, no output) within this window. */
 	staleActivityMs: number;
-	/** Per-child spend ceiling. */
+	/** Per-child spend ceiling. The only hard spend wall: stop a runaway child
+	 *  before it burns "tens of dollars for no reason". */
 	maxCostUsd: number;
 }
 
@@ -57,6 +58,7 @@ export interface ChildBreakerPolicy {
  * Deliberately generous defaults: these end children that are provably stuck,
  * not children that are merely slow. The run-wide deadline remains the outer
  * bound; breakers fire well before it when a child stops making progress.
+ * `maxCostUsd` is a runaway guard, not a $/M price policy.
  */
 export const DEFAULT_CHILD_BREAKER_POLICY: ChildBreakerPolicy = {
 	maxConsecutiveProviderFailures: 4,
@@ -65,7 +67,7 @@ export const DEFAULT_CHILD_BREAKER_POLICY: ChildBreakerPolicy = {
 	maxToolCalls: 48,
 	maxTurns: 400,
 	staleActivityMs: 20 * 60_000,
-	maxCostUsd: 25,
+	maxCostUsd: 15,
 };
 
 export interface ChildBreakerObservation {

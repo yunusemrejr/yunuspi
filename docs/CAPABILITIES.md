@@ -937,7 +937,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 651; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 192; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
-- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 837; literal)
+- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 839; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 741; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)

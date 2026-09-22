@@ -2984,7 +2984,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 837,
+        "line": 839,
         "kind": "literal"
       },
       {
@@ -3317,7 +3317,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 837,
+        "line": 839,
         "kind": "literal"
       },
       {

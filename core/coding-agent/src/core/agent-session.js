@@ -242,33 +242,49 @@ export class AgentSession {
             }
         };
         this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
-            const runner = this._extensionRunner;
-            const hookResult = runner.hasHandlers("tool_result")
-                ? await runner.emitToolResult({
-                    type: "tool_result",
-                    toolName: toolCall.name,
-                    toolCallId: toolCall.id,
-                    input: args,
-                    content: result.content,
-                    details: result.details,
-                    isError,
-                    usage: result.usage,
-                })
-                : undefined;
-            const content = hookResult?.content ?? result.content ?? [];
-            // Runs after the extension hook so images injected or replaced by extensions are normalized too.
-            const normalizedContent = await normalizeToolResultImages(content, {
-                autoResizeImages: this.settingsManager.getImageAutoResize(),
-            });
-            if (!hookResult && normalizedContent === content) {
+            // Post-processing must never replace a successful tool result with an
+            // error. On any failure keep the original content (return undefined).
+            try {
+                const runner = this._extensionRunner;
+                const hookResult = runner.hasHandlers("tool_result")
+                    ? await runner.emitToolResult({
+                        type: "tool_result",
+                        toolName: toolCall.name,
+                        toolCallId: toolCall.id,
+                        input: args,
+                        content: result.content,
+                        details: result.details,
+                        isError,
+                        usage: result.usage,
+                    })
+                    : undefined;
+                const content = hookResult?.content ?? result.content ?? [];
+                // Runs after the extension hook so images injected or replaced by extensions are normalized too.
+                const normalizedContent = await normalizeToolResultImages(content, {
+                    autoResizeImages: this.settingsManager.getImageAutoResize(),
+                });
+                if (!hookResult && normalizedContent === content) {
+                    return undefined;
+                }
+                return {
+                    content: normalizedContent,
+                    details: hookResult?.details,
+                    isError: hookResult?.isError ?? isError,
+                    usage: hookResult?.usage,
+                };
+            }
+            catch (err) {
+                try {
+                    this._extensionRunner.emitError({
+                        extensionPath: "<agent-session:afterToolCall>",
+                        event: "tool_result",
+                        error: err instanceof Error ? err.message : String(err),
+                        stack: err instanceof Error ? err.stack : undefined,
+                    });
+                }
+                catch { /* diagnostics must not fail the tool */ }
                 return undefined;
             }
-            return {
-                content: normalizedContent,
-                details: hookResult?.details,
-                isError: hookResult?.isError ?? isError,
-                usage: hookResult?.usage,
-            };
         };
     }
     async _compactBeforeNextAssistantResponse(context) {

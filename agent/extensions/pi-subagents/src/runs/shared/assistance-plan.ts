@@ -37,7 +37,9 @@ export interface AssistanceMember {route:string;proof:string;role:string;free:bo
  * At most one paid helper; no subscription is silently used for a swarm. */
 export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
- const cheap = {...config,subscriptionProviders:[],maxInputPerMillion:Math.min(config.maxInputPerMillion,.2),maxOutputPerMillion:Math.min(config.maxOutputPerMillion,.5),operationalPremiumMaxPerMillion:undefined};
+ // Relaxed economy: no tighter $/M clamp than the global policy. Runaway spend
+ // is owned by child circuit breakers, not per-helper price matching.
+ const cheap = {...config,subscriptionProviders:[],operationalPremiumMaxPerMillion:undefined};
  const minOutputTokens = options.minOutputTokens ?? 1024;
  const requiresTools = options.requiresTools !== false;
  // Unknown tool support passes the pool: explicit preferences carry their own

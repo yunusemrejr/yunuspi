@@ -10,17 +10,13 @@ import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../
 import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 
 /**
- * Cost-aware subagent economy policy (2026-09-06 pass).
+ * Cost-aware subagent economy policy (2026-09-22 relaxed).
  *
- * Every AUTOMATIC (non-user-chosen) candidate must have KNOWN input AND output
- * prices within explicit caps, or the bounded default operational exception
- * based on fresh observed workloads (including cold/miss stress); unknown / zero /
- * placeholder pricing is NOT proof that a route is cheap and is never eligible
- * for autonomous selection. Manual routes (explicit human or agent-supplied
- * requests and the running parent's own model) are exempt from the *ceiling*
- * — they are only ever *replaced* when the route is inherited and its metered
- * price is proven above the cap; an inherited route whose price cannot be
- * proven is kept with a warning.
+ * Intent: do not micro-manage $/M matching. Automatic selection only avoids
+ * provable traps (zero-price placeholders, absurd rates). Unknown price is
+ * eligible — spend is bounded by runaway circuit breakers
+ * (`child-circuit-breakers.ts`, per-child `maxCostUsd`) and request budgets,
+ * not by proving every route is under $1/M. Manual routes are always honored.
  *
  * Deterministic, no timers, no network. Config precedence:
  *   1. $PI_SUBAGENTS_ECONOMY_CONFIG — JSON fixture (tests / operators)
@@ -61,6 +57,8 @@ export interface ModelEconomyClassification {
 	authorized: boolean;
 	/** True when cost metadata declares long-context tiers with a worst case above the cap. */
 	tiered?: boolean;
+	/** True when metered rates are missing — eligible under the relaxed economy. */
+	priceUnproven?: boolean;
 	/** Worst-case (base + tiers) rates, USD per 1M tokens, when price metadata exists. */
 	rates?: ModelEconomyRates;
 	reason?: string;
@@ -72,10 +70,14 @@ const DEFAULT_SUBSCRIPTION_PROVIDERS = ["openai-codex"];
 function defaultConfig(): ModelEconomyConfig {
 	return {
 		enabled: true,
-		operationalPremiumMaxPerMillion: 3,
-		maxInputPerMillion: 1.0,
-		maxOutputPerMillion: 1.0,
+		// Relaxed ceilings: these catch absurd rates, not ordinary commercial
+		// models. Runaway spend is owned by child circuit breakers.
+		operationalPremiumMaxPerMillion: undefined,
+		maxInputPerMillion: 50,
+		maxOutputPerMillion: 50,
 		subscriptionProviders: [...DEFAULT_SUBSCRIPTION_PROVIDERS],
+		// Keep free-route max_price=0 binding (prevents accidental paid fallback
+		// on a proven-free route). Do not pin metered children to $/M caps.
 		openRouterMaxPrice: true,
 		allowExpensive: [],
 	};
@@ -319,24 +321,24 @@ export function classifyModelEconomy(
 	}
 	const cost = model?.cost;
 	if (!cost || !Number.isFinite(cost.input) || !Number.isFinite(cost.output)) {
-		const result: ModelEconomyClassification = {
-			verdict: "unknown-price",
+		// Unknown price is eligible under the relaxed economy. Runaway breakers
+		// bound spend; refusing unpriced routes just starved good helpers.
+		return {
+			verdict: "affordable",
 			authorized,
-			reason: "no metered price metadata for this route",
+			priceUnproven: true,
+			reason: "no metered price metadata; spend bounded by circuit breakers rather than price proof",
 		};
-		if (authorized) return { ...result, verdict: "affordable" };
-		return result;
 	}
 	const rates = worstCaseRates(cost as RateSet);
 	const tiered = Boolean(Array.isArray(cost.tiers) && cost.tiers.length > 0);
 	if (!rates) {
-		const result: ModelEconomyClassification = {
-			verdict: "unknown-price",
+		return {
+			verdict: "affordable",
 			authorized,
-			reason: "incomplete metered price metadata for this route",
+			priceUnproven: true,
+			reason: "incomplete metered price metadata; spend bounded by circuit breakers rather than price proof",
 		};
-		if (authorized) return { ...result, verdict: "affordable" };
-		return result;
 	}
 	if (rates.input === 0 && rates.output === 0) {
 		const result: ModelEconomyClassification = {
@@ -349,10 +351,6 @@ export function classifyModelEconomy(
 		return result;
 	}
 	const aboveCap = rates.input > cfg.maxInputPerMillion || rates.output > cfg.maxOutputPerMillion;
-    if (aboveCap && !authorized) {
-        const qualified = operationalEconomyQualification(model, cfg);
-        if (qualified) return {verdict:"affordable", authorized:false, rates, ...(tiered ? {tiered:true}:{}), reason:qualified.reason};
-    }
 	if (aboveCap) {
 		const result: ModelEconomyClassification = {
 			verdict: "expensive",
@@ -366,14 +364,17 @@ export function classifyModelEconomy(
 	return { verdict: "affordable", authorized, ...(tiered ? { tiered: true } : {}), rates };
 }
 
-/** Autonomously eligible: known metered rates within caps or a measured operational exception. Authorization
- *  does NOT widen the autonomous pool — allowlisted routes only pass explicit use. */
+/** Autonomously eligible under the relaxed economy: reject only zero-price
+ * placeholders and absurd above-cap rates. Unknown/unproven price is allowed
+ * (circuit breakers own runaway spend). Authorization does NOT widen the
+ * autonomous pool — allowlisted routes only pass explicit use. */
 export function isAutonomousMeteredEligible(model: ModelInfo | undefined, cfg: ModelEconomyConfig): boolean {
-	if (!model?.cost || !Number.isFinite(model.cost.input) || !Number.isFinite(model.cost.output)) return false;
+	if (isProvenFreeRoute(model)) return true;
+	if (!model?.cost || !Number.isFinite(model.cost.input) || !Number.isFinite(model.cost.output)) return true;
 	if (model.cost.input === 0 && model.cost.output === 0 && !(Array.isArray(model.cost.tiers) && model.cost.tiers.length > 0)) return false;
 	const rates = worstCaseRates(model.cost as RateSet);
-	if (!rates) return false;
-	return (rates.input > 0 || rates.output > 0) && ((rates.input <= cfg.maxInputPerMillion && rates.output <= cfg.maxOutputPerMillion) || operationalEconomyQualification(model,cfg) !== undefined);
+	if (!rates) return true;
+	return rates.input <= cfg.maxInputPerMillion && rates.output <= cfg.maxOutputPerMillion;
 }
 
 /** Explicit token accounting: cache buckets are disjoint from uncached input.
@@ -570,7 +571,10 @@ export function registerEconomyRequestHook(pi: EconomyHookPi, options: { automat
 		if (!cfg.enabled || !cfg.openRouterMaxPrice) return undefined;
 		const classification = classifyModelEconomy(model.fullId, model, cfg);
 		if (classification.authorized) return undefined;
-		if (!operationalRouteWasAdmitted(model.fullId) && (classification.verdict !== "affordable" || !classification.rates)) return undefined;
+		// Affordable includes price-unproven routes under the relaxed economy.
+		// Still pin provider.max_price to the absurd-rate caps so OpenRouter
+		// cannot charge runaway prices on an unpriced metered route.
+		if (classification.verdict !== "affordable") return undefined;
 		const provider = payload.provider && typeof payload.provider === "object" ? { ...(payload.provider as Record<string, unknown>) } : {};
 		const existing = provider.max_price && typeof provider.max_price === "object" ? (provider.max_price as Record<string, unknown>) : {};
         const qualified = operationalEconomyQualification(model,cfg);

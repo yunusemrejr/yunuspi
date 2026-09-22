@@ -41,7 +41,9 @@ import { capFreeRequest, isProvenFreeRoute } from "./free-route-evidence.ts";
 export function capAutomaticHelperRequest(raw: any, model: NonNullable<ExtensionContext["model"]>) {
  if (!raw || typeof raw !== "object" || Array.isArray(raw) || ![model.id,`${model.provider}/${model.id}`].includes(raw.model)) throw new Error("Helper route/payload mismatch");
  const cfg=loadModelEconomyConfig();
- const cheap={...cfg,maxInputPerMillion:Math.min(cfg.maxInputPerMillion,0.2),maxOutputPerMillion:Math.min(cfg.maxOutputPerMillion,0.5)};
+ // Relaxed: helpers share the global economy caps. The per-child runaway
+ // circuit breaker owns spend; do not re-clamp $/M here.
+ const cheap={...cfg};
  let payload: any;
  if(isProvenFreeRoute(model)) payload=capFreeRequest(raw,model);
  else {

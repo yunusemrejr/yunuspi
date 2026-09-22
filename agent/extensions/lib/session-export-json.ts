@@ -1,6 +1,6 @@
 // Pure builder for the local /export-json diagnostics archive.
 //
-// The stock /export path is redacted for sharing (scripts/compatibility/legacy-transforms/
+// The stock /export path is redacted for sharing (owned core export-redaction,
 // export-redaction.mjs): reasoning, tool I/O, images and harness metadata
 // never leave the machine there. This builder is the opposite contract: a
 // LOCAL-ONLY, unredacted, machine-sortable JSON archive of one session for
