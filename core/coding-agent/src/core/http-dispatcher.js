@@ -12,6 +12,7 @@ export const HTTP_IDLE_TIMEOUT_CHOICES = [
 ];
 const originalGlobalFetch = globalThis.fetch;
 let installedGlobalFetch;
+let installedDispatcher;
 export function parseHttpIdleTimeoutMs(value) {
     if (typeof value === "string") {
         const trimmed = value.trim();
@@ -83,6 +84,10 @@ export function configureHttpDispatcher(timeoutMs = DEFAULT_HTTP_IDLE_TIMEOUT_MS
         factory: createUndiciOriginDispatcher,
     }));
     undici.setGlobalDispatcher(dispatcher);
+    const previousDispatcher = installedDispatcher;
+    installedDispatcher = dispatcher;
+    // Graceful close lets in-flight requests finish and retires idle sockets.
+    void previousDispatcher?.close().catch(ignoreUndiciDispatcherError);
     // Keep fetch and the dispatcher on the same undici implementation. Node 26.0's
     // bundled fetch can otherwise consume compressed responses through npm undici's
     // dispatcher without decompressing them, causing response.json() failures.

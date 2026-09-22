@@ -37,7 +37,7 @@ import { toModelInfo } from "../../shared/model-info.ts";
 import { registerEconomyRequestHook, isAutonomousMeteredEligible, loadModelEconomyConfig, operationalEconomyQualification } from "./model-economy.ts";
 import { capFreeRequest, isProvenFreeRoute } from "./free-route-evidence.ts";
 
-/** Helper admission and dispatch share the same strict low-price policy. */
+/** Helper admission and dispatch share the global economy caps; per-child runaway circuit breakers own spend. */
 export function capAutomaticHelperRequest(raw: any, model: NonNullable<ExtensionContext["model"]>) {
  if (!raw || typeof raw !== "object" || Array.isArray(raw) || ![model.id,`${model.provider}/${model.id}`].includes(raw.model)) throw new Error("Helper route/payload mismatch");
  const cfg=loadModelEconomyConfig();

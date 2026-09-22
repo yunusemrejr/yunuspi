@@ -10,31 +10,20 @@ const BASE_FILE_SYSTEM_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 500, 1000, 2000,
 /**
  * Clamp the retry ladder to a total sleep budget, preserving its length.
  *
- * waitForFileSystemRetry blocks the calling thread, so the ladder above is also
- * a ceiling on how long a single contended rename can stall that thread: about
- * 7.9s. That is fine for a short-lived CLI. A long-lived host that loads this
- * extension in-process runs the same writers on its event loop, where an 8s
- * stall stops it serving anything at all -- and because Atomics.wait parks
- * rather than spins, it presents as an unresponsive process at 0% CPU.
- *
- * The length is preserved deliberately: run-fanout-budget.ts and
- * workflow-state.ts index this array by attempt number and treat running off
- * the end as "timed out acquiring lock". Shortening it would quietly shrink
- * those attempt budgets too, so only the sleeps shrink here.
- *
- * Unset by default, so behaviour is unchanged unless a host opts in. Opting in
- * trades lock-wait tolerance for responsiveness: entries clamped to 0 return
- * immediately, so contention that would previously have been waited out is
- * surfaced as an error sooner.
+ * The parent event loop gets at most 100 ms of blocking waits. Isolated child
+ * processes retain the full ladder for durable completion writes. Keep every
+ * attempt: lock callers also use the array length as their attempt budget.
+ * Explicit budgets override either default.
  */
 export function resolveFileSystemRetryDelays(
 	env: NodeJS.ProcessEnv = process.env,
 	base: readonly number[] = BASE_FILE_SYSTEM_RETRY_DELAYS_MS,
 ): readonly number[] {
 	const raw = env[FS_RETRY_MAX_TOTAL_MS_ENV];
-	if (raw === undefined || raw.trim() === "") return base;
-	const budget = Number(raw);
-	if (!Number.isInteger(budget) || budget < 0) {
+	const hasBudget = raw !== undefined && raw.trim() !== "";
+	if (!hasBudget && env.PI_SUBAGENT_CHILD === "1") return base;
+	const budget = hasBudget ? Number(raw) : 100;
+	if (!Number.isSafeInteger(budget) || budget < 0) {
 		throw new Error(`${FS_RETRY_MAX_TOTAL_MS_ENV} must be a non-negative integer number of milliseconds.`);
 	}
 	let spent = 0;

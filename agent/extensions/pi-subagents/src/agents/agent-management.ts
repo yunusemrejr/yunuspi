@@ -13,6 +13,9 @@ import {
 	discoverAgentsAll,
 	buildRuntimeName,
 	findBlockingAgentDiagnostic,
+	findShadowedAgentDiagnostic,
+	formatBlockingAgentError,
+	formatShadowedAgentWarning,
 	frontmatterNameForConfig,
 	parsePackageName,
 	mergeBuiltinAgentOverride,
@@ -965,18 +968,22 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	scopedAgents = scopedAgents
 		.sort((a, b) => a.name.localeCompare(b.name));
 	const requestedAgent = params.agent?.trim();
+	let listFallbackWarning: string | undefined;
 	if (requestedAgent) {
 		const matches = findAgentsInDiscovery(requestedAgent, d, scope, ctx.runtimeAgentOwner);
 		const diagnostics = diagnosticsForScope(d.agentDiagnostics, scope);
 		const normalizedName = sanitizeName(requestedAgent);
 		const diagnostic = findBlockingAgentDiagnostic(requestedAgent, matches, diagnostics)
 			?? (normalizedName !== requestedAgent ? findBlockingAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
-		if (diagnostic) return result(`Agent '${requestedAgent}' has invalid configuration: ${diagnostic.error}`, true);
+		if (diagnostic) return result(formatBlockingAgentError(requestedAgent, diagnostic), true);
+		const shadowed = findShadowedAgentDiagnostic(requestedAgent, matches, diagnostics)
+			?? (normalizedName !== requestedAgent ? findShadowedAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
 		const distinctNames = [...new Set(matches.map((agent) => agent.name))];
 		if (distinctNames.length > 1) return result(`Ambiguous agent alias or name '${requestedAgent}': ${distinctNames.sort((a, b) => a.localeCompare(b)).join(", ")}`, true);
 		if (!matches.length) return result(`Agent '${requestedAgent}' not found. Available: ${availableAgentNamesFromDiscovery(d, ctx.runtimeAgentOwner).join(", ") || "none"}.`, true);
 		const selectedName = matches[0]!.name;
 		scopedAgents = scopedAgents.filter((agent) => agent.name === selectedName);
+		if (shadowed) listFallbackWarning = formatShadowedAgentWarning(requestedAgent, matches[0]!, shadowed);
 	}
 	const capabilityCeiling = resolveCurrentSubagentCapabilityCeiling(ctx.currentSessionId);
 	const visibleAgents = scopedAgents.filter((a) => !a.disabled);
@@ -999,6 +1006,7 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	appendRestrictedAgentLines({ lines, agents: restrictedAgents, sources: restrictedSources, providerNames: providerNameSet, formatLine });
 	appendExternalJobRegistryLine(lines, [...agents, ...restrictedAgents], providerStatus);
 	appendAgentDiagnosticLines(lines, d.agentDiagnostics);
+	if (listFallbackWarning) lines.push("", listFallbackWarning);
 	if (proactiveSuggestions.length) lines.push("", ...proactiveSuggestions);
 	return result(lines.join("\n"), false, agentCapabilityDetails({
 		capabilityMode,
@@ -1037,24 +1045,29 @@ function handleModels(params: ManagementParams, ctx: ManagementContext): AgentTo
 	const filteredModels = modelQuery ? filterModelsByQuery(availableModels, modelQuery) : availableModels;
 
 	let selectedAgents = effectiveAgents;
+	let modelsFallbackWarning: string | undefined;
 	if (requestedAgent) {
 		const matches = findAgentsInDiscovery(requestedAgent, discovered, scope, ctx.runtimeAgentOwner);
 		const diagnostics = diagnosticsForScope(discovered.agentDiagnostics, scope);
 		const normalizedName = sanitizeName(requestedAgent);
 		const diagnostic = findBlockingAgentDiagnostic(requestedAgent, matches, diagnostics)
 			?? (normalizedName !== requestedAgent ? findBlockingAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
-		if (diagnostic) return result(`Agent '${params.agent}' has invalid configuration: ${diagnostic.error}`, true);
+		if (diagnostic) return result(formatBlockingAgentError(requestedAgent, diagnostic), true);
+		const shadowed = findShadowedAgentDiagnostic(requestedAgent, matches, diagnostics)
+			?? (normalizedName !== requestedAgent ? findShadowedAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
 		const distinctNames = [...new Set(matches.map((agent) => agent.name))];
 		if (distinctNames.length > 1) return result(`Ambiguous agent alias or name '${params.agent}': ${distinctNames.sort((a, b) => a.localeCompare(b)).join(", ")}`, true);
 		if (!matches.length) {
 			return result(`Agent '${params.agent}' not found. Available: ${availableAgentNamesFromDiscovery(discovered, ctx.runtimeAgentOwner).join(", ") || "none"}.`, true);
 		}
 		selectedAgents = [matches[0]!];
+		if (shadowed) modelsFallbackWarning = formatShadowedAgentWarning(requestedAgent, matches[0]!, shadowed);
 	}
 
 	const dateNotice = /(?:^|\s)added:/i.test(modelQuery) ? "Date filter uses the provider catalog addition timestamp in UTC, not the model's release date. Missing dates are excluded; an empty result is not permission to broaden the request." : undefined;
 	const lines = [
 		...(dateNotice ? [dateNotice, ""] : []),
+		...(modelsFallbackWarning ? [modelsFallbackWarning, ""] : []),
 		requestedAgent ? "Subagent model" : "Subagent models",
 		"",
 		...(requestedAgent ? [] : [
@@ -1180,13 +1193,15 @@ function handleGet(params: ManagementParams, ctx: ManagementContext): AgentToolR
 	const normalizedName = sanitizeName(rawName);
 	const diagnostic = findBlockingAgentDiagnostic(rawName, matches, diagnostics)
 		?? (normalizedName !== rawName ? findBlockingAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
-	if (diagnostic) return result(`Agent '${params.agent}' has invalid configuration: ${diagnostic.error}`, true);
+	if (diagnostic) return result(formatBlockingAgentError(rawName, diagnostic), true);
+	const shadowed = findShadowedAgentDiagnostic(rawName, matches, diagnostics)
+		?? (normalizedName !== rawName ? findShadowedAgentDiagnostic(normalizedName, matches, diagnostics) : undefined);
 	const distinctNames = [...new Set(matches.map((agent) => agent.name))];
 	if (distinctNames.length > 1) return result(`Ambiguous agent alias or name '${params.agent}': ${distinctNames.sort((a, b) => a.localeCompare(b)).join(", ")}`, true);
 	if (!matches.length) {
 		return result(`Agent '${params.agent}' not found. Available: ${availableAgentNamesFromDiscovery(discovered).join(", ") || "none"}.`, true);
 	}
-	return result(matches.map(formatAgentDetail).join("\n\n"));
+	return result(matches.map(formatAgentDetail).join("\n\n") + (shadowed ? `\n\n${formatShadowedAgentWarning(rawName, matches[0]!, shadowed)}` : ""));
 }
 
 export function handleCreate(params: ManagementParams, ctx: ManagementContext): AgentToolResult<Details> {

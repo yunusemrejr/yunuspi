@@ -456,6 +456,8 @@ fs.cpSync(
 );
 fs.mkdirSync(path.join(agent, "extensions/lib"), {recursive:true});
 fs.cpSync(path.join(source, "lib"), path.join(agent, "extensions/lib"), {recursive:true});
+// scope-council-runner.ts imports the micro-intelligence owner directly.
+fs.copyFileSync(path.join(source, "micro-intelligence.ts"), path.join(agent, "extensions/micro-intelligence.ts"));
 fs.symlinkSync(
  path.resolve(resolveOwnedCore(), "../../node_modules"),
  path.join(agent, "extensions/node_modules"),
@@ -563,7 +565,7 @@ const original = globalThis.fetch;
 function guardedFetch(input, init) {
  const url = typeof input === "string" ? input : input.url ?? String(input);
  const parsed = new URL(url);
- if (parsed.origin !== "http://127.0.0.1:${port}") return deny(parsed.origin);
+ if (parsed.origin !== "http://127.0.0.1:${port}") return deny(parsed.href);
  return original(url, init);
 }
 Object.defineProperty(globalThis, "fetch", { configurable: false, get: () => guardedFetch, set: () => {} });
@@ -681,7 +683,7 @@ try {
    stdout.slice(-10000),
   );
  check(
-  "REAL root and any started helpers use the guard and attempt no external fetch",
+  `REAL root and any started helpers use the guard and attempt no external fetch${fs.existsSync(deniedFetches) ? ` (blocked: ${fs.readFileSync(deniedFetches, "utf8").trim()})` : ""}`,
   !fs.existsSync(deniedFetches) && new Set(fs.readFileSync(guardedProcesses, "utf8").trim().split("\n")).size >= 1,
  );
  check(

@@ -329,9 +329,13 @@ function resolveSubagentModelCandidate(
 	if (!availableModels || availableModels.length === 0) return model;
 	// An explicit entry provider is a hard constraint, not a preference: a
 	// leaf/owner-tolerant match must never silently resolve to a different
-	// provider (cost/security-sensitive configs).
+	// provider (cost/security-sensitive configs). The veto applies only to
+	// bare queries: when the query itself names a provider, that explicit
+	// choice is authoritative (explicit cross-provider requests must keep
+	// working when the caller's preferred provider differs).
+	const { queryProvider: queryNamesProvider } = splitQualifiedModelQuery(splitThinkingSuffix(model).baseModel, availableModels);
 	const constrain = (route: string | undefined): string | undefined => {
-		if (!route || !preferredProvider) return route;
+		if (!route || !preferredProvider || queryNamesProvider !== undefined) return route;
 		const winner = availableModels.find((entry) => entry.fullId === route);
 		if (winner && normalizeModelSegment(winner.provider) !== normalizeModelSegment(preferredProvider)) return undefined;
 		return route;

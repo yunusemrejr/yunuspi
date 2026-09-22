@@ -250,10 +250,10 @@ test("exporter refuses a hardcoded home path in executable source but sanitizes 
       os.homedir(),
       ".pi/agent/extensions/pi-lens/dist/index.js",
     );
-    fs.mkdirSync(path.join(f.source, "scripts/compatibility/legacy-transforms"), { recursive: true });
+    fs.mkdirSync(path.join(f.source, "scripts/lib"), { recursive: true });
     fs.mkdirSync(path.join(f.source, "skills/example"), { recursive: true });
     fs.writeFileSync(
-      path.join(f.source, "scripts/compatibility/legacy-transforms/example-patch.mjs"),
+      path.join(f.source, "scripts/lib/example.mjs"),
       `const DIST = ${JSON.stringify(literal)};\n`,
     );
     fs.writeFileSync(
@@ -266,7 +266,7 @@ test("exporter refuses a hardcoded home path in executable source but sanitizes 
     assert.ok(!fs.existsSync(f.output));
 
     // Documentation keeps the privacy substitution instead of failing.
-    fs.rmSync(path.join(f.source, "scripts/compatibility/legacy-transforms/example-patch.mjs"));
+    fs.rmSync(path.join(f.source, "scripts/lib/example.mjs"));
     const accepted = f.run();
     assert.equal(accepted.status, 0, accepted.stderr);
     const shipped = fs.readFileSync(

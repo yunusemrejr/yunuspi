@@ -47,7 +47,11 @@ const runtimeDirs =
 const sensitiveNames =
   /(?:^|\/)(?:\.env(?:\..*)?|auth\.json|settings\.json|models(?:-store)?\.json|provider-health\.json|free-route-evidence\.json|live-model-catalog\.json|run-history\.jsonl|yunuspi-session-[^/]+\.html|pi-session-[^/]+-diagnostics\.json|api-key|credentials(?:\..*)?|id_rsa|id_ed25519|.*\.(?:pem|p12|pfx|key|sqlite|db|jsonl|tar|tgz|zip|onnx|safetensors))$/i;
 const placeholder =
-  /^(?:|UNKNOWN|REDACTED|CHANGEME|YOUR[_ -].*|EXAMPLE[_ -].*|TEST[_ -].*|DUMMY[_ -].*|PLACEHOLDER|\$\{[^}]+\}|<[^>]+>|test|fake|dummy|example|none|null|undefined)$/i;
+  /^(?:|UNKNOWN|REDACTED|CHANGEME|YOUR[_ -].*|\$\{[^}]+\}|<[^>]+>|none|null|undefined|.*(?:synthetic|placeholder|example|dummy|fake|test|\.\.).*)$/i;
+// A value that spells an environment-variable name is a reference, not a secret.
+// Deliberately case-sensitive: a mixed-case token must never be exempted by shape.
+const envReference = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
+const publishable = (value) => placeholder.test(value) || envReference.test(value);
 
 export function scanContent(name, data) {
   const findings = [];
@@ -71,8 +75,9 @@ export function scanContent(name, data) {
     ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
     [
       "provider-token",
-      /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,})\b/,
+      /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{24,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|hf_[A-Za-z0-9]{30,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36})\b/,
     ],
+    ["bearer-credential", /\bBearer\s+eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
     ["credential-url", /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/i],
     [
       "personal-home-path",
@@ -85,7 +90,7 @@ export function scanContent(name, data) {
   ];
   for (const [rule, regex] of patterns) if (regex.test(text)) add(rule);
   const assignments =
-    /["']?\b(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|authorization|bearer|namecheap[_-]?(?:user|username)|godaddy[_-]?(?:user|username))["']?\s*[:=]\s*["']([^"'\r\n]{1,512})["']/gi;
+    /["']?(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|access[_-]?key[_-]?id|password|passwd|authorization|bearer|namecheap[_-]?(?:user|username)|godaddy[_-]?(?:user|username))["']?\s*[:=]\s*["']([^"'\r\n]{1,512})["']/gi;
   for (const match of text.matchAll(assignments)) {
     if (
       [
@@ -103,14 +108,14 @@ export function scanContent(name, data) {
         "487ba2299be7f759d7c7bf6a4ac3a32cee81f1bb9332fc485947e32918864fb2"
     )
       continue;
-    if (!placeholder.test(match[1]) && !/^(?:Bearer )?\$\{/.test(match[1]))
+    if (!publishable(match[1]) && !/^(?:Bearer )?\$\{/.test(match[1]))
       add("credential-literal");
   }
   // Shell/env assignments may be unquoted. Restrict names and syntax to avoid code expressions.
   const env =
-    /^\s*(?:export\s+)?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|SECRET|PASSWORD|ACCESS_TOKEN|REFRESH_TOKEN)\s*=\s*([^\s'"#]+)\s*$/gm;
+    /^\s*(?:export\s+)?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|SECRET_ACCESS_KEY|ACCESS_KEY_ID|SECRET|PASSWORD|ACCESS_TOKEN|REFRESH_TOKEN)\s*=\s*([^\s'"#]+)\s*$/gm;
   for (const match of text.matchAll(env))
-    if (!placeholder.test(match[1]) && !match[1].startsWith("$"))
+    if (!publishable(match[1]) && !match[1].startsWith("$"))
       add("credential-environment-literal");
   return findings;
 }
@@ -127,7 +132,7 @@ export function scanPath(name) {
       scoped,
     );
   if (
-    normalized.split("/").includes("node_modules") ||
+    normalized.split("/").some(part => ["node_modules", "__pycache__"].includes(part)) ||
     (runtimeDirs.test(scoped) && !packageOnly) ||
     sensitiveNames.test(normalized)
   )
@@ -140,6 +145,13 @@ export function scanTree(root) {
   function walk(dir, prefix = "") {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const name = prefix + entry.name;
+      // Installed dependencies and build outputs are never published from a
+      // working tree (both are gitignored here), so walking them only makes the
+      // pre-push hook fail on every checkout that has run npm install. Tracked
+      // copies of those paths are still caught by scanPath()/scanGit().
+      if (entry.isDirectory() && (entry.name === "node_modules" || entry.name === "__pycache__" || /^core\/[^/]+\/dist$/.test(name))) {
+        continue;
+      }
       if (!prefix && entry.name === ".git") continue;
       const filename = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) {
@@ -162,10 +174,11 @@ export function scanTree(root) {
 }
 
 export function scanGit(root, { history = true } = {}) {
-  const git = (args) =>
+  const git = (args, input) =>
     execFileSync("git", ["-C", root, ...args], {
+      input,
       maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
   const findings = [];
   // Scan the index, including ignored tracked files and staged-but-not-committed blobs.
@@ -173,7 +186,7 @@ export function scanGit(root, { history = true } = {}) {
     .toString()
     .split("\0")
     .filter(Boolean);
-  const visited = new Set();
+  const objects = new Map();
   function inspect(mode, oid, filename, origin) {
     findings.push(...scanPath(filename).map((f) => ({ ...f, origin })));
     if (mode === "120000" || mode === "160000")
@@ -182,24 +195,12 @@ export function scanGit(root, { history = true } = {}) {
         rule: mode === "120000" ? "symlink" : "submodule",
         origin,
       });
-    if (visited.has(oid)) return;
-    visited.add(oid);
-    const size = Number(git(["cat-file", "-s", oid]).toString().trim());
-    if (size > MAX_BYTES) {
-      findings.push({
-        path: filename,
-        rule: "oversized-unreviewed-file",
-        origin,
-      });
-      return;
-    }
-    findings.push(
-      ...scanContent(filename, git(["cat-file", "blob", oid])).map((f) => ({
-        ...f,
-        origin,
-      })),
-    );
+    let paths = objects.get(oid);
+    if (!paths) objects.set(oid, paths = new Map());
+    // Content exemptions depend on the path (not just the blob's bytes).
+    if (!paths.has(filename)) paths.set(filename, origin);
   }
+
   for (const record of records) {
     const m = /^(\d+) ([a-f0-9]+) \d\t([\s\S]+)$/.exec(record);
     if (m) inspect(m[1], m[2], m[3], "index");
@@ -246,6 +247,41 @@ export function scanGit(root, { history = true } = {}) {
         );
     }
   }
+  // Batch Git plumbing instead of spawning two processes for every blob.
+  // Bound each content batch so a large history does not require one huge buffer.
+  const ids = [...objects.keys()];
+  const sizes = ids.length ? git(['cat-file', '--batch-check=%(objectname) %(objectsize)'], ids.join('\n') + '\n').toString().trim().split('\n') : [];
+  let batch = [], batchBytes = 0;
+  const flush = () => {
+    if (!batch.length) return;
+    const data = git(['cat-file', '--batch'], batch.map(([oid]) => oid).join('\n') + '\n');
+    let offset = 0;
+    for (const [oid, size] of batch) {
+      const headerEnd = data.indexOf(10, offset);
+      if (headerEnd < 0 || data.toString('ascii', offset, headerEnd) !== `${oid} blob ${size}`)
+        throw Error('Invalid Git batch response; publication blocked.');
+      const end = headerEnd + 1 + size;
+      if (end >= data.length || data[end] !== 10) throw Error('Truncated Git blob; publication blocked.');
+      const content = data.subarray(headerEnd + 1, end);
+      for (const [filename, origin] of objects.get(oid))
+        findings.push(...scanContent(filename, content).map(f => ({ ...f, origin })));
+      offset = end + 1;
+    }
+    batch = []; batchBytes = 0;
+  };
+  for (let i = 0; i < ids.length; i++) {
+    const match = /^([a-f0-9]+) (\d+)$/.exec(sizes[i] ?? '');
+    if (!match || match[1] !== ids[i]) throw Error('Cannot inspect Git object; publication blocked.');
+    const oid = ids[i], size = Number(match[2]);
+    if (size > MAX_BYTES) {
+      for (const [filename, origin] of objects.get(oid))
+        findings.push({ path: filename, rule: 'oversized-unreviewed-file', origin });
+      continue;
+    }
+    if (batchBytes + size > 16 * 1024 * 1024) flush();
+    batch.push([oid, size]); batchBytes += size;
+  }
+  flush();
   return findings;
 }
 

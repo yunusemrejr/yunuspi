@@ -186,11 +186,11 @@ export const PROTECTED_MUTATION_ROOTS: readonly string[] = Object.freeze(
 );
 const discoveryFailure =
   "Unable to determine protected global skill paths. Use a harness maintenance session to check settings.json and skill-directory permissions; no unguarded mutation was allowed.";
-const maintenanceSkill = path.join(
-  HARNESS_ROOT,
-  "agent/skills/harness-self-maintenance/SKILL.md",
-);
-export const SELF_MUTATION_GUIDANCE = `Harness maintenance: inspect ${fs.existsSync(maintenanceSkill) ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
+const maintenanceSkill = [
+  path.join(HARNESS_ROOT, "agent/skills/harness-self-maintenance/SKILL.md"),
+  path.join(homedir(), "skills/harness-self-maintenance/SKILL.md"),
+].find((candidate) => fs.existsSync(candidate));
+export const SELF_MUTATION_GUIDANCE = `Harness maintenance: inspect ${maintenanceSkill ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
 export function selfMutationDenial(
   target: string,
   cwd: string,

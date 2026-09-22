@@ -132,7 +132,7 @@ export function scanPath(name) {
       scoped,
     );
   if (
-    normalized.split("/").includes("node_modules") ||
+    normalized.split("/").some(part => ["node_modules", "__pycache__"].includes(part)) ||
     (runtimeDirs.test(scoped) && !packageOnly) ||
     sensitiveNames.test(normalized)
   )
@@ -149,7 +149,7 @@ export function scanTree(root) {
       // working tree (both are gitignored here), so walking them only makes the
       // pre-push hook fail on every checkout that has run npm install. Tracked
       // copies of those paths are still caught by scanPath()/scanGit().
-      if (entry.isDirectory() && (entry.name === "node_modules" || entry.name === "dist")) {
+      if (entry.isDirectory() && (entry.name === "node_modules" || entry.name === "__pycache__" || /^core\/[^/]+\/dist$/.test(name))) {
         continue;
       }
       if (!prefix && entry.name === ".git") continue;
@@ -174,10 +174,11 @@ export function scanTree(root) {
 }
 
 export function scanGit(root, { history = true } = {}) {
-  const git = (args) =>
+  const git = (args, input) =>
     execFileSync("git", ["-C", root, ...args], {
+      input,
       maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
   const findings = [];
   // Scan the index, including ignored tracked files and staged-but-not-committed blobs.
@@ -185,7 +186,7 @@ export function scanGit(root, { history = true } = {}) {
     .toString()
     .split("\0")
     .filter(Boolean);
-  const visited = new Set();
+  const objects = new Map();
   function inspect(mode, oid, filename, origin) {
     findings.push(...scanPath(filename).map((f) => ({ ...f, origin })));
     if (mode === "120000" || mode === "160000")
@@ -194,24 +195,12 @@ export function scanGit(root, { history = true } = {}) {
         rule: mode === "120000" ? "symlink" : "submodule",
         origin,
       });
-    if (visited.has(oid)) return;
-    visited.add(oid);
-    const size = Number(git(["cat-file", "-s", oid]).toString().trim());
-    if (size > MAX_BYTES) {
-      findings.push({
-        path: filename,
-        rule: "oversized-unreviewed-file",
-        origin,
-      });
-      return;
-    }
-    findings.push(
-      ...scanContent(filename, git(["cat-file", "blob", oid])).map((f) => ({
-        ...f,
-        origin,
-      })),
-    );
+    let paths = objects.get(oid);
+    if (!paths) objects.set(oid, paths = new Map());
+    // Content exemptions depend on the path (not just the blob's bytes).
+    if (!paths.has(filename)) paths.set(filename, origin);
   }
+
   for (const record of records) {
     const m = /^(\d+) ([a-f0-9]+) \d\t([\s\S]+)$/.exec(record);
     if (m) inspect(m[1], m[2], m[3], "index");
@@ -258,6 +247,41 @@ export function scanGit(root, { history = true } = {}) {
         );
     }
   }
+  // Batch Git plumbing instead of spawning two processes for every blob.
+  // Bound each content batch so a large history does not require one huge buffer.
+  const ids = [...objects.keys()];
+  const sizes = ids.length ? git(['cat-file', '--batch-check=%(objectname) %(objectsize)'], ids.join('\n') + '\n').toString().trim().split('\n') : [];
+  let batch = [], batchBytes = 0;
+  const flush = () => {
+    if (!batch.length) return;
+    const data = git(['cat-file', '--batch'], batch.map(([oid]) => oid).join('\n') + '\n');
+    let offset = 0;
+    for (const [oid, size] of batch) {
+      const headerEnd = data.indexOf(10, offset);
+      if (headerEnd < 0 || data.toString('ascii', offset, headerEnd) !== `${oid} blob ${size}`)
+        throw Error('Invalid Git batch response; publication blocked.');
+      const end = headerEnd + 1 + size;
+      if (end >= data.length || data[end] !== 10) throw Error('Truncated Git blob; publication blocked.');
+      const content = data.subarray(headerEnd + 1, end);
+      for (const [filename, origin] of objects.get(oid))
+        findings.push(...scanContent(filename, content).map(f => ({ ...f, origin })));
+      offset = end + 1;
+    }
+    batch = []; batchBytes = 0;
+  };
+  for (let i = 0; i < ids.length; i++) {
+    const match = /^([a-f0-9]+) (\d+)$/.exec(sizes[i] ?? '');
+    if (!match || match[1] !== ids[i]) throw Error('Cannot inspect Git object; publication blocked.');
+    const oid = ids[i], size = Number(match[2]);
+    if (size > MAX_BYTES) {
+      for (const [filename, origin] of objects.get(oid))
+        findings.push({ path: filename, rule: 'oversized-unreviewed-file', origin });
+      continue;
+    }
+    if (batchBytes + size > 16 * 1024 * 1024) flush();
+    batch.push([oid, size]); batchBytes += size;
+  }
+  flush();
   return findings;
 }
 

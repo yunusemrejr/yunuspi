@@ -27,7 +27,7 @@ for (let i = 0; i < args.length; i++) {
 }
 const source = path.join(repo, 'agent');
 const inside = (child, parent) => child === parent || child.startsWith(parent + path.sep);
-function assertTree(directory, skipped = new Set(['node_modules'])) {
+function assertTree(directory, skipped = new Set(['node_modules', '__pycache__'])) {
   const rootInfo = fs.lstatSync(directory);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw Error(`Source root must be a regular directory: ${path.relative(repo, directory)}`);
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -62,7 +62,10 @@ function sourceInventory(directory, core = false) {
   const files = Object.create(null);
   const visit = current => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.name === 'node_modules' || (core && entry.name === 'dist') || (core && current === directory && entry.name === 'build.json')) continue;
+      // __pycache__ is a Python bytecode cache, ignored by .gitignore and
+      // regenerated on demand; tracking it makes every later run look like a
+      // local edit and blocks the update.
+      if (entry.name === 'node_modules' || entry.name === '__pycache__' || (core && entry.name === 'dist') || (core && current === directory && entry.name === 'build.json')) continue;
       const file = path.join(current, entry.name);
       if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) throw Error(`Source inventory contains a link or special file: ${path.relative(directory, file)}`);
       if (entry.isDirectory()) visit(file);
@@ -106,7 +109,7 @@ function carryState(previous, stage, incoming, incomingCore) {
   const visit = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name), relative = path.relative(previous, file);
-      if (excluded(relative)) continue;
+      if (excluded(relative) || entry.name === '__pycache__') continue;
       const stat = fs.lstatSync(file), destination = path.join(stage, relative);
       if (relative.split(path.sep).length === 1 && PRIVATE_STATE_DIRECTORIES.has(relative)) {
         if (!stat.isDirectory()) throw Error(`Private state root must be a directory: ${relative}`);
@@ -144,7 +147,7 @@ if (major < 22 || (major === 22 && minor < 19)) throw Error('Use Node.js 22.19 o
 if (process.platform === 'win32') throw Error('Run this installer inside WSL2 Ubuntu. Native Windows parity is not supported; see docs/PLATFORMS.md.');
 if (!fs.existsSync(path.join(source, 'extensions', 'manifest.json'))) throw Error('Public agent tree missing; use a complete release checkout.');
 assertTree(source);
-assertTree(path.join(repo, 'core'), new Set(['node_modules', 'dist']));
+assertTree(path.join(repo, 'core'), new Set(['node_modules', '__pycache__', 'dist']));
 if (fs.existsSync(path.join(repo, 'docs'))) assertTree(path.join(repo, 'docs'));
 for (const file of ['package.json', 'package-lock.json', 'scripts/build-core.mjs']) {
   const stat = fs.lstatSync(path.join(repo, file));
@@ -191,7 +194,7 @@ let backup, deferredState = [], movedState = [], retainStage = false;
 try {
   const managedFiles = sourceInventory(source);
   const managedCoreFiles = sourceInventory(path.join(repo, 'core'), true);
-  fs.cpSync(source, stage, { recursive: true, force: false, errorOnExist: true, filter: file => !path.relative(source, file).split(path.sep).includes('node_modules') });
+  fs.cpSync(source, stage, { recursive: true, force: false, errorOnExist: true, filter: file => !path.relative(source, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
   fs.chmodSync(stage, 0o700);
   for (const name of ['settings', 'models']) {
     const sample = path.join(repo, 'config', `${name}.example.json`);
@@ -215,7 +218,7 @@ try {
   }
   if (fs.existsSync(path.join(repo, 'docs'))) {
     const docsRoot = path.join(repo, 'docs');
-    fs.cpSync(docsRoot, path.join(runtime, 'docs'), { recursive: true, filter: file => !path.relative(docsRoot, file).split(path.sep).includes('node_modules') });
+    fs.cpSync(docsRoot, path.join(runtime, 'docs'), { recursive: true, filter: file => !path.relative(docsRoot, file).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
   }
   // Keep installed export safeguards and documentation on the same revision
   // as the runtime. Older installations may have an unmanaged public-template
@@ -230,13 +233,13 @@ try {
     const info = fs.lstatSync(file);
     if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory())) throw Error(`Release template must be regular source: ${name}`);
     if (info.isDirectory()) assertTree(file);
-    fs.cpSync(file, path.join(templateTarget, name), { recursive: true, filter: item => !path.relative(file, item).split(path.sep).includes('node_modules') });
+    fs.cpSync(file, path.join(templateTarget, name), { recursive: true, filter: item => !path.relative(file, item).split(path.sep).some(part => ['node_modules', '__pycache__'].includes(part)) });
   }
   for (const name of ['package.json', 'package-lock.json']) {
     const file = path.join(source, 'npm', name);
     if (fs.existsSync(file)) fs.copyFileSync(file, path.join(runtime, 'agent/npm', name));
   }
-  fs.cpSync(path.join(repo, 'core'), path.join(runtime, 'core'), { recursive: true, filter: file => !file.split(path.sep).some(part => ['node_modules', 'dist', '.git'].includes(part)) });
+  fs.cpSync(path.join(repo, 'core'), path.join(runtime, 'core'), { recursive: true, filter: file => !path.relative(path.join(repo, 'core'), file).split(path.sep).some(part => ['node_modules', '__pycache__', 'dist', '.git'].includes(part)) });
   if (deps) {
     const result = spawnSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund', ...(offline ? ['--offline'] : [])], { cwd: runtime, stdio: 'inherit', timeout: 300000 });
     if (result.error || result.status !== 0) throw Error(`Dependency install failed: ${result.error?.message ?? result.status}`);

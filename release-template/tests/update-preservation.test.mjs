@@ -131,3 +131,17 @@ test('missing and path-escaping managed inventories fail closed',t=>{
   valid.managedFiles['../outside']='0'.repeat(64);f.write(f.target,'installation.json',JSON.stringify(valid));
   assert.notEqual(f.update().status,0);assert.equal(f.backups().length,0);
 });
+
+
+test('Python caches never become managed source or block a state-preserving update',t=>{
+  const f=fixture(t,[['extensions/__pycache__/helper.pyc','stale bytecode']]);
+  assert.equal(fs.existsSync(path.join(f.target,'extensions/__pycache__')),false);
+  const receipt=JSON.parse(f.read('installation.json'));
+  assert.equal(Object.keys(receipt.managedFiles).some(file=>file.includes('__pycache__')),false);
+  f.write(f.target,'extensions/__pycache__/helper.pyc','local bytecode');
+  f.write(f.target,'runtime/core/coding-agent/src/__pycache__/helper.pyc','local bytecode');
+  f.write(f.repo,'core/coding-agent/src/__pycache__/helper.pyc','incoming bytecode');
+  const updated=f.update();assert.equal(updated.status,0,updated.stderr);
+  for(const file of ['extensions/__pycache__','runtime/core/coding-agent/src/__pycache__'])
+    assert.equal(fs.existsSync(path.join(f.target,file)),false);
+});

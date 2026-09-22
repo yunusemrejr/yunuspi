@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getEventListeners } from "node:events";
 
 const root = path.resolve(import.meta.dirname, "..");
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-core-robustness-"));
@@ -32,17 +33,17 @@ test("session resource cleanups follow every session and are removable", async (
 	assert.deepEqual(seen, ["s1", "s2"]);
 });
 
-test("a throwing cleanup still lets remaining cleanups run", async () => {
+test("a throwing cleanup still lets remaining cleanups run", async (t) => {
 	const { registerSessionResourceCleanup, cleanupSessionResources } = await importFrom(
 		"core/ai/src/session-resources.js",
 	);
 	let secondRan = false;
-	registerSessionResourceCleanup(() => {
+	t.after(registerSessionResourceCleanup(() => {
 		throw new Error("boom");
-	});
-	registerSessionResourceCleanup(() => {
+	}));
+	t.after(registerSessionResourceCleanup(() => {
 		secondRan = true;
-	});
+	}));
 	assert.throws(
 		() => cleanupSessionResources("s3"),
 		(error) =>
@@ -121,4 +122,110 @@ test("vertex ADC false is not cached permanently across a later credential mount
 		GOOGLE_CLOUD_LOCATION: "us-central1",
 	};
 	assert.equal(getEnvApiKey("google-vertex", env2), "<authenticated>");
+});
+
+test("skill defaults diagnose collisions and ordered external overrides keep their winner", async () => {
+	const { loadSkills } = await importFrom("core/coding-agent/src/core/skills.js");
+	const { CONFIG_DIR_NAME } = await importFrom("core/coding-agent/src/config.js");
+	const cwd = path.join(work, "skill-project");
+	const agentDir = path.join(work, "skill-agent");
+	const external = path.join(work, "skill-external");
+	const user = path.join(agentDir, "skills");
+	const project = path.join(cwd, CONFIG_DIR_NAME, "skills");
+	for (const dir of [user, project, external]) {
+		fs.mkdirSync(path.join(dir, "example"), { recursive: true });
+		fs.writeFileSync(path.join(dir, "example", "SKILL.md"), `---\nname: example\ndescription: Test skill.\n---\n${dir}\n`);
+	}
+	const defaults = loadSkills({ cwd, agentDir, includeDefaults: true, skillPaths: [] });
+	assert.equal(defaults.diagnostics.filter((item) => item.type === "collision").length, 1);
+	assert.equal(defaults.skills[0].filePath, path.join(user, "example", "SKILL.md"));
+	const ordered = loadSkills({ cwd, agentDir, includeDefaults: false, skillPaths: [external, user] });
+	assert.deepEqual(ordered.diagnostics, []);
+	assert.equal(ordered.skills[0].filePath, path.join(external, "example", "SKILL.md"));
+	const projectCollision = loadSkills({ cwd, agentDir, includeDefaults: false, skillPaths: [project, user] });
+	assert.equal(projectCollision.diagnostics.filter((item) => item.type === "collision").length, 1);
+});
+
+test("skill discovery and package scanning visit symlink cycles only once", async () => {
+	const { loadSkillsFromDir } = await importFrom("core/coding-agent/src/core/skills.js");
+	const { DefaultPackageManager } = await importFrom("core/coding-agent/src/core/package-manager.js");
+	const dir = path.join(work, "skill-cycle");
+	fs.mkdirSync(path.join(dir, "example"), { recursive: true });
+	const file = path.join(dir, "example", "SKILL.md");
+	fs.writeFileSync(file, "---\nname: example\ndescription: Test skill.\n---\n");
+	fs.symlinkSync(dir, path.join(dir, "loop"), "dir");
+	assert.deepEqual(loadSkillsFromDir({ dir, source: "user" }).skills.map((skill) => skill.filePath), [file]);
+	assert.deepEqual(DefaultPackageManager.prototype.collectFilesFromPaths([dir], "skills"), [file]);
+});
+
+test("retry without extension hooks uses the built-in retry policy", async () => {
+	const { AgentSession } = await importFrom("core/coding-agent/src/core/agent-session.js");
+	const message = { role: "assistant", content: [], errorMessage: "500 temporary failure" };
+	const session = {
+		settingsManager: { getRetrySettings: () => ({ enabled: true, maxRetries: 1, baseDelayMs: 0 }) },
+		agent: { state: { messages: [message] } },
+		_retryAttempt: 0,
+		_emit() {},
+	};
+	assert.equal(await AgentSession.prototype._prepareRetry.call(session, message), true);
+	assert.equal(session._retryAttempt, 1);
+	assert.equal(session._retryAbortController, undefined);
+});
+
+test("abortable sleep removes listeners after completion and cancellation", async () => {
+	const { sleep } = await importFrom("core/coding-agent/src/utils/sleep.js");
+	const controller = new AbortController();
+	await sleep(0, controller.signal);
+	assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+	const pending = sleep(60_000, controller.signal);
+	controller.abort();
+	await assert.rejects(pending, /Aborted/);
+	assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+});
+
+test("new, forked, and rewritten session transcripts are private under a permissive umask", async () => {
+	const { SessionManager } = await importFrom("core/coding-agent/src/core/session-manager.js");
+	const oldUmask = process.umask(0);
+	try {
+		const dir = path.join(work, "private-sessions");
+		const session = SessionManager.create(work, dir);
+		session.appendMessage({ role: "user", content: "Synthetic test prompt", timestamp: 1 });
+		assert.equal(fs.existsSync(session.getSessionFile()), false);
+		session.appendMessage({ role: "assistant", content: [], timestamp: 2 });
+		session.appendCustomEntry("fixture", { ok: true });
+		assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
+		assert.equal(fs.statSync(session.getSessionFile()).mode & 0o777, 0o600);
+		assert.equal(fs.readFileSync(session.getSessionFile(), "utf8").trim().split("\n").length, 4);
+		const fork = SessionManager.forkFrom(session.getSessionFile(), work, path.join(work, "private-forks"));
+		assert.equal(fs.statSync(fork.getSessionFile()).mode & 0o777, 0o600);
+		fs.unlinkSync(session.getSessionFile());
+		session._rewriteFile();
+		assert.equal(fs.statSync(session.getSessionFile()).mode & 0o777, 0o600);
+	} finally {
+		process.umask(oldUmask);
+	}
+});
+
+test("changing HTTP settings gracefully closes only the previously owned dispatcher", async () => {
+	const undici = await import("undici");
+	const { configureHttpDispatcher } = await importFrom("core/coding-agent/src/core/http-dispatcher.js");
+	const original = undici.getGlobalDispatcher();
+	let first;
+	let second;
+	try {
+		configureHttpDispatcher(1000);
+		first = undici.getGlobalDispatcher();
+		let closed = 0;
+		const close = first.close.bind(first);
+		first.close = (...args) => { if (args.length === 0) closed++; return close(...args); };
+		configureHttpDispatcher(2000);
+		second = undici.getGlobalDispatcher();
+		assert.notEqual(first, second);
+		assert.equal(closed, 1);
+		assert.equal(original.closed, false);
+	} finally {
+		undici.setGlobalDispatcher(original);
+		await first?.close();
+		await second?.close();
+	}
 });

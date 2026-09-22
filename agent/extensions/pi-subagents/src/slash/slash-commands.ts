@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { keyText, type ExtensionAPI, type ExtensionContext } from "@yunuspi/coding-agent";
 import { Key, matchesKey, truncateToWidth, type Component, type KeyId, type TUI } from "@yunuspi/tui";
-import { discoverAgentSnapshot, discoverAgents, findBlockingAgentDiagnostic, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryDiagnostic, type AgentScope, type UnknownAgentDiagnosticContext } from "../agents/agents.ts";
+import { discoverAgentSnapshot, discoverAgents, findBlockingAgentDiagnostic, findShadowedAgentDiagnostic, formatBlockingAgentError, formatShadowedAgentWarning, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryDiagnostic, type AgentScope, type UnknownAgentDiagnosticContext } from "../agents/agents.ts";
 import { listRuntimeAgentConfigs, mergeRuntimeAgents } from "../agents/runtime-agent-registry.ts";
 import { resolveExistingReadPaths } from "../shared/settings.ts";
 import {
@@ -892,9 +892,11 @@ export function registerSlashCommands(
 				: resolvedAgent.agent;
 			const diagnostic = findBlockingAgentDiagnostic(agentName, candidates, discovered.agentDiagnostics);
 			if (diagnostic || resolvedAgent.error || !resolvedAgent.agent) {
-				ctx.ui.notify(diagnostic ? `Agent '${agentName}' has invalid configuration: ${diagnostic.error}` : resolvedAgent.error ?? formatUnknownAgentError(agentName, discovered.unknownAgentDiagnosticContext), "error");
+				ctx.ui.notify(diagnostic ? formatBlockingAgentError(agentName, diagnostic) : resolvedAgent.error ?? formatUnknownAgentError(agentName, discovered.unknownAgentDiagnosticContext), "error");
 				return;
 			}
+			const shadowed = findShadowedAgentDiagnostic(agentName, candidates, discovered.agentDiagnostics);
+			if (shadowed) ctx.ui.notify(formatShadowedAgentWarning(agentName, resolvedAgent.agent, shadowed), "warning");
 
 			let finalTask = task;
 			if (inline.reads && Array.isArray(inline.reads) && inline.reads.length > 0) {

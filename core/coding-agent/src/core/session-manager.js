@@ -251,7 +251,7 @@ function getDefaultSessionDirPath(cwd, agentDir = getDefaultAgentDir()) {
 export function getDefaultSessionDir(cwd, agentDir = getDefaultAgentDir()) {
     const sessionDir = getDefaultSessionDirPath(cwd, agentDir);
     if (!existsSync(sessionDir)) {
-        mkdirSync(sessionDir, { recursive: true });
+        mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
     }
     return sessionDir;
 }
@@ -603,7 +603,7 @@ export class SessionManager {
         this.sessionDir = normalizePath(sessionDir);
         this.persist = persist;
         if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
-            mkdirSync(this.sessionDir, { recursive: true });
+            mkdirSync(this.sessionDir, { recursive: true, mode: 0o700 });
         }
         if (sessionFile) {
             this._setSessionFile(sessionFile, preloadedFileEntries);
@@ -711,7 +711,7 @@ export class SessionManager {
     _rewriteFile() {
         if (!this.persist || !this.sessionFile)
             return;
-        const fd = openSync(this.sessionFile, "w");
+        const fd = openSync(this.sessionFile, "w", 0o600);
         try {
             for (const entry of this.fileEntries) {
                 writeFileSync(fd, `${JSON.stringify(entry)}\n`);
@@ -742,32 +742,23 @@ export class SessionManager {
     _persist(entry) {
         if (!this.persist || !this.sessionFile)
             return;
-        const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-        if (!hasAssistant) {
-            if (this.flushed) {
-                appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
-            }
-            else {
-                // Mark as not flushed so when assistant arrives, all entries get written
-                this.flushed = false;
-            }
+        if (this.flushed) {
+            appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
             return;
         }
-        if (!this.flushed) {
-            const fd = openSync(this.sessionFile, "wx");
-            try {
-                for (const e of this.fileEntries) {
-                    writeFileSync(fd, `${JSON.stringify(e)}\n`);
-                }
+        const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
+        if (!hasAssistant)
+            return;
+        const fd = openSync(this.sessionFile, "wx", 0o600);
+        try {
+            for (const e of this.fileEntries) {
+                writeFileSync(fd, `${JSON.stringify(e)}\n`);
             }
-            finally {
-                closeSync(fd);
-            }
-            this.flushed = true;
         }
-        else {
-            appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
+        finally {
+            closeSync(fd);
         }
+        this.flushed = true;
     }
     _appendEntry(entry) {
         this.fileEntries.push(entry);
@@ -1278,7 +1269,7 @@ export class SessionManager {
         }
         const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
         if (!existsSync(dir)) {
-            mkdirSync(dir, { recursive: true });
+            mkdirSync(dir, { recursive: true, mode: 0o700 });
         }
         // Create new session file with new ID but forked content
         if (options?.id !== undefined) {
@@ -1297,7 +1288,7 @@ export class SessionManager {
             cwd: resolvedTargetCwd,
             parentSession: resolvedSourcePath,
         };
-        writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
+        writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx", mode: 0o600 });
         // Copy all non-header entries from source
         for (const entry of sourceEntries) {
             if (entry.type !== "session") {

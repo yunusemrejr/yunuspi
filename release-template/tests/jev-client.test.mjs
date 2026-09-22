@@ -17,6 +17,7 @@ assert.ok(agent, "agent tree with jev-client.ts is present");
 process.env.PI_CODING_AGENT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jev-test-"));
 process.env.OPENROUTER_API_KEY = "sk-or-test";
 delete process.env.PI_JEV;
+delete process.env.PI_OFFLINE;
 
 const jev = await import(pathToFileURL(path.join(agent, "extensions/lib/jev-client.ts")));
 
@@ -201,6 +202,25 @@ test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {
   const controller = new AbortController();
   controller.abort();
   assert.equal((await jev.askJev("s", "hello world", { q: { type: "noul", instructions: "x" } }, { pi, signal: controller.signal })).skipped, "aborted");
+});
+
+test('offline mode prevents remote advisories and scheduled recovery probes', async () => {
+  let fetches = 0;
+  const { pi, timers } = harness(async () => { fetches++; throw Error('offline fixture'); });
+  const ask = () => jev.askJev('offline', 'substantive request', { q: { type: 'noul', instructions: 'Assess' } }, { pi });
+  await ask();
+  const before = fetches;
+  try {
+    for (const value of ['1', 'true', 'yes']) {
+      process.env.PI_OFFLINE = value;
+      assert.equal((await ask()).skipped, 'disabled');
+      assert.equal(jev.jevEnabled({ PI_OFFLINE: value, PI_JEV: 'on' }), false);
+    }
+    await timers[0].fn();
+    assert.equal(fetches, before, 'offline mode sends neither a request nor a background probe');
+  } finally {
+    delete process.env.PI_OFFLINE;
+  }
 });
 
 test('concurrent identical advisory calls pay once and cached answers cannot be mutated', async () => {

@@ -200,10 +200,14 @@ function collectFiles(dir, filePattern, skipNodeModules = true, ignoreMatcher, r
     }
     return files;
 }
-function collectSkillEntries(dir, mode, ignoreMatcher, rootDir) {
+function collectSkillEntries(dir, mode, ignoreMatcher, rootDir, visited = new Set()) {
     const entries = [];
     if (!existsSync(dir))
         return entries;
+    const realDir = canonicalizePath(dir);
+    if (visited.has(realDir))
+        return entries;
+    visited.add(realDir);
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
     addIgnoreRules(ig, dir, root);
@@ -260,7 +264,7 @@ function collectSkillEntries(dir, mode, ignoreMatcher, rootDir) {
                 continue;
             if (ig.ignores(`${relPath}/`))
                 continue;
-            entries.push(...collectSkillEntries(fullPath, mode, ig, root));
+            entries.push(...collectSkillEntries(fullPath, mode, ig, root, visited));
         }
     }
     catch {

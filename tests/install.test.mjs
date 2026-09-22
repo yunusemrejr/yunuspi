@@ -27,9 +27,10 @@ const env={...process.env,PATH:bin+path.delimiter+process.env.PATH};
 const run=(...args)=>spawnSync(process.execPath,[script,'--target',target,'--skip-needle',...args],{encoding:'utf8',env});
 try {
 assert.equal(run().status,0);assert(!fs.existsSync(target));
-const outsideDocsDependency=path.join(root,'outside-docs-dependency');fs.mkdirSync(outsideDocsDependency);fs.writeFileSync(path.join(outsideDocsDependency,'private.txt'),'private fixture');fs.symlinkSync(outsideDocsDependency,path.join(repo,'docs/node_modules'));
+const outsideDocsDependency=path.join(root,'outside-docs-dependency');fs.mkdirSync(outsideDocsDependency);fs.writeFileSync(path.join(outsideDocsDependency,'private.txt'),'private fixture');fs.symlinkSync(outsideDocsDependency,path.join(repo,'docs/node_modules'));fs.symlinkSync(outsideDocsDependency,path.join(repo,'docs/__pycache__'));
 assert.equal(run('--apply').status,0);assert.equal(fs.readFileSync(path.join(target,'test.txt'),'utf8'),'public');
-assert.equal(fs.existsSync(path.join(target,'runtime/docs/node_modules')),false);
+for(const docs of ['runtime/docs','runtime/release-template/docs'])
+  for(const cache of ['node_modules','__pycache__'])assert.equal(fs.existsSync(path.join(target,docs,cache)),false);
 assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target,'settings.json'))),{});
 assert.equal(fs.statSync(path.join(target,'models.json')).mode & 0o777,0o600);
 for (const dir of ['extensions','npm']) assert.equal(fs.readlinkSync(path.join(target,dir,'node_modules')),'../runtime/node_modules');

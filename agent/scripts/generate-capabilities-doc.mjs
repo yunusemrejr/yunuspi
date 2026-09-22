@@ -256,12 +256,9 @@ function manifestInventory(agentRoot, manifest) {
 			exists: fs.existsSync(path.join(agentRoot, key.replace(/^agent\//, ""))),
 		}))
 		.sort((a, b) => a.path.localeCompare(b.path));
-	const patches = []
-		.map((file) => ({
-			path: canonicalAgentPath(agentRoot, file),
-			kind: path.extname(file).slice(1),
-		}))
-		.sort((a, b) => a.path.localeCompare(b.path));
+	// Legacy transform patches were deleted with the owned-core fold (T3);
+	// the inventory keeps the field for consumers and reports it empty.
+	const patches = [];
 	return {
 		extensions: list(manifest.extensions, "extensions"),
 		libraries: list(manifest.lib, "extensions/lib"),

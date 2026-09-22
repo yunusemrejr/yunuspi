@@ -2453,7 +2453,7 @@
       {
         "name": "subagent-cost",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 914
+        "line": 916
       },
       {
         "name": "subagents",
@@ -2463,67 +2463,67 @@
       {
         "name": "subagents-check-profile",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1278
+        "line": 1280
       },
       {
         "name": "subagents-detach",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 992
+        "line": 994
       },
       {
         "name": "subagents-doctor",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 921
+        "line": 923
       },
       {
         "name": "subagents-fleet",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 958
+        "line": 960
       },
       {
         "name": "subagents-generate-profiles",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1240
+        "line": 1242
       },
       {
         "name": "subagents-inspect-rpc",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 928
+        "line": 930
       },
       {
         "name": "subagents-load-profile",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1153
+        "line": 1155
       },
       {
         "name": "subagents-models",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1123
+        "line": 1125
       },
       {
         "name": "subagents-profiles",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1141
+        "line": 1143
       },
       {
         "name": "subagents-refine",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 945
+        "line": 947
       },
       {
         "name": "subagents-refresh-provider-models",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1206
+        "line": 1208
       },
       {
         "name": "subagents-steer",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1052
+        "line": 1054
       },
       {
         "name": "subagents-stop",
         "source": "agent/extensions/pi-subagents/src/slash/slash-commands.ts",
-        "line": 1004
+        "line": 1006
       },
       {
         "name": "subagents-watchdog",

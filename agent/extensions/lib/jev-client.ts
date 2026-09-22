@@ -38,7 +38,8 @@ export const JEV_REMOTE_PROVIDER = "OpenRouter";
 export const JEV_INPUT_POLICY = `When Jev is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off (or PI_JEV=0) to disable remote Jev calls.`;
 
 export function jevEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  return !['off', '0'].includes((env.PI_JEV ?? 'on').toLowerCase());
+  return !['1', 'true', 'yes'].includes((env.PI_OFFLINE ?? '').toLowerCase())
+    && !['off', '0'].includes((env.PI_JEV ?? 'on').toLowerCase());
 }
 
 const agentDir = (): string =>

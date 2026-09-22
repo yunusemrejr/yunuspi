@@ -7,10 +7,14 @@ export function sleep(ms, signal) {
             reject(new Error("Aborted"));
             return;
         }
-        const timeout = setTimeout(resolve, ms);
-        signal?.addEventListener("abort", () => {
+        const onAbort = () => {
             clearTimeout(timeout);
             reject(new Error("Aborted"));
-        });
+        };
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener("abort", onAbort, { once: true });
     });
 }

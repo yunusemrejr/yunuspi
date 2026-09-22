@@ -208,6 +208,25 @@ test("unresolved chain entries diagnose the true gate", () => {
 	}
 });
 
+test("explicit provider-qualified models resolve across providers", () => {
+	const live = [
+		model("z-ai/glm-5.3-flash", "openrouter", { cost: undefined }),
+		model("zai-org/GLM-5.3-Flash", "together", { baseUrl: "https://api.together.xyz/v1", cost: undefined }),
+	];
+	const parent = { provider: "openrouter", id: "z-ai/glm-5.3-flash" };
+	// A qualified explicit request names its provider; the caller's preferred
+	// provider must not veto it.
+	assert.equal(
+		fallback.resolveEffectiveSubagentModel("together/zai-org/GLM-5.3-Flash:max", undefined, parent, live, "openrouter", { source: "explicit" }),
+		"together/zai-org/GLM-5.3-Flash:max",
+	);
+	// Bare ids keep the preferred-provider hard constraint.
+	assert.throws(
+		() => fallback.resolveEffectiveSubagentModel("zai-org/GLM-5.3-Flash", undefined, parent, live, "openrouter", { source: "explicit" }),
+		/Unknown subagent model/,
+	);
+});
+
 test("vendor-paused ids surface the vendor reason in chain diagnostics", () => {
 	const live = [model("nemotron-3-5-lightning-30b", "runinfra", { baseUrl: "https://api.runinfra.ai/v1" })];
 	const warnings = [];

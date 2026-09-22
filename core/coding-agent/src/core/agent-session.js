@@ -2323,7 +2323,7 @@ export class AgentSession {
     async _prepareRetry(message) {
  /* PI_AUTONOMOUS_RECOVERY_V4 */
  const _piRecoveryChildAllowed=(()=>{if(process.env.PI_SUBAGENT_CHILD!=="1")return true;try{const encoded=process.env.PI_SUBAGENT_RECOVERY_ROUTES??"";if(encoded.length>8192)return false;const routes=JSON.parse(encoded||"[]");return Array.isArray(routes)&&routes.length>=2&&routes.length<=8&&new Set(routes).size===routes.length&&routes.every(route=>typeof route==="string"&&route.length<=512&&route.includes("/")&&!/[\s\x00-\x1f]/.test(route));}catch{return false;}})();
- if(_piRecoveryChildAllowed && this.settingsManager.getRetrySettings().enabled && this._extensionRunner.hasHandlers("pi_provider_recovery")) {
+ if(_piRecoveryChildAllowed && this.settingsManager.getRetrySettings().enabled && this._extensionRunner?.hasHandlers("pi_provider_recovery")) {
    if(message.content?.some(b=>b.type==="toolCall")) return false;
    const controller=new AbortController(); this._retryAbortController=controller;
    const event={type:"pi_provider_recovery",message:message,signal:controller.signal,decision:undefined};

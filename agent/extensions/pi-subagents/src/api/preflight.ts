@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverAgentSnapshot, findBlockingAgentDiagnostic, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryAllResult, type AgentScope, type AgentSource } from "../agents/agents.ts";
+import { discoverAgentSnapshot, findBlockingAgentDiagnostic, findShadowedAgentDiagnostic, formatBlockingAgentError, formatShadowedAgentWarning, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryAllResult, type AgentScope, type AgentSource } from "../agents/agents.ts";
 import { resolveExecutionAgentScope } from "../agents/agent-scope.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
@@ -266,7 +266,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		: resolvedAgent.agent;
 	const invalidAgent = findBlockingAgentDiagnostic(input.agent, ambiguousCandidates, discovered.agentDiagnostics);
 	if (invalidAgent) {
-		const message = `Agent '${input.agent}' has invalid configuration: ${invalidAgent.error}`;
+		const message = formatBlockingAgentError(input.agent, invalidAgent);
 		return { ok: false, code: "missing_agent", message, diagnostics: [{ code: "missing_agent", severity: "error", message }] };
 	}
 	if (resolvedAgent.error) {
@@ -276,6 +276,8 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		return { ok: false, code: "missing_agent", message: formatUnknownAgentError(input.agent, unknownAgentDiagnosticContext(discovered)), diagnostics };
 	}
 	const agent = resolvedAgent.agent;
+	const shadowed = findShadowedAgentDiagnostic(input.agent, ambiguousCandidates, discovered.agentDiagnostics);
+	if (shadowed) diagnostics.push({ code: "shadowed_agent_definition", severity: "warning", message: formatShadowedAgentWarning(input.agent, agent, shadowed) });
 	let extensionBindings: ExtensionBindings | undefined;
 	try {
 		extensionBindings = normalizeExtensionBindings(input.extensionBindings)?.value;

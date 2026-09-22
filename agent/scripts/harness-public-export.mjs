@@ -243,7 +243,7 @@ try {
    fs.rmSync(temp, { recursive: true });
   }
  }
- for (const dir of ["lib", "compatibility/legacy-transforms"])
+ for (const dir of ["lib"])
   if (fs.existsSync(path.join(source, "scripts", dir)))
    copyTree(path.join(source, "scripts", dir), "agent/scripts/" + dir);
  // The updater's synthetic compatibility gate is release code. Historical

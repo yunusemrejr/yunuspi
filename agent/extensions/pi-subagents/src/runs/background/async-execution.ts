@@ -572,6 +572,8 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
 			env: {
 				...omitExtensionBindingsEnv(process.env),
+				// The isolated runner can wait for durable writes without freezing the parent UI.
+				PI_SUBAGENT_FS_RETRY_MAX_TOTAL_MS: process.env.PI_SUBAGENT_FS_RETRY_MAX_TOTAL_MS?.trim() || "7885",
                 [OPERATIONAL_ECONOMY_ROUTES_ENV]: operationalAdmissionRoutes(),
 				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
 			},

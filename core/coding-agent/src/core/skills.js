@@ -122,12 +122,16 @@ export function loadSkillsFromDir(options) {
     const { dir, source } = options;
     return loadSkillsFromDirInternal(dir, source, true);
 }
-function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher, rootDir) {
+function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher, rootDir, visited = new Set()) {
     const skills = [];
     const diagnostics = [];
     if (!existsSync(dir)) {
         return { skills, diagnostics };
     }
+    const realDir = canonicalizePath(dir);
+    if (visited.has(realDir))
+        return { skills, diagnostics };
+    visited.add(realDir);
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
     addIgnoreRules(ig, dir, root);
@@ -187,7 +191,7 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
                 continue;
             }
             if (isDirectory) {
-                const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root);
+                const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root, visited);
                 skills.push(...subResult.skills);
                 diagnostics.push(...subResult.diagnostics);
                 continue;
@@ -351,6 +355,9 @@ export function loadSkills(options) {
     // Resolve agentDir - if not provided, use default from config
     const resolvedCwd = resolvePath(options.cwd);
     const resolvedAgentDir = resolvePath(agentDir ?? getAgentDir());
+    const userSkillsDir = join(resolvedAgentDir, "skills");
+    const projectSkillsDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "skills");
+    const isUnderPath = (target, root) => target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
     const skillMap = new Map();
     const realPathSet = new Set();
     const allDiagnostics = [];
@@ -366,9 +373,14 @@ export function loadSkills(options) {
             }
             const existing = skillMap.get(skill.name);
             if (existing) {
+                // Ordered external paths may override the deployed catalogue.
+                // Only silence that already-resolved direction; first path still wins.
+                const resolvedMirror = isUnderPath(skill.filePath, userSkillsDir)
+                    && !isUnderPath(existing.filePath, resolvedAgentDir)
+                    && !isUnderPath(existing.filePath, projectSkillsDir);
                 // Same name + byte-identical skill directories is a redundant
                 // load path (e.g. a mirrored skills dir), not a conflict.
-                if (!sameSkillContent(existing.filePath, skill.filePath)) {
+                if (!resolvedMirror && !sameSkillContent(existing.filePath, skill.filePath)) {
                     collisionDiagnostics.push({
                         type: "collision",
                         message: `name "${skill.name}" collision`,
@@ -392,16 +404,6 @@ export function loadSkills(options) {
         addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
         addSkills(loadSkillsFromDirInternal(resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"), "project", true));
     }
-    const userSkillsDir = join(resolvedAgentDir, "skills");
-    const projectSkillsDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "skills");
-    const isUnderPath = (target, root) => {
-        const normalizedRoot = resolve(root);
-        if (target === normalizedRoot) {
-            return true;
-        }
-        const prefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
-        return target.startsWith(prefix);
-    };
     const getSource = (resolvedPath) => {
         if (!includeDefaults) {
             if (isUnderPath(resolvedPath, userSkillsDir))

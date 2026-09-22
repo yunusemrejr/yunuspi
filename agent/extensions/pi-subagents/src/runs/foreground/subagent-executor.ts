@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@yunuspi/agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
-import { discoverAgents, findBlockingAgentDiagnostic, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryDiagnostic, type AgentScope, type UnknownAgentDiagnosticContext } from "../../agents/agents.ts";
+import { discoverAgents, findBlockingAgentDiagnostic, findShadowedAgentDiagnostic, formatBlockingAgentError, formatShadowedAgentWarning, formatUnknownAgentError, resolveAgentName, unknownAgentDiagnosticContext, type AgentConfig, type AgentDiscoveryDiagnostic, type AgentScope, type UnknownAgentDiagnosticContext } from "../../agents/agents.ts";
 import { getArtifactsDir, getProjectArtifactPackagingWarning, getProjectSubagentsDir } from "../../shared/artifacts.ts";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { createCapacityResilientJsonWriter } from "../../shared/capacity-resilient-json.ts";
@@ -2331,13 +2331,20 @@ function diagnosticContextFromDiscovery(
 	return unknownAgentDiagnosticContext(discoverAgents(path.resolve(cwd), scope));
 }
 
+const warnedShadowedAgentFiles = new Set<string>();
+
 function canonicalizeAgentName(name: string, agents: AgentConfig[], diagnostics: AgentDiscoveryDiagnostic[] | undefined, context: UnknownAgentDiagnosticContext): { name?: string; error?: string } {
 	const resolved = resolveAgentName(name, agents);
 	const candidates = resolved.error ? agents.filter((agent) => resolveAgentName(name, [agent]).agent) : resolved.agent;
 	const diagnostic = findBlockingAgentDiagnostic(name, candidates, diagnostics);
-	if (diagnostic) return { error: `Agent '${name}' has invalid configuration: ${diagnostic.error}` };
+	if (diagnostic) return { error: formatBlockingAgentError(name, diagnostic) };
 	if (resolved.error) return { error: resolved.error };
 	if (!resolved.agent) return { error: formatUnknownAgentError(name, context) };
+	const shadowed = findShadowedAgentDiagnostic(name, candidates, diagnostics);
+	if (shadowed && !warnedShadowedAgentFiles.has(shadowed.filePath)) {
+		warnedShadowedAgentFiles.add(shadowed.filePath);
+		console.warn(`[pi-subagents] ${formatShadowedAgentWarning(name, resolved.agent, shadowed)}`);
+	}
 	return { name: resolved.agent.name };
 }
 

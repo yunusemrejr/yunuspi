@@ -59,3 +59,34 @@ test('tracked ignored files and deleted historical credentials cannot bypass the
     assert.deepEqual(scanTree(dir), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('identical blobs cannot reuse a binary exemption at an unreviewed path', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'public-binary-path-'));
+  const git = args => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
+  try {
+    git(['init', '-q']);
+    const allowed = 'docs/assets/graph-demo.png';
+    fs.mkdirSync(path.join(dir, 'docs/assets'), { recursive: true });
+    const bytes = fs.readFileSync(new URL('../' + allowed, import.meta.url));
+    fs.writeFileSync(path.join(dir, allowed), bytes);
+    fs.writeFileSync(path.join(dir, 'unreviewed.png'), bytes);
+    git(['add', '.']);
+    const findings = scanGit(dir, { history: false });
+    assert.equal(findings.some(f => f.path === allowed), false);
+    assert.ok(findings.some(f => f.path === 'unreviewed.png' && f.rule === 'binary-unreviewed-file'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('generated caches are skipped but shipped dist source is still scanned', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'public-cache-'));
+  try {
+    for (const folder of ['node_modules/pkg', 'core/ai/dist', 'agent/scripts/__pycache__', 'agent/extensions/pi-lens/dist']) {
+      fs.mkdirSync(path.join(dir, folder), { recursive: true });
+      fs.writeFileSync(path.join(dir, folder, 'fixture.js'), JSON.stringify({ apiKey: canary }));
+    }
+    assert.deepEqual(scanTree(dir).map(f => f.path), ['agent/extensions/pi-lens/dist/fixture.js']);
+    assert.ok(scanPath('agent/scripts/__pycache__/fixture.pyc').length);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

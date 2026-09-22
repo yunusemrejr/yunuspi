@@ -257,21 +257,50 @@ function agentDefinitionPriority(definition: Pick<AgentConfig | AgentDiscoveryDi
 		+ (definition.discoveryPriority ?? 0);
 }
 
-export function findBlockingAgentDiagnostic(name: string, agent: AgentConfig | readonly AgentConfig[] | undefined, diagnostics: AgentDiscoveryDiagnostic[] | undefined): AgentDiscoveryDiagnostic | undefined {
-	const normalizedName = name.trim();
-	const agents = Array.isArray(agent) ? agent : agent ? [agent] : [];
+function matchAgentDiagnostic(normalizedName: string, agents: readonly AgentConfig[], diagnostics: AgentDiscoveryDiagnostic[] | undefined): AgentDiscoveryDiagnostic | undefined {
+	const names = new Set([normalizedName, ...agents.map((agent) => agent.name)]);
 	let match: AgentDiscoveryDiagnostic | undefined;
 	for (const diagnostic of diagnostics ?? []) {
-		if ((diagnostic.runtimeName === normalizedName
-			|| (diagnostic.name === normalizedName && (!diagnostic.packageSpecified
+		if (((diagnostic.runtimeName !== undefined && names.has(diagnostic.runtimeName))
+			|| (diagnostic.name !== undefined && names.has(diagnostic.name) && (!diagnostic.packageSpecified
 				|| diagnostic.runtimeName === undefined
 				|| agents.some((agent) => agent.name === diagnostic.runtimeName && agent.localName === diagnostic.name))))
 			&& (!match || agentDefinitionPriority(diagnostic) > agentDefinitionPriority(match))) {
 			match = diagnostic;
 		}
 	}
-	const highestPriority = Math.max(...agents.map(agentDefinitionPriority), -Infinity);
-	return !agents.length || (match && agentDefinitionPriority(match) > highestPriority) ? match : undefined;
+	return match;
+}
+
+function asAgentArray(agent: AgentConfig | readonly AgentConfig[] | undefined): readonly AgentConfig[] {
+	return Array.isArray(agent) ? agent : agent ? [agent] : [];
+}
+
+export function findBlockingAgentDiagnostic(name: string, agent: AgentConfig | readonly AgentConfig[] | undefined, diagnostics: AgentDiscoveryDiagnostic[] | undefined): AgentDiscoveryDiagnostic | undefined {
+	const agents = asAgentArray(agent);
+	if (agents.length) return undefined;
+	return matchAgentDiagnostic(name.trim(), agents, diagnostics);
+}
+
+/**
+ * A definition that failed validation while a valid definition (e.g. builtin)
+ * still resolves the name or alias. Callers use the valid
+ * definition and surface this as a warning, never silently: shared user
+ * directories can hold other harnesses' files, and a foreign or broken
+ * override must not brick the shipped default.
+ */
+export function findShadowedAgentDiagnostic(name: string, agent: AgentConfig | readonly AgentConfig[] | undefined, diagnostics: AgentDiscoveryDiagnostic[] | undefined): AgentDiscoveryDiagnostic | undefined {
+	const agents = asAgentArray(agent);
+	if (!agents.length) return undefined;
+	return matchAgentDiagnostic(name.trim(), agents, diagnostics);
+}
+
+export function formatBlockingAgentError(name: string, diagnostic: AgentDiscoveryDiagnostic): string {
+	return `Agent '${name}' has invalid configuration: ${diagnostic.error} (${diagnostic.filePath})`;
+}
+
+export function formatShadowedAgentWarning(name: string, resolved: AgentConfig, diagnostic: AgentDiscoveryDiagnostic): string {
+	return `Warning: ignoring invalid ${diagnostic.source} agent definition for '${name}' at ${diagnostic.filePath} (${diagnostic.error}); using ${resolved.source} '${resolved.name}' instead.`;
 }
 
 export type AgentDefinitionDirectoryState = "absent" | "empty" | "candidates" | "unreadable" | "not-directory";
