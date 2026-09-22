@@ -41,7 +41,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { platform } from "node:os";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getActiveGoogleEmail, getGeminiWebAvailabilityDiagnostic, getGeminiWebAvailabilityDiagnosticDetails, isGeminiWebAvailable } from "./gemini-web.ts";
 import { isBrowserCookieAccessAllowed } from "./gemini-web-config.ts";
@@ -177,7 +177,10 @@ function saveConfig(updates: Partial<WebSearchConfig>): void {
 	Object.assign(config, updates);
 	const dir = getWebSearchConfigDir();
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(WEB_SEARCH_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+	// Holds provider keys and any proxy URL credentials. mode applies only on
+	// creation, so existing installs are tightened explicitly.
+	writeFileSync(WEB_SEARCH_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+	try { chmodSync(WEB_SEARCH_CONFIG_PATH, 0o600); } catch { }
 }
 
 type ToolNames = {

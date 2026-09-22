@@ -18,7 +18,9 @@ function loadAuth() {
     }
 }
 function saveAuth(auth) {
-    writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), "utf-8");
+    // AUTH_FILE resolves against the current directory and holds long-lived
+    // access and refresh tokens, so it must never be created group/world-readable.
+    writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), { encoding: "utf-8", mode: 0o600 });
 }
 async function answerPrompt(rl, authPrompt) {
     if (authPrompt.type === "select") {

@@ -7,6 +7,7 @@ import { pathExists, resolveToCwd } from "./path-utils.js";
 import { findRenderers } from "./renderers/find.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
+import { spillToolOutput } from "./spill-output.js";
 /** Relativize a find result against the search root and normalize it to posix separators. */
 export function relativizeFindResultPath(resultPath, searchPath, pathModule = path) {
     const hadTrailingSeparator = resultPath.endsWith(pathModule.sep) || (pathModule.sep === "\\" && resultPath.endsWith("/"));
@@ -104,7 +105,7 @@ export function createFindToolDefinition(cwd, options) {
                             }
                             if (truncation.truncated) {
                                 // Full raw output stays retrievable instead of vanishing at the byte cap.
-                                const fullOutputPath = __piSpillOutput("pi-find", rawOutput);
+                                const fullOutputPath = spillToolOutput("pi-find", rawOutput);
                                 details.truncation = truncation;
                                 details.fullOutputPath = fullOutputPath;
                                 notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached. Full output: ${fullOutputPath}`);
@@ -223,7 +224,7 @@ export function createFindToolDefinition(cwd, options) {
                             }
                             if (truncation.truncated) {
                                 // Full raw output stays retrievable instead of vanishing at the byte cap.
-                                const fullOutputPath = __piSpillOutput("pi-find", rawOutput);
+                                const fullOutputPath = spillToolOutput("pi-find", rawOutput);
                                 details.truncation = truncation;
                                 details.fullOutputPath = fullOutputPath;
                                 notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached. Full output: ${fullOutputPath}`);
@@ -253,13 +254,4 @@ export function createFindToolDefinition(cwd, options) {
 }
 export function createFindTool(cwd, options) {
     return wrapToolDefinition(createFindToolDefinition(cwd, options));
-}
-function __piSpillOutput(prefix, text) { /* PI_SEARCH_OUTPUT_SPILL */
-  const { randomBytes } = process.getBuiltinModule("node:crypto");
-  const { writeFileSync } = process.getBuiltinModule("node:fs");
-  const { tmpdir } = process.getBuiltinModule("node:os");
-  const { join } = process.getBuiltinModule("node:path");
-  const file = join(tmpdir(), `${prefix}-${randomBytes(8).toString("hex")}.log`);
-  writeFileSync(file, text);
-  return file;
 }

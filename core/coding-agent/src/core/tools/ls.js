@@ -5,6 +5,7 @@ import { pathExists, resolveToCwd } from "./path-utils.js";
 import { lsRenderers } from "./renderers/ls.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
+import { spillToolOutput } from "./spill-output.js";
 const lsSchema = Type.Object({
     path: Type.Optional(Type.String({ description: "Directory to list (default: current directory)" })),
     limit: Type.Optional(Type.Number({ description: "Maximum number of entries to return (default: 500)" })),
@@ -100,7 +101,7 @@ export function createLsToolDefinition(cwd, options) {
                         }
                         if (truncation.truncated) {
                             // Full raw output stays retrievable instead of vanishing at the byte cap.
-                            const fullOutputPath = __piSpillOutput("pi-ls", rawOutput);
+                            const fullOutputPath = spillToolOutput("pi-ls", rawOutput);
                             details.truncation = truncation;
                             details.fullOutputPath = fullOutputPath;
                             notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached. Full output: ${fullOutputPath}`);
@@ -125,13 +126,4 @@ export function createLsToolDefinition(cwd, options) {
 }
 export function createLsTool(cwd, options) {
     return wrapToolDefinition(createLsToolDefinition(cwd, options));
-}
-function __piSpillOutput(prefix, text) { /* PI_SEARCH_OUTPUT_SPILL */
-  const { randomBytes } = process.getBuiltinModule("node:crypto");
-  const { writeFileSync } = process.getBuiltinModule("node:fs");
-  const { tmpdir } = process.getBuiltinModule("node:os");
-  const { join } = process.getBuiltinModule("node:path");
-  const file = join(tmpdir(), `${prefix}-${randomBytes(8).toString("hex")}.log`);
-  writeFileSync(file, text);
-  return file;
 }

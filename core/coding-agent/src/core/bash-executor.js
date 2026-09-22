@@ -47,6 +47,11 @@ export async function executeBashWithOperations(command, cwd, operations, option
         }
         const stream = tempFileStream;
         tempFileStream = undefined;
+        // A write error must not surface as an unhandled stream error, and must
+        // not leave this promise pending: callers await it inside executeBash, so
+        // a hang here strands the bash tool with no abort path. The command's
+        // output is still valid without the spill file.
+        stream.once("error", () => resolve());
         stream.end(() => resolve());
     });
     const onData = (data) => {

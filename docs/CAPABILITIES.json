@@ -2293,7 +2293,7 @@
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3392
+        "line": 3395
       },
       {
         "name": "effort",
@@ -2313,7 +2313,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3434
+        "line": 3437
       },
       {
         "name": "graph",
@@ -2443,7 +2443,7 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3482
+        "line": 3485
       },
       {
         "name": "self",
@@ -2548,7 +2548,7 @@
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3131
+        "line": 3134
       }
     ],
     "commandDynamicOwners": [
@@ -2765,14 +2765,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 193,
+        "line": 196,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 194,
+        "line": 197,
         "kind": "configured-default",
         "configurable": true
       },
@@ -2821,37 +2821,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2506,
+        "line": 2507,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2366,
+        "line": 2367,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2649,
+        "line": 2650,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2748,
+        "line": 2749,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2892,
+        "line": 2893,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2018,
+        "line": 2019,
         "kind": "literal"
       },
       {
@@ -2935,7 +2935,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2179,
+        "line": 2180,
         "kind": "literal"
       },
       {
@@ -2971,7 +2971,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 192,
+        "line": 195,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3068,7 +3068,7 @@
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 191,
+        "line": 194,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3191,37 +3191,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2506,
+        "line": 2507,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2366,
+        "line": 2367,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2649,
+        "line": 2650,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2748,
+        "line": 2749,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2892,
+        "line": 2893,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2018,
+        "line": 2019,
         "kind": "literal"
       },
       {
@@ -3281,7 +3281,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2179,
+        "line": 2180,
         "kind": "literal"
       },
       {
@@ -3493,10 +3493,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1656,
-          2244,
-          2398,
-          2797
+          1659,
+          2247,
+          2401,
+          2800
         ],
         "knownNames": [
           "fetch_content",

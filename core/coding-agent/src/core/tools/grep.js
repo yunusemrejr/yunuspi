@@ -8,6 +8,7 @@ import { resolveToCwd } from "./path-utils.js";
 import { grepRenderers } from "./renderers/grep.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, GREP_MAX_LINE_LENGTH, truncateHead, truncateLine, } from "./truncate.js";
+import { spillToolOutput } from "./spill-output.js";
 const grepSchema = Type.Object({
     pattern: Type.String({ description: "Search pattern (regex or literal string)" }),
     path: Type.Optional(Type.String({ description: "Directory or file to search (default: current directory)" })),
@@ -223,7 +224,7 @@ export function createGrepToolDefinition(cwd, options) {
                             }
                             if (truncation.truncated) {
                                 // Full raw output stays retrievable instead of vanishing at the byte cap.
-                                const fullOutputPath = __piSpillOutput("pi-grep", rawOutput);
+                                const fullOutputPath = spillToolOutput("pi-grep", rawOutput);
                                 details.truncation = truncation;
                                 details.fullOutputPath = fullOutputPath;
                                 notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached. Full output: ${fullOutputPath}`);
@@ -251,13 +252,4 @@ export function createGrepToolDefinition(cwd, options) {
 }
 export function createGrepTool(cwd, options) {
     return wrapToolDefinition(createGrepToolDefinition(cwd, options));
-}
-function __piSpillOutput(prefix, text) { /* PI_SEARCH_OUTPUT_SPILL */
-  const { randomBytes } = process.getBuiltinModule("node:crypto");
-  const { writeFileSync } = process.getBuiltinModule("node:fs");
-  const { tmpdir } = process.getBuiltinModule("node:os");
-  const { join } = process.getBuiltinModule("node:path");
-  const file = join(tmpdir(), `${prefix}-${randomBytes(8).toString("hex")}.log`);
-  writeFileSync(file, text);
-  return file;
 }

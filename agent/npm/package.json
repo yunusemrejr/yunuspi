@@ -23,11 +23,5 @@
     "vscode-jsonrpc": "9.0.1",
     "web-tree-sitter": "0.25.10",
     "yaml": "2.8.3"
-  },
-  "allowScripts": {
-    "@ast-grep/cli@0.45.2": true,
-    "@google/genai@1.52.0": true,
-    "protobufjs@7.6.5": true,
-    "protobufjs@7.6.6": true
   }
 }

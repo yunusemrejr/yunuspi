@@ -208,7 +208,7 @@ function retireDocFiles() {
     const p = path.join(AGENT_DIR, md);
     if (fs.existsSync(p)) files.push(p);
   }
-  for (const dir of ["scripts", path.join("scripts", "patches")]) {
+  for (const dir of ["scripts"]) {
     const p = path.join(AGENT_DIR, dir);
     if (!fs.existsSync(p)) continue;
     for (const f of fs.readdirSync(p)) {
