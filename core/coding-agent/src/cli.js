@@ -10,5 +10,8 @@ if (args.length === 1 && (args[0] === "--core-info" || args[0] === "--version" |
     else console.log(`YunusPi ${product.version} (core ${core.version}; origin Pi ${core.forkOrigin.version})`);
 } else {
     setupCli();
-    main(args);
+    main(args).catch((error) => {
+        console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+        process.exit(1);
+    });
 }

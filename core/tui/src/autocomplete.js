@@ -13,7 +13,10 @@ function escapeRegex(value) {
 function buildFdPathQuery(query) {
     const normalized = toDisplayPath(query);
     if (!normalized.includes("/")) {
-        return normalized;
+        // Escape like the multi-segment path below so `test.` / `.*` / `foo(`
+        // are literals, not raw fd regex. Otherwise top-level queries silently
+        // differ from the same text used inside a path.
+        return escapeRegex(normalized);
     }
     const hasTrailingSeparator = normalized.endsWith("/");
     const trimmed = normalized.replace(/^\/+|\/+$/g, "");
@@ -271,8 +274,10 @@ export class CombinedAutocompleteProvider {
         const hasTrailingQuoteInItem = item.value.endsWith('"');
         const adjustedAfterCursor = isQuotedPrefix && hasTrailingQuoteInItem && hasLeadingQuoteAfterCursor ? afterCursor.slice(1) : afterCursor;
         // Check if we're completing a slash command (prefix starts with "/" but NOT a file path)
-        // Slash commands are at the start of the line and don't contain path separators after the first /
-        const isSlashCommand = prefix.startsWith("/") && beforePrefix.trim() === "" && !prefix.slice(1).includes("/");
+        // Slash commands are at the start of the line and don't contain path separators after the first /.
+        // Also require the item to look like a bare command name: an absolute
+        // path item (`/usr/`) completed from `/u` must not become `//usr/ `.
+        const isSlashCommand = prefix.startsWith("/") && beforePrefix.trim() === "" && !prefix.slice(1).includes("/") && !item.value.includes("/") && item.value !== prefix.slice(1);
         if (isSlashCommand) {
             // This is a command name completion
             const newLine = `${beforePrefix}/${item.value} ${adjustedAfterCursor}`;

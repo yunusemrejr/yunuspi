@@ -57,6 +57,20 @@ const confine = async (root, target) => {
 	const resolved = path.resolve(root, target);
 	const real = await fsp.realpath(resolved).catch(() => null);
 	const base = await fsp.realpath(root).catch(() => path.resolve(root));
+	// Resolve the nearest existing ancestor so a symlinked parent cannot
+	// redirect a create/edit outside the workspace even when the final
+	// component does not exist yet (realpath of the leaf then fails open).
+	let ancestor = resolved;
+	let realAncestor = null;
+	for (;;) {
+		realAncestor = await fsp.realpath(ancestor).catch(() => null);
+		if (realAncestor !== null) break;
+		const parent = path.dirname(ancestor);
+		if (parent === ancestor) break;
+		ancestor = parent;
+	}
+	if (realAncestor !== null && realAncestor !== base && !realAncestor.startsWith(base + path.sep))
+		fail("path outside workspace");
 	const check = real ?? resolved;
 	if (check !== base && !check.startsWith(base + path.sep))
 		fail("path outside workspace");

@@ -2114,12 +2114,23 @@ export class DefaultPackageManager {
             let stdout = "";
             let stderr = "";
             let timedOut = false;
+            let exited = false;
+            let forceKillId;
             const timeout = typeof options?.timeoutMs === "number"
                 ? setTimeout(() => {
                     timedOut = true;
                     child.kill();
+                    // A child that ignores SIGTERM would otherwise hang this
+                    // promise forever; escalate after a short grace period.
+                    forceKillId = setTimeout(() => {
+                        if (!exited)
+                            child.kill("SIGKILL");
+                    }, 5000);
                 }, options.timeoutMs)
                 : undefined;
+            child.once("exit", () => {
+                exited = true;
+            });
             child.stdout?.on("data", (data) => {
                 stdout += data.toString();
             });
@@ -2129,11 +2140,15 @@ export class DefaultPackageManager {
             child.once("error", (error) => {
                 if (timeout)
                     clearTimeout(timeout);
+                if (forceKillId)
+                    clearTimeout(forceKillId);
                 reject(error);
             });
             child.once("close", (code, signal) => {
                 if (timeout)
                     clearTimeout(timeout);
+                if (forceKillId)
+                    clearTimeout(forceKillId);
                 if (timedOut) {
                     reject(new Error(`${command} ${args.join(" ")} timed out after ${options?.timeoutMs}ms`));
                     return;

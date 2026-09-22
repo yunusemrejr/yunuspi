@@ -149,6 +149,9 @@ export class ProcessTerminal {
                 this.scheduleKeyboardProtocolNegotiationBufferFlush();
                 return; // Wait briefly for the rest of a split Kitty response.
             }
+            if (negotiationSequence === "handled") {
+                return; // Buffered prefix + this chunk were forwarded together.
+            }
             if (this.handleKeyboardProtocolNegotiationSequence(negotiationSequence)) {
                 return;
             }
@@ -219,7 +222,12 @@ export class ProcessTerminal {
                 this.setKeyboardProtocolNegotiationBuffer(bufferedSequence);
                 return "pending";
             }
-            this.flushKeyboardProtocolNegotiationBufferAsInput();
+            // Not a negotiation fragment. The parked prefix plus this chunk is
+            // ordinary input (a CSI sequence split after ESC[), so forward the
+            // concatenation once — never the two halves as separate keystrokes.
+            this.clearKeyboardProtocolNegotiationBuffer();
+            this.forwardInputSequence(bufferedSequence);
+            return "handled";
         }
         const negotiationSequence = parseKeyboardProtocolNegotiationSequence(sequence);
         if (negotiationSequence)

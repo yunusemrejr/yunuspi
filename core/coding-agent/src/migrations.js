@@ -3,7 +3,7 @@
  */
 import chalk from "chalk";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
 import { stripBom } from "./utils/text.js";
@@ -29,10 +29,13 @@ export function migrateAuthToAuthJson() {
         try {
             const oauth = JSON.parse(stripBom(readFileSync(oauthPath, "utf-8")));
             for (const [provider, cred] of Object.entries(oauth)) {
-                migrated[provider] = { type: "oauth", ...cred };
+                // Force the discriminator AFTER the spread so a corrupt
+                // `type` inside the stored entry cannot rewrite the credential kind.
+                migrated[provider] = { ...(cred && typeof cred === "object" ? cred : {}), type: "oauth" };
                 providers.push(provider);
             }
-            renameSync(oauthPath, `${oauthPath}.migrated`);
+            // Rename only after auth.json has been written below; renaming first
+            // would strand credentials if the write throws (disk full, crash).
         }
         catch {
             // Skip on error
@@ -61,6 +64,15 @@ export function migrateAuthToAuthJson() {
     if (Object.keys(migrated).length > 0) {
         mkdirSync(dirname(authPath), { recursive: true });
         writeFileSync(authPath, JSON.stringify(migrated, null, 2), { mode: 0o600 });
+    }
+    // Retire oauth.json only after auth.json is safely on disk.
+    if (existsSync(oauthPath) && existsSync(authPath)) {
+        try {
+            renameSync(oauthPath, `${oauthPath}.migrated`);
+        }
+        catch {
+            // Leave oauth.json in place so a later run can retry.
+        }
     }
     return providers;
 }
@@ -105,8 +117,9 @@ export function migrateSessionsFromAgentRoot() {
             if (!existsSync(correctDir)) {
                 mkdirSync(correctDir, { recursive: true });
             }
-            // Move the file
-            const fileName = file.split("/").pop() || file.split("\\").pop();
+            // Move the file. Use path.basename so a Windows-style path is not
+            // treated as one opaque name when the source string has no "/".
+            const fileName = basename(file);
             const newPath = join(correctDir, fileName);
             if (existsSync(newPath))
                 continue; // Skip if target exists

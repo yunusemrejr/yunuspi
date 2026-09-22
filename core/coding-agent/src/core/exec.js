@@ -17,19 +17,26 @@ export async function execCommand(command, args, cwd, options) {
         let stdout = "";
         let stderr = "";
         let killed = false;
+        let exited = false;
         let timeoutId;
+        let forceKillId;
         const killProcess = () => {
             if (!killed) {
                 killed = true;
                 proc.kill("SIGTERM");
-                // Force kill after 5 seconds if SIGTERM doesn't work
-                setTimeout(() => {
-                    if (!proc.killed) {
+                // Force kill after 5 seconds if SIGTERM doesn't work.
+                // `proc.killed` flips true as soon as any kill() is delivered, so
+                // it cannot detect a child that ignored SIGTERM; track exit instead.
+                forceKillId = setTimeout(() => {
+                    if (!exited) {
                         proc.kill("SIGKILL");
                     }
                 }, 5000);
             }
         };
+        proc.once("exit", () => {
+            exited = true;
+        });
         // Handle abort signal
         if (options?.signal) {
             if (options.signal.aborted) {
@@ -57,6 +64,8 @@ export async function execCommand(command, args, cwd, options) {
             .then((code) => {
             if (timeoutId)
                 clearTimeout(timeoutId);
+            if (forceKillId)
+                clearTimeout(forceKillId);
             if (options?.signal) {
                 options.signal.removeEventListener("abort", killProcess);
             }
@@ -65,6 +74,8 @@ export async function execCommand(command, args, cwd, options) {
             .catch((_err) => {
             if (timeoutId)
                 clearTimeout(timeoutId);
+            if (forceKillId)
+                clearTimeout(forceKillId);
             if (options?.signal) {
                 options.signal.removeEventListener("abort", killProcess);
             }

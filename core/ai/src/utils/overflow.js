@@ -143,7 +143,7 @@ export function isContextOverflow(message, contextWindow) {
         }
     }
     // Case 2: Silent overflow (z.ai style) - successful but usage exceeds context
-    if (contextWindow && message.stopReason === "stop") {
+    if (contextWindow && message.stopReason === "stop" && message.usage) {
         const inputTokens = message.usage.input + message.usage.cacheRead;
         if (inputTokens > contextWindow) {
             return true;
@@ -152,7 +152,7 @@ export function isContextOverflow(message, contextWindow) {
     // Case 3: Length-stop overflow (Xiaomi MiMo style) - server truncates oversized input
     // to fit the context window, leaving no room for output. Returns stopReason "length"
     // with output=0 and input+cacheRead filling the context window.
-    if (contextWindow && message.stopReason === "length" && message.usage.output === 0) {
+    if (contextWindow && message.stopReason === "length" && message.usage && message.usage.output === 0) {
         const inputTokens = message.usage.input + message.usage.cacheRead;
         if (inputTokens >= contextWindow * 0.99) {
             return true;
@@ -167,7 +167,7 @@ export function isContextOverflow(message, contextWindow) {
  * limit before any context-based clamping.
  */
 export function isRecoverableLength(message, desiredMaxOutput) {
-    return message.stopReason === "length" && desiredMaxOutput > 0 && message.usage.output < desiredMaxOutput;
+    return message.stopReason === "length" && desiredMaxOutput > 0 && !!message.usage && message.usage.output < desiredMaxOutput;
 }
 /**
  * Get the overflow patterns for testing purposes.

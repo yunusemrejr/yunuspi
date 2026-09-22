@@ -30,14 +30,26 @@ function getRetryDelayMs(error, retryIndex, maxRetryDelayMs) {
     const retryAfterMs = error.headers?.get("retry-after-ms");
     if (retryAfterMs) {
         const value = Number.parseFloat(retryAfterMs);
-        if (!Number.isNaN(value))
+        // Non-finite and negative header values are malformed; fall through to
+        // retry-after / exponential backoff instead of sleeping on NaN or -5ms.
+        if (Number.isFinite(value) && value >= 0)
             return validateServerRetryDelayMs(value, maxRetryDelayMs, error.message);
     }
     const retryAfter = error.headers?.get("retry-after");
     if (retryAfter) {
         const seconds = Number.parseFloat(retryAfter);
-        const delayMs = Number.isNaN(seconds) ? Date.parse(retryAfter) - Date.now() : seconds * 1000;
-        return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error.message);
+        let delayMs;
+        if (Number.isFinite(seconds) && seconds >= 0) {
+            delayMs = seconds * 1000;
+        }
+        else {
+            // HTTP-date form. An unparseable or already-past date must not
+            // become a NaN/zero sleep; only a future date is authoritative.
+            const parsed = Date.parse(retryAfter);
+            delayMs = Number.isFinite(parsed) ? parsed - Date.now() : Number.NaN;
+        }
+        if (Number.isFinite(delayMs) && delayMs >= 0)
+            return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error.message);
     }
     const exponentialDelay = Math.min(0.5 * 2 ** retryIndex, 8) * 1000;
     return exponentialDelay * (1 - Math.random() * 0.25);

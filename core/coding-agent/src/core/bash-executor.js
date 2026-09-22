@@ -38,6 +38,17 @@ export async function executeBashWithOperations(command, cwd, operations, option
         }
     };
     const decoder = new TextDecoder();
+    // Ending a WriteStream is asynchronous; callers receive fullOutputPath and
+    // read it immediately, so the file must be fully flushed before returning.
+    const closeTempFile = () => new Promise((resolve) => {
+        if (!tempFileStream) {
+            resolve();
+            return;
+        }
+        const stream = tempFileStream;
+        tempFileStream = undefined;
+        stream.end(() => resolve());
+    });
     const onData = (data) => {
         totalBytes += data.length;
         // Sanitize: strip ANSI, replace binary garbage, normalize newlines
@@ -71,9 +82,7 @@ export async function executeBashWithOperations(command, cwd, operations, option
         if (truncationResult.truncated) {
             ensureTempFile();
         }
-        if (tempFileStream) {
-            tempFileStream.end();
-        }
+        await closeTempFile();
         const cancelled = options?.signal?.aborted ?? false;
         return {
             output: truncationResult.truncated ? truncationResult.content : fullOutput,
@@ -91,9 +100,7 @@ export async function executeBashWithOperations(command, cwd, operations, option
             if (truncationResult.truncated) {
                 ensureTempFile();
             }
-            if (tempFileStream) {
-                tempFileStream.end();
-            }
+            await closeTempFile();
             return {
                 output: truncationResult.truncated ? truncationResult.content : fullOutput,
                 exitCode: undefined,
@@ -102,9 +109,7 @@ export async function executeBashWithOperations(command, cwd, operations, option
                 fullOutputPath: tempFilePath,
             };
         }
-        if (tempFileStream) {
-            tempFileStream.end();
-        }
+        await closeTempFile();
         throw err;
     }
 }

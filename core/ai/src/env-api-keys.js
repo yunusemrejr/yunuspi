@@ -32,31 +32,31 @@ export const ANTHROPIC_OAUTH_TOKEN_ENV = "ANTHROPIC_OAUTH_TOKEN";
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
 let cachedVertexAdcCredentialsExists = null;
 function hasVertexAdcCredentials(env) {
-    const explicitCredentialsPath = env?.GOOGLE_APPLICATION_CREDENTIALS;
+    // Use the same env resolution in both branches so an explicit path is
+    // honored consistently with the default-path cache below.
+    const explicitCredentialsPath = getProviderEnvValue("GOOGLE_APPLICATION_CREDENTIALS", env);
     if (explicitCredentialsPath) {
         return _existsSync ? _existsSync(explicitCredentialsPath) : false;
     }
     if (cachedVertexAdcCredentialsExists === null) {
         // If node modules haven't loaded yet (async import race at startup),
         // return false WITHOUT caching so the next call retries once they're ready.
-        // Only cache false permanently in a browser environment where fs is never available.
+        // Only cache a POSITIVE hit. Caching false here would keep saying
+        // "no ADC" after `gcloud auth application-default login` (or a
+        // late-mounted credentials file) appears mid-process.
         if (!_existsSync || !_homedir || !_join) {
-            const isNode = typeof process !== "undefined" && (process.versions?.node || process.versions?.bun);
-            if (!isNode) {
-                // Definitively in a browser — safe to cache false permanently
-                cachedVertexAdcCredentialsExists = false;
-            }
             return false;
         }
         // Check GOOGLE_APPLICATION_CREDENTIALS env var first (standard way)
         const gacPath = getProviderEnvValue("GOOGLE_APPLICATION_CREDENTIALS", env);
-        if (gacPath) {
-            cachedVertexAdcCredentialsExists = _existsSync(gacPath);
+        const candidatePath = gacPath
+            ? gacPath
+            : _join(_homedir(), ".config", "gcloud", "application_default_credentials.json");
+        if (_existsSync(candidatePath)) {
+            cachedVertexAdcCredentialsExists = true;
+            return true;
         }
-        else {
-            // Fall back to default ADC path (lazy evaluation)
-            cachedVertexAdcCredentialsExists = _existsSync(_join(_homedir(), ".config", "gcloud", "application_default_credentials.json"));
-        }
+        return false;
     }
     return cachedVertexAdcCredentialsExists;
 }

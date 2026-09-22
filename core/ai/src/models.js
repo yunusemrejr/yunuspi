@@ -558,10 +558,11 @@ export function calculateCost(model, usage) {
         if (!valid(rates[key])) { if (tokens > 0) complete = false; continue; }
         cost[key] = tokens * rates[key] / 1e6;
     }
+    let longRate;
     if (longWrite > 0) {
         // Existing native contract: 1h writes cost 2x input. An explicit 1h
         // rate supports gateways whose write schedule differs from Anthropic.
-        const longRate = rates.cacheWrite1h ?? (valid(rates.input) ? rates.input * 2 : undefined);
+        longRate = rates.cacheWrite1h ?? (valid(rates.input) ? rates.input * 2 : undefined);
         if (valid(longRate) && valid(rates.cacheWrite)) cost.cacheWrite = ((writes - longWrite) * rates.cacheWrite + longWrite * longRate) / 1e6;
         else complete = false;
     }
@@ -574,7 +575,8 @@ export function calculateCost(model, usage) {
     cost.provider = model.provider;
     cost.model = model.id;
     cost.rates = Object.fromEntries(buckets.filter(k => valid(rates[k])).map(k => [k, rates[k]]));
-    if (longWrite > 0) cost.rates.cacheWrite1h = rates.cacheWrite1h ?? rates.input * 2;
+    // Never publish a NaN rate when the input schedule is missing/invalid.
+    if (longWrite > 0 && valid(longRate)) cost.rates.cacheWrite1h = longRate;
     if (threshold >= 0) cost.inputTokensAbove = threshold;
     return cost;
 }
