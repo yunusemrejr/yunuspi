@@ -2735,6 +2735,9 @@ export function resolveForegroundTimeout(params: SubagentParamsLike, defaultTime
 		if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
 			return { error: `${name} must be a positive integer.` };
 		}
+		if (value > MAX_TIMER_DELAY_MS) {
+			return { error: `${name} must be a positive integer no larger than ${MAX_TIMER_DELAY_MS}.` };
+		}
 	}
 	if (rawTimeout !== undefined && rawMaxRuntime !== undefined && rawTimeout !== rawMaxRuntime) {
 		return { error: "timeoutMs and maxRuntimeMs are aliases; provide only one value or use the same value for both." };

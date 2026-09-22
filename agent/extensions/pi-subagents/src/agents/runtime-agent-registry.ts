@@ -229,6 +229,7 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const inheritSkills = validateBoolean(definition.inheritSkills, "Runtime agent definition inheritSkills");
 	const defaultAsync = validateBoolean(definition.defaultAsync, "Runtime agent definition defaultAsync");
 	const defaultTimeoutMs = validatePositiveInteger(definition.defaultTimeoutMs, "Runtime agent definition defaultTimeoutMs");
+	if (defaultTimeoutMs !== undefined && defaultTimeoutMs > 2_147_483_647) throw new Error("Runtime agent definition defaultTimeoutMs must be a positive integer no larger than 2147483647.");
 	const defaultToolTimeoutMs = validatePositiveInteger(definition.defaultToolTimeoutMs, "Runtime agent definition defaultToolTimeoutMs");
 	const defaultAcceptance = validateAcceptance(definition.defaultAcceptance);
 	const runner = validateRunner(definition.runner);
