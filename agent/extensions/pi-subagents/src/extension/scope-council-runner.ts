@@ -386,7 +386,7 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
 	return {
 		agent: "automatic-free-assistant",
 		model: member.route,
-		modelOrigin: "explicit",
+		modelOrigin: member.proof === "explicit llm_preferences" ? "configured" : "explicit",
 		context: "fresh",
 		async: false,
 		foregroundOnly: true,
@@ -420,13 +420,19 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
  * The service is intentionally not a Pi tool and cannot be called by a child. */
 export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
+	const previous = (globalThis as any)[SCOPE_COUNCIL_RUNNER];
+	previous?.dispose?.();
+	const lifetime = new AbortController();
+	let statusOwner: object | undefined;
+	let clearOwnedStatus: (() => void) | undefined;
 	const now = deps.now ?? Date.now;
 	const enabled = () => scopeCouncilEnabled();
 	const runner = async (request: ScopeCouncilRequest, ctx: ExtensionContext, parentSignal?: AbortSignal): Promise<ScopeCouncilResult> => {
 		const limits = normalizeLimits(request?.limits);
+		if (lifetime.signal.aborted || (globalThis as any)[SCOPE_COUNCIL_RUNNER] !== runner) return unavailable("The scope council owner was replaced or shut down.");
 		if (!enabled()) return unavailable("Automatic scope council is disabled by the current session policy.");
 		if (!request || typeof request.task !== "string" || !request.task.trim()) return unavailable("The current task is empty; scope deliberation has no grounded question.");
-		if (parentSignal?.aborted) return unavailable("Scope deliberation was cancelled before dispatch.");
+		if (parentSignal?.aborted || ctx?.signal?.aborted) return unavailable("Scope deliberation was cancelled before dispatch.");
 		let activeTools: unknown;
 		try { activeTools = pi.getActiveTools?.(); } catch { activeTools = undefined; }
 		if (!ctx?.model || !Array.isArray(activeTools) || !activeTools.includes("subagent")) return unavailable("The native subagent capability is unavailable for automatic scope deliberation.");
@@ -464,9 +470,6 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return unavailable("The economy and capability gate could not select permitted council routes safely.");
 		}
 		if (team.length < 2) return unavailable("Fewer than two healthy, permitted, tool-capable council routes are available within the current economy policy.");
-	// Name the participants on the existing status channel (transient, one
-	// line): who is deliberating, how many models, council vs single route.
-	try { ctx.ui?.setStatus?.("scope-council", `Scope council: ${team.slice(0, 3).map((member) => formatModelThinking(member.route)).join(" + ")}`); } catch { /* UI is optional. */ }
 
 		let sessionFile: string | null | undefined;
 		let identity: string;
@@ -483,18 +486,30 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		} catch {
 			capturedCurrent = () => false;
 		}
-		const current = () => {
+		const ownsContext = () => {
 			try {
-				return !parentSignal?.aborted && (deps.isCurrent?.(ctx) ?? true)
+				return (globalThis as any)[SCOPE_COUNCIL_RUNNER] === runner && (deps.isCurrent?.(ctx) ?? true)
 					&& capturedCurrent()
-					&& !controller.signal.aborted
 					&& JSON.stringify([ctx.cwd, ctx.sessionManager?.getSessionId?.(), ctx.sessionManager?.getSessionFile?.()]) === identity;
 			} catch { return false; }
 		};
+		const current = () => !signal.aborted && ownsContext();
 		const deadlineAt = now() + limits.deadlineMs;
 		const deadlineTimer = setTimeout(() => controller.abort(new Error("Scope council deadline reached.")), limits.deadlineMs);
 		deadlineTimer.unref?.();
-		const signal = parentSignal ? AbortSignal.any([parentSignal, controller.signal]) : controller.signal;
+		const signal = AbortSignal.any([controller.signal, lifetime.signal, ...(parentSignal ? [parentSignal] : []), ...(ctx.signal ? [ctx.signal] : [])]);
+		const statusToken = {};
+		const clearStatus = () => {
+			if (statusOwner !== statusToken) return;
+			if (ownsContext()) { try { ctx.ui?.setStatus?.("scope-council", undefined); } catch {} }
+			statusOwner = undefined;
+			if (clearOwnedStatus === clearStatus) clearOwnedStatus = undefined;
+		};
+		if (current()) {
+			clearOwnedStatus = clearStatus;
+			statusOwner = statusToken;
+			try { ctx.ui?.setStatus?.("scope-council", `Scope council: ${team.slice(0, 3).map(member => formatModelThinking(member.route)).join(" + ")}`); } catch { /* UI is optional. */ }
+		}
 		// Marked harness flow (step 21; D-010): one assistance unit per
 		// council execution per cycle, shared by all peers under the grant.
 		const councilFlowId = `scope-council-${randomUUID()}`;
@@ -579,6 +594,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				].join("\n\n")
 				: [
 					`One council perspective returned (${proposals[0]!.role}); the other perspective is unavailable and must not be inferred.`,
+					proposals[0]!.text,
 					"The synthesizer must challenge this single provisional perspective: name unsupported assumptions, state what evidence could decide the disagreement and what the missing perspective would most plausibly have raised. It must not treat this as consensus or as a second opinion.",
 				].join("\n\n");
 			// Prefer a third distinct member. With only two healthy routes, the
@@ -607,6 +623,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
+			clearStatus();
       try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
 			controller.abort();
 		}
@@ -614,5 +631,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 	// The runner owns the council's limits; the lifecycle reads the shared
 	// deadline from here instead of declaring a second copy that can drift.
 	(runner as any).limits = SCOPE_COUNCIL_LIMITS;
+	(runner as any).dispose = () => { clearOwnedStatus?.(); lifetime.abort(); };
 	(globalThis as any)[SCOPE_COUNCIL_RUNNER] = runner;
+	pi.on?.("session_shutdown", () => {
+		(runner as any).dispose();
+		if ((globalThis as any)[SCOPE_COUNCIL_RUNNER] === runner) delete (globalThis as any)[SCOPE_COUNCIL_RUNNER];
+	});
 }

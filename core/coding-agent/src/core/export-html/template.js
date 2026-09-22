@@ -27,7 +27,7 @@
       const urlLeafId = urlParams.get('leafId');
       const urlTargetId = urlParams.get('targetId');
       // Use URL leafId if provided, otherwise fall back to session default
-      const leafId = urlLeafId || defaultLeafId;
+      let leafId = urlLeafId || defaultLeafId;
 
       // ============================================================
       // DATA STRUCTURES
@@ -39,9 +39,15 @@
         byId.set(entry.id, entry);
       }
 
+      if (!byId.has(leafId)) leafId = byId.has(defaultLeafId) ? defaultLeafId : entries.at(-1)?.id;
+
       // Tool call lookup (toolCallId -> {name, arguments})
       const toolCallMap = new Map();
+      const toolResultMap = new Map();
       for (const entry of entries) {
+        if (entry.type === 'message' && entry.message.role === 'toolResult' && !toolResultMap.has(entry.message.toolCallId)) {
+          toolResultMap.set(entry.message.toolCallId, entry.message);
+        }
         if (entry.type === 'message' && entry.message.role === 'assistant') {
           const content = entry.message.content;
           if (Array.isArray(content)) {
@@ -84,29 +90,31 @@
           });
         }
 
-        // Build parent-child relationships
-        for (const entry of entries) {
-          const node = nodeMap.get(entry.id);
-          if (entry.parentId === null || entry.parentId === undefined || entry.parentId === entry.id) {
-            roots.push(node);
-          } else {
-            const parent = nodeMap.get(entry.parentId);
-            if (parent) {
-              parent.children.push(node);
-            } else {
-              roots.push(node);
+        // Break malformed parent cycles once, then build/sort without recursion.
+        const complete = new Set();
+        for (const node of nodeMap.values()) {
+          const chain = new Set();
+          let current = node;
+          while (current && !complete.has(current)) {
+            if (chain.has(current)) {
+              current.entry = { ...current.entry, parentId: null };
+              break;
             }
+            chain.add(current);
+            current = nodeMap.get(current.entry.parentId);
           }
+          for (const item of chain) complete.add(item);
         }
-
-        // Sort children by timestamp
-        function sortChildren(node) {
+        for (const node of nodeMap.values()) {
+          const parent = nodeMap.get(node.entry.parentId);
+          if (parent) parent.children.push(node);
+          else roots.push(node);
+        }
+        for (const node of nodeMap.values()) {
           node.children.sort((a, b) =>
             new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime()
           );
-          node.children.forEach(sortChildren);
         }
-        roots.forEach(sortChildren);
 
         return roots;
       }
@@ -117,7 +125,7 @@
       function buildActivePathIds(targetId) {
         const ids = new Set();
         let current = byId.get(targetId);
-        while (current) {
+        while (current && !ids.has(current.id)) {
           ids.add(current.id);
           // Stop if no parent or self-referencing (root)
           if (!current.parentId || current.parentId === current.id) {
@@ -133,16 +141,18 @@
        */
       function getPath(targetId) {
         const path = [];
+        const visited = new Set();
         let current = byId.get(targetId);
-        while (current) {
-          path.unshift(current);
+        while (current && !visited.has(current.id)) {
+          visited.add(current.id);
+          path.push(current);
           // Stop if no parent or self-referencing (root)
           if (!current.parentId || current.parentId === current.id) {
             break;
           }
           current = byId.get(current.parentId);
         }
-        return path;
+        return path.reverse();
       }
 
       // Tree node lookup for finding leaves
@@ -158,11 +168,12 @@
         if (!treeNodeMap) {
           treeNodeMap = new Map();
           const tree = buildTree();
-          function mapNodes(node) {
+          const pending = [...tree];
+          while (pending.length) {
+            const node = pending.pop();
             treeNodeMap.set(node.entry.id, node);
-            node.children.forEach(mapNodes);
+            for (const child of node.children) pending.push(child);
           }
-          tree.forEach(mapNodes);
         }
 
         const node = treeNodeMap.get(nodeId);
@@ -187,15 +198,16 @@
 
         // Mark which subtrees contain the active leaf
         const containsActive = new Map();
-        function markActive(node) {
-          let has = activePathIds.has(node.entry.id);
-          for (const child of node.children) {
-            if (markActive(child)) has = true;
+        const pending = roots.map(node => [node, false]);
+        while (pending.length) {
+          const [node, visited] = pending.pop();
+          if (visited) {
+            containsActive.set(node, activePathIds.has(node.entry.id) || node.children.some(child => containsActive.get(child)));
+          } else {
+            pending.push([node, true]);
+            for (const child of node.children) pending.push([child, false]);
           }
-          containsActive.set(node, has);
-          return has;
         }
-        roots.forEach(markActive);
 
         // Stack: [node, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild]
         const stack = [];
@@ -836,14 +848,7 @@
       }
 
       function findToolResult(toolCallId) {
-        for (const entry of entries) {
-          if (entry.type === 'message' && entry.message.role === 'toolResult') {
-            if (entry.message.toolCallId === toolCallId) {
-              return entry.message;
-            }
-          }
-        }
-        return null;
+        return toolResultMap.get(toolCallId) ?? null;
       }
 
       function formatExpandableOutput(text, maxLines, lang) {

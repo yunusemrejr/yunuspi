@@ -11,16 +11,17 @@ const hookLedger=createHookLedger();
 /** Numeric counters plus fixed-size content hashes only. Never persists hook arguments, output, thinking or message text. */
 export function registerSessionTelemetry(pi:any) {
  let current:any,owner=0,dirty=false;
+ let sink:any,view:any,ledgerView:any;
  const snapshot=()=>current?structuredClone(current.data):undefined;
  const flush=()=>{if(current&&dirty){pi.appendEntry('session-metrics-v1',snapshot());dirty=false;}};
  const start=(_event:any,ctx:any)=>{
   const epoch=++owner;
   current={id:ctx.sessionManager.getSessionId(),data:{version:2,segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
-  (globalThis as any)[METRICS_SINK]=(kind:string,data:any={})=>{
+  sink=(kind:string,data:any={})=>{
+   if(epoch!==owner||!current)return;
    if(kind==='hook'&&typeof data.hook==='string'&&typeof data.owner==='string'){
     hookLedger.record({owner:data.owner,hook:data.hook,eventId:typeof data.eventId==='string'?data.eventId:'',seq:Number.isSafeInteger(data.seq)?data.seq:0,changed:data.changed===true,blocked:data.blocked===true,error:data.error===true,addedChars:data.addedChars,removedChars:data.removedChars});
    }
-   if(epoch!==owner||!current)return;
    if(kind==='hook'&&typeof data.hook==='string'&&typeof data.owner==='string'){
     const key=`${data.owner}:${data.hook}`.replace(/[^a-z0-9_.:/-]/gi,'_').slice(0,160);
     if(!current.data.hooks[key]&&Object.keys(current.data.hooks).length>=256)return;
@@ -38,12 +39,19 @@ export function registerSessionTelemetry(pi:any) {
    else return;
    dirty=true;
   };
-  (globalThis as any)[METRICS_VIEW]=(id:string)=>id===current?.id?snapshot():undefined;
-  (globalThis as any)[HOOK_LEDGER_VIEW]=()=>hookLedger.snapshot();
+  (globalThis as any)[METRICS_SINK]=sink;
+  (globalThis as any)[METRICS_VIEW]=view=(id:string)=>id===current?.id?snapshot():undefined;
+  (globalThis as any)[HOOK_LEDGER_VIEW]=ledgerView=()=>hookLedger.snapshot();
  };
  pi.on('session_start',start);pi.on('session_switch',start);
  for(const hook of ['agent_end','session_before_compact','session_before_switch'])pi.on(hook,flush);
- pi.on('session_shutdown',()=>{flush();owner++;current=undefined;});
+ pi.on('session_shutdown',()=>{
+  try{flush();}finally{
+   owner++;current=undefined;
+   for(const [key,value] of [[METRICS_SINK,sink],[METRICS_VIEW,view],[HOOK_LEDGER_VIEW,ledgerView]] as const)
+    if((globalThis as any)[key]===value)delete (globalThis as any)[key];
+  }
+ });
  pi.registerCommand('metrics',{description:'Session tools, errors, agents, swarms, fusions, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{
   const entries=ctx.sessionManager.getEntries();
   const model=ctx?.model;

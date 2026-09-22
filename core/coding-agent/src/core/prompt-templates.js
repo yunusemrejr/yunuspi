@@ -4,6 +4,7 @@ import { CONFIG_DIR_NAME } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
 import { resolvePath } from "../utils/paths.js";
 import { createSyntheticSourceInfo } from "./source-info.js";
+import { parseSlashCommand } from "./slash-commands.js";
 /**
  * Parse command arguments respecting quoted strings (bash-style)
  * Returns array of arguments
@@ -221,11 +222,10 @@ export function loadPromptTemplates(options) {
 export function expandPromptTemplate(text, templates) {
     if (!text.startsWith("/"))
         return text;
-    const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
-    if (!match)
+    const parsed = parseSlashCommand(text);
+    if (!parsed)
         return text;
-    const templateName = match[1];
-    const argsString = match[2] ?? "";
+    const { name: templateName, args: argsString } = parsed;
     const template = templates.find((t) => t.name === templateName);
     if (template) {
         const args = parseCommandArgs(argsString);

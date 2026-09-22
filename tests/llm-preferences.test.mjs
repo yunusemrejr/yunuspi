@@ -273,3 +273,91 @@ test("explicit preferences pass tool requirements when catalog capability is unk
 		"deepseek/deepseek-chat",
 	]);
 });
+
+test("one malformed alias or role cannot discard otherwise valid preference chains", () => {
+	writePrefs({ version: 1, models: {
+		broken: null,
+		badProvider: { provider: 7, model: 'fixture' },
+		good: { provider: 'deepseek', model: 'deepseek-chat' },
+	}, preferences: {
+		council: { models: [null, 'bad alias!', 'good'] },
+		subagents: { models: ['broken', 'badProvider', 'good'] },
+		fusion: 'invalid list',
+	} });
+	assert.equal(prefs.loadLlmPreferences().ok, true);
+	assert.ok(prefs.loadLlmPreferences().warnings.length >= 4);
+	for (const role of ['council', 'subagents']) {
+		assert.deepEqual(fallback.resolveLlmPreferenceChain(role, registry).map(row => row.route), ['deepseek/deepseek-chat']);
+	}
+});
+
+test("Friendli provider fields preserve vendor namespaces even when they name another registered provider", () => {
+	const live = [model('vendor/model-a', 'friendli'), model('model-a', 'vendor')];
+	writePrefs({ models: { chosen: { provider: 'Friendli', model: 'vendor/model-a' } }, preferences: { subagents: ['chosen'] } });
+	assert.equal(fallback.selectLlmPreferredModel('subagents', live).route, 'friendli/vendor/model-a');
+	writePrefs({ models: { chosen: { provider: 'friendli', model: 'friendli/vendor/model-a:high' } }, preferences: { subagents: ['chosen'] } });
+	const pick = fallback.selectLlmPreferredModel('subagents', live);
+	assert.equal(pick.route, 'friendli/vendor/model-a');
+	assert.equal(pick.thinking, 'high');
+});
+
+test("live subagents consistently honor role order through selection and candidate economy", () => {
+	const preferred = model('vendor/preferred', 'friendli', { cost: { input: 10, output: 20 } });
+	const second = model('vendor/backup', 'friendli', { cost: { input: 10, output: 20 } });
+	const cheap = model('lab/cheap', 'openrouter', { cost: { input: 0.01, output: 0.02 } });
+	const live = [preferred, second, cheap];
+	writePrefs({ models: { first: { provider: 'friendli', model: preferred.id }, second: { provider: 'friendli', model: second.id } }, preferences: { subagents: ['first', 'second'] } });
+	const parent = { provider: cheap.provider, id: cheap.id };
+	const task = 'Inspect the source and report one bounded finding without editing';
+	for (let attempt = 0; attempt < 20; attempt++) {
+		const route = fallback.resolveSubagentModelOverride(undefined, parent, live, undefined, { task, sessionId: `session-${attempt % 2}` });
+		assert.equal(route, preferred.fullId, 'frequency and free-route competition cannot demote the configured first choice');
+		const candidates = fallback.buildModelCandidates(route, undefined, live, undefined, { origin: 'inherited', task });
+		assert.deepEqual(candidates.slice(0, 2), [preferred.fullId, second.fullId]);
+	}
+	assert.deepEqual(fallback.buildModelCandidates(cheap.fullId, undefined, live, undefined, { origin: 'inherited', task }).slice(0, 2), [preferred.fullId, second.fullId]);
+	assert.deepEqual(parent, { provider: cheap.provider, id: cheap.id }, 'selection never mutates main-session state');
+});
+
+test("preference selection works without pricing metadata and falls through actual capacity/quota gates", () => {
+	const first = model('preferred', 'friendli', { cost: undefined, maxTokens: 32 });
+	const second = model('backup', 'direct', { cost: undefined });
+	const third = model('last', 'other', { cost: undefined });
+	const live = [first, second, third];
+	writePrefs({ models: {}, preferences: { subagents: live.map(m => ({ provider: m.provider, model: m.id })) } });
+	const task = 'Inspect the source and summarize the observed behavior';
+	assert.equal(fallback.resolveSubagentModelOverride(undefined, { provider: 'parent', id: 'model' }, live, undefined, { task }), second.fullId);
+	const at = Date.now();
+	fallback.setQuotaEventReader(() => [
+		{ provider: 'direct', at: at - 1, kind: 'quota-exhausted' },
+		{ provider: 'direct', at, kind: 'quota-exhausted' },
+	]);
+	try {
+		assert.equal(fallback.resolveSubagentModelOverride(undefined, { provider: 'parent', id: 'model' }, live, undefined, { task }), third.fullId);
+	} finally { fallback.setQuotaEventReader(undefined); }
+});
+
+test("free-only is enforced even with disabled economy or absent registry prices", async () => {
+	const freeEvidence = await import(shared + 'free-route-evidence.ts');
+	const paid = model('vendor/preferred', 'friendli', { cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+	const free = model('lab/free', 'openrouter');
+	const task = 'Use only free models to inspect the source and summarize one observation';
+	writePrefs({ preferences: { subagents: [{ provider: paid.provider, model: paid.id }] } });
+	freeEvidence.publishFreeEvidence([{ id: free.id, pricing: { prompt: '0', completion: '0' }, capabilities: { toolCalling: true, contextWindow: 65536, maxTokens: 8192 } }], freeEvidence.FREE_CATALOG_URL);
+	try {
+		for (const disabled of [true, false]) {
+			fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, JSON.stringify({ enabled: !disabled }));
+			const live = [paid, free].map(item => disabled ? item : { ...item, cost: undefined });
+			const parent = { provider: paid.provider, id: paid.id };
+			assert.equal(fallback.resolveSubagentModelOverride(undefined, parent, live, undefined, { task }), free.fullId);
+			assert.deepEqual(fallback.buildModelCandidates(paid.fullId, undefined, live, undefined, { origin: 'inherited', task }), [free.fullId]);
+			assert.throws(() => fallback.resolveSubagentModelOverride(undefined, parent, [live[0]], undefined, { task }), /free route|Free-only/);
+			assert.throws(() => fallback.resolveSubagentModelOverride(paid.fullId, parent, live, undefined, { task, source: 'explicit' }), /free route|Free-only/);
+			assert.throws(() => fallback.buildModelCandidates(paid.fullId, undefined, [live[0]], undefined, { origin: 'inherited', task }), /free route|Free-only/);
+			for (const origin of ['explicit', 'configured']) {
+				assert.throws(() => fallback.buildModelCandidates(paid.fullId, undefined, live, undefined, { origin, task }), /free route|Free-only/);
+				assert.deepEqual(fallback.buildModelCandidates(free.fullId, [paid.fullId], live, undefined, { origin, task }), [free.fullId]);
+			}
+		}
+	} finally { fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}'); }
+});

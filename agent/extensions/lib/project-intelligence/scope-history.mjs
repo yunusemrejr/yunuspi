@@ -298,7 +298,7 @@ async function readBounded(file, maxBytes, signal, { tail = false } = {}) {
     const after = await handle.stat();
     if (!sameStat(before, after)) return { ok: false, reason: "changed" };
     const truncated = offset > 0 || Number(after.size) > maxBytes;
-    return { ok: true, buffer: Buffer.concat(chunks, total), truncated, offset, size: Number(before.size) || 0 };
+    return { ok: true, buffer: Buffer.concat(chunks, total), truncated, offset, size: Number(before.size) || 0, stat: after };
   } catch (error) {
     checkAborted(signal);
     return { ok: false, reason: error?.code === "ELOOP" ? "symlink" : "read" };
@@ -406,6 +406,7 @@ async function inspectCandidate(file, projectCwd, state, signal) {
     size: Number(info.size) || 0,
     mtimeMs: Number(info.mtimeMs) || 0,
     header,
+    stat: prefix.stat,
     oversize,
   };
 }
@@ -463,7 +464,7 @@ async function parsePersistedFile(candidate, state, signal) {
     signal,
     { tail: candidate.oversize === true },
   );
-  if (!read.ok) {
+  if (!read.ok || !sameStat(candidate.stat, read.stat)) {
     if (read.reason === "symlink") state.symlinks++;
     else state.readFailures++;
     state.incomplete = true;

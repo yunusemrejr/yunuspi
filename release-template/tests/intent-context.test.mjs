@@ -7,7 +7,7 @@ import {pathToFileURL} from 'node:url';
 const release=path.resolve(import.meta.dirname,'..');
 const agent=fs.existsSync(path.join(release,'agent'))?path.join(release,'agent'):path.resolve(release,'..');
 const load=name=>import(pathToFileURL(path.join(agent,'extensions',name)));
-const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence}=await load('lib/intent-context.ts');
+const {helperIntentEvidence,intentRetrievalQuery,priorUserEvidence,isPromptPivot}=await load('lib/intent-context.ts');
 const {scopeRequest}=await load('lib/scope-deliberation.ts');
 const {agentBrief}=await load('lib/project-intelligence/query.mjs');
 const {discoverContinuity}=await load('lib/project-intelligence/continuity.mjs');
@@ -104,4 +104,22 @@ test('curated preferences re-index once after an extractor update and remain his
     if(prior===undefined)delete process.env.PI_MEMORY_DIR;else process.env.PI_MEMORY_DIR=prior;
     fs.rmSync(temp,{recursive:true,force:true});
   }
+});
+
+
+test('changing a tool or presentation choice retains the task and its constraints',()=>{
+  const branch=[user('goal','Build the invoice dashboard; preserve keyboard access.')];
+  for(const choice of ['Switch to pnpm.','Switch to dark mode.','Switch it to CSS grid.']) {
+    assert.equal(isPromptPivot(choice),false,choice);
+    assert.match(intentRetrievalQuery(choice,branch),/invoice/);
+    const history=[...branch,user('choice',choice)];
+    const brief=helperIntentEvidence('Continue.',history);
+    assert.match(brief,/invoice dashboard/);
+    assert.match(brief,/preserve keyboard access/);
+    assert.match(brief,/branch-entry:choice/);
+  }
+  const history=[...branch,user('new','Switch to another task: write the migration plan.')];
+  assert.equal(isPromptPivot(history.at(-1).message.content),true);
+  assert.doesNotMatch(helperIntentEvidence('Continue.',history),/invoice|keyboard/);
+  assert.match(helperIntentEvidence('Continue.',history),/migration plan/);
 });

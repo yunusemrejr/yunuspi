@@ -41,7 +41,7 @@ function piRedactExportEntry(entry) {
   const blocks =
     typeof source.content === "string"
       ? [{ type: "text", text: source.content }]
-      : (source.content ?? []);
+      : Array.isArray(source.content) ? source.content.filter(block => block && typeof block === "object") : [];
   if (source.role === "toolResult") {
     Object.assign(message, pick(source, ["toolCallId", "toolName", "isError"]));
     message.content = [
@@ -49,7 +49,7 @@ function piRedactExportEntry(entry) {
     ];
   } else {
     message.content = blocks.flatMap((block) => {
-      if (block.type === "text") return [{ type: "text", text: block.text }];
+      if (block.type === "text" && typeof block.text === "string") return [{ type: "text", text: block.text }];
       if (block.type === "toolCall")
         return [
           { type: "toolCall", id: block.id, name: block.name, arguments: {} },
@@ -193,12 +193,13 @@ function piRedactExportData(data) {
       "Conversation export: reasoning, harness instructions, tool data, images and internal metadata omitted. User/assistant text is retained and may contain sensitive information; review before sharing. This is not a resumable archive.",
   };
 }
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.js";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.js";
-import { normalizePath, resolvePath } from "../../utils/paths.js";
-import { SessionManager } from "../session-manager.js";
+import { resolvePath } from "../../utils/paths.js";
+import { writeSessionExport } from "../export-file.js";
+import { SessionManager, loadEntriesFromFile } from "../session-manager.js";
 /** Parse a color string to RGB values. Supports hex (#RRGGBB) and rgb(r,g,b) formats. */
 function parseColor(color) {
     const hexMatch = color.match(/^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
@@ -300,16 +301,16 @@ function generateHtml(sessionData, themeName) {
     const sessionDataBase64 = Buffer.from(JSON.stringify(sessionData)).toString("base64");
     // Build the CSS with theme variables injected
     const css = templateCss
-        .replace("{{THEME_VARS}}", themeVars)
-        .replace("{{BODY_BG}}", bodyBg)
-        .replace("{{CONTAINER_BG}}", containerBg)
-        .replace("{{INFO_BG}}", infoBg);
+        .replace("{{THEME_VARS}}", () => themeVars)
+        .replace("{{BODY_BG}}", () => bodyBg)
+        .replace("{{CONTAINER_BG}}", () => containerBg)
+        .replace("{{INFO_BG}}", () => infoBg);
     return template
-        .replace("{{CSS}}", css)
-        .replace("{{JS}}", templateJs)
-        .replace("{{SESSION_DATA}}", sessionDataBase64)
-        .replace("{{MARKED_JS}}", markedJs)
-        .replace("{{HIGHLIGHT_JS}}", hljsJs);
+        .replace("{{CSS}}", () => css)
+        .replace("{{JS}}", () => templateJs)
+        .replace("{{SESSION_DATA}}", () => sessionDataBase64)
+        .replace("{{MARKED_JS}}", () => markedJs)
+        .replace("{{HIGHLIGHT_JS}}", () => hljsJs);
 }
 /** Tools rendered directly by the HTML template (not pre-rendered via TUI→ANSI→HTML pipeline) */
 const TEMPLATE_RENDERED_TOOLS = new Set(["bash", "read", "write", "edit", "ls"]);
@@ -359,13 +360,10 @@ function preRenderCustomTools(entries, toolRenderer) {
 export async function exportSessionToHtml(sm, state, options) {
     const opts = typeof options === "string" ? { outputPath: options } : options || {};
     const sessionFile = sm.getSessionFile();
-    if (!sessionFile) {
-        throw new Error("Cannot export in-memory session to HTML");
-    }
-    if (!existsSync(sessionFile)) {
+    const entries = sm.getEntries();
+    if (!entries.length) {
         throw new Error("Nothing to export yet - start a conversation first");
     }
-    const entries = sm.getEntries();
     // Pre-render custom tools if a tool renderer is provided
     let renderedTools;
     if (false && opts.toolRenderer) {
@@ -384,13 +382,12 @@ export async function exportSessionToHtml(sm, state, options) {
         renderedTools,
     };
     const html = generateHtml(sessionData, opts.themeName);
-    let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
+    let outputPath = opts.outputPath ? resolvePath(opts.outputPath) : undefined;
     if (!outputPath) {
-        const sessionBasename = basename(sessionFile, ".jsonl");
+        const sessionBasename = sessionFile ? basename(sessionFile, ".jsonl") : String(sm.getSessionId()).replace(/[^a-zA-Z0-9_-]/g, "_");
         outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
     }
-    writeFileSync(outputPath, html, "utf8");
-    return outputPath;
+    return writeSessionExport(outputPath, html, sessionFile);
 }
 /**
  * Export session file to HTML (standalone, without AgentState).
@@ -402,7 +399,12 @@ export async function exportFromFile(inputPath, options) {
     if (!existsSync(resolvedInputPath)) {
         throw new Error(`File not found: ${resolvedInputPath}`);
     }
-    const sm = SessionManager.open(resolvedInputPath);
+    // Loading an export must not migrate/rewrite the original session file.
+    const fileEntries = loadEntriesFromFile(resolvedInputPath).filter(entry => entry && typeof entry === "object" && !Array.isArray(entry));
+    if (!fileEntries.some(entry => entry.type === "session")) {
+        throw new Error(`Session file is empty or invalid: ${resolvedInputPath}`);
+    }
+    const sm = SessionManager.inMemory(process.cwd(), undefined, fileEntries);
     const sessionData = {
         header: sm.getHeader(),
         entries: sm.getEntries(),
@@ -411,11 +413,10 @@ export async function exportFromFile(inputPath, options) {
         tools: undefined,
     };
     const html = generateHtml(sessionData, opts.themeName);
-    let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
+    let outputPath = opts.outputPath ? resolvePath(opts.outputPath) : undefined;
     if (!outputPath) {
         const inputBasename = basename(resolvedInputPath, ".jsonl");
         outputPath = `${APP_NAME}-session-${inputBasename}.html`;
     }
-    writeFileSync(outputPath, html, "utf8");
-    return outputPath;
+    return writeSessionExport(outputPath, html, resolvedInputPath);
 }

@@ -66,6 +66,7 @@ export interface LlmPreferencesLoad {
 	reason?: string;
 	path: string;
 	missing?: boolean;
+	warnings?: string[];
 }
 
 export function llmPreferencesPath(): string {
@@ -116,14 +117,15 @@ export function loadLlmPreferences(): LlmPreferencesLoad {
 	const doc = raw as Record<string, unknown>;
 	if (doc.version !== undefined && doc.version !== LLM_PREFERENCES_VERSION)
 		return miss(`unsupported llm_preferences version ${JSON.stringify(doc.version)}; expected ${LLM_PREFERENCES_VERSION}`);
-	const models = parseRegistry(doc.models);
+	const warnings: string[] = [];
+	const models = parseRegistry(doc.models, warnings);
 	if (!models) return miss("preferences.models must be an object of alias to {provider, model, thinking?, provider_options?}");
-	const preferences = parsePreferences(doc.preferences);
+	const preferences = parsePreferences(doc.preferences, warnings);
 	if (!preferences) return miss("preferences.preferences must be an object of role to {models:[alias-or-entry]}");
 	const metadata = doc.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)
 		? (doc.metadata as Record<string, unknown>) : undefined;
 	cacheKey = filePath; cacheStamp = stamp;
-	return (cache = { ok: true, config: { version: LLM_PREFERENCES_VERSION, models, preferences, ...(metadata ? { metadata } : {}) }, path: filePath });
+	return (cache = { ok: true, config: { version: LLM_PREFERENCES_VERSION, models, preferences, ...(metadata ? { metadata } : {}) }, path: filePath, ...(warnings.length ? { warnings } : {}) });
 }
 
 const ALIAS_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -140,6 +142,7 @@ function parseEntry(value: unknown): LlmModelEntry | undefined {
 	const raw = value as Record<string, unknown>;
 	const model = cleanText(raw.model);
 	const provider = cleanText(raw.provider, 128);
+	if (raw.provider !== undefined && !provider) return undefined;
 	if (!model && !provider) return undefined;
 	const thinking = cleanText(raw.thinking, 32);
 	const options = raw.provider_options && typeof raw.provider_options === "object" && !Array.isArray(raw.provider_options)
@@ -147,38 +150,38 @@ function parseEntry(value: unknown): LlmModelEntry | undefined {
 	return { ...(provider ? { provider } : {}), ...(model ? { model } : {}), ...(thinking ? { thinking } : {}), ...(options ? { provider_options: options } : {}) };
 }
 
-function parseRegistry(value: unknown): Record<string, LlmModelEntry> | undefined {
+function parseRegistry(value: unknown, warnings: string[]): Record<string, LlmModelEntry> | undefined {
 	if (value === undefined) return {};
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-	const out: Record<string, LlmModelEntry> = {};
+	const out: Record<string, LlmModelEntry> = Object.create(null);
 	for (const [alias, entry] of Object.entries(value as Record<string, unknown>)) {
-		if (!ALIAS_RE.test(alias)) return undefined;
+		if (!ALIAS_RE.test(alias)) { warnings.push("ignored an invalid model alias"); continue; }
 		const parsed = parseEntry(entry);
-		if (!parsed || !parsed.model) return undefined;
+		if (!parsed || !parsed.model) { warnings.push(`ignored invalid model alias ${JSON.stringify(alias)}`); continue; }
 		out[alias] = parsed;
 	}
 	return out;
 }
 
-function parsePreferences(value: unknown): LlmPreferencesConfig["preferences"] | undefined {
+function parsePreferences(value: unknown, warnings: string[]): LlmPreferencesConfig["preferences"] | undefined {
 	if (value === undefined) return {};
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-	const out: LlmPreferencesConfig["preferences"] = {};
+	const out: LlmPreferencesConfig["preferences"] = Object.create(null);
 	for (const [role, spec] of Object.entries(value as Record<string, unknown>)) {
 		const canonical = normalizePreferenceRole(role);
-		if (!canonical) return undefined;
+		if (!canonical) { warnings.push("ignored an invalid preference role"); continue; }
 		const list = Array.isArray(spec) ? spec : (spec && typeof spec === "object" && !Array.isArray(spec)
 			? (spec as Record<string, unknown>).models : undefined);
-		if (!Array.isArray(list) || list.length > 64) return undefined;
+		if (!Array.isArray(list) || list.length > 64) { warnings.push(`ignored invalid preference list for ${canonical}`); continue; }
 		const models: Array<string | LlmModelEntry> = [];
 		for (const item of list) {
 			if (typeof item === "string") {
-				if (!ALIAS_RE.test(item.trim())) return undefined;
+				if (!ALIAS_RE.test(item.trim())) { warnings.push(`ignored invalid alias in ${canonical}`); continue; }
 				models.push(item.trim());
 				continue;
 			}
 			const parsed = parseEntry(item);
-			if (!parsed || !parsed.model) return undefined;
+			if (!parsed || !parsed.model) { warnings.push(`ignored invalid model entry in ${canonical}`); continue; }
 			models.push(parsed);
 		}
 		out[canonical] = { models };

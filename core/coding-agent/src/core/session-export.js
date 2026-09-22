@@ -41,7 +41,7 @@ function piRedactExportEntry(entry) {
   const blocks =
     typeof source.content === "string"
       ? [{ type: "text", text: source.content }]
-      : (source.content ?? []);
+      : Array.isArray(source.content) ? source.content.filter(block => block && typeof block === "object") : [];
   if (source.role === "toolResult") {
     Object.assign(message, pick(source, ["toolCallId", "toolName", "isError"]));
     message.content = [
@@ -49,7 +49,7 @@ function piRedactExportEntry(entry) {
     ];
   } else {
     message.content = blocks.flatMap((block) => {
-      if (block.type === "text") return [{ type: "text", text: block.text }];
+      if (block.type === "text" && typeof block.text === "string") return [{ type: "text", text: block.text }];
       if (block.type === "toolCall")
         return [
           { type: "toolCall", id: block.id, name: block.name, arguments: {} },
@@ -193,17 +193,12 @@ function piRedactExportData(data) {
       "Conversation export: reasoning, harness instructions, tool data, images and internal metadata omitted. User/assistant text is retained and may contain sensitive information; review before sharing. This is not a resumable archive.",
   };
 }
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { writeSessionExport } from "./export-file.js";
 import { resolvePath } from "../utils/paths.js";
 import { CURRENT_SESSION_VERSION } from "./session-manager.js";
 /** Write the current session branch and optional trailing export-only entries as JSONL. */
 export function exportSessionToJsonl(sessionManager, outputPath, createTrailingEntries) {
     const filePath = resolvePath(outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`, process.cwd());
-    const dir = dirname(filePath);
-    if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-    }
     const timestamp = new Date().toISOString();
     const header = {
         type: "session",
@@ -221,6 +216,5 @@ export function exportSessionToJsonl(sessionManager, outputPath, createTrailingE
     for (const entry of createTrailingEntries?.(parentId, timestamp) ?? []) {
         lines.push(JSON.stringify(piRedactExportEntry(entry)));
     }
-    writeFileSync(filePath, `${lines.join("\n")}\n`);
-    return filePath;
+    return writeSessionExport(filePath, `${lines.join("\n")}\n`, sessionManager.getSessionFile?.());
 }

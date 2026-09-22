@@ -1,4 +1,9 @@
 import { APP_NAME } from "../config.js";
+/** Split the command token from its arguments without discarding multiline input. */
+export function parseSlashCommand(text) {
+    const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
+    return match ? { name: match[1], args: match[2] ?? "" } : undefined;
+}
 export const BUILTIN_SLASH_COMMANDS = [
     { name: "settings", description: "Open settings menu" },
     { name: "model", description: "Select model (opens selector UI)", argumentHint: "<provider/model>" },

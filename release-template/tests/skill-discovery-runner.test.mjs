@@ -18,12 +18,13 @@ const { toModelInfo } = await mod('shared/model-info.ts');
 const { resetSharedControl } = await import(pathToFileURL(path.join(agent, 'extensions/lib/intervention-shared.ts')));
 const { parseFrontmatter, parseFrontmatterList } = await mod('agents/frontmatter.ts');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-discovery-'));
-const keys = ['PI_CODING_AGENT_DIR', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_AUTONOMOUS_FREE_ASSIST', 'PI_SUBAGENT_CHILD', 'PI_SUBAGENT_CHILD_AGENT', 'PI_OFFLINE'];
+const keys = ['PI_CODING_AGENT_DIR', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_LLM_PREFERENCES_FILE', 'PI_AUTONOMOUS_FREE_ASSIST', 'PI_SUBAGENT_CHILD', 'PI_SUBAGENT_CHILD_AGENT', 'PI_OFFLINE'];
 const previous = Object.fromEntries(keys.map(k => [k, process.env[k]]));
 process.env.PI_CODING_AGENT_DIR = root;
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(root, 'economy.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, 'exclusions.json');
+process.env.PI_LLM_PREFERENCES_FILE = path.join(root, 'preferences.json');
 process.env.PI_AUTONOMOUS_FREE_ASSIST = 'on';
 delete process.env.PI_SUBAGENT_CHILD; delete process.env.PI_OFFLINE;
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
@@ -256,6 +257,26 @@ test('consecutive instant failures walk distinct routes up to the attempt bound'
     assert.equal(h.calls.length, 2, 'a launch throw retries instead of abandoning discovery');
     assert.ok(seen.some(e => e.kind === 'skill.discovery' && e.data.decision === 'retried' && e.data.error === 'route unresolvable at dispatch'));
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
+test('skill discovery preserves configured Friendli routes through dispatch admission', async () => {
+  const prefs = await mod('runs/shared/llm-preferences.ts');
+  const fallback = await mod('runs/shared/model-fallback.ts');
+  const chosen = {...model, provider:'friendli',id:'vendor/preferred',baseUrl:'https://api.friendli.ai/serverless/v1'};
+  const available = [toModelInfo(chosen)];
+  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({preferences:{subagents:[{provider:chosen.provider,model:chosen.id}]}}));
+  prefs.clearLlmPreferencesCache();
+  try {
+    const f=fixture({models:[chosen],launch:async(_id,params)=>{
+      assert.equal(params.modelOrigin,'configured');
+      const route=fallback.resolveEffectiveSubagentModel(params.model,undefined,undefined,available,undefined,{source:params.modelOrigin==='explicit'?'explicit':'inherited',task:params.task});
+      assert.deepEqual(fallback.buildModelCandidates(route,undefined,available,undefined,{origin:params.modelOrigin,task:params.task}),[params.model]);
+      return result('{"skills":[]}');
+    }});
+    assert.equal(await f.runner({brief:'Select a useful installed skill from the supplied evidence.'},f.ctx),'{"skills":[]}');
+    assert.equal(f.calls.length,1);
+    assert.equal(f.calls[0][1].model,`friendli/${chosen.id}`);
+  } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache(); }
 });
 
 after(() => { delete globalThis[SKILL_DISCOVERY_RUNNER]; for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } fs.rmSync(root, { recursive: true, force: true }); });

@@ -2283,12 +2283,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1708
+        "line": 1715
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1310
+        "line": 1317
       },
       {
         "name": "curator",
@@ -2303,12 +2303,12 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1682
+        "line": 1689
       },
       {
         "name": "export-json",
         "source": "agent/extensions/session-export-json.ts",
-        "line": 49
+        "line": 72
       },
       {
         "name": "google-account",
@@ -2328,7 +2328,7 @@
       {
         "name": "hook-audit",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 65
+        "line": 73
       },
       {
         "name": "jobs",
@@ -2403,7 +2403,7 @@
       {
         "name": "metrics",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 47
+        "line": 55
       },
       {
         "name": "obs",
@@ -2448,7 +2448,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1635
+        "line": 1642
       },
       {
         "name": "subagent-cost",
@@ -2533,7 +2533,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1640
+        "line": 1647
       },
       {
         "name": "tasks",
@@ -2543,7 +2543,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1659
+        "line": 1666
       },
       {
         "name": "websearch",
@@ -2687,7 +2687,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 206,
+        "line": 207,
         "kind": "literal"
       },
       {
@@ -2941,7 +2941,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1800,
+        "line": 1807,
         "kind": "literal"
       },
       {
@@ -2953,13 +2953,13 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1737,
+        "line": 1744,
         "kind": "literal"
       },
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 361,
+        "line": 362,
         "kind": "literal"
       },
       {
@@ -3149,7 +3149,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 206,
+        "line": 207,
         "kind": "literal"
       },
       {
@@ -3287,7 +3287,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1800,
+        "line": 1807,
         "kind": "literal"
       },
       {
@@ -3299,13 +3299,13 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1737,
+        "line": 1744,
         "kind": "literal"
       },
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 361,
+        "line": 362,
         "kind": "literal"
       },
       {

@@ -24,7 +24,7 @@ import { CredentialSynchronizationError } from "../../core/model-runtime.js";
 import { DefaultPackageManager } from "../../core/package-manager.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.js";
-import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
+import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../core/slash-commands.js";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import { withBuiltInRenderers } from "../../core/tools/renderers/index.js";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.js";
@@ -2392,13 +2392,17 @@ export class InteractiveMode {
         this.showStatus("Startup is still in progress");
     }
     setupEditorSubmitHandler() {
-        this.defaultEditor.onSubmit = async (text) => {
+        const submit = async (text) => {
             text = text.trim();
             if (!text)
                 return;
+            // Command separators may be tabs/newlines, including pasted input.
+            const command = parseSlashCommand(text);
+            if (command && BUILTIN_SLASH_COMMANDS.some((builtin) => builtin.name === command.name))
+                text = `/${command.name}${command.args ? ` ${command.args}` : ""}`;
             // Handle commands
             if (text === "/settings") {
-                this.showSettingsSelector();
+                await this.showSettingsSelector();
                 this.editor.setText("");
                 return;
             }
@@ -2416,7 +2420,7 @@ export class InteractiveMode {
             if (text === "/thinking" || text.startsWith("/thinking ")) {
                 const searchTerm = text.startsWith("/thinking ") ? text.slice(10).trim() : undefined;
                 this.editor.setText("");
-                this.handleThinkingCommand(searchTerm);
+                await this.handleThinkingCommand(searchTerm);
                 return;
             }
             if (text === "/export" || text.startsWith("/export ")) {
@@ -2460,7 +2464,7 @@ export class InteractiveMode {
                 return;
             }
             if (text === "/fork") {
-                this.showUserMessageSelector();
+                await this.showUserMessageSelector();
                 this.editor.setText("");
                 return;
             }
@@ -2470,12 +2474,12 @@ export class InteractiveMode {
                 return;
             }
             if (text === "/tree") {
-                this.showTreeSelector();
+                await this.showTreeSelector();
                 this.editor.setText("");
                 return;
             }
             if (text === "/trust") {
-                this.showTrustSelector();
+                await this.showTrustSelector();
                 this.editor.setText("");
                 return;
             }
@@ -2486,7 +2490,7 @@ export class InteractiveMode {
                 return;
             }
             if (text === "/logout") {
-                this.showOAuthSelector("logout");
+                await this.showOAuthSelector("logout");
                 this.editor.setText("");
                 return;
             }
@@ -2522,13 +2526,20 @@ export class InteractiveMode {
                 return;
             }
             if (text === "/resume") {
-                this.showSessionSelector();
+                await this.showSessionSelector();
                 this.editor.setText("");
                 return;
             }
             if (text === "/quit") {
                 this.editor.setText("");
                 await this.shutdown();
+                return;
+            }
+            // A missing extension must not silently turn a command into a paid model prompt.
+            // Keep absolute paths and prompt-template invocations usable as ordinary input.
+            if (/^\/[a-z][\w-]*$/i.test(text) && !this.isExtensionCommand(text) &&
+                !this.session.promptTemplates.some((template) => template.name === text.slice(1)) && !fs.existsSync(text)) {
+                this.showError(`Unknown command '${text}'. Use /reload to reload extensions or /commands to list available commands.`);
                 return;
             }
             // Handle bash command (! for normal, !! for excluded from context)
@@ -2580,6 +2591,15 @@ export class InteractiveMode {
                 this.pendingUserInputs.push(text);
             }
             this.editor.addToHistory?.(text);
+        };
+        // The terminal editor cannot await submission; report asynchronous failures here.
+        this.defaultEditor.onSubmit = async (text) => {
+            try {
+                await submit(text);
+            }
+            catch (error) {
+                this.showError(error instanceof Error ? error.message : String(error));
+            }
         };
     }
     subscribeToAgent() {
@@ -3424,34 +3444,47 @@ export class InteractiveMode {
         }
     }
     async handleFollowUp() {
-        const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
-        if (!text)
-            return;
-        // Queue input during compaction (extension commands execute immediately)
-        if (this.session.isCompacting) {
-            if (this.isExtensionCommand(text)) {
+        try {
+            const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
+            if (!text)
+                return;
+            const command = parseSlashCommand(text);
+            if (command && (BUILTIN_SLASH_COMMANDS.some((builtin) => builtin.name === command.name) ||
+                this.isExtensionCommand(text) || (/^\/[a-z][\w-]*$/i.test(text) && !fs.existsSync(text) &&
+                    !this.session.promptTemplates.some((template) => template.name === command.name)))) {
+                this.editor.setText("");
+                await this.defaultEditor.onSubmit?.(text);
+                return;
+            }
+            // Queue input during compaction (extension commands execute immediately)
+            if (this.session.isCompacting) {
+                if (this.isExtensionCommand(text)) {
+                    this.editor.addToHistory?.(text);
+                    this.editor.setText("");
+                    await this.session.prompt(text);
+                }
+                else {
+                    this.queueCompactionMessage(text, "followUp");
+                }
+                return;
+            }
+            // Alt+Enter queues a follow-up message (waits until agent finishes)
+            // This handles extension commands (execute immediately), prompt template expansion, and queueing
+            if (this.session.isStreaming) {
                 this.editor.addToHistory?.(text);
                 this.editor.setText("");
-                await this.session.prompt(text);
+                await this.session.prompt(text, { streamingBehavior: "followUp" });
+                this.updatePendingMessagesDisplay();
+                this.ui.requestRender();
             }
-            else {
-                this.queueCompactionMessage(text, "followUp");
+            // If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
+            else if (this.editor.onSubmit) {
+                this.editor.setText("");
+                await this.editor.onSubmit(text);
             }
-            return;
         }
-        // Alt+Enter queues a follow-up message (waits until agent finishes)
-        // This handles extension commands (execute immediately), prompt template expansion, and queueing
-        if (this.session.isStreaming) {
-            this.editor.addToHistory?.(text);
-            this.editor.setText("");
-            await this.session.prompt(text, { streamingBehavior: "followUp" });
-            this.updatePendingMessagesDisplay();
-            this.ui.requestRender();
-        }
-        // If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
-        else if (this.editor.onSubmit) {
-            this.editor.setText("");
-            this.editor.onSubmit(text);
+        catch (error) {
+            this.showError(error instanceof Error ? error.message : String(error));
         }
     }
     handleDequeue() {
@@ -3691,10 +3724,8 @@ export class InteractiveMode {
     isExtensionCommand(text) {
         if (!text.startsWith("/"))
             return false;
-        const extensionRunner = this.session.extensionRunner;
-        const spaceIndex = text.indexOf(" ");
-        const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-        return !!extensionRunner.getCommand(commandName);
+        const command = parseSlashCommand(text);
+        return !!command && !!this.session.extensionRunner.getCommand(command.name);
     }
     async flushCompactionQueue(options) {
         if (this.compactionQueuedMessages.length === 0) {

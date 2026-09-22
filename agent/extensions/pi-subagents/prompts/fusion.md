@@ -27,7 +27,8 @@ Every fragment is a fenced block:
 - `updatedAt`: the current epoch-milliseconds value you were given in your
   task brief. Do not invent or reuse timestamps.
 - `body`: the section content. JSON-escape it (quotes, newlines as \n).
-  No trailing commas, no `null`, no markdown fences inside `body`.
+  No trailing commas or `null`. Markdown code fences inside `body` are fine
+  when their newlines are JSON-escaped; the outer fence closes on its own line.
 
 ## Kinds (pick exactly one per fragment)
 

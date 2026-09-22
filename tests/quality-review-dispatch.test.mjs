@@ -9,6 +9,7 @@ const load=relative=>import(pathToFileURL(path.join(agentRoot,relative)));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'quality-dispatch-'));
 process.env.PI_CODING_AGENT_DIR=root;
 process.env.PI_MODEL_EXCLUSIONS_PATH=path.join(root,'exclusions.json');
+process.env.PI_LLM_PREFERENCES_FILE=path.join(root,'llm_preferences.json');
 process.env.PI_PROVIDER_STATE_FILE=path.join(root,'health.json');
 delete process.env.PI_AUTONOMOUS_FREE_ASSIST;delete process.env.PI_SUBAGENT_CHILD;
 const {compactForegroundResult}=await load('extensions/pi-subagents/src/shared/utils.ts');

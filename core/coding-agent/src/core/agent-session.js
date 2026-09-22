@@ -33,6 +33,7 @@ import { expandPromptTemplate } from "./prompt-templates.js";
 import { exportSessionToJsonl } from "./session-export.js";
 import { getLatestCompactionEntry } from "./session-manager.js";
 import { createSyntheticSourceInfo } from "./source-info.js";
+import { parseSlashCommand } from "./slash-commands.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
@@ -987,9 +988,10 @@ export class AgentSession {
      */
     async _tryExecuteExtensionCommand(text) {
         // Parse command name and args
-        const spaceIndex = text.indexOf(" ");
-        const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-        const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+        const parsed = parseSlashCommand(text);
+        if (!parsed)
+            return false;
+        const { name: commandName, args } = parsed;
         const command = this._extensionRunner.getCommand(commandName);
         if (!command)
             return false;
@@ -1017,9 +1019,11 @@ export class AgentSession {
     _expandSkillCommand(text) {
         if (!text.startsWith("/skill:"))
             return text;
-        const spaceIndex = text.indexOf(" ");
-        const skillName = spaceIndex === -1 ? text.slice(7) : text.slice(7, spaceIndex);
-        const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1).trim();
+        const parsed = parseSlashCommand(text);
+        if (!parsed)
+            return text;
+        const skillName = parsed.name.slice(6);
+        const args = parsed.args.trim();
         const skill = this.resourceLoader.getSkills().skills.find((s) => s.name === skillName);
         if (!skill)
             return text; // Unknown skill, pass through

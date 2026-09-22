@@ -19,8 +19,9 @@ import { stableToolOrder } from "./lib/stable-tool-order.ts";
 import { createToolJsonCompactor } from "./lib/compact-tool-json.ts";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import { openExternal } from "./lib/project-intelligence/viewer.mjs";
 import {
@@ -114,11 +115,11 @@ export function renderPopupHtml(title: string, bodyHtml: string): string {
 }
 
 export function popupDir(): string {
-  return path.join(os.homedir(), ".pi", "popups");
+  return path.join(path.dirname(getAgentDir()), "popups");
 }
 
 export function sysPromptDir(): string {
-  return path.join(os.homedir(), ".pi", "sys-prompts");
+  return path.join(path.dirname(getAgentDir()), "sys-prompts");
 }
 
 export function sanitizeFileSegment(value: unknown): string {
@@ -129,11 +130,14 @@ export function sanitizeFileSegment(value: unknown): string {
 export function writePopupFile(dir: string, fileName: string, html: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, fileName);
-  fs.writeFileSync(file, html, { encoding: "utf8", mode: 0o600 });
+  if (path.basename(fileName) !== fileName || fileName === "." || fileName === "..")
+    throw new Error("Popup filename must be a single path segment");
+  const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    fs.chmodSync(file, 0o600);
-  } catch {
-    // Best-effort: the file already holds the bytes.
+    fs.writeFileSync(temporary, html, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
   }
   return file;
 }
@@ -1294,13 +1298,16 @@ export default function (pi: any) {
     const dir = popupDir();
     const file = writePopupFile(dir, `${kind}-${sanitizeFileSegment(sid || "session")}.html`, renderPopupHtml(title, bodyHtml));
     pruneStaleFiles(dir, 7 * 24 * 3600_000, path.basename(file));
-    const url = `file://${file.split(path.sep).map((segment) => encodeURIComponent(segment)).join("/")}`;
-    const error = await openExternal(url);
+    if (ctx.hasUI === false) return file;
+    const error = await openExternal(pathToFileURL(file).href);
     if (error) throw new Error(`Could not open a browser window: ${error}. Open the popup manually: ${file}`);
     return file;
   };
   const popupError = (command: string, error: unknown, ctx: any) => {
     const message = error instanceof Error ? error.message : String(error);
+    try {
+      (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("hook.error", { hook: "command", owner: "session-signals.ts", isError: true });
+    } catch { /* A diagnostic sink cannot hide the original failure. */ }
     try {
       ctx.ui?.notify?.(`/${command} failed: ${message.slice(0, 300)}`, "error");
     } catch {
@@ -1641,8 +1648,8 @@ export default function (pi: any) {
     description:
       "Show this session's captured opening system prompt in a separate window.",
     handler: (_args: string, ctx: any) => {
-      // Deliberately return immediately: no waitForIdle, model prompt or session abort.
-      void (async () => {
+      // Await only the popup operation, never model idleness or a session abort.
+      return (async () => {
         const snapshot = readSysSnapshot(ctx);
         if (!snapshot) {
           ctx.ui?.notify?.(
@@ -1651,8 +1658,8 @@ export default function (pi: any) {
           );
           return;
         }
-        await openHtmlPopup("sys-prompt", "Session system prompt", sysPromptHtml(snapshot), ctx);
-        ctx.ui?.notify?.("System prompt opened.", "info");
+        const file = await openHtmlPopup("sys-prompt", "Session system prompt", sysPromptHtml(snapshot), ctx);
+        ctx.ui?.notify?.(`System prompt ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("sys-prompt", error, ctx));
     },
   });
@@ -1660,7 +1667,7 @@ export default function (pi: any) {
     description:
       "Open expandable session details for models, tools, skills, child agents and Harness activity.",
     handler: (_args: string, ctx: any) => {
-      void (async () => {
+      return (async () => {
         let entries: unknown;
         try {
           entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
@@ -1674,8 +1681,8 @@ export default function (pi: any) {
           id: ctx?.model?.id,
           thinking: ctx?.thinkingLevel,
         });
-        await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
-        ctx.ui?.notify?.("Detailed session usage opened.", "info");
+        const file = await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
+        ctx.ui?.notify?.(`Detailed session usage ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("used", error, ctx));
     },
   });
@@ -1683,7 +1690,7 @@ export default function (pi: any) {
     description:
       "Open a detailed JSON list of this session's errors (payloads, modules, causes) with a copy button.",
     handler: (_args: string, ctx: any) => {
-      void (async () => {
+      return (async () => {
         let entries: unknown;
         try {
           entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
@@ -1700,15 +1707,15 @@ export default function (pi: any) {
           ledgerTasks = undefined;
         }
         const report = collectSessionErrors(list, { ledgerTasks });
-        await openHtmlPopup("errors", "Session errors", errorsHtml(report), ctx);
-        ctx.ui?.notify?.("Detailed session errors opened.", "info");
+        const file = await openHtmlPopup("errors", "Session errors", errorsHtml(report), ctx);
+        ctx.ui?.notify?.(`Detailed session errors ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("errors", error, ctx));
     },
   });
   pi.registerCommand("commands", {
     description: "List all registered slash commands in a separate window.",
     handler: (_args: string, ctx: any) => {
-      void (async () => {
+      return (async () => {
         let registered: unknown;
         try {
           registered = typeof pi.getCommands === "function" ? pi.getCommands() : undefined;
@@ -1718,7 +1725,7 @@ export default function (pi: any) {
           );
         }
         if (!Array.isArray(registered)) throw new Error("Command registry is unavailable.");
-        await openHtmlPopup(
+        const file = await openHtmlPopup(
           "commands",
           "Slash commands",
           commandsHtml(
@@ -1730,7 +1737,7 @@ export default function (pi: any) {
           ),
           ctx,
         );
-        ctx.ui?.notify?.("Command list opened.", "info");
+        ctx.ui?.notify?.(`Command list ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("commands", error, ctx));
     },
   });

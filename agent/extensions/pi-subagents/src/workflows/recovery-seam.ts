@@ -52,7 +52,7 @@ function requireChildKey(item: WorkflowChildOutcome, index: number): string {
 export function childResultsToRecoveryRecords(results: unknown, now: number): SwarmRunRecord[] {
 	const items = requireResultsArray(results);
 	return items.map((item, index) => {
-		if (!item || typeof item !== "object") {
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
 			throw new TypeError(`runs.recover: results[${index}] must be an object`);
 		}
 		const key = requireChildKey(item, index);
@@ -96,6 +96,8 @@ export function fuseChildOutputs(results: unknown, config?: Partial<FusionConfig
 	const now = Date.now();
 	const fragments: FusionFragment[] = [];
 	items.forEach((item, index) => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) throw new TypeError(`runs.fuse: results[${index}] must be an object`);
+		if (typeof item.ok !== "boolean") throw new TypeError(`runs.fuse: results[${index}].ok must be a boolean`);
 		const key = requireChildKey(item, index);
 		if (item.ok === false || item.stopped === true || item.interrupted === true) return;
 		if (typeof item.output !== "string") {

@@ -208,3 +208,28 @@ test("omits credentials, symlinks and aborted reads", async () => {
     await fs.rm(temp, { recursive: true, force: true });
   }
 });
+
+
+test("a session replaced between header discovery and content read cannot contribute foreign evidence", async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "pi-scope-history-race-"));
+  const originalOpen = fs.open;
+  try {
+    const cwd=path.join(temp,'project'), foreign=path.join(temp,'foreign'), sessions=path.join(temp,'sessions');
+    await Promise.all([fs.mkdir(cwd),fs.mkdir(foreign),fs.mkdir(sessions)]);
+    const file=path.join(sessions,'history.jsonl');
+    await writeSession(file,{id:'same-id',cwd,entries:[message('before',null,'user','Preserve checkout keyboard access.',1)]});
+    let reads=0;
+    fs.open = async function (target, ...args) {
+      if(target===file && ++reads===2) {
+        const replacement=path.join(temp,'replacement.jsonl');
+        await writeSession(replacement,{id:'same-id',cwd:foreign,entries:[message('after',null,'user','Checkout FOREIGN REPLACEMENT MUST NOT APPEAR.',2)]});
+        await fs.rename(replacement,file);
+      }
+      return originalOpen.call(this,target,...args);
+    };
+    const collected=await collectScopeHistory({cwd,sessionsDir:sessions,currentSessionId:'current',prompt:'Redesign checkout',branch:[]});
+    assert.equal(reads,2);
+    assert.equal(collected.incomplete,true);
+    assert.doesNotMatch(JSON.stringify(collected.evidence),/FOREIGN REPLACEMENT/);
+  } finally {fs.open=originalOpen;await fs.rm(temp,{recursive:true,force:true});}
+});

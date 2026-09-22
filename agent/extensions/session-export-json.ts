@@ -21,6 +21,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { homedir } from "node:os";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { buildSessionJsonExport } from "./lib/session-export-json.ts";
 import { shadowReport } from "./lib/intervention-registry.ts";
@@ -33,14 +34,36 @@ const USAGE =
 
 function parseArgs(raw: string): { output: string | null; all: boolean; includeRaw: boolean; min: boolean; help: boolean } {
   const parsed = { output: null as string | null, all: false, includeRaw: true, min: false, help: false };
-  for (const token of String(raw ?? "").split(/\s+/).filter(Boolean)) {
-    if (token === "--all") parsed.all = true;
-    else if (token === "--no-raw") parsed.includeRaw = false;
-    else if (token === "--min") parsed.min = true;
-    else if (token === "--help" || token === "-h") parsed.help = true;
-    else if (token.startsWith("--")) parsed.help = true;
-    else if (parsed.output === null) parsed.output = token;
-    else parsed.help = true;
+  const tokens: string[] = [];
+  let token = "", quote = "", started = false;
+  const text = String(raw ?? "");
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\\" && quote !== "'") {
+      if (i + 1 === text.length) throw new Error("Unfinished escape in output path");
+      token += text[++i]; started = true;
+    } else if (quote) {
+      if (char === quote) quote = "";
+      else token += char;
+    } else if (char === '"' || char === "'") {
+      quote = char; started = true;
+    } else if (/\s/.test(char)) {
+      if (started) tokens.push(token);
+      token = ""; started = false;
+    } else { token += char; started = true; }
+  }
+  if (quote) throw new Error("Unclosed quote in output path");
+  if (started) tokens.push(token);
+  let positional = false;
+  for (const token of tokens) {
+    if (!positional && token === "--") { positional = true; continue; }
+    if (!positional && token === "--all") parsed.all = true;
+    else if (!positional && token === "--no-raw") parsed.includeRaw = false;
+    else if (!positional && token === "--min") parsed.min = true;
+    else if (!positional && (token === "--help" || token === "-h")) parsed.help = true;
+    else if (!positional && token.startsWith("--")) throw new Error(`Unknown option: ${token}`);
+    else if (parsed.output === null && token) parsed.output = token;
+    else throw new Error("Expected one output path; quote paths containing spaces");
   }
   return parsed;
 }
@@ -50,108 +73,108 @@ export default function (pi: ExtensionAPI) {
     description:
       "Export the session as unredacted local diagnostics JSON (thinking, tool I/O, API records, signals, analytics) — private, never share",
     handler: async (args: string, ctx: any) => {
-      const options = parseArgs(args);
-      if (options.help) {
-        if (ctx.hasUI) ctx.ui.notify(USAGE, "info");
-        else console.log(USAGE);
-        return;
-      }
-      let retained: any[];
       try {
-        retained = ctx.sessionManager.getEntries() ?? [];
-      } catch (error) {
-        const msg = `export-json: cannot read session entries: ${(error?.message ?? String(error)).slice(0, 200)}`;
-        if (ctx.hasUI) ctx.ui.notify(msg, "warning");
-        else console.error(msg);
-        return;
-      }
-      let branch = retained;
-      try {
-        const current = ctx.sessionManager.getBranch?.();
-        if (Array.isArray(current)) branch = current;
-      } catch {
-        branch = retained;
-      }
-      const header = ctx.sessionManager.getHeader?.() ?? null;
-      const sessionFile = ctx.sessionManager.getSessionFile?.() ?? null;
-      const leafId = ctx.sessionManager.getLeafId?.() ?? null;
-      if (!retained.length && !branch.length) {
-        const msg = "export-json: nothing to export yet — start a conversation first.";
-        if (ctx.hasUI) ctx.ui.notify(msg, "warning");
-        else console.log(msg);
-        return;
-      }
-      const scope = options.all ? "all" : "branch";
-      let controlPlaneShadow = null;
-      try {
-        controlPlaneShadow = shadowReport();
-      } catch { /* live rollup is best-effort diagnostics */ }
-      let activity = null;
-      try {
-        activity = activityView() ?? null;
-      } catch { /* live rollup is best-effort diagnostics */ }
-      let currentRouting: unknown;
-      try {
-        const text = JSON.stringify(ctx.model?.compat?.openRouterRouting);
-        if (text && text !== "{}" && text.length <= 1024) currentRouting = JSON.parse(text);
-      } catch { currentRouting = undefined; }
-      const currentEndpoint = typeof ctx.model?.compat?.recoveryEndpointName === "string" && ctx.model.compat.recoveryEndpointName.trim()
-        ? ctx.model.compat.recoveryEndpointName.trim().slice(0, 160) : undefined;
-      let provenance = null;
-      try {
-        provenance = collectRuntimeProvenance({});
-      } catch { /* provenance is best-effort diagnostics */ }
-      const report = buildSessionJsonExport({
-        header,
-        sessionFile,
-        leafId,
-        cwd: ctx.cwd ?? null,
-        scope,
-        branch,
-        retained,
-        model: ctx.model ? {
-          provider: ctx.model.provider, id: ctx.model.id,
-          ...(currentRouting ? { routing: currentRouting } : {}),
-          ...(currentEndpoint ? { endpoint: currentEndpoint } : {}),
-        } : null,
-        thinkingLevel: ctx.thinkingLevel ?? null,
-        includeRaw: options.includeRaw,
-        controlPlaneShadow,
-        activity,
-        provenance,
-      });
-      const sessionTag = typeof header?.id === "string" && header.id
-        ? header.id.slice(0, 8)
-        : typeof sessionFile === "string" && sessionFile
-          ? path.basename(sessionFile, ".jsonl").slice(-32)
-          : "session";
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const outputPath = options.output
-        ? path.resolve(ctx.cwd ?? process.cwd(), options.output)
-        : path.resolve(ctx.cwd ?? process.cwd(), `pi-session-${sessionTag}-${stamp}-diagnostics.json`);
-      const json = options.min ? JSON.stringify(report) : JSON.stringify(report, null, 2);
-      try {
-        fs.writeFileSync(outputPath, json, { encoding: "utf8", mode: 0o600 });
-        try {
-          fs.chmodSync(outputPath, 0o600);
-        } catch {
-          // Best effort: the create-mode already applied for new files.
+        const options = parseArgs(args);
+        if (options.help) {
+          if (ctx.hasUI) ctx.ui.notify(USAGE, "info");
+          else console.log(USAGE);
+          return;
         }
+        const retained = ctx.sessionManager.getEntries();
+        if (!Array.isArray(retained)) throw new Error("Session entries are unavailable");
+        let branch: any[] = [];
+        try {
+          const current = ctx.sessionManager.getBranch?.();
+          if (!Array.isArray(current)) throw new Error("Current session branch is unavailable; use --all to export retained entries");
+          branch = current;
+        } catch (error) {
+          if (!options.all) throw error;
+        }
+        const header = ctx.sessionManager.getHeader?.() ?? null;
+        const sessionFile = ctx.sessionManager.getSessionFile?.() ?? null;
+        const leafId = ctx.sessionManager.getLeafId?.() ?? null;
+        if (!(options.all ? retained : branch).length) {
+          const msg = "export-json: nothing to export yet — start a conversation first.";
+          if (ctx.hasUI) ctx.ui.notify(msg, "warning");
+          else console.log(msg);
+          return;
+        }
+        const scope = options.all ? "all" : "branch";
+        let controlPlaneShadow = null;
+        try {
+          controlPlaneShadow = shadowReport();
+        } catch { /* live rollup is best-effort diagnostics */ }
+        let activity = null;
+        try {
+          activity = activityView() ?? null;
+        } catch { /* live rollup is best-effort diagnostics */ }
+        let currentRouting: unknown;
+        try {
+          const text = JSON.stringify(ctx.model?.compat?.openRouterRouting);
+          if (text && text !== "{}" && text.length <= 1024) currentRouting = JSON.parse(text);
+        } catch { currentRouting = undefined; }
+        const currentEndpoint = typeof ctx.model?.compat?.recoveryEndpointName === "string" && ctx.model.compat.recoveryEndpointName.trim()
+          ? ctx.model.compat.recoveryEndpointName.trim().slice(0, 160) : undefined;
+        let provenance = null;
+        try {
+          provenance = collectRuntimeProvenance({});
+        } catch { /* provenance is best-effort diagnostics */ }
+        const report = buildSessionJsonExport({
+          header,
+          sessionFile,
+          leafId,
+          cwd: ctx.cwd ?? null,
+          scope,
+          branch,
+          retained,
+          model: ctx.model ? {
+            provider: ctx.model.provider, id: ctx.model.id,
+            ...(currentRouting ? { routing: currentRouting } : {}),
+            ...(currentEndpoint ? { endpoint: currentEndpoint } : {}),
+          } : null,
+          thinkingLevel: ctx.thinkingLevel ?? null,
+          includeRaw: options.includeRaw,
+          controlPlaneShadow,
+          activity,
+          provenance,
+        });
+        const sessionTag = typeof header?.id === "string" && header.id
+          ? header.id.slice(0, 8).replace(/[^a-zA-Z0-9_-]/g, "_")
+          : typeof sessionFile === "string" && sessionFile
+            ? path.basename(sessionFile, ".jsonl").slice(-32).replace(/[^a-zA-Z0-9_-]/g, "_")
+            : "session";
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const outputPath = options.output
+          ? path.resolve(ctx.cwd ?? process.cwd(), options.output === "~" ? homedir() : options.output.startsWith("~/") ? path.join(homedir(), options.output.slice(2)) : options.output)
+          : path.resolve(ctx.cwd ?? process.cwd(), `pi-session-${sessionTag}-${stamp}-diagnostics.json`);
+        const json = options.min ? JSON.stringify(report) : JSON.stringify(report, null, 2);
+        const canonical = (file: string) => fs.existsSync(file) ? fs.realpathSync(file) : path.resolve(file);
+        if (sessionFile && canonical(outputPath) === canonical(sessionFile)) {
+          throw new Error("Export output must not overwrite the source session");
+        }
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
+        const temporaryDir = fs.mkdtempSync(path.join(path.dirname(outputPath), ".session-export-"));
+        try {
+          const temporaryFile = path.join(temporaryDir, "export");
+          fs.writeFileSync(temporaryFile, json, { encoding: "utf8", mode: 0o600 });
+          fs.renameSync(temporaryFile, outputPath);
+        } finally {
+          fs.rmSync(temporaryDir, { recursive: true, force: true });
+        }
+        const summary = report.summary;
+        const kb = (Buffer.byteLength(json) / 1024).toFixed(1);
+        const lines = [
+          `export-json: wrote ${outputPath} (${kb} KB, ${scope}, ${report.events.length} events, 0600).`,
+          `${summary.userTurns} prompts · ${summary.assistantTurns} responses · ${summary.toolCalls} tool calls (${summary.toolErrors} errors) · ${summary.modelErrors} provider errors · ${summary.thinkingBlocks} thinking blocks.`,
+          "Private diagnostics — never share or publish this file.",
+        ].join("\n");
+        if (ctx.hasUI) ctx.ui.notify(lines, "info");
+        else console.log(lines);
       } catch (error) {
-        const msg = `export-json: write failed: ${(error?.message ?? String(error)).slice(0, 300)}`;
+        const msg = `export-json: failed: ${String(error?.message ?? error).slice(0, 300)}`;
         if (ctx.hasUI) ctx.ui.notify(msg, "warning");
         else console.error(msg);
-        return;
       }
-      const summary = report.summary;
-      const kb = (Buffer.byteLength(json) / 1024).toFixed(1);
-      const lines = [
-        `export-json: wrote ${outputPath} (${kb} KB, ${scope}, ${report.events.length} events, 0600).`,
-        `${summary.userTurns} prompts · ${summary.assistantTurns} responses · ${summary.toolCalls} tool calls (${summary.toolErrors} errors) · ${summary.modelErrors} provider errors · ${summary.thinkingBlocks} thinking blocks.`,
-        "Private diagnostics — never share or publish this file.",
-      ].join("\n");
-      if (ctx.hasUI) ctx.ui.notify(lines, "info");
-      else console.log(lines);
     },
   });
 }

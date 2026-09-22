@@ -10,7 +10,7 @@ const agent = fs.existsSync(path.join(release, "agent"))
   : path.resolve(release, "..");
 const lib = (name) => import(pathToFileURL(path.join(agent, "extensions/lib/", name)));
 const { createRelevantGuidance } = await lib("relevant-guidance.ts");
-const { noteQualityReviewCompleted, lastQualityReviewCompletedAt } = await lib("quality-review-owner.ts");
+const { noteQualityReviewCompleted, lastQualityReviewCompletedAt, registerSharedQualityReview, settleSharedQualityReview } = await lib("quality-review-owner.ts");
 
 let sessionSerial = 0;
 function fixture() {
@@ -76,4 +76,19 @@ test("an old review does not suppress, and the session cap persists across resto
   g.start();
   g.fail(4);
   assert.equal(g.suggested(), false);
+});
+
+
+test('shared review drops a result when its caller aborts or changes sessions while awaiting',async()=>{
+  for(const mode of ['abort','session']){
+    let session='fixture-review-owner-'+mode, release;
+    const wait=new Promise(resolve=>release=resolve), controller=new AbortController();
+    const ctx={cwd:'/fixture/shared-review',signal:controller.signal,sessionManager:{getSessionId:()=>session}};
+    const unregister=registerSharedQualityReview(ctx,{owner:{},available:()=>true,settle:()=>wait,snapshot:()=>({status:'old advice'})});
+    const pending=settleSharedQualityReview(ctx);
+    if(mode==='abort')controller.abort();else session='replacement-session';
+    release();
+    assert.equal(await pending,undefined,mode);
+    unregister();
+  }
 });

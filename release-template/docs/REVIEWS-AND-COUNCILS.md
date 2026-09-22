@@ -47,3 +47,14 @@ always stays available regardless of these gates.
 Model and thinking choices for every kind follow
 [llm_preferences.json](LLM-PREFERENCES.md) first and the autonomous selector
 second. See [Model routing](MODEL-ROUTING.md) for budgets and quality gates.
+
+Short follow-ups such as “keep going” retain the current task. A model,
+provider or thinking change is not a new project objective; a genuine task
+pivot starts a new scope. Automatic wakes reuse the latest real user direction
+and do not spend a fresh council budget or reinterpret a completion notice as
+a user request. Late advice from a cancelled or replaced session is discarded.
+
+Interpretation and effort helpers provide passive advice. They do not change
+the main session's model or thinking, interrupt its active turn, or wake it.
+An optional second reading of an unclear follow-up is delivered as next-turn
+context, leaving the parent responsible for interpretation and action.

@@ -4,7 +4,7 @@ import { safeText } from './project-intelligence/privacy.mjs';
 
 const WINDOW = 256;
 const MAX_SCAN_CHARS = 32768;
-const pivot = /\b(?:new (?:task|topic|request)|unrelated (?:task|topic|question|request)|start over|switch to|forget (?:that|this|the previous))\b/i;
+const pivot = /\b(?:new (?:task|topic|request)|unrelated (?:task|topic|question|request)|start over|switch to (?:(?:a|an|the) )?(?:(?:new|different|another|next) )?(?:task|topic|request)|forget (?:that|this|the previous))\b/i;
 const refusal = /\b(?:do not|don't|never|stop)\s+(?:continue|resume|do|handle|apply|implement|finish|start|work on|carry out|execute)\b/i;
 /** A compound instruction can name its subject only by reference ("do this and
  * that", "handle the rest"). The demonstrative must stand alone: "this SQL
@@ -31,7 +31,7 @@ export function isPromptRefusal(prompt: string): boolean {
 export function isReferentialFollowup(prompt: string): boolean {
   const text = intentText(prompt.slice(0,1024)).trim();
   if (text.length > 240 || pivot.test(text) || refusal.test(text)) return false;
-  if (/\b(?:continue|resume|same task|keep going|next step)\b|\bmake\s+(?:it|this|that|them)\b|\b(?:improve|refine|polish|fix|animate|rework)\s+(?:it|this|that|them)(?:\s+(?:more|less|too|again)\b|[.!?]|$)/i.test(text)) return true;
+  if (/\b(?:continue|resume|same task|keep going|next step|switch (?:it |this |that )?to)\b|\bmake\s+(?:it|this|that|them)\b|\b(?:improve|refine|polish|fix|animate|rework)\s+(?:it|this|that|them)(?:\s+(?:more|less|too|again)\b|[.!?]|$)/i.test(text)) return true;
   // Compound instructions inherit their subject the same way a bare "make it
   // better" does; the caller still treats the inherited text as evidence only.
   return demonstrative.test(text) || pluralDemonstrative.test(text) || sameAsBefore.test(text);

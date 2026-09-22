@@ -419,10 +419,16 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
         },
         registerCommand(name, options) {
             assertActive();
+            if (typeof name !== "string" || !/^[^\s/]+$/.test(name)) {
+                throw new Error("Command names must be non-empty and contain no whitespace or slashes");
+            }
+            if (typeof options?.handler !== "function") {
+                throw new Error(`Command '${name}' requires a handler function`);
+            }
             extension.commands.set(name, {
+                ...options,
                 name,
                 sourceInfo: extension.sourceInfo,
-                ...options,
             });
         },
         registerShortcut(shortcut, options) {

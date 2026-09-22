@@ -8,6 +8,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-quality-routing-"));
 process.env.PI_CODING_AGENT_DIR = root;
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, "health.json");
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "exclusions.json");
+process.env.PI_LLM_PREFERENCES_FILE = path.join(root, "missing-preferences.json");
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(root, "economy.json");
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, "{}");
 const repo = path.resolve(import.meta.dirname, "..");

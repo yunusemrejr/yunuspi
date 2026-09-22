@@ -1,11 +1,11 @@
-import {mkdir,appendFile} from 'node:fs/promises';
+import {mkdir,open} from 'node:fs/promises';
 import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 const zip=promisify(gzip);
 export const HEALTH_SINK=Symbol.for('yunus-pi.health.v1');
-const fields=new Set(['tool','hook','decision','skill','route','outcome','durationMs','similarity','overlap','count','dropped','isError','partial','inputTokens','outputTokens']);
+const fields=new Set(['tool','hook','owner','decision','skill','route','outcome','durationMs','similarity','overlap','count','dropped','isError','partial','inputTokens','outputTokens']);
 export function safeHealthEvent(kind:string,data:Record<string,unknown>={}) {
  const event:Record<string,unknown>={v:1,t:Date.now(),kind:kind.replace(/[^a-z0-9_.-]/gi,'_').slice(0,64)};
  for(const [k,v] of Object.entries(data))if(fields.has(k)) {
@@ -19,17 +19,31 @@ export function safeHealthEvent(kind:string,data:Record<string,unknown>={}) {
 export function createHealthLog(directory:string,session:string) {
  const segment=randomUUID();
  const file=path.join(directory,`${session.replace(/[^a-z0-9_-]/gi,'_').slice(0,80)||'unknown'}-${segment}.jsonl.gz`);
- let queue:string[]=[],bytes=0,total=0,dropped=0,chain=Promise.resolve(),busy=false;
+ let queue:string[]=[],bytes=0,total=0,dropped=0,closed=false,failures=0;
+ let chain:Promise<boolean>=Promise.resolve(true);
  const flush=()=>{
-  if(busy||!queue.length)return chain;
-  const batch=queue.join('');queue=[];bytes=0;busy=true;
-  chain=chain.then(async()=>{try{await mkdir(directory,{recursive:true,mode:0o700});const data=await zip(batch,{level:1});await appendFile(file,data,{mode:0o600});}catch{dropped++;}finally{busy=false;}});
+  chain=chain.then(async()=>{
+   if(!queue.length&&!dropped)return true;
+   // Keep the batch until append succeeds. A transient disk error must not erase it.
+   const count=queue.length,lost=dropped,batchBytes=bytes;
+   const batch=queue.join('')+(lost?JSON.stringify(safeHealthEvent('log.loss',{dropped:lost}))+'\n':'');
+   try{
+    await mkdir(directory,{recursive:true,mode:0o700});
+    const data=await zip(batch,{level:1});
+    const handle=await open(file,'a',0o600);
+    try{
+     const size=(await handle.stat()).size;
+     try{await handle.writeFile(data);}catch(error){await handle.truncate(size);throw error;}
+    }finally{await handle.close();}
+    queue.splice(0,count);bytes-=batchBytes;dropped-=lost;return true;
+   }catch{failures++;return false;}
+  });
   return chain;
  };
  return {file,record(kind:string,data:Record<string,unknown>={}){
+  if(closed)return;
   const line=JSON.stringify(safeHealthEvent(kind,data))+'\n';
   if(bytes+line.length>128*1024||total+line.length>16*1024*1024){dropped++;return;}
-  if(dropped){const loss=JSON.stringify(safeHealthEvent('log.loss',{dropped}))+'\n';queue.push(loss);bytes+=loss.length;total+=loss.length;dropped=0;}
   queue.push(line);bytes+=line.length;total+=line.length;
- },flush,async close(){await flush();if(dropped){queue.push(JSON.stringify(safeHealthEvent('log.loss',{dropped}))+'\n');dropped=0;}await flush();},get dropped(){return dropped;}};
+ },flush,close(){closed=true;return flush();},get dropped(){return dropped;},get pending(){return queue.length;},get failures(){return failures;}};
 }

@@ -2,6 +2,7 @@
 import {readCostEvidence, mergeCostEvidence} from './cost-evidence.ts';
 
 export function collectSessionCost(entries, subscription = false) {
+  entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const rows = new Map(), nodes = new Map(), aliases = new Map();
@@ -77,7 +78,7 @@ export function collectSessionCost(entries, subscription = false) {
       // reflect genuinely missing accounting, not the wrapper/native split.
       // Same linkage discipline as the metrics helper-run repair: exact
       // run-0 session paths only, never model, timing or neighbors.
-      for (const node of entry.data?.results ?? []) {
+      for (const node of Array.isArray(entry.data?.results) ? entry.data.results : []) {
         if (!node || typeof node !== 'object' || !node.usage) continue;
         const file = node.sessionFile;
         if (typeof file !== 'string' || file.length > 4096 || file.split('/').some((p) => p === '.' || p === '..')) continue;

@@ -95,12 +95,12 @@ const extractExecutionFlags = (rawArgs: string): { args: string; bg: boolean; fo
 	let fork = false;
 
 	while (true) {
-		if (args.endsWith(" --bg") || args === "--bg") {
+		if (/(?:^|\s)--bg$/.test(args)) {
 			bg = true;
 			args = args === "--bg" ? "" : args.slice(0, -5).trim();
 			continue;
 		}
-		if (args.endsWith(" --fork") || args === "--fork") {
+		if (/(?:^|\s)--fork$/.test(args)) {
 			fork = true;
 			args = args === "--fork" ? "" : args.slice(0, -7).trim();
 			continue;
@@ -879,7 +879,7 @@ export function registerSlashCommands(
 		handler: async (args, ctx) => {
 			const { args: cleanedArgs, bg, fork } = extractExecutionFlags(args);
 			const input = cleanedArgs.trim();
-			const firstSpace = input.indexOf(" ");
+			const firstSpace = input.search(/\s/);
 			if (!input) { ctx.ui.notify("Usage: /run <agent> [task] [--bg] [--fork]", "error"); return; }
 			const { name: agentName, config: inline } = parseAgentToken(firstSpace === -1 ? input : input.slice(0, firstSpace));
 			const task = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();

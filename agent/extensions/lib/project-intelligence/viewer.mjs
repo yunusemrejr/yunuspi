@@ -182,51 +182,44 @@ async function waitForState(statePath, childPid) {
 }
 
 async function openExternal(url) {
-	let command;
-	let args;
+	let parsed;
+	try { parsed = new URL(url); } catch { return "invalid browser URL"; }
+	if (!["http:", "https:", "file:"].includes(parsed.protocol)) return "unsupported browser URL scheme";
+	let candidates;
 	if (process.platform === "darwin") {
-		command = "open";
-		args = ["-na", "Google Chrome", "--args", `--app=${url}`];
+		candidates = [["open", ["-na", "Google Chrome", "--args", `--app=${url}`]], ["open", [url]]];
 	} else if (process.platform === "win32") {
-		command = "cmd";
-		args = ["/c", "start", "", url];
+		candidates = [["rundll32.exe", ["url.dll,FileProtocolHandler", url]]];
 	} else {
-		// An app-mode Chromium window is a separate graphical window and keeps
-		// the terminal free. Prefer a detected browser, then Firefox's own window
-		// switch, with xdg-open as a last-resort desktop integration.
-		const chromiumCandidates = [
-			"/usr/bin/google-chrome",
-			"/usr/bin/google-chrome-stable",
-			"/usr/bin/chromium",
-			"/usr/bin/chromium-browser",
-			"/snap/bin/chromium",
-		];
-		const chromium = chromiumCandidates.find((candidate) => existsSync(candidate));
-		if (chromium) {
-			command = chromium;
-			args = [`--app=${url}`, "--new-window"];
-		} else if (existsSync("/usr/bin/firefox")) {
-			command = "/usr/bin/firefox";
-			args = ["--new-window", url];
-		} else {
-			command = "xdg-open";
-			args = [url];
-		}
+		candidates = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"]
+			.filter(candidate => existsSync(candidate))
+			.map(command => [command, [`--app=${url}`, "--new-window"]]);
+		if (existsSync("/usr/bin/firefox")) candidates.push(["/usr/bin/firefox", ["--new-window", url]]);
+		candidates.push(["xdg-open", [url]]);
 	}
-	return new Promise((resolve) => {
-		let settled = false;
-		const finish = (error) => { if (settled) return; settled = true; resolve(error ? String(error.message || error) : null); };
-		let child;
-		try {
-			child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
-			child.once("error", finish);
-			child.once("exit", (code, signal) => { if (code && code !== 0) finish(new Error(`${command} exited ${code}${signal ? ` (${signal})` : ""}`)); });
-			child.unref();
-			setTimeout(() => finish(null), 700);
-		} catch (error) {
-			finish(error);
-		}
-	});
+	const errors = [];
+	for (const [command, args] of candidates) {
+		const error = await new Promise(resolve => {
+			let settled = false, timer;
+			const finish = error => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				resolve(error ? String(error.message || error) : null);
+			};
+			try {
+				const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
+				child.once("error", finish);
+				child.once("exit", (code, signal) => finish(code === 0 ? null : new Error(`${path.basename(command)} exited ${signal ?? code}`)));
+				child.unref();
+				// A desktop browser may keep running; successful launch need not exit.
+				timer = setTimeout(() => finish(null), 700);
+			} catch (error) { finish(error); }
+		});
+		if (!error) return null;
+		errors.push(error);
+	}
+	return errors.join("; ");
 }
 
 function viewerUrl(state) {

@@ -16,8 +16,15 @@ Resolution hierarchy:
    selection (free-model preference, availability, benchmark quality gates,
    economy caps — see [Model routing](MODEL-ROUTING.md)).
 
-One bad alias, unavailable provider, unsupported thinking level or invalid
-model skips that entry only. It never invalidates the whole file.
+Invalid aliases, model entries and role lists are reported and skipped while
+valid entries remain active. Unsupported thinking levels retain the model and
+use dynamic child thinking, as described below.
+
+A viable preference keeps its place across repeated requests and sessions.
+Usage frequency and random rotation do not move free alternatives ahead of it.
+Context, output, modality, tool-support and quota failures explain why an entry
+was skipped. The same order survives launch-time economy filtering; bounded
+fallback attempts try the remaining configured routes before autonomous picks.
 
 An explicit free-only task constraint filters preference chains to
 proven-free routes. Automatic council and review rounds keep honoring
@@ -82,7 +89,10 @@ normal main-session model:
 ```
 
 - `models` is a reusable alias registry. `model` is required (bare id,
-  `provider/id`, or with a `:thinking` suffix); `provider` narrows matching.
+  `provider/id`, or with a `:thinking` suffix). When supplied, `provider` is
+  authoritative: an owner namespace inside `model` is part of the vendor ID,
+  even if that namespace also names another registered provider. Case and
+  supported separator differences resolve against the live registry.
 - `preferences.<role>.models` is an ordered list of aliases (or inline
   entries). Role names accept `subagents`, `council`, `swarm`, `fusion`,
   `quality_review`, `project_review`, `error_review` and

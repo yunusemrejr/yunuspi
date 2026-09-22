@@ -12,3 +12,5 @@ export interface BuiltinSlashCommand {
     argumentHint?: string;
 }
 export declare const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand>;
+
+export declare function parseSlashCommand(text: string): { name: string; args: string } | undefined;

@@ -175,6 +175,7 @@ function mergeCostEvidence(left, right) {
 // @ts-nocheck -- Pure collector, embedded in SDK/CLI; imports supplied by patch.
 
 function collectSessionCost(entries, subscription = false) {
+  entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const rows = new Map(), nodes = new Map(), aliases = new Map();
@@ -222,19 +223,42 @@ function collectSessionCost(entries, subscription = false) {
     } else for (const child of nested) old.nested.add(child);
     return key;
   };
+  // A bare running placeholder carries lifecycle, not accounting: no usage,
+  // no inclusive total, no nested graph, no completion markers. It must
+  // neither mint an unattributed cost node nor settle the run.
+  const isPlaceholderResult = (node) => node && typeof node === 'object' &&
+    !node.usage && node.totalCost === undefined && !Array.isArray(node.children) && !Array.isArray(node.steps) &&
+    !node.error && typeof node.exitCode !== 'number' && !node.stopped && !node.interrupted && !node.detached;
   const record = (data, terminal) => {
     if (!data || typeof data !== 'object') return;
     const root = data.runId ?? data.asyncId ?? data.id;
     if (typeof root !== 'string') return;
-    if (terminal) { pending.delete(root); settled.add(root); }
+    const results = Array.isArray(data.results) ? data.results : [];
+    const informative = results.length > 0 && results.every((node) => !isPlaceholderResult(node));
+    if (terminal && informative) { pending.delete(root); settled.add(root); }
     else if (!settled.has(root)) pending.add(root);
     if (!Array.isArray(data.results)) return;
-    data.results.forEach((node,i) => recordNode(node,`${root}:${node?.index ?? i}`));
+    data.results.forEach((node,i) => { if (!isPlaceholderResult(node)) recordNode(node,`${root}:${node?.index ?? i}`); });
   };
   for (const entry of entries) {
     const m = entry.type === 'message' ? entry.message : undefined;
     if (m?.role === 'toolResult' && m.toolName === 'subagent') record(m.details, !m.details?.asyncId && Array.isArray(m.details?.results) && m.details.results.length > 0);
-    if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') record(entry.data,true);
+    if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') {
+      record(entry.data,true);
+      // Helper wrappers (auto-assist, quality-review, ...) carry the native
+      // run's usage inside their own cost record; the native id never gets a
+      // record of its own. Settle the linked native id so pending/unknown
+      // reflect genuinely missing accounting, not the wrapper/native split.
+      // Same linkage discipline as the metrics helper-run repair: exact
+      // run-0 session paths only, never model, timing or neighbors.
+      for (const node of Array.isArray(entry.data?.results) ? entry.data.results : []) {
+        if (!node || typeof node !== 'object' || !node.usage) continue;
+        const file = node.sessionFile;
+        if (typeof file !== 'string' || file.length > 4096 || file.split('/').some((p) => p === '.' || p === '..')) continue;
+        const native = file.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];
+        if (native) { pending.delete(native); settled.add(native); }
+      }
+    }
     if (entry.type === 'custom' && entry.customType === 'subagent-lifecycle-v1') {
       const data = entry.data;
       // Terminal lifecycle without cost remains pending until accounting arrives.
@@ -393,7 +417,8 @@ return collectSessionCost(entries,subscription).formatted;
         const activityMetrics = (/** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 function collectSessionMetrics(entries, live) {
- const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:{},skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:{},hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:{},jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:{}}};
+ entries=Array.isArray(entries)?entries.filter(e=>e&&typeof e==='object'):[];
+ const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
@@ -479,7 +504,7 @@ function collectSessionMetrics(entries, live) {
   // child immediately; never count a workflow controller as a child.
   if(!rows.length&&d.mode==='single'&&d.asyncId)rows=[{index:0,status:d.state??'queued'}];
   if(d.mode==='parallel'&&rows.filter(r=>!['pending'].includes(r?.status??r?.state)&&((r?.status??r?.state)&&normalizedState(r.status??r.state)!=='unknown'||r?.runId||r?.exitCode!==undefined||r?.usage)).length>1)nativeGroups.add(root);
-  for(const group of d.mode==='parallel'?[]:d.parallelGroups??[])if(group.count>1&&rows.filter((r,i)=>(r?.index??i)>=group.start&&(r?.index??i)<group.start+group.count&&!['pending','unknown'].includes(r?.status??r?.state??'unknown')).length>1)nativeGroups.add(`${root}:group:${group.start}`);
+  for(const group of d.mode==='parallel'||!Array.isArray(d.parallelGroups)?[]:d.parallelGroups)if(group?.count>1&&rows.filter((r,i)=>(r?.index??i)>=group.start&&(r?.index??i)<group.start+group.count&&!['pending','unknown'].includes(r?.status??r?.state??'unknown')).length>1)nativeGroups.add(`${root}:group:${group.start}`);
   for(const [i,r] of rows.entries()) {
    if(!r||typeof r!=='object'||r.status==='pending'||r.state==='pending')continue;
    const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}`];
@@ -530,7 +555,7 @@ function collectSessionMetrics(entries, live) {
    // projecting their empty body back into context.
    if((msg.stopReason==='aborted'||msg.stopReason==='error')&&visibleChars(msg.content)===0&&!String(msg.errorMessage??''))m.abortedTelemetry++;
    else if(visibleChars(msg.content)===0&&(msg.content??[]).length===0&&number(msg.usage?.input)===0&&number(msg.usage?.output)===0)m.abortedTelemetry++;
-   for(const c of msg.content??[])if(c.type==='toolCall'&&!calls.has(c.id??`call:${i}`)){calls.add(c.id??`call:${i}`);m.toolCalls++;callInputs.set(c.id,{name:c.name,input:c.arguments??{}});}
+   for(const c of Array.isArray(msg.content)?msg.content:[])if(c?.type==='toolCall'&&!calls.has(c.id??`call:${i}`)){calls.add(c.id??`call:${i}`);m.toolCalls++;callInputs.set(c.id,{name:c.name,input:c.arguments??{}});}
   }
   if(msg?.role==='toolResult'&&!results.has(msg.toolCallId??`result:${i}`)) {
    results.add(msg.toolCallId??`result:${i}`);m.toolResults++;m.tools[msg.toolName]=(m.tools[msg.toolName]||0)+1;m.rawReturnedChars+=visibleChars(msg.content);pendingChars+=visibleChars(msg.content);
@@ -550,8 +575,8 @@ function collectSessionMetrics(entries, live) {
   if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage,undefined,false,true);}
   if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType))record(e.data,e.id,e.customType==='subagent-cost-v1');
   if(e.type==='custom'&&e.customType==='relevant-guidance'){
-   for(const p of e.data?.read??[])read.add(name(p));
-   for(const p of e.data?.shown??[])if(p.startsWith('skill:')||p.startsWith('skillctx:'))routed.add(name(p));
+   for(const p of Array.isArray(e.data?.read)?e.data.read:[])if(typeof p==='string')read.add(name(p));
+   for(const p of Array.isArray(e.data?.shown)?e.data.shown:[])if(typeof p==='string'&&(p.startsWith('skill:')||p.startsWith('skillctx:')))routed.add(name(p));
   }
   if(e.type==='custom'&&e.customType==='provider-recovery'&&/^Automatic free read-only group:/.test(e.data?.text??''))groups.push({id:e.id??`legacy:${i}`,time:Date.parse(e.timestamp)||0});
 
@@ -581,6 +606,7 @@ function collectSessionMetrics(entries, live) {
  for(const s of segments.values()){
   m.telemetry=true;
   for(const [k,v] of Object.entries(s.hooks??{})){
+   if(!v||typeof v!=='object')continue;
    const cut=k.lastIndexOf(':'),owner=k.slice(0,cut).split('/').pop(),hook=k.slice(cut+1);
    if(!hookNames.has(hook)||['health-log.ts','session-telemetry.ts'].includes(owner)){m.hookExcluded+=number(v.calls);continue;}
    const h=m.hooks[k]??={calls:0,errors:0,ms:0,changed:0,removedChars:0,addedChars:0,charsChanged:0,tokensChanged:0};
@@ -594,7 +620,7 @@ function collectSessionMetrics(entries, live) {
   m.abortedTelemetry+=number(s.events?.aborted);
  }
  // Legacy auto-groups are only inferred when no corresponding new event exists.
- const measuredSince=Math.min(...[...segments.values()].map(s=>Number.isFinite(s.startedAt)?s.startedAt:Infinity));
+ const measuredSince=[...segments.values()].reduce((min,s)=>Number.isFinite(s.startedAt)?Math.min(min,s.startedAt):min,Infinity);
  m.legacySwarms+=new Set(groups.filter(g=>g.time<measuredSince).map(g=>g.id)).size;m.swarms+=nativeGroups.size;
  for(const a of activities.values())for(const k of ['swarms','fusions','recoveries'])m[k]+=number(a[k]);
  m.legacyFusions+=new Set(legacyFusions.filter(g=>g.time<measuredSince).map(g=>g.id)).size;

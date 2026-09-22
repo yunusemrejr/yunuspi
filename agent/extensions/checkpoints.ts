@@ -27,6 +27,7 @@
  * disables. Default: live.
  */
 import * as fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import type {
@@ -534,35 +535,47 @@ function stateFile(sid: string): string {
 	);
 }
 
+export function normalizeCheckpointState(raw: unknown, sid: string): CheckpointState {
+	const state = defaultState(sid);
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return state;
+	const value = raw as Record<string, unknown>;
+	for (const key of ["verifyStrikes", "verifyCheckpoints", "editsSinceCommand"] as const)
+		if (Number.isSafeInteger(value[key]) && (value[key] as number) >= 0) state[key] = value[key] as number;
+	state.editCheckpointShown = value.editCheckpointShown === true;
+	state.pendingReadbackPaths = Array.isArray(value.pendingReadbackPaths)
+		? value.pendingReadbackPaths.filter((p): p is string => typeof p === "string" && p.length > 0 && p.length <= 4096).slice(-128)
+		: [];
+	return state;
+}
+
 function readState(sid: string): CheckpointState {
-	try {
-		const raw = JSON.parse(
-			fs.readFileSync(stateFile(sid), "utf8"),
-		) as Partial<CheckpointState>;
-		return { ...defaultState(sid), ...raw };
-	} catch {
-		return defaultState(sid);
-	}
+	try { return normalizeCheckpointState(JSON.parse(fs.readFileSync(stateFile(sid), "utf8")), sid); }
+	catch { return defaultState(sid); }
 }
 
 function writeState(st: CheckpointState): void {
+	const tmp = `${stateFile(st.sid)}.${process.pid}.${randomUUID()}.tmp`;
 	try {
-		fs.mkdirSync(STATE_DIR, { recursive: true });
-		const tmp = stateFile(st.sid) + ".tmp";
-		fs.writeFileSync(tmp, JSON.stringify(st));
+		fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+		fs.chmodSync(STATE_DIR, 0o700);
+		fs.writeFileSync(tmp, JSON.stringify(st), { mode: 0o600, flag: "wx" });
 		fs.renameSync(tmp, stateFile(st.sid));
 	} catch {
 		/* checkpoints must never break a session */
-	}
+	} finally { try { fs.unlinkSync(tmp); } catch {} }
 }
 
 function shadowLog(sid: string, kind: string, detail: string): void {
 	try {
-		fs.mkdirSync(STATE_DIR, { recursive: true });
+		fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+		fs.chmodSync(STATE_DIR, 0o700);
+		const file = path.join(STATE_DIR, `shadow-${sid.replace(/[^A-Za-z0-9_-]/g, "-")}.jsonl`);
+		try { fs.chmodSync(file, 0o600); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 		fs.appendFileSync(
-			path.join(STATE_DIR, `shadow-${sid.replace(/[^A-Za-z0-9_-]/g, "-")}.jsonl`),
+			file,
 			JSON.stringify({ ts: Date.now(), kind, detail: detail.slice(0, 200) }) +
 				"\n",
+			{ mode: 0o600 },
 		);
 	} catch {
 		/* best-effort */

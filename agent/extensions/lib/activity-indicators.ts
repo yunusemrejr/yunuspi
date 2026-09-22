@@ -2,8 +2,8 @@
  *
  * Tools already render as native single lines in the transcript; this module
  * covers what the transcript otherwise hides: skill routing/reads, local
- * ML-ish helpers (intent, mini/smol selection), the preferred/free model
- * mixer (picks as lines; per-route skip reasons in ring/metrics/report),
+ * ML-ish helpers (intent, mini/smol selection), model preference skips
+ * (with historical mixed-route events retained for older session reports),
  * local-provider refreshes and reminder compliance. Every tapped health
  * event lands in the bounded ring and the counters; only notable kinds
  * become transcript lines, deduplicated and budgeted so indicators stay

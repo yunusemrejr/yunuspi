@@ -155,8 +155,8 @@ function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
       const thinking = thinkingOf(message.content);
       const text = textOf(message.content);
       const calls = toolCallsOf(message.content).map((call) => ({
-        id: call?.id ?? null,
-        name: call?.name ?? null,
+        id: typeof call?.id === "string" ? call.id : null,
+        name: typeof call?.name === "string" ? call.name : "unknown",
         arguments: call?.arguments ?? null,
       }));
       const thinkingChars = thinking.reduce((sum, block) => sum + block.length, 0);
@@ -195,7 +195,7 @@ function normalizeEvent(entry: any, seq: number, includeRaw: boolean): any {
       return {
         ...base,
         kind: "tool_result",
-        toolName: message.toolName ?? "unknown",
+        toolName: typeof message.toolName === "string" ? message.toolName : "unknown",
         toolCallId: message.toolCallId ?? null,
         isError: failed,
         category: classification.category,
@@ -305,9 +305,9 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     return row;
   };
   const thinkingByModel = new Map<string, { route: string; blocks: number; chars: number }>();
-  const stopReasons: Record<string, number> = {};
-  const signals: Record<string, number> = {};
-  const harnessRecords: Record<string, number> = {};
+  const stopReasons: Record<string, number> = Object.create(null);
+  const signals: Record<string, number> = Object.create(null);
+  const harnessRecords: Record<string, number> = Object.create(null);
   const modelTrail: any[] = [];
   const userTurns: any[] = [];
 
@@ -491,7 +491,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
   };
   for (const entry of accounted) {
     const message = (entry as any)?.type === "message" ? (entry as any).message : undefined;
-    if (message?.role === "toolResult" && message.toolName === "todo" && message.details?.tasks && todoSnapshots.length < 4) {
+    if (message?.role === "toolResult" && message.toolName === "todo" && Array.isArray(message.details?.tasks) && todoSnapshots.length < 4) {
       todoSnapshots.push({
         action: message.details.action ?? null,
         tasks: (message.details.tasks ?? []).slice(0, 64).map((task: any) => ({

@@ -1,6 +1,7 @@
 /**
  * Extension runner - executes extensions and manages their lifecycle.
  */
+import { basename } from "node:path";
 import { theme } from "../../modes/interactive/theme/theme.js";
 // Extension shortcuts compete with canonical keybinding ids from keybindings.json.
 // Only editor-global shortcuts are reserved here. Picker-specific bindings are not.
@@ -409,8 +410,19 @@ export class ExtensionRunner {
         return () => this.errorListeners.delete(listener);
     }
     emitError(error) {
+        try {
+            globalThis[Symbol.for("yunus-pi.health.v1")]?.("hook.error", {
+                hook: String(error.event ?? "unknown").replace(/[^a-z0-9_.:-]/gi, "_").slice(0, 120),
+                owner: basename(String(error.extensionPath ?? "unknown")).replace(/[^a-z0-9_.:-]/gi, "_").slice(0, 120),
+                isError: true,
+            });
+        }
+        catch { /* optional telemetry cannot break error delivery */ }
         for (const listener of this.errorListeners) {
-            listener(error);
+            try {
+                Promise.resolve(listener(error)).catch(() => {});
+            }
+            catch { /* one broken listener must not hide the original error */ }
         }
     }
     hasHandlers(eventType) {

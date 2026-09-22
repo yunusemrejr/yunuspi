@@ -60,3 +60,58 @@ test('finite local task completion still sends its receipt and exactly one wake'
   assert.equal(disabled.sent[0].options.triggerTurn, false);
   assert.equal(serviceNotificationOnly({...task,command,triggerOnCompletionExplicit:true}), false);
 });
+
+const tick = () => new Promise(resolve => setImmediate(resolve));
+function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+
+test('old completion acknowledgement cannot consume work from a newer user request', async () => {
+  const hooks = new Map(), sent = [], firstWake = deferred();
+  const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
+  let wakes = 0;
+  const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
+    sent.push({ message, options });
+    if (options.triggerTurn && ++wakes === 1) return firstWake.promise;
+  } };
+  const notify = createCompletionNotifier(pi, () => ctx);
+  notify({ content: 'first receipt' }, { triggerTurn: true });
+  hooks.get('input')({ source: 'interactive', text: 'Continue with the updated task' });
+  notify({ content: 'second receipt' }, { triggerTurn: true });
+  assert.equal(wakes, 1, 'one wake is still waiting for acceptance');
+  firstWake.resolve();
+  await tick();
+  await hooks.get('agent_settled')();
+  assert.equal(wakes, 2, 'the newer completion retains its own acknowledgement');
+  assert.equal(sent.filter(item => item.options.triggerTurn).length, 2);
+});
+
+test('completion wake waits until its durable receipt is accepted and ignores stale receipt delivery', async () => {
+  const hooks = new Map(), sent = [], receipt = deferred();
+  const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
+  const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
+    sent.push({ message, options });
+    if (!options.triggerTurn) return receipt.promise;
+  } };
+  const notify = createCompletionNotifier(pi, () => ctx);
+  notify({ content: 'delayed receipt' }, { triggerTurn: true });
+  await tick();
+  assert.equal(sent.length, 1, 'a wake cannot precede the receipt it refers to');
+  hooks.get('input')({ source: 'interactive', text: 'A newer user request' });
+  receipt.resolve();
+  await tick();
+  await hooks.get('agent_settled')();
+  assert.equal(sent.length, 1, 'a stale completion cannot wake a newer request');
+});
+
+test('a failed completion receipt cannot trigger inference with missing results', async () => {
+  const hooks = new Map(), sent = [];
+  const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
+  const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
+    sent.push({ message, options });
+    if (!options.triggerTurn) return Promise.reject(new Error('Receipt unavailable'));
+  } };
+  const notify = createCompletionNotifier(pi, () => ctx);
+  notify({ content: 'failed receipt' }, { triggerTurn: true });
+  await tick();
+  await hooks.get('agent_settled')();
+  assert.equal(sent.length, 1);
+});

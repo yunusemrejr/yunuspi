@@ -41,7 +41,7 @@ export function planCompletionEvidence(input: {
 				: input.guard.expectedMutation
 					? guardTriggered
 						? "missing" as const
-						: input.arbiterRescued
+						: input.arbiterRescued || !mutationAttempted
 							? "not-applicable" as const
 							: "observed" as const
 					: "not-applicable" as const,

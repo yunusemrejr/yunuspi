@@ -1,7 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "./pi-spawn.ts";
+import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../../shared/file-system-retry.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir } from "../../shared/utils.ts";
+import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
 import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
@@ -179,7 +182,7 @@ function sanitizeHistoryLine(line: string): string | undefined {
 
 function sanitizeHistoryLines(raw: string): { lines: string[]; changed: boolean } {
 	const lines: string[] = [];
-	let changed = false;
+	let changed = raw.length > 0 && !raw.endsWith("\n");
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim();
 		if (!trimmed) continue;
@@ -194,9 +197,30 @@ function sanitizeHistoryLines(raw: string): { lines: string[]; changed: boolean 
 	return { lines, changed };
 }
 
+/** All readers that sanitize/rotate share the writer lock: rename alone can
+ * otherwise erase an append from another child process. */
+function withHistoryLock<T>(historyPath: string, operation: () => T): T {
+	const packageRoot = process.env[PI_CODING_AGENT_PACKAGE_ROOT_ENV] || resolvePiPackageRoot() || resolveInstalledPiPackageRoot();
+	const require = createRequire(packageRoot ? path.join(packageRoot, "package.json") : import.meta.url);
+	const lockfile = require("proper-lockfile") as { lockSync(file: string, options: { realpath: boolean }): () => void };
+	let release: (() => void) | undefined;
+	for (let attempt = 0; !release; attempt++) {
+		try { release = lockfile.lockSync(historyPath, { realpath: false }); }
+		catch (error) {
+			const delay = DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS[attempt];
+			if ((error as NodeJS.ErrnoException).code !== "ELOCKED" || delay === undefined) throw error;
+			waitForFileSystemRetry(delay);
+		}
+	}
+	try { return operation(); } finally { release(); }
+}
+
 function writePrivateHistory(historyPath: string, lines: string[]): void {
-	fs.writeFileSync(historyPath, lines.length ? `${lines.join("\n")}\n` : "", { encoding: "utf-8", mode: PRIVATE_FILE_MODE });
-	try { fs.chmodSync(historyPath, PRIVATE_FILE_MODE); } catch {}
+	const tmp = `${historyPath}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		fs.writeFileSync(tmp, lines.length ? `${lines.join("\n")}\n` : "", { encoding: "utf-8", mode: PRIVATE_FILE_MODE, flag: "wx" });
+		fs.renameSync(tmp, historyPath);
+	} finally { try { fs.unlinkSync(tmp); } catch {} }
 }
 
 function rememberHistoryFile(historyPath: string, lineCount: number): void {
@@ -221,6 +245,7 @@ function sanitizeHistoryFile(historyPath: string): number {
 	}
 	const cached = historyFileStates.get(historyPath);
 	if (cached
+		&& cached.lineCount < ROTATE_READ_THRESHOLD
 		&& cached.mtimeMs === stat.mtimeMs
 		&& cached.ctimeMs === stat.ctimeMs
 		&& cached.size === stat.size
@@ -228,7 +253,8 @@ function sanitizeHistoryFile(historyPath: string): number {
 		return cached.lineCount;
 	}
 	const raw = fs.readFileSync(historyPath, "utf-8");
-	const { lines, changed } = sanitizeHistoryLines(raw);
+	let { lines, changed } = sanitizeHistoryLines(raw);
+	if (lines.length >= ROTATE_READ_THRESHOLD) { lines = lines.slice(-ROTATE_KEEP); changed = true; }
 	if (changed) writePrivateHistory(historyPath, lines);
 	rememberHistoryFile(historyPath, lines.length);
 	return lines.length;
@@ -265,7 +291,7 @@ export function recordRun(
 			task: REDACTED_TASK,
 			taskHash: hashTask(task),
 			ts: Math.floor(Date.now() / 1000),
-			status: exitCode === 0 ? "ok" : "error",
+			status: outcome === "completed" ? "ok" : "error",
 			outcome,
 			duration: durationMs,
 			...(exitCode !== 0 ? { exit: exitCode } : {}),
@@ -273,11 +299,11 @@ export function recordRun(
 		};
 		const historyPath = getHistoryPath();
 		hardenHistoryStorage(historyPath);
-		let lineCount: number | undefined;
-		try { lineCount = sanitizeHistoryFile(historyPath); } catch {}
-		appendPrivateHistoryLine(historyPath, JSON.stringify(entry));
-		if (lineCount === undefined) historyFileStates.delete(historyPath);
-		else rememberHistoryFile(historyPath, lineCount + 1);
+		withHistoryLock(historyPath, () => {
+			const lineCount = sanitizeHistoryFile(historyPath);
+			appendPrivateHistoryLine(historyPath, JSON.stringify(entry));
+			rememberHistoryFile(historyPath, lineCount + 1);
+		});
 	} catch {
 		// Best-effort — never crash the execution flow for history recording
 	}
@@ -285,28 +311,13 @@ export function recordRun(
 
 export function loadRunsForAgent(agent: string): RunEntry[] {
 	const historyPath = getHistoryPath();
-	try { hardenHistoryStorage(historyPath); } catch {}
-	if (!fs.existsSync(historyPath)) return [];
-	let raw: string;
 	try {
-		raw = fs.readFileSync(historyPath, "utf-8");
-	} catch {
-		return [];
-	}
-
-	let { lines, changed } = sanitizeHistoryLines(raw);
-
-	if (lines.length > ROTATE_READ_THRESHOLD) {
-		lines = lines.slice(-ROTATE_KEEP);
-		changed = true;
-	}
-	try {
-		if (changed) writePrivateHistory(historyPath, lines);
-		rememberHistoryFile(historyPath, lines.length);
-	} catch {}
-
-	return lines
-		.map((line) => { try { return JSON.parse(line) as RunEntry; } catch { return undefined; } })
-		.filter((entry): entry is RunEntry => entry !== undefined && entry.agent === agent)
-		.reverse();
+		hardenHistoryStorage(historyPath);
+		if (!fs.existsSync(historyPath)) return [];
+		try { withHistoryLock(historyPath, () => sanitizeHistoryFile(historyPath)); } catch { /* still provide a read-only snapshot when storage is busy */ }
+		return sanitizeHistoryLines(fs.readFileSync(historyPath, "utf-8")).lines.slice(-ROTATE_READ_THRESHOLD)
+			.map(line => JSON.parse(line) as RunEntry)
+			.filter(entry => entry.agent === agent)
+			.reverse();
+	} catch { return []; }
 }

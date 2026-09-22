@@ -467,17 +467,22 @@ export function resolveLlmPreferenceChain(
 	const loaded = loadLlmPreferences();
 	if (!loaded.ok && !loaded.missing) warnOnceEconomy(`${loaded.path}::${loaded.reason ?? "unknown"}`, "preference-load", `[pi-subagents] llm_preferences (${role}): ignoring preference file (${loaded.reason ?? "unknown reason"}); autonomous selection applies`);
 	if (!loaded.ok || !loaded.config || !availableModels || availableModels.length === 0) return [];
+	for (const warning of loaded.warnings ?? []) warnOnceEconomy(`${loaded.path}::${warning}`, "preference-entry", `[pi-subagents] llm_preferences: ${warning}; valid entries remain active`);
 	const entries = preferenceEntriesFor(role, loaded.config);
 	if (!entries.length) return [];
 	const out: LlmPreferenceRoute[] = [];
 	const seen = new Set<string>();
 	const now = Date.now();
+	const exhausted = new Set(exhaustedProvidersOf(availableModels) ?? []);
 	let health: ReturnType<typeof readHealth> | undefined;
 	for (const entry of entries) {
-		const query = entry.provider && entry.model && !entry.model.includes("/") ? `${entry.provider}/${entry.model}` : (entry.model ?? "");
+		// The provider field is authoritative even when the vendor model ID
+		// contains an owner namespace which is also a registered provider.
+		const provider = entry.provider ? availableModels.find(model => normalizeModelSegment(model.provider) === normalizeModelSegment(entry.provider!))?.provider ?? entry.provider : undefined;
+		const query = provider ? `${provider}/${stripProviderPrefix(entry.model ?? "", provider)}` : (entry.model ?? "");
 		if (!query) continue;
 		const suffix = splitThinkingSuffix(query);
-		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, entry.provider);
+		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, provider);
 		if (!resolved) {
 			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): ${describeUnresolvedPreference(query, entry.provider, availableModels)}; continuing chain`);
 			noteHealth("model.skip", { route: query, outcome: "unresolved" });
@@ -504,12 +509,18 @@ export function resolveLlmPreferenceChain(
 			}
 		} catch { continue; }
 		const req = options?.requirements;
-		if (req?.minContextWindow !== undefined && !(typeof info.contextWindow === "number" && info.contextWindow >= req.minContextWindow)) continue;
-		if (req?.minOutputTokens !== undefined && !(typeof info.maxTokens === "number" && info.maxTokens >= req.minOutputTokens)) continue;
-		if (req?.reasoning === true && info.reasoning !== true) continue;
-		if (req?.inputModalities?.some((input) => !info.input?.includes(input))) continue;
-		if (req?.toolCalling && catalogRouteCapabilities(info)?.toolCalling === false) continue;
-		if (options?.freeOnly && !isProvenFreeRoute(info)) continue;
+		const rejection = exhausted.has(info.provider) ? "provider quota exhausted"
+			: req?.minContextWindow !== undefined && !(typeof info.contextWindow === "number" && info.contextWindow >= req.minContextWindow) ? "insufficient context window"
+			: req?.minOutputTokens !== undefined && !(typeof info.maxTokens === "number" && info.maxTokens >= req.minOutputTokens) ? "insufficient output capacity"
+			: req?.reasoning === true && info.reasoning !== true ? "required reasoning unavailable"
+			: req?.inputModalities?.some((input) => !info.input?.includes(input)) ? "required input modality unavailable"
+			: req?.toolCalling && catalogRouteCapabilities(info)?.toolCalling === false ? "tool calling unsupported"
+			: options?.freeOnly && !isProvenFreeRoute(info) ? "explicit free-only constraint" : undefined;
+		if (rejection) {
+			warnOnceEconomy(`${role}:${base}`, `preference-${rejection}`, `[pi-subagents] llm_preferences (${role}): skipping ${base} (${rejection}); continuing chain`);
+			noteHealth("model.skip", { route: base, outcome: "ineligible", reason: rejection, role });
+			continue;
+		}
 		const wanted = suffix.thinkingSuffix ? suffix.thinkingSuffix.slice(1) : entry.thinking;
 		const norm = normalizeThinking(wanted);
 		const thinking = !norm.dynamic && norm.thinking && getSupportedThinkingLevels(info).includes(norm.thinking) ? norm.thinking : undefined;
@@ -596,8 +607,7 @@ export interface ResolveSubagentModelOverrideOptions {
 	source?: ModelSource;
 	/** Called for warn-severity violations instead of `console.warn`. */
 	onWarn?: (violation: ModelScopeViolation) => void;
-	/** Session id enabling the preferred/free session mixer (rotation +
-	 * seeded variety). Omitted callers keep deterministic legacy order. */
+	/** Dispatch session identity; it does not change declared preference order. */
 	sessionId?: string;
 	/** Child-specific route bounds; derived from `task` when omitted. */
 	child?: ChildRouteRequirements;
@@ -659,88 +669,6 @@ function throwForExplicitModelExclusion(model: string): void {
  * an explicit (`source: "explicit"`) request and warns for an inherited one,
  * unless strict scope enforcement makes inherited violations hard errors.
  */
-export interface MixCandidate {
-	route: string;
-	preferred: boolean;
-	free: boolean;
-}
-
-const mixSession: { id: string | undefined; uses: Map<string, number>; draws: number } = { id: undefined, uses: new Map(), draws: 0 };
-
-/** Deterministic per-session stream (FNV-1a + mulberry32): varied across
- * sessions, reproducible within one for tests and debugging. */
-function mixRandom(): number {
-	let h = (2166136261 ^ mixSession.draws++) | 0;
-	const s = mixSession.id ?? "";
-	for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-	h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909);
-	return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-/** Session-aware preferred/free mixer. Live sessions (sessionId set) rotate
- * by frequency, bias critical tasks to preferred routes, respect health via
- * the already-gated pool, and add seeded variety. Without a sessionId the
- * scoring collapses to deterministic legacy order (preferred chain first,
- * then the affordable pick), so offline suites observe zero behavior change. */
-export function mixSubagentModel(pool: MixCandidate[], task = "", sessionId?: string): MixCandidate | undefined {
-	if (!pool.length) return undefined;
-	if (mixSession.id !== sessionId) { mixSession.id = sessionId; mixSession.uses.clear(); mixSession.draws = 0; }
-	const live = sessionId !== undefined;
-	const critical = taskQuality(task).level === "critical";
-	// Critical work stays on explicit preferences whenever any survived
-	// gating (the pool is already freeOnly-filtered when constrained, so
-	// this never violates an explicit free-only request).
-	const ranked = live && critical && pool.some((c) => c.preferred) ? pool.filter((c) => c.preferred) : pool;
-	let best: MixCandidate | undefined;
-	let bestScore = -Infinity;
-	for (const c of ranked) {
-		const uses = live ? (mixSession.uses.get(c.route) ?? 0) : 0;
-		const score = live
-			? (c.preferred ? 4 : 0) + (c.free ? 3 : 0) + (critical && c.preferred ? 4 : 0) - 2.5 * uses + mixRandom()
-			: (c.preferred ? 10 : 0);
-		if (score > bestScore) { bestScore = score; best = c; }
-	}
-	if (best && live) {
-		mixSession.uses.set(best.route, (mixSession.uses.get(best.route) ?? 0) + 1);
-		noteHealth("model.mix", { route: best.route, decision: best.preferred && best.free ? "preferred-free" : best.preferred ? "preferred" : best.free ? "free" : "affordable" });
-	}
-	return best;
-}
-
-/** Gather the viable preferred chain plus up to 3 affordable candidates and
- * mix one route. Returns undefined when the pool is empty so callers keep
- * their existing fallback behavior. */
-export function selectMixedSubagentModel(
-	availableModels: AvailableModelInfo[] | undefined,
-	cfg: ReturnType<typeof loadModelEconomyConfig>,
-	task: string,
-	opts: { freeOnly?: boolean; sessionId?: string; preferredModel?: string; exhaustedProviders?: string[]; child?: ChildRouteRequirements },
-): string | undefined {
-	const chain = resolveLlmPreferenceChain(inferPreferenceRole(task), availableModels, { freeOnly: opts.freeOnly });
-	const seen = new Set<string>();
-	const pool: MixCandidate[] = [];
-	for (const c of chain) {
-		const key = c.route.toLowerCase();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		const info = availableModels?.find((m) => m.fullId === c.route);
-		pool.push({ route: withLlmThinkingSuffix(c), preferred: true, free: info ? isProvenFreeRoute(info) : false });
-	}
-	const exclude = pool.map((p) => splitThinkingSuffix(p.route).baseModel);
-	const child = opts.child ?? childFor(task);
-	for (let i = 0; i < 3; i++) {
-		const pick = selectAffordableModel(availableModels, cfg, { task, freeOnly: opts.freeOnly, preferredModel: opts.preferredModel, exclude, exhaustedProviders: opts.exhaustedProviders, ...(child ? { child } : {}) });
-		if (!pick) break;
-		exclude.push(splitThinkingSuffix(pick.model).baseModel);
-		const key = pick.model.toLowerCase();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		const info = availableModels?.find((m) => m.fullId === splitThinkingSuffix(pick.model).baseModel);
-		pool.push({ route: pick.model, preferred: false, free: info ? isProvenFreeRoute(info) : false });
-	}
-	return mixSubagentModel(pool, task, opts.sessionId)?.route;
-}
-
 export function resolveSubagentModelOverride(
 	requestedModel: string | boolean | undefined,
 	parentModel: ParentModel | undefined,
@@ -772,6 +700,34 @@ export function resolveSubagentModelOverride(
 		const source: ModelSource = explicit === undefined ? "inherited" : (options.source ?? "inherited");
 		enforceModelScopes(resolved, options.scope, source, options.onWarn);
 	}
+	// Preferences are independent of autonomous pricing and session usage counts.
+	// Explicit per-call/agent routes and task route locks remain authoritative.
+	if (explicit === undefined && options?.task) {
+		const constraints = taskRouteConstraints(options.task);
+		const preferred = constraints.fixed ? undefined : selectLlmPreferredModel(inferPreferenceRole(options.task), availableModels, {
+			freeOnly: constraints.freeOnly, requirements: options.child ?? childFor(options.task),
+		});
+		if (preferred) {
+			const route = withLlmThinkingSuffix(preferred);
+			enforceModelScopes(route, options?.scope, "inherited", options?.onWarn);
+			return route;
+		}
+	}
+	// A user free-only constraint is independent of optional economy pricing.
+	// Missing metadata or a disabled economy policy must not admit paid work.
+	const routeConstraints = taskRouteConstraints(options?.task);
+	if (routeConstraints.freeOnly) {
+		if (explicit === undefined && !routeConstraints.fixed) {
+			const pick = selectAffordableModel(availableModels, loadModelEconomyConfig(), {
+				task: options?.task, freeOnly: true, preferredModel: resolved,
+				exhaustedProviders: exhaustedProvidersOf(availableModels), child: options?.child ?? childFor(options?.task),
+			});
+			if (pick) { enforceModelScopes(pick.model, options?.scope, "inherited", options?.onWarn); return pick.model; }
+		}
+		if (!resolved || !isProvenFreeRoute(economyRouteInfo(resolved, availableModels).info)) {
+			throw new Error("No eligible free route satisfies this task; keep the work in the parent. Paid assistance was not admitted.");
+		}
+	}
 	if (resolved) {
 		const cfg = loadModelEconomyConfig();
 		if (cfg.enabled && registryHasPricing(availableModels)) {
@@ -780,12 +736,6 @@ export function resolveSubagentModelOverride(
 				const classification = classifyModelEconomy(splitThinkingSuffix(resolved).baseModel, info, cfg);
 				if (explicit === undefined && options?.task) {
      const constraints=taskRouteConstraints(options.task);
-     if (!constraints.fixed) {
-      const mixed = selectMixedSubagentModel(availableModels, cfg, options.task, { freeOnly: constraints.freeOnly, sessionId: options.sessionId, preferredModel: resolved, exhaustedProviders: exhaustedProvidersOf(availableModels) });
-      if (mixed) { enforceModelScopes(mixed, options?.scope, "inherited", options?.onWarn); return mixed; }
-      const preferred = selectLlmPreferredModel(inferPreferenceRole(options.task), availableModels, { freeOnly: constraints.freeOnly });
-      if (preferred) { const preferredRoute = withLlmThinkingSuffix(preferred); enforceModelScopes(preferredRoute, options?.scope, "inherited", options?.onWarn); return preferredRoute; }
-     }
      const child = options?.child ?? childFor(options?.task);
      const pick = constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task:options.task,freeOnly:constraints.freeOnly,preferredModel:resolved,exhaustedProviders:exhaustedProvidersOf(availableModels),...(child ? {child} : {})});
      if (pick) { enforceModelScopes(pick.model,options?.scope,"inherited",options?.onWarn); return pick.model; }
@@ -939,13 +889,17 @@ export function buildModelCandidates(
 	const pinsRoute=/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(options?.task??"");
 	const autoConstraints=taskRouteConstraints(options?.task);
 	if(options?.allowAutomaticAlternatives!==false&&origin==="inherited"&&!pinsRoute&&!fallbackModels?.length&&process.env.PI_AUTONOMOUS_MODEL_FALLBACK!=="off") {
-		for (const pref of resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, autoConstraints.freeOnly ? { freeOnly: true } : {})) {
-			if (economical.length >= 3) break;
+		const preferredFallbacks = resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, { freeOnly: autoConstraints.freeOnly, requirements: childFor(options?.task) });
+		for (const pref of preferredFallbacks) {
+			if (economical.length >= 8) break;
 			const prefRoute = withLlmThinkingSuffix(pref);
 			if (economical.includes(prefRoute) || economical.some(e => splitKnownThinkingSuffix(e).baseModel === pref.route)) continue;
 			try { enforceModelScopes(prefRoute, scopes, "inherited", options?.onWarn); } catch { continue; }
 			economical.push(prefRoute);
 		}
+		// A retained parent/autonomous candidate follows every configured route.
+		const preferenceOrder = new Map(preferredFallbacks.map((pref, index) => [pref.route, index]));
+		economical.sort((left, right) => (preferenceOrder.get(splitThinkingSuffix(left).baseModel) ?? Infinity) - (preferenceOrder.get(splitThinkingSuffix(right).baseModel) ?? Infinity));
 		const cfg=loadModelEconomyConfig();
 		const first=availableModels?.find(model=>model.fullId===splitKnownThinkingSuffix(economical[0]).baseModel);
 		if(cfg.enabled&&first&&Number.isSafeInteger(first.contextWindow)&&first.contextWindow!>0&&Number.isSafeInteger(first.maxTokens)&&first.maxTokens!>0) {
@@ -956,7 +910,7 @@ export function buildModelCandidates(
 				&&catalogRouteCapabilities(model,evidence)?.toolCalling===true
 				&&(isProvenFreeRoute(model,evidence)||!freeOnly&&isAutonomousMeteredEligible(model,cfg)));
 			const excluded=[...economical];
-			for(let attempts=0;attempts<8&&economical.length<3;attempts++) {
+			for(let attempts=0;attempts<8&&economical.length<Math.min(8, Math.max(3, preferredFallbacks.length + 1));attempts++) {
 				const choice=selectAffordableModel(pool,cfg,{task:options?.task,preferredModel:first.fullId,exclude:excluded,exhaustedProviders:exhaustedProvidersOf(availableModels)});
 				if(!choice)break;excluded.push(choice.model);
 				try {enforceModelScopes(choice.model,scopes,"explicit",options?.onWarn);}catch {continue;}
@@ -1137,25 +1091,39 @@ function applyCandidateEconomy(
  task?: string,
 ): string[] {
 	const cfg = loadModelEconomyConfig();
-	if (!cfg.enabled || !registryHasPricing(availableModels) || candidates.length === 0) return candidates;
  const constraints=taskRouteConstraints(task);
  const child = origin === "inherited" && task ? childFor(task) : undefined;
- if (origin === "inherited" && task) {
+ const preferences = origin === "inherited" && task && !constraints.fixed
+  ? resolveLlmPreferenceChain(inferPreferenceRole(task), availableModels, { freeOnly: constraints.freeOnly, requirements: child }) : [];
+ if (preferences.length) {
+  const first = withLlmThinkingSuffix(preferences[0]);
+  candidates = [first, ...candidates.filter(route => splitThinkingSuffix(route).baseModel !== preferences[0].route)];
+ }
+ const preferredRoutes = new Set(preferences.map(preference => preference.route));
+ if (origin === "inherited" && task && !preferences.length && (constraints.freeOnly || cfg.enabled && registryHasPricing(availableModels))) {
   const pick=constraints.fixed ? undefined : selectAffordableModel(availableModels,cfg,{task,freeOnly:constraints.freeOnly,preferredModel:candidates[0],exhaustedProviders:exhaustedProvidersOf(availableModels),...(child ? {child} : {})});
   if (pick) candidates=[pick.model,...candidates.slice(1).filter(route=>route!==pick.model)];
   else if (constraints.freeOnly && !isProvenFreeRoute(economyRouteInfo(candidates[0],availableModels).info)) throw new Error("No eligible free route satisfies this task; keep the work in the parent. Paid assistance was not admitted.");
  }
+ if (constraints.freeOnly) {
+  candidates = candidates.filter((route, index) => {
+   if (isProvenFreeRoute(economyRouteInfo(route, availableModels).info)) return true;
+   if (index === 0) throw new Error("Free-only task refused a route without current free pricing evidence.");
+   return false;
+  });
+ }
+ if (!cfg.enabled || !registryHasPricing(availableModels) || candidates.length === 0) return constraints.fixed ? candidates.slice(0, 1) : candidates;
 	const kept: string[] = [];
 	let primaryDropped = false;
 	for (let index = 0; index < candidates.length; index++) {
 		const route = candidates[index]!;
 		const { info, base } = economyRouteInfo(route, availableModels);
 		const isPrimary = index === 0;
-  if (constraints.freeOnly && !isProvenFreeRoute(info)) {
-   if (isPrimary) throw new Error("Free-only task refused a route without current free pricing evidence.");
-   continue;
-  }
 		if (!info) {
+			kept.push(route);
+			continue;
+		}
+		if (preferredRoutes.has(base)) {
 			kept.push(route);
 			continue;
 		}

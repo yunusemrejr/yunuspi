@@ -24,6 +24,7 @@ const environment={
   PI_SUBAGENTS_ECONOMY_CONFIG:process.env.PI_SUBAGENTS_ECONOMY_CONFIG,
   PI_PROVIDER_STATE_FILE:process.env.PI_PROVIDER_STATE_FILE,
   PI_MODEL_EXCLUSIONS_PATH:process.env.PI_MODEL_EXCLUSIONS_PATH,
+  PI_LLM_PREFERENCES_FILE:process.env.PI_LLM_PREFERENCES_FILE,
   PI_SCOPE_COUNCIL:process.env.PI_SCOPE_COUNCIL,
   PI_AUTONOMOUS_FREE_ASSIST:process.env.PI_AUTONOMOUS_FREE_ASSIST,
   PI_SUBAGENT_CHILD:process.env.PI_SUBAGENT_CHILD,
@@ -32,6 +33,7 @@ process.env.PI_CODING_AGENT_DIR=root;
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG=path.join(root,'economy.json');
 process.env.PI_PROVIDER_STATE_FILE=path.join(root,'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH=path.join(root,'exclusions.json');
+process.env.PI_LLM_PREFERENCES_FILE=path.join(root,'preferences.json');
 process.env.PI_SCOPE_COUNCIL='on';
 process.env.PI_AUTONOMOUS_FREE_ASSIST='on';
 delete process.env.PI_SUBAGENT_CHILD;
@@ -231,6 +233,7 @@ test('one surviving perspective is still challenged instead of returning an empt
   assert.match(output.gap,/peer/i,'the unavailable perspective stays an explicit gap');
   const synth=calls.find(call=>String(call.params.task).includes('Peer critique synthesizer'));
   assert.match(String(synth.params.task),/other perspective is unavailable/);
+  assert.match(String(synth.params.task),/Recover the explicit title reference before widening the change/);
 });
 
 test('the generic proactive helper yields to the automatic scope council trigger',async()=>{
@@ -265,4 +268,76 @@ test('failed peers keep the categorized row and name the underlying failure',asy
 process.on('exit',()=>{
   for(const [key,value] of Object.entries(environment)){if(value===undefined) delete process.env[key]; else process.env[key]=value;}
   fs.rmSync(root,{recursive:true,force:true});
+});
+
+
+test('replacing a council runner cancels its peers and a stale shutdown cannot remove the new owner', async () => {
+  const hooks=[], signals=[], entries=[];
+  const pi={getActiveTools:()=>['subagent'],appendEntry:(type,data)=>entries.push({type,data}),on:(name,fn)=>{if(name==='session_shutdown')hooks.push(fn);}};
+  registerScopeCouncilRunner(pi,{available:()=>models,constraints:()=>({}),rankPerspectives:null,
+    launch:async(_id,_params,signal)=>{signals.push(signal);return new Promise(()=>{});}});
+  const old=globalThis[SCOPE_COUNCIL_RUNNER];
+  const pending=old({task},context());
+  assert.equal(signals.length,2);
+  registerScopeCouncilRunner(pi,{available:()=>models,constraints:()=>({}),rankPerspectives:null,launch:async()=>result('Current owner advice with concrete evidence.')});
+  const replacement=globalThis[SCOPE_COUNCIL_RUNNER];
+  assert.ok(signals.every(signal=>signal.aborted));
+  assert.equal((await pending).status,'unavailable');
+  assert.match((await old({task},context())).gap,/replaced|shut down/);
+  hooks[0]();
+  assert.equal(globalThis[SCOPE_COUNCIL_RUNNER],replacement);
+  hooks[1]();
+  assert.equal(globalThis[SCOPE_COUNCIL_RUNNER],undefined);
+});
+
+test('council honors the active context signal even without an explicit parent signal', async () => {
+  let launches=0;
+  registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{available:()=>models,constraints:()=>({}),launch:async()=>{launches++;return result('unexpected');}});
+  const controller=new AbortController();controller.abort();
+  const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task},{...context(),signal:controller.signal});
+  assert.equal(output.status,'unavailable');assert.equal(launches,0);
+});
+
+
+test('cancelled councils clear their status without erasing a replacement owner status',async()=>{
+  for(const mode of ['abort','replace']){
+    resetSharedControl();
+    const statuses=[],controller=new AbortController(),ctx={...context(),ui:{setStatus:(_key,value)=>statuses.push(value)}};
+    const pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+    const deps={available:()=>models,constraints:()=>({}),rankPerspectives:null,launch:()=>new Promise(()=>{})};
+    registerScopeCouncilRunner(pi,deps);
+    const pending=globalThis[SCOPE_COUNCIL_RUNNER]({task},ctx,controller.signal);
+    assert.ok(statuses.at(-1));
+    if(mode==='abort')controller.abort();else registerScopeCouncilRunner(pi,deps);
+    await pending;
+    assert.equal(statuses.at(-1),undefined,mode);
+  }
+});
+
+test('configured council routes survive economy admission without changing their role order',async()=>{
+  const fallback=await import(shared+'model-fallback.ts');
+  const prefs=await import(shared+'llm-preferences.ts');
+  const configured=[
+    {...model('vendor/preferred'),provider:'friendli',baseUrl:'https://api.friendli.ai/serverless/v1'},
+    {...model('vendor/backup'),provider:'friendli',baseUrl:'https://api.friendli.ai/serverless/v1',cost:{input:99,output:99,cacheRead:0,cacheWrite:0}},
+  ];
+  const available=configured.map(row=>({...row,fullId:`${row.provider}/${row.id}`}));
+  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE,JSON.stringify({preferences:{council:configured.map(row=>({provider:row.provider,model:row.id}))}}));
+  prefs.clearLlmPreferencesCache();
+  const calls=[];
+  try{
+    for(const row of available) assert.throws(()=>fallback.buildModelCandidates(row.fullId,undefined,available,undefined,{origin:'explicit'}),/economy|price|expensive|metered/i,'direct explicit overrides retain their strict economy policy');
+    registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{available:()=>configured,constraints:()=>({}),rankPerspectives:null,
+      launch:async(_id,params)=>{
+        calls.push(params);
+        assert.equal(params.modelOrigin,'configured');
+        const route=fallback.resolveEffectiveSubagentModel(params.model,undefined,undefined,available,undefined,{source:params.modelOrigin==='explicit'?'explicit':'inherited',task:params.task});
+        assert.deepEqual(fallback.buildModelCandidates(route,undefined,available,undefined,{origin:params.modelOrigin,task:params.task}),[params.model]);
+        return result('Bounded council advice based on the supplied source evidence.');
+      }});
+    const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task},context());
+    assert.equal(output.status,'complete');
+    assert.deepEqual(calls.slice(0,2).map(row=>row.model),available.map(row=>row.fullId));
+    assert.equal(calls.length,3);
+  }finally{fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache();}
 });

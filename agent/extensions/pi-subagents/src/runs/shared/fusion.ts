@@ -17,6 +17,11 @@ export type FusionStrategy = "deduped" | "union" | "disjoint-split";
 export type FusionProvenance = {
 	section: string;
 	owner: string;
+	/** UTF-16 character range of this source's retained body, excluding the truncation marker. */
+	start: number;
+	end: number;
+	omitted?: boolean;
+	truncated?: boolean;
 };
 
 /** Result of planning a fusion. */
@@ -33,7 +38,7 @@ export type FusionResult = {
 
 /** Optional planning config. */
 export type FusionConfig = {
-	maxBodyChars: number;
+	maxBodyChars?: number;
 };
 
 const DEFAULT_MAX_BODY_CHARS = 32768;
@@ -54,14 +59,14 @@ function validateFragmentShape(fragment: unknown, index: number): asserts fragme
 	if (f === null || typeof f !== "object" || Array.isArray(f)) {
 		throw fieldError(index, "", "must be an object");
 	}
-	if (typeof f.owner !== "string" || f.owner.length === 0) {
+	if (typeof f.owner !== "string" || f.owner.trim().length === 0) {
 		throw fieldError(index, "owner", "must be a non-empty string");
 	}
 	if (typeof f.kind !== "string" || !KINDS.includes(f.kind)) {
 		throw fieldError(index, "kind", "must be one of " + KINDS.join("|"));
 	}
-	if (typeof f.body !== "string") {
-		throw fieldError(index, "body", "must be a string");
+	if (typeof f.body !== "string" || !f.body.trim()) {
+		throw fieldError(index, "body", "must be a non-empty string");
 	}
 	if (typeof f.updatedAt !== "number" || !Number.isFinite(f.updatedAt)) {
 		throw fieldError(index, "updatedAt", "must be a finite number");
@@ -84,6 +89,7 @@ function validateConfig(config: FusionConfig | undefined): number {
 	if (c === null || typeof c !== "object" || Array.isArray(c)) {
 		throw new TypeError("config must be an object");
 	}
+	if (c.maxBodyChars === undefined) return DEFAULT_MAX_BODY_CHARS;
 	if (typeof c.maxBodyChars !== "number" || !Number.isInteger(c.maxBodyChars) || c.maxBodyChars <= 0) {
 		throw new TypeError("config.maxBodyChars must be a positive integer");
 	}
@@ -102,7 +108,7 @@ export function classifyFusionStrategy(fragments: FusionFragment[]): FusionStrat
 	return "union";
 }
 
-const FRAGMENT_FENCE_OPEN: RegExp = /```[ \t]*fragment[ \t]*\n/g;
+
 
 /**
  * Extracts fenced fragment blocks from a fusion-mode worker's output (the
@@ -122,25 +128,25 @@ export function parseFragmentBlocks(text: string): FusionFragment[] {
 		throw new TypeError("parseFragmentBlocks: text must be a string");
 	}
 	const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-	const blockRe = /```[ \t]*fragment[ \t]*\n([\s\S]*?)```/g;
+	const openRe = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*fragment[ \t]*(?:\n|$)/gm;
 	const fragments: FusionFragment[] = [];
 	let match: RegExpExecArray | null;
-	while ((match = blockRe.exec(normalized)) !== null) {
-		const index = fragments.length;
+	while ((match = openRe.exec(normalized)) !== null) {
+		const index = fragments.length, fence = match[1];
+		// Markdown fences end on their own line. Backticks inside a JSON body
+		// (for example an escaped code block) are ordinary source content.
+		const closeRe = new RegExp(`^[ \\t]{0,3}${fence[0]}{${fence.length},}[ \\t]*(?:\\n|$)`, "gm");
+		closeRe.lastIndex = openRe.lastIndex;
+		const closing = closeRe.exec(normalized);
+		if (!closing) throw new TypeError(`fragments[${index}]: unterminated fragment fence`);
 		let parsed: unknown;
-		try {
-			parsed = JSON.parse(match[1]);
-		} catch (error) {
-			throw new TypeError(
-				`fragments[${index}]: fenced fragment block is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-			);
+		try { parsed = JSON.parse(normalized.slice(openRe.lastIndex, closing.index)); }
+		catch (error) {
+			throw new TypeError(`fragments[${index}]: fenced fragment block is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
 		}
 		validateFragmentShape(parsed, index);
 		fragments.push(parsed);
-	}
-	const openers = normalized.match(FRAGMENT_FENCE_OPEN)?.length ?? 0;
-	if (openers > fragments.length) {
-		throw new TypeError("fragments[" + fragments.length + "]: unterminated fragment fence (opening ```fragment without a closing ```)");
+		openRe.lastIndex = closeRe.lastIndex;
 	}
 	return fragments;
 }
@@ -150,12 +156,12 @@ function byOwnerThenTime(a: FusionFragment, b: FusionFragment): number {
 	return a.updatedAt - b.updatedAt;
 }
 
-function applyBound(body: string, maxBodyChars: number): string {
-	if (body.length <= maxBodyChars) return body;
-	if (maxBodyChars <= TRUNCATION_MARKER.length) {
-		return body.slice(0, maxBodyChars);
-	}
-	return body.slice(0, maxBodyChars - TRUNCATION_MARKER.length) + TRUNCATION_MARKER;
+function retainedChars(body: string, maxBodyChars: number): number {
+	if (body.length <= maxBodyChars) return body.length;
+	let end = maxBodyChars <= TRUNCATION_MARKER.length ? maxBodyChars : maxBodyChars - TRUNCATION_MARKER.length;
+	// Never leave a lone UTF-16 high surrogate at the truncation boundary.
+	if (end > 0 && /[\uD800-\uDBFF]/.test(body[end - 1]) && /[\uDC00-\uDFFF]/.test(body[end])) end--;
+	return end;
 }
 
 /**
@@ -167,20 +173,28 @@ export function planFusion(fragments: FusionFragment[], config?: FusionConfig): 
  const maxBodyChars=validateConfig(config);
  const strategy=classifyFusionStrategy(fragments);
  const ordered=fragments.slice().sort((a,b)=>Number(b.kind==="conflict")-Number(a.kind==="conflict")||byOwnerThenTime(a,b));
- const sections=new Map<string,string>();
+ const sections=new Map<string,{section:string;start:number;end:number}>();
+ let originalChars=0;
  const provenanceOwners=new Map<string,Set<string>>();
  const parts:string[]=[];
  const provenance:FusionProvenance[]=[];
  for(const fragment of ordered) {
-  let section=sections.get(fragment.body);
-  if(!section){section=`s${sections.size+1}`;sections.set(fragment.body,section);parts.push(fragment.body);}
+  let range=sections.get(fragment.body);
+  if(!range){
+   const start=originalChars+(parts.length?2:0);
+   range={section:`s${sections.size+1}`,start,end:start+fragment.body.length};
+   originalChars=range.end;sections.set(fragment.body,range);parts.push(fragment.body);
+  }
+  const {section}=range;
   let owners=provenanceOwners.get(section);
   if(!owners){owners=new Set<string>();provenanceOwners.set(section,owners);}
-  if(!owners.has(fragment.owner)){owners.add(fragment.owner);provenance.push({section,owner:fragment.owner});}
+  if(!owners.has(fragment.owner)){owners.add(fragment.owner);provenance.push({...range,owner:fragment.owner});}
  }
  const body=parts.join("\n\n");
  const truncated=body.length>maxBodyChars;
- return {strategy,fusedBody:applyBound(body,maxBodyChars),provenance,
+ const retained=retainedChars(body,maxBodyChars);
+ const fusedBody=body.slice(0,retained)+(truncated&&maxBodyChars>TRUNCATION_MARKER.length?TRUNCATION_MARKER:"");
+ return {strategy,fusedBody,provenance:provenance.map(entry=>entry.end<=retained?entry:{...entry,start:Math.min(entry.start,retained),end:retained,...(entry.start>=retained?{omitted:true}:{truncated:true})}),
   ...(truncated?{truncated:true,originalChars:body.length,requiresReview:true}:{}),
   ...(strategy==="disjoint-split"?{requiresReview:true,unresolvedConflicts:[...new Set(fragments.filter(f=>f.kind==="conflict").map(f=>f.owner))]}:{})};
 }
