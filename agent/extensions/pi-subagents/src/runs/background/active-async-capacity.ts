@@ -8,6 +8,12 @@ import { checkPidLiveness, type PidLiveness } from "./stale-run-reconciler.ts";
 import { readProcessTerminal } from "./process-terminal.ts";
 
 export const ACTIVE_ASYNC_CAPACITY_DIR = path.join(TEMP_ROOT_DIR, "session-active-async-capacity");
+/**
+ * Slot claims are held across synchronous operations only, so a claim older
+ * than this is necessarily orphaned by a crashed process. Recovering it keeps
+ * one crash from permanently shrinking session capacity.
+ */
+const STALE_SLOT_CLAIM_MS = 60_000;
 export const DEFAULT_ABANDONED_SLOT_RELEASE_AFTER_MS = 20 * 60 * 1000;
 export const MIN_ABANDONED_SLOT_RELEASE_AFTER_MS = 5 * 60 * 1000;
 export const MAX_ABANDONED_SLOT_RELEASE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -151,8 +157,24 @@ function matchingOwner(dir: string, expected: ActiveAsyncCapacityOwnerV1): Activ
 		: undefined;
 }
 
-function withSlotClaim<T>(dir: string, operation: () => T): { acquired: true; value: T } | { acquired: false } {
+function recoverStaleSlotClaim(claimPath: string, nowMs: number): void {
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(claimPath);
+	} catch {
+		return;
+	}
+	if (nowMs - stat.mtimeMs <= STALE_SLOT_CLAIM_MS) return;
+	try {
+		fs.rmSync(claimPath);
+	} catch {
+		// Lost the race with another recovery or the releasing owner.
+	}
+}
+
+function withSlotClaim<T>(dir: string, operation: () => T, nowMs: number = Date.now()): { acquired: true; value: T } | { acquired: false } {
 	const claimPath = path.join(dir, "capacity.claim");
+	recoverStaleSlotClaim(claimPath, nowMs);
 	const claimToken = randomUUID();
 	let claim: number | undefined;
 	try {
