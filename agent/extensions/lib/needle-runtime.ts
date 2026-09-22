@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Needle runtime: one long-lived worker thread per process, bounded queue,
  * caches, timeouts, health state, crash recovery and graceful degradation.
  * No failure here may break normal YunusPi operation: every op resolves to
@@ -31,7 +32,7 @@ const SHARED_RUNTIME = Symbol.for("yunus-pi.needle-runtime.v1");
 const processState = globalThis as typeof globalThis & { [SHARED_RUNTIME]?: NeedleHandle };
 
 function noteHealth(kind: string, data: Record<string, unknown>): void {
-  try { (globalThis as Record<symbol, unknown>)[HEALTH_SINK]?.(kind, data); } catch { /* telemetry is optional */ }
+  try { sessionObservability()[HEALTH_SINK]?.(kind, data); } catch { /* telemetry is optional */ }
 }
 
 export const NEEDLE_ASSET_FILES = ["needle.js", "needle.wasm", "needle3.cact"] as const;

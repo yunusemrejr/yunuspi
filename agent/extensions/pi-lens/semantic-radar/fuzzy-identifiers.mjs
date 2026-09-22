@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../lib/session-observability.ts';
 /** Typo candidates from the EXISTING vocabulary; no scan, cache, model or I/O.
  * One insertion/deletion/substitution/transposition, bounded by token length.
  * Ambiguous neighborhoods abstain. Suggestions never authorize source edits. */
@@ -22,5 +23,8 @@ export function identifierTerms(tokens, postings) {
     if(found.size>2) continue;
     for(const token of [...found].sort()) if(!out.has(token)) out.set(token,{token,weight:0.45,original});
   }
-  return [...out.values()];
+  const result = [...out.values()];
+  const recovered = result.filter(item => item.original).length;
+  if (recovered) try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used", { count: recovered }); } catch { /* optional visibility */ }
+  return result;
 }

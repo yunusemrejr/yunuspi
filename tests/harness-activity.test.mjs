@@ -21,7 +21,7 @@ test('native tools and automatic helpers share compact safe UI-only status with 
   const f = fixture();
   try {
     assert.equal(registerHarnessActivity(f.pi), f.service);
-    assert.equal(globalThis[HARNESS_ACTIVITY], f.service);
+    assert.equal(typeof globalThis[HARNESS_ACTIVITY], "function");
     const finish = f.service({ action: 'start', id: 'auto', label: 'skills' });
     f.emit('tool_execution_start', { toolCallId: 'auto', toolName: 'render_see', args: { secret: 'PRIVATE-ARGUMENT' } });
     assert.match(f.writes.at(-1).text, /Skill discovery · Browser/);

@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Shared per-capability health: seven states, usefulness ratios, auto-gating.
  * Pure transition core plus a tiny bounded store. Observations flow in shadow:
  * recording never blocks, gates or delays any caller. Enforcement belongs to
@@ -106,7 +107,7 @@ export function parseHealthSnapshot(data: unknown): { records: CapabilityHealthR
 
 export type HealthTransitionEmitter = (event: CapabilityHealthTransition) => void;
 const defaultEmit: HealthTransitionEmitter = event => {
-  try { (globalThis as { [k: symbol]: unknown })[Symbol.for('yunus-pi.health.v1')]?.('capability.health', event as unknown as Record<string, unknown>); } catch { /* telemetry is optional */ }
+  try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('capability.health', event as unknown as Record<string, unknown>); } catch { /* telemetry is optional */ }
 };
 
 export function createCapabilityHealth(options: { policy?: CapabilityHealthPolicy; now?: () => number; emit?: HealthTransitionEmitter } = {}) {

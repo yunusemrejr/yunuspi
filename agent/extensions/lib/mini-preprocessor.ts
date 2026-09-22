@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Local non-generative paragraph selection. The transcript always owns raw text. */
 import {createHash} from 'node:crypto';
 import {beginHarnessActivity} from './harness-activity.ts';
@@ -136,7 +137,7 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     if(!accepted)skip(expired?'timeout':valid?'no-useful-selection':'invalid-selection');
     finishActivity(epoch!==generation?'cancelled':expired||!valid?'error':accepted?'ok':'skipped');
     if(!accepted && epoch===generation){failures=valid?0:Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
-    try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
+    try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}
     if(current===abort){busy=false;current=undefined;}
    }
   }

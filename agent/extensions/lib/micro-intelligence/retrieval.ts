@@ -1,3 +1,4 @@
+import { sessionObservability } from '../session-observability.ts';
 /** Multi-stage retrieval: deterministic eligibility (caller-owned) ->
  * lexical/statistical order (caller-provided) -> Needle semantic ranking ->
  * Jev validation when uncertain. Candidates entering this function are
@@ -85,9 +86,10 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   const metrics = microMetrics();
   const bit = (id: string | undefined): string | undefined => id;
   const lexicalTop = bit(lexical[0]?.id);
-  const done = (ordered: T[], applied: RetrievalOutcome<T>["applied"], extra: Partial<RetrievalOutcome<T>> = {}): RetrievalOutcome<T> => ({
-    ordered, applied, lexicalTop, ...extra,
-  });
+  const done = (ordered: T[], applied: RetrievalOutcome<T>["applied"], extra: Partial<RetrievalOutcome<T>> = {}): RetrievalOutcome<T> => {
+    if(applied !== "lexical")try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.retrieval.used",{count:1});}catch{/* optional visibility */}
+    return { ordered, applied, lexicalTop, ...extra };
+  };
 
   if (lexical.length < 2 || trivialQuery(query)) {
     metrics.skip("needle", lexical.length < 2 ? "no-candidates" : "trivial");

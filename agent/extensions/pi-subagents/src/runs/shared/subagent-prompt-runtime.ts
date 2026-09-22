@@ -36,6 +36,7 @@ import { registerAutonomousRecovery } from "../../extension/autonomous-recovery.
 import { toModelInfo } from "../../shared/model-info.ts";
 import { registerEconomyRequestHook, isAutonomousMeteredEligible, loadModelEconomyConfig, operationalEconomyQualification } from "./model-economy.ts";
 import { capFreeRequest, isProvenFreeRoute } from "./free-route-evidence.ts";
+import { decodeSubagentModelRouteCandidate, SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV } from "../../shared/model-route.ts";
 
 /** Helper admission and dispatch share the global economy caps; per-child runaway circuit breakers own spend. */
 export function capAutomaticHelperRequest(raw: any, model: NonNullable<ExtensionContext["model"]>) {
@@ -183,6 +184,30 @@ function registerRuntimeExtensionAcknowledgements(pi: ExtensionAPI): void {
 	} catch {
 		// Acknowledgement collection is optional observability and must not affect child execution.
 	}
+}
+
+/** Carry a single parent's already-resolved route pin into this Pi child.
+ * Apply it to the request payload only: model registry objects can be shared
+ * between sessions and the session's selected model is refreshed before each
+ * turn, so writing model.compat can leak a pin or silently lose it. */
+export function rewriteSubagentModelRouteRequest(
+	event: BeforeProviderRequestEvent,
+	ctx?: Pick<ExtensionContext, "model">,
+	candidate = decodeSubagentModelRouteCandidate(process.env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV]),
+): unknown {
+	const model = ctx?.model;
+	if (!candidate?.providerRouting || !model || `${model.provider}/${model.id}`.toLowerCase() !== candidate.route.toLowerCase()) return event.payload;
+	if (!event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) return event.payload;
+	return { ...(event.payload as Record<string, unknown>), provider: candidate.providerRouting };
+}
+
+/** The candidate is bound to one exact route in this child process and only
+ * rewrites that route's outgoing request. This remains correct across model
+ * refreshes and cannot mutate registry-shared model metadata. */
+export function registerSubagentModelRouteOverride(pi: ExtensionAPI): void {
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: unknown, ctx?: ExtensionContext) => unknown) => void;
+	const candidate = decodeSubagentModelRouteCandidate(process.env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV]);
+	onRuntimeEvent("before_provider_request", (event, ctx) => rewriteSubagentModelRouteRequest(event as BeforeProviderRequestEvent, ctx, candidate));
 }
 
 function findSectionEnd(prompt: string, startIndex: number, nextHeaders: string[]): number {
@@ -783,6 +808,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 	registerGitAuthorityGate(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
 	registerChildWatchdog(pi);
+	registerSubagentModelRouteOverride(pi);
 	const waitToolConfig = resolveWaitToolConfig();
 	const waitState = {
 		baseCwd: "",

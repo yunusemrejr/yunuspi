@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
+import { guardianOwnerForSession } from "@yunuspi/coding-agent";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
-import { selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
+import { assistanceMemberRouteCandidate, selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
@@ -386,6 +387,7 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
 	return {
 		agent: "automatic-free-assistant",
 		model: member.route,
+		modelRouteCandidates: [assistanceMemberRouteCandidate(member)],
 		modelOrigin: member.proof === "explicit llm_preferences" ? "configured" : "explicit",
 		context: "fresh",
 		async: false,
@@ -604,7 +606,8 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			const critic = team[2] ?? (both ? team[0]! : proposals[0]!.role === "preservation" ? team[1]! : team[0]!);
 			const independence: "cross-peer" | "self-critique" = team[2] ? "cross-peer"
 				: both ? "self-critique" : "cross-peer";
-			const advisory = microRequestAdvice(request.task);
+            const sessionId = ctx.sessionManager.getSessionId();
+            const advisory = microRequestAdvice(request.task, guardianOwnerForSession(sessionId, ctx.sessionManager));
 			const focus = COUNCIL_PERSPECTIVES.filter(entry => [...perspectiveIds, ...(advisory?.perspectives ?? [])].includes(entry.id)).slice(0, 3);
 			const cue = focus.length ? `Optional semantic focus cues (similarity only; these do not establish findings or limit required review): ${focus.map(entry => `${entry.id}: ${entry.text}`).join("; ")}. Independently assess relevance and all evidence above.` : "";
 			if (cue && perspectiveIds.length) microMetrics().accept("needle");

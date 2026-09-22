@@ -1,3 +1,4 @@
+import { sessionObservability } from './lib/session-observability.ts';
 import { collectSessionDiagnostics } from "./lib/session-diagnostics.ts";
 import { shadowReport } from "./lib/intervention-registry.ts";
 import {
@@ -1306,7 +1307,7 @@ export default function (pi: any) {
   const popupError = (command: string, error: unknown, ctx: any) => {
     const message = error instanceof Error ? error.message : String(error);
     try {
-      (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("hook.error", { hook: "command", owner: "session-signals.ts", isError: true });
+      sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("hook.error", { hook: "command", owner: "session-signals.ts", isError: true });
     } catch { /* A diagnostic sink cannot hide the original failure. */ }
     try {
       ctx.ui?.notify?.(`/${command} failed: ${message.slice(0, 300)}`, "error");

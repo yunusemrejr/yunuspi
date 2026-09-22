@@ -699,7 +699,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		const parts: string[] = [];
 		if (details.ms !== undefined) parts.push(`${details.ms}ms`);
 		if (details.detail) parts.push(details.detail);
-		let text = `${icon} ${theme.bold(ACTIVITY_TAGS[details.kind] ?? details.kind)} ${details.label}`;
+		let text = details.kind === "intelligence.used"
+			? `${icon} ${theme.bold(`${details.label} used`)}`
+			: `${icon} ${theme.bold(ACTIVITY_TAGS[details.kind] ?? details.kind)} ${details.label}`;
 		if (parts.length > 0) text += ` ${theme.fg("dim", "·")} ${parts.map((part) => theme.fg("dim", part)).join(` ${theme.fg("dim", "·")} `)}`;
 		if (options.expanded) text += `\n  ${theme.fg("muted", details.kind)}`;
 		return new Text(text, 0, 0);

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { MODEL_ROUTE_MAX_LENGTH, MODEL_ROUTE_ROUTING_MAX_LENGTH } from "../../shared/model-route.ts";
 import { DIRS, type AcceptanceInput, type AsyncStatus, type SteeringRecoveryDescriptor, type SubagentRunMode } from "../../shared/types.ts";
 import type { AgentConfig } from "../../agents/agents.ts";
 import { normalizeExtensionBindings } from "../shared/extension-bindings.ts";
@@ -315,6 +316,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 	const parsed = value as Record<string, unknown>;
 	const allowedFields = new Set([
 		"version", "launchContractDigest", "sourceRunId", "agentContract", "agent", "sessionFile", "cwd", "model", "modelProvider", "modelOverrideFromParent", "modelOrigin", "fallbackModels", "thinking", "thinkingCeiling", "tools", "allowNestedSubagents", "extensions",
+		"modelRouteCandidates",
 		"subagentOnlyExtensions", "mcpDirectTools", "excludeTools", "mutationTools", "systemPrompt", "systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "skills",
 		"skillPath", "agentFilePath", "completionGuard", "memory", "outputPath", "outputMode", "structuredOutputSchema", "acceptance", "sessionDir", "artifactConfig",
 		"artifactsDir", "maxOutput", "controlConfig", "context", "intercomBridge", "absoluteDeadlineAt", "initialTurnBudget", "initialToolBudget", "maxSubagentDepth", "share", "capabilityCeiling",
@@ -359,6 +361,16 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 	for (const field of ["fallbackModels", "tools", "excludeTools", "extensions", "subagentOnlyExtensions", "mcpDirectTools", "mutationTools", "skills", "skillPath"] as const) {
 		const item = parsed[field];
 		if (item !== undefined && (!Array.isArray(item) || item.some((entry) => typeof entry !== "string" || !entry.trim()))) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': ${field} must contain non-empty strings.`);
+	}
+	if (parsed.modelRouteCandidates !== undefined) {
+		if (!Array.isArray(parsed.modelRouteCandidates) || parsed.modelRouteCandidates.length > 8) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelRouteCandidates must contain at most eight routes.`);
+		parsed.modelRouteCandidates = parsed.modelRouteCandidates.map((value, index) => {
+			if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelRouteCandidates[${index}] must be an object.`);
+			const routeCandidate = value as Record<string, unknown>;
+			if (Object.keys(routeCandidate).some((key) => key !== "route" && key !== "providerRouting") || typeof routeCandidate.route !== "string" || !routeCandidate.route.trim() || routeCandidate.route.length > MODEL_ROUTE_MAX_LENGTH || !routeCandidate.route.includes("/") || /[\u0000-\u001f\u007f]/.test(routeCandidate.route)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelRouteCandidates[${index}].route is invalid.`);
+			if (routeCandidate.providerRouting !== undefined && (!routeCandidate.providerRouting || typeof routeCandidate.providerRouting !== "object" || Array.isArray(routeCandidate.providerRouting) || JSON.stringify(routeCandidate.providerRouting).length > MODEL_ROUTE_ROUTING_MAX_LENGTH)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelRouteCandidates[${index}].providerRouting is invalid.`);
+			return JSON.parse(JSON.stringify(routeCandidate));
+		});
 	}
 	if (parsed.systemPrompt !== undefined && typeof parsed.systemPrompt !== "string") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': systemPrompt must be a string.`);
 	for (const field of ["launchContractDigest", "sessionFile", "model", "modelProvider", "thinking", "agentFilePath", "outputPath", "sessionDir", "artifactsDir"] as const) {

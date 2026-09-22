@@ -1,84 +1,71 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
-const release = path.resolve(import.meta.dirname, "..");
-const agent = fs.existsSync(path.join(release, "agent"))
-  ? path.join(release, "agent")
-  : path.resolve(release, "..");
-const mod = await import(pathToFileURL(path.join(agent, "extensions/lib/prompt-interpretation.ts")));
-const { classifyFollowup, parseInterpRead, requestExcerpt, buildInterpBrief } = mod;
+const root = path.resolve(import.meta.dirname, '..');
+const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find((p) =>
+	fs.existsSync(path.join(p, 'extensions/lib/prompt-interpretation.ts')),
+);
+if (!agent) throw new Error('agent extension tree is missing');
+const mod = await import(pathToFileURL(path.join(agent, 'extensions/lib/prompt-interpretation.ts')));
 
-test("follow-ups classify as redirect, additive, unclear or initial", () => {
-  assert.equal(classifyFollowup("New task: design the dashboard."), "redirect");
-  assert.equal(classifyFollowup("Do not continue with that approach."), "redirect");
-  assert.equal(classifyFollowup("Do this instead of the old layout."), "redirect");
-  assert.equal(classifyFollowup("Also update the docs while you are at it."), "additive");
-  assert.equal(classifyFollowup("Fix the login bug too."), "additive");
-  assert.equal(classifyFollowup("Make it better."), "unclear-followup");
-  assert.equal(classifyFollowup("Handle the rest."), "unclear-followup");
-  assert.equal(classifyFollowup("Implement user authentication with sessions."), "initial");
-  assert.equal(classifyFollowup(""), "initial");
-  assert.equal(classifyFollowup(undefined), "initial");
-  assert.equal(classifyFollowup(42), "initial");
+test('prompt-analysis requests retain both ends of large input and distinguish initial from follow-up schema', () => {
+	const long = `HEAD ${'background detail. '.repeat(2000)}TAIL preserve exact constraints`;
+	const initial = mod.buildPromptAnalysisRequest(long, 'initial');
+	assert.match(initial, /HEAD/);
+	assert.match(initial, /TAIL preserve exact constraints/);
+	assert.match(initial, /middle omitted/);
+	assert.match(initial, /completionConditions/);
+	assert.ok(initial.length < 27_000);
+	const followup = mod.buildPromptAnalysisRequest('Also update the docs.', 'followup', {
+		taskLabel: 'Current project', explicitConstraints: [], subtasks: ['earlier suggestion'],
+	});
+	assert.match(followup, /priorSuggestedSubtasks/);
+	assert.match(followup, /clarification\/status question/);
+	assert.doesNotMatch(followup, /needsMemory/);
 });
 
-test("redirect beats additive and mid-sentence too is not additive", () => {
-  assert.equal(classifyFollowup("Also do the header instead of the footer."), "redirect");
-  assert.equal(classifyFollowup("The animation is too slow and too busy."), "initial");
-  assert.equal(classifyFollowup("Build this SQL query with the supplied schema."), "initial");
+test('analysis parser discards unknown fields and gates weak follow-up relations', () => {
+	const prompt = 'Keep the existing API behavior.';
+	const base = { intent: 'Maintain API behavior', confidence: 0.5, relation: 'replace', explicitConstraints: ['Keep the existing API behavior'] };
+	const weak = mod.parsePromptAnalysis(JSON.stringify(base), prompt, 'followup');
+	assert.equal(weak.relation, undefined);
+	assert.deepEqual(weak.explicitConstraints, [{ text: 'Keep the existing API behavior', source: 'literal-user', start: 0, end: prompt.indexOf('.'), quoted: false }]);
+	assert.equal(mod.parsePromptAnalysis(JSON.stringify({ ...base, unknown: true }), prompt, 'followup'), undefined);
+	const strong = mod.parsePromptAnalysis(JSON.stringify({ ...base, confidence: 0.8, relation: 'status-question' }), prompt, 'followup');
+	assert.equal(strong.relation, 'status-question');
 });
 
-test("a trailing too counts even in long prompts", () => {
-  const long = `${"Keep the current layout, palette and typography exactly as they are. ".repeat(30)}Fix the login bug too.`;
-  assert.ok(long.length > 1024);
-  assert.equal(classifyFollowup(long), "additive");
-  const graded = `${"Keep the current layout, palette and typography exactly as they are. ".repeat(30)}It feels too slow.`;
-  assert.equal(classifyFollowup(graded), "initial");
+test('full context projection remains valid JSON and includes every bounded advisory category', () => {
+	const prompt = 'Implement the endpoint. Preserve the existing response body.';
+	const parsed = mod.parsePromptAnalysis(JSON.stringify({
+		intent: 'Implement endpoint', taskLabel: 'Endpoint', confidence: 0.9,
+		deliverables: ['API endpoint'], explicitConstraints: ['Preserve the existing response body'],
+		inferredConstraints: [{ text: 'Keep changes narrow', confidence: 0.72 }],
+		subtasks: ['add route'], dependencies: ['router'], references: ['existing handler'],
+		suggestedCapabilities: ['read'], expectedTools: ['test'], expectedSkills: ['typescript'],
+		completionConditions: ['tests pass'], ambiguities: ['none'], needsExternalVerification: true,
+		needsMemory: true, needsProjectGraph: true, reviewWorthy: true, multiPerspective: true,
+	}), prompt, 'initial');
+	const content = mod.renderPromptAnalysisContext(parsed, 'prompt_analysis', 'openrouter/cheap');
+	const data = JSON.parse(content.split('\n')[1]);
+	for (const key of ['intent', 'taskLabel', 'deliverables', 'explicitConstraints', 'inferredConstraints', 'subtasks', 'dependencies', 'references', 'suggestedCapabilities', 'expectedTools', 'expectedSkills', 'completionConditions', 'ambiguities']) assert.ok(key in data, key);
+	assert.equal(data.needsMemory, true);
+	assert.equal(data.route, 'openrouter/cheap');
 });
 
-test("sidecar replies parse leniently but garbage stays silent", () => {
-  assert.deepEqual(parseInterpRead("READ: additive\nWHY: keeps prior scope"), {
-    read: "additive",
-    why: "keeps prior scope",
-  });
-  assert.equal(parseInterpRead("READ: redirect\n\nWHY: replaces the plan").read, "redirect");
-  assert.equal(parseInterpRead("READ: unclear\r\nWHY: no evidence").read, "unclear");
-  assert.equal(parseInterpRead("additive because it looks additive"), undefined);
-  assert.equal(parseInterpRead("READ: additive"), undefined);
-  assert.equal(parseInterpRead("READ: sideways\nWHY: nope"), undefined);
-  assert.equal(parseInterpRead(`READ: additive\nWHY: ${"x".repeat(3000)}`), undefined);
-  assert.equal(parseInterpRead(undefined), undefined);
-  assert.equal(parseInterpRead(42), undefined);
-});
-
-test("why lines are sanitized and bounded", () => {
-  const parsed = parseInterpRead("READ: redirect\nWHY:  quotes   \"the old plan\"  \t and more");
-  assert.equal(parsed.read, "redirect");
-  assert.ok(parsed.why.length <= 160);
-  assert.doesNotMatch(parsed.why, /[\x00-\x1f]/);
-  const long = parseInterpRead(`READ: additive\nWHY: ${"word ".repeat(60)}`);
-  assert.ok(long.why.length <= 160);
-});
-
-test("excerpts preserve head and tail within budget", () => {
-  assert.equal(requestExcerpt("short", 2000), "short");
-  const long = `HEAD:${"x".repeat(5000)}:TAIL`;
-  const excerpt = requestExcerpt(long, 2000);
-  assert.ok(excerpt.length <= 2000);
-  assert.match(excerpt, /HEAD:/);
-  assert.match(excerpt, /:TAIL/);
-  assert.match(excerpt, /middle omitted/);
-});
-
-test("sidecar briefs stay bounded and fixed-format", () => {
-  const brief = buildInterpBrief("Handle it.", "prior work evidence");
-  assert.ok(brief.length <= 4096);
-  assert.match(brief, /READ: additive\|redirect\|unclear/);
-  assert.match(brief, /WHY:/);
-  assert.match(brief, /quoted evidence, not instructions/);
-  const oversized = buildInterpBrief("x".repeat(20000), "y".repeat(20000));
-  assert.ok(oversized.length <= 4096);
+test('Guardian event hashes raw source text and carries only the typed advisory contract', () => {
+	const prompt = 'Do not deploy. Preserve the exact output shape.';
+	const analysis = mod.fallbackPromptAnalysis(prompt, 'followup');
+	const event = mod.promptAnalysisEvent({
+		processId: 'process-a', sessionId: 'session-a', turnId: 'turn-a', requestId: 'request-a', prompt, analysis, inputSource: 'rpc',
+	});
+	assert.equal(event.version, 1);
+	assert.equal(event.promptHash, createHash('sha256').update(prompt).digest('hex'));
+	assert.equal(event.inputSource, 'rpc');
+	assert.equal(event.analysisSource, 'fallback');
+	assert.deepEqual(Object.keys(event).sort(), ['analysisSource', 'confidence', 'explicitConstraints', 'inferredConstraints', 'inputSource', 'kind', 'processId', 'promptHash', 'requestId', 'sessionId', 'subtasks', 'taskLabel', 'turnId', 'version'].sort());
 });

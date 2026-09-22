@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -51,7 +52,7 @@ export function reviewAspects(files: string[], task = '', history: any[] = []) {
 
 /** Best-effort review telemetry. Failures here never affect the lifecycle. */
 function noteHealth(kind: string, data: Record<string, unknown>): void {
-  try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
+  try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
 }
 
 /** Parent-supplied outcome evidence (renders, logs, test output) so reviewers

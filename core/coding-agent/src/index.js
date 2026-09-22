@@ -1,8 +1,12 @@
+export { sessionObservability, withSessionObservability } from "./core/session-observability.js";
 // Core session management
 export { parseArgs } from "./cli/args.js";
 // Config paths
 export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.js";
 export { AgentSession, parseSkillBlock, } from "./core/agent-session.js";
+export { InterventionControl, DEFAULT_BUDGETS, isActionable, isNoOpIntent, noopReceipt } from "./core/intervention-control.js";
+export { createInterventionSession } from "./core/intervention-session.js";
+export { GuardianSupervisor, guardianOwnerForSession, guardianRequestMessages, relayIntelligenceUsageFromChild, tagGuardianRequestMessage, GUARDIAN_REQUEST_META } from "./core/guardian/guardian-supervisor.js";
 export { readStoredCredential } from "./core/auth-storage.js";
 // Compaction
 export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";

@@ -1,3 +1,4 @@
+import { sessionObservability } from './lib/session-observability.ts';
 /**
  * Soft Reminders — todo-list upkeep, context-drift check-in, and reliable
  * user-registered /reminder scheduling.
@@ -575,7 +576,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	const pendingCompliance = new Map<string, ComplianceWatch>();
 	const healthSink = () => {
 		try {
-			const sink = (globalThis as any)[Symbol.for("yunus-pi.health.v1")];
+			const sink = sessionObservability()[Symbol.for("yunus-pi.health.v1")];
 			return typeof sink === "function" ? sink : undefined;
 		} catch {
 			return undefined;

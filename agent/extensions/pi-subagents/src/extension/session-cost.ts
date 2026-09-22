@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../../lib/session-observability.ts';
 import { sumResultsCost } from "../shared/utils.ts";
 import { readCostEvidence } from "../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
@@ -28,7 +29,7 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     totalCost: r?.usage ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
   }));
   pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['swarms','fusions','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
-  try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}
+  try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}
 }
 
 /** Recover retained detached accounting by exact run IDs from this session;

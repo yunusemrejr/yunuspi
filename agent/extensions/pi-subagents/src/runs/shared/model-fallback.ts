@@ -1,4 +1,6 @@
+import { sessionObservability } from '../../../../lib/session-observability.ts';
 import { readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { getSupportedThinkingLevels, splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
 import type { Usage } from "../../shared/types.ts";
@@ -24,6 +26,7 @@ import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
 import { modelIdentity } from "./model-quality.ts";
 import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting } from "./llm-preferences.ts";
+import { modelRouteCandidateKey, normalizeModelRouteCandidate, routeOf, stableProviderRouting, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { childRequirementsFromTask, type ChildRouteRequirements } from "./child-route-requirements.ts";
 import { extractTaskIntent } from "./task-intent-model.ts";
 
@@ -31,8 +34,9 @@ import { extractTaskIntent } from "./task-intent-model.ts";
 const childBoundsCache = new Map<string, ChildRouteRequirements>();
 function childFor(task: string | undefined): ChildRouteRequirements | undefined {
 	if (!task) return undefined;
-	// ponytail: length + head + tail key; same-prefix swarm briefs must not share bounds.
-	const key = `${task.length}:${task.slice(0, 512)}:${task.slice(-128)}`;
+	// Every part of the brief can carry modality or output requirements.
+	// Keep a bounded digest instead of collapsing equal-length middle edits.
+	const key = createHash("sha256").update(task).digest("hex");
 	const hit = childBoundsCache.get(key);
 	if (hit) return hit;
 	const bounds = childRequirementsFromTask(task);
@@ -47,7 +51,7 @@ const economyWarnedRoutes = new Set<string>();
 
 /** Best-effort selection telemetry. Failures here never affect selection. */
 function noteHealth(kind: string, data: Record<string, unknown>): void {
-	try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
+	try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
 }
 
 function taskRouteConstraints(task = ""): { fixed: boolean; freeOnly: boolean } {
@@ -441,9 +445,14 @@ export interface LlmPreferenceRoute {
 }
 
 export interface LlmPreferenceOptions {
+	/** Explicit canonical document for editor diagnostics; runtime callers use the configured path. */
+	configPath?: string;
 	requirements?: LlmPreferenceRequirements;
 	/** Restrict the chain to proven-free routes (explicit free-only tasks). */
 	freeOnly?: boolean;
+	/** Optional diagnostic sink. Called only for configured entries skipped by
+	 * the same checks that govern runtime selection. */
+	onSkip?: (event: { role: string; priority: number; route: string; reason: string }) => void;
 }
 
 /**
@@ -464,7 +473,7 @@ export function resolveLlmPreferenceChain(
 	availableModels: AvailableModelInfo[] | undefined,
 	options?: LlmPreferenceOptions,
 ): LlmPreferenceRoute[] {
-	const loaded = loadLlmPreferences();
+	const loaded = loadLlmPreferences(options?.configPath);
 	if (!loaded.ok && !loaded.missing) warnOnceEconomy(`${loaded.path}::${loaded.reason ?? "unknown"}`, "preference-load", `[pi-subagents] llm_preferences (${role}): ignoring preference file (${loaded.reason ?? "unknown reason"}); autonomous selection applies`);
 	if (!loaded.ok || !loaded.config || !availableModels || availableModels.length === 0) return [];
 	for (const warning of loaded.warnings ?? []) warnOnceEconomy(`${loaded.path}::${warning}`, "preference-entry", `[pi-subagents] llm_preferences: ${warning}; valid entries remain active`);
@@ -475,7 +484,11 @@ export function resolveLlmPreferenceChain(
 	const now = Date.now();
 	const exhausted = new Set(exhaustedProvidersOf(availableModels) ?? []);
 	let health: ReturnType<typeof readHealth> | undefined;
-	for (const entry of entries) {
+	for (const [entryIndex, entry] of entries.entries()) {
+		const requested = entry.provider ? `${entry.provider}/${entry.model ?? ""}` : (entry.model ?? "");
+		const reportSkip = (route: string, reason: string) => {
+			try { options?.onSkip?.({ role, priority: entryIndex + 1, route: route || requested, reason }); } catch { /* diagnostics must not affect selection */ }
+		};
 		// The provider field is authoritative even when the vendor model ID
 		// contains an owner namespace which is also a registered provider.
 		const provider = entry.provider ? availableModels.find(model => normalizeModelSegment(model.provider) === normalizeModelSegment(entry.provider!))?.provider ?? entry.provider : undefined;
@@ -484,30 +497,39 @@ export function resolveLlmPreferenceChain(
 		const suffix = splitThinkingSuffix(query);
 		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, provider);
 		if (!resolved) {
+			reportSkip(query, "unavailable in this session's model registry");
 			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): ${describeUnresolvedPreference(query, entry.provider, availableModels)}; continuing chain`);
 			noteHealth("model.skip", { route: query, outcome: "unresolved" });
 			continue;
 		}
 		const base = splitThinkingSuffix(resolved).baseModel;
-		const identity = base.toLowerCase();
-		if (seen.has(identity)) continue;
 		const exclusion = findModelExclusion(base);
 		if (exclusion) {
+			reportSkip(base, `excluded until ${new Date(exclusion.expiresAt).toISOString()}${exclusion.reason ? `: ${exclusion.reason}` : ""}`);
 			warnOnceEconomy(base, "preference-excluded", `[pi-subagents] llm_preferences (${role}): skipping ${base} (excluded until ${new Date(exclusion.expiresAt).toISOString()}: ${exclusion.reason ?? "no reason"}); continuing chain`);
 			noteHealth("model.skip", { route: base, outcome: "excluded" });
 			continue;
 		}
 		const info = availableModels.find((entry) => entry.fullId === base);
-		if (!info) continue;
+		if (!info) { reportSkip(base, "not present in the active model registry"); continue; }
+		const translated = providerOptionsToRouting(entry.provider_options, info.provider);
+		const routingMode = entry.provider_options?.routing;
+		if (translated.note && routingMode !== undefined && (typeof routingMode !== "string" || routingMode.trim().toLowerCase() !== "auto")) {
+			reportSkip(base, translated.note);
+			continue;
+		}
+		const identity = `${base.toLowerCase()}\u0000${stableRouteJson(translated.routing ?? null)}`;
+		if (seen.has(identity)) { reportSkip(base, "duplicate route and provider settings"); continue; }
 		if (!health) health = readHealth();
 		try {
 			const decision = evaluateRoute({ provider: info.provider, model: info.id, now }, health);
 			if (!decision.allowed) {
+				reportSkip(base, `provider cooling until ${new Date(decision.cooldownUntil).toISOString()}`);
 				warnOnceEconomy(base, "preference-cooling", `[pi-subagents] llm_preferences (${role}): skipping ${base} (route cooling until ${new Date(decision.cooldownUntil).toISOString()}); continuing chain`);
 				noteHealth("model.skip", { route: base, outcome: "cooling" });
 				continue;
 			}
-		} catch { continue; }
+		} catch { reportSkip(base, "provider health could not be verified"); continue; }
 		const req = options?.requirements;
 		const rejection = exhausted.has(info.provider) ? "provider quota exhausted"
 			: req?.minContextWindow !== undefined && !(typeof info.contextWindow === "number" && info.contextWindow >= req.minContextWindow) ? "insufficient context window"
@@ -517,6 +539,7 @@ export function resolveLlmPreferenceChain(
 			: req?.toolCalling && catalogRouteCapabilities(info)?.toolCalling === false ? "tool calling unsupported"
 			: options?.freeOnly && !isProvenFreeRoute(info) ? "explicit free-only constraint" : undefined;
 		if (rejection) {
+			reportSkip(base, rejection);
 			warnOnceEconomy(`${role}:${base}`, `preference-${rejection}`, `[pi-subagents] llm_preferences (${role}): skipping ${base} (${rejection}); continuing chain`);
 			noteHealth("model.skip", { route: base, outcome: "ineligible", reason: rejection, role });
 			continue;
@@ -524,7 +547,6 @@ export function resolveLlmPreferenceChain(
 		const wanted = suffix.thinkingSuffix ? suffix.thinkingSuffix.slice(1) : entry.thinking;
 		const norm = normalizeThinking(wanted);
 		const thinking = !norm.dynamic && norm.thinking && getSupportedThinkingLevels(info).includes(norm.thinking) ? norm.thinking : undefined;
-		const translated = providerOptionsToRouting(entry.provider_options, info.provider);
 		seen.add(identity);
 		out.push({
 			route: base,
@@ -537,6 +559,14 @@ export function resolveLlmPreferenceChain(
 	return out;
 }
 
+function stableRouteJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(stableRouteJson).join(",")}]`;
+	if (value && typeof value === "object") {
+		return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableRouteJson(item)}`).join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "null";
+}
+
 /** First viable preference for a role, or undefined for autonomous fallback. */
 export function selectLlmPreferredModel(
 	role: string,
@@ -544,6 +574,27 @@ export function selectLlmPreferredModel(
 	options?: LlmPreferenceOptions,
 ): LlmPreferenceRoute | undefined {
 	return resolveLlmPreferenceChain(role, availableModels, options)[0];
+}
+
+export interface PromptAnalysisPreferenceSelection {
+	source: "prompt_analysis" | "subagents" | "autonomous";
+	routes: LlmPreferenceRoute[];
+}
+
+/** Prefer the explicit lightweight analysis role, then inherit the same
+ * user's ordered subagent routes for older or deliberately reset configs. */
+export function resolvePromptAnalysisPreferenceChain(
+	availableModels: AvailableModelInfo[] | undefined,
+	options?: LlmPreferenceOptions,
+): PromptAnalysisPreferenceSelection {
+	const loaded = loadLlmPreferences(options?.configPath);
+	const explicit = loaded.ok && loaded.config?.preferences.prompt_analysis?.models.length
+		? resolveLlmPreferenceChain("prompt_analysis", availableModels, options)
+		: [];
+	if (explicit.length) return { source: "prompt_analysis", routes: explicit };
+	const inherited = resolveLlmPreferenceChain("subagents", availableModels, options);
+	if (inherited.length) return { source: "subagents", routes: inherited };
+	return { source: "autonomous", routes: [] };
 }
 
 /** Distribute `count` slots across the viable chain: distinct model
@@ -827,6 +878,20 @@ export function inheritsParentModel(
 	return Boolean(parentModel && (!trimmed || trimmed === INHERIT_MODEL));
 }
 
+function shouldUseLlmPreferenceFallbacks(
+	fallbackModels: string[] | undefined,
+	options: BuildModelCandidatesOptions | undefined,
+	origin: ModelOrigin,
+): boolean {
+	const task = options?.task ?? "";
+	const pinsRoute = /\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(task);
+	return options?.allowAutomaticAlternatives !== false
+		&& origin === "inherited"
+		&& !pinsRoute
+		&& !fallbackModels?.length
+		&& process.env.PI_AUTONOMOUS_MODEL_FALLBACK !== "off";
+}
+
 export function buildModelCandidates(
 	primaryModel: string | undefined,
 	fallbackModels: string[] | undefined,
@@ -871,6 +936,15 @@ export function buildModelCandidates(
 		candidates.push(normalized);
 	}
 	const resolved = filterFallbackCandidates(candidates, { onExcluded: warnCachedExclusion });
+	if (resolved.length === 0 && shouldUseLlmPreferenceFallbacks(fallbackModels, options, origin)) {
+		const constraints = taskRouteConstraints(options?.task);
+		for (const preference of resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, { freeOnly: constraints.freeOnly, requirements: childFor(options?.task) })) {
+			const route = withLlmThinkingSuffix(preference);
+			try { enforceModelScopes(route, scopes, "inherited", options?.onWarn); } catch { continue; }
+			resolved.push(route);
+			break;
+		}
+	}
 	if (resolved.length === 0) {
 		if (skippedPrimary) resolveRequiredSubagentModelCandidate(skippedPrimary, availableModels, preferredProvider);
 		if (candidates.length > 0) throw new Error(ZERO_USABLE_MODEL_CANDIDATES_ERROR);
@@ -886,20 +960,36 @@ export function buildModelCandidates(
 	// Raw text (not segmented): quoted mentions still pin automatic
 	// alternatives here. The free lookahead matches taskRouteConstraints: a
 	// free-only task receives free alternatives, never paid ones.
-	const pinsRoute=/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(options?.task??"");
 	const autoConstraints=taskRouteConstraints(options?.task);
-	if(options?.allowAutomaticAlternatives!==false&&origin==="inherited"&&!pinsRoute&&!fallbackModels?.length&&process.env.PI_AUTONOMOUS_MODEL_FALLBACK!=="off") {
+	if(shouldUseLlmPreferenceFallbacks(fallbackModels, options, origin)) {
 		const preferredFallbacks = resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, { freeOnly: autoConstraints.freeOnly, requirements: childFor(options?.task) });
+		const seenPreferenceVariants = new Set<string>();
 		for (const pref of preferredFallbacks) {
 			if (economical.length >= 8) break;
+			const identity = modelRouteCandidateKey({ route: pref.route, providerRouting: pref.providerRouting });
+			if (seenPreferenceVariants.has(identity)) continue;
+			seenPreferenceVariants.add(identity);
 			const prefRoute = withLlmThinkingSuffix(pref);
-			if (economical.includes(prefRoute) || economical.some(e => splitKnownThinkingSuffix(e).baseModel === pref.route)) continue;
+			// A plain primary with the same model still needs an explicit pinned
+			// attempt. Distinct provider pins are separate retries even when the
+			// canonical registry route is identical.
+			if (!pref.providerRouting && economical.includes(prefRoute)) continue;
+			if (!pref.providerRouting && economical.some(e => splitKnownThinkingSuffix(e).baseModel === pref.route)) continue;
 			try { enforceModelScopes(prefRoute, scopes, "inherited", options?.onWarn); } catch { continue; }
 			economical.push(prefRoute);
 		}
 		// A retained parent/autonomous candidate follows every configured route.
-		const preferenceOrder = new Map(preferredFallbacks.map((pref, index) => [pref.route, index]));
-		economical.sort((left, right) => (preferenceOrder.get(splitThinkingSuffix(left).baseModel) ?? Infinity) - (preferenceOrder.get(splitThinkingSuffix(right).baseModel) ?? Infinity));
+		// Consume occurrences in preference order. Sorting by model ID merges
+		// separate upstream variants and lets a later A pin move the first A
+		// behind B in an A/Together, B, A/Friendli chain.
+		const remaining = economical.splice(0);
+		for (const preference of preferredFallbacks) {
+			const index = remaining.findIndex(route => splitThinkingSuffix(route).baseModel === preference.route);
+			if (index < 0) continue;
+			remaining.splice(index, 1);
+			economical.push(withLlmThinkingSuffix(preference));
+		}
+		economical.push(...remaining);
 		const cfg=loadModelEconomyConfig();
 		const first=availableModels?.find(model=>model.fullId===splitKnownThinkingSuffix(economical[0]).baseModel);
 		if(cfg.enabled&&first&&Number.isSafeInteger(first.contextWindow)&&first.contextWindow!>0&&Number.isSafeInteger(first.maxTokens)&&first.maxTokens!>0) {
@@ -919,6 +1009,42 @@ export function buildModelCandidates(
 		}
 	}
 	return economical;
+}
+
+/** Ordered child retry candidates with their exact request-scoped upstream
+ * routing. The string-only helper remains for display/legacy callers; child
+ * launch paths use this paired form so a saved pin reaches the API request. */
+export function buildModelRouteCandidates(
+	primaryModel: string | undefined,
+	fallbackModels: string[] | undefined,
+	availableModels: AvailableModelInfo[] | undefined,
+	preferredProvider?: string,
+	options?: BuildModelCandidatesOptions,
+): ModelRouteCandidate[] {
+	const candidates = buildModelCandidates(primaryModel, fallbackModels, availableModels, preferredProvider, options);
+	if (!availableModels?.length) return candidates.map((route) => ({ route }));
+	const origin = options?.origin ?? (options?.primaryModelFromParent ? "inherited" : "configured");
+	if (!shouldUseLlmPreferenceFallbacks(fallbackModels, options, origin)) return candidates.map((route) => ({ route }));
+	const constraints = taskRouteConstraints(options?.task);
+	const preferences = resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, {
+		freeOnly: constraints.freeOnly,
+		requirements: childFor(options?.task),
+	});
+	const byRoute = new Map<string, LlmPreferenceRoute[]>();
+	for (const preference of preferences) {
+		const key = preference.route.toLowerCase();
+		const queue = byRoute.get(key) ?? [];
+		queue.push(preference);
+		byRoute.set(key, queue);
+	}
+	return candidates.map((route) => {
+		const base = splitKnownThinkingSuffix(route).baseModel.toLowerCase();
+		const preference = byRoute.get(base)?.shift();
+		return {
+			route,
+			...(preference?.providerRouting ? { providerRouting: preference.providerRouting } : {}),
+		};
+	});
 }
 
 const RETRYABLE_MODEL_FAILURE_PATTERNS = [

@@ -1,3 +1,4 @@
+import { withSessionObservability } from "../session-observability.js";
 /** Wrap a ToolDefinition into an AgentTool for the core runtime. */
 export function wrapToolDefinition(definition, ctxFactory) {
     return {
@@ -8,7 +9,10 @@ export function wrapToolDefinition(definition, ctxFactory) {
         constrainedSampling: definition.constrainedSampling,
         prepareArguments: definition.prepareArguments,
         executionMode: definition.executionMode,
-        execute: (toolCallId, params, signal, onUpdate, ctx) => definition.execute(toolCallId, params, signal, onUpdate, ctx ?? ctxFactory?.()),
+        execute: (toolCallId, params, signal, onUpdate, ctx) => {
+            const context = ctx ?? ctxFactory?.();
+            return withSessionObservability(context, () => definition.execute(toolCallId, params, signal, onUpdate, context));
+        },
     };
 }
 /** Wrap multiple ToolDefinitions into AgentTools for the core runtime. */

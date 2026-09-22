@@ -9,9 +9,12 @@ import { pathToFileURL } from 'node:url';
 const release = path.resolve(import.meta.dirname, '..');
 let agent = path.join(release, 'agent');
 try { await fs.access(agent); } catch { agent = path.resolve(release, '..'); }
+let coreInterventionPath = path.join(release, 'core/coding-agent/src/core/intervention-session.js');
+try { await fs.access(coreInterventionPath); } catch { coreInterventionPath = path.join(path.resolve(release, '..'), 'core/coding-agent/src/core/intervention-session.js'); }
+const coreIntervention = pathToFileURL(coreInterventionPath).href;
 // Only the SDK's configuration lookup is substituted. The extension, client,
 // worker, discovery and SQLite store all execute their actual implementations.
-const config = 'data:text/javascript,' + encodeURIComponent('export const getAgentDir=()=>process.env.PI_CODING_AGENT_DIR;');
+const config = 'data:text/javascript,' + encodeURIComponent(`export const getAgentDir=()=>process.env.PI_CODING_AGENT_DIR; export { createInterventionSession } from ${JSON.stringify(coreIntervention)};`);
 register('data:text/javascript,' + encodeURIComponent(`export function resolve(n,c,next){return n==='@yunuspi/coding-agent'?{url:${JSON.stringify(config)},shortCircuit:true}:next(n,c);}`), import.meta.url);
 const { default: projectIntelligence } = await import(pathToFileURL(path.join(agent, 'extensions/project-intelligence.ts')));
 const { IntelligenceClient } = await import(pathToFileURL(path.join(agent, 'extensions/lib/project-intelligence/client.mjs')));

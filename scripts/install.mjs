@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { activePiProcesses } from '../agent/scripts/lib/active-core-processes.mjs';
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
@@ -170,6 +171,14 @@ console.log(`Dependencies: ${deps ? `npm ci --ignore-scripts + build:core (${off
 console.log(`Needle3 local-semantic assets: ${needle && !offline ? 'pinned official build (~36MB download)' : 'skipped (offline or --skip-needle)'}`);
 if (preserveState) console.log('Private state and compatible local customizations will carry forward; source conflicts or unsafe links reject the update.');
 if (!apply) process.exit(0);
+function assertIdleCore() {
+  if (!existing || process.platform !== 'linux') return;
+  const installedCore = path.join(target, 'runtime/core/coding-agent');
+  if (!fs.existsSync(installedCore)) return;
+  const active = activePiProcesses(installedCore);
+  if (active.length) throw Error(`YunusPi core processes are active (${active.join(', ')}); stop them before replacing this installation.`);
+}
+assertIdleCore();
 // Stop replacements while a maintained launcher holds the installation's lease.
 // The inherited descriptor stays attached to the old directory after its rename.
 if (existing) {
@@ -262,6 +271,7 @@ exec /bin/bash "$AGENT/scripts/pi-launch.sh" ${quote(process.execPath)} "$YUNUSP
   fs.symlinkSync('yunuspi', path.join(stage, 'bin/pi'));
   fs.writeFileSync(path.join(stage, 'installation.json'), JSON.stringify({ product: 'YunusPi', core: coreManifest.name, coreVersion: coreManifest.version, source: 'repository-owned', sourceCommit, built: deps, managedFiles, managedCoreFiles }, null, 2) + '\n', { mode: 0o600 });
   // Recheck at the mutation boundary; never follow destination symlinks.
+  assertIdleCore();
   assertAncestors(target);
   if (fs.existsSync(target)) {
     if (!backupExisting || !existing) throw Error('Destination appeared during installation; refusing replacement.');

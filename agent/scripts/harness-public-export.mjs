@@ -80,17 +80,24 @@ const credentialKeys = new Set([
  "sessiontoken", "access", "refresh", "accountid", "token",
  "authorization", "cookie",
 ]);
-function gather(value, key = "") {
+function gather(value, key = "", headerValue = false) {
  if (typeof value === "string") {
   const normalizedKey = key.replace(/[-_]/g, "").toLowerCase();
+  const credentialHeader = headerValue && /(?:apikey|apisecret|authkey|authtoken|accesstoken|refreshtoken|sessiontoken|subscriptionkey|authorization|cookie)$/.test(normalizedKey);
   if (
-   credentialKeys.has(normalizedKey) &&
+   (credentialKeys.has(normalizedKey) || credentialHeader) &&
    value.length >= 8 &&
    !/^[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET)$|^\$|^!/.test(value)
-  )
+  ) {
    secrets.add(value);
+   // A diagnostic/source file can contain the credential without its HTTP
+   // authentication scheme. Check both exact forms without treating ordinary
+   // header values, public URLs or configuration prose as credentials.
+   const token = /^(?:Bearer|Basic|Token|ApiKey)\s+(\S+)\s*$/i.exec(value)?.[1];
+   if (token && token.length >= 8 && !/^[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET)$|^\$|^!/.test(token)) secrets.add(token);
+  }
  } else if (value && typeof value === "object")
-  for (const [k, v] of Object.entries(value)) gather(v, k);
+  for (const [k, v] of Object.entries(value)) gather(v, k, /^(?:headers|httpheaders|requestheaders)$/i.test(key.replace(/[-_]/g, "")));
 }
 for (const name of ["auth.json", "models.json", "settings.json"]) {
  try {
@@ -140,12 +147,17 @@ const allowedExt = new Set([
  ".timer",
  ".path",
  ".apparmor",
+ // Guardian's WASM kernels are built from these checked-in C++ sources by
+ // scripts/guardian/build-wasm.mjs. The public provenance gate verifies their
+ // hashes, so the sources must ship with the binaries they produced.
+ ".cpp",
+ ".h",
 ]);
 /** Executable source must resolve machine-specific paths at run time. A
  * literal author home path rewritten to the /home/example placeholder still
  * ships, but as dead code for every other installation, so the export stops
  * instead. Documentation and example configuration keep the substitution. */
-const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh", ".service"]);
+const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh", ".service", ".cpp", ".h"]);
 const omitted = new Set([
  "node_modules",
  ".git",

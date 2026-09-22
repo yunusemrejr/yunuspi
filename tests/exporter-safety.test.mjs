@@ -100,6 +100,43 @@ test("exporter rejects exact OAuth and account canaries without exposing their v
     }
   }
 });
+
+test("credential headers and bare authorization tokens cannot leak into public source or diagnostics", () => {
+  for (const [header, scheme] of [
+    ['X-API-Key', ''], ['X-Auth-Token', ''], ['Ocp-Apim-Subscription-Key', ''],
+    ['Authorization', 'Bearer '], ['authorization', 'bEaReR '], ['Authorization', 'Token '],
+    ['Authorization', 'Basic '], ['Proxy-Authorization', 'ApiKey '],
+  ]) {
+    const f = fixture();
+    const value = ['opaque', 'fixture', 'credential', 'a19bd2e043'].join('-');
+    try {
+      fs.writeFileSync(path.join(f.source, 'models.json'), JSON.stringify({ providers: { fixture: {
+        baseUrl: 'https://api.example.com/v1', headers: { [header]: scheme + value },
+      } } }));
+      fs.writeFileSync(path.join(f.source, 'extensions/diagnostic.md'), 'Synthetic diagnostic marker: ' + value);
+      const result = f.run();
+      assert.notEqual(result.status, 0, header + scheme);
+      assert.equal(`${result.stdout}${result.stderr}`.includes(value), false, 'matched values stay out of diagnostics');
+      assert.equal(fs.existsSync(f.output), false, 'rejected staged output is never published');
+      assert.equal(JSON.parse(fs.readFileSync(path.join(f.source, 'models.json'))).providers.fixture.headers[header], scheme + value);
+    } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("ordinary provider endpoints, headers and environment references remain exportable", () => {
+  const f = fixture();
+  try {
+    const endpoint = 'https://api.example.com/v1';
+    fs.writeFileSync(path.join(f.source, 'models.json'), JSON.stringify({ providers: { fixture: {
+      baseUrl: endpoint, description: 'Public endpoint documentation',
+      headers: { 'HTTP-Referer': endpoint, 'User-Agent': 'public-example-client', 'X-API-Key': 'EXAMPLE_API_KEY' },
+    } } }));
+    fs.writeFileSync(path.join(f.source, 'extensions/README.md'), `${endpoint}\npublic-example-client\nEXAMPLE_API_KEY\nPublic endpoint documentation`);
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(fs.readFileSync(path.join(f.output, 'agent/extensions/README.md'), 'utf8'), /api\.example\.com/);
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
 test("exporter refuses symlinked copy roots and allowlisted compatibility files", () => {
   const f = fixture();
   try {

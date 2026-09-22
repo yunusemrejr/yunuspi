@@ -1,3 +1,4 @@
+import { sessionObservability } from './lib/session-observability.ts';
 /**
  * Bash Router — routes common simple bash commands to structured tools.
  *
@@ -83,7 +84,7 @@ export default function bashRouter(pi: any) {
           row.count++;
           activity.set(key, row);
           try {
-               (globalThis as any)[HEALTH_SINK]?.("router.activity", {
+               sessionObservability()[HEALTH_SINK]?.("router.activity", {
                     decision,
                     tool,
                     hook: rule,
@@ -121,7 +122,7 @@ export default function bashRouter(pi: any) {
           ruleId: string,
           count: number,
      ) => {
-          const sink = (globalThis as any)[HEALTH_SINK];
+          const sink = sessionObservability()[HEALTH_SINK];
           if (typeof sink !== "function") return;
           try {
                sink("router.decision", { decision, tool, hook: ruleId, count });

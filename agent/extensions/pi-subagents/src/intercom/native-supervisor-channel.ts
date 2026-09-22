@@ -27,7 +27,7 @@ const CHANNEL_SAFETY_POLL_MS = 5000;
 const STALE_EMPTY_CHANNEL_AGE_MS = 60 * 1000;
 const STALE_EMPTY_CHANNEL_CLEANUP_INTERVAL_MS = 60 * 1000;
 
-type SupervisorReason = "need_decision" | "interview_request" | "progress_update";
+type SupervisorReason = "need_decision" | "interview_request" | "progress_update" | "guardian_intervention" | "intelligence_used";
 
 interface SupervisorRequest {
 	type: "subagent.supervisor.request";
@@ -145,6 +145,8 @@ function readChildMetadata(): {
 }
 
 function reasonHeading(reason: SupervisorReason): string {
+	if (reason === "guardian_intervention") return "Guardian intervention from child subagent.";
+	if (reason === "intelligence_used") return "Child subagent used internal intelligence.";
 	if (reason === "interview_request") return "Subagent requests a structured supervisor interview.";
 	if (reason === "progress_update") return "Subagent progress update.";
 	return "Subagent needs a supervisor decision.";
@@ -316,9 +318,9 @@ function parseRequestFile(file: string, channelDir: string): PendingSupervisorRe
 		const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<SupervisorRequest>;
 		if (parsed.type !== "subagent.supervisor.request") return undefined;
 		if (typeof parsed.id !== "string" || !parsed.id) return undefined;
-		if (parsed.reason !== "need_decision" && parsed.reason !== "interview_request" && parsed.reason !== "progress_update") return undefined;
+		if (parsed.reason !== "need_decision" && parsed.reason !== "interview_request" && parsed.reason !== "progress_update" && parsed.reason !== "guardian_intervention" && parsed.reason !== "intelligence_used") return undefined;
 		if (typeof parsed.message !== "string" || !parsed.message) return undefined;
-		if (typeof parsed.runId !== "string" || typeof parsed.agent !== "string" || typeof parsed.childIndex !== "number") return undefined;
+		if (typeof parsed.runId !== "string" || parsed.runId.length > 256 || typeof parsed.agent !== "string" || parsed.agent.length > 256 || typeof parsed.childIndex !== "number" || !Number.isSafeInteger(parsed.childIndex) || parsed.childIndex < 0 || typeof parsed.orchestratorSessionId !== "string" || !parsed.orchestratorSessionId) return undefined;
 		return { ...parsed as SupervisorRequest, channelDir, requestFile: file };
 	} catch {
 		return undefined;
@@ -506,7 +508,7 @@ function requestLifecycle(request: PendingSupervisorRequest, state: SubagentStat
 	if (ctx && !requestMatchesContext(request, state, ctx)) return "wrong-session";
 	if (!fs.existsSync(request.requestFile)) return "missing";
 	if (request.expectsReply && fs.existsSync(replyPath(request.channelDir, request.id))) return "resolved";
-	if (request.expectsReply && now > requestExpiresAt(request, now)) return "expired";
+	if (now > requestExpiresAt(request, now)) return "expired";
 	if (request.expectsReply && requestRunInactive(request, state)) return "inactive";
 	return "pending";
 }
@@ -531,6 +533,8 @@ function formatPendingLine(request: PendingSupervisorRequest): string {
 }
 
 function requestVisibleText(request: PendingSupervisorRequest): string {
+	if (request.reason === "guardian_intervention") return `Guardian · ${request.agent} [${request.runId}#${request.childIndex}]\n${request.message}`;
+	if (request.reason === "intelligence_used") return `Internal intelligence · ${request.agent} [${request.runId}#${request.childIndex}]\n${request.message}`;
 	const lines = [request.message];
 	if (request.expectsReply) {
 		lines.push("", `Reply with: ${NATIVE_SUPERVISOR_TOOL_NAME}({ action: "reply", replyTo: "${request.id}", message: "..." })`);
@@ -673,10 +677,23 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
 			else {
 				removeRequestFile(request.requestFile);
 			}
+			const internalNotice = request.reason === "guardian_intervention" || request.reason === "intelligence_used";
+			let guardianNoticeAcknowledged = false;
+			if (internalNotice && ctx.hasUI !== false) {
+				try {
+					// Notify synchronously: sendMessage(triggerTurn:false) is intentionally
+					// deferred until agent_end while a parent run is streaming.
+					ctx.ui.notify(requestVisibleText(request), "info");
+					guardianNoticeAcknowledged = true;
+				} catch {
+					guardianNoticeAcknowledged = false;
+				}
+			}
 			pi.sendMessage({
 				customType: "subagent_supervisor_request",
 				content: requestVisibleText(request),
 				display: true,
+				...(internalNotice ? { excludeFromContext: true } : {}),
 				details: {
 					id: request.id,
 					reason: request.reason,
@@ -685,7 +702,19 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
 					agent: request.agent,
 					childIndex: request.childIndex,
 				},
-			}, { triggerTurn: true });
+			}, { triggerTurn: !internalNotice });
+			if (request.reason === "guardian_intervention" && guardianNoticeAcknowledged) {
+				try {
+					writeAtomicJson(replyPath(request.channelDir, request.id), {
+						type: "subagent.supervisor.reply",
+						requestId: request.id,
+						createdAt: Date.now(),
+						message: "displayed",
+					});
+				} catch {
+					// The child waits only briefly; a failed acknowledgement means abstain.
+				}
+			}
 			if (request.expectsReply) {
 				(pi as { events?: IntercomEventBus }).events?.emit(INTERCOM_DETACH_REQUEST_EVENT, {
 					requestId: request.id,

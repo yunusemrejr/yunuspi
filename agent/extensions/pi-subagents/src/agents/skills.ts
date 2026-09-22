@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../../lib/session-observability.ts';
 /**
  * Skill resolution and caching for subagent extension
  */
@@ -659,7 +660,7 @@ export function resolveSkills(
 		else missing.push(trimmed);
 	}
 	try {
-		const sink = (globalThis as any)[Symbol.for("yunus-pi.health.v1")];
+		const sink = sessionObservability()[Symbol.for("yunus-pi.health.v1")];
 		if (typeof sink === "function") {
 			for (const skill of resolved) sink("skill.resolve", { skill: skill.name, decision: "resolved", count: 1 });
 			for (const name of missing) sink("skill.resolve", { skill: name, decision: "missing", isError: true });

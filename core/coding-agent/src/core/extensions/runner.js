@@ -3,6 +3,26 @@
  */
 import { basename } from "node:path";
 import { theme } from "../../modes/interactive/theme/theme.js";
+import { sessionObservability, withSessionObservability } from "../session-observability.js";
+const GUARDIAN_REQUEST_META = Symbol.for("yunuspi.guardian.request-meta.v1");
+
+function contextRequestMetadata(messages, fallback = {}) {
+    const requestMessages = [];
+    for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
+        const metadata = messages[messageIndex]?.[GUARDIAN_REQUEST_META];
+        if (metadata?.requestId) {
+            requestMessages.push({ requestId: metadata.requestId, turnId: metadata.turnId, messageIndex });
+        }
+    }
+    const latest = requestMessages.at(-1);
+    return {
+        ...fallback,
+        requestMessages,
+        ...(latest
+            ? { requestId: latest.requestId, turnId: latest.turnId, requestMessageIndex: latest.messageIndex }
+            : { requestId: undefined, turnId: undefined, requestMessageIndex: undefined }),
+    };
+}
 // Extension shortcuts compete with canonical keybinding ids from keybindings.json.
 // Only editor-global shortcuts are reserved here. Picker-specific bindings are not.
 const RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS = [
@@ -411,11 +431,11 @@ export class ExtensionRunner {
     }
     emitError(error) {
         try {
-            globalThis[Symbol.for("yunus-pi.health.v1")]?.("hook.error", {
+            withSessionObservability(this.createContext(), () => sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("hook.error", {
                 hook: String(error.event ?? "unknown").replace(/[^a-z0-9_.:-]/gi, "_").slice(0, 120),
                 owner: basename(String(error.extensionPath ?? "unknown")).replace(/[^a-z0-9_.:-]/gi, "_").slice(0, 120),
                 isError: true,
-            });
+            }));
         }
         catch { /* optional telemetry cannot break error delivery */ }
         for (const listener of this.errorListeners) {
@@ -815,16 +835,34 @@ export class ExtensionRunner {
         }
         return undefined;
     }
-    async emitContext(messages) {
+    async emitContext(messages, metadata = {}) {
         const ctx = this.createContext();
         let currentMessages = structuredClone(messages);
+        // structuredClone intentionally does not preserve the private Symbol
+        // provenance attached to live user messages. Reattach it to the
+        // working clone, then recompute indices before each hook so earlier
+        // context handlers may insert/remove messages without leaving later
+        // handlers with stale offsets. The marker is non-enumerable and never
+        // reaches provider serialization.
+        for (const request of metadata.requestMessages ?? []) {
+            const message = currentMessages[request.messageIndex];
+            if (!message || typeof request.requestId !== "string") continue;
+            try {
+                Object.defineProperty(message, GUARDIAN_REQUEST_META, {
+                    value: Object.freeze({ requestId: request.requestId, turnId: request.turnId }),
+                    enumerable: false,
+                    configurable: true,
+                });
+            }
+            catch { /* A frozen/hostile message has no Guardian provenance. */ }
+        }
         for (const ext of this.extensions) {
             const handlers = ext.handlers.get("context");
             if (!handlers || handlers.length === 0)
                 continue;
             for (const handler of handlers) {
                 try {
-                    const event = { type: "context", messages: currentMessages };
+                    const event = { type: "context", messages: currentMessages, ...contextRequestMetadata(currentMessages, metadata) };
                     const handlerResult = await handler(event, ctx);
                     if (handlerResult && handlerResult.messages) {
                         currentMessages = handlerResult.messages;
@@ -998,12 +1036,13 @@ export class ExtensionRunner {
         return { skillPaths, promptPaths, themePaths };
     }
     /** Emit input event. Transforms chain, "handled" short-circuits. */
-    async emitInput(text, images, source, streamingBehavior) {
+    async emitInput(text, images, source, streamingBehavior, metadata = {}) {
         const ctx = this.createContext();
         let currentText = text;
         let currentImages = images;
         for (const ext of this.extensions) {
             for (const handler of ext.handlers.get("input") ?? []) {
+                metadata.signal?.throwIfAborted();
                 try {
                     const event = {
                         type: "input",
@@ -1011,8 +1050,16 @@ export class ExtensionRunner {
                         images: currentImages,
                         source,
                         streamingBehavior,
+                        originalText: metadata.originalText ?? text,
+                        requestId: metadata.requestId,
+                        turnId: metadata.turnId,
+                        sessionId: metadata.sessionId,
+                        processId: metadata.processId,
+                        guardianOwnerId: metadata.guardianOwnerId,
+                        signal: metadata.signal,
                     };
                     const result = (await handler(event, ctx));
+                    metadata.signal?.throwIfAborted();
                     if (result?.action === "handled")
                         return result;
                     if (result?.action === "transform") {
@@ -1021,6 +1068,7 @@ export class ExtensionRunner {
                     }
                 }
                 catch (err) {
+                    if (metadata.signal?.aborted) throw err;
                     this.emitError({
                         extensionPath: ext.path,
                         event: "input",

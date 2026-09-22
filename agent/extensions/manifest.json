@@ -36,6 +36,7 @@
     "research-toolkit.ts",
     "session-export-json.ts",
     "model-config.ts",
+    "model-routing-config.ts",
     "micro-intelligence.ts"
   ],
   "lib": [
@@ -92,6 +93,8 @@
     "metrics-panel.ts",
     "mini-preprocessor.ts",
     "model-facts.ts",
+    "model-routing-metrics.ts",
+    "model-routing-store.ts",
     "music-score.ts",
     "needle-assets.mjs",
     "needle-policy.ts",

@@ -379,6 +379,8 @@ export interface SubagentParamsLike {
 	artifacts?: boolean;
 	includeProgress?: boolean;
 	model?: string;
+	/** Internal-only exact route candidates supplied by native helper dispatch. */
+	modelRouteCandidates?: import("../../shared/model-route.ts").ModelRouteCandidate[];
 	/** Internal recovery provenance for a resolved model override. */
 	modelOrigin?: ModelOrigin;
 	fast?: boolean;
@@ -2056,6 +2058,7 @@ async function resumeAsyncRun(input: {
 		fast: recoveryDescriptor?.fast,
 		modelOverrideFromParent: recoveryDescriptor?.modelOverrideFromParent,
 		modelOrigin: recoveryDescriptor?.modelOrigin ?? (recoveryDescriptor?.modelOverrideFromParent ? "inherited" : undefined),
+		modelRouteCandidates: recoveryDescriptor?.modelRouteCandidates,
 		thinkingOverride: recoveryDescriptor?.thinking ?? target.thinking,
 		thinkingCeiling: recoveryDescriptor?.thinkingCeiling ?? ("thinkingCeiling" in target ? target.thinkingCeiling : undefined),
 		extensionBindings: recoveryDescriptor?.extensionBindings ?? ("extensionBindings" in target ? target.extensionBindings : undefined),
@@ -3299,6 +3302,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			...(params.reads !== undefined ? { reads: params.reads } : {}),
 			outputBaseDir: resolveSingleRunOutputBaseDir(deps, artifactsDir, id),
 			modelOverride,
+			modelRouteCandidates: requestParams.modelRouteCandidates,
 			fast: params.fast,
 			modelOverrideFromParent,
 			modelOrigin,
@@ -3846,6 +3850,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			nestedRoute: foregroundControl?.nestedRoute,
 			index: 0,
 			modelOverride,
+			modelRouteCandidates: requestParams.modelRouteCandidates,
 			fast: params.fast,
 			modelOverrideFromParent,
 			modelOrigin,
@@ -4743,6 +4748,10 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const normalizedGate = normalizeGateParams(params);
 		if (!normalizedGate.ok) return buildRequestedModeError(params, normalizedGate.error);
 		let requestParams = normalizedGate.params;
+		if (!delegatedExecution && requestParams.modelRouteCandidates !== undefined) {
+			const { modelRouteCandidates: _untrustedRouteCandidates, ...publicParams } = requestParams;
+			requestParams = publicParams;
+		}
 		try { requestParams = expandCommonTask(requestParams); }
 		catch (error) { return buildRequestedModeError(requestParams, error instanceof Error ? error.message : String(error)); }
 		const capacityOverrideError = validateWorkflowCapacityOverrides(requestParams);

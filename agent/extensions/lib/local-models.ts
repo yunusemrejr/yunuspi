@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 import {boundedContextLimit,positiveTokenLimit} from "./context-limits.ts";
 /** Local runtime metadata only: no inference, downloads, model loads or subprocesses. */
 import {readFileSync} from 'node:fs';
@@ -98,9 +99,9 @@ export function registerLocalModels(pi:any,agentDir:string):string[] {
           // refresh has started. Never let that stale result overwrite it.
           if(controller.signal.aborted)return cache;
           cache=next;last=Date.now();
-          try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'ok',count:next.length});}catch{}
+          try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'ok',count:next.length});}catch{}
           return cache;
-        } catch { if(!controller.signal.aborted){cache=[];last=Date.now();try{(globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
+        } catch { if(!controller.signal.aborted){cache=[];last=Date.now();try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
       };
       const promise=work();
       pending={promise,controller,waiters:0};

@@ -4,6 +4,7 @@ import { modelIdentity, taskQuality } from "./model-quality.ts";
 import { selectAffordableModel } from "./model-selection.ts";
 import { distributeLlmPreferredModels, withLlmThinkingSuffix } from "./model-fallback.ts";
 import type { ModelEconomyConfig } from "./model-economy.ts";
+import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 
 export interface AssistancePlan {
  mode: "none" | "subagent" | "swarm" | "fusion";
@@ -31,7 +32,10 @@ export function planAssistance(prompt: string, project = false): AssistancePlan 
  return {mode:"subagent",roles:[critical ? "Investigate concrete failure cases and the checks the parent should run" : "Investigate the relevant source and return a useful next step with its verification"],reason:"one bounded independent investigation",deadlineMs:20000,maxCostUsd:.01};
 }
 
-export interface AssistanceMember {route:string;proof:string;role:string;free:boolean;explanation:string[]}
+export interface AssistanceMember {route:string;proof:string;role:string;free:boolean;explanation:string[];providerRouting?:Record<string,unknown>}
+export function assistanceMemberRouteCandidate(member: AssistanceMember): ModelRouteCandidate {
+ return { route: member.route, ...(member.providerRouting ? { providerRouting: member.providerRouting } : {}) };
+}
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a swarm. */
@@ -63,7 +67,7 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
   const model = pool.find(m=>m.fullId===pick.route);
   if (!model) return;
   used.add(modelIdentity(model.id));
-  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role,proof:"explicit llm_preferences",explanation:pick.explanation});
+  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role,proof:"explicit llm_preferences",explanation:pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
  });
  for (const role of slots.slice(team.length)) {
   const candidates = pool.filter(m=>!used.has(modelIdentity(m.id)));

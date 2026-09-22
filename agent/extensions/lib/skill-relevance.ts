@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Catalog-wide advisory skill relevance. Pure and deterministic: no I/O,
  * inference, timers or scanning of tool-output prose. It scores the loaded
  * available-skills catalogue's own name/description tokens against bounded
@@ -259,5 +260,7 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
   const ranked=new Map(out.map((item,i)=>[item.skill.name,relevance[i]??0]));
   // Statistical tie-break only after all rarity, fuzzy-match and availability gates.
   out.sort((a, b) => b.score - a.score || ranked.get(b.skill.name)!-ranked.get(a.skill.name)! || a.skill.name.localeCompare(b.skill.name));
-  return out.slice(0, Math.max(1, limit));
+  const selected = out.slice(0, Math.max(1, limit));
+  if(selected.some(item=>item.matched.some(term=>term.includes("~"))))try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:selected.length});}catch{/* optional visibility */}
+  return selected;
 }

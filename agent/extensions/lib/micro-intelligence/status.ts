@@ -64,6 +64,7 @@ export interface MicroStatusRequest {
     multiPerspective: boolean;
     perspectives: string[];
   } | { pending: true };
+  promptAnalysis?: { kind: "initial" | "followup"; source: "model" | "fallback"; confidence: number; taskLabel: string };
 }
 
 export function microStatusSnapshot(request?: {
@@ -75,6 +76,7 @@ export function microStatusSnapshot(request?: {
   advisory?: MicroStatusRequest["advisory"];
   advisoryPending?: boolean;
   advisoryFamily?: string;
+  promptAnalysis?: MicroStatusRequest["promptAnalysis"];
 }): Record<string, unknown> {
   const needle = needleHealth();
   const stats = needleHandle().stats();
@@ -110,6 +112,7 @@ export function microStatusSnapshot(request?: {
           needle: request.needle ?? (request.needlePending ? { pending: true } : undefined),
           advisory: request.advisory ?? (request.advisoryPending ? { pending: true } : undefined),
           ...(request.advisoryFamily ? { advisoryFamily: request.advisoryFamily } : {}),
+          ...(request.promptAnalysis ? { promptAnalysis: request.promptAnalysis } : {}),
         }
       : null,
     needle: {

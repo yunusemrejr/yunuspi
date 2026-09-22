@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Harness activity indicators: tiny TUI lines for harness-internal work.
  *
  * Tools already render as native single lines in the transcript; this module
@@ -50,13 +51,8 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "skill.route": "all",
   "skill.read": "all",
   "skill.resolve": "all",
-  "skill.rank": "all",
   "skill.discovery": "error",
   "guidance.delivered": "all",
-  "ml.intent": "all",
-  "ml.mini.select": "all",
-  "ml.smol.take": "all",
-  "ml.smol.offer": "error",
   "model.mix": "all",
   // Routine preference-chain skips (excluded/cooling/unresolved) fire per
   // dispatch and would spam a line per skipped route; they stay in the
@@ -67,12 +63,12 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   "reminder.ack": "error",
   "reminder.follow": "error",
   "review.disposition": "all",
-  "interp.sidecar": "all",
 };
 
 const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, error: 10_000 };
 /** Infrastructure states flap slowly; a 10s window would re-log every check. */
 const DEDUPE_OVERRIDE: Array<[string, number]> = [
+  ["intelligence.used", 60_000],
   ["local.refresh", 600_000],
   ["ml.smol.offer", 600_000],
   ["reminder.", 300_000],
@@ -87,6 +83,26 @@ const clean = (value: unknown, max = 80): string =>
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max);
+
+/** Only success records that prove an intelligence result was consumed may
+ * become transcript markers. A cached result counts when a caller used it;
+ * offers, skips, shadow evaluations and infrastructure state never do. The
+ * component labels are fixed so event payloads cannot leak prompts, routes,
+ * paths or model names. */
+export function intelligenceUseForEvent(kind: string, data: Record<string, unknown>): string | undefined {
+  if (data.isError === true || data.disabled === true || data.shadow === true) return undefined;
+  switch (kind) {
+    case "ml.jev.used": return "JEV";
+    case "ml.needle.call": return data.count === undefined || (typeof data.count === "number" && data.count > 0) ? "Needle3" : undefined;
+    case "ml.smol.used": return "Smol";
+    case "ml.mini.used": return "Kompress";
+    case "ml.intent": return "Intent classifier";
+    case "ml.fuzzy.used": return "Fuzzy matching";
+    case "ml.retrieval.used": return "Retrieval intelligence";
+    case "ml.radar.rank": return data.decision === "on" && typeof data.count === "number" && data.count > 0 ? "Neural ranker" : undefined;
+    default: return undefined;
+  }
+}
 
 /** Skill name from a read-tool path (parent dir of SKILL.md). Undefined when
  * the path is not a skill file, so callers can keep their hash fallback. */
@@ -173,14 +189,6 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     if (kind === "reminder.follow") {
       return { label: clean(decision || "follow-through", 32), status: "ok" };
     }
-    if (kind === "interp.sidecar") {
-      const read = clean(decision || "sidecar", 24);
-      return {
-        label: read === "additive" || read === "redirect" ? `second-read ${read}` : "second-read",
-        status: read === "additive" || read === "redirect" ? "ok" : "skip",
-        detail: read === "additive" || read === "redirect" ? undefined : read || undefined,
-      };
-    }
     if (kind === "review.disposition") {
       const blockers = typeof data.count === "number" && Number.isFinite(data.count) ? Math.max(0, Math.round(data.count)) : 0;
       return {
@@ -234,7 +242,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
     skips: { ...skips },
     local: Object.fromEntries(Object.entries(local).map(([k, v]) => [k, { ...v }])),
   });
-  (globalThis as Record<symbol, unknown>)[ACTIVITY_VIEW] = counters;
+  sessionObservability()[ACTIVITY_VIEW] = counters;
 
   const note = (kind: string, data: Record<string, unknown> = {}): void => {
     if (typeof kind !== "string" || !kind || process.env.PI_ACTIVITY_INDICATORS === "off") return;
@@ -268,14 +276,18 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
         const key = d.label || "local";
         local[key] = { outcome: d.detail ?? "ok", count: (local[key]?.count ?? 0) + 1, at: now };
       }
-      const policy = LINE_POLICY[kind];
+      const intelligence = intelligenceUseForEvent(kind, data);
+      const lineKind = intelligence ? "intelligence.used" : kind;
+      const lineLabel = intelligence ?? d.label;
+      const policy = intelligence ? "all" : LINE_POLICY[kind];
       if (!policy) return;
       if (policy === "error" && d.status !== "error") return;
       // Child sessions have no TUI: lines would only bloat child context.
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
-      const key = `${kind}\0${d.label}\0${d.status}`;
+      const lineStatus = intelligence ? "ok" : d.status;
+      const key = `${lineKind}\0${lineLabel}\0${lineStatus}`;
       const last = lastLine.get(key) ?? 0;
-      if (now - last < dedupeMs(kind, d.status)) return;
+      if (now - last < dedupeMs(lineKind, lineStatus)) return;
       while (lineAt.length && now - lineAt[0]! > 60_000) lineAt.shift();
       if (lineAt.length >= LINE_BUDGET_PER_MIN) {
         dropped++;
@@ -288,7 +300,9 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       }
       lineAt.push(now);
       lines++;
-      const content = clean(`activity ${kind} ${d.label} ${d.status}`, 64);
+      const content = intelligence
+        ? clean(`${lineLabel} used`, 64)
+        : clean(`activity ${kind} ${d.label} ${d.status}`, 64);
       try {
         const result = send(
           {
@@ -297,9 +311,9 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
             display: true,
             excludeFromContext: true,
             details: {
-              kind: rec.kind, label: rec.label, status: rec.status,
-              ...(rec.ms !== undefined ? { ms: rec.ms } : {}),
-              ...(rec.detail ? { detail: rec.detail } : {}),
+              kind: lineKind, label: lineLabel, status: lineStatus,
+              ...(!intelligence && rec.ms !== undefined ? { ms: rec.ms } : {}),
+              ...(!intelligence && rec.detail ? { detail: rec.detail } : {}),
             },
           },
           { triggerTurn: false },
@@ -316,6 +330,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
   };
 
   const reset = (): void => {
+    sessionObservability()[ACTIVITY_VIEW] = counters;
     ring.length = 0;
     errors.length = 0;
     lastLine.clear();
@@ -332,8 +347,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
     note,
     reset,
     dispose: () => {
-      if ((globalThis as Record<symbol, unknown>)[ACTIVITY_VIEW] === counters) {
-        delete (globalThis as Record<symbol, unknown>)[ACTIVITY_VIEW];
+      if (sessionObservability()[ACTIVITY_VIEW] === counters) {
+        delete sessionObservability()[ACTIVITY_VIEW];
       }
     },
     snapshot: () => ring.slice(),
@@ -369,14 +384,13 @@ export const ACTIVITY_TAGS: Record<string, string> = {
   "reminder.ack": "reminder",
   "reminder.follow": "reminder",
   "review.disposition": "review",
-  "interp.sidecar": "interp",
 };
 
 /** In-process counters view for /metrics and /export-json. Undefined when the
  * health-log extension (the tap owner) has not started in this process. */
 export function activityView(): ActivityCounters | undefined {
   try {
-    const view = (globalThis as Record<symbol, unknown>)[ACTIVITY_VIEW];
+    const view = sessionObservability()[ACTIVITY_VIEW];
     return typeof view === "function" ? (view as () => ActivityCounters)() : undefined;
   } catch {
     return undefined;

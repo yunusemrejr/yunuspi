@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Transient terminal activity only. Never writes messages, model context or
  * session entries, and never inspects tool arguments or result contents. */
 export const HARNESS_ACTIVITY = Symbol.for('yunus-pi.activity.v1');
@@ -12,7 +13,7 @@ const helpers = new Set(['JEV', 'Needle', 'Smol', 'Kompress']);
 let sequence = 0;
 /** No payloads, global status handles or model messages escape this boundary. */
 export function beginHarnessActivity(label: ActivityLabel): FinishActivity {
-  try { return (globalThis as any)[HARNESS_ACTIVITY]?.({ action: 'start', id: `helper-${++sequence}`, label }) ?? (() => {}); }
+  try { return sessionObservability()[HARNESS_ACTIVITY]?.({ action: 'start', id: `helper-${++sequence}`, label }) ?? (() => {}); }
   catch { return () => {}; }
 }
 const toolLabels: Record<string, string> = {
@@ -37,6 +38,9 @@ export function registerHarnessActivity(pi: { on: (name: any, handler: any) => v
   if (installed) return installed;
   const active = new Map<string, { label: string; token: object; started: number }>();
   let context: Context | undefined, session: string | undefined, status: string | undefined;
+  let generation = 0;
+  let scopedService: HarnessActivityService = serviceUnavailable;
+  function serviceUnavailable() { return undefined; }
   let blocked = false, closed = false, signal: AbortSignal | undefined;
   let completed: string | undefined, completionTimer: ReturnType<typeof setTimeout> | undefined;
   const color = (name: string, text: string) => {
@@ -107,7 +111,7 @@ export function registerHarnessActivity(pi: { on: (name: any, handler: any) => v
     if (request.action === 'start' && request.label && Object.hasOwn(labels, request.label)) return begin(id, labels[request.label], ctx);
   };
   owners.set(pi, service);
-  (globalThis as any)[HARNESS_ACTIVITY] = service;
+  sessionObservability()[HARNESS_ACTIVITY] = service;
   pi.on('tool_execution_start', (event: any, ctx: Context) => {
     if (typeof event.toolCallId !== 'string') return;
     begin('tool:' + event.toolCallId, Object.hasOwn(toolLabels, event.toolName) ? toolLabels[event.toolName] :
@@ -120,6 +124,9 @@ export function registerHarnessActivity(pi: { on: (name: any, handler: any) => v
   for (const event of ['session_before_switch', 'session_before_fork', 'session_before_tree']) pi.on(event, cancel);
   for (const event of ['session_start', 'session_switch', 'session_fork', 'session_tree']) pi.on(event, (_event: unknown, ctx: Context) => {
     clear(); context = ctx; session = sessionOf(ctx); blocked = false;
+    const epoch = ++generation;
+    scopedService = (request, context) => epoch === generation ? service(request, context) : undefined;
+    sessionObservability()[HARNESS_ACTIVITY] = scopedService;
   });
   for (const event of ['before_agent_start', 'agent_start']) pi.on(event, (_event: unknown, ctx: Context) => {
     if (sessionOf(ctx) === session || !session) { context = ctx; session = sessionOf(ctx); blocked = false; }
@@ -127,8 +134,8 @@ export function registerHarnessActivity(pi: { on: (name: any, handler: any) => v
   pi.on('agent_end', () => { active.clear(); blocked = true; render(); });
   pi.on('message_end', (event: any) => { if (event.message?.role === 'assistant' && event.message.stopReason === 'aborted') cancel(); });
   pi.on('session_shutdown', () => {
-    clear(); closed = true;
-    if ((globalThis as any)[HARNESS_ACTIVITY] === service) delete (globalThis as any)[HARNESS_ACTIVITY];
+    clear(); closed = true; generation++;
+    if ((sessionObservability()[HARNESS_ACTIVITY] === service || sessionObservability()[HARNESS_ACTIVITY] === scopedService)) delete sessionObservability()[HARNESS_ACTIVITY];
     owners.delete(pi);
   });
   return service;

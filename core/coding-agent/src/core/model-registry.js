@@ -65,6 +65,9 @@ export class ModelRegistry {
     complete(model, context, options) {
         return this.runtime.complete(model, context, options);
     }
+    completeSimple(model, context, options) {
+        return this.runtime.completeSimple(model, context, options);
+    }
     getProviderDisplayName(provider) {
         return this.runtime.getProvider(provider)?.name ?? provider;
     }

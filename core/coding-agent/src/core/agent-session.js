@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
 import { contentText } from "@yunuspi/ai";
 import { clampThinkingLevel, cleanupSessionResources, getSupportedThinkingLevels, isContextOverflow, isRecoverableLength, isRetryableAssistantError, modelsAreEqual, resetApiProviders, streamSimple, } from "@yunuspi/ai/compat";
@@ -39,6 +40,7 @@ import { createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.js";
+import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 /**
  * Parse a skill block from message text.
  * Returns null if the text doesn't contain a skill block.
@@ -68,6 +70,16 @@ function estimateMessagesTokens(messages) {
         tokens += estimateTokens(message);
     }
     return tokens;
+}
+function awaitBeforeAbort(promise, signal) {
+    if (signal.aborted)
+        return Promise.reject(signal.reason ?? new Error("Input preflight cancelled."));
+    return new Promise((resolve, reject) => {
+        const cleanup = () => signal.removeEventListener("abort", onAbort);
+        const onAbort = () => { cleanup(); reject(signal.reason ?? new Error("Input preflight cancelled.")); };
+        signal.addEventListener("abort", onAbort, { once: true });
+        Promise.resolve(promise).then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+    });
 }
 // ============================================================================
 // Constants
@@ -127,6 +139,10 @@ export class AgentSession {
     _extensionErrorListener;
     _extensionErrorUnsubscriber;
     _modelRuntime;
+    _guardian;
+    _guardianAnalysisUnsubscribe;
+    _pendingInputControllers = new Set();
+    _inputQueueTail = Promise.resolve();
     // Tool registry for extension getTools/setTools
     _toolRegistry = new Map();
     _toolDefinitions = new Map();
@@ -151,6 +167,20 @@ export class AgentSession {
         this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
         this._baseToolsOverride = config.baseToolsOverride;
         this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+        this._guardian = new GuardianSupervisor({
+            sessionOwner: this.sessionManager,
+            sessionId: this.sessionManager.getSessionId(),
+            cwd: this._cwd,
+            emit: async ({ type, content, detail, child }) => {
+                if (child && !this.isStreaming) return;
+                await this.sendCustomMessage({
+                    customType: type,
+                    content: [{ type: "text", text: content }],
+                    display: true,
+                    details: detail,
+                }, { deliverAs: "steer" });
+            },
+        });
         // Always subscribe to agent events for internal handling
         // (session persistence, extensions, auto-compaction, retry logic)
         this._unsubscribeAgent = this.agent.subscribe(this._handleAgentEvent);
@@ -375,6 +405,8 @@ export class AgentSession {
     _lastAssistantMessage = undefined;
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event) => {
+        try { await this._guardian?.observeAgentEvent(event); }
+        catch (error) { this._guardian?.quarantine(error); }
         // When a user message starts, check if it's from either queue and remove it BEFORE emitting
         // This ensures the UI sees the updated queue state
         if (event.type === "message_start" && event.message.role === "user") {
@@ -612,6 +644,7 @@ export class AgentSession {
      */
     dispose() {
         try {
+            this._abortPendingInputPreflights();
             this.abortRetry();
             this.abortCompaction();
             this.abortBranchSummary();
@@ -622,6 +655,9 @@ export class AgentSession {
             // Dispose must succeed even if an abort hook throws.
         }
         this._extensionRunner.invalidate("This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().");
+        this._guardianAnalysisUnsubscribe?.();
+        this._guardianAnalysisUnsubscribe = undefined;
+        this._guardian?.dispose();
         this._disconnectFromAgent();
         this._eventListeners = [];
         cleanupSessionResources(this.sessionId);
@@ -848,12 +884,43 @@ export class AgentSession {
      * @throws Error if no model selected or no API key available (when not streaming)
      */
     async prompt(text, options) {
+        const guardianCommand = this._guardian?.handleCommand(text);
+        if (guardianCommand) {
+            // Status must describe the live supervisor, not the configuration:
+            // kernel state, task count and (in debug) the active request.
+            const state = `enabled=${guardianCommand.enabled ? "on" : "off"} kernel=${guardianCommand.kernel} tasks=${guardianCommand.taskCount} admitted=${guardianCommand.stats.admitted} abstained=${guardianCommand.stats.abstained} quarantined=${guardianCommand.stats.quarantined}`;
+            const debugState = guardianCommand.debug ? ` active=${guardianCommand.activeTaskId ?? "none"} instance=${guardianCommand.guardianInstanceId}${guardianCommand.debugInfo ? ` diagnostics=${JSON.stringify(guardianCommand.debugInfo)}` : ""}` : "";
+            const summary = guardianCommand.command === "stats"
+                ? `Guardian stats: ${JSON.stringify(guardianCommand.stats)} · ${state}`
+                : `Guardian ${guardianCommand.command} · ${state}${debugState}. Use /guardian on, /guardian off, /guardian status, /guardian stats, or /guardian debug.`;
+            await this.sendCustomMessage({ customType: "guardian_status", content: [{ type: "text", text: summary }], display: true, excludeFromContext: true, details: { enabled: guardianCommand.enabled, debug: guardianCommand.debug, stats: guardianCommand.stats, kernel: guardianCommand.kernel, taskCount: guardianCommand.taskCount, ...(guardianCommand.activeTaskId ? { activeTaskId: guardianCommand.activeTaskId } : {}), ...(guardianCommand.guardianInstanceId ? { guardianInstanceId: guardianCommand.guardianInstanceId } : {}), ...(guardianCommand.debugInfo ? { debugInfo: guardianCommand.debugInfo } : {}) } }, { triggerTurn: false });
+            return;
+        }
+        const inputAbortController = new AbortController();
+        this._pendingInputControllers.add(inputAbortController);
+        const requestId = randomUUID();
+        const inputMeta = { requestId, turnId: requestId, sessionId: this.sessionId, processId: String(process.pid), originalText: text, signal: inputAbortController.signal, guardianOwnerId: this._guardian?.ownerId };
+        const previous = this._inputQueueTail;
+        let unlock;
+        const gate = new Promise((resolve) => { unlock = resolve; });
+        this._inputQueueTail = previous.then(() => gate);
+        let released = false;
+        const release = () => { if (!released) { released = true; unlock(); } };
+        try {
+            await awaitBeforeAbort(previous, inputAbortController.signal);
+            inputAbortController.signal.throwIfAborted();
+            return await this._promptWithInputQueue(text, options, release, inputMeta, inputAbortController);
+        }
+        finally { this._pendingInputControllers.delete(inputAbortController); release(); }
+    }
+    async _promptWithInputQueue(text, options, releaseInputQueue, inputMeta, inputAbortController) {
         // PI_RATE_LIMIT_POLICY: a new user message resets the consecutive-429 clock.
         this._piRateLimitLoopStart = undefined;
         const expandPromptTemplates = options?.expandPromptTemplates ?? true;
         const preflightResult = options?.preflightResult;
         let messages;
         try {
+            inputAbortController.signal.throwIfAborted();
             // Handle extension commands first (execute immediately, even during streaming)
             // Extension commands manage their own LLM interaction via pi.sendMessage()
             if (expandPromptTemplates && text.startsWith("/")) {
@@ -870,9 +937,18 @@ export class AgentSession {
             // Emit input event for extension interception (before skill/template expansion)
             let currentText = text;
             let currentImages = options?.images;
+            const { requestId, turnId, sessionId, processId } = inputMeta;
+            const source = options?.source ?? "interactive";
+            const requestMessageMeta = { requestId, turnId, sessionId, processId, guardianOwnerId: inputMeta.guardianOwnerId };
+            this._guardian?.noteInput({ ...inputMeta, source });
             if (this._extensionRunner.hasHandlers("input")) {
-                const inputResult = await this._extensionRunner.emitInput(currentText, currentImages, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
+                const inputResult = await awaitBeforeAbort(this._extensionRunner.emitInput(currentText, currentImages, source, this.isStreaming ? options?.streamingBehavior : undefined, inputMeta), inputAbortController.signal);
+                inputAbortController.signal.throwIfAborted();
                 if (inputResult.action === "handled") {
+                    inputAbortController.abort(new Error("Input was handled before prompt acceptance."));
+                    this._guardian?.cancelRequest(requestId);
+                    this._pendingInputControllers.delete(inputAbortController);
+                    releaseInputQueue();
                     preflightResult?.(true);
                     return;
                 }
@@ -893,11 +969,14 @@ export class AgentSession {
                     throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
                 }
                 if (options.streamingBehavior === "followUp") {
-                    await this._queueFollowUp(expandedText, currentImages);
+                    await this._queueFollowUp(expandedText, currentImages, requestMessageMeta);
                 }
                 else {
-                    await this._queueSteer(expandedText, currentImages);
+                    await this._queueSteer(expandedText, currentImages, requestMessageMeta);
                 }
+                this._guardian?.acceptRequest(requestId);
+                this._pendingInputControllers.delete(inputAbortController);
+                releaseInputQueue();
                 preflightResult?.(true);
                 return;
             }
@@ -913,6 +992,7 @@ export class AgentSession {
             }
             const hasConfiguredAuth = this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
                 (await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
+            inputAbortController.signal.throwIfAborted();
             if (!hasConfiguredAuth) {
                 const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
                 if (isOAuth) {
@@ -927,6 +1007,7 @@ export class AgentSession {
             const lastAssistant = this._findLastAssistantMessage();
             if (lastAssistant) {
                 await this._checkCompaction(lastAssistant, false);
+                inputAbortController.signal.throwIfAborted();
             }
             // Build messages array (custom message if any, then user message)
             messages = [];
@@ -935,11 +1016,11 @@ export class AgentSession {
             if (currentImages) {
                 userContent.push(...currentImages);
             }
-            messages.push({
+            messages.push(tagGuardianRequestMessage({
                 role: "user",
                 content: userContent,
                 timestamp: Date.now(),
-            });
+            }, requestMessageMeta));
             // Inject any pending "nextTurn" messages as context alongside the user message
             for (const msg of this._pendingNextTurnMessages) {
                 messages.push(msg);
@@ -947,6 +1028,7 @@ export class AgentSession {
             this._pendingNextTurnMessages = [];
             // Emit before_agent_start extension event
             const result = await this._extensionRunner.emitBeforeAgentStart(expandedText, currentImages, this._baseSystemPrompt, this._baseSystemPromptOptions);
+            inputAbortController.signal.throwIfAborted();
             // Add all custom messages from extensions
             if (result?.messages) {
                 for (const msg of result.messages) {
@@ -974,12 +1056,20 @@ export class AgentSession {
             }
         }
         catch (error) {
+            inputAbortController.abort(error);
+            this._guardian?.cancelRequest(inputMeta.requestId);
+            if (inputAbortController) this._pendingInputControllers.delete(inputAbortController);
             preflightResult?.(false);
             throw error;
+        }
+        finally {
+            if (inputAbortController) this._pendingInputControllers.delete(inputAbortController);
         }
         if (!messages) {
             return;
         }
+        releaseInputQueue();
+        this._guardian?.acceptRequest(inputMeta.requestId);
         preflightResult?.(true);
         await this._runAgentPrompt(messages);
     }
@@ -1051,15 +1141,12 @@ export class AgentSession {
      * @param images Optional image attachments to include with the message
      * @throws Error if text is an extension command
      */
-    async steer(text, images) {
+    async steer(text, images, source = "rpc") {
         // Check for extension commands (cannot be queued)
         if (text.startsWith("/")) {
             this._throwIfExtensionCommand(text);
         }
-        // Expand skill commands and prompt templates
-        let expandedText = this._expandSkillCommand(text);
-        expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-        await this._queueSteer(expandedText, images);
+        await this._queueDirectInput(text, images, "steer", source);
     }
     /**
      * Queue a follow-up message to be processed after the agent finishes.
@@ -1068,47 +1155,86 @@ export class AgentSession {
      * @param images Optional image attachments to include with the message
      * @throws Error if text is an extension command
      */
-    async followUp(text, images) {
+    async followUp(text, images, source = "rpc") {
         // Check for extension commands (cannot be queued)
         if (text.startsWith("/")) {
             this._throwIfExtensionCommand(text);
         }
-        // Expand skill commands and prompt templates
-        let expandedText = this._expandSkillCommand(text);
-        expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-        await this._queueFollowUp(expandedText, images);
+        await this._queueDirectInput(text, images, "followUp", source);
+    }
+    async _queueDirectInput(text, images, behavior, source = "rpc") {
+        const inputAbortController = new AbortController();
+        this._pendingInputControllers.add(inputAbortController);
+        const requestId = randomUUID();
+        const turnId = requestId;
+        const meta = { requestId, turnId, sessionId: this.sessionId, processId: String(process.pid), originalText: text, signal: inputAbortController.signal, guardianOwnerId: this._guardian?.ownerId };
+        const previous = this._inputQueueTail;
+        let unlock;
+        const gate = new Promise((resolve) => { unlock = resolve; });
+        this._inputQueueTail = previous.then(() => gate);
+        try {
+            await awaitBeforeAbort(previous, inputAbortController.signal);
+            inputAbortController.signal.throwIfAborted();
+            this._guardian?.noteInput({ ...meta, source });
+            let currentText = text;
+            let currentImages = images;
+            if (this._extensionRunner.hasHandlers("input")) {
+                const inputResult = await awaitBeforeAbort(this._extensionRunner.emitInput(text, images, source, behavior, meta), inputAbortController.signal);
+                inputAbortController.signal.throwIfAborted();
+                if (inputResult.action === "handled") {
+                    inputAbortController.abort(new Error("Input was handled before queue acceptance."));
+                    this._guardian?.cancelRequest(requestId);
+                    return;
+                }
+                if (inputResult.action === "transform") { currentText = inputResult.text; currentImages = inputResult.images ?? currentImages; }
+            }
+            let expandedText = this._expandSkillCommand(currentText);
+            expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+            const accepted = { ...meta };
+            delete accepted.originalText;
+            delete accepted.signal;
+            if (behavior === "steer") await this._queueSteer(expandedText, currentImages, accepted);
+            else await this._queueFollowUp(expandedText, currentImages, accepted);
+            this._guardian?.acceptRequest(requestId);
+        }
+        catch (error) {
+            inputAbortController.abort(error);
+            this._guardian?.cancelRequest(requestId);
+            throw error;
+        }
+        finally { this._pendingInputControllers.delete(inputAbortController); unlock(); }
     }
     /**
      * Internal: Queue a steering message (already expanded, no extension command check).
      */
-    async _queueSteer(text, images) {
+    async _queueSteer(text, images, requestMeta) {
         this._steeringMessages.push(text);
         this._emitQueueUpdate();
         const content = [{ type: "text", text }];
         if (images) {
             content.push(...images);
         }
-        this.agent.steer({
+        this.agent.steer(tagGuardianRequestMessage({
             role: "user",
             content,
             timestamp: Date.now(),
-        });
+        }, requestMeta));
     }
     /**
      * Internal: Queue a follow-up message (already expanded, no extension command check).
      */
-    async _queueFollowUp(text, images) {
+    async _queueFollowUp(text, images, requestMeta) {
         this._followUpMessages.push(text);
         this._emitQueueUpdate();
         const content = [{ type: "text", text }];
         if (images) {
             content.push(...images);
         }
-        this.agent.followUp({
+        this.agent.followUp(tagGuardianRequestMessage({
             role: "user",
             content,
             timestamp: Date.now(),
-        });
+        }, requestMeta));
     }
     /**
      * Throw an error if the text is an extension command.
@@ -1259,11 +1385,19 @@ export class AgentSession {
      * Abort current operation and wait for agent to become idle.
      */
     async abort() {
+        this._abortPendingInputPreflights();
         this.abortRetry();
         this.abortCompaction();
         this.abortBranchSummary();
         this.agent.abort();
         await this.waitForIdle();
+    }
+    _abortPendingInputPreflights() {
+        for (const controller of this._pendingInputControllers) controller.abort();
+        this._pendingInputControllers.clear();
+        // Old gate chains may still be resolving. Requests already in them are
+        // aborted; new session input begins on a fresh FIFO chain.
+        this._inputQueueTail = Promise.resolve();
     }
     async waitForIdle() {
         if (this.isIdle) {
@@ -2241,6 +2375,10 @@ export class AgentSession {
             }
         }
         this._extensionRunner = new ExtensionRunner(extensionsResult.extensions, extensionsResult.runtime, this._cwd, this.sessionManager, new ModelRegistry(this._modelRuntime));
+        this._guardianAnalysisUnsubscribe?.();
+        this._guardianAnalysisUnsubscribe = extensionsResult.runtime.onEvent("guardian:prompt-analysis:v1", (event) => {
+            try { this._guardian?.observePromptAnalysis(event); } catch { /* a malformed advisory event is an abstention */ }
+        });
         if (this._extensionRunnerRef) {
             this._extensionRunnerRef.current = this._extensionRunner;
         }

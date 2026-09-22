@@ -3,6 +3,8 @@ import { captureFileVerification, hasFailedFileVerification } from "../shared/fi
 import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
+import { modelRouteCandidateAt, routeOf } from "../../shared/model-route.ts";
+import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -1742,6 +1744,14 @@ async function runSingleStepInner(
 		const recoveringAbort = abortRecoveryAttempted;
 		const attemptTask = nextAttemptTask;
 		const candidate = candidates[modelIndex];
+		const modelRouteCandidate = modelRouteCandidateAt(step.modelRouteCandidates, modelIndex);
+		recordModelRoutingAttempt({
+			route: modelRouteCandidate?.route ?? candidate,
+			fromRoute: modelIndex > 0 ? routeOf(modelRouteCandidateAt(step.modelRouteCandidates, modelIndex - 1)) : undefined,
+			source: step.modelOrigin ?? "subagents",
+			fallback: modelIndex > 0,
+			providerRouting: modelRouteCandidate?.providerRouting,
+		});
 		const expectedModelForVerification = candidate && !(step.skipPrimaryModelVerification && modelIndex === 0) ? candidate : undefined;
 		try {
 			assertThinkingWithinCeiling({ model: candidate, configThinking: step.thinking, ceiling: step.thinkingCeiling ?? decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]), agent: step.agent, runId: ctx.id });
@@ -1792,6 +1802,7 @@ async function runSingleStepInner(
 			subagentOnlyExtensions: step.subagentOnlyExtensions,
 			fast: step.fast,
 			modelCandidates: step.modelCandidates,
+			modelRouteCandidate,
 			systemPrompt: step.systemPrompt ?? "",
 			systemPromptMode: step.systemPromptMode,
 			mcpDirectTools: step.mcpDirectTools,
@@ -1860,6 +1871,7 @@ async function runSingleStepInner(
 				task: step.launchBindingTask ?? task,
 				...(candidate ? { model: candidate } : {}),
 				modelCandidates: candidates as string[],
+				modelRouteCandidates: step.modelRouteCandidates,
 				...(step.fast !== undefined ? { fast: step.fast } : {}),
 				...(resolveEffectiveThinking(candidate, step.thinking) ? { thinking: resolveEffectiveThinking(candidate, step.thinking) } : {}),
 				...(step.thinkingCeiling ? { thinkingCeiling: step.thinkingCeiling } : {}),
@@ -4367,6 +4379,10 @@ async function runSubagent(
 						...(step.parallel.modelCandidates ? { modelCandidates: step.parallel.modelCandidates.flatMap((candidate) => {
 							const resolved = applyThinkingSuffix(candidate, thinkingOverride, true);
 							return resolved ? [resolved] : [];
+						}) } : {}),
+						...(step.parallel.modelRouteCandidates ? { modelRouteCandidates: step.parallel.modelRouteCandidates.flatMap((candidate) => {
+							const route = applyThinkingSuffix(candidate.route, thinkingOverride, true);
+							return route ? [{ ...candidate, route }] : [];
 						}) } : {}),
 					} : {}),
 					structuredOutputSchema: step.parallel.structuredOutputSchema ?? step.parallel.structuredOutput?.schema,

@@ -4,6 +4,7 @@ import { clampThinkingLevel, streamSimple } from "@yunuspi/ai/compat";
 import { getAgentDir } from "../config.js";
 import { resolvePath } from "../utils/paths.js";
 import { AgentSession } from "./agent-session.js";
+import { guardianRequestMessages } from "./guardian/guardian-supervisor.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
 import { convertToLlm } from "./messages.js";
@@ -320,7 +321,12 @@ export async function createAgentSession(options = {}) {
             const runner = extensionRunnerRef.current;
             if (!runner)
                 return messages;
-            return runner.emitContext(messages);
+            const requestMessages = guardianRequestMessages(messages);
+            const latestRequest = requestMessages.at(-1);
+            return runner.emitContext(messages, {
+                requestMessages,
+                ...(latestRequest ? { requestId: latestRequest.requestId, turnId: latestRequest.turnId, requestMessageIndex: latestRequest.messageIndex } : {}),
+            });
         },
         steeringMode: settingsManager.getSteeringMode(),
         followUpMode: settingsManager.getFollowUpMode(),

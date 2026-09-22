@@ -1,3 +1,4 @@
+import { sessionObservability } from './lib/session-observability.ts';
 /**
  * session-hooks — deterministic first-use guidance for recurring workflows.
  *
@@ -60,7 +61,7 @@ export default function (pi: any) {
 		if (rule.needsEmptyResult && !isEmptySearchResult(event.content)) return;
 		shown.add(rule.key);
 
-		const sink = (globalThis as any)[HEALTH_SINK];
+		const sink = sessionObservability()[HEALTH_SINK];
 		if (typeof sink === "function") {
 			try { sink("session_hook.decision", {
 				hook: rule.key,

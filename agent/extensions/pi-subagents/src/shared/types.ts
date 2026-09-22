@@ -780,6 +780,7 @@ export interface SteeringRecoveryDescriptor {
 	sessionFile?: string;
 	cwd: string;
 	model?: string;
+	modelRouteCandidates?: import("./model-route.ts").ModelRouteCandidate[];
 	modelProvider?: string;
 	modelOverrideFromParent?: boolean;
 	modelOrigin?: "explicit" | "inherited" | "configured";
@@ -2430,6 +2431,8 @@ export interface RunSyncOptions {
 	nestedRoute?: NestedRouteInfo;
 	/** Override the agent's default model (format: "provider/id" or just "id") */
 	modelOverride?: string;
+	/** Exact ordered model/upstream routes persisted for this run's retries. */
+	modelRouteCandidates?: import("./model-route.ts").ModelRouteCandidate[];
 	/** Opt into priority service tier for supported native OpenAI-Codex launches. */
 	fast?: boolean;
 	/** The override came from the running parent session, not configuration. */

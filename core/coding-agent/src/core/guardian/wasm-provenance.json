@@ -1,0 +1,62 @@
+{
+  "format": "yunuspi-guardian-wasm-provenance-v1",
+  "buildCommand": "node scripts/guardian/build-wasm.mjs",
+  "compiler": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+  "target": "wasm32-unknown-unknown",
+  "flags": [
+    "--target=wasm32-unknown-unknown",
+    "-std=c++20",
+    "-O3",
+    "-fno-exceptions",
+    "-fno-rtti",
+    "-fno-ident",
+    "-fno-builtin",
+    "-ffile-prefix-map=.=.",
+    "-nostdlib",
+    "-Wl,--no-entry",
+    "-Wl,--export-memory",
+    "-Wl,--initial-memory=131072",
+    "-Wl,--max-memory=131072",
+    "-Wl,--strip-all",
+    "-Wl,--fatal-warnings"
+  ],
+  "modelTraining": "node scripts/guardian/train-model.mjs",
+  "trainingData": "scripts/guardian/case-data.mjs",
+  "modelHeaderSha256": "b512c7d51f1b89aa76c30bc0a573a5e820e2afdb69dcdc41e7e7b0999759821c",
+  "sources": {
+    "classifier.cpp": "a90a8579a09809fcd7d40f0c3eef1341cb4e03b85fa5cbae90962204fdb03b5c",
+    "similarity.cpp": "5ef5f7b6cc6b4f13d994ba8a75d6dd82df1f6081868d73ae2753e4e887d311fe",
+    "model-parameters.generated.h": "b512c7d51f1b89aa76c30bc0a573a5e820e2afdb69dcdc41e7e7b0999759821c"
+  },
+  "trainingSources": {
+    "scripts/guardian/case-data.mjs": "5f21cdb766b11dc502f0bfad62304f61cc634c76f8ca7f7b0081fb162de0446d",
+    "scripts/guardian/train-model.mjs": "08537b81eb5632c7389db0e88e996bb627e71cc16f486a3a876c275fe4b3fa19"
+  },
+  "artifacts": {
+    "classifier.wasm": {
+      "sha256": "d325cf354b67fa27ff46d0299bf01f50ca778d3c23ae7afccdd1785e0fb5626c",
+      "bytes": 1114,
+      "exports": [
+        "guardian_eval",
+        "guardian_model_version",
+        "guardian_feature_count",
+        "guardian_threshold",
+        "guardian_feature_buffer_ptr",
+        "memory"
+      ],
+      "imports": []
+    },
+    "similarity.wasm": {
+      "sha256": "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
+      "bytes": 943,
+      "exports": [
+        "guardian_similarity",
+        "guardian_similarity_version",
+        "guardian_similarity_left_ptr",
+        "guardian_similarity_right_ptr",
+        "memory"
+      ],
+      "imports": []
+    }
+  }
+}

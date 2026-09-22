@@ -2423,6 +2423,11 @@ export class InteractiveMode {
                 await this.handleThinkingCommand(searchTerm);
                 return;
             }
+            if (/^\/guardian(?:\s+(?:on|off|status|stats|debug))?\s*$/i.test(text)) {
+                this.editor.setText("");
+                await this.handleGuardianCommand(text);
+                return;
+            }
             if (text === "/export" || text.startsWith("/export ")) {
                 await this.handleExportCommand(text);
                 this.editor.setText("");
@@ -3443,6 +3448,9 @@ export class InteractiveMode {
             throw error;
         }
     }
+    async handleGuardianCommand(text) {
+        await this.session.prompt(text);
+    }
     async handleFollowUp() {
         try {
             const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
@@ -3748,10 +3756,10 @@ export class InteractiveMode {
                         await this.session.prompt(message.text);
                     }
                     else if (message.mode === "followUp") {
-                        await this.session.followUp(message.text);
+                        await this.session.followUp(message.text, undefined, "interactive");
                     }
                     else {
-                        await this.session.steer(message.text);
+                        await this.session.steer(message.text, undefined, "interactive");
                     }
                 }
                 this.updatePendingMessagesDisplay();
@@ -3785,10 +3793,10 @@ export class InteractiveMode {
                     await this.session.prompt(message.text);
                 }
                 else if (message.mode === "followUp") {
-                    await this.session.followUp(message.text);
+                    await this.session.followUp(message.text, undefined, "interactive");
                 }
                 else {
-                    await this.session.steer(message.text);
+                    await this.session.steer(message.text, undefined, "interactive");
                 }
             }
             this.updatePendingMessagesDisplay();

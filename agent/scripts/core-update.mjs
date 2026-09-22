@@ -7,18 +7,7 @@ import os from 'node:os';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-export function activePiProcesses(core) {
-  if (process.platform !== 'linux') throw Error('Cannot attest idle YunusPi processes on this platform');
-  const found = [];
-  for (const entry of fs.readdirSync('/proc')) {
-    if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
-    try {
-      const args = fs.readFileSync(`/proc/${entry}/cmdline`, 'utf8').split('\0');
-      if (args.some(arg => arg.startsWith(core + path.sep))) found.push(Number(entry));
-    } catch (error) { if (!['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes(error.code)) throw error; }
-  }
-  return found;
-}
+export { activePiProcesses } from './lib/active-core-processes.mjs';
 export function updateInvocation(args, agent = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent')) {
   let source, offline = false, skipNeedle = false;
   for (let i = 0; i < args.length; i++) {

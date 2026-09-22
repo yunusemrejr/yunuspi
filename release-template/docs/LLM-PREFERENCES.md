@@ -83,7 +83,8 @@ normal main-session model:
     "fusion": { "models": ["cheap_auto"] },
     "quality_review": { "models": ["cheap_auto"] },
     "project_review": { "models": ["cheap_auto"] },
-    "error_review": { "models": ["cheap_auto"] }
+    "error_review": { "models": ["cheap_auto"] },
+    "prompt_analysis": { "models": ["cheap_auto"] }
   }
 }
 ```
@@ -96,8 +97,11 @@ normal main-session model:
 - `preferences.<role>.models` is an ordered list of aliases (or inline
   entries). Role names accept `subagents`, `council`, `swarm`, `fusion`,
   `quality_review`, `project_review`, `error_review` and
-  `main_session_fallback` (dashes, case and singular/plural variants are
-  accepted). Unknown roles pass through for future mechanisms.
+  `main_session_fallback`, and `prompt_analysis` (dashes, case and
+  singular/plural variants are accepted). Unknown roles pass through for
+  future mechanisms. When `prompt_analysis` has no explicit list, its
+  low-cost, tool-free initial and follow-up checks inherit the ordered
+  `subagents` chain; no model ID is hardcoded by prompt analysis.
 - Ad-hoc subagent tasks use the `subagents` chain unless the task explicitly
   names a review or council (`project review`, `error review`, `bug review`,
   `quality review`, `council`). Automatic dispatchers pass their role
@@ -125,9 +129,17 @@ vocabulary — the same shapes `/provider order|only|json` persists:
   `only`, `ignore`, `sort`) becomes an ordered backend preference.
 
 Backend pins apply to main-session fallback recovery through the existing
-`compat` path and are recorded in routing decisions for child teams. Child
-launches otherwise follow the registry, including global `/provider` pins in
-`models.json`. `provider_options` is ignored for non-OpenRouter providers.
+`compat` path. Child launches carry the selected provider options into each
+request payload with a request-local hook, so a retry on the same model can
+use a different configured backend without mutating the shared registry
+model. Global `/provider` pins in `models.json` remain part of the route.
+`provider_options` is ignored for non-OpenRouter providers.
+
+The `/models` command opens the graphical editor for these same preferences.
+It saves against a content revision, keeps unknown JSON fields, writes a
+verified backup, and refuses to overwrite concurrent manual edits. See
+[Model routing](MODEL-ROUTING.md) for provider-aware search, diagnostics and
+recovery behavior.
 
 ## Parallel allocation
 

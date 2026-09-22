@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 import {randomUUID} from 'node:crypto';
 import {buildSessionReport} from './session-report.ts';
 import {createMetricsPanel} from './metrics-panel.ts';
@@ -6,16 +7,18 @@ export const METRICS_SINK=Symbol.for('yunus-pi.metrics.v1');
 export const METRICS_VIEW=Symbol.for('yunus-pi.metrics-view.v1');
 /** Read-only ledger view; diagnostics only, never model-visible. */
 export const HOOK_LEDGER_VIEW=Symbol.for('yunus-pi.hook-ledger.v1');
-/** Process-wide: a /reload must not erase duplication evidence. */
-const hookLedger=createHookLedger();
+/** Per runtime/session: /reload retains duplication evidence without mixing sessions. */
+const LEDGER=Symbol.for("yunus-pi.session-hook-ledger.v1");
 /** Numeric counters plus fixed-size content hashes only. Never persists hook arguments, output, thinking or message text. */
 export function registerSessionTelemetry(pi:any) {
  let current:any,owner=0,dirty=false;
+ let hookLedger=createHookLedger();
  let sink:any,view:any,ledgerView:any;
  const snapshot=()=>current?structuredClone(current.data):undefined;
  const flush=()=>{if(current&&dirty){pi.appendEntry('session-metrics-v1',snapshot());dirty=false;}};
  const start=(_event:any,ctx:any)=>{
   const epoch=++owner;
+  hookLedger=sessionObservability()[LEDGER]??=createHookLedger();
   current={id:ctx.sessionManager.getSessionId(),data:{version:2,segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
   sink=(kind:string,data:any={})=>{
    if(epoch!==owner||!current)return;
@@ -39,9 +42,9 @@ export function registerSessionTelemetry(pi:any) {
    else return;
    dirty=true;
   };
-  (globalThis as any)[METRICS_SINK]=sink;
-  (globalThis as any)[METRICS_VIEW]=view=(id:string)=>id===current?.id?snapshot():undefined;
-  (globalThis as any)[HOOK_LEDGER_VIEW]=ledgerView=()=>hookLedger.snapshot();
+  sessionObservability()[METRICS_SINK]=sink;
+  sessionObservability()[METRICS_VIEW]=view=(id:string)=>id===current?.id?snapshot():undefined;
+  sessionObservability()[HOOK_LEDGER_VIEW]=ledgerView=()=>hookLedger.snapshot();
  };
  pi.on('session_start',start);pi.on('session_switch',start);
  for(const hook of ['agent_end','session_before_compact','session_before_switch'])pi.on(hook,flush);
@@ -49,7 +52,7 @@ export function registerSessionTelemetry(pi:any) {
   try{flush();}finally{
    owner++;current=undefined;
    for(const [key,value] of [[METRICS_SINK,sink],[METRICS_VIEW,view],[HOOK_LEDGER_VIEW,ledgerView]] as const)
-    if((globalThis as any)[key]===value)delete (globalThis as any)[key];
+    if(sessionObservability()[key]===value)delete sessionObservability()[key];
   }
  });
  pi.registerCommand('metrics',{description:'Session tools, errors, agents, swarms, fusions, skills, hooks and measured context reductions',handler:async(_args:any,ctx:any)=>{

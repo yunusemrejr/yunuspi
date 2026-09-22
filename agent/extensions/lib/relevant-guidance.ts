@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * Deterministic routes remain authoritative; optional asynchronous discovery
  * offers bounded catalog-backed advice. Tool-output prose is never authority. */
@@ -395,7 +396,7 @@ export function createRelevantGuidance(pi: any) {
       // the same workflow has already been offered and ignored; explicit task
       // and file routes keep their full priority and their review obligation.
       // Calibration telemetry: score joins read receipts in ranking audits.
-      try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("skill.rank", {skill: ranked.skill.name, score: ranked.score, matched: ranked.matched.length}); } catch {}
+      try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.rank", {skill: ranked.skill.name, score: ranked.score, matched: ranked.matched.length}); } catch {}
       add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file,
         priority: Math.max(1, priority - fatigue(ranked.skill.file)),
         text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
@@ -1153,7 +1154,7 @@ export function createRelevantGuidance(pi: any) {
           if (topicOffers.size > 64) topicOffers.delete(topicOffers.keys().next().value!);
         }
         else { shown.add(h.key); if (shown.size > LIMIT) shown.delete(shown.values().next().value!); }
-        pending.delete(h.key); try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
+        pending.delete(h.key); try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
         if (h.discovery) advisoryDiscoveryDelivered.add(h.discovery);
         if (h.key.startsWith("signal:") && runCount - urgentCount >= runAllowance()) urgentCount++;
         runCount++; }

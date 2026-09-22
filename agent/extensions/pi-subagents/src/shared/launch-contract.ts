@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type { AgentConfig } from "../agents/agents.ts";
 import type { ExtensionBindings } from "../runs/shared/extension-bindings.ts";
+import type { ModelRouteCandidate } from "./model-route.ts";
 
 export const AGENT_DEFINITION_PROJECTION_VERSION = 1 as const;
 export const LAUNCH_BINDING_PROJECTION_VERSION = 1 as const;
@@ -85,6 +86,7 @@ export interface LaunchBindingInput {
 	task?: string;
 	model?: string;
 	modelCandidates?: string[];
+	modelRouteCandidates?: ModelRouteCandidate[];
 	fast?: boolean;
 	thinking?: string;
 	systemPrompt?: string | null;
@@ -113,6 +115,7 @@ export function projectLaunchBinding(input: LaunchBindingInput): Record<string, 
 		// The ordered candidate set already contains each attempted model; keeping only
 		// this set makes retries correlate to the same preflight binding.
 		modelCandidates: input.modelCandidates,
+		modelRouteCandidates: input.modelRouteCandidates,
 		fast: input.fast,
 		thinking: input.thinking,
 		systemPromptDigest: input.systemPrompt === undefined || input.systemPrompt === null ? undefined : stableJsonDigest(input.systemPrompt),

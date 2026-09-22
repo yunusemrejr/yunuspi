@@ -372,7 +372,7 @@ export declare class AgentSession {
      * @param images Optional image attachments to include with the message
      * @throws Error if text is an extension command
      */
-    steer(text: string, images?: ImageContent[]): Promise<void>;
+    steer(text: string, images?: ImageContent[], source?: InputSource): Promise<void>;
     /**
      * Queue a follow-up message to be processed after the agent finishes.
      * Delivered only when agent has no more tool calls or steering messages.
@@ -380,7 +380,7 @@ export declare class AgentSession {
      * @param images Optional image attachments to include with the message
      * @throws Error if text is an extension command
      */
-    followUp(text: string, images?: ImageContent[]): Promise<void>;
+    followUp(text: string, images?: ImageContent[], source?: InputSource): Promise<void>;
     private _queueSteer;
     private _queueFollowUp;
     /**

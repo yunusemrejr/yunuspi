@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, AuthResult, Context, Model, ModelsApiStreamOptions, ModelsRefreshOptions, ModelsRefreshResult, Provider, ProviderHeaders } from "@yunuspi/ai";
+import type { Api, AssistantMessage, AuthResult, Context, Model, ModelsApiStreamOptions, ModelsSimpleStreamOptions, ModelsRefreshOptions, ModelsRefreshResult, Provider, ProviderHeaders } from "@yunuspi/ai";
 import type { ModelRuntime } from "./model-runtime.ts";
 import type { AuthStatus, ProviderConfigInput } from "./provider-composer.ts";
 export type { ProviderConfigInput } from "./provider-composer.ts";
@@ -31,6 +31,7 @@ export declare class ModelRegistry {
     getProviderAuthStatus(provider: string): AuthStatus;
     getProvider(provider: string): Provider | undefined;
     complete<TApi extends Api>(model: Model<TApi>, context: Context, options?: ModelsApiStreamOptions<TApi>): Promise<AssistantMessage>;
+    completeSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): Promise<AssistantMessage>;
     getProviderDisplayName(provider: string): string;
     getProviderAuth(provider: string): Promise<AuthResult | undefined>;
     getApiKeyForProvider(provider: string): Promise<string | undefined>;

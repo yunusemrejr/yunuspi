@@ -810,6 +810,7 @@
       "group": "models",
       "summary": "Prefer explicit per-role model/provider choices from llm_preferences.json, with the autonomous selector as fallback when preferences are absent or unusable.",
       "entrypoints": [
+        "/models",
         "llm_preferences.json",
         "resolveLlmPreferenceChain",
         "selectAssistanceTeam"
@@ -821,7 +822,11 @@
         },
         {
           "name": "preferences.<role>.models",
-          "summary": "Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, main_session_fallback."
+          "summary": "Ordered alias list per role: subagents, council, swarm, fusion, quality_review, project_review, error_review, prompt_analysis, main_session_fallback."
+        },
+        {
+          "name": "/models",
+          "summary": "Open the graphical editor for ordered role routes, upstream pins and canonical JSON recovery."
         },
         {
           "name": "thinking",
@@ -852,7 +857,10 @@
       ],
       "sourceFiles": [
         "agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts",
-        "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts"
+        "agent/extensions/pi-subagents/src/runs/shared/model-fallback.ts",
+        "agent/extensions/model-routing-config.ts",
+        "agent/extensions/lib/model-routing-store.ts",
+        "agent/extensions/lib/model-routing-metrics.ts"
       ],
       "doc": "docs/LLM-PREFERENCES.md",
       "tools": [],
@@ -977,6 +985,7 @@
         "graph",
         "provider",
         "or-provider",
+        "models",
         "todos",
         "memory-prime",
         "bg",
@@ -1008,7 +1017,8 @@
         "sys-prompt",
         "used",
         "errors",
-        "commands"
+        "commands",
+        "guardian"
       ],
       "options": [
         {
@@ -1024,8 +1034,12 @@
           "summary": "Session accounting, metrics and observations."
         },
         {
-          "name": "/sys-prompt|/used|/errors|/commands",
-          "summary": "Separate-window popups: opening system prompt, session usage, detailed error JSON, command list."
+          "name": "/sys-prompt|/used|/errors|/commands|/models",
+          "summary": "Separate-window popups: system prompt, session usage, detailed errors, command list, graphical model routing."
+        },
+        {
+          "name": "/guardian on|off|status|stats|debug",
+          "summary": "Guardian supervision for this session only; on by default, off stops analysis and intervention."
         },
         {
           "name": "/effort",
@@ -1048,6 +1062,7 @@
       ],
       "sourceFiles": [
         "agent/extensions/session-signals.ts",
+        "agent/extensions/model-routing-config.ts",
         "agent/extensions/lib/session-telemetry.ts",
         "agent/extensions/thinking.ts",
         "agent/extensions/project-intelligence.ts",
@@ -2248,7 +2263,7 @@
       {
         "name": "bash-routes",
         "source": "agent/extensions/bash-router.ts",
-        "line": 96
+        "line": 97
       },
       {
         "name": "bg",
@@ -2283,12 +2298,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1715
+        "line": 1716
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1317
+        "line": 1318
       },
       {
         "name": "curator",
@@ -2303,7 +2318,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1689
+        "line": 1690
       },
       {
         "name": "export-json",
@@ -2328,7 +2343,7 @@
       {
         "name": "hook-audit",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 73
+        "line": 76
       },
       {
         "name": "jobs",
@@ -2403,12 +2418,17 @@
       {
         "name": "metrics",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 55
+        "line": 58
+      },
+      {
+        "name": "models",
+        "source": "agent/extensions/model-routing-config.ts",
+        "line": 412
       },
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 899
+        "line": 900
       },
       {
         "name": "or-provider",
@@ -2433,7 +2453,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1186
+        "line": 1187
       },
       {
         "name": "run",
@@ -2448,7 +2468,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1642
+        "line": 1643
       },
       {
         "name": "subagent-cost",
@@ -2533,7 +2553,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1647
+        "line": 1648
       },
       {
         "name": "tasks",
@@ -2543,7 +2563,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1666
+        "line": 1667
       },
       {
         "name": "websearch",
@@ -2693,7 +2713,7 @@
       {
         "name": "contact_supervisor",
         "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
-        "line": 303,
+        "line": 305,
         "kind": "definition"
       },
       {
@@ -2857,7 +2877,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 72,
+        "line": 387,
         "kind": "literal"
       },
       {
@@ -2875,7 +2895,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 846,
+        "line": 847,
         "kind": "literal"
       },
       {
@@ -2911,7 +2931,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 495,
+        "line": 496,
         "kind": "literal"
       },
       {
@@ -2941,7 +2961,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1807,
+        "line": 1808,
         "kind": "literal"
       },
       {
@@ -2953,7 +2973,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1744,
+        "line": 1745,
         "kind": "literal"
       },
       {
@@ -2965,7 +2985,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 651,
+        "line": 652,
         "kind": "literal"
       },
       {
@@ -2984,7 +3004,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 839,
+        "line": 865,
         "kind": "literal"
       },
       {
@@ -2996,7 +3016,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 741,
+        "line": 743,
         "kind": "definition"
       },
       {
@@ -3227,13 +3247,13 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 72,
+        "line": 387,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 846,
+        "line": 847,
         "kind": "literal"
       },
       {
@@ -3257,7 +3277,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 495,
+        "line": 496,
         "kind": "literal"
       },
       {
@@ -3287,7 +3307,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1807,
+        "line": 1808,
         "kind": "literal"
       },
       {
@@ -3299,7 +3319,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1744,
+        "line": 1745,
         "kind": "literal"
       },
       {
@@ -3311,13 +3331,13 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 651,
+        "line": 652,
         "kind": "literal"
       },
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 839,
+        "line": 865,
         "kind": "literal"
       },
       {
@@ -3441,7 +3461,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          791
+          793
         ],
         "knownNames": [
           "subagent"
@@ -3467,8 +3487,8 @@
           "registration receives source-owned supervisor tool definitions"
         ],
         "lines": [
-          311,
-          638
+          313,
+          642
         ],
         "knownNames": [
           "contact_supervisor",
@@ -3538,7 +3558,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 585,
+      "sourceFiles": 591,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 82,
@@ -3623,6 +3643,10 @@
       },
       {
         "path": "agent/extensions/model-config.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/model-routing-config.ts",
         "exists": true
       },
       {
@@ -3909,6 +3933,14 @@
       },
       {
         "path": "agent/extensions/lib/model-facts.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/model-routing-metrics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/model-routing-store.ts",
         "exists": true
       },
       {
@@ -4895,6 +4927,12 @@
         ]
       },
       {
+        "source": "agent/extensions/model-routing-config.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/pi-background-tasks/src/core/registry.ts",
         "signals": [
           "wrapper/adapter"
@@ -5238,6 +5276,10 @@
       {
         "name": "cad-engineering",
         "path": "agent/skills/cad-engineering/SKILL.md"
+      },
+      {
+        "name": "cinematic-pixel-scene",
+        "path": "agent/skills/cinematic-pixel-scene/SKILL.md"
       },
       {
         "name": "classical-ml-modeling",
@@ -5632,6 +5674,10 @@
         "path": "agent/skills/scientific-paper-research/SKILL.md"
       },
       {
+        "name": "scroll-animated-websites",
+        "path": "agent/skills/scroll-animated-websites/SKILL.md"
+      },
+      {
         "name": "search-discoverability",
         "path": "agent/skills/search-discoverability/SKILL.md"
       },
@@ -5828,6 +5874,14 @@
       {
         "name": "EMAIL.md",
         "path": "docs/EMAIL.md"
+      },
+      {
+        "name": "GUARDIAN-IMPLEMENTATION-AUDIT.md",
+        "path": "docs/GUARDIAN-IMPLEMENTATION-AUDIT.md"
+      },
+      {
+        "name": "GUARDIAN-INTELLIGENCE.md",
+        "path": "docs/GUARDIAN-INTELLIGENCE.md"
       },
       {
         "name": "GUIDANCE-AND-DIAGNOSTICS.md",

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawnSync,spawn} from 'node:child_process';
 
 const source=path.resolve(import.meta.dirname,'..');
 function fixture(t, additions=[]){
@@ -12,6 +12,7 @@ function fixture(t, additions=[]){
   const repo=path.join(root,'repo'), target=path.join(root,'installed');
   const write=(base,relative,text)=>{const file=path.join(base,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text,{mode:0o600});};
   write(repo,'scripts/install.mjs',fs.readFileSync(path.join(source,'scripts/install.mjs')));
+  write(repo,'agent/scripts/lib/active-core-processes.mjs',fs.readFileSync(path.join(source,'agent/scripts/lib/active-core-processes.mjs')));
   write(repo,'scripts/build-core.mjs','// owned fixture build');
   write(repo,'package.json','{}');write(repo,'package-lock.json','{}');
   write(repo,'core/coding-agent/package.json',JSON.stringify({name:'@yunuspi/coding-agent',version:'0.1.0'}));
@@ -144,4 +145,33 @@ test('Python caches never become managed source or block a state-preserving upda
   const updated=f.update();assert.equal(updated.status,0,updated.stderr);
   for(const file of ['extensions/__pycache__','runtime/core/coding-agent/src/__pycache__'])
     assert.equal(fs.existsSync(path.join(f.target,file)),false);
+});
+
+test('direct CLI processes block replacement for absolute, relative and symlink entrypoints; exit permits retry',async t=>{
+  const f=fixture(t), core=path.join(f.target,'runtime/core/coding-agent'), cli=path.join(core,'dist/cli.js');
+  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',"console.log('ready');setInterval(()=>{},10000);");
+  const linked=path.join(f.root,'linked-cli.js');fs.symlinkSync(cli,linked);
+  for(const entry of [cli,'dist/cli.js',linked]){
+    const child=spawn(process.execPath,[entry],{cwd:core,stdio:['ignore','pipe','pipe']});
+    try{
+      await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error(`Fixture process exited ${code}`)));});
+      const inode=fs.statSync(f.target).ino,updated=f.update();
+      assert.notEqual(updated.status,0);assert.match(updated.stderr,/core processes are active/);
+      assert.equal(fs.statSync(f.target).ino,inode);assert.equal(f.backups().length,0);
+    }finally{const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}
+  }
+  const updated=f.update();assert.equal(updated.status,0,updated.stderr);assert.equal(f.backups().length,1);
+});
+
+test('a direct CLI started during dependency staging is caught again before activation',t=>{
+  const f=fixture(t),cli=path.join(f.target,'runtime/core/coding-agent/dist/cli.js');
+  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',"console.log('ready');setInterval(()=>{},10000);");
+  const bin=path.join(f.root,'bin'),pidFile=path.join(f.root,'direct.pid');fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin,'npm'),`#!${process.execPath}\nconst fs=require('node:fs');if(process.argv[2]==='ci'){const child=require('node:child_process').spawn(process.execPath,[${JSON.stringify(cli)}],{detached:true,stdio:['ignore','pipe','ignore']});child.stdout.once('data',()=>{fs.writeFileSync(${JSON.stringify(pidFile)},String(child.pid));child.unref();process.exit(0);});}`,{mode:0o755});
+  try{
+    const updated=spawnSync(process.execPath,[path.join(f.repo,'scripts/install.mjs'),'--target',f.target,'--skip-needle','--apply','--backup-existing','--preserve-state','--install-deps'],{encoding:'utf8',env:{...process.env,PATH:bin+path.delimiter+process.env.PATH}});
+    assert.ok(fs.existsSync(pidFile),'provider process started inside the staged dependency phase');
+    assert.notEqual(updated.status,0);assert.match(updated.stderr,/core processes are active/);assert.equal(f.backups().length,0);
+    assert.equal(fs.readdirSync(f.root).some(name=>name.startsWith('.yunuspi-install-')),false);
+  }finally{if(fs.existsSync(pidFile)){try{process.kill(Number(fs.readFileSync(pidFile,'utf8')));}catch(error){if(error.code!=='ESRCH')throw error;}}}
 });

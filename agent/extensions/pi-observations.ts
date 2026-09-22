@@ -1,3 +1,4 @@
+import { sessionObservability } from './lib/session-observability.ts';
 /**
  * Exact deduplication, bounded output distillation and visible-baseline deltas.
  * The session transcript owns original evidence;
@@ -81,7 +82,7 @@ const ERROR_FAMILY_LABELS = [
 // proven downstream use, which no observer can see).
 const noteHealth = (kind: string, data: Record<string, unknown>): void => {
 	try {
-		(globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.(kind, data);
+		sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data);
 	} catch {
 		/* telemetry is optional */
 	}

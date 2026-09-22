@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../../../lib/session-observability.ts';
 /** Tiny sparse nearest-prototype classifier. Curated examples, not learned user data.
  * Scores are cosine similarities, not calibrated probabilities. No I/O or dependencies. */
 const examples = [
@@ -29,7 +30,7 @@ export function localIntent(prompt:string): {name:string;similarity:number;overl
  }).sort((a,b)=>b.similarity-a.similarity);
  const best=ranked[0];
  if(best.overlap<3 || best.similarity<0.30 || best.similarity-ranked[1].similarity<0.12)return;
- try { (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("ml.intent",{route:best.name,similarity:best.similarity,overlap:best.overlap}); } catch {}
+ try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.intent",{route:best.name,similarity:best.similarity,overlap:best.overlap}); } catch {}
  return best;
 }
 

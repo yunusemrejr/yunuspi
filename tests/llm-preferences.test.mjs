@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-llm-prefs-"));
 process.env.PI_CODING_AGENT_DIR = root;
@@ -360,4 +362,150 @@ test("free-only is enforced even with disabled economy or absent registry prices
 			}
 		}
 	} finally { fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}'); }
+});
+
+
+test("strict editor saves are atomic, conflict-checked, and preserve unknown JSON fields", async () => {
+  const nested = path.join(root, "fresh-settings", "llm_preferences.json");
+  const initial = { version: 1, models: { first: { provider: "OpenRouter", model: "org/model", extra: { retained: true } } }, preferences: { subagents: ["first"] }, futureField: { retained: true } };
+  const saved = await prefs.saveLlmPreferencesDocument(nested, "missing", initial);
+  assert.equal(saved.ok, true, saved.reason);
+  assert.equal(fs.statSync(nested).mode & 0o777, 0o600);
+  const beforeBadSave = fs.readFileSync(nested);
+  const invalid = structuredClone(initial);
+  invalid.preferences.subagents = ["unknown-alias"];
+  const rejected = await prefs.saveLlmPreferencesDocument(nested, saved.revision, invalid);
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.reason, /unknown model alias/);
+  assert.deepEqual(fs.readFileSync(nested), beforeBadSave, "strict validation rejects the write without replacing valid JSON");
+
+  const changed = structuredClone(initial);
+  changed.preferences.subagents.push({ provider: "openrouter", model: "org/second", provider_options: { routing: "pinned", order: ["together"] } });
+  changed.newUnknownField = [1, 2, 3];
+  const updated = await prefs.saveLlmPreferencesDocument(nested, saved.revision, changed);
+  assert.equal(updated.ok, true, updated.reason);
+  assert.deepEqual(JSON.parse(fs.readFileSync(nested, "utf8")).futureField, { retained: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(nested, "utf8")).newUnknownField, [1, 2, 3]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${nested}.bak`, "utf8")), initial);
+
+  const currentRevision = updated.revision;
+  const manual = structuredClone(changed); manual.manualEdit = "keep me";
+  fs.writeFileSync(nested, JSON.stringify(manual));
+  const manualBytes = fs.readFileSync(nested);
+  const conflict = await prefs.saveLlmPreferencesDocument(nested, currentRevision, changed);
+  assert.equal(conflict.conflict, true);
+  assert.deepEqual(fs.readFileSync(nested), manualBytes, "a stale GUI revision leaves manual edits untouched");
+  const restored = await prefs.saveLlmPreferencesDocument(nested, prefs.readLlmPreferencesDocument(nested).revision, undefined, { restoreBackup: true });
+  assert.equal(restored.ok, true, restored.reason);
+  assert.deepEqual(JSON.parse(fs.readFileSync(nested, "utf8")), initial);
+});
+
+test("stale crash locks recover and independent writers serialize on the same revision", async () => {
+  const nested = path.join(root, "writer-settings", "llm_preferences.json");
+  const initial = { version: 1, models: {}, preferences: { subagents: [] } };
+  const first = await prefs.saveLlmPreferencesDocument(nested, "missing", initial);
+  assert.equal(first.ok, true, first.reason);
+
+  const lockPath = `${nested}.lock`;
+  fs.writeFileSync(lockPath, "");
+  const stale = new Date(Date.now() - 5_000);
+  fs.utimesSync(lockPath, stale, stale);
+  const recoveredDoc = { ...initial, recovered: true };
+  const recovered = await prefs.saveLlmPreferencesDocument(nested, first.revision, recoveredDoc);
+  assert.equal(recovered.ok, true, recovered.reason);
+  assert.equal(fs.existsSync(lockPath), false);
+
+  const revision = recovered.revision;
+  const moduleUrl = pathToFileURL(path.join(agent, "extensions/pi-subagents/src/runs/shared/llm-preferences.ts")).href;
+  const runWriter = document => new Promise((resolve, reject) => {
+    const source = `import { saveLlmPreferencesDocument } from ${JSON.stringify(moduleUrl)}; const result = await saveLlmPreferencesDocument(${JSON.stringify(nested)}, ${JSON.stringify(revision)}, ${JSON.stringify(document)}); process.stdout.write(JSON.stringify(result));`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", chunk => stdout += chunk);
+    child.stderr.setEncoding("utf8").on("data", chunk => stderr += chunk);
+    child.once("error", reject);
+    child.once("close", code => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(stderr || `writer exited ${code}`)));
+  });
+  const outcomes = await Promise.all([
+    runWriter({ ...recoveredDoc, writer: "a" }),
+    runWriter({ ...recoveredDoc, writer: "b" }),
+  ]);
+  assert.equal(outcomes.filter(result => result.ok).length, 1, "the lock admits one writer for an optimistic revision");
+  assert.equal(outcomes.filter(result => result.conflict).length, 1, "the later writer sees the updated revision");
+  assert.equal(fs.existsSync(lockPath), false, "all acquired locks are released");
+});
+
+test("malformed explicit backend restrictions are skipped instead of silently becoming automatic", () => {
+  for (const providerOptions of [
+    { routing: "pinned", order: [] },
+    { routing: "pinned", order: "together" },
+    { routing: "custom", only: "together" },
+    { routing: "custom", ignore: [42] },
+    { routing: "custom", order: ["together"], allow_fallbacks: "false" },
+    { routing: "unknown", order: ["together"] },
+    { routing: 7, order: ["together"] },
+  ]) {
+    writePrefs({ models: {}, preferences: { subagents: { models: [
+      { provider: "openrouter", model: "google/gemini-2.5-flash", provider_options: providerOptions },
+      { provider: "deepseek", model: "deepseek-chat" },
+    ] } } });
+    const skipped = [];
+    const chain = fallback.resolveLlmPreferenceChain("subagents", registry, { onSkip: event => skipped.push(event) });
+    assert.deepEqual(chain.map(item => item.route), ["deepseek/deepseek-chat"], JSON.stringify(providerOptions));
+    assert.ok(skipped.some(event => /provider_options|pinned routing/.test(event.reason)));
+  }
+});
+
+test("disk failures preserve canonical bytes, return diagnostics, and release the writer lock", async () => {
+  const configPath = path.join(root, "disk-failure", "llm_preferences.json");
+  const initial = { models: {}, preferences: {}, marker: "original" };
+  const first = await prefs.saveLlmPreferencesDocument(configPath, "missing", initial);
+  const original = fs.readFileSync(configPath);
+  const originalRename = fs.renameSync;
+  try {
+    fs.renameSync = (from, to) => {
+      if (to === `${configPath}.bak`) throw new Error("simulated backup disk failure");
+      return originalRename(from, to);
+    };
+    syncBuiltinESMExports();
+    const backupFailure = await prefs.saveLlmPreferencesDocument(configPath, first.revision, { ...initial, marker: "new" });
+    assert.equal(backupFailure.ok, false);
+    assert.match(backupFailure.reason, /backup disk failure/);
+    assert.equal(fs.readFileSync(configPath).compare(original), 0);
+    assert.equal(fs.existsSync(`${configPath}.lock`), false);
+    fs.renameSync = (from, to) => {
+      if (to === configPath) throw new Error("simulated canonical rename failure");
+      return originalRename(from, to);
+    };
+    syncBuiltinESMExports();
+    const renameFailure = await prefs.saveLlmPreferencesDocument(configPath, first.revision, { ...initial, marker: "new" });
+    assert.equal(renameFailure.ok, false);
+    assert.match(renameFailure.reason, /canonical rename failure/);
+    assert.equal(fs.readFileSync(configPath).compare(original), 0);
+    assert.equal(fs.existsSync(`${configPath}.lock`), false);
+  } finally { fs.renameSync = originalRename; syncBuiltinESMExports(); }
+
+  const originalFsync = fs.fsyncSync;
+  let replacementInstalled = false;
+  try {
+    fs.renameSync = (from, to) => {
+      const result = originalRename(from, to);
+      if (to === configPath) replacementInstalled = true;
+      return result;
+    };
+    fs.fsyncSync = fd => {
+      if (replacementInstalled && fs.fstatSync(fd).isDirectory()) {
+        replacementInstalled = false;
+        fs.fsyncSync = originalFsync;
+        throw new Error("simulated post-rename durability failure");
+      }
+      return originalFsync(fd);
+    };
+    syncBuiltinESMExports();
+    const failed = await prefs.saveLlmPreferencesDocument(configPath, first.revision, { ...initial, marker: "new" });
+    assert.equal(failed.ok, false);
+    assert.match(failed.reason, /durability failure/);
+    assert.equal(fs.readFileSync(configPath).compare(original), 0, "read-back-owned rollback restores exact previous bytes");
+    assert.equal(fs.existsSync(`${configPath}.lock`), false);
+  } finally { fs.renameSync = originalRename; fs.fsyncSync = originalFsync; syncBuiltinESMExports(); }
 });

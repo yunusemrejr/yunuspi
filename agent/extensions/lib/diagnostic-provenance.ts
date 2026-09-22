@@ -59,6 +59,75 @@ function readJson(file: string): Record<string, unknown> | undefined {
 	}
 }
 
+function readSmallText(file: string, maxBytes = 16 * 1024): string | undefined {
+	try {
+		const stat = fs.statSync(file);
+		if (!stat.isFile() || stat.size > maxBytes) return undefined;
+		return fs.readFileSync(file, "utf8").trim();
+	} catch {
+		return undefined;
+	}
+}
+
+function validGitObjectId(value: string | undefined): value is string {
+	return typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+}
+
+function safeGitRef(value: string): boolean {
+	return value.startsWith("refs/")
+		&& /^[A-Za-z0-9._/-]+$/.test(value)
+		&& value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+function packedRef(gitDirs: string[], ref: string): string | undefined {
+	for (const gitDir of gitDirs) {
+		const packed = readSmallText(path.join(gitDir, "packed-refs"), 16 * 1024 * 1024);
+		if (!packed) continue;
+		for (const line of packed.split(/\r?\n/)) {
+			if (line.startsWith("#") || line.startsWith("^")) continue;
+			const match = /^([a-f0-9]{40}|[a-f0-9]{64}) (refs\/.+)$/.exec(line);
+			if (match?.[2] === ref) return match[1];
+		}
+	}
+	return undefined;
+}
+
+/** Resolve ordinary and linked-worktree Git metadata without shelling out.
+ * Worktree .git files point to a per-worktree gitdir; refs may live in the
+ * shared common directory or only in its packed-refs file. */
+function readGitSha(repoRoot: string): string | undefined {
+	const dotGit = path.join(repoRoot, ".git");
+	let gitDir: string;
+	try {
+		const stat = fs.statSync(dotGit);
+		if (stat.isDirectory()) gitDir = dotGit;
+		else if (stat.isFile()) {
+			const pointer = readSmallText(dotGit, 4096);
+			const match = pointer && /^gitdir:\s*(.+)$/.exec(pointer);
+			if (!match) return undefined;
+			gitDir = path.resolve(repoRoot, match[1]!);
+		} else return undefined;
+	} catch {
+		return undefined;
+	}
+	try { if (!fs.statSync(gitDir).isDirectory()) return undefined; } catch { return undefined; }
+	let commonDir = gitDir;
+	const commonPointer = readSmallText(path.join(gitDir, "commondir"), 4096);
+	if (commonPointer) commonDir = path.resolve(gitDir, commonPointer);
+	try { if (!fs.statSync(commonDir).isDirectory()) commonDir = gitDir; } catch { commonDir = gitDir; }
+	const gitDirs = commonDir === gitDir ? [gitDir] : [gitDir, commonDir];
+	const head = readSmallText(path.join(gitDir, "HEAD"), 4096);
+	if (validGitObjectId(head)) return head;
+	const symbolic = head && /^ref:\s*(\S+)$/.exec(head)?.[1];
+	if (!symbolic || !safeGitRef(symbolic)) return undefined;
+	for (const base of gitDirs) {
+		const loose = readSmallText(path.join(base, symbolic), 256);
+		if (validGitObjectId(loose)) return loose;
+	}
+	const packed = packedRef(gitDirs, symbolic);
+	return validGitObjectId(packed) ? packed : undefined;
+}
+
 export interface ProvenancePaths {
 	repoRoot?: string;
 	agentDir?: string;
@@ -81,18 +150,7 @@ export function collectRuntimeProvenance(paths: ProvenancePaths = {}): RuntimePr
 		collectedAt: Date.now(),
 	};
 	if (repoRoot) {
-		try {
-			const head = fs.readFileSync(path.join(repoRoot, ".git", "HEAD"), "utf8").trim();
-			const match = /^ref: (.+)$/.exec(head);
-			if (match) {
-				const sha = fs.readFileSync(path.join(repoRoot, ".git", match[1]!), "utf8").trim();
-				if (/^[a-f0-9]{40}$/.test(sha)) provenance.gitSha = sha;
-			} else if (/^[a-f0-9]{40}$/.test(head)) {
-				provenance.gitSha = head;
-			}
-		} catch {
-			// Non-git installs (live tree) leave gitSha missing, not invented.
-		}
+		provenance.gitSha = readGitSha(repoRoot);
 		const identity = readJson(path.join(repoRoot, "core", "identity.json"));
 		if (typeof identity?.name === "string") provenance.coreName = identity.name.slice(0, 80);
 		if (typeof identity?.version === "string") provenance.coreVersion = identity.version.slice(0, 32);

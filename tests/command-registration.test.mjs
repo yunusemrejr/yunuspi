@@ -12,7 +12,7 @@ const expected = [
   "effort", "errors", "export-json", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
   "logs", "memory-prime", "metrics", "obs", "or-provider", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
-  "subagent-cost", "subagents", "subagents-check-profile", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-generate-profiles", "subagents-inspect-rpc",
+  "models", "subagent-cost", "subagents", "subagents-check-profile", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-generate-profiles", "subagents-inspect-rpc",
   "subagents-load-profile", "subagents-models", "subagents-profiles", "subagents-refine", "subagents-refresh-provider-models", "subagents-steer", "subagents-stop", "subagents-watchdog",
   "sys-prompt", "tasks", "todos", "used", "websearch",
 ].sort();
@@ -49,7 +49,7 @@ test("the installed extension graph registers every shipped command without load
     const result = JSON.parse(child.stdout.trim().split("\n").at(-1));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
-    assert.equal(result.extensions, 45);
+    assert.equal(result.extensions, 46);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

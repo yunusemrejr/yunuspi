@@ -6,6 +6,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const PUBLIC_BINARY_SHA256 = {
   // Pi 0.85.1 asset; byte-identical to fork origin d981de1229ef899957bbe968bc8dcda02a21f477.
   "core/coding-agent/src/modes/interactive/assets/clankolas.png": "169acd0dfe6fbb8d8742ed24a3fc654fd0b2e2d4223c733249c5493723f1b72d",
@@ -39,6 +41,12 @@ const PUBLIC_BINARY_SHA256 = {
     "8515404dceed38e1ed86aa34b09fcf3379fff1b4ff9dd3967bcd6d1eb5ac3d8f",
   "agent/extensions/pi-lens/grammars/tree-sitter-yaml.wasm":
     "e752dc21c3591df9b45692fe417d101f45d1828c28c44d79005f4066dc7e4e91",
+  // Guardian's no-import kernels are source-built by scripts/guardian/build-wasm.mjs;
+  // scanner acceptance also requires the checked-in manifest and source hashes below.
+  "core/coding-agent/src/core/guardian/classifier.wasm":
+    "d325cf354b67fa27ff46d0299bf01f50ca778d3c23ae7afccdd1785e0fb5626c",
+  "core/coding-agent/src/core/guardian/similarity.wasm":
+    "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
 };
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -53,6 +61,27 @@ const placeholder =
 const envReference = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 const publishable = (value) => placeholder.test(value) || envReference.test(value);
 
+function guardianWasmHasCurrentProvenance(name, data, digest) {
+  if (!name.startsWith("core/coding-agent/src/core/guardian/") || !name.endsWith(".wasm")) return true;
+  try {
+    const directory = path.join(REPO_ROOT, "core/coding-agent/src/core/guardian");
+    const provenance = JSON.parse(fs.readFileSync(path.join(directory, "wasm-provenance.json"), "utf8"));
+    const artifact = provenance?.artifacts?.[path.basename(name)];
+    if (provenance?.format !== "yunuspi-guardian-wasm-provenance-v1" || provenance.buildCommand !== "node scripts/guardian/build-wasm.mjs" || provenance.target !== "wasm32-unknown-unknown") return false;
+    if (artifact?.sha256 !== digest || artifact.bytes !== data.length || !Array.isArray(artifact.imports) || artifact.imports.length !== 0) return false;
+    for (const [relativePath, expectedHash] of Object.entries(provenance.sources ?? {})) {
+      const source = path.join(directory, path.basename(relativePath));
+      if (createHash("sha256").update(fs.readFileSync(source)).digest("hex") !== expectedHash) return false;
+    }
+    for (const [relativePath, expectedHash] of Object.entries(provenance.trainingSources ?? {})) {
+      if (createHash("sha256").update(fs.readFileSync(path.join(REPO_ROOT, relativePath))).digest("hex") !== expectedHash) return false;
+    }
+    return Boolean(provenance.compiler && provenance.flags?.length && provenance.modelTraining && provenance.trainingData);
+  } catch {
+    return false;
+  }
+}
+
 export function scanContent(name, data) {
   const findings = [];
   const add = (rule) => findings.push({ path: name, rule });
@@ -61,10 +90,8 @@ export function scanContent(name, data) {
     return findings;
   }
   if (data.includes(0)) {
-    if (
-      PUBLIC_BINARY_SHA256[name] ===
-      createHash("sha256").update(data).digest("hex")
-    )
+    const digest = createHash("sha256").update(data).digest("hex");
+    if (PUBLIC_BINARY_SHA256[name] === digest && guardianWasmHasCurrentProvenance(name, data, digest))
       return findings;
     add("binary-unreviewed-file");
     return findings;

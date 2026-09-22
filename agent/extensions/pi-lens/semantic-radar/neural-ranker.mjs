@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../lib/session-observability.ts';
 // Local advisory ranking only: never changes candidate eligibility, tiers,
 // lexical identity, cluster edges, or tool/model permissions. No online training.
 import fs from "node:fs";
@@ -118,7 +119,7 @@ export function rankCandidates(fp, candidates, { mode = neuralRankerMode() } = {
   }
   // Existing bounded health sink accepts scalar evidence only; no source,
   // path, prompt, literal, or feature vector is written to telemetry.
-  try { globalThis[Symbol.for("yunus-pi.health.v1")]?.("ml.radar.rank", {
+  try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.radar.rank", {
     decision: mode, route: model.modelId, count: scored, dropped: fallback,
     durationMs: performance.now() - start,
   }); } catch {}

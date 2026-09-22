@@ -84,13 +84,15 @@ import { readChildToolDiagnosticError } from "../shared/tool-availability.ts";
 import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTrackedMutations } from "../shared/mutation-evidence.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import {
-	buildModelCandidates,
+	buildModelRouteCandidates,
 	formatSubagentModelVerificationError,
 	formatModelAttemptNote,
 	isContextOverflow,
 	isRetryableModelFailureAttempt,
 	recordRetryableModelFailure,
 } from "../shared/model-fallback.ts";
+import { modelRouteCandidateAt, routeOf, type ModelRouteCandidate } from "../../shared/model-route.ts";
+import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import {
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
 	formatSubagentExtensionConflictError,
@@ -369,6 +371,8 @@ async function runSingleAttempt(
 		systemPrompt: string;
 		resolvedSkillNames?: string[];
 		modelCandidates?: string[];
+		modelRouteCandidates?: ModelRouteCandidate[];
+		modelRouteCandidate?: ModelRouteCandidate;
 		skillsWarning?: string;
 		jsonlPath?: string;
 		artifactPaths?: ArtifactPaths;
@@ -451,6 +455,8 @@ async function runSingleAttempt(
 		structuredOutput: options.structuredOutput,
 		fast: options.fast ?? agent.fast,
 		modelCandidates: shared.modelCandidates,
+		modelRouteCandidates: shared.modelRouteCandidates,
+		modelRouteCandidate: shared.modelRouteCandidate,
 		toolBudget: options.toolBudget,
 		allowZeroToolBudget: options.allowZeroToolBudget,
 		permissionRules,
@@ -1955,7 +1961,7 @@ async function runSyncCompletionInner(
 	systemPrompt = appendAgentRefinementOverlay(systemPrompt, { cwd: skillCwd, agentName });
 	systemPrompt = injectOutputPathSystemPrompt(systemPrompt, options.outputPath, agent);
 
-	const candidates = buildModelCandidates(
+	const configuredCandidates = options.modelRouteCandidates?.length ? options.modelRouteCandidates : buildModelRouteCandidates(
 		options.modelOverride ?? agent.model,
 		agent.fallbackModels,
 		options.availableModels,
@@ -1968,9 +1974,14 @@ async function runSyncCompletionInner(
 			origin: options.modelOrigin ?? (options.modelOverrideFromParent ? "inherited" : "configured"),
 		},
 	);
+	const candidates = configuredCandidates.flatMap((candidate) => {
+		const route = applyThinkingSuffix(candidate.route, options.thinkingOverride ?? agent.thinking, options.thinkingOverride !== undefined);
+		return route ? [{ ...candidate, route }] : [];
+	});
+	const modelCandidates = candidates.map((candidate) => candidate.route);
 	if (options.workflowChildPermitLaunch && candidates.length > 1 && (() => {
 		const allowed=workflowChildPermitRoutes(options.workflowChildPermitLaunch.permit);
-		const requested=[...new Set(candidates.map(value=>splitKnownThinkingSuffix(value).baseModel))];
+		const requested=[...new Set(candidates.map(value=>splitKnownThinkingSuffix(value.route).baseModel))];
 		return requested.length!==allowed.length || requested.some(route=>!allowed.includes(route));
 	})()) {
 		const error = "Workflow child permit does not authorize these continuation routes.";
@@ -1986,7 +1997,7 @@ async function runSyncCompletionInner(
 	}
 	try {
 		for (const candidate of candidates) {
-			const model = applyThinkingSuffix(candidate, options.thinkingOverride ?? agent.thinking, options.thinkingOverride !== undefined);
+			const model = candidate.route;
 			assertThinkingWithinCeiling({ model, configThinking: options.thinkingOverride ?? agent.thinking, ceiling: options.thinkingCeiling, agent: agent.name, runId: options.runId });
 		}
 	} catch (error) {
@@ -2073,14 +2084,22 @@ async function runSyncCompletionInner(
 		},
 	};
 	let lastResult: SingleResult | undefined;
-	const modelsToTry = candidates.length > 0 ? candidates : [undefined];
+	const modelsToTry: Array<ModelRouteCandidate | undefined> = candidates.length > 0 ? candidates : [undefined];
 	// Escalated to "file" after an unexplained zero-activity startup failure so
 	// retries keep the task text out of argv (endpoint pre-exec scans may deny it).
 	let taskDeliveryOverride: SubagentTaskDelivery | undefined;
 	let abortRecoveryAttempted = false;
 	let nextAttemptTask = taskWithAcceptance;
 	modelAttemptsLoop: for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex++) {
-		const candidate = modelsToTry[modelIndex];
+		const routeCandidate = modelRouteCandidateAt(candidates, modelIndex);
+		const candidate = routeCandidate?.route;
+		recordModelRoutingAttempt({
+			route: candidate,
+			fromRoute: modelIndex > 0 ? routeOf(modelRouteCandidateAt(candidates, modelIndex - 1)) : undefined,
+			source: options.modelOrigin ?? "subagents",
+			fallback: modelIndex > 0,
+			providerRouting: routeCandidate?.providerRouting,
+		});
 		for (let startupAttemptIndex = 0; ; startupAttemptIndex++) {
 			const recoveringAbort = abortRecoveryAttempted;
 			const attemptTask = nextAttemptTask;
@@ -2098,9 +2117,9 @@ async function runSyncCompletionInner(
 				artifactPaths: artifactPathsResult,
 				transcriptWriter,
 				attemptNotes,
-				modelCandidates: candidates
-					.map((modelCandidate) => applyThinkingSuffix(modelCandidate, options.thinkingOverride ?? agent.thinking, options.thinkingOverride !== undefined))
-					.filter((modelCandidate): modelCandidate is string => Boolean(modelCandidate)),
+		modelCandidates,
+		modelRouteCandidates: candidates,
+				modelRouteCandidate: routeCandidate,
 				outputSnapshot,
 				originalTask: task,
 				taskDelivery: taskDeliveryOverride,

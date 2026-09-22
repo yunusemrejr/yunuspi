@@ -9,6 +9,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     { name: "model", description: "Select model (opens selector UI)", argumentHint: "<provider/model>" },
     { name: "tree", description: "Navigate session tree (switch branches)" },
     { name: "thinking", description: "Set thinking level", argumentHint: "<level>" },
+    { name: "guardian", description: "Control Guardian guidance for this session", argumentHint: "<on|off|status|stats|debug>" },
     { name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
     { name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
     { name: "import", description: "Import and resume a session from a JSONL file" },

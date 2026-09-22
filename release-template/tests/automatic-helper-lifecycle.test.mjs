@@ -58,38 +58,13 @@ test('a delayed preparation cannot launch helpers for a newer request, session, 
  }
 });
 
-test('interpretation is passive next-turn advice and never changes main model or thinking',async()=>{
+test('unclear follow-ups do not launch a second interpretation sidecar',async()=>{
  const fx=fixture();
  await fx.input('Handle the rest.');
  await fx.emit('before_agent_start',{prompt:'Handle the rest.'});
  await tick();
- assert.equal(fx.calls.length,1);
- assert.equal(fx.calls[0][1].modelOrigin,'explicit');
- assert.deepEqual(fx.messages.map(x=>x.options),[{deliverAs:'nextTurn',triggerTurn:false}]);
- assert.equal(fx.messages[0].message.customType,'interp-second-read');
- await fx.emit('session_shutdown');
-});
-
-test('late interpretation results are discarded after new user input',async()=>{
- let release;
- const fx=fixture({launch:()=>new Promise(resolve=>{release=resolve;})});
- await fx.input('Handle the rest.');
- await fx.emit('before_agent_start',{prompt:'Handle the rest.'});
- assert.equal(fx.calls.length,1);
- await fx.input('New task: summarize this sentence.');
- release(result('READ: redirect\nWHY: old interpretation'));
- await tick();
+ assert.equal(fx.calls.length,0);
  assert.equal(fx.messages.length,0);
- assert.equal(fx.calls[0][2].aborted,true);
- await fx.emit('session_shutdown');
-});
-
-test('rejected asynchronous advice delivery is handled',async()=>{
- const fx=fixture({send:async()=>{throw Error('session closed');}});
- await fx.input('Handle the rest.');
- await fx.emit('before_agent_start',{prompt:'Handle the rest.'});
- await tick();
- assert.equal(fx.messages.length,1);
  await fx.emit('session_shutdown');
 });
 

@@ -1,6 +1,10 @@
+export { sessionObservability, withSessionObservability } from "./core/session-observability.js";
 export { type Args, parseArgs } from "./cli/args.ts";
 export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.ts";
 export { AgentSession, type AgentSessionConfig, type AgentSessionEvent, type AgentSessionEventListener, type ModelCycleResult, type ParsedSkillBlock, type PromptOptions, parseSkillBlock, type SessionStats, } from "./core/agent-session.ts";
+export { InterventionControl, DEFAULT_BUDGETS, isActionable, isNoOpIntent, noopReceipt, type DecisionOutcome, type InterventionBudgets, type InterventionCategory, type InterventionDecision, type InterventionEvidenceRef, type InterventionIntent, type InterventionControlOptions, type SlotClaim } from "./core/intervention-control.js";
+export { createInterventionSession, type InterventionSession, type InterventionSessionOptions, type ShadowAudit, type ShadowRecord } from "./core/intervention-session.js";
+export { GuardianSupervisor, GUARDIAN_REQUEST_META, guardianOwnerForSession, guardianRequestMessages, relayIntelligenceUsageFromChild, tagGuardianRequestMessage, type GuardianRequestMetadata } from "./core/guardian/guardian-supervisor.js";
 export { readStoredCredential } from "./core/auth-storage.ts";
 export { type BranchPreparation, type BranchSummaryResult, type CollectEntriesResult, type CompactionResult, type CutPointResult, calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, type FileOperations, findCutPoint, findTurnStartIndex, type GenerateBranchSummaryOptions, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";

@@ -14,6 +14,7 @@ import { createEventBus } from "../core/coding-agent/src/core/event-bus.js";
 const commandMethods = {
   settings: "showSettingsSelector", "scoped-models": "showModelsSelector", model: "handleModelCommand",
   thinking: "handleThinkingCommand", export: "handleExportCommand", import: "handleImportCommand",
+  guardian: "handleGuardianCommand",
   share: "handleShareCommand", copy: "handleCopyCommand", name: "handleNameCommand", session: "handleSessionCommand",
   changelog: "handleChangelogCommand", hotkeys: "handleHotkeysCommand", fork: "showUserMessageSelector",
   clone: "handleCloneCommand", tree: "showTreeSelector", trust: "showTrustSelector", login: "handleLoginCommand",
@@ -79,6 +80,34 @@ test("submitted builtin and streaming errors are displayed without rejecting int
   fixture.mode.session.prompt = async () => { throw new Error("Queue unavailable"); };
   await fixture.mode.defaultEditor.onSubmit("Continue the task");
   assert.deepEqual(fixture.errors, ["Session directory unavailable", "Clone failed", "Queue unavailable"]);
+});
+
+test("Guardian controls route immediately through prompt while idle, active, and Alt+Enter", async () => {
+  for (const command of ["/guardian", "/guardian status", "/guardian off"]) {
+    const fixture = editorFixture();
+    const delivered = [];
+    fixture.mode.runtimeHost.session.isStreaming = true;
+    fixture.mode.runtimeHost.session.prompt = async (...args) => delivered.push(args);
+    fixture.mode.handleGuardianCommand = async (text) => fixture.mode.runtimeHost.session.prompt(text);
+    await fixture.mode.defaultEditor.onSubmit(command);
+    assert.deepEqual(delivered, [[command]]);
+    assert.deepEqual(fixture.prompts, []);
+    assert.deepEqual(fixture.queued, []);
+  }
+
+  const fixture = editorFixture();
+  const delivered = [];
+  fixture.mode.runtimeHost.session.isStreaming = true;
+  fixture.mode.runtimeHost.session.prompt = async (...args) => delivered.push(args);
+  fixture.mode.handleGuardianCommand = async (text) => fixture.mode.runtimeHost.session.prompt(text);
+  fixture.mode.editor.getText = () => fixture.mode._guardianTestText ?? "";
+  fixture.mode.editor.getExpandedText = () => fixture.mode._guardianTestText ?? "";
+  fixture.mode.editor.setText = (text) => { fixture.mode._guardianTestText = text; };
+  fixture.mode._guardianTestText = "/guardian off";
+  await fixture.mode.handleFollowUp();
+  assert.deepEqual(delivered, [["/guardian off"]]);
+  assert.deepEqual(fixture.prompts, []);
+  assert.deepEqual(fixture.queued, []);
 });
 
 test("extension commands with whitespace arguments run immediately while compacting or streaming", async () => {
@@ -182,6 +211,30 @@ test("extension error delivery survives throwing listeners and logs only safe me
     if (previous === undefined) delete globalThis[key];
     else globalThis[key] = previous;
   }
+});
+
+test("context request indices are recomputed after earlier handlers insert messages", async () => {
+  const requestMeta = Symbol.for("yunuspi.guardian.request-meta.v1");
+  const userMessage = { role: "user", content: [{ type: "text", text: "review this" }] };
+  Object.defineProperty(userMessage, requestMeta, { value: { requestId: "request-a", turnId: "turn-a" }, enumerable: false });
+  let laterEvent;
+  const first = { handlers: new Map([["context", [async (event) => ({ messages: [{ role: "custom", content: [] }, ...event.messages] })]]]) };
+  const later = { handlers: new Map([["context", [async (event) => { laterEvent = event; }]]]) };
+  const runner = new ExtensionRunner([first, later], {}, process.cwd(), {}, {});
+  runner.createContext = () => ({});
+
+  const output = await runner.emitContext([userMessage], {
+    requestMessages: [{ requestId: "request-a", turnId: "turn-a", messageIndex: 0 }],
+    requestId: "request-a",
+    turnId: "turn-a",
+    requestMessageIndex: 0,
+  });
+
+  assert.equal(laterEvent.requestMessageIndex, 1);
+  assert.deepEqual(laterEvent.requestMessages, [{ requestId: "request-a", turnId: "turn-a", messageIndex: 1 }]);
+  assert.equal(output[1].role, "user");
+  assert.equal(Object.keys(output[1]).includes(String(requestMeta)), false);
+  assert.equal(structuredClone(output).flatMap((message) => Object.getOwnPropertySymbols(message)).length, 0);
 });
 
 

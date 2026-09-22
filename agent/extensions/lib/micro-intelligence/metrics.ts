@@ -1,3 +1,4 @@
+import { sessionObservability } from '../session-observability.ts';
 /** Unified micro-intelligence metrics. Every helper (deterministic, Needle,
  * Smol, Kompress, Jev, full-LLM arbitration) reports offers, runs, skips and
  * latencies here so utilization and savings are measurable instead of
@@ -195,13 +196,13 @@ export type MicroMetrics = ReturnType<typeof createMicroMetrics>;
 // Jiti isolates extension modules; all producers and status readers share this
 // session collector, while already-running work can retain its old collector.
 const SHARED_METRICS = Symbol.for("yunus-pi.micro-metrics.v1");
-const processState = globalThis as typeof globalThis & { [SHARED_METRICS]?: MicroMetrics };
+const collectorScope = () => sessionObservability() as { [SHARED_METRICS]?: MicroMetrics };
 
 export function microMetrics(): MicroMetrics {
-  return processState[SHARED_METRICS] ??= createMicroMetrics();
+  return collectorScope()[SHARED_METRICS] ??= createMicroMetrics();
 }
 
 /** Session boundary: pending callers retain their original collector. */
 export function resetMicroMetrics(): void {
-  delete processState[SHARED_METRICS];
+  delete collectorScope()[SHARED_METRICS];
 }

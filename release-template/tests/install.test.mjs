@@ -8,6 +8,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-installer-test-'));
 const repo=path.join(root,'repo'), script=path.join(repo,'scripts/install.mjs');
 const source=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 fs.mkdirSync(path.dirname(script),{recursive:true});fs.copyFileSync(path.join(source,'scripts/install.mjs'),script);
+fs.mkdirSync(path.join(repo,'agent/scripts/lib'),{recursive:true});fs.copyFileSync(path.join(source,'agent/scripts/lib/active-core-processes.mjs'),path.join(repo,'agent/scripts/lib/active-core-processes.mjs'));
 fs.writeFileSync(path.join(repo,'scripts/build-core.mjs'),'// owned build fixture');
 fs.mkdirSync(path.join(repo,'docs'));fs.writeFileSync(path.join(repo,'docs/INSTALL.md'),'YunusPi source installation');
 fs.writeFileSync(path.join(repo,'AGENTS.md'),'Owned-source development');

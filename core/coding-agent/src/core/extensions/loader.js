@@ -1,3 +1,4 @@
+import { sessionObservability, withSessionObservability } from "../session-observability.js";
 /**
  * Extension loader - loads TypeScript extension modules using jiti.
  *
@@ -151,6 +152,7 @@ export function createExtensionRuntime() {
         throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
     };
     const state = {};
+    let eventBus;
     const eventBusUnsubscribers = new Set();
     const assertActive = () => {
         if (state.staleMessage) {
@@ -177,6 +179,13 @@ export function createExtensionRuntime() {
         pendingProviderRegistrations: [],
         pendingNativeProviderRegistrations: [],
         assertActive,
+        bindEventBus: (bus) => { eventBus = bus; },
+        emitEvent: (channel, data) => { assertActive(); eventBus?.emit(channel, data); },
+        onEvent: (channel, handler) => {
+            assertActive();
+            if (!eventBus) return () => {};
+            return runtime.trackEventBusSubscription(eventBus.on(channel, handler));
+        },
         invalidate: (message) => {
             if (state.staleMessage)
                 return;
@@ -246,7 +255,7 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
         on(event, handler) {
             assertActive();
             const list = extension.handlers.get(event) ?? [];
-            list.push((function instrumentHook(handler, hook, extensionPath) {
+            const instrumented = (function instrumentHook(handler, hook, extensionPath) {
  // Count decision/check boundaries, not every streamed token, UI notification,
  // lifecycle observer or the telemetry observer itself. Keep this list aligned
  // with session-metrics.ts so pre-V2 history is interpreted by the same contract.
@@ -319,7 +328,7 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
   } catch { return undefined; }
  };
  return async function (...args) {
-  const sink = globalThis[Symbol.for("yunus-pi.metrics.v1")];
+  const sink = sessionObservability()[Symbol.for("yunus-pi.metrics.v1")];
   if (typeof sink !== "function") return handler.apply(this, args);
   const started = performance.now(),
    event = args[0];
@@ -406,7 +415,8 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
    } catch {}
   }
  };
-})(handler,event,extension.path));
+})(handler,event,extension.path);
+            list.push(function (...args) { return withSessionObservability(args[1], () => instrumented.apply(this, args)); });
             extension.handlers.set(event, list); /* PI_HOOK_METRICS_V3 */
         },
         registerTool(tool) {
@@ -427,13 +437,16 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
             }
             extension.commands.set(name, {
                 ...options,
+                handler: function (...args) { return withSessionObservability(args[1], () => options.handler.apply(this, args)); },
                 name,
                 sourceInfo: extension.sourceInfo,
             });
         },
         registerShortcut(shortcut, options) {
             assertActive();
-            extension.shortcuts.set(shortcut, { shortcut, extensionPath: extension.path, ...options });
+            extension.shortcuts.set(shortcut, { shortcut, extensionPath: extension.path, ...options,
+                handler: function (...args) { return withSessionObservability(args[0], () => options.handler.apply(this, args)); },
+            });
         },
         registerFlag(name, options) {
             assertActive();
@@ -682,6 +695,7 @@ async function loadExtensionsInternal(paths, cwd, eventBus, runtime, useCache = 
     const resolvedCwd = cacheToken?.cwd ?? resolvePath(cwd);
     const resolvedEventBus = eventBus ?? createEventBus();
     const resolvedRuntime = runtime ?? createExtensionRuntime();
+    resolvedRuntime.bindEventBus?.(resolvedEventBus);
     for (const extPath of paths) {
         const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, resolvedRuntime, cacheToken);
         if (error) {

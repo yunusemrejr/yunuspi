@@ -1,3 +1,4 @@
+import { sessionObservability } from '../../../../lib/session-observability.ts';
 import {localIntent} from "./local-intent.ts";
 import {extractTaskIntent} from "./task-intent-model.ts";
 import {precisionRankSkill} from "../../../../lib/skill-telemetry.ts";
@@ -143,7 +144,7 @@ export function routeSkills(prompt = '', file = '') {
     const route = inferred && skillRoutes.find(r=>r.name===inferred.name);
     if (route) matches.push({name:route.name,check:route.check,priority:50});
   }
-  try { for(const m of matches) (globalThis as any)[Symbol.for("yunus-pi.health.v1")]?.("skill.route",{route:m.name}); } catch {}
+  try { for(const m of matches) sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.route",{route:m.name}); } catch {}
   return matches;
 }
 /**

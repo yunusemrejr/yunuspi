@@ -1,3 +1,4 @@
+import { sessionObservability } from './session-observability.ts';
 /** Optional, speculative line selection. Never delays a provider request. */
 import { open, stat, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { microMetrics } from './micro-intelligence/metrics.ts';
 /** Best-effort capability telemetry. Failures here never affect selection. */
 function noteHealth(kind: string, data: Record<string, unknown>): void {
   if (kind === 'ml.smol.offer' && data.decision !== 'accepted' && data.decision !== 'cache-hit') microMetrics().skip('smol', String(data.decision));
-  try { (globalThis as any)[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
+  try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.(kind, data); } catch { /* telemetry is optional */ }
 }
 import { prepareSmolExtraction, smolExtractionSchema, validateSmolExtraction, renderSmolExtraction, prepareSmolWindow, renderSmolWindow, smolProtectedLine, type SmolWindow, type SmolExtractionSource } from './smol-extraction.ts';
 

@@ -514,6 +514,11 @@ export type SessionEvent = SessionStartEvent | SessionInfoChangedEvent | Session
 export interface ContextEvent {
     type: "context";
     messages: AgentMessage[];
+    /** Exact request provenance carried by live Guardian-tagged user messages. */
+    requestMessages?: Array<{ requestId: string; turnId: string; messageIndex: number }>;
+    requestId?: string;
+    turnId?: string;
+    requestMessageIndex?: number;
 }
 /** Fired before a provider request is sent. Can replace the payload. */
 export interface BeforeProviderRequestEvent {
@@ -664,6 +669,15 @@ export interface InputEvent {
     source: InputSource;
     /** How the input will be delivered during streaming, or undefined when idle */
     streamingBehavior?: "steer" | "followUp";
+    /** Unmodified input before extension transforms or template expansion. */
+    originalText?: string;
+    requestId?: string;
+    turnId?: string;
+    sessionId?: string;
+    processId?: string;
+    guardianOwnerId?: string;
+    /** Remains live through asynchronous input preflight and queue acceptance. */
+    signal?: AbortSignal;
 }
 /** Result from input event handler */
 export type InputEventResult = {
@@ -1229,6 +1243,9 @@ export interface ExtensionRuntimeState {
     invalidate: (message?: string) => void;
     /** Retain an event-bus subscription until this runtime is invalidated. */
     trackEventBusSubscription: (unsubscribe: () => void) => () => void;
+    bindEventBus: (bus: EventBus) => void;
+    emitEvent: (channel: string, data: unknown) => void;
+    onEvent: (channel: string, handler: (data: unknown) => void) => () => void;
     /**
      * Register or unregister a provider.
      *

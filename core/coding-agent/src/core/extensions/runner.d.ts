@@ -153,7 +153,7 @@ export declare class ExtensionRunner {
     emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined>;
     emitToolCall(event: ToolCallEvent): Promise<ToolCallEventResult | undefined>;
     emitUserBash(event: UserBashEvent): Promise<UserBashEventResult | undefined>;
-    emitContext(messages: AgentMessage[]): Promise<AgentMessage[]>;
+    emitContext(messages: AgentMessage[], metadata?: Pick<ContextEvent, "requestMessages" | "requestId" | "turnId" | "requestMessageIndex">): Promise<AgentMessage[]>;
     emitBeforeProviderRequest(payload: unknown): Promise<unknown>;
     emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
     emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions): Promise<BeforeAgentStartCombinedResult | undefined>;
@@ -172,6 +172,6 @@ export declare class ExtensionRunner {
         }>;
     }>;
     /** Emit input event. Transforms chain, "handled" short-circuits. */
-    emitInput(text: string, images: ImageContent[] | undefined, source: InputSource, streamingBehavior?: "steer" | "followUp"): Promise<InputEventResult>;
+    emitInput(text: string, images: ImageContent[] | undefined, source: InputSource, streamingBehavior?: "steer" | "followUp", metadata?: Pick<InputEvent, "originalText" | "requestId" | "turnId" | "sessionId" | "processId" | "guardianOwnerId" | "signal">): Promise<InputEventResult>;
 }
 export {};
