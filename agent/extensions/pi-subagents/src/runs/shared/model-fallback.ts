@@ -929,9 +929,13 @@ export function buildModelCandidates(
 	for (const route of economical) if (!resolved.includes(route)) enforceModelScopes(route, scopes, "inherited", options?.onWarn);
 	// Inherited automatic workers may continue on a small, pre-admitted set.
 	// Explicit/configured model choices and caller fallback lists remain exact.
-	const pinsRoute=/\b(?:only use|use only|stick to|stay on)\b|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(options?.task??"");
+	// Raw text (not segmented): quoted mentions still pin automatic
+	// alternatives here. The free lookahead matches taskRouteConstraints: a
+	// free-only task receives free alternatives, never paid ones.
+	const pinsRoute=/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)|\b(?:same|current|this)\s+(?:model|provider)\s+only\b|\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?(?:provider|model)\b/i.test(options?.task??"");
+	const autoConstraints=taskRouteConstraints(options?.task);
 	if(options?.allowAutomaticAlternatives!==false&&origin==="inherited"&&!pinsRoute&&!fallbackModels?.length&&process.env.PI_AUTONOMOUS_MODEL_FALLBACK!=="off") {
-		for (const pref of resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, {})) {
+		for (const pref of resolveLlmPreferenceChain(inferPreferenceRole(options?.task), availableModels, autoConstraints.freeOnly ? { freeOnly: true } : {})) {
 			if (economical.length >= 3) break;
 			const prefRoute = withLlmThinkingSuffix(pref);
 			if (economical.includes(prefRoute) || economical.some(e => splitKnownThinkingSuffix(e).baseModel === pref.route)) continue;
@@ -941,7 +945,7 @@ export function buildModelCandidates(
 		const cfg=loadModelEconomyConfig();
 		const first=availableModels?.find(model=>model.fullId===splitKnownThinkingSuffix(economical[0]).baseModel);
 		if(cfg.enabled&&first&&Number.isSafeInteger(first.contextWindow)&&first.contextWindow!>0&&Number.isSafeInteger(first.maxTokens)&&first.maxTokens!>0) {
-			const evidence=readFreeEvidence();const freeOnly=isProvenFreeRoute(first,evidence);
+			const evidence=readFreeEvidence();const freeOnly=autoConstraints.freeOnly||isProvenFreeRoute(first,evidence);
 			const pool=(availableModels??[]).filter(model=>Number.isSafeInteger(model.contextWindow)&&model.contextWindow!>=first.contextWindow!
 				&&Number.isSafeInteger(model.maxTokens)&&model.maxTokens!>=first.maxTokens!
 				&&(!first.reasoning||model.reasoning===true)&&(!first.input||first.input.every(input=>model.input?.includes(input)))
