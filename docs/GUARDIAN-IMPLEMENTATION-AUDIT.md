@@ -40,6 +40,9 @@ from architecture that is still absent.
 | Failed backup creation escaped the editor's structured save response. | Keep rollback/error handling around every write stage, preserve original bytes, clean locks. Injected disk failures test all stages. |
 | Installer trusted only launcher leases, allowing replacement under direct CLI processes. | Check the shared active-core process detector both before staging and immediately before activation; direct, relative/symlink and start-during-build tests preserve the old install. |
 | Exporter exact-secret gathering missed credential headers and bare tokens in prefixed Authorization values. | Recognize narrowly defined credential headers and scheme payloads; synthetic canary tests reject publication without printing secrets, while ordinary endpoints/headers remain exportable. |
+| Two new extension libraries were omitted from the installed integrity manifest. | Register prompt analysis and session observability libraries; a source-inventory regression now compares all shipped TypeScript libraries with the installed verifier inventory. |
+| The Needle smoke CLI awaited a runtime that statically imported the still-evaluating CLI module, exiting with unsettled top-level await before inference. | Finish module evaluation before asynchronous CLI execution. Real subprocess tests cover corrupt assets and successful embedding/ranking with installed pinned assets. |
+| Text mode inspected only the final stored message, so a later advisory display could hide a successful assistant response or its error status. | Track the current prompt’s completed assistant response through events while ignoring trailing custom display messages. Regression tests exercise the actual SDK/post-turn message path and command-only history. |
 | Two newer local skills contained incorrect animation examples. | Correct reflection pivot, delta-time steam, saved/restored fog alpha, line reveal baseline and resize-dependent scroll measurements. Frontmatter/skill validation and reflection invariant checked. |
 
 ## Remaining concerns
@@ -91,11 +94,14 @@ was still changing; its failure was an unsynchronized release-test copy. These
 counts are diagnostic history, not the final release gate.
 
 Final release validation: a fresh sanitized distribution, with no Git metadata,
-passed **1,171/1,171 tests**, zero failures, skips or cancellations, in 75.27
+passed **1,180/1,180 tests**, zero failures, skips or cancellations, in 71.99
 seconds using Node 22.22.3 and four test workers. This includes the owned-core
 build, actual SDK/native-provider integrations, browser/HTTP routing tests,
 concurrency, adversarial input, installation/export safety and existing regression
-suites. The final owner-isolation repair also passed 100 directly affected tests.
+suites, including an opt-in real embedding/ranking check against locally installed
+pinned Needle assets. Deployment testing also exposed the manifest, Needle CLI
+and text-output defects listed above; this final run includes all three repairs.
+The owner-isolation repair additionally passed 100 directly affected tests.
 
 The first distribution run exposed two tests that assumed `.git` existed. They
 now use explicit temporary Git fixtures and assert exact metadata; an additional

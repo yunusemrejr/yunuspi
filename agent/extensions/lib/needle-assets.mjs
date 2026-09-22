@@ -266,7 +266,7 @@ try {
 } catch {
   invoked = false;
 }
-if (invoked) {
+async function runCli() {
   const [command, ...rest] = process.argv.slice(2);
   if (command === "--help" || command === "-h" || command === undefined) {
     console.log("node needle-assets.mjs <verify|install|repair|smoke|status> [--agent-dir PATH]");
@@ -333,3 +333,10 @@ if (invoked) {
     process.exit(1);
   }
 }
+// Complete this module's evaluation before smoke dynamically loads runtime.
+// Runtime and its worker import the pinned constants/verification above; a
+// top-level await here makes that legitimate cycle wait on itself (exit 13).
+if (invoked) void runCli().catch((error) => {
+  console.error(JSON.stringify({ ok: false, error: String(error?.message ?? error).slice(0, 300) }));
+  process.exitCode = 1;
+});

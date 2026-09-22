@@ -3980,6 +3980,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/prompt-analysis-runtime.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/prompt-interpretation.ts",
         "exists": true
       },
@@ -4061,6 +4065,10 @@
       },
       {
         "path": "agent/extensions/lib/session-metrics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-observability.ts",
         "exists": true
       },
       {

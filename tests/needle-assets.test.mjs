@@ -112,6 +112,49 @@ test("CLI smoke exits 2 without assets (no hang, no crash)", () => {
   assert.equal(smoke.status, 2);
 });
 
+test("CLI smoke evaluates the real runtime and reports corrupt same-size assets without an import deadlock", (t) => {
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-cli-cycle-"));
+  t.after(() => fs.rmSync(agentDir, { recursive: true, force: true }));
+  const dir = path.join(agentDir, "local-models/needle3");
+  fs.mkdirSync(dir, { recursive: true });
+  // Sparse synthetic files pass the CLI's size preflight, then the real
+  // worker must reject their hashes before evaluating any engine loader.
+  for (const file of assets.NEEDLE_PINNED_FILES) {
+    const fd = fs.openSync(path.join(dir, file.local), "w");
+    try { fs.ftruncateSync(fd, file.bytes); } finally { fs.closeSync(fd); }
+  }
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(assets.expectedManifest()));
+  const smoke = spawnSync(process.execPath, [cli, "smoke", "--agent-dir", agentDir], {
+    encoding: "utf8", timeout: 15000,
+    env: { ...process.env, PI_NEEDLE_ASSETS: dir, PI_NEEDLE: "on", PI_NEEDLE_RESTARTS: "0" },
+  });
+  assert.equal(smoke.error, undefined, smoke.error?.message);
+  assert.equal(smoke.status, 2, smoke.stderr);
+  const report = JSON.parse(smoke.stdout);
+  assert.equal(report.command, "smoke");
+  assert.equal(report.ok, false);
+  assert.equal(report.state, "cooling");
+  assert.equal(report.reason, "cooling");
+  assert.equal(report.dim, 0);
+  assert.doesNotMatch(smoke.stderr, /unsettled top-level await/i);
+});
+
+test("CLI smoke embeds and ranks with explicitly supplied installed pinned assets", {
+  skip: !process.env.PI_NEEDLE_TEST_ASSETS,
+}, () => {
+  const smoke = spawnSync(process.execPath, [cli, "smoke"], {
+    encoding: "utf8", timeout: 100000,
+    env: { ...process.env, PI_NEEDLE_ASSETS: process.env.PI_NEEDLE_TEST_ASSETS, PI_NEEDLE: "on" },
+  });
+  assert.equal(smoke.error, undefined, smoke.error?.message);
+  assert.equal(smoke.status, 0, smoke.stderr);
+  const report = JSON.parse(smoke.stdout);
+  assert.equal(report.ok, true);
+  assert.equal(report.state, "healthy");
+  assert.equal(report.dim, 3072);
+  assert.equal(report.top, "a");
+});
+
 const downloadFixture = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "needle-download-"));
   const body = Buffer.from("verified pinned bytes");

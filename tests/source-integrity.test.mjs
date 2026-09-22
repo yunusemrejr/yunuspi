@@ -35,3 +35,11 @@ test('release templates retain current tests, installer, and public safeguards',
   for (const name of ['package.json', 'package-lock.json', '.gitignore', 'AGENTS.md'])
     assert.deepEqual(fs.readFileSync(path.join(root, 'release-template', name)), fs.readFileSync(path.join(root, name)), name);
 });
+
+
+test('installed-verifier library inventory matches the shipped TypeScript libraries', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'agent/extensions/manifest.json'), 'utf8'));
+  const declared = manifest.lib.filter(file => file.endsWith('.ts')).sort();
+  const shipped = fs.readdirSync(path.join(root, 'agent/extensions/lib')).filter(file => file.endsWith('.ts')).sort();
+  assert.deepEqual(declared, shipped, 'new libraries must be registered for installed integrity checks');
+});

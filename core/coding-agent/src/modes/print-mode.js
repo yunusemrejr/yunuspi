@@ -16,6 +16,7 @@ export async function runPrintMode(runtimeHost, options) {
     const { mode, messages = [], initialMessage, initialImages } = options;
     let exitCode = 0;
     let session = runtimeHost.session;
+    let finalAssistantMessage;
     let unsubscribe;
     let unsubscribeBackpressure;
     let disposed = false;
@@ -82,6 +83,12 @@ export async function runPrintMode(runtimeHost, options) {
         unsubscribe?.();
         unsubscribeBackpressure?.();
         unsubscribe = session.subscribe((event) => {
+            // Post-turn custom messages (including advisory intelligence) may
+            // follow the assistant in state. Track this prompt's actual model
+            // response, not whichever persisted message happens to be last.
+            if (event.type === "message_end" && event.message.role === "assistant") {
+                finalAssistantMessage = event.message;
+            }
             if (mode === "json") {
                 writeRawStdout(`${JSON.stringify(toJsonEvent(event))}\n`);
             }
@@ -102,16 +109,18 @@ export async function runPrintMode(runtimeHost, options) {
         }
         await rebindSession();
         if (initialMessage) {
+            finalAssistantMessage = undefined;
             await session.prompt(initialMessage, { images: initialImages });
         }
         for (const message of messages) {
+            // A slash command may complete without inference. Never print an
+            // earlier turn's answer or error for that command.
+            finalAssistantMessage = undefined;
             await session.prompt(message);
         }
         if (mode === "text") {
-            const state = session.state;
-            const lastMessage = state.messages[state.messages.length - 1];
-            if (lastMessage?.role === "assistant") {
-                const assistantMsg = lastMessage;
+            if (finalAssistantMessage) {
+                const assistantMsg = finalAssistantMessage;
                 if (assistantMsg.stopReason === "error" || assistantMsg.stopReason === "aborted") {
                     console.error(assistantMsg.errorMessage || `Request ${assistantMsg.stopReason}`);
                     exitCode = 1;
