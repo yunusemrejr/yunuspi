@@ -36,7 +36,7 @@ export const collectVerificationLines = (limit = MAX_LINES, session?: object) =>
 
 /** Settled/blocked is a lifecycle decision, never a successful verification. */
 export function verificationWarning(lines: readonly string[]): string {
-  return lines.length ? `\n\n---\n⚠️ Verification incomplete (harness receipts):\n${lines.map(line => `- ${line}`).join('\n')}\nA finished response or a blocked assessment does not establish that the deliverable works.` : '';
+  return lines.length ? `\n\n---\n⚠️ Verification incomplete (harness receipts):\n${lines.map(line => `- ${line}`).join('\n')}\nThese are verification limits, not evidence of a product defect. Preserve completed checks and report any remaining blocker.` : '';
 }
 
 /** Warning appended to a finished answer. Empty lines + no queued follow-up = "". */

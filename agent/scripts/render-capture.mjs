@@ -8,6 +8,19 @@ import { renderNavigationFailure } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
+export async function resolveLocalRenderSource(source) {
+  // A literal '#' in an existing filename wins. Only a missing HTML path is
+  // interpreted as a route fragment; the filesystem and asset boundary never
+  // include that fragment, which belongs exclusively to the browser URL.
+  try { return { target: await fs.realpath(source), fragment: "" }; }
+  catch (error) {
+    const hash = source.indexOf("#");
+    if (error.code !== "ENOENT" || hash < 0 || !/\.html?$/i.test(source.slice(0, hash))) throw error;
+    const fragment = source.slice(hash);
+    if (fragment.length > 8192) throw Error("Local HTML route fragment exceeds 8192 characters");
+    return { target: await fs.realpath(source.slice(0, hash)), fragment };
+  }
+}
 function boundedCaptureResult(result) {
   while (JSON.stringify(result).length > 14000 && result.errors.length) {
     result.errors.pop();
@@ -137,9 +150,10 @@ export async function renderCapture(p, output, signal) {
       );
     } else {
       const local = !/^https?:\/\//i.test(p.source);
-      let root, target;
+      let root, target, fragment = "";
       if (local) {
-        target = await fs.realpath(p.source);
+        ({ target, fragment } = await resolveLocalRenderSource(p.source));
+        if (fragment) conditions.fragmentApplied = true;
         if (!/\.(html?|svg|png|jpe?g|gif|webp|bmp)$/i.test(target))
           throw Error(
             "Unsupported local type: HTML, SVG, PNG/JPEG/GIF/WebP/BMP or PDF required",
@@ -374,7 +388,7 @@ export async function renderCapture(p, output, signal) {
       stage = "navigation";
       await page.goto(
         local
-          ? `https://pi-local.invalid/${encodeURIComponent(path.basename(target))}`
+          ? `https://pi-local.invalid/${encodeURIComponent(path.basename(target))}${fragment}`
           : p.source,
         {
           waitUntil: conditions.ready,
@@ -425,15 +439,20 @@ export async function renderCapture(p, output, signal) {
           `Unsupported GPU/WebGL path requested (${gpu.join(",")}); not visual verification. No GPU retry.`,
         );
       const oversizedImages = await page.evaluate(() =>
-        [...document.images].some(
-          (i) =>
-            i.naturalWidth > 8192 ||
-            i.naturalHeight > 8192 ||
-            i.naturalWidth * i.naturalHeight > 16000000,
-        ),
+        Array.from(document.images, (image, imageIndex) => ({ imageIndex, width: image.naturalWidth, height: image.naturalHeight }))
+          .filter(({ width, height }) => width > 8192 || height > 8192 || width * height > 16000000)
+          .slice(0, 3),
       );
-      if (oversizedImages)
-        throw Error("Decoded image exceeds 8192 edge / 16M pixel input limit");
+      if (oversizedImages.length) {
+        const failure = {
+          stage: "resource-validation", kind: "image-dimensions", outcome: "not-captured",
+          reason: "An embedded decoded image exceeds the 8192-edge / 16M-pixel input limit.",
+          limits: { maxEdge: 8192, maxPixels: 16000000 },
+          images: oversizedImages,
+          nextStep: "Use a smaller derivative of each oversized source image (images lists zero-based document.images indexes and natural dimensions). Changing viewport, fullPage, selector or CSS display size does not reduce decoded resource dimensions. No screenshot or visual verification was produced.",
+        };
+        throw Object.assign(Error(failure.reason), { failure });
+      }
       const size = await page.evaluate(() => ({
         width: document.documentElement.scrollWidth,
         height: document.documentElement.scrollHeight,
@@ -515,6 +534,7 @@ export async function renderCapture(p, output, signal) {
     });
   } catch (e) {
     await fs.unlink(output).catch(() => {});
+    if (e.failure) throw e;
     if (!signal?.aborted && stage === "navigation" && /^https?:\/\//i.test(p.source)) {
       const failure = navigationFailure ?? renderNavigationFailure(
         Date.now() - start >= ms ? Object.assign(Error("navigation timeout"), {name: "TimeoutError"}) : e,

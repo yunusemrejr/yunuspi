@@ -166,7 +166,7 @@ test('used summary joins child runs with launch-level model and thinking', () =>
   ];
   const summary = signals.buildUsedSummary(branch, { provider: 'openrouter', id: 'main-model', thinking: 'medium' });
   assert.equal(summary.runs.length, 1);
-  assert.deepEqual(summary.runs[0], { runId: 'run-async-1', index: 0, mode: 'single', agent: 'worker', status: 'completed', provider: 'openrouter', model: 'big-model', thinking: 'high', tokens: 0, usageRecorded: false });
+  assert.deepEqual(summary.runs[0], { runId: 'run-async-1', attempt: 1, index: 0, mode: 'single', agent: 'worker', status: 'completed', provider: 'openrouter', model: 'big-model', thinking: 'high', tokens: 0, usageRecorded: false });
   assert.equal(summary.routes.length, 1);
   assert.equal(summary.routes[0].thinking, 'medium');
   assert.ok(summary.routes[0].nested.includes('DeepInfra'));
@@ -203,7 +203,7 @@ test('used summary deduplicates child snapshots and keeps final model usage', ()
     toolCall('s1', 'subagent', { agent: 'worker', model: 'openrouter/child-model', thinking: 'high' }),
     toolResult('s1', 'subagent', { asyncId: 'child-parent', state: 'running' }),
     { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'child-parent', mode: 'single', state: 'running', results: [{ index: 0, status: 'running' }] } },
-    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'child-parent', mode: 'single', state: 'completed', results: [{ index: 0, status: 'completed', model: 'openrouter/child-model', usage: { input: 20, cacheRead: 10, cacheWrite: 0, output: 5, turns: 2, cost: 0 } }] } },
+    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'child-parent', mode: 'single', state: 'completed', results: [{ index: 0, status: 'completed', model: 'openrouter/child-model', usage: { input: 20, cacheRead: 10, cacheWrite: 0, output: 5, turns: 2, cost: {total:0,source:'provider-reported',complete:true} } }] } },
   ];
   const summary = signals.buildUsedSummary(branch);
   assert.equal(summary.runs.length, 1);
@@ -215,6 +215,14 @@ test('used summary deduplicates child snapshots and keeps final model usage', ()
   const html = signals.usedSummaryHtml(summary);
   assert.ok(html.includes('35'));
   assert.ok(html.includes('$0.000000'));
+  // A numeric zero without pricing provenance is a legacy placeholder, not
+  // evidence that these nonzero token counts were free.
+  const legacy=structuredClone(branch);
+  legacy.at(-1).data.results[0].usage.cost=0;
+  const unknown=signals.buildUsedSummary(legacy);
+  assert.equal(unknown.runs[0].tokens,35);
+  assert.equal(unknown.runs[0].costUsd,undefined);
+  assert.ok(!signals.usedSummaryHtml(unknown).includes('$0.000000'));
 });
 
 test('unknown run provenance stays absent, never guessed', () => {

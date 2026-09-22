@@ -11,6 +11,23 @@ const schema='data:text/javascript,'+encodeURIComponent('export const Type=new P
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(n,c,next){return n==='typebox'?{url:${JSON.stringify(schema)},shortCircuit:true}:next(n,c);}`),import.meta.url);
 const {projectCheckCommand,createProjectTestLifecycle}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
 
+test('a later failed receipt retires an older pass for the identical tree across scopes', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-latest-receipt-')),tools={};
+ const ctx={cwd};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the first scope'});
+ const write=async value=>{fs.writeFileSync(path.join(cwd,'value.js'),`export const value=${value};`);await api.result({toolName:'write',toolCallId:`write-${value}`,input:{path:'value.js'},isError:false},ctx);};
+ const assess=disposition=>tools.project_tests.execute('assess',{action:'assess',disposition,reason:'The focused check covers the changed behavior.',commands:disposition==='required'?['node --test']:[]},undefined,undefined,ctx);
+ const run=async(isError,id)=>{const event={toolName:'bash',toolCallId:id,input:{command:'node --test'}};await api.call(event,ctx);await api.result({...event,isError,details:{exitCode:isError?1:0},content:[{type:'text',text:isError?'1 test failed':'1 test passed'}]},ctx);};
+ await write(1);await assess('required');await run(false,'passed');assert.equal(api.snapshot().need,null);
+ api.input({source:'interactive',text:'Fix the second scope'});await write(2);await write(1);await assess('required');
+ assert.equal(api.snapshot().need,null,'unchanged tree can initially reuse the existing pass');
+ await run(true,'failed');assert.equal(api.snapshot().need,'failed');await assess('blocked');
+ api.input({source:'interactive',text:'Fix the third scope'});await write(2);await write(1);await assess('required');
+ assert.notEqual(api.snapshot().need,null,'the newer failure must not disappear and reveal the older pass');
+});
+
 test('a late test from a completed scope cannot approve the next user scope',async t=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-scope-'));
  const tools={};
@@ -142,4 +159,79 @@ test('background completion observes source writes before accepting the command 
   assert.equal(api.snapshot().checks[0].tree,tree,'the command remains bound to its starting source');
   await assess();assert.equal(api.snapshot().need,'missing','the modified source needs current verification');
  });
+});
+
+test('safe pre-plan commands retain exact receipts, while composition and stale source never pass', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-preplan-')),tools={},sent=[];
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){},sendMessage:m=>sent.push(m)});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Build a small static page and verify its data'});
+ fs.writeFileSync(path.join(cwd,'app.js'),'const value=1;');
+ await api.result({toolName:'write',toolCallId:'write',input:{path:'app.js'},isError:false},ctx);
+ const run=async(command,id,exitCode=0)=>{
+  const event={toolName:'bash',toolCallId:id,input:{command}};
+  await api.call(event,ctx);await api.result({...event,isError:exitCode!==0,details:{exitCode},content:[{type:'text',text:exitCode?'Assertion failed':'126 assertions passed'}]},ctx);
+ };
+ const assess=commands=>tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'Syntax and the existing data invariant check cover this static page.',commands},undefined,undefined,ctx);
+ await run('node --check app.js','syntax');await run('node check.js','behavior');
+ assert.equal(api.snapshot().need,'assessment','receipts do not invent a verification plan');
+ await assess(['node --check app.js','node check.js']);
+ assert.equal(api.snapshot().need,null,'planning after execution does not require duplicate commands');
+ assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['passed','passed']);
+ await api.settled({},ctx);assert.equal(sent.length,0);
+ await run('node check.js; echo passed','masked');
+ await assert.rejects(assess(['node check.js; echo passed']),/shell composition/);
+ await run('node other-check.js','failed',1);await assess(['node other-check.js']);
+ assert.equal(api.snapshot().need,'failed','a declared failed command cannot inherit another pass');
+ fs.writeFileSync(path.join(cwd,'app.js'),'const value=2;');
+ await api.result({toolName:'write',toolCallId:'edit',input:{path:'app.js'},isError:false},ctx);
+ await assess(['node --check app.js','node check.js']);
+ assert.equal(api.snapshot().need,'missing');
+ assert.deepEqual(api.snapshot().plannedChecks.map(c=>c.outcome),['stale','stale']);
+});
+
+test('follow-up turns that edit and settle recursively cannot replenish their two-turn budget', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-followup-budget-')),sent=[],branch=[];
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};
+ let api;
+ const mutate=async value=>{
+  fs.writeFileSync(path.join(cwd,'app.js'),`const value=${value};`);
+  await api.result({toolName:'write',toolCallId:`write-${value}`,input:{path:'app.js'},isError:false},ctx);
+ };
+ api=createProjectTestLifecycle({registerTool(){},getActiveTools:()=>['project_tests','bash'],appendEntry:(type,data)=>branch.push(structuredClone(data)),
+  async sendMessage(message){
+   sent.push(message);assert.ok(sent.length<=2,'no third triggered model turn');
+   await api.message({message:{role:'custom',customType:message.customType}},ctx);
+   await mutate(sent.length+1);
+   await api.settled({},ctx);
+  }});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Implement and verify the parser'});
+ await mutate(1);await api.settled({},ctx);
+ assert.equal(sent.length,2);assert.equal(api.snapshot().followups,2);
+ assert.match(sent[0].content,/Automatic follow-up 1\/2/);assert.match(sent[1].content,/Automatic follow-up 2\/2/);
+ await api.settled({},ctx);assert.equal(sent.length,2);
+ assert.ok(branch.some(entry=>entry.followups===2),'reservation is persisted before model execution');
+});
+
+test('a rejected follow-up delivery refunds its reservation before any model work', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-followup-reject-'));let sends=0;
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};
+ const api=createProjectTestLifecycle({registerTool(){},getActiveTools:()=>['project_tests','bash'],appendEntry(){},async sendMessage(){if(++sends===1)throw Error('queue unavailable');}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Repair the parser'});
+ fs.writeFileSync(path.join(cwd,'app.js'),'const value=1;');
+ await api.result({toolName:'write',toolCallId:'write',input:{path:'app.js'},isError:false},ctx);
+ await api.settled({},ctx);assert.equal(api.snapshot().followups,0);
+ await api.settled({},ctx);assert.equal(api.snapshot().followups,1);assert.equal(sends,2);
+});
+
+
+test('planned command labels preserve working-directory prefixes and long literal arguments',()=>{
+ const command='cd app && node check.js "'+'fixture-value'.repeat(35)+'"';
+ const check=projectCheckCommand(command,'/project',true);
+ assert.equal(check.label,command);
+ assert.equal(projectCheckCommand(check.label,'/project',true).key,check.key);
+ assert.notEqual(projectCheckCommand('node check.js "'+'fixture-value'.repeat(35)+'"','/project',true).key,check.key);
 });

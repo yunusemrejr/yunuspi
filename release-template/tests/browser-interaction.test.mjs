@@ -59,10 +59,10 @@ test("lease keeps new reads free and budgets new mutations", () => {
 
 test("guidance treats new mutations like clicks and new reads like inspection", () => {
   for (const action of ["evaluate", "hover", "scroll", "drag"]) {
-    assert.equal(matchHook("browser_session", { action }, true).key, "browser-session-recovery");
+    assert.equal(matchHook("browser_session", { action }, true, {details:{failure:{outcome:"unknown"}}}).key, "browser-session-recovery");
     assert.equal(matchHook("browser_session", { action }).key, "browser-session-workflow");
   }
-  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }, true).key, "browser-session-recovery");
+  assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }, true, {details:{failure:{outcome:"unknown"}}}).key, "browser-session-recovery");
   assert.equal(matchHook("browser_session", { action: "wait", kind: "function" }).key, "browser-session-workflow");
   assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }, true).key, "browser-session-read-recovery");
   assert.equal(matchHook("browser_session", { action: "wait", kind: "element" }), null);

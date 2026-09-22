@@ -413,7 +413,8 @@ test(
         return;
       }
       const one = opened.details.session;
-      assert.match(JSON.stringify(opened), /Fresh/);
+      assert.equal(opened.details.pageState.itemsOmitted, true);
+      assert.match(JSON.stringify(await call({ action: "snapshot", session: one })), /Fresh/);
       assert.doesNotMatch(
         JSON.stringify(opened),
         /DO_NOT_ECHO|PRIVATE_CONSOLE_FIXTURE|PRIVATE_URL_FIXTURE/,
@@ -424,7 +425,8 @@ test(
         role: "button",
         name: "Save",
       });
-      assert.match(JSON.stringify(clicked), /Saved/);
+      assert.equal(clicked.details.ok, true);
+      assert.match(JSON.stringify(await call({ action: "snapshot", session: one })), /Saved/);
       const two = (await call({ action: "open", url })).details.session;
       assert.match(
         JSON.stringify(await call({ action: "snapshot", session: two })),
@@ -432,8 +434,9 @@ test(
       );
       assert.match(
         JSON.stringify(await call({ action: "navigate", session: one, url })),
-        /Saved/,
+        /itemsOmitted/,
       );
+      assert.match(JSON.stringify(await call({ action: "snapshot", session: one })), /Saved/);
       await call({
         action: "fill",
         session: two,
@@ -458,10 +461,7 @@ test(
       const saved = shot.details.output;
       await call({ action: "close", session: one });
       assert.equal(fs.existsSync(saved), false);
-      await assert.rejects(
-        call({ action: "snapshot", session: one }),
-        /foreign/,
-      );
+      assert.equal((await call({ action: "snapshot", session: one })).details.failure.kind, "unknown-session");
       const controller = new AbortController();
       const pending = call(
         { action: "click", session: two, selector: "#missing" },
@@ -469,13 +469,10 @@ test(
       );
       setTimeout(() => controller.abort(), 100);
       await assert.rejects(pending, /cancelled/);
-      await assert.rejects(
-        call({ action: "snapshot", session: two }, undefined, {
+      assert.equal((await call({ action: "snapshot", session: two }, undefined, {
           ...ctx,
           cwd: scratch + "-foreign",
-        }),
-        /foreign/,
-      );
+        })).details.failure.kind, "unknown-session");
     } finally {
       await events.session_shutdown();
       await new Promise((resolve) => server.close(resolve));

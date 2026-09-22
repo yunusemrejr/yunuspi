@@ -195,7 +195,7 @@ export function relayIntelligenceUsageFromChild(input) {
 }
 
 export class GuardianSupervisor {
-	constructor({ sessionId, sessionOwner, processId = String(process.pid), cwd = process.cwd(), emit, clock = Date.now, childRelay = createAtomicRelay, awaitParentVisibility = waitForRelayVisibility } = {}) {
+	constructor({ sessionId, sessionOwner, processId = String(process.pid), cwd = process.cwd(), emit, observe, clock = Date.now, childRelay = createAtomicRelay, awaitParentVisibility = waitForRelayVisibility } = {}) {
 		this.sessionId = sessionText(sessionId);
 		this.ownerId = randomUUID();
 		const owners = liveGuardianSessions.get(this.sessionId) ?? new Set();
@@ -212,6 +212,7 @@ export class GuardianSupervisor {
 		this.processId = String(processId);
 		this.cwd = cwd;
 		this._emit = typeof emit === "function" ? emit : () => {};
+		this._observe = typeof observe === "function" ? observe : () => {};
 		this._clock = clock;
 		this._childRelay = childRelay;
 		this._awaitParentVisibility = awaitParentVisibility;
@@ -226,7 +227,7 @@ export class GuardianSupervisor {
 		this._activeTaskId = undefined;
 		this._latestAcceptedTaskId = undefined;
 		this._inFlight = new Map();
-		this._stats = { observed: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0 };
+		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0 };
 		this._admittedAtByKind = new Map();
 		this._window = { startedAt: this._clock(), evaluations: 0 };
 		this._kernelPromise = undefined;
@@ -237,6 +238,18 @@ export class GuardianSupervisor {
 
 	get enabled() { return this._enabled; }
 	get debug() { return this._debug; }
+
+	_notifyObservation(evaluationsBefore) {
+		try {
+			const states = this._kernelRuntime ? Object.values(this._kernelRuntime.status()) : [];
+			const decision = this._kernelError || states.some(({ state }) => state === "quarantined") ? "quarantined"
+				: states.length ? "ready" : this._kernelPromise ? "initializing" : "lazy";
+			const result = this._observe({ count: this._stats.toolResults, evaluations: this._stats.classifierEvaluations,
+				similarityEvaluations: this._stats.similarityEvaluations, decision,
+				outcome: this._stats.classifierEvaluations > evaluationsBefore ? "evaluated" : "observed" });
+			if (result?.then) void Promise.resolve(result).catch(() => {});
+		} catch { /* display-only activity cannot affect supervision */ }
+	}
 
 	_handle(sessionId) {
 		if (this._disposed || sessionText(sessionId) !== this.sessionId || !liveGuardianSessions.get(this.sessionId)?.has(this.ownerId)) return undefined;
@@ -443,20 +456,27 @@ export class GuardianSupervisor {
 			const call = this._inFlight.get(key);
 			this._inFlight.delete(key);
 			if (!call || call.taskId !== task.requestId) return;
-			const errorHash = fingerprintFailureResult(event.result, event.isError);
-			if (!event.isError || !errorHash || call.toolName === "bash" || !call.fingerprint || !call.shape) {
+			const generation = this._stateGeneration, evaluationsBefore = this._stats.classifierEvaluations;
+			this._stats.toolResults++;
+			try {
+				const errorHash = fingerprintFailureResult(event.result, event.isError);
+				if (!event.isError || !errorHash || call.toolName === "bash" || !call.fingerprint || !call.shape) {
+					task.evidenceVersion++;
+					task.attempts = [];
+					task.episodeKey = undefined;
+					if (!event.isError) await this.analyzeToolActivity({ taskId: call.taskId, toolName: call.toolName, args: call.candidatePath ? { path: call.candidatePath } : undefined, toolCallId: event.toolCallId, succeeded: true });
+					return;
+				}
 				task.evidenceVersion++;
-				task.attempts = [];
-				task.episodeKey = undefined;
-				if (!event.isError) await this.analyzeToolActivity({ taskId: call.taskId, toolName: call.toolName, args: call.candidatePath ? { path: call.candidatePath } : undefined, toolCallId: event.toolCallId, succeeded: true });
-				return;
+				const attempt = { toolName: call.toolName, fingerprint: call.fingerprint, shape: call.shape, errorHash, typedFailure: true, failed: true, responseEpoch: call.responseEpoch, responseSeen: false, at: this._clock(), taskId: task.requestId };
+				if (task.attempts.some((prior) => prior.fingerprint !== attempt.fingerprint || prior.errorHash !== attempt.errorHash || prior.toolName !== attempt.toolName)) task.attempts = [];
+				task.attempts.push(attempt);
+				if (task.attempts.length > MAX_ATTEMPTS) task.attempts.shift();
+				await this._considerRepeatedFailure(task, event);
+			} finally {
+				if (this._enabled && !this._disposed && !this._quarantined && generation === this._stateGeneration && this._tasks.get(this._activeTaskId) === task)
+					this._notifyObservation(evaluationsBefore);
 			}
-			task.evidenceVersion++;
-			const attempt = { toolName: call.toolName, fingerprint: call.fingerprint, shape: call.shape, errorHash, typedFailure: true, failed: true, responseEpoch: call.responseEpoch, responseSeen: false, at: this._clock(), taskId: task.requestId };
-			if (task.attempts.some((prior) => prior.fingerprint !== attempt.fingerprint || prior.errorHash !== attempt.errorHash || prior.toolName !== attempt.toolName)) task.attempts = [];
-			task.attempts.push(attempt);
-			if (task.attempts.length > MAX_ATTEMPTS) task.attempts.shift();
-			await this._considerRepeatedFailure(task, event);
 		}
 	}
 
@@ -478,8 +498,10 @@ export class GuardianSupervisor {
 		if (status.state !== "ready") { this._stats.quarantined++; return; }
 		const similarity = runtime.similarity(attempts.at(-2).shape, attempts.at(-1).shape);
 		if (similarity === undefined) { this._stats.quarantined++; return; }
+		this._stats.similarityEvaluations++;
 		const scored = runtime.evaluate(makeRepeatedFailureFeatures({ priorAttempts: attempts.slice(-3), shapeSimilarity: similarity, activeTaskId: task.requestId, now: this._clock(), userRetryDirective: hasExplicitRetryDirective(prompt) }));
 		if (!scored) { this._stats.abstained++; return; }
+		this._stats.classifierEvaluations++;
 		if (scored.probability < scored.threshold) { this._stats.abstained++; return; }
 		const evidence = attempts.slice(-3).map((attempt, index) => ({ kind: "tool-failure", id: `${task.requestId}:${task.toolCount - 2 + index}`, hash: attempt.errorHash }));
 		const content = "The same tool operation failed repeatedly with the same result. Verify the cause before retrying it.";

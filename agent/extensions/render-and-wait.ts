@@ -35,7 +35,7 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
         let report;
         try { report = JSON.parse(message); } catch { /* ordinary launch/source failure */ }
         reject(Object.assign(new Error(`Render failed: ${message}`),
-          report?.status === "failed" && report.failure?.stage === "navigation" ? { renderFailure: report } : {}));
+          report?.status === "failed" && typeof report.failure?.stage === "string" ? { renderFailure: report } : {}));
       }
       else resolve(stdout);
     });
@@ -89,7 +89,7 @@ export default function (pi: any) {
     description:
       "Built-in browser inspection: use directly without locating/installing Playwright. Inspect or capture local HTML/SVG/image/PDF or HTTP(S). output:text returns bounded live-DOM labels, controls, bounds/overflow, image alt/load status and validation state without pixels; both adds PNG. Default image for vision models, text otherwise. Supports dark/light, reduced motion and sampled CSS/WAAPI frames. Selector scopes DOM inspection and scrolls viewport images to the first match (may clip oversized elements). Oversized full-page captures return explicitly incomplete viewport evidence. Concurrent calls queue per agent (up to four waiting, 120s queue deadline); other agents have independent captures. Isolated, unauthenticated, 30s execution max; no actions/GPU. DOM facts are not visual interpretation.",
     parameters: Type.Object({
-      source: Type.String({description: "Local file path or HTTP(S) URL, including localhost on the harness host. Browser isolation is not network isolation; check server readiness on connection failures."}),
+      source: Type.String({description: "Local file path (HTML may include #route) or HTTP(S) URL, including localhost. Existing literal '#' filenames take precedence over fragments. Browser isolation is not network isolation; check server readiness on connection failures."}),
       output: Type.Optional(StringEnum(["image", "text", "both"])),
       width: Type.Optional(Type.Integer({ minimum: 64, maximum: 2048 })),
       height: Type.Optional(Type.Integer({ minimum: 64, maximum: 2048 })),

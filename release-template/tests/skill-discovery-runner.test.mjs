@@ -279,4 +279,78 @@ test('skill discovery preserves configured Friendli routes through dispatch admi
   } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache(); }
 });
 
+test('startup runtime failures retain identity and cause and do not retry providers', async () => {
+  const {reduceChildEvents,projectTranscriptChildren}=await mod('runs/shared/child-ledger.ts');
+  const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{throw new ReferenceError('fixtureBinding is not defined');}});
+  await f.runner({brief:'Private synthetic task text must not enter accounting.'},f.ctx);
+  assert.equal(f.calls.length,1,'provider changes cannot fix a harness ReferenceError');
+  const entries=f.entries.map(e=>({type:'custom',customType:e.type,data:e.data}));
+  const ledger=reduceChildEvents(projectTranscriptChildren(entries));
+  assert.equal(ledger.tasks.length,1);
+  const task=ledger.tasks[0];
+  assert.equal(task.agent,'automatic-skill-discovery');
+  assert.equal(task.label,'Installed skill discovery');
+  assert.equal(task.scopeId,'supplied-skill-candidates');
+  assert.equal(task.execution.cause.category,'internal');
+  assert.equal(task.execution.cause.stage,'launch');
+  assert.match(task.execution.cause.diagnosticRef,/ReferenceError:fixtureBinding$/);
+  assert.equal(task.attempts[0].route,'openrouter/free/discovery');
+  assert.equal(task.attempts[0].usage,undefined,'missing provider evidence is not invented zero');
+  assert.doesNotMatch(JSON.stringify(entries),/Private synthetic task/);
+});
+
+test('provider retries remain separate attributable attempts under one logical scope', async () => {
+  const {reduceChildEvents,projectTranscriptChildren}=await mod('runs/shared/child-ledger.ts');
+  let calls=0;
+  const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>++calls===1?{isError:true}:result('{"skills":[]}')});
+  await f.runner({brief:'Select a supplied skill.'},f.ctx);
+  const ledger=reduceChildEvents(projectTranscriptChildren(f.entries.map(e=>({type:'custom',customType:e.type,data:e.data}))));
+  assert.equal(ledger.tasks.length,1);
+  assert.equal(ledger.tasks[0].attempts.length,2);
+  assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.state),['failed','completed']);
+  assert.equal(new Set(ledger.tasks[0].attempts.map(a=>a.route)).size,2);
+});
+
+test('native helper launches coalesce with wrapper receipts while retry usage stays per attempt', async () => {
+ const {reduceChildEvents,projectTranscriptChildren}=await mod('runs/shared/child-ledger.ts');
+ const {collectSessionCost}=await import(pathToFileURL(path.join(agent,'extensions/lib/session-cost.ts')));
+ const {collectSessionMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/session-metrics.ts')));
+ const {buildUsedSummary}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
+ let calls=0;
+ const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{
+  const attempt=++calls, runId=`native-fixture-${attempt}`, status=attempt===1?'failed':'completed';
+  f.entries.push({type:'subagent-lifecycle-v1',data:{runId,mode:'single',state:status,results:[{index:0,status}]}});
+  const row={exitCode:attempt===1?1:0,...(attempt===1?{error:'provider unavailable'}:{output:'{"skills":[]}'}),usage:{input:attempt*10,output:attempt,cacheRead:0,cacheWrite:0,cost:attempt*.01,turns:1}};
+  // Native accounting can also arrive independently of its wrapper.
+  f.entries.push({type:'subagent-cost-v1',data:{runId,mode:'single',results:[row]}});
+  return {isError:attempt===1,details:{runId,results:[row]}};
+ }});
+ await f.runner({brief:'Select a supplied skill.'},f.ctx);
+ const entries=f.entries.map(e=>({type:'custom',customType:e.type,data:e.data}));
+ const ledger=reduceChildEvents(projectTranscriptChildren(entries));
+ assert.equal(ledger.tasks.length,1,'native and wrapper rows describe one logical task');
+ assert.equal(ledger.tasks[0].attempts.length,2);
+ assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.runId),['native-fixture-1','native-fixture-2']);
+ assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.usage.input),[10,20]);
+ const metrics=collectSessionMetrics(entries);assert.equal(metrics.childTokens,33,'both attempts count exactly once');
+ const costs=collectSessionCost(entries);assert.equal(costs.total,.03);assert.equal(costs.pending,0);assert.equal(costs.unknown,false);
+ const report=buildUsedSummary(entries);
+ assert.equal(report.agents.total,1);
+ assert.equal(report.runs.length,2,'forensic rows also coalesce native and wrapper accounting');
+ const rows=report.runs.filter(r=>r.runId.startsWith('skill-discovery-'));
+ assert.deepEqual(rows.map(r=>r.tokens),[11,22]);assert.deepEqual(rows.map(r=>r.attempt),[1,2]);
+});
+
+test('host spawn failures do not change provider routes',async()=>{
+ for(const code of ['EACCES','EPERM','ENOENT']){
+  const error=Object.assign(new Error(`spawn /fixture/cli.js ${code}`),{code,syscall:'spawn /fixture/cli.js'});
+  const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{throw error;}});
+  await f.runner({brief:'Select a supplied skill.'},f.ctx);assert.equal(f.calls.length,1,code);
+  const cost=f.entries.filter(e=>e.type==='subagent-cost-v1').at(-1).data.results[0];
+  assert.equal(cost.cause.category,code==='ENOENT'?'dependency':'permission');assert.equal(cost.usage,undefined);
+ }
+ const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>({isError:true,details:{results:[{exitCode:1,error:'spawn /fixture/cli.js EACCES'}]}})});
+ await f.runner({brief:'Select a supplied skill.'},f.ctx);assert.equal(f.calls.length,1,'native error row follows the same policy');
+});
+
 after(() => { delete globalThis[SKILL_DISCOVERY_RUNNER]; for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } fs.rmSync(root, { recursive: true, force: true }); });

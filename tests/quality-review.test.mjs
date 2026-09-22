@@ -1033,12 +1033,12 @@ test("rounds with no dispatched reviewer are refunded, not charged", async (t) =
  await f.tool({ action: "review" });
  await f.tool({ action: "review" });
  assert.equal(f.state().rounds, 0);
- assert.equal(f.state().refunded, 2);
+ assert.equal(f.state().refunded, 1);
  assert.equal(f.state().status, "unavailable");
  assert.match(f.state().reason, /No healthy permitted reviewer/);
  assert.equal(f.state().reports[0].outcome, "unknown");
  await f.settle(); await f.settle();
- assert.equal(f.calls.length, 2, "settled hooks do not retry unavailable capacity");
+ assert.equal(f.calls.length, 1, "unchanged capacity and settled hooks do not retry");
  assert.ok(f.sent.every(s => s.o.triggerTurn === false), "no model wakeup to acknowledge a dispatch gap");
 });
 
@@ -1095,7 +1095,7 @@ test('an explicit retry can recover refunded capacity while later edits do not a
  await f.mutate(); await f.tool({action:'review'});
  await f.mutate('src/value.js','export const value=2;'); await f.settle();
  assert.equal(f.calls.length,1); assert.equal(f.state().status,'unavailable');
- available=true; await f.tool({action:'review'});
+ available=true; await f.tool({action:'review',retryReason:'A reviewer slot is now available after the prior job completed.'});
  assert.equal(f.calls.length,2); assert.equal(f.state().rounds,1);
  assert.equal(f.state().reports[0].outcome,'pass'); assert.equal(f.state().status,'awaiting_assessment');
 });
@@ -1232,4 +1232,66 @@ test("accepted assessment names the open aspects and gaps instead of failing bli
  assert.ok(err, "a pass with an open gap must not be accepted");
  assert.match(err.message, /Current independent reviews.*missing evidence/);
  assert.match(err.message, /Open: .*\(gap: Prior content unavailable/);
+});
+
+test('launch failure cannot be retried by changing evidence or source; a corrected cause explicitly reopens it', async t => {
+ let available=false;
+ const f=await fixture(t,{runner:async req=>req.aspects.map(a=>available?pass(a.id):{aspect:a.id,ok:false,gap:'Reviewer launch failed: runtime configuration was missing.'})});
+ await f.mutate();fs.writeFileSync(path.join(f.dir,'screen.png'),'synthetic evidence fixture');
+ await f.tool({action:'review',evidence:['screen.png']});
+ fs.writeFileSync(path.join(f.dir,'screen.png'),'new fixture evidence');
+ await f.tool({action:'review',evidence:['screen.png']});
+ await f.tool({action:'review'});
+ await f.mutate('src/value.js','export const value=2;');await f.settle();
+ assert.equal(f.calls.length,1,'neither screenshots nor source repairs fix the reviewer environment');
+ assert.equal(f.state().rounds,1);assert.match(f.state().nextAction,/retryReason/);
+ assert.ok(f.sent.every(s=>s.o.triggerTurn===false));
+ assert.ok(f.state().aspects.every(a=>!Object.hasOwn(a,'rubric')),'parent receipts omit repeated reviewer-only rubrics');
+ available=true;
+ await f.tool({action:'review',retryReason:'Corrected the missing reviewer runtime configuration and verified the launch.'});
+ assert.equal(f.calls.length,2);assert.equal(f.state().reports[0].outcome,'pass');
+ await f.tool({action:'assess',disposition:'accepted',reason:'The repaired reviewer inspected the current source and found no blockers.'});
+ assert.equal(f.state().status,'accepted');
+});
+
+test('source changes during failed review do not erase the infrastructure retry gate', async t => {
+ for (const unattempted of [false, true]) {
+  let release, started;
+  const waiting = new Promise(resolve => started = resolve);
+  const f = await fixture(t, { runner: async request => {
+   started(); await new Promise(resolve => release = resolve);
+   return request.aspects.map(a => ({ aspect: a.id, ok: false, unattempted, gap: 'Reviewer unavailable because the configured runtime could not start.' }));
+  } });
+  await f.mutate();
+  const running = f.tool({ action: 'review' });
+  await waiting;
+  await f.mutate('src/value.js', 'export const value = 2;');
+  release(); await running;
+  assert.equal(f.state().status, 'unavailable');
+  assert.equal(f.state().rounds, unattempted ? 0 : 1);
+  await f.settle();
+  assert.equal(f.calls.length, 1, 'a source edit cannot repair unavailable reviewer infrastructure');
+  assert.ok(f.sent.every(({ o }) => o.triggerTurn === false));
+  await assert.rejects(f.tool({ action: 'assess', disposition: 'accepted', reason: 'This unsupported acceptance must remain rejected.' }), /Current independent reviews/);
+  await f.tool({ action: 'assess', disposition: 'blocked', reason: 'Independent review remains unavailable until its runtime is repaired.' });
+  assert.equal(f.state().status, 'blocked', 'source changes do not prevent truthful acknowledgement of unavailable infrastructure');
+ }
+});
+
+test('review follow-up budget is reserved while a triggered model turn edits and settles', async t => {
+ // Exercise the actual lifecycle with a sendMessage promise that, like the
+ // core idle dispatcher, resolves only after the triggered work has finished.
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'review-reentrant-')),sent=[],tools={};
+ let api,edit=0;
+ const ctx={cwd:dir,isIdle:()=>true,hasPendingMessages:()=>false,sessionManager:{getBranch:()=>[]}};
+ const mutate=async()=>{fs.writeFileSync(path.join(dir,'app.js'),`const value=${++edit};`);api.observe(await projectTestFacts(dir),true);};
+ api=createQualityReviewLifecycle({on(){},registerTool:d=>tools[d.name]=d,getActiveTools:()=>['quality_review'],appendEntry(){},async sendMessage(message,options){
+  sent.push({message,options});assert.ok(sent.length<=3);
+  api.message({message:{role:'custom',customType:message.customType}});
+  await mutate();await api.settled({},ctx);
+ }},{refresh:async()=>api.observe(await projectTestFacts(dir),false),tests:()=>({need:null}),runner:async req=>req.aspects.map(a=>pass(a.id))});
+ t.after(()=>{api.shutdown();fs.rmSync(dir,{recursive:true,force:true});});
+ api.restore(ctx);await api.run(ctx);api.input({source:'interactive',text:'Implement the behavior'});await mutate();
+ await api.settled({},ctx);assert.equal(sent.length,3);
+ await api.settled({},ctx);assert.equal(sent.length,3,'edits do not replenish acknowledgement turns');
 });

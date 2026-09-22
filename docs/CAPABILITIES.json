@@ -2298,12 +2298,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1716
+        "line": 1726
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1318
+        "line": 1328
       },
       {
         "name": "curator",
@@ -2318,7 +2318,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1690
+        "line": 1700
       },
       {
         "name": "export-json",
@@ -2468,7 +2468,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1643
+        "line": 1653
       },
       {
         "name": "subagent-cost",
@@ -2553,7 +2553,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1648
+        "line": 1658
       },
       {
         "name": "tasks",
@@ -2563,7 +2563,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1667
+        "line": 1677
       },
       {
         "name": "websearch",
@@ -2695,7 +2695,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 102,
+        "line": 108,
         "kind": "literal"
       },
       {
@@ -2925,13 +2925,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 518,
+        "line": 531,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 496,
+        "line": 506,
         "kind": "literal"
       },
       {
@@ -2961,7 +2961,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1808,
+        "line": 1818,
         "kind": "literal"
       },
       {
@@ -2973,7 +2973,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1745,
+        "line": 1755,
         "kind": "literal"
       },
       {
@@ -3157,7 +3157,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 102,
+        "line": 108,
         "kind": "literal"
       },
       {
@@ -3271,13 +3271,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 518,
+        "line": 531,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 496,
+        "line": 506,
         "kind": "literal"
       },
       {
@@ -3307,7 +3307,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1808,
+        "line": 1818,
         "kind": "literal"
       },
       {
@@ -3319,7 +3319,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1745,
+        "line": 1755,
         "kind": "literal"
       },
       {
@@ -3558,7 +3558,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 591,
+      "sourceFiles": 592,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 82,
@@ -5974,6 +5974,10 @@
       {
         "name": "SESSION-METRICS.md",
         "path": "docs/SESSION-METRICS.md"
+      },
+      {
+        "name": "SESSION-RECOVERY-AUDIT.md",
+        "path": "docs/SESSION-RECOVERY-AUDIT.md"
       },
       {
         "name": "SKILLS-AND-CHECKS.md",

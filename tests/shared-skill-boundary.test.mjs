@@ -93,7 +93,9 @@ function fixture() {
   };
 }
 function node(cwd, script) {
-  const env = { ...process.env };
+  // The fixture owns its global skill roots. Reading the desktop's real HOME
+  // makes mount setup race unrelated applications atomically replacing files.
+  const env = { ...process.env, HOME: path.join(path.dirname(cwd), "home") };
   delete env.PI_SUBAGENT_CHILD;
   delete env.PI_HARNESS_MUTATION_DENIED;
   delete env.NODE_TEST_CONTEXT;
@@ -214,7 +216,7 @@ test("real command isolation protects all shared roots, missing roots and aliase
   try {
     const child = `import {spawnSync} from 'node:child_process';const g=await import(${JSON.stringify(f.guard)});const invoke=g.guardedCommand('/usr/bin/python3',['-c',process.env.FIXTURE_CODE]);const r=spawnSync(invoke.command,invoke.args,{cwd:process.cwd(),encoding:'utf8'});console.log(JSON.stringify({status:r.status,stderr:r.stderr,error:r.error?.code}));`;
     const run = (code) => {
-      const env = { ...process.env, FIXTURE_CODE: code };
+      const env = { ...process.env, HOME: f.home, FIXTURE_CODE: code };
       delete env.PI_SUBAGENT_CHILD;
       delete env.PI_HARNESS_MUTATION_DENIED;
       delete env.NODE_TEST_CONTEXT;

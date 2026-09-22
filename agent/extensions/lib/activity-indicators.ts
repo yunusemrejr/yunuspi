@@ -48,6 +48,8 @@ export interface ActivityCounters {
 /** Default-deny: only these health kinds may become transcript lines.
  * `error` = line only on error status (routine ok stays in ring/metrics). */
 const LINE_POLICY: Record<string, "all" | "error"> = {
+  "guardian.observing": "all",
+  "guardian.evaluated": "all",
   "skill.route": "all",
   "skill.read": "all",
   "skill.resolve": "all",
@@ -68,6 +70,7 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
 const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, error: 10_000 };
 /** Infrastructure states flap slowly; a 10s window would re-log every check. */
 const DEDUPE_OVERRIDE: Array<[string, number]> = [
+  ["guardian.", 60_000],
   ["intelligence.used", 60_000],
   ["local.refresh", 600_000],
   ["ml.smol.offer", 600_000],
@@ -136,6 +139,13 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     const outcome = typeof data.outcome === "string" ? data.outcome : "";
     const route = typeof data.route === "string" ? data.route : "";
     const skill = typeof data.skill === "string" ? data.skill : "";
+    if (kind === "guardian.observing" || kind === "guardian.evaluated") {
+      const count = Number.isSafeInteger(data.count) && Number(data.count) >= 0 ? Number(data.count) : 0;
+      const evaluations = Number.isSafeInteger(data.evaluations) && Number(data.evaluations) >= 0 ? Number(data.evaluations) : 0;
+      const wasm = decision === "lazy" ? "WASM not needed" : decision === "quarantined" ? "WASM unavailable"
+        : decision === "initializing" ? "WASM initializing" : `${evaluations} WASM evaluations`;
+      return { label: kind === "guardian.evaluated" ? "evaluated" : "observing", status: decision === "quarantined" ? "error" : "ok", detail: `${count} tool results · ${wasm}` };
+    }
     if (kind === "skill.read") {
       const name = skillNameFromPath(skill) ?? skill;
       return { label: clean(name || "skill", 60), status: isError ? "error" : "ok", ms, detail: data.partial === true ? "partial" : "full" };
@@ -286,8 +296,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
       const lineStatus = intelligence ? "ok" : d.status;
       const key = `${lineKind}\0${lineLabel}\0${lineStatus}`;
-      const last = lastLine.get(key) ?? 0;
-      if (now - last < dedupeMs(lineKind, lineStatus)) return;
+      const last = lastLine.get(key);
+      if (last !== undefined && now - last < dedupeMs(lineKind, lineStatus)) return;
       while (lineAt.length && now - lineAt[0]! > 60_000) lineAt.shift();
       if (lineAt.length >= LINE_BUDGET_PER_MIN) {
         dropped++;
@@ -368,6 +378,8 @@ export interface ActivityDetails {
 
 /** Short TUI tag per health kind; unknown kinds render in full. */
 export const ACTIVITY_TAGS: Record<string, string> = {
+  "guardian.observing": "Guardian",
+  "guardian.evaluated": "Guardian",
   "skill.route": "skill",
   "skill.read": "skill",
   "skill.resolve": "skill",

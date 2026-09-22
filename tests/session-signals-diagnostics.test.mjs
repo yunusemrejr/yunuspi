@@ -176,3 +176,49 @@ test("context projection removes owned pressure lines across repeated projection
     "a new model generation keeps its own pressure notice",
   );
 });
+
+test('used report identifies native helper startup failures without inventing usage', async () => {
+  const {buildUsedSummary,usedSummaryHtml}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
+  const {persistSubagentCost}=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/session-cost.ts')));
+  const {helperLaunchFailure}=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/helper-receipt.ts')));
+  const entries=[];
+  persistSubagentCost({appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},
+    {currentSessionId:'fixture',completionOwnerId:'helper'},
+    {sessionId:'fixture',completionOwnerId:'helper',runId:'helper',mode:'single',state:'failed',results:[{
+      index:0,agent:'automatic-skill-discovery',label:'Installed skill discovery',scopeId:'supplied-skill-candidates',model:'example/fixture',thinking:'off',attempt:1,
+      ...helperLaunchFailure(new ReferenceError('fixtureBinding is not defined'),'helper'),
+    }]});
+  const summary=buildUsedSummary(entries);
+  assert.equal(summary.agents.total,1);
+  const html=usedSummaryHtml(summary);
+  for(const fragment of ['automatic-skill-discovery','Installed skill discovery','supplied-skill-candidates','fixtureBinding','internal','launch','not recorded'])assert.ok(html.includes(fragment),fragment);
+  assert.ok(summary.runs.every(run=>run.usageRecorded===false),'empty evidence objects cannot turn missing usage into zero');
+});
+
+
+test('empty usage objects retain unknown cost and token evidence while reported zero cost remains zero', async()=>{
+ const {buildUsedSummary}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
+ const {persistSubagentCost}=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/session-cost.ts')));
+ const entries=[],pi={appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})};
+ const state={currentSessionId:'fixture',completionOwnerId:'helper'};
+ for(const [runId,usage] of [['empty',{}],['zero',{cost:{total:0,source:'provider-reported'}}]])persistSubagentCost(pi,state,{sessionId:'fixture',completionOwnerId:'helper',runId,mode:'single',results:[{exitCode:0,usage}]});
+ const rows=buildUsedSummary(entries).runs;
+ assert.equal(rows.find(r=>r.runId==='empty').costUsd,undefined);
+ assert.equal(rows.find(r=>r.runId==='empty').usageRecorded,false);
+ assert.equal(rows.find(r=>r.runId==='zero').costUsd,0);
+ assert.equal(rows.find(r=>r.runId==='zero').usageRecorded,false,'known zero cost does not establish token counts');
+});
+
+
+test('only an explicit native no-child launch proof permits zero accounting',async()=>{
+ const {buildUsedSummary}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
+ const {persistSubagentCost}=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/session-cost.ts')));
+ const entries=[],pi={appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})};
+ const state={currentSessionId:'fixture',completionOwnerId:'helper'};
+ for(const [runId,proof] of [['proven',{stage:'launch',childProcessStarted:false}],['unknown',{stage:'launch'}],['started',{stage:'launch',childProcessStarted:true}]]){
+  persistSubagentCost(pi,state,{sessionId:'fixture',completionOwnerId:'helper',runId,mode:'single',results:[{error:true,...proof}]});
+ }
+ const rows=buildUsedSummary(entries).runs;
+ assert.equal(rows.find(r=>r.runId==='proven').costUsd,0);assert.equal(rows.find(r=>r.runId==='proven').usageRecorded,true);
+ for(const id of ['unknown','started']){assert.equal(rows.find(r=>r.runId===id).costUsd,undefined);assert.equal(rows.find(r=>r.runId===id).usageRecorded,false);}
+});

@@ -208,10 +208,11 @@ export class CombinedAutocompleteProvider {
                 prefix: atPrefix,
             };
         }
-        if (!options.force && textBeforeCursor.startsWith("/")) {
-            const spaceIndex = textBeforeCursor.indexOf(" ");
+        const commandText = textBeforeCursor.trimStart();
+        if (!options.force && cursorLine === 0 && commandText.startsWith("/")) {
+            const spaceIndex = commandText.search(/\s/);
             if (spaceIndex === -1) {
-                const prefix = textBeforeCursor.slice(1);
+                const prefix = commandText.slice(1);
                 const commandItems = this.commands.map((cmd) => {
                     const name = "name" in cmd ? cmd.name : cmd.value;
                     const hint = "argumentHint" in cmd && cmd.argumentHint ? cmd.argumentHint : undefined;
@@ -232,11 +233,11 @@ export class CombinedAutocompleteProvider {
                     return null;
                 return {
                     items: filtered,
-                    prefix: textBeforeCursor,
+                    prefix: commandText,
                 };
             }
-            const commandName = textBeforeCursor.slice(1, spaceIndex);
-            const argumentText = textBeforeCursor.slice(spaceIndex + 1);
+            const commandName = commandText.slice(1, spaceIndex);
+            const argumentText = commandText.slice(spaceIndex).trimStart();
             const command = this.commands.find((cmd) => {
                 const name = "name" in cmd ? cmd.name : cmd.value;
                 return name === commandName;
@@ -277,16 +278,17 @@ export class CombinedAutocompleteProvider {
         // Slash commands are at the start of the line and don't contain path separators after the first /.
         // Also require the item to look like a bare command name: an absolute
         // path item (`/usr/`) completed from `/u` must not become `//usr/ `.
-        const isSlashCommand = prefix.startsWith("/") && beforePrefix.trim() === "" && !prefix.slice(1).includes("/") && !item.value.includes("/") && item.value !== prefix.slice(1);
+        const isSlashCommand = cursorLine === 0 && /^\/[^\s/]*$/.test(prefix) && beforePrefix.trim() === "" && !/[\s/]/.test(item.value);
         if (isSlashCommand) {
             // This is a command name completion
-            const newLine = `${beforePrefix}/${item.value} ${adjustedAfterCursor}`;
+            const suffix = /^\s/.test(adjustedAfterCursor) ? "" : " ";
+            const newLine = `${beforePrefix}/${item.value}${suffix}${adjustedAfterCursor}`;
             const newLines = [...lines];
             newLines[cursorLine] = newLine;
             return {
                 lines: newLines,
                 cursorLine,
-                cursorCol: beforePrefix.length + item.value.length + 2, // +2 for "/" and space
+                cursorCol: beforePrefix.length + item.value.length + 1 + suffix.length,
             };
         }
         // Check if we're completing a file attachment (prefix starts with "@")
@@ -661,7 +663,7 @@ export class CombinedAutocompleteProvider {
         const currentLine = lines[cursorLine] || "";
         const textBeforeCursor = currentLine.slice(0, cursorCol);
         // Don't trigger if we're typing a slash command at the start of the line
-        if (textBeforeCursor.trim().startsWith("/") && !textBeforeCursor.trim().includes(" ")) {
+        if (cursorLine === 0 && /^\/[^\s/]*$/.test(textBeforeCursor.trimStart())) {
             return false;
         }
         return true;

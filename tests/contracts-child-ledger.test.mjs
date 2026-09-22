@@ -152,3 +152,13 @@ test('audit: ledger and /metrics agree a detached child is outstanding',async ()
  assert.equal(m.agentsActive,1);
  assert.equal(m.agentOutcomeUnknown,0);
 });
+
+
+test('empty or cost-only usage never fabricates zero token counts and partial receipts preserve prior measurements',()=>{
+ const events=[{type:'launch',taskId:'fixture',attempt:1},
+  {type:'completion',taskId:'fixture',attempt:1,row:{exitCode:0,usage:{cost:0}}}];
+ assert.equal(reduceChildEvents(events).tasks[0].attempts[0].usage,undefined);
+ events.push({type:'completion',taskId:'fixture',attempt:1,row:{exitCode:0,usage:{input:10,output:5}}},
+  {type:'completion',taskId:'fixture',attempt:1,row:{exitCode:0,usage:{input:8}}});
+ assert.deepEqual(reduceChildEvents(events).tasks[0].attempts[0].usage,{input:10,output:5});
+});

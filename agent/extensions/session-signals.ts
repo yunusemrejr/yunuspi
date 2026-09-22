@@ -7,10 +7,12 @@ import {
   reportText,
 } from "./lib/session-report.ts";
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
+import { readCostEvidence } from "./lib/cost-evidence.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import {
   reduceChildEvents,
   projectTranscriptChildren,
+  normalizeHelperChildEntries,
   summarizeLedger,
   type LogicalChildTask,
 } from "./pi-subagents/src/runs/shared/child-ledger.ts";
@@ -317,6 +319,7 @@ export type UsedSummary = {
   runs: {
     runId: string;
     childRunId?: string;
+    attempt?: number;
     index?: number;
     mode?: string;
     agent?: string;
@@ -571,25 +574,29 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     const parent = String(data.runId ?? data.asyncId ?? data.id ?? fallback ?? "unknown").slice(0, 80);
     const childIndex = Number.isInteger(result.index) ? result.index : index;
     const childKey = String(result.workflowKey ?? result.childId ?? childIndex).slice(0, 80);
-    const key = `${parent}:${childKey}`;
+    const attempt = Number.isSafeInteger(result.attempt) && result.attempt > 0 ? result.attempt : 1;
+    const key = `${parent}:${childKey}:attempt-${attempt}`;
     const previous = runRows.get(key);
     const modelText = bounded(result.model, 240) ?? launchModel(args, childIndex) ?? (previous?.provider && previous?.model ? `${previous.provider}/${previous.model}` : previous?.model);
     const slash = modelText?.indexOf("/") ?? -1;
-    const usage = result.usage && typeof result.usage === "object" ? result.usage : result.evidence?.usage && typeof result.evidence.usage === "object" ? result.evidence.usage : undefined;
+    const usage = [result.usage, result.evidence?.usage].find(value => value && typeof value === "object" && ["input", "output", "cacheRead", "cacheWrite", "turns"].some(field => isNonnegative(value[field])));
     const tokens = usage ? ["input", "output", "cacheRead", "cacheWrite"].reduce((sum, field) => sum + finite(usage[field]), 0) : 0;
-    const rawCost = result.totalCost?.costUsd ?? usage?.cost?.total ?? usage?.cost;
+    const totalCostEvidence = readCostEvidence({cost:result.totalCost?.costUsd,costDetails:result.totalCost?.costDetails});
+    const ownCostEvidence = readCostEvidence(result.usage);
+    const costEvidence = totalCostEvidence.seen ? totalCostEvidence : ownCostEvidence;
+    const rawCost = costEvidence.seen ? costEvidence.reported + costEvidence.estimated : undefined;
     let status = statusOf(data, result);
     if (previous && terminal.has(previous.status) && !terminal.has(status)) status = previous.status;
-    const agent = launchAgent(args, childIndex) ?? previous?.agent;
+    const agent = bounded(result.agent, 80) ?? launchAgent(args, childIndex) ?? previous?.agent;
     runRows.set(key, {
-      runId: parent,
+      runId: parent, attempt,
       ...(bounded(result.runId, 80) ? { childRunId: bounded(result.runId, 80) } : previous?.childRunId ? { childRunId: previous.childRunId } : {}),
       ...(Number.isInteger(childIndex) ? { index: childIndex } : {}),
       ...(bounded(data.mode, 32) ? { mode: bounded(data.mode, 32) } : previous?.mode ? { mode: previous.mode } : {}),
       ...(agent ? { agent } : {}),
       status,
       ...(slash > 0 ? { provider: modelText!.slice(0, slash).slice(0, 80), model: modelText!.slice(slash + 1).slice(0, 160) } : modelText ? { model: modelText.slice(0, 160) } : previous?.model ? { ...(previous.provider ? { provider: previous.provider } : {}), model: previous.model } : {}),
-      ...(bounded(args?.thinking ?? args?.thinkingOverride, 16) ? { thinking: bounded(args?.thinking ?? args?.thinkingOverride, 16) } : previous?.thinking ? { thinking: previous.thinking } : {}),
+      ...(bounded(result.thinking ?? args?.thinking ?? args?.thinkingOverride, 16) ? { thinking: bounded(result.thinking ?? args?.thinking ?? args?.thinkingOverride, 16) } : previous?.thinking ? { thinking: previous.thinking } : {}),
       tokens: Math.max(previous?.tokens ?? 0, tokens),
       ...(finite(usage?.turns) || previous?.turns ? { turns: Math.max(previous?.turns ?? 0, finite(usage?.turns)) } : {}),
       ...(isNonnegative(rawCost) || previous?.costUsd !== undefined ? { costUsd: Math.max(previous?.costUsd ?? 0, finite(rawCost)) } : {}),
@@ -601,7 +608,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     const rows = Array.isArray(data.results) && data.results.length ? data.results : data.asyncId || data.runId ? [{ index: 0, status: data.state ?? "queued" }] : [];
     rows.forEach((result: any, index: number) => recordRun(data, result, index, launch.args, launch.fallback));
   }
-  for (const entry of list) {
+  for (const entry of normalizeHelperChildEntries(list)) {
     if ((entry as any)?.type !== "custom" || (entry as any)?.customType !== "subagent-cost-v1") continue;
     const data = (entry as any)?.data ?? {};
     for (const [index, result] of (Array.isArray(data.results) ? data.results : []).entries()) {
@@ -794,6 +801,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(run.status)}</span></summary>${factGrid([
       ["Parent run", run.runId],
       ["Child run", run.childRunId ?? "not recorded"],
+      ["Attempt", run.attempt ?? "not recorded"],
       ["Child position", Number.isInteger(run.index) ? `#${Number(run.index) + 1}` : "not recorded"],
       ["Launch mode", run.mode ?? "not recorded"],
       ["Agent", run.agent ?? "not recorded"],
@@ -813,6 +821,8 @@ export function usedSummaryHtml(summary: UsedSummary): string {
         ["Run", attempt.runId ?? "not recorded"],
         ["Route", attempt.route ?? "not recorded"],
         ["Backend", attempt.backend ?? "not recorded"],
+        ["Failure stage", cause?.stage ?? "none"],
+        ["Diagnostic", cause?.diagnosticRef ?? "not recorded"],
         ["Execution", cause ? `${attempt.execution.status} (${cause.category}${cause.truncation !== "none" ? `, ${cause.truncation}` : ""})` : attempt.execution.status],
         ["Acceptance", attempt.acceptance.status + (attempt.acceptance.reason ? ` · ${attempt.acceptance.reason}` : "")],
         ["Usage", attempt.usage ? `${formatCount(attempt.usage.input ?? 0)} in · ${formatCount(attempt.usage.output ?? 0)} out` : "not recorded"],

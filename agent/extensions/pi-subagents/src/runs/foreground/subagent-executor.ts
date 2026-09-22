@@ -2,6 +2,7 @@ import { fileVerificationSummary } from "../shared/file-verification.ts";
 import { expandCommonTask } from "../shared/common-task.ts";
 import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import { persistSubagentActivity } from "../../extension/session-cost.ts";
+import { helperLaunchFailure } from "../../extension/helper-receipt.ts";
 import { SELF_MUTATION_ALLOWED } from "../../../../lib/self-mutation-guard.ts";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -453,6 +454,10 @@ type PrepareForkSessionForTask = (agentName: string, idx?: number, modelOverride
 type ForkThinkingOverrideForTask = (agentName: string, idx?: number, modelOverride?: string, modelOverrideFromParent?: boolean, modelOrigin?: ModelOrigin) => AgentConfig["thinking"] | undefined;
 
 interface ExecutionContextData {
+	/** Set only when a process start or successful background launch is observed. */
+	childProcessStarted?: boolean;
+	/** Once a launcher is invoked, an unobserved start cannot prove no spawn. */
+	childLaunchAttempted?: boolean;
 	params: SubagentParamsLike;
 	effectiveCwd: string;
 	requestedCwd?: string;
@@ -3277,7 +3282,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 				...(data.parentSessionId ? { sessionId: data.parentSessionId } : {}),
 			});
 		const modelOverrideFromParent = modelOrigin === "inherited";
-		const asyncResult = executeAsyncSingle(id, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
+		const launchOptions = compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
 			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
 			goal: params.task ?? "",
@@ -3302,7 +3307,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			...(params.reads !== undefined ? { reads: params.reads } : {}),
 			outputBaseDir: resolveSingleRunOutputBaseDir(deps, artifactsDir, id),
 			modelOverride,
-			modelRouteCandidates: requestParams.modelRouteCandidates,
+			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
 			modelOverrideFromParent,
 			modelOrigin,
@@ -3336,7 +3341,10 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			workflowKey: params.workflowKey,
 			lane: params.lane,
 			workflowAwaitAsync: params.workflowAwaitAsync,
-		}));
+		});
+		data.childLaunchAttempted = true;
+		const asyncResult = executeAsyncSingle(id, launchOptions);
+		if (!asyncResult.isError) data.childProcessStarted = true;
 		return waitForWorkflowAsyncSingleResult(params, asyncResult, { runId: id, task: params.task ?? "", signal: data.signal, state: deps.state, kill: deps.kill });
 	}
 
@@ -3811,7 +3819,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		: undefined;
 	const lifecycleSessionId=resolveCurrentSessionId(ctx.sessionManager);
 	try {
-		const launched = await runSync(ctx.cwd, agents, params.agent!, task, compactOptional<Parameters<typeof runSync>[4]>({
+		const launchOptions = compactOptional<Parameters<typeof runSync>[4]>({
+			onProcessStarted: () => { data.childProcessStarted = true; },
 			onLifecycle: status => persistSubagentActivity(deps.pi, deps.state, {sessionId:lifecycleSessionId,runId,mode:'single',state:status,results:[{index:0,status}]}),
 			permissions: deps.config.permissions,
 			runtimeSnapshotHost: deps.pi,
@@ -3850,7 +3859,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			nestedRoute: foregroundControl?.nestedRoute,
 			index: 0,
 			modelOverride,
-			modelRouteCandidates: requestParams.modelRouteCandidates,
+			modelRouteCandidates: params.modelRouteCandidates,
 			fast: params.fast,
 			modelOverrideFromParent,
 			modelOrigin,
@@ -3915,7 +3924,9 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			toolBudget: effectiveToolBudget.toolBudget,
 			capabilityCeiling: data.capabilityCeiling,
 			allowZeroToolBudget: data.allowZeroToolBudget && effectiveToolBudget.toolBudget === data.toolBudget,
-		}));
+		});
+		data.childLaunchAttempted = true;
+		const launched = await runSync(ctx.cwd, agents, params.agent!, task, launchOptions);
 		r = launched.detached && detachedWorkflowChild ? await detachedWorkflowChild : launched;
 	} catch (error) {
 		if (worktreeSetup) cleanupWorktrees(worktreeSetup);
@@ -6891,6 +6902,12 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		} catch (error) {
 			asyncLaunchFailed = effectiveAsync;
 			const errorResult = withForkThinkingNotes(toExecutionErrorResult(effectiveParams, error, contextPolicy.contextSummary), forkThinkingDowngrades);
+			// Single dispatch owns process-start evidence. Other modes may have
+			// already launched siblings, so absence here proves nothing for them.
+			const runnerType = hasSingle ? agents.find(agent => agent.name === effectiveParams.agent)?.runner?.type : undefined;
+			if (hasSingle && (!runnerType || runnerType === "pi") && !execData.childLaunchAttempted && !execData.childProcessStarted) {
+				errorResult.details.launchFailure = { ...helperLaunchFailure(error, runId), error: true, stage: "launch", childProcessStarted: false };
+			}
 			if (nestedForegroundStarted) writeNestedForegroundEvent("subagent.nested.completed", errorResult);
 			return attachMission(errorResult);
 		} finally {

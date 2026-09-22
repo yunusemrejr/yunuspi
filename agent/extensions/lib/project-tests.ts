@@ -166,7 +166,7 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
     // the need stays unresolved forever, and automatic reviews stay off.
     || /^php(?:\d+(?:\.\d+)*)?$/.test(executable) && tokens[1] === '-l' && tokens.length > 2 && tokens.slice(2).every(t => !t.startsWith('-'));
   if (!runner && !declared) return { reason: 'not a recognized test runner; declare it explicitly in an assessment plan to use it' };
-  return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: bodyCommand.slice(0, 300) } };
+  return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: command.trim() } };
 }
 
 export function projectCheckCommand(command: unknown, cwd: string, declared = false) {
@@ -181,6 +181,11 @@ export function projectCheckCommandReason(command: unknown, cwd: string): string
   return 'reason' in verdict ? verdict.reason : null;
 }
 
+function currentProjectCheck(state: State, key: string) {
+  return state.checks.findLast(c => c.key === key && c.revision === state.revision)
+    ?? (state.treeComplete && state.tree ? state.evidence.findLast(c => c.key === key && c.tree === state.tree) : undefined);
+}
+
 export function projectTestNeed(state: State): string | null {
   if (!state.changed.length || state.paused || state.optedOut) return null;
   const a = state.assessment;
@@ -188,18 +193,7 @@ export function projectTestNeed(state: State): string | null {
   if (a.disposition !== 'required') return null;
   const planned = a.checks.length ? a.checks.map(p => p.key)
     : [...new Set(state.checks.filter(c => c.revision === state.revision).map(c => c.key))];
-  const live = [...state.checks].reverse();
-  const usable = (key: string) => {
-    const c = live.find(c => c.key === key && c.revision === state.revision);
-    if (c) return c;
-    // Reuse still-valid evidence: the same command key bound to the exact
-    // tree the scan observes now. Revision counters restart across scopes
-    // and reloads, so a passed receipt is honored without re-running only
-    // when its tree hash matches the current tree.
-    if (state.tree) { const e = state.evidence.find(e => e.key === key && e.tree === state.tree); if (e) return e; }
-    return undefined;
-  };
-  const resolved = planned.map(usable);
+  const resolved = planned.map(key => currentProjectCheck(state, key));
   if (resolved.some(c => c?.outcome === 'running')) return 'running';
   if (resolved.some(c => c?.outcome === 'failed')) return 'failed';
   if (!resolved.length || resolved.some(c => !c || c.outcome !== 'passed')) return 'missing';
@@ -221,12 +215,13 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1, delivered = '', deliveryInFlight = '', deliveryVersion = 0;
   let hashes: Record<string, string> = {};
-  const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number }>();
+  const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number; observeOnly?: boolean }>();
   const earlyTerminals = new Map<string, any>();
   // Recent commands that LOOK like a planned check (same executable) but did
   // not match any receipt key: the usual cause is composition (trailing echo,
   // pipes) that changes the key. Surfaced in the missing-need advice so a run
   // is never silently "missing". Bounded: 3 commands × 160 chars, one revision.
+  let activity = 0;
   let unmatched = { revision: -1, commands: [] as string[] };
   const firstExe = (command: string) => {
     const segments = command.split('&&');
@@ -308,7 +303,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };
-  const summary = () => ({ ...state, disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
+  const summary = () => ({ ...state, plannedChecks: (state.assessment?.checks ?? []).map(check => {
+    const receipt = currentProjectCheck(state, check.key);
+    return { command: check.label, outcome: receipt?.outcome ?? ([...state.checks, ...state.evidence].some(c => c.key === check.key) ? 'stale' : 'missing'), ...(receipt ? { callId: receipt.callId } : {}) };
+  }), disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
     evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit. Receipts are bound to the observed source tree hash; reuse across scopes requires an identical tree.' });
   const advice = () => {
     const need = projectTestNeed(state);
@@ -317,20 +315,29 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       ? 'Choose verification proportional to the changed behavior with project_tests({action:"inspect"}). Reuse focused existing checks and their current receipts; add or update regression coverage when it tests a changed contract or demonstrated defect. Avoid redundant runs and tests that mirror implementation. Record the scoped decision with project_tests({action:"assess",disposition:"required",reason:"...",commands:["..."]}), or not_needed/blocked with a concrete reason when appropriate.'
       : need === 'failed'
         ? 'A planned check failed. Inspect its actual failure, repair the cause or outdated test, then rerun the focused check. Preserve unrelated/baseline failures in a blocked assessment with a reason; do not suppress tests just to obtain green output.'
-        : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect project_tests, run the scoped planned checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.'
+        : 'Planned verification evidence is missing, unknown or older than the latest change. Inspect plannedChecks in project_tests; rerun only missing, failed or stale checks using bash/bg_run, and evaluate their actual results. Use a simple command without pipes, trailing echo, or status-masking shell composition so its exit status is observable; literal environment assignments and cd into the project with && are supported. Reassess after changing code/tests. A readback, linter or successful echo does not establish behavioral test coverage.'
           + (unmatched.revision === state.revision && unmatched.commands.length
             ? ` These ran but matched no planned check (composition such as trailing echo or pipes changes the receipt key; run the planned command exactly): ${unmatched.commands.map(c => JSON.stringify(c)).join('; ')}.`
             : '');
     return `[project tests] ${state.changed.length} observed source/config change(s), revision ${state.revision}. ${message} Inspect scripts and configuration before running them; respect user scope and permissions, use existing dependencies and avoid unrelated installs. No scripts are automatically executed.`;
   };
-  const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string } }, callId: string, outcome: Check['outcome'], handle?: string) => {
-    state.checks = state.checks.filter(c => !(c.key === start.check.key && c.revision === start.revision));
-    state.checks.push({ ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}) });
-    state.checks = state.checks.slice(-32); save();
+  const receipt = (start: { revision: number; tree?: string; check: { key: string; label: string }; observeOnly?: boolean }, callId: string, outcome: Check['outcome'], handle?: string) => {
+    const receipt = { ...start.check, revision: start.revision, outcome, callId, ...(start.tree ? { tree: start.tree } : {}), ...(handle ? { handle } : {}) };
+    // A newer failed/running/unknown receipt must retire an older reusable
+    // pass before live checks are discarded at a later scope boundary.
+    state.evidence = state.evidence.filter(c => c.key !== receipt.key || Boolean(receipt.tree && c.tree !== receipt.tree));
+    if (start.observeOnly) {
+      // A safe command may precede the plan. Retain its observed exit for an
+      // exact later declaration; unrelated commands never become planned tests.
+      state.evidence = [...state.evidence, receipt].slice(-32);
+    } else {
+      state.checks = [...state.checks.filter(c => !(c.key === receipt.key && c.revision === receipt.revision)), receipt].slice(-32);
+    }
+    save();
   };
   const terminal = (task: any) => {
     if (!task?.id) return;
-    const check = state.checks.find(c => c.handle === task.id && c.outcome === 'running');
+    const check = [...state.checks, ...state.evidence].find(c => c.handle === task.id && c.outcome === 'running');
     if (/^(?:running|pending|queued|starting)$/.test(task.status ?? task.state ?? '')) return;
     if (!check) {
       if (earlyTerminals.size >= 32) earlyTerminals.delete(earlyTerminals.keys().next().value!);
@@ -344,7 +351,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   };
   const completesOwnedCheck = (task: any) => task?.id
     && !/^(?:running|pending|queued|starting)$/.test(task.status ?? task.state ?? '')
-    && state.checks.some(c => c.handle === task.id && c.outcome === 'running');
+    && [...state.checks, ...state.evidence].some(c => c.handle === task.id && c.outcome === 'running');
   const api = {
     async restore(ctx: any) {
       disposeContinuationNotice();
@@ -420,9 +427,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       await scan(ctx);
       const candidate = projectCheckCommand(event.input?.command, ctx.cwd, true);
       const check = candidate && (state.assessment?.checks.some(c => c.key === candidate.key) ? candidate : projectCheckCommand(event.input?.command, ctx.cwd));
-      if (check) {
+      if (candidate) {
         if (starts.size >= 64) starts.delete(starts.keys().next().value!);
-        starts.set(event.toolCallId, { revision: state.revision, tree: state.tree, check, epoch });
+        starts.set(event.toolCallId, { revision: state.revision, tree: state.tree, check: candidate, epoch, observeOnly: !check });
       } else if (state.assessment?.revision === state.revision && state.assessment.disposition === 'required' && typeof event.input?.command === 'string') {
         const planned = new Set(state.assessment.checks.map(c => firstExe(c.label)));
         if (planned.has(firstExe(event.input.command))) {
@@ -475,6 +482,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if (event.toolName === 'bg_status') { await scan(ctx, (event.details?.tasks ?? []).some(completesOwnedCheck)); for (const task of event.details?.tasks ?? []) terminal(task); }
     },
     async message(event: any, ctx: any) {
+      activity++;
       const message = event.message;
       if (message?.role === 'assistant' && ['aborted', 'error'].includes(message.stopReason)) {
         // A provider may recover in the same user turn. Escape/Stop remains
@@ -504,12 +512,17 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       const key = `${version}:${revision}:${projectTestNeed(state)}`;
       if (delivered === key || deliveryInFlight === key) return;
       deliveryInFlight = key;
-      // Count only successful delivery, and never replenish on extension turns.
+      // Idle delivery awaits the complete model turn, which can edit source
+      // and re-enter settled. Reserve the budget before dispatch, not afterward.
+      const priorFollowups = state.followups, priorDelivered = delivered, priorActivity = activity;
+      state.followups++; delivered = key; save();
       try {
-        await pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups + 1}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true });
-        if (ticket !== epoch || !active || deliveryVersion !== version || state.revision !== revision) return;
-        state.followups++; delivered = key; save();
-      } catch { /* failed delivery may retry at the next native settled event */ }
+        await pi.sendMessage({ customType: 'project-test-followup', content: `${content} Automatic follow-up ${state.followups}/${MAX_FOLLOWUPS}; if verification cannot be completed, record the concrete blocker and report the remaining gap.`, display: false }, { deliverAs: 'followUp', triggerTurn: true });
+      } catch {
+        if (ticket === epoch && deliveryVersion === version && activity === priorActivity && delivered === key) {
+          state.followups = priorFollowups; delivered = priorDelivered; save();
+        }
+      }
       finally { if (deliveryInFlight === key) deliveryInFlight = ''; }
     },
     shutdown() { disposeContinuationNotice(); active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
@@ -534,6 +547,10 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
           if (!check) throw Error(`Command ${index + 1}/${commands.length} rejected (${projectCheckCommandReason(command, ctx.cwd) ?? 'invalid'}): ${JSON.stringify(String(command)).slice(0, 200)}. Declare a simple test command without shell composition, expansion, watch/list/help modes or status masking. Use the project working directory. No command was executed.`);
           return check;
         });
+        for (const check of checks) {
+          const observed = currentProjectCheck(state, check.key);
+          if (observed && !state.checks.includes(observed)) state.checks = [...state.checks, { ...observed, revision: state.revision }].slice(-32);
+        }
         state.assessment = { revision: state.revision, disposition: params.disposition, reason: params.reason.trim().slice(0, 1200), checks };
         save();
       }

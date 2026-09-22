@@ -41,6 +41,7 @@ import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
+import { sessionObservability, withSessionObservability } from "./session-observability.js";
 /**
  * Parse a skill block from message text.
  * Returns null if the text doesn't contain a skill block.
@@ -171,6 +172,9 @@ export class AgentSession {
             sessionOwner: this.sessionManager,
             sessionId: this.sessionManager.getSessionId(),
             cwd: this._cwd,
+            observe: (data) => withSessionObservability({ sessionManager: this.sessionManager }, () => {
+                sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(data.outcome === "evaluated" ? "guardian.evaluated" : "guardian.observing", data);
+            }),
             emit: async ({ type, content, detail, child }) => {
                 if (child && !this.isStreaming) return;
                 await this.sendCustomMessage({

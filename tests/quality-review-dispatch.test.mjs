@@ -42,6 +42,17 @@ function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result
  return {ctx,calls,entries,run:(req=request,signal=new AbortController().signal)=>runner(req,ctx,signal),switch:()=>{session='other';resetSharedControl();},emit:async(name,event)=>{for(const fn of hooks.get(name)??[])await fn(event,ctx);}};
 }
 try {
+ const failedLaunch=fixture({models:[free('free/a')],result:async()=>{throw new ReferenceError('reviewBinding is not defined');}});
+ const failedReports=await failedLaunch.run({...request,aspects:[aspects[0]]});
+ assert.match(failedReports[0].gap,/ReferenceError:reviewBinding/);
+ assert.match(failedReports[0].gap,/harness error/);
+ const failedCost=failedLaunch.entries.filter(e=>e.customType==='subagent-cost-v1').at(-1).data.results[0];
+ assert.equal(failedCost.agent,'automatic-free-assistant');
+ assert.equal(failedCost.scopeId,'correctness');
+ assert.equal(failedCost.model,'openrouter/free/a');
+ assert.equal(failedCost.cause.category,'internal');
+ assert.equal(failedCost.evidence.cause.stage,'launch');
+ assert.equal(failedCost.usage,undefined);
  const start={role:'assistant',content:[{type:'toolCall',id:'read-1',name:'read',arguments:{path:'src/value.js'}}]};
  const receipt={role:'toolResult',toolCallId:'read-1',toolName:'read',isError:false,content:[{type:'text',text:'export const value = 1;'}]};
  const imageReceipt={...receipt,content:[{type:'text',text:'Read image file [image/png]'},{type:'image',data:'fixture',mimeType:'image/png'}]};

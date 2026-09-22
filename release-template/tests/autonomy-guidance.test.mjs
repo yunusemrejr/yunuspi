@@ -90,3 +90,33 @@ test('first-use hooks distinguish operations and failures without repeating on e
   handlers.get('session_switch')();assert.ok(call('artifact_check',{operation:'svg'}),'new session gets its own receipt');
   handlers.get('session_switch')();process.env.PI_SESSION_HOOKS='off';assert.equal(call('artifact_check',{operation:'svg'}),undefined);
 });
+
+test('browser recovery follows the observed dispatch outcome without inventing a possible submission',()=>{
+ const handlers=new Map();registerHooks({on:(name,handler)=>handlers.set(name,handler)});
+ const run=(id,details,text)=>{
+  const event={toolCallId:id,toolName:'browser_session',input:{action:'click',session:'missing'},isError:true,details,content:[{type:'text',text}]};
+  handlers.get('tool_call')(event);return handlers.get('tool_result')(event);
+ };
+ const validation={failure:{outcome:'not-dispatched',kind:'unknown-session',nextStep:'Use the handle returned by open.'}};
+ assert.equal(run('validation',validation,'Unknown browser session'),undefined);
+ assert.equal(matchHook('browser_session',{action:'click'},true,{details:validation,content:[{type:'text',text:'timeout named session is unknown'}]}).key,'browser-session-read-recovery');
+ const uncertain=run('timeout',{failure:{outcome:'unknown'}},'Click timed out');
+ assert.match(uncertain.content.at(-1).text,/reconcile|Reconcile/);
+ assert.match(uncertain.content.at(-1).text,/successful post/);
+ assert.equal(run('timeout-again',{failure:{outcome:'unknown'}},'Click timed out'),undefined,'actual uncertainty is still once per session');
+});
+
+test('precise render failures suppress generic advice and result-specific browser recovery remains eligible', () => {
+ const handlers = new Map(); registerHooks({ on: (name, handler) => handlers.set(name, handler) });
+ let id = 0;
+ const result = (toolName, isError, text, details) => {
+  const event = { toolCallId: String(++id), toolName, input: { action: 'click' }, isError, content: [{ type: 'text', text }], details };
+  handlers.get('tool_call')(event); return handlers.get('tool_result')(event);
+ };
+ assert.equal(result('render_see', true, 'Embedded image too large', { failure: { kind: 'image-dimensions', outcome: 'not-captured', nextStep: 'Use a smaller source image; viewport changes cannot fix its dimensions.' } }), undefined);
+ assert.ok(result('render_see', true, 'Unstructured rendering error'), 'suppression does not consume generic recovery');
+ assert.ok(result('browser_session', false, 'Clicked'), 'successful first-use guidance');
+ assert.ok(result('browser_session', true, 'Invalid selector'), 'generic first-use failure guidance');
+ const timeout = result('browser_session', true, 'Browser action timed out');
+ assert.match(timeout?.content.at(-1).text ?? '', /uncertain action/);
+});

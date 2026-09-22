@@ -24,7 +24,7 @@ const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 
 export default function (pi: any) {
 	/** toolCallId -> rule key queued at tool_call time. */
-	const pending = new Map<string, { success: ReturnType<typeof matchHook>; failure: ReturnType<typeof matchHook> }>();
+	const pending = new Map<string, { success: ReturnType<typeof matchHook>; failure: ReturnType<typeof matchHook>; input: Record<string, unknown> }>();
 	/** Rule keys already shown this session. */
 	const shown = new Set<string>();
 
@@ -46,17 +46,22 @@ export default function (pi: any) {
 		if (typeof event.toolCallId !== "string") return;
 		const success = matchHook(event.toolName, event.input ?? {});
 		const failure = matchHook(event.toolName, event.input ?? {}, true);
-		if ((!success || shown.has(success.key)) && (!failure || shown.has(failure.key))) return;
+		// Browser recovery is selected from the actual outcome at result time.
+		// Its earlier generic hint cannot consume a later uncertain-action hint.
+		const mayMatchResult = event.toolName === 'browser_session' && !shown.has('browser-session-recovery');
+		if (!mayMatchResult && (!success || shown.has(success.key)) && (!failure || shown.has(failure.key))) return;
 		// Aborted/unpaired calls cannot retain an unbounded per-session map.
 		if (pending.size >= 256) pending.delete(pending.keys().next().value!);
-		pending.set(event.toolCallId, { success, failure });
+		pending.set(event.toolCallId, { success, failure, input: event.input ?? {} });
 	});
 
 	pi.on("tool_result", (event: any) => {
 		const queued = pending.get(event.toolCallId);
 		pending.delete(event.toolCallId);
 		if (!enabled() || !queued) return;
-		const rule = event.isError ? queued.failure : queued.success;
+		// Structured browser failures already carry the precise recovery step.
+		if (event.isError && ['browser_session', 'render_see'].includes(event.toolName) && typeof event.details?.failure?.nextStep === 'string') return;
+		const rule = event.isError ? matchHook(event.toolName, queued.input, true, event) : queued.success;
 		if (!rule || shown.has(rule.key)) return;
 		if (rule.needsEmptyResult && !isEmptySearchResult(event.content)) return;
 		shown.add(rule.key);

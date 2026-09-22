@@ -22,6 +22,41 @@ const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
 
+/** Listen before creating any page: a popup can log before its page event. */
+export function createBrowserPageLogs(context) {
+  const byPage = new WeakMap();
+  const forPage = (page) => {
+    let events = byPage.get(page);
+    if (!events) {
+      events = createBrowserEvents();
+      byPage.set(page, events);
+    }
+    return events;
+  };
+  context.on("console", (message) => {
+    const owner = message.page();
+    if (!owner) return;
+    const location = message.location();
+    forPage(owner).record(`console-${message.type()}`, {
+      message: diagnosticText(message.text()),
+      location: {
+        url: safeBrowserUrl(location.url),
+        line: location.lineNumber,
+        column: location.columnNumber,
+      },
+    });
+  });
+  context.on("weberror", (event) => {
+    const owner = event.page();
+    if (!owner) return;
+    const error = event.error();
+    forPage(owner).record("page-script-error", {
+      message: diagnosticText(error.stack ?? error.message, 1200),
+    });
+  });
+  return forPage;
+}
+
 export function browserUrl(raw) {
   const url = new URL(raw);
   if (
@@ -130,6 +165,7 @@ export async function runBrowserSession(input, output) {
             serviceWorkers: "block",
             permissions: [],
           });
+          const pageLogs = createBrowserPageLogs(context);
           await context.route("**/*", (route) => {
             try {
               browserUrl(route.request().url());
@@ -145,7 +181,7 @@ export async function runBrowserSession(input, output) {
               child.close().catch(() => {});
               return;
             }
-            const tab = { id: `tab-${++tabSequence}`, page: child, logs: createBrowserEvents(), network: createBrowserEvents(), refs: new Map(), markers: new Map(), dialog: null };
+            const tab = { id: `tab-${++tabSequence}`, page: child, logs: pageLogs(child), network: createBrowserEvents(), refs: new Map(), markers: new Map(), dialog: null };
             tabs.set(tab.id, tab);
             const { logs, network } = tab;
             const record = (kind, extra) => logs.record(kind, extra);
@@ -175,22 +211,6 @@ export async function runBrowserSession(input, output) {
               record("download-cancelled");
               download.cancel().catch(() => {});
             });
-            child.on("console", (message) => {
-              const location = message.location();
-              record(`console-${message.type()}`, {
-                message: diagnosticText(message.text()),
-                location: {
-                  url: safeBrowserUrl(location.url),
-                  line: location.lineNumber,
-                  column: location.columnNumber,
-                },
-              });
-            });
-            child.on("pageerror", (error) =>
-              record("page-script-error", {
-                message: diagnosticText(error.stack ?? error.message, 1200),
-              }),
-            );
             child.on("request", (request) => {
               const entry = {
                 requestId: ++requestId,
@@ -576,7 +596,7 @@ export async function runBrowserSession(input, output) {
               ? await snapshot()
               : await surface
                   .locator(":root")
-                  .evaluate(inspectPageState, {}, { timeout });
+                  .evaluate(inspectPageState, { summary: true }, { timeout });
           result = {
             pageState: state,
             frames: frameList(),

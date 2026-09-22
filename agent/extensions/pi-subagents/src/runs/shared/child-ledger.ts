@@ -186,6 +186,9 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 					: { status: "none" };
 
 	const evidence: StructuredFailureEvidence = {
+		...(typeof row.stage === "string" ? { stage: row.stage as StructuredFailureEvidence["stage"] } : {}),
+		...(typeof row.runtimeError === "string" ? { runtimeError: row.runtimeError } : {}),
+		...(typeof row.processCode === "string" ? { processCode: row.processCode } : {}),
 		...(typeof row.validatorCode === "string" ? { validatorCode: row.validatorCode } : {}),
 		...(typeof row.toolName === "string" ? { toolName: row.toolName } : {}),
 		...(typeof row.schemaField === "string" ? { schemaField: row.schemaField } : {}),
@@ -429,16 +432,12 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 					}
 					const row = asRecord(event.row);
 					const usageRow = asRecord(row.usage);
-					if (Object.keys(usageRow).length) {
-						attempt.usage = {
-							...(asNumber(usageRow.input) === undefined ? {} : { input: asNumber(usageRow.input) }),
-							...(asNumber(usageRow.output) === undefined ? {} : { output: asNumber(usageRow.output) }),
-							...(asNumber(usageRow.cacheRead) === undefined ? {} : { cacheRead: asNumber(usageRow.cacheRead) }),
-							...(asNumber(usageRow.cacheWrite) === undefined ? {} : { cacheWrite: asNumber(usageRow.cacheWrite) }),
-							...(asNumber(usageRow.reasoning) === undefined ? {} : { reasoning: asNumber(usageRow.reasoning) }),
-							...(asNumber(usageRow.turns) === undefined ? {} : { turns: asNumber(usageRow.turns) }),
-						};
+					const mergedUsage = {...attempt.usage};
+					for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning", "turns"] as const) {
+						const value = asNumber(usageRow[key]);
+						if (value !== undefined) mergedUsage[key] = Math.max(mergedUsage[key] ?? 0, value);
 					}
+					if (Object.keys(mergedUsage).length) attempt.usage = mergedUsage;
 					if (typeof row.sessionFile === "string") attempt.sessionFile = row.sessionFile.slice(0, 512);
 					if (Array.isArray(row.artifacts)) {
 						attempt.artifacts = row.artifacts.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.slice(0, 512)).slice(0, 32);
@@ -530,7 +529,37 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
  * notices) and normalizes them into ONE event stream for reduceChildEvents.
  * Bounded and pure; unknown shapes are skipped, never inferred.
  */
+export function normalizeHelperChildEntries(entries: readonly unknown[]): readonly unknown[] {
+	// Native lifecycle and helper accounting describe the same attempted child.
+	// Link only explicit single-child run IDs; conflicts remain separate.
+	const helperLinks = new Map<string, {parent: string; row: Record<string, unknown>} | null>();
+	for (const value of entries) {
+		const entry = asRecord(value), data = asRecord(entry.data);
+		if (entry.type !== "custom" || entry.customType !== "subagent-cost-v1" || typeof data.runId !== "string" || !/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(data.runId) || !Array.isArray(data.results) || data.results.length !== 1) continue;
+		const row = asRecord(data.results[0]);
+		if (typeof row.runId !== "string" || row.runId === data.runId || (row.index ?? 0) !== 0) continue;
+		const prior = helperLinks.get(row.runId);
+		if (prior === null || prior && (prior.parent !== data.runId || (prior.row.attempt ?? 1) !== (row.attempt ?? 1))) helperLinks.set(row.runId, null);
+		else helperLinks.set(row.runId, {parent:data.runId, row});
+	}
+	return entries.map(value => {
+		const entry = asRecord(value), message = asRecord(entry.message);
+		const custom = entry.type === "custom" && ["subagent-cost-v1", "subagent-lifecycle-v1"].includes(String(entry.customType));
+		const tool = entry.type === "message" && message.role === "toolResult" && message.toolName === "subagent";
+		if (!custom && !tool) return value;
+		const data = asRecord(custom ? entry.data : message.details);
+		const native = asString(data.runId ?? data.asyncId, 160), link = native ? helperLinks.get(native) : undefined;
+		if (!link || !Array.isArray(data.results) || data.results.length !== 1) return value;
+		const row = asRecord(data.results[0]);
+		if ((row.index ?? 0) !== 0) return value;
+		const normalized = {...data, runId:link.parent, results:[{...row, runId:native, index:0, attempt:link.row.attempt ?? 1,
+			...(link.row.label ? {label:link.row.label} : {}), ...(link.row.scopeId ? {scopeId:link.row.scopeId} : {})}]};
+		return custom ? {...entry,data:normalized} : {...entry,message:{...message,details:normalized}};
+	});
+}
+
 export function projectTranscriptChildren(entries: readonly unknown[]): ChildLedgerEvent[] {
+	entries = normalizeHelperChildEntries(entries);
 	const events: ChildLedgerEvent[] = [];
 	const push = (event: ChildLedgerEvent) => {
 		if (events.length < 4096) events.push(event);
@@ -662,6 +691,7 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					workflowKey: asString(row.workflowKey, 160),
 					childId: asString(row.childId, 160),
 				});
+				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, label: identity.label, ...(identity.scopeId ? { scopeId: identity.scopeId } : {}) });
 				const usage = asRecord(row.usage);
 				const costLaunch = launchFor(undefined, runId, index);
 				push({
@@ -713,7 +743,7 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					childId: asString(row.childId, 160),
 				});
 				const lifeLaunch = launchFor(undefined, runId, index);
-				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), label: identity.label, ...(typeof row.agent === "string" && row.agent ? { agent: row.agent.slice(0, 80) } : lifeLaunch?.agent ? { agent: lifeLaunch.agent } : {}), ...(typeof row.model === "string" && row.model ? { route: row.model.slice(0, 200) } : lifeLaunch?.model ? { route: lifeLaunch.model } : {}) });
+				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, ...(typeof row.runId === "string" ? { runId: row.runId.slice(0, 160) } : {}), label: identity.label, ...(identity.scopeId ? { scopeId: identity.scopeId } : {}), ...(typeof row.agent === "string" && row.agent ? { agent: row.agent.slice(0, 80) } : lifeLaunch?.agent ? { agent: lifeLaunch.agent } : {}), ...(typeof row.model === "string" && row.model ? { route: row.model.slice(0, 200) } : lifeLaunch?.model ? { route: lifeLaunch.model } : {}) });
 				const state = asString(row.status ?? row.state, 32);
 				if (state) push({ type: "lifecycle", taskId: identity.taskId, attempt: identity.attempt, state });
 			});

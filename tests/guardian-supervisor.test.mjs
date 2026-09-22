@@ -79,6 +79,20 @@ function promptAnalysisEvent(sessionId, requestId, text, constraints, { confiden
 	};
 }
 
+test("optional observation projection failures cannot escape into supervision", async () => {
+	const { supervisor } = harness("observation-projection", process.cwd(), { observe: () => { throw Error("display unavailable"); } });
+	try {
+		await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "task", "Read the fixture") });
+		await toolStart(supervisor, { toolCallId: "first" });
+		await toolEnd(supervisor, { toolCallId: "first", isError: false });
+		supervisor._kernelRuntime = { status() { throw Error("status projection unavailable"); } };
+		await toolStart(supervisor, { toolCallId: "second" });
+		await assert.doesNotReject(toolEnd(supervisor, { toolCallId: "second", isError: false }));
+		assert.equal(supervisor._stats.toolResults, 2);
+		assert.equal(supervisor._quarantined, false);
+	} finally { supervisor.dispose(); }
+});
+
 test("guardians are enabled by default and expose their real state", async () => {
 	const { supervisor, stats } = harness("guardian-default");
 	assert.equal(supervisor.enabled, true);

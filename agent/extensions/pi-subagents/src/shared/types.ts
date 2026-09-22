@@ -1399,6 +1399,15 @@ export interface AgentCapabilityRow {
 }
 
 export interface Details {
+	/** Safe diagnostics when execution failed before a child process started. */
+	launchFailure?: {
+		error: true;
+		stage: "launch";
+		childProcessStarted: false;
+		runtimeError?: "ReferenceError" | "TypeError" | "SyntaxError";
+		diagnosticCode?: string;
+		diagnosticRef: string;
+	};
 	mode: SubagentResultMode | "management";
 	runId?: string;
 	/** Host tool-call id retained when it differs from the internal run id. */

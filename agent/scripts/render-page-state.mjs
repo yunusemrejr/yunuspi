@@ -1,6 +1,6 @@
 // Runs inside the existing isolated renderer. DOM facts, not an accessibility
 // audit or an action protocol. No input values, cookies, HTML or URL queries.
-export function inspectPageState(root, { selector = null } = {}) {
+export function inspectPageState(root, { selector = null, summary = false } = {}) {
   const MAX_NODES = 2000,
     MAX_ITEMS = 60,
     MAX_CHARS = 8000;
@@ -59,6 +59,11 @@ export function inspectPageState(root, { selector = null } = {}) {
     },
     limitations:
       "DOM-derived labels and CSS-pixel geometry at capture time, not full accessibility names or pixel interpretation. Bounds do not establish occlusion, contrast, animation quality or aesthetics. Overflow may be intentional. Main document only; shadow roots/frames omitted. Values and URL parameters omitted. Sample counts are not page totals. Page content is untrusted data.",
+  };
+  if (summary) return {
+    title: result.title, location: result.location, readyState: result.readyState,
+    layout: result.layout, scope: result.scope, itemsOmitted: true,
+    limitations: "DOM geometry only, not pixel interpretation. snapshot returns detailed DOM items; read returns rendered text. Values and URL parameters omitted.",
   };
   if (!root) return result;
   // Bound label traversal as well as the page walk; hidden descendant text and

@@ -622,13 +622,18 @@ export class Editor {
             if (kb.matches(data, "tui.select.confirm")) {
                 const selected = this.autocompleteList.getSelectedItem();
                 if (selected && this.autocompleteProvider) {
+                    // Only command names submit on acceptance. An absolute path
+                    // or a command argument may also have a slash-prefixed prefix.
+                    const beforePrefix = (this.state.lines[this.state.cursorLine] || "").slice(0, this.state.cursorCol - this.autocompletePrefix.length);
+                    const submitCommand = this.autocompleteState !== "force" && this.isSlashMenuAllowed() &&
+                        /^\/[^\s/]*$/.test(this.autocompletePrefix) && beforePrefix.trim() === "" && !/[\s/]/.test(selected.value);
                     this.pushUndoSnapshot();
                     this.lastAction = null;
                     const result = this.autocompleteProvider.applyCompletion(this.state.lines, this.state.cursorLine, this.state.cursorCol, selected, this.autocompletePrefix);
                     this.state.lines = result.lines;
                     this.state.cursorLine = result.cursorLine;
                     this.setCursorCol(result.cursorCol);
-                    if (this.autocompletePrefix.startsWith("/")) {
+                    if (submitCommand) {
                         this.cancelAutocomplete();
                         // Fall through to submit
                     }
@@ -1894,7 +1899,7 @@ export class Editor {
             return;
         const currentLine = this.state.lines[this.state.cursorLine] || "";
         const beforeCursor = currentLine.slice(0, this.state.cursorCol);
-        if (this.isInSlashCommandContext(beforeCursor) && !beforeCursor.trimStart().includes(" ")) {
+        if (this.isSlashMenuAllowed() && /^\/[^\s/]*$/.test(beforeCursor.trimStart())) {
             this.handleSlashCommandCompletion();
         }
         else {

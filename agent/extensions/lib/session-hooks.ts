@@ -222,11 +222,17 @@ export function matchHook(
 	toolName: string,
 	args: HookArgs = {},
 	onError = false,
+	result?: { details?: any; content?: unknown },
 ): HookRule | null {
 	for (const rule of HOOK_RULES) {
 		if (!!rule.onError !== onError) continue;
 		if (!rule.tools.includes(toolName)) continue;
 		if (rule.when && !rule.when(args)) continue;
+		if (rule.key === 'browser-session-recovery') {
+			const failure = result?.details?.failure;
+			const text = Array.isArray(result?.content) ? result.content.filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' ') : '';
+			if (failure?.outcome !== 'unknown' && (failure?.outcome || !/\b(?:timeout|timed out|TimeoutError)\b/i.test(text))) continue;
+		}
 		return rule;
 	}
 	return null;

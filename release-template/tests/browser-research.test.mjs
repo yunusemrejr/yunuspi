@@ -157,7 +157,10 @@ test("real forum workflow preserves drafts across renewal and reconciles a timed
     assert.equal(receipt.details.verification.matches, true);
     assert.equal(posts.length, 1, "reconciliation must not resubmit");
     await call({ session, action: "close" });
-    await assert.rejects(call({ session, action: "renew" }), /Unknown or foreign/);
+    const closed = await call({ session, action: "renew" });
+    assert.equal(closed.isError, true);
+    assert.equal(closed.details.failure.kind, "unknown-session");
+    assert.equal(closed.details.failure.outcome, "not-dispatched");
     assert.equal((await call({ action: "list" })).details.sessions.length, 0);
   } finally {
     await events.session_shutdown();

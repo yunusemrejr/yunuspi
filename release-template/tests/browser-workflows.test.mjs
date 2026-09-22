@@ -4,10 +4,38 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { EventEmitter } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => fs.existsSync(path.join(dir, 'extensions/lib/browser-session.ts')));
 const { registerBrowserSession } = await import(pathToFileURL(path.join(agent, 'extensions/lib/browser-session.ts')));
+
+test('popup diagnostics arrive before tab registration without loss, duplication or cross-tab attribution', async () => {
+  const { createBrowserPageLogs } = await import(pathToFileURL(path.join(agent, 'scripts/browser-session-runner.mjs')));
+  const context = new EventEmitter();
+  const forPage = createBrowserPageLogs(context);
+  const parent = {}, popup = {};
+  const consoleEvent = (page, text) => ({
+    page: () => page, text: () => text, type: () => 'error',
+    location: () => ({ url: 'http://localhost/popup?private=value', lineNumber: 1, columnNumber: 0 }),
+  });
+  const parentLogs = forPage(parent);
+  context.emit('console', consoleEvent(popup, 'Early popup diagnostic'));
+  context.emit('weberror', { page: () => popup, error: () => new Error('Early popup script failure') });
+  const popupLogs = forPage(popup); // The later page event adopts the early buffer.
+  context.emit('console', consoleEvent(popup, 'Later popup diagnostic'));
+  context.emit('console', consoleEvent(null, 'Unowned event'));
+  const events = popupLogs.read({ includeText: true }).events;
+  assert.deepEqual(events.map(row => row.kind), ['console-error', 'page-script-error', 'console-error']);
+  assert.equal(events[0].message, 'Early popup diagnostic');
+  assert.equal(events[0].location.url, 'http://localhost/popup');
+  assert.match(events[1].message, /Early popup script failure/);
+  assert.equal(events[2].message, 'Later popup diagnostic');
+  assert.deepEqual(parentLogs.read({ includeText: true }).events, []);
+  assert.equal(forPage(popup), popupLogs);
+  for (let n = 0; n < 200; n++) context.emit('console', consoleEvent(popup, `Bounded ${n}`));
+  assert.equal(popupLogs.summary().retained, 150);
+});
 
 test('browser workflows keep tab/ref ownership, recover asynchronous UI and request human answers', { timeout: 90000 }, async t => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-workflows-'));
@@ -24,7 +52,7 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     <script>const shadow=document.querySelector('#shadow').attachShadow({mode:'open'});shadow.innerHTML='<button>Shadow action</button>';shadow.firstChild.onclick=event=>event.target.textContent='Shadow saved';</script>`;
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html');
-    res.end(req.url === '/frame' ? '<button>Frame button</button>' : req.url === '/popup' ? '<h1>Popup detail</h1><script>console.error("Popup diagnostic")</script>' : fixture);
+    res.end(req.url === '/frame' ? '<button>Frame button</button>' : req.url === '/popup' ? '<script>console.error("Popup diagnostic"); throw new Error("Popup script diagnostic")</script><h1>Popup detail</h1>' : fixture);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let tool; const hooks = {};
@@ -78,7 +106,9 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     const popup = (await call({ action: 'tabs' })).tabs.find(row => row.tab !== tab);
     assert.ok(popup);
     await call({ action: 'wait', tab: popup.tab, kind: 'text', text: 'Popup detail' });
-    assert.ok((await call({ action: 'logs', tab: popup.tab, includeText: true })).logs.some(row => row.message === 'Popup diagnostic'));
+    const popupLogs = (await call({ action: 'logs', tab: popup.tab, includeText: true })).logs;
+    assert.equal(popupLogs.filter(row => row.message === 'Popup diagnostic').length, 1);
+    assert.ok(popupLogs.some(row => row.kind === 'page-script-error' && row.message.includes('Popup script diagnostic')));
     assert.ok(!(await call({ action: 'logs', tab, includeText: true })).logs.some(row => row.message === 'Popup diagnostic'));
     assert.equal((await raw({ action: 'inspect', session, tab: popup.tab, ref: search.ref })).isError, true);
     await call({ action: 'close_tab', tab: popup.tab });

@@ -15,11 +15,11 @@ Use the tool limit stated in the assigned task; the default automatic investigat
 
 Use `math_check` for supplied numerical metrics or exact split-ID overlap, `artifact_check` for Unicode or image header dimensions, and `value_convert` for exact encodings/JSON formatting when those checks resolve the task. Their results have bounded scope; they do not establish visual correctness or general model quality.
 
-For scoped code investigation, use `context_slice` with a task and explicit source paths, then `symbol_expand` for bounded dependency candidates. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
+When a focused source read leaves an unresolved dependency question, use `context_slice` with a task and explicit source paths, or `symbol_expand` for bounded dependency candidates. Do not add these calls when the assigned contract is fully visible in the supplied source. Check omission and binding-resolution metadata; use ordinary reads before editing. `ast_diff` summarizes supplied before/after source structurally. These tools do not prove runtime correctness.
 
 Use `obs_read` with the observation ID when a compressed tool result omits evidence needed for your task. The original output remains authoritative.
 
-Use shared project intelligence through `project_intel` query/impact for the relevant architecture, consumers, constraints and prior decisions before investigation or changes. Check provenance and checkout scope; return proposed durable discoveries to the parent. Use only query/impact/inspect/health/history actions in this read-only role.
+Use shared project intelligence through `project_intel` query/impact when relevant architecture, consumers, constraints or prior decisions are missing from the supplied context and affect the assigned judgment. Reuse an adequate supplied graph; a small self-contained source contract does not require a project-wide query. Check provenance and checkout scope; return proposed durable discoveries to the parent. Use only query/impact/inspect/health/history actions in this read-only role.
 
 Use `sandbox_run` for small experiments that must not affect the project or other agents. Supply only needed fixtures or explicit source copies; related commands share one call and are automatically disposed. Do not fall back to host execution if sandbox isolation fails. Results cover only the supplied snapshot.
 

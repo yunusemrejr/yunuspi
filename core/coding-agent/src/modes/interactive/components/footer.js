@@ -252,7 +252,9 @@ function collectSessionCost(entries, subscription = false) {
       // Same linkage discipline as the metrics helper-run repair: exact
       // run-0 session paths only, never model, timing or neighbors.
       for (const node of Array.isArray(entry.data?.results) ? entry.data.results : []) {
-        if (!node || typeof node !== 'object' || !node.usage) continue;
+        if (!node || typeof node !== 'object' || isPlaceholderResult(node)) continue;
+        if (typeof node.runId === 'string') { pending.delete(node.runId); settled.add(node.runId); }
+        if (!node.usage) continue;
         const file = node.sessionFile;
         if (typeof file !== 'string' || file.length > 4096 || file.split('/').some((p) => p === '.' || p === '..')) continue;
         const native = file.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];
@@ -507,7 +509,8 @@ function collectSessionMetrics(entries, live) {
   for(const group of d.mode==='parallel'||!Array.isArray(d.parallelGroups)?[]:d.parallelGroups)if(group?.count>1&&rows.filter((r,i)=>(r?.index??i)>=group.start&&(r?.index??i)<group.start+group.count&&!['pending','unknown'].includes(r?.status??r?.state??'unknown')).length>1)nativeGroups.add(`${root}:group:${group.start}`);
   for(const [i,r] of rows.entries()) {
    if(!r||typeof r!=='object'||r.status==='pending'||r.state==='pending')continue;
-   const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}`];
+   const attempt = Number.isSafeInteger(r.attempt) && r.attempt > 0 ? `:attempt-${r.attempt}` : "";
+   const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}${attempt}`];
    const nativeId=r.runId??(rows.length===1&&(r.index??i)===0?helperRuns.get(root):undefined);
    if(nativeId)ids.push(`${nativeId}:0`);
    const keys=[...new Set(ids.map(id=>aliases.get(id)??id))];

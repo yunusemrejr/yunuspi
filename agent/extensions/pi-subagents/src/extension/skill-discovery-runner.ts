@@ -7,6 +7,8 @@ import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
 import { persistSubagentCost } from "./session-cost.ts";
+import { failureOf } from "../runs/shared/run-history.ts";
+import { helperLaunchFailure } from "./helper-receipt.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 import { askJev } from "../../../lib/jev-client.ts";
 import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
@@ -129,14 +131,19 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
         : undefined;
       try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.discovery", { decision, route: member?.route, ...(excerpt ? { error: excerpt } : {}) }); } catch { /* telemetry is optional */ }
     };
-    const receipt = (status: string, row?: any) => {
+    let attempts = 1;
+    const receipt = (status: string, row?: any, thrown?: unknown) => {
+      const identity = { index: 0, agent: "automatic-skill-discovery", label: "Installed skill discovery", scopeId: "supplied-skill-candidates", model: member!.route, attempt: attempts };
+      const result = { ...identity, ...row, index: 0, attempt: attempts, status,
+        ...(row?.runId ? {runId:row.runId} : status !== "running" ? {runId:`${runId}-attempt-${attempts}`} : {}),
+        ...(!row && status !== "running" ? helperLaunchFailure(thrown, `${runId}-attempt-${attempts}`) : {}) };
       if (!owns()) return;
-      try { pi.appendEntry("subagent-lifecycle-v1", { runId, mode: "single", state: status, results: [{ index: 0, status }] }); } catch {}
+      try { pi.appendEntry("subagent-lifecycle-v1", { runId, mode: "single", state: status, results: [{...identity,status,runId:result.runId}] }); } catch {}
       try {
-        if (status === "running") pi.appendEntry("subagent-cost-v1", { runId, results: [{ index: 0, status }] });
+        if (status === "running") pi.appendEntry("subagent-cost-v1", { runId, results: [result] });
         else if (sessionFile) persistSubagentCost(pi, { currentSessionId: sessionFile, completionOwnerId: runId }, {
           sessionId: sessionFile, completionOwnerId: runId, runId, mode: "single", state: status,
-          results: [row ?? { index: 0, exitCode: 1, error: true }],
+          results: [result],
         });
       } catch {}
     };
@@ -157,12 +164,12 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       // discovery per cycle. Refused discovery stays silent like the
       // budget pre-gates above; the refusal is journaled for audit.
       if (enforceAssistanceFlow(runId, { agent: "automatic-skill-discovery", task: request.brief, model: member!.route, runId }) !== "admitted") return;
-      receipt("running");
       try {
-        const finish = (globalThis as any)[Symbol.for("yunus-pi.activity.v1")]?.({ action: "start", id: runId, label: "skills" }, ctx);
+        const finish = sessionObservability()[Symbol.for("yunus-pi.activity.v1")]?.({ action: "start", id: runId, label: "skills" }, ctx);
         if (typeof finish === "function") finishActivity = finish;
       } catch { /* Optional UI instrumentation cannot change dispatch. */ }
       const attempt = async () => {
+        receipt("running");
         microMetrics().llmHelperCall();
         const work = deps.launch(runId, {
 			agent: "automatic-skill-discovery", model: member!.route, modelRouteCandidates: [assistanceMemberRouteCandidate(member!)], modelOrigin: member!.proof === "explicit llm_preferences" ? "configured" : "explicit", thinking: "off", context: "fresh", async: false, foregroundOnly: true,
@@ -176,7 +183,7 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
         const result = await Promise.race([work, cancelled]);
         if (!owns()) return { stale: true as const };
         const rows = result?.details?.results;
-        const row = Array.isArray(rows) && rows.length === 1 ? rows[0] : undefined;
+        const row = Array.isArray(rows) && rows.length === 1 ? {...rows[0], ...(typeof result?.details?.runId === "string" ? {runId: rows[0]?.runId ?? result.details.runId} : {})} : result?.details?.launchFailure;
         const ok = !signal.aborted && !result?.isError && row && row.exitCode === 0 && !row.error && !row.stopped && !row.timedOut;
         return { stale: false as const, result, row, ok, body: bodyText(row) };
       };
@@ -201,11 +208,12 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       // retried. Each superseded attempt is journaled as "retried" telemetry
       // (metrics only, no indicator line); the final outcome alone decides
       // the receipt and any indicator.
+      const localFailure = (attempt: any) => ['internal','permission','dependency'].includes(failureOf(attempt.row ?? helperLaunchFailure(attempt.thrown, runId)).cause.category);
       const tried = new Set<string>([member!.route.split(":")[0]]);
-      let attempts = 1;
-      while (!current.ok && !current.body && !signal.aborted && owns() && attempts < SKILL_DISCOVERY_LIMITS.attempts) {
+      while (!current.ok && !current.body && !localFailure(current) && !signal.aborted && owns() && attempts < SKILL_DISCOVERY_LIMITS.attempts) {
         const backup = selectBackup?.(tried);
         if (!backup || tried.has(backup.route.split(":")[0])) break;
+        receipt("failed", current.row, (current as { thrown?: unknown }).thrown);
         note("retried", { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
         member = backup;
         tried.add(member.route.split(":")[0]);
@@ -214,13 +222,13 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
         if (current.stale) return;
       }
       const terminal = signal.aborted ? "stopped" : current.ok ? "completed" : "failed";
-      receipt(terminal, current.row); note(terminal, { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
+      receipt(terminal, current.row, (current as { thrown?: unknown }).thrown); note(terminal, { result: current.result, row: current.row, thrown: (current as { thrown?: unknown }).thrown });
       if (!current.ok) return;
       const body = current.body;
       activityOutcome = body && body.length <= SKILL_DISCOVERY_LIMITS.outputChars ? 'ok' : 'error';
       // Never truncate a JSON value into a different or malformed selection.
       return body && body.length <= SKILL_DISCOVERY_LIMITS.outputChars ? body : undefined;
-    } catch { const terminal = signal.aborted ? "stopped" : "failed"; receipt(terminal); note(terminal); return; }
+    } catch (thrown) { const terminal = signal.aborted ? "stopped" : "failed"; receipt(terminal, undefined, thrown); note(terminal, {thrown}); return; }
     finally {
       clearTimeout(timer); signal.removeEventListener("abort", abort);
       try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI teardown is best effort. */ }

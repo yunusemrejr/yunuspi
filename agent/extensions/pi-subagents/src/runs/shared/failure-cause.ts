@@ -52,6 +52,7 @@ export type FailureCategory =
 	| "budget-exhausted"
 	| "permission"
 	| "dependency"
+	| "internal"
 	| "process-signal"
 	| "acceptance"
 	| "interrupted"
@@ -108,6 +109,10 @@ export interface StructuredFailureEvidence {
 	backend?: string;
 	/** SQLite/parser typed error name. */
 	parserError?: string;
+	/** Typed JavaScript exception from the native helper launch boundary. */
+	runtimeError?: string;
+	/** Native child-process spawn code, not a provider response code. */
+	processCode?: string;
 	budgetExhausted?: boolean;
 	timedOut?: boolean;
 	timedOutPhase?: string;
@@ -206,6 +211,11 @@ export function classifyFailure(evidence: StructuredFailureEvidence = {}): Failu
 	// 1. Explicit lifecycle flags win over everything else.
 	if (evidence.stopped || evidence.status === "stopped") return finish("stopped", { healthScopes: {} });
 	if (evidence.interrupted || evidence.status === "paused") return finish("interrupted", { retryable: true, healthScopes: {} });
+
+	if (["ReferenceError", "TypeError", "SyntaxError"].includes(evidence.runtimeError ?? "")) return finish("internal", { healthScopes: {} });
+
+	if (evidence.stage === "launch" && ["EACCES", "EPERM"].includes(evidence.processCode ?? "")) return finish("permission", { healthScopes: {} });
+	if (evidence.stage === "launch" && evidence.processCode === "ENOENT") return finish("dependency", { healthScopes: {} });
 
 	// 2. Tool validator codes (structured, exact).
 	if (evidence.validatorCode) {
@@ -307,7 +317,7 @@ export function classifyFailure(evidence: StructuredFailureEvidence = {}): Failu
 		if (/context (?:length|limit) exceeded|maximum context|too many tokens|input too (?:long|large)/i.test(message)) {
 			return finish("context-overflow", { healthScopes: {} });
 		}
-		if (/permission denied|not authorized|unauthorized|operation not permitted/i.test(message)) {
+		if (/^spawn(?:Sync)? .+ (?:EACCES|EPERM)$/.test(message) || /permission denied|not authorized|unauthorized|operation not permitted/i.test(message)) {
 			return finish("permission", { healthScopes: {} });
 		}
 		if (/cannot find (?:module|package)|module not found|command not found|enoent/i.test(message)) {

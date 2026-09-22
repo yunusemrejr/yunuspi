@@ -92,7 +92,8 @@ export function collectSessionMetrics(entries, live) {
   for(const group of d.mode==='parallel'||!Array.isArray(d.parallelGroups)?[]:d.parallelGroups)if(group?.count>1&&rows.filter((r,i)=>(r?.index??i)>=group.start&&(r?.index??i)<group.start+group.count&&!['pending','unknown'].includes(r?.status??r?.state??'unknown')).length>1)nativeGroups.add(`${root}:group:${group.start}`);
   for(const [i,r] of rows.entries()) {
    if(!r||typeof r!=='object'||r.status==='pending'||r.state==='pending')continue;
-   const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}`];
+   const attempt = Number.isSafeInteger(r.attempt) && r.attempt > 0 ? `:attempt-${r.attempt}` : "";
+   const ids=[`${root}:${r.workflowKey??r.childId??r.index??i}${attempt}`];
    const nativeId=r.runId??(rows.length===1&&(r.index??i)===0?helperRuns.get(root):undefined);
    if(nativeId)ids.push(`${nativeId}:0`);
    const keys=[...new Set(ids.map(id=>aliases.get(id)??id))];

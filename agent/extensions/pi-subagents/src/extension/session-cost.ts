@@ -10,8 +10,15 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
   if (!payload || payload.sessionId !== state.currentSessionId || payload.completionOwnerId !== state.completionOwnerId) return;
   const runId = payload.runId ?? payload.id;
   if (typeof runId !== 'string' || !Array.isArray(payload.results)) return;
-  const results = payload.results.map((r: any, index: number) => ({
+  const hasUsage = (row: any) => row?.usage && (["input","output","cacheRead","cacheWrite","turns"].some(key => typeof row.usage[key] === 'number' && Number.isFinite(row.usage[key]) && row.usage[key] >= 0) || readCostEvidence(row.usage).seen);
+  const results = payload.results.map((input: any, index: number) => {
+    const r = input?.childProcessStarted === false && input?.stage === 'launch' && !hasUsage(input)
+      ? {...input, usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}} : input;
+    return ({
     index: r?.index ?? index,
+    ...(r?.childProcessStarted === false ? {childProcessStarted:false} : {}),
+    ...Object.fromEntries(['agent','label','scopeId','thinking','stage','runtimeError','processCode','diagnosticCode','diagnosticRef'].flatMap(key => typeof r?.[key] === 'string' && r[key].length <= 200 ? [[key,r[key]]] : [])),
+    ...(Number.isSafeInteger(r?.attempt) && r.attempt > 0 ? {attempt:r.attempt} : {}),
     ...(typeof r?.workflowKey === 'string' ? {workflowKey:r.workflowKey} : {}),
     ...(typeof r?.status === 'string' ? {status:r.status} : typeof r?.state === 'string' ? {status:r.state} : typeof r?.success === 'boolean' ? {status:r.success?'completed':'failed'} : payload.success === true ? {status:'completed'} : payload.results.length === 1 && ['complete','completed','failed','paused','stopped'].includes(payload.state) ? {status:payload.state} : {}),
     ...(typeof r?.exitCode === 'number' ? {exitCode:r.exitCode} : {}),
@@ -25,9 +32,9 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     ...(typeof r?.model === 'string' ? {model:r.model} : {}),
     ...(r?.children ? {children:projectCostChildren(r.children)} : {}),
     evidence: projectRunEvidence(r ?? {}),
-    usage: r?.usage ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
-    totalCost: r?.usage ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
-  }));
+    usage: hasUsage(r) ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
+    totalCost: hasUsage(r) ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
+  });});
   pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['swarms','fusions','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
   try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}
 }
@@ -54,6 +61,7 @@ export function restoreSubagentCosts(pi: any, state: any, entries: any[], lookup
  * plans are not child launches; the tracker supplies observed started rows. */
 export function persistSubagentActivity(pi: any, state: any, payload: any): void {
   if (!payload || payload.sessionId !== state.currentSessionId || typeof payload.runId !== 'string' || !Array.isArray(payload.results)) return;
+  const hasUsage = (row: any) => row?.usage && (["input","output","cacheRead","cacheWrite","turns"].some(key => typeof row.usage[key] === 'number' && Number.isFinite(row.usage[key]) && row.usage[key] >= 0) || readCostEvidence(row.usage).seen);
   const results = payload.results.map((r:any,index:number)=>({index:r.index??index,
     ...(typeof r.runId==='string'?{runId:r.runId}:{}),
     ...(typeof r.workflowKey==='string'?{workflowKey:r.workflowKey}:{}),

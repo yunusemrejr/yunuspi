@@ -6,6 +6,7 @@ import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { AUTOMATIC_HELPER_LIMITS, REVIEW_LIMITS } from "../runs/shared/automatic-budgets.ts";
 import { routeSkills } from "../runs/shared/skill-routing.ts";
 import { persistSubagentCost } from "./session-cost.ts";
+import { helperLaunchFailure, helperFailureGap } from "./helper-receipt.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
 import { READ_ONLY_REASONING_TOOLS } from "../runs/shared/tool-budget.ts";
 import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
@@ -307,6 +308,8 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			let status = 'failed';
 			const finishActivity = beginHarnessActivity('review');
 			let nativeRunId: string | undefined;
+			const identity = { index:0, agent:'automatic-free-assistant', label:'Independent quality review', scopeId:assigned.map((a:any)=>a.id).join(','), model:member.route, attempt:1 };
+			let launchFailure: ReturnType<typeof helperLaunchFailure> | undefined;
 			const evidencePaths = Array.isArray(request.evidence) ? request.evidence.map(normalizeReviewPath).filter((f: unknown): f is string => typeof f === 'string').slice(0, 8) : [];
 			const visualPaths = assigned.some((a:any) => a.id === 'interface') ? evidencePaths.filter((file:string) => /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(file)) : [];
 			const reviewerCanSeeImages = models.some(m => route(m) === splitKnownThinkingSuffix(member.route).baseModel && m.input?.includes('image'));
@@ -314,7 +317,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 			// when the general parent-assessed acceptance level is none.
 			const visualTask = visualPaths.length ? `Visual review ${visualPaths.map((file:string) => JSON.stringify('./' + file)).join(' ')}.\n` : '';
 			const evidenceSection = evidencePaths.length ? `\nOutcome evidence supplied by the parent: inspect the paths relevant to your assigned aspects and cite what they establish (do not spend every tool call on every artifact): ${JSON.stringify(evidencePaths)}.` : '';
-			if (owns()) try { pi.appendEntry('subagent-cost-v1',{runId:launchId,results:[{index:0,status:'running'}]}); } catch {}
+			if (owns()) try { pi.appendEntry('subagent-cost-v1',{runId:launchId,mode:'single',results:[{...identity,status:'running'}]}); } catch {}
 			try {
 				const result = await launch(launchId, {
 					agent:'automatic-free-assistant',model:member.route,modelRouteCandidates:[assistanceMemberRouteCandidate(member)],modelOrigin:member.proof === 'explicit llm_preferences' ? 'configured' : 'explicit',context:'fresh',async:false,foregroundOnly:true,
@@ -325,10 +328,10 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 					usageBudget:{tokens:{hard:REVIEW_LIMITS.tokens},costUsd:{hard:REVIEW_LIMITS.costUsd/team.length}},timeoutMs:REVIEW_LIMITS.deadlineMs,maxRuntimeMs:REVIEW_LIMITS.deadlineMs,toolBudget:{soft:reviewTools-2,hard:reviewTools,block:'*'},artifacts:false,output:false,includeProgress:false,suppressRoutineResultIntercom:true,
 				},signal,undefined,ctx);
 				nativeRunId = typeof result?.details?.runId === 'string' ? result.details.runId : undefined;
-				const rows = Array.isArray(result?.details?.results) ? result.details.results : [];
+				const rows = Array.isArray(result?.details?.results) && result.details.results.length ? result.details.results : [{...helperLaunchFailure(undefined,launchId),...result?.details?.launchFailure,status:'failed'}];
 				// The executor has its own run ID. Link the helper receipt to it
 				// so native lifecycle and helper accounting describe one child.
-				const children = rows.map((r:any) => r && rows.length === 1 && nativeRunId ? {...r,runId:r.runId ?? nativeRunId} : r);
+				const children = rows.map((r:any) => ({...identity,...r,...(rows.length === 1 && nativeRunId ? {runId:r?.runId ?? nativeRunId} : {})}));
 				if (owns()) {
 					try { persistSubagentCost(pi,{currentSessionId:sessionFile,completionOwnerId:launchId},{sessionId:sessionFile,completionOwnerId:launchId,runId:launchId,results:children}); } catch {}
 				}
@@ -360,7 +363,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				const hardFailure = !owns() || signal.aborted || children.length !== 1 || !childResult || childResult.stopped || childResult.timedOut || childResult.interrupted || childResult.detached;
 				const childFailure = Boolean(result?.isError || childResult?.exitCode !== 0 || childResult?.error);
 				if (hardFailure || (childFailure && !budgetReportFinalized)) {
-					const gap = signal.aborted || childResult?.timedOut ? 'The reviewer reached its deadline or was cancelled.' : budgetExhausted ? `The reviewer exhausted its ${usageBudget?.reason ?? 'usage'} budget.` : 'The native reviewer failed or was unable to start; no independent assessment was returned.';
+					const gap = childResult?.runtimeError ? `Native reviewer launch failed with ${childResult.diagnosticCode ?? childResult.runtimeError}. This is a harness error; changing provider cannot repair it. Diagnostic: ${childResult.diagnosticRef ?? launchId}.` : signal.aborted || childResult?.timedOut ? 'The reviewer reached its deadline or was cancelled.' : budgetExhausted ? `The reviewer exhausted its ${usageBudget?.reason ?? 'usage'} budget.` : 'The native reviewer failed or was unable to start; no independent assessment was returned.';
 					return pending.map(r=>({...r,gap}));
 				}
 				// A budget-salvaged non-clean child is useful evidence, but its outcome
@@ -405,8 +408,12 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				// malformed and no-source children remain failed in the lifecycle ledger.
 				status = childCompletedCleanly && reports.every((report:any) => report.ok === true && !parseReviewReport(report.text, report.aspect).gap.startsWith('Invalid reviewer report:') && parseReviewReport(report.text, report.aspect).evidence.length > 0) ? 'completed' : 'failed';
 				return reports;
-			} catch { return pending.map(r=>({...r,gap:'Reviewer execution failed before a report could be assessed.'})); }
-			finally { finishActivity(signal.aborted || !owns() ? 'cancelled' : status === 'completed' ? 'ok' : 'error'); if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{index:0,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
+			} catch (error) {
+                launchFailure = helperLaunchFailure(error, launchId);
+                if (owns()) try { persistSubagentCost(pi,{currentSessionId:sessionFile,completionOwnerId:launchId},{sessionId:sessionFile,completionOwnerId:launchId,runId:launchId,mode:'single',state:'failed',results:[{...identity,...launchFailure,status:'failed'}]}); } catch {}
+                return pending.map(r=>({...r,gap:helperFailureGap(error,launchId)}));
+            }
+			finally { finishActivity(signal.aborted || !owns() ? 'cancelled' : status === 'completed' ? 'ok' : 'error'); if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{...identity,...launchFailure,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
 		}).map((operation,index)=>operation.then(reports=>{
 			if (!owns() || signal.aborted) return;
 			settled[index] = reports.map(r=>({...r,gap:'gap' in r ? String(r.gap) : ''}));

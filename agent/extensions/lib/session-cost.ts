@@ -79,7 +79,9 @@ export function collectSessionCost(entries, subscription = false) {
       // Same linkage discipline as the metrics helper-run repair: exact
       // run-0 session paths only, never model, timing or neighbors.
       for (const node of Array.isArray(entry.data?.results) ? entry.data.results : []) {
-        if (!node || typeof node !== 'object' || !node.usage) continue;
+        if (!node || typeof node !== 'object' || isPlaceholderResult(node)) continue;
+        if (typeof node.runId === 'string') { pending.delete(node.runId); settled.add(node.runId); }
+        if (!node.usage) continue;
         const file = node.sessionFile;
         if (typeof file !== 'string' || file.length > 4096 || file.split('/').some((p) => p === '.' || p === '..')) continue;
         const native = file.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];

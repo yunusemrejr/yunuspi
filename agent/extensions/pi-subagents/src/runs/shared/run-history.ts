@@ -25,6 +25,7 @@ const LEGACY_REASON: Record<string, string> = {
 	"budget-exhausted": "budget",
 	permission: "permission",
 	dependency: "dependency",
+	internal: "internal",
 	"process-signal": "process-signal",
 	acceptance: "acceptance",
 	interrupted: "interrupted",
@@ -37,6 +38,8 @@ function structuredEvidenceOf(r: any): StructuredFailureEvidence {
 		typeof value === "string" && value.length <= 4096 ? value.slice(0, max) : undefined;
 	return {
 		...(typeof r?.stage === "string" ? { stage: r.stage } : {}),
+		...(text(r?.runtimeError, 32) ? { runtimeError: text(r.runtimeError, 32) } : {}),
+		...(text(r?.processCode, 16) ? { processCode: text(r.processCode, 16) } : {}),
 		...(text(r?.validatorCode ?? r?.toolValidation?.code ?? r?.validationCode, 64) ? { validatorCode: text(r?.validatorCode ?? r?.toolValidation?.code ?? r?.validationCode, 64) } : {}),
 		...(text(r?.toolName ?? r?.tool, 128) ? { toolName: text(r?.toolName ?? r?.tool, 128) } : {}),
 		...(text(r?.schemaField ?? r?.field, 256) ? { schemaField: text(r?.schemaField ?? r?.field, 256) } : {}),
