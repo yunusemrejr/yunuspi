@@ -301,7 +301,10 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 	const lines = content.split("\n");
 	const match = (lines[0] ?? "").match(/^(Background task|Detached foreground task) (completed|failed|paused|stopped): \*\*(.+?)\*\*(?:\s+(\([^)]*\)))?$/);
 	if (!match) return undefined;
-	let body = lines.slice(2);
+	let body = lines.slice(1);
+	// A grouped notice carries a one-line group summary after the header. Drop
+	// that line (no consumer restores it) without eating preview content.
+	if (/^Group: \d+\/\d+ terminal\b/.test(body[0] ?? "")) body = body.slice(body[1]?.trim() === "" ? 2 : 1);
 	// Restore the schedule origin so a re-rendered notice keeps its attribution and
 	// does not fold the line into the result preview.
 	const scheduleMatch = (body[0] ?? "").match(/^Scheduled run from \*\*(.+?)\*\* \(schedule (.+?)\)\.$/);
