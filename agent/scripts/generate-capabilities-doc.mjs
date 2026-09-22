@@ -256,7 +256,7 @@ function manifestInventory(agentRoot, manifest) {
 			exists: fs.existsSync(path.join(agentRoot, key.replace(/^agent\//, ""))),
 		}))
 		.sort((a, b) => a.path.localeCompare(b.path));
-	const patches = walkFiles(path.join(agentRoot, "scripts", "compatibility", "legacy-transforms"))
+	const patches = []
 		.map((file) => ({
 			path: canonicalAgentPath(agentRoot, file),
 			kind: path.extname(file).slice(1),
@@ -567,7 +567,7 @@ function capabilityMarkdown(
 	lines.push(
 		"## Migration test fixtures",
 		"",
-		"These historical transforms live under `agent/scripts/compatibility/legacy-transforms` for synthetic regression tests. The core build, installer, updater and verifier never apply them; runtime behavior is owned directly in source.",
+		"The historical core transforms were deleted after the owned-core migration (see PATCH-MIGRATION.md). Runtime behavior is owned directly in `runtime/core/*/src` and `extensions/`; no transform catalogue remains.",
 		"",
 		listItems(
 			inventory.patchModules,

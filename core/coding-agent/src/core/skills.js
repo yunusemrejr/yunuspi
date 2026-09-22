@@ -305,6 +305,44 @@ function escapeXml(str) {
         .replace(/'/g, "&apos;");
 }
 /**
+ * Byte-compare two skill directories (SKILL.md parent dirs). True only when
+ * both trees hold the same relative file set with identical bytes. Any
+ * unreadable or non-regular path returns false so genuine conflicts keep
+ * surfacing instead of being silenced.
+ */
+function sameSkillContent(fileA, fileB) {
+    try {
+        const snapshot = (file) => {
+            const root = dirname(file);
+            const entries = [];
+            const visit = (dir) => {
+                for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+                    if (entry.isSymbolicLink() || (!entry.isFile() && !entry.isDirectory()))
+                        return null;
+                    const full = join(dir, entry.name);
+                    if (entry.isDirectory()) {
+                        if (!visit(full))
+                            return null;
+                    }
+                    else {
+                        entries.push([relative(root, full), readFileSync(full)]);
+                    }
+                }
+                return entries;
+            };
+            return visit(root);
+        };
+        const a = snapshot(fileA);
+        const b = snapshot(fileB);
+        if (!a || !b || a.length !== b.length)
+            return false;
+        return a.every(([rel, bytes], index) => b[index][0] === rel && bytes.equals(b[index][1]));
+    }
+    catch {
+        return false;
+    }
+}
+/**
  * Load skills from all configured locations.
  * Returns skills and any validation diagnostics.
  */
@@ -328,17 +366,21 @@ export function loadSkills(options) {
             }
             const existing = skillMap.get(skill.name);
             if (existing) {
-                collisionDiagnostics.push({
-                    type: "collision",
-                    message: `name "${skill.name}" collision`,
-                    path: skill.filePath,
-                    collision: {
-                        resourceType: "skill",
-                        name: skill.name,
-                        winnerPath: existing.filePath,
-                        loserPath: skill.filePath,
-                    },
-                });
+                // Same name + byte-identical skill directories is a redundant
+                // load path (e.g. a mirrored skills dir), not a conflict.
+                if (!sameSkillContent(existing.filePath, skill.filePath)) {
+                    collisionDiagnostics.push({
+                        type: "collision",
+                        message: `name "${skill.name}" collision`,
+                        path: skill.filePath,
+                        collision: {
+                            resourceType: "skill",
+                            name: skill.name,
+                            winnerPath: existing.filePath,
+                            loserPath: skill.filePath,
+                        },
+                    });
+                }
             }
             else {
                 skillMap.set(skill.name, skill);

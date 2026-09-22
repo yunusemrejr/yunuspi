@@ -37,13 +37,20 @@ import {
 	MAX_OUTPUT_CHARS,
 	isSearchCommand,
 } from "./lib/output-distiller.ts";
-import { askJev, selectDistillChunks } from "./lib/jev-client.ts";
+import { askJev, selectDistillChunks, jevEnabled } from "./lib/jev-client.ts";
 import {
 	compactProviderPayload,
 	providerImageCountLimit,
 	GATE_THRESHOLD_BYTES,
 } from "./lib/image-compaction.ts";
-import { hasRequestBodyLimit } from "../scripts/compatibility/legacy-transforms/request-body-gate.mjs";
+
+/** Providers whose encoded request body has a hard size cap (independent of the
+ *  token window). Inlined from the retired request-body-gate transform — owned
+ *  source no longer depends on any transform catalogue. */
+const BODY_LIMIT_PROVIDERS = new Set(["openrouter", "runinfra", "friendli"]);
+function hasRequestBodyLimit(provider: string | undefined): boolean {
+	return !provider || BODY_LIMIT_PROVIDERS.has(provider);
+}
 
 const MIN_DEDUP_CHARS = 400;
 // Small tool results are already cheap and exact. Preserve them byte-for-byte
@@ -526,7 +533,7 @@ export default function piObservationsExtension(
 		// below consumes whatever is ready without waiting on slow calls.
 		if (
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
-			process.env.PI_JEV !== "off" &&
+			jevEnabled() &&
 			pi.getActiveTools().includes("obs_read") &&
 			!event.isError &&
 			text.length >= 6000 &&
@@ -636,7 +643,7 @@ export default function piObservationsExtension(
 			if (pending.length) await Promise.all(pending);
 		}
 		const jevReady = new Map<number, string | undefined>();
-		if (process.env.PI_JEV !== "off") {
+		if (jevEnabled()) {
 			event.messages.forEach((message,index)=>{
 				const ref=message.details?.piObservation as Reference|undefined;
 				if(message.role==='toolResult'&&ref?.version===1&&ref.operation&&TOOLS.has(message.toolName))

@@ -53,6 +53,7 @@
     "code-guidance-signals.ts",
     "code-lexical-mask.ts",
     "compact-tool-json.ts",
+    "compaction-policy.ts",
     "context-anchor.ts",
     "context-limits.ts",
     "context-profile.mjs",
@@ -109,6 +110,7 @@
     "reminders-state.ts",
     "render-queue.ts",
     "request-compat.ts",
+    "retry-policy.ts",
     "review-coordinator.ts",
     "scope-deliberation.ts",
     "scoped-snapshots.ts",
@@ -139,6 +141,7 @@
     "svg-check.ts",
     "sys-probe.ts",
     "todo-linkage.ts",
+    "token-budget.ts",
     "tool-discovery.ts",
     "utility-client.ts",
     "workspace-write-lease.ts"

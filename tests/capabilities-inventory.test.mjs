@@ -110,10 +110,10 @@ test("capability inventory is deterministic, complete, and generated from public
 		);
 	assert.ok(metadata.inventory.forks.length >= 5);
 	assert.ok(metadata.inventory.skills.length >= 100);
-	assert.ok(
-		metadata.inventory.patchModules.some((item) =>
-			item.path.endsWith("autonomous-recovery.mjs"),
-		),
+	assert.deepEqual(
+		metadata.inventory.patchModules,
+		[],
+		"transform catalogue is retired; runtime behavior is owned directly in source",
 	);
 	assert.ok(
 		metadata.inventory.serviceOwners.some((item) => item.signals.includes("MCP")),

@@ -2408,7 +2408,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 892
+        "line": 899
       },
       {
         "name": "or-provider",
@@ -2875,7 +2875,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 839,
+        "line": 846,
         "kind": "literal"
       },
       {
@@ -3233,7 +3233,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 839,
+        "line": 846,
         "kind": "literal"
       },
       {
@@ -3538,7 +3538,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 582,
+      "sourceFiles": 585,
       "registrationSites": 63,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 82,
@@ -3753,6 +3753,10 @@
       },
       {
         "path": "agent/extensions/lib/compact-tool-json.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/compaction-policy.ts",
         "exists": true
       },
       {
@@ -3980,6 +3984,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/retry-policy.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/review-coordinator.ts",
         "exists": true
       },
@@ -4097,6 +4105,10 @@
       },
       {
         "path": "agent/extensions/lib/todo-linkage.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/token-budget.ts",
         "exists": true
       },
       {
@@ -4498,196 +4510,7 @@
         "exists": true
       }
     ],
-    "patchModules": [
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/autonomous-recovery.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/background-task-signal-status.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/background-task-terminal-publish.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/cache-hit-footer.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/cache-usage-accuracy.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/calculate-cost.js",
-        "kind": "js"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/catalog-refresh-credential-gate.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/compaction-early.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/context-settings.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/edit-optimistic-concurrency.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/export-redaction.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/hook-metrics-wrapper.js",
-        "kind": "js"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/hook-metrics.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/local-context-allocation.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/model-selector-custom.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/mutation-path-boundary.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/native-read-mutation-queue.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/notify-broker-delivery.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/openai-service-pricing.js",
-        "kind": "js"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-atomic-preflight.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-autofix-debounce.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-compact-reports.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-diagnostic-scope.md",
-        "kind": "md"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-diagnostic-scope.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-feedback-notices.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-format-safety.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-fuzzy-identifiers.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-indent-comments.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-radar-state.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-read-guard.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-semantic-dry.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-tool-result-profile.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/pi-lens-workspace-facts.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/preserve-terminal-scrollback.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/provider-price-accuracy.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/README.md",
-        "kind": "md"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/request-body-gate.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/retry-429-policy.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/search-output-spill.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/session-cost-display.js",
-        "kind": "js"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/stream-idle.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/summary-effort.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/thinking-reflow.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/token-budget.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/tool-validation.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/truncation-context.mjs",
-        "kind": "mjs"
-      },
-      {
-        "path": "agent/scripts/compatibility/legacy-transforms/tui-branding.mjs",
-        "kind": "mjs"
-      }
-    ],
+    "patchModules": [],
     "foldedMarkers": [
       {
         "file": "extensions/pi-lens/dist/index.js",
