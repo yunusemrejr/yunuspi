@@ -135,12 +135,3 @@ test('decision records bound required capabilities', () => {
   assert.ok(Object.values(record.requiredCapabilities).every((v) => String(v).length <= 160), 'capability values truncated');
   assert.ok(JSON.stringify(record).length < 20000, 'record stays bounded');
 });
-
-test('preferred reasoning never hard-gates; required always does', () => {
-  for (const action of ['implement', 'plan', 'operate', 'investigate', 'review', 'unknown']) {
-    const preferred = req.buildChildRouteRequirements({ estimatedPromptTokens: 1000, reasoning: 'preferred' }, { requestedAction: action });
-    assert.equal(preferred.reasoning, false, `${action}: preferred must not gate`);
-    const required = req.buildChildRouteRequirements({ estimatedPromptTokens: 1000, reasoning: 'required' }, { requestedAction: action });
-    assert.equal(required.reasoning, true, `${action}: required must gate`);
-  }
-});

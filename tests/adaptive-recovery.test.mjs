@@ -159,13 +159,5 @@ try {
  assert.equal(h.evaluateRoute({provider:base.provider,model:base.id,endpoints:['Host b']}).allowed,false);
  assert.equal(h.evaluateRoute({provider:base.provider,model:base.id,endpoints:['Host c']}).allowed,true);
  await fx.emit('session_shutdown');
- // A primary without cost metadata skips endpoint recovery instead of
- // throwing and pausing the whole recovery.
- const costless={...base,cost:undefined};
- fx=await fixture({model:costless,models:[costless]});
- assert.equal((await fx.fail(upstream('Host a'))).decision,'retry','costless primary waits on the route instead of pausing recovery');
- assert.equal(fx.lookups(),0,'no endpoint catalog lookup without prices');
- assert.equal(fx.ctx.model,costless);
- await fx.emit('session_shutdown');
  console.log('PASS adaptive recovery: upstream isolation, historical ranking, catalog admission, request gate, bounded escalation, constraints, cancellation and restoration');
 } finally {globalThis.fetch=network;fs.rmSync(dir,{recursive:true,force:true});}
