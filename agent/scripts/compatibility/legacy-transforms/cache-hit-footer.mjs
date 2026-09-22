@@ -290,7 +290,7 @@ function transformDisplay(source, bundled) {
 }
 
 export function targets() {
-  if (!process.env.PI_HARNESS_PATCH_TEST_CORE) throw Error("Legacy transform targets are test-only; set an isolated fixture core explicitly");
+  if (!process.env.PI_HARNESS_PATCH_TEST_CORE) throw new Error("Legacy transform targets are test-only; set an isolated fixture core explicitly");
   const core =
     process.env.PI_HARNESS_PATCH_TEST_CORE ??
     path.join(

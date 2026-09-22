@@ -272,7 +272,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       if (!policy) return;
       if (policy === "error" && d.status !== "error") return;
       // Child sessions have no TUI: lines would only bloat child context.
-      if (process.env.PI_SUBAGENT_CHILD) return;
+      if (process.env.PI_SUBAGENT_CHILD === "1") return;
       const key = `${kind}\0${d.label}\0${d.status}`;
       const last = lastLine.get(key) ?? 0;
       if (now - last < dedupeMs(kind, d.status)) return;

@@ -65,7 +65,7 @@ export function microRequestAdvice(prompt: string): AdvisoryResult | undefined {
 }
 
 export default function (pi: any, deps = { classify: needleClassify, warmup: needleWarmup, ask: askJev }) {
-  if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD) return;
+  if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD === "1") return;
   let controller: AbortController | undefined;
   let advisoryTimer: ReturnType<typeof setTimeout> | undefined;
 

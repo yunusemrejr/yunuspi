@@ -186,6 +186,11 @@ test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {
   const { pi } = harness(async () => decisionsOk());
   process.env.PI_JEV = "off";
   assert.equal((await jev.askJev("s", "hello world", { q: { type: "noul", instructions: "x" } }, { pi })).skipped, "disabled");
+  process.env.PI_JEV = "0";
+  assert.equal((await jev.askJev("s", "hello world", { q: { type: "noul", instructions: "x" } }, { pi })).skipped, "disabled", "PI_JEV=0 disables remote calls (no paid fallback)");
+  assert.equal(jev.jevEnabled({ PI_JEV: "0" }), false);
+  assert.equal(jev.jevEnabled({ PI_JEV: "off" }), false);
+  assert.equal(jev.jevEnabled({}), true);
   delete process.env.PI_JEV;
   assert.equal((await jev.askJev("s", "  ", { q: { type: "noul", instructions: "x" } }, { pi })).skipped, "trivial");
   assert.equal((await jev.askJev("s", "hello world", {}, { pi })).skipped, "trivial");

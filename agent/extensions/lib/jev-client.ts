@@ -35,7 +35,7 @@ export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
 const JEV_CACHE_MAX = 500;
 export const JEV_MAX_INPUT_CHARS = 32768;
 export const JEV_REMOTE_PROVIDER = "OpenRouter";
-export const JEV_INPUT_POLICY = `When Jev is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off to disable remote Jev calls.`;
+export const JEV_INPUT_POLICY = `When Jev is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off (or PI_JEV=0) to disable remote Jev calls.`;
 
 export function jevEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !['off', '0'].includes((env.PI_JEV ?? 'on').toLowerCase());
@@ -345,7 +345,7 @@ function scheduleProbe(): void {
 
 async function recoverProbe(): Promise<void> {
   if (!breakerOpen) return;
-  if ((process.env.PI_JEV ?? '').toLowerCase() === 'off') return;
+  if (!jevEnabled()) return;
   const key = openRouterKey();
   if (!key) {
     openBreaker("recover probe: no OpenRouter key");
@@ -402,7 +402,10 @@ export async function askJev(
   // A caller can leave its own wait without cancelling an identical shared
   // transport. The last cancelled waiter aborts the underlying request so a
   // stale advisory cannot keep consuming network/provider time.
-  if (!jevEnabled() || opts.signal?.aborted) return boundedAsk(site,state,questions,opts);
+  // Disabled must never reach the network: fall through to boundedAsk would
+  // still bill when PI_JEV=0 (askJevOnce used to accept only the literal "off").
+  if (!jevEnabled()) return { ok: false, skipped: "disabled" };
+  if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
   let identity: string;
   try { identity=cacheKey(site,'inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
   let entry=inflight.get(identity);
@@ -475,7 +478,7 @@ async function askJevOnce(
   questions: Record<string, unknown>,
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
-  if ((process.env.PI_JEV ?? "").toLowerCase() === "off") return { ok: false, skipped: "disabled" };
+  if (!jevEnabled()) return { ok: false, skipped: "disabled" };
   if (state === undefined || state === null || (typeof state === "string" && !state.trim()))
     return { ok: false, skipped: "trivial" };
   if (!questions || typeof questions !== "object" || Object.keys(questions).length === 0)

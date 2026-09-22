@@ -7,7 +7,7 @@ export default function lastModel(pi: ExtensionAPI) {
  let settings: SettingsManager | undefined;
  let remembered = '';
  const remember = async (model: {provider: string; id: string} | undefined, ctx: any) => {
-  if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD || !model ||
+  if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD === "1" || !model ||
       typeof model.provider !== 'string' || !model.provider.trim() ||
       typeof model.id !== 'string' || !model.id.trim()) return;
   const key = JSON.stringify([model.provider, model.id]);

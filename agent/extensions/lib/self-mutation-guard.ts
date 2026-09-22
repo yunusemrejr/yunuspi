@@ -67,7 +67,7 @@ export const HARNESS_ROOT = canonicalMutationPath(
 const INITIAL_CWD = canonicalMutationPath(process.cwd());
 export const SELF_MUTATION_ALLOWED =
   process.env.PI_HARNESS_MUTATION_DENIED !== "1" &&
-  !process.env.PI_SUBAGENT_CHILD &&
+  process.env.PI_SUBAGENT_CHILD !== "1" &&
   containsPath(HARNESS_ROOT, INITIAL_CWD);
 // Children inherit denial even if they change cwd or import another copy of this module.
 if (!SELF_MUTATION_ALLOWED) process.env.PI_HARNESS_MUTATION_DENIED = "1";

@@ -23,7 +23,8 @@ import { toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
  * - Live metadata wins (cost/context/maxTokens/reasoning). Store overlay
  *   contributes only what live APIs cannot express: thinkingLevelMap and
  *   compat (wire formats differ per provider).
- * - Catalog TTL 15m; `pi update --models` (force) bypasses. On failure the
+ * - Catalog cache TTL is CACHE_TTL_MS (6h). Router catalog TTL is
+ *   ROUTER_CATALOG_TTL_MS (15m). `pi update --models` (force) bypasses. On failure the
  *   previous list is retained; offline startup serves the cache.
  * - Never persists to models-store.json (the native catalog owns that file).
  * - models.json provider-level `compat` is NOT folded into extension models
@@ -1646,7 +1647,7 @@ export default async function registerLiveModels(
 	// the fetches, so frequent boots cost one cached list read, not I/O.
 	// Discovery belongs to the interactive parent; each child already receives
 	// the model catalog. Do not fan out background requests per worker/session.
-	const automaticRefreshAllowed = () => process.env.PI_OFFLINE === undefined && !process.env.PI_SUBAGENT_CHILD;
+	const automaticRefreshAllowed = () => process.env.PI_OFFLINE === undefined && process.env.PI_SUBAGENT_CHILD !== "1";
     const refreshScope = (ctx: ExtensionContext) => [...new Set([
         ...REFRESHER_IDS, ...localProviderIds,
         ...(ctx.modelRegistry.getAvailable?.() ?? []).map(model => model.provider),

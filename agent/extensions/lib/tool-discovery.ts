@@ -166,7 +166,7 @@ function capabilityMetadata(record: any, pi: any, detail = false): any {
   return result;
 }
 export function registerToolDiscovery(pi: any) {
-  if (process.env.PI_SUBAGENT_CHILD || process.env.PI_TOOL_DISCOVERY === 'off'
+  if (process.env.PI_SUBAGENT_CHILD === "1" || process.env.PI_TOOL_DISCOVERY === 'off'
     || typeof pi.getAllTools !== 'function' || typeof pi.setActiveTools !== 'function'
     || typeof pi.getActiveTools !== 'function') return;
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
@@ -447,7 +447,7 @@ function buildSkillCatalog(skills: any[]): string {
 
 /** Skills eligible for projection, or null when projection does not apply. */
 function projectionSkills(event: any, activeTools: string[]): any[] | null {
-  if (process.env.PI_SKILL_CATALOG === 'full' || process.env.PI_SUBAGENT_CHILD
+  if (process.env.PI_SKILL_CATALOG === 'full' || process.env.PI_SUBAGENT_CHILD === "1"
     || !activeTools.includes('skill_review')) return null;
   const skills = event.systemPromptOptions?.skills?.filter((skill: any)=>!skill.disableModelInvocation);
   if (!Array.isArray(skills) || !skills.length) return null;

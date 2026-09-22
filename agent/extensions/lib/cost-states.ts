@@ -44,8 +44,8 @@ export function classifyCostState(input: CostStateInput): CostState {
 	if (input.freeProven === true && total === 0) return "free-evidence";
 	if (input.seen !== true) return "unknown";
 	if ((input.pending ?? 0) > 0 || input.unknown === true) {
-		// Partial evidence with outstanding accounting: pending dominates.
-		if (total === 0) return "pending";
+		// Partial evidence with outstanding accounting: pending dominates,
+		// whether or not a partial total has accumulated.
 		return "pending";
 	}
 	if (total === 0) return "verified-zero";

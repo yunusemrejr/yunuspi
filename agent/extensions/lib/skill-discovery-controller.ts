@@ -32,7 +32,7 @@ export function createSkillDiscoveryController(options: {
     observations.clear(); files.clear(); tools.clear(); attempted = false;
     if (clearCache) seen.clear();
   };
-  const permitted = () => options.enabled() && process.env.PI_OFFLINE !== '1' && !process.env.PI_SUBAGENT_CHILD
+  const permitted = () => options.enabled() && process.env.PI_OFFLINE !== '1' && process.env.PI_SUBAGENT_CHILD !== "1"
     && !['off','0'].includes(process.env.PI_SKILL_DISCOVERY ?? 'on');
   return {
     cancel,
