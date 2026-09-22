@@ -11,7 +11,7 @@ test.after(() => fs.rmSync(work, { recursive: true, force: true }));
 
 const importFrom = (rel) => import(pathToFileURL(path.join(root, rel)).href);
 
-test("session resource cleanups run once and do not accumulate", async () => {
+test("session resource cleanups follow every session and are removable", async () => {
 	const { registerSessionResourceCleanup, cleanupSessionResources } = await importFrom(
 		"core/ai/src/session-resources.js",
 	);
@@ -21,9 +21,15 @@ test("session resource cleanups run once and do not accumulate", async () => {
 	});
 	assert.equal(typeof off, "function");
 	cleanupSessionResources("s1");
-	// A second dispose must not re-run the same cleanup (process-lifetime leak).
+	// A later dispose in the same process must still clean that session's
+	// resources; a registry that empties itself on first use leaves every
+	// subsequent session in the process with no cleanup at all.
 	cleanupSessionResources("s2");
-	assert.deepEqual(seen, ["s1"]);
+	assert.deepEqual(seen, ["s1", "s2"]);
+	// The disposer is what prevents process-lifetime accumulation.
+	off();
+	cleanupSessionResources("s3");
+	assert.deepEqual(seen, ["s1", "s2"]);
 });
 
 test("a throwing cleanup still lets remaining cleanups run", async () => {

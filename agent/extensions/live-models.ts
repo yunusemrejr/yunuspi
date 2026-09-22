@@ -1615,7 +1615,7 @@ export default async function registerLiveModels(
 		handler: async (args: string, ctx: ExtensionContext) => {
       if (args.trim() && args.trim() !== 'refresh') { ctx.ui.notify('Usage: /catalog-status [refresh]', 'info'); return; }
       if (args.trim() === 'refresh') {
-        if (process.env.PI_OFFLINE !== undefined || !ctx.model?.provider) { ctx.ui.notify('Model-list refresh needs an online session and a selected provider.', 'warning'); return; }
+        if (process.env.PI_OFFLINE === "1" || !ctx.model?.provider) { ctx.ui.notify('Model-list refresh needs an online session and a selected provider.', 'warning'); return; }
         try { await ctx.modelRegistry.refresh({ allowNetwork: true, force: true, providers: [ctx.model.provider] }); }
         catch { ctx.ui.notify('Model-list refresh failed; the saved list remains available.', 'error'); }
         catalogStatus(ctx);
@@ -1647,7 +1647,7 @@ export default async function registerLiveModels(
 	// the fetches, so frequent boots cost one cached list read, not I/O.
 	// Discovery belongs to the interactive parent; each child already receives
 	// the model catalog. Do not fan out background requests per worker/session.
-	const automaticRefreshAllowed = () => process.env.PI_OFFLINE === undefined && process.env.PI_SUBAGENT_CHILD !== "1";
+	const automaticRefreshAllowed = () => process.env.PI_OFFLINE !== "1" && process.env.PI_SUBAGENT_CHILD !== "1";
     const refreshScope = (ctx: ExtensionContext) => [...new Set([
         ...REFRESHER_IDS, ...localProviderIds,
         ...(ctx.modelRegistry.getAvailable?.() ?? []).map(model => model.provider),

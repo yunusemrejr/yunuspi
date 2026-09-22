@@ -133,7 +133,7 @@ export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, dep
 	const now = deps.now ?? Date.now;
 	const sleep = deps.wait ?? wait;
 	// Bounded proactive assistance is enabled; explicit opt-out still wins.
-	const freeAssistRequested = () => process.env.PI_AUTONOMOUS_FREE_ASSIST !== "0" && process.env.PI_AUTONOMOUS_FREE_ASSIST !== "off";
+	const freeAssistRequested = () => !["0", "off"].includes((process.env.PI_AUTONOMOUS_FREE_ASSIST ?? "on").toLowerCase());
 	const on = pi.on as (name: string, fn: (event: any, ctx: ExtensionContext) => any) => void;
 	let primary: Model | undefined;
 	let prompt = "";

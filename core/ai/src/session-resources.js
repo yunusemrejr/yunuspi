@@ -7,11 +7,12 @@ export function registerSessionResourceCleanup(cleanup) {
 }
 export function cleanupSessionResources(sessionId) {
     const errors = [];
-    // Invoke each registered cleanup once and drop it, so a session dispose
-    // cannot re-run foreign cleanups or accumulate closures for the process
-    // lifetime. Errors are aggregated after every cleanup had its chance.
+    // Registrations belong to the loaded module, not to one session, so only the
+    // disposer returned by registerSessionResourceCleanup removes an entry.
+    // Draining the registry here left every later session in the same process
+    // without cleanup at all. Errors are aggregated after every cleanup had its
+    // chance.
     for (const cleanup of [...sessionResourceCleanups]) {
-        sessionResourceCleanups.delete(cleanup);
         try {
             cleanup(sessionId);
         }

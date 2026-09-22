@@ -1013,6 +1013,7 @@ function writeRecoveryRecord(
 	fs.writeFileSync(filePath, `${JSON.stringify(record, null, 2)}\n`, {
 		encoding: "utf-8",
 		flag: "wx",
+		mode: 0o600,
 	});
 	return record;
 }

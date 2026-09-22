@@ -3368,6 +3368,22 @@ export class InteractiveMode {
         const uncaughtExceptionHandler = (error) => this.uncaughtCrash(error);
         process.prependListener("uncaughtException", uncaughtExceptionHandler);
         this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
+        // An unhandled rejection leaves the process in an undefined state, but
+        // extension teardown still has to run: session_shutdown flushes memory,
+        // checkpoints and the subagent ledger, and Node's default crash skips it.
+        // Use the signal path so teardown happens before the terminal is touched,
+        // with a hard fallback in case a shutdown handler stalls and would
+        // otherwise leave the terminal in raw mode.
+        const unhandledRejectionHandler = (reason) => {
+            if (this.isShuttingDown)
+                return;
+            console.error(`${APP_NAME} unhandled rejection:`);
+            console.error(reason);
+            setTimeout(() => this.uncaughtCrash(reason), 10_000);
+            void this.shutdown({ fromSignal: true });
+        };
+        process.prependListener("unhandledRejection", unhandledRejectionHandler);
+        this.signalCleanupHandlers.push(() => process.off("unhandledRejection", unhandledRejectionHandler));
     }
     unregisterSignalHandlers() {
         for (const cleanup of this.signalCleanupHandlers) {

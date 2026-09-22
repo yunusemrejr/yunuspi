@@ -174,9 +174,19 @@ export class OutputAccumulator {
             return;
         }
         this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
-        this.tempFileStream = createWriteStream(this.tempFilePath);
+        // closeTempFile() only attaches its error handler once closing starts, so
+        // a write failure before that (ENOSPC, EIO) is an unhandled stream error
+        // that kills the session, and after it leaves closeTempFile pending. The
+        // spill file is optional: drop the stream and keep the truncated output.
+        const stream = createWriteStream(this.tempFilePath);
+        stream.on("error", () => {
+            if (this.tempFileStream === stream) {
+                this.tempFileStream = undefined;
+            }
+        });
+        this.tempFileStream = stream;
         for (const chunk of this.rawChunks) {
-            this.tempFileStream.write(chunk);
+            stream.write(chunk);
         }
         this.rawChunks = [];
     }

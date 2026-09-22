@@ -47,7 +47,11 @@ const runtimeDirs =
 const sensitiveNames =
   /(?:^|\/)(?:\.env(?:\..*)?|auth\.json|settings\.json|models(?:-store)?\.json|provider-health\.json|free-route-evidence\.json|live-model-catalog\.json|run-history\.jsonl|yunuspi-session-[^/]+\.html|pi-session-[^/]+-diagnostics\.json|api-key|credentials(?:\..*)?|id_rsa|id_ed25519|.*\.(?:pem|p12|pfx|key|sqlite|db|jsonl|tar|tgz|zip|onnx|safetensors))$/i;
 const placeholder =
-  /^(?:|UNKNOWN|REDACTED|CHANGEME|YOUR[_ -].*|EXAMPLE[_ -].*|TEST[_ -].*|DUMMY[_ -].*|PLACEHOLDER|\$\{[^}]+\}|<[^>]+>|test|fake|dummy|example|none|null|undefined)$/i;
+  /^(?:|UNKNOWN|REDACTED|CHANGEME|YOUR[_ -].*|\$\{[^}]+\}|<[^>]+>|none|null|undefined|.*(?:synthetic|placeholder|example|dummy|fake|test|\.\.).*)$/i;
+// A value that spells an environment-variable name is a reference, not a secret.
+// Deliberately case-sensitive: a mixed-case token must never be exempted by shape.
+const envReference = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
+const publishable = (value) => placeholder.test(value) || envReference.test(value);
 
 export function scanContent(name, data) {
   const findings = [];
@@ -71,8 +75,9 @@ export function scanContent(name, data) {
     ["private-key", /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
     [
       "provider-token",
-      /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,})\b/,
+      /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{24,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|hf_[A-Za-z0-9]{30,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36})\b/,
     ],
+    ["bearer-credential", /\bBearer\s+eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/],
     ["credential-url", /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/i],
     [
       "personal-home-path",
@@ -85,7 +90,7 @@ export function scanContent(name, data) {
   ];
   for (const [rule, regex] of patterns) if (regex.test(text)) add(rule);
   const assignments =
-    /["']?\b(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|authorization|bearer|namecheap[_-]?(?:user|username)|godaddy[_-]?(?:user|username))["']?\s*[:=]\s*["']([^"'\r\n]{1,512})["']/gi;
+    /["']?(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|access[_-]?key[_-]?id|password|passwd|authorization|bearer|namecheap[_-]?(?:user|username)|godaddy[_-]?(?:user|username))["']?\s*[:=]\s*["']([^"'\r\n]{1,512})["']/gi;
   for (const match of text.matchAll(assignments)) {
     if (
       [
@@ -103,14 +108,14 @@ export function scanContent(name, data) {
         "487ba2299be7f759d7c7bf6a4ac3a32cee81f1bb9332fc485947e32918864fb2"
     )
       continue;
-    if (!placeholder.test(match[1]) && !/^(?:Bearer )?\$\{/.test(match[1]))
+    if (!publishable(match[1]) && !/^(?:Bearer )?\$\{/.test(match[1]))
       add("credential-literal");
   }
   // Shell/env assignments may be unquoted. Restrict names and syntax to avoid code expressions.
   const env =
-    /^\s*(?:export\s+)?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|SECRET|PASSWORD|ACCESS_TOKEN|REFRESH_TOKEN)\s*=\s*([^\s'"#]+)\s*$/gm;
+    /^\s*(?:export\s+)?(?:[A-Z][A-Z0-9_]*_)?(?:API_KEY|SECRET_ACCESS_KEY|ACCESS_KEY_ID|SECRET|PASSWORD|ACCESS_TOKEN|REFRESH_TOKEN)\s*=\s*([^\s'"#]+)\s*$/gm;
   for (const match of text.matchAll(env))
-    if (!placeholder.test(match[1]) && !match[1].startsWith("$"))
+    if (!publishable(match[1]) && !match[1].startsWith("$"))
       add("credential-environment-literal");
   return findings;
 }
@@ -140,6 +145,13 @@ export function scanTree(root) {
   function walk(dir, prefix = "") {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const name = prefix + entry.name;
+      // Installed dependencies and build outputs are never published from a
+      // working tree (both are gitignored here), so walking them only makes the
+      // pre-push hook fail on every checkout that has run npm install. Tracked
+      // copies of those paths are still caught by scanPath()/scanGit().
+      if (entry.isDirectory() && (entry.name === "node_modules" || entry.name === "dist")) {
+        continue;
+      }
       if (!prefix && entry.name === ".git") continue;
       const filename = path.join(dir, entry.name);
       if (entry.isSymbolicLink()) {

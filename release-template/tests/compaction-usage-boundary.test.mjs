@@ -8,7 +8,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createRequire} from 'node:module';
 const template=path.resolve(import.meta.dirname,'..');
-const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'scripts/compatibility/legacy-transforms/compaction-early.mjs')));
+const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/session-cost.ts')));
 let parser;
 try {parser=await import('acorn');} catch {parser=createRequire(path.join(agent,'npm/package.json'))('acorn');}
 const {parseExpressionAt}=parser;

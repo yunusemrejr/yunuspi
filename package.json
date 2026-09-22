@@ -16,6 +16,7 @@
     "undici": "8.10.0"
   },
   "scripts": {
+    "pretest": "npm run build:core",
     "test": "node --test --test-concurrency=${PI_PUBLIC_TEST_CONCURRENCY:-1} tests/*.test.mjs",
     "check:public": "node scripts/check-public.mjs",
     "prepare:hooks": "git config core.hooksPath .githooks",

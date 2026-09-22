@@ -9,6 +9,7 @@ import { resolveReadPathAsync } from "./path-utils.js";
 import { readRenderers } from "./renderers/read.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
+import { spillToolOutput } from "./spill-output.js";
 const readSchema = Type.Object({
     path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
     offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
@@ -132,7 +133,7 @@ export function createReadToolDefinition(cwd, options) {
                                     outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
                                 }
                                 // Full raw output stays retrievable instead of vanishing at the byte cap.
-                                const fullOutputPath = __piSpillOutput("pi-read", selectedContent);
+                                const fullOutputPath = spillToolOutput("pi-read", selectedContent);
                                 details = { truncation, fullOutputPath };
                                 outputText += `\n\n[Full untruncated output: ${fullOutputPath}]`;
                             }
@@ -166,13 +167,4 @@ export function createReadToolDefinition(cwd, options) {
 }
 export function createReadTool(cwd, options) {
     return wrapToolDefinition(createReadToolDefinition(cwd, options));
-}
-function __piSpillOutput(prefix, text) { /* PI_SEARCH_OUTPUT_SPILL */
-  const { randomBytes } = process.getBuiltinModule("node:crypto");
-  const { writeFileSync } = process.getBuiltinModule("node:fs");
-  const { tmpdir } = process.getBuiltinModule("node:os");
-  const { join } = process.getBuiltinModule("node:path");
-  const file = join(tmpdir(), `${prefix}-${randomBytes(8).toString("hex")}.log`);
-  writeFileSync(file, text);
-  return file;
 }

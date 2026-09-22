@@ -12,8 +12,13 @@ const {addUsageCost,addAuxiliaryUsage}=await load('extensions/pi-subagents/src/s
 const {sumResultsCost,sumResultsUsage,toAgentToolUsage}=await load('extensions/pi-subagents/src/shared/utils.ts');
 const {persistSubagentCost}=await load('extensions/pi-subagents/src/extension/session-cost.ts');
 const {toWaitCompletion}=await load('extensions/pi-subagents/src/runs/background/wait-completions.ts');
-const calculate=vm.runInNewContext('('+fs.readFileSync(path.join(agent,'scripts/compatibility/legacy-transforms/calculate-cost.js'),'utf8')+')');
-const service=vm.runInNewContext(fs.readFileSync(path.join(agent,'scripts/compatibility/legacy-transforms/openai-service-pricing.js'),'utf8')+';applyServiceTierPricing',{URL});
+const coreRoot=[path.join(root,'core'),path.join(agent,'runtime','core')].find(p=>fs.existsSync(path.join(p,'ai','src','models.js')));
+assert.ok(coreRoot,'owned core with ai/src/models.js not found');
+const {calculateCost:calculate}=await import(pathToFileURL(path.join(coreRoot,'ai','src','models.js')));
+const sliceFn=(src,decl)=>{const start=src.indexOf(decl);assert.ok(start>=0,decl.trim()+' missing from owned core');let i=src.indexOf('{',start),depth=0;for(;i<src.length;i++){const c=src[i];if(c==='\''||c==='"'||c==='`'){const q=c;i++;for(;i<src.length;i++){if(src[i]==='\\'){i++;continue;}if(src[i]===q)break;if(q==='`'&&src[i]==='$'&&src[i+1]==='{'){let d=1;i+=2;for(;i<src.length&&d;i++){if(src[i]==='{')d++;else if(src[i]==='}')d--;}i--;}continue;}}else if(c==='/'&&(src[i+1]==='/'||src[i+1]==='*')){if(src[i+1]==='/'){i=src.indexOf('\n',i);if(i<0)break;}else{i=src.indexOf('*/',i+2);if(i<0)break;i++;}}else if(c==='{')depth++;else if(c==='}'){depth--;if(!depth){i++;break;}}}return src.slice(start,i);};
+const responsesSrc=fs.readFileSync(path.join(coreRoot,'ai','src','api','openai-responses.js'),'utf8');
+const service=vm.runInNewContext(sliceFn(responsesSrc,'function getServiceTierCostMultiplier')+'\n'+sliceFn(responsesSrc,'function applyServiceTierPricing')+';applyServiceTierPricing',{URL});
+for(const f of ['api/openai-completions.js','api/openai-responses.js']){assert.ok(fs.readFileSync(path.join(coreRoot,'ai','src',f),'utf8').includes("'gpt-4o-mini':5/3"),'service pricing table missing from owned '+f);}
 const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-10,`${actual} != ${expected}`);
 const usage=(total,source='provider-reported',extra={})=>({input:100,output:20,cacheRead:80,cacheWrite:0,cost:{total,source},...extra});
 const empty=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,cost:0,turns:0});
@@ -164,9 +169,14 @@ test('reported zero corrects a same-turn estimate and stale estimates cannot dow
 });
 
 test('native provider/auth billing classification follows each response across switches',async()=>{
- const {transform}=await load('scripts/compatibility/legacy-transforms/provider-price-accuracy.mjs');
- const body=transform('async function handle(event){await this._emitExtensionEvent(event)}','billing');
- const handle=vm.runInNewContext('('+body+')');
+ const sessionSrc=fs.readFileSync(path.join(coreRoot,'coding-agent','src','core','agent-session.js'),'utf8');
+ const marker='/* PI_RESPONSE_BILLING_V1 */';
+ const mStart=sessionSrc.indexOf(marker);
+ assert.ok(mStart>=0,'owned core billing marker missing from agent-session.js');
+ const exprEnd=sessionSrc.indexOf(', event))',mStart);
+ assert.ok(exprEnd>mStart,'owned core billing expression anchor drift');
+ const expr=sessionSrc.slice(mStart+marker.length,exprEnd).trim();
+ const handle=vm.runInNewContext('(async function handle(event){await this._emitExtensionEvent(('+expr+', event))})');
  const delivered=[];
  const owner={modelRuntime:{isUsingSubscription:provider=>provider==='subscription-provider'},_emitExtensionEvent:event=>delivered.push(event)};
  for(const provider of ['subscription-provider','openai']){

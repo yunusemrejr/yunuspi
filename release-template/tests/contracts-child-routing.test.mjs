@@ -25,7 +25,7 @@ const { confidentValue, checkCapabilityProvenance } = await import(shared + 'cat
 const { formatCandidateRejection, recoveryHintForDimension, recordRouteDecision } = await import(shared + 'route-decision-record.ts');
 
 const cfg = loadModelEconomyConfig();
-const parent = { provider: 'p', id: 'big', fullId: 'p/big', contextWindow: 200000, maxTokens: 32000, reasoning: true, input: ['text', 'image'], cost: { input: 5, output: 20, cacheRead: 5, cacheWrite: 5 } };
+const parent = { provider: 'p', id: 'big', fullId: 'p/big', contextWindow: 200000, maxTokens: 32000, reasoning: true, input: ['text', 'image'], cost: { input: 500, output: 2000, cacheRead: 500, cacheWrite: 500 } };
 const small = { provider: 'p', id: 'small', fullId: 'p/small', contextWindow: 32000, maxTokens: 4096, input: ['text'], cost: { input: 0.1, output: 0.4, cacheRead: 0.1, cacheWrite: 0.1 } };
 
 test('child-scoped routing drops parent capacity gates', () => {
