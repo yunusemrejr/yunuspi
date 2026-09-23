@@ -83,7 +83,7 @@ export default function (pi: any) {
       };
     },
   });
-  pi.registerTool({
+  const renderTool = {
     name: "render_see",
     label: "Render and see",
     description:
@@ -212,6 +212,18 @@ export default function (pi: any) {
           releaseRender();
         }
       }
+    },
+  };
+  pi.registerTool({ ...renderTool, name: "render_see", parameters: renderTool.parameters, execute: renderTool.execute });
+  pi.registerTool({
+    ...renderTool,
+    name: "design_audit",
+    parameters: renderTool.parameters,
+    label: "Rendered design audit",
+    description: "Inspect a rendered web page for typography/spacing distributions, repeated surface effects, overflow, running motion and solid-color text contrast. Uses the existing isolated browser, with screenshot pixels for vision models. Numeric evidence for accessible and anti-slop design review, not a style score or certification. Complex paint is indeterminate. Compare mobile/desktop and reduced-motion calls; use design skills and actual screenshots to judge hierarchy and originality.",
+    async execute(id: any, params: any, signal: any, update: any, ctx: any) {
+      if (/\.pdf$/i.test(params.source)) throw new Error("design_audit requires rendered HTML; PDF has no computed web styles");
+      return renderTool.execute(id, { ...params, output: params.output === "text" ? "text" : "both", designAudit: true }, signal, update, ctx);
     },
   });
 }

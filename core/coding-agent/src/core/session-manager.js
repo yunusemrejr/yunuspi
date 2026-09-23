@@ -1,12 +1,13 @@
 import { uuidv7 } from "@yunuspi/ai";
 import { randomUUID } from "crypto";
-import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
+import { appendFileSync, closeSync, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync, } from "fs";
 import { readdir, stat } from "fs/promises";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
 import { normalizePath, resolvePath } from "../utils/paths.js";
+import { withSessionWriteLock } from "../utils/session-write-lock.js";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
 export const CURRENT_SESSION_VERSION = 3;
 function createSessionId() {
@@ -277,10 +278,14 @@ function parseSessionEntryLine(line) {
     }
 }
 /** Exported for testing */
-export function loadEntriesFromFile(filePath) {
+export function loadEntriesFromFile(filePath, options) {
     const resolvedFilePath = normalizePath(filePath);
     if (!existsSync(resolvedFilePath))
         return [];
+    if (options?.readOnly) return loadEntriesUnlocked(resolvedFilePath, false);
+    return withSessionWriteLock(resolvedFilePath, () => loadEntriesUnlocked(resolvedFilePath));
+}
+function loadEntriesUnlocked(resolvedFilePath, repair = true) {
     const entries = [];
     let pending = "";
     const fd = openSync(resolvedFilePath, "r");
@@ -318,7 +323,7 @@ export function loadEntriesFromFile(filePath) {
     if (header.type !== "session" || typeof header.id !== "string") {
         return [];
     }
-    if (pending)
+    if (pending && repair)
         appendFileSync(resolvedFilePath, "\n");
     return entries;
 }
@@ -593,6 +598,7 @@ export class SessionManager {
     cwd;
     persist;
     flushed = false;
+    persistenceError;
     fileEntries = [];
     byId = new Map();
     labelsById = new Map();
@@ -621,31 +627,36 @@ export class SessionManager {
     }
     _setSessionFile(sessionFile, preloadedFileEntries) {
         this.sessionFile = resolvePath(sessionFile);
-        if (existsSync(this.sessionFile)) {
-            const entries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
-            // If file was empty, initialize it with a valid session header. If it was
-            // non-empty but did not parse as a pi session, fail without modifying it.
-            if (entries.length === 0) {
-                const explicitPath = this.sessionFile;
-                if (statSync(explicitPath).size > 0) {
-                    throw new Error(`Session file is not a valid ${APP_NAME} session: ${explicitPath}`);
+        return withSessionWriteLock(this.sessionFile, () => {
+            if (existsSync(this.sessionFile)) {
+                // Discovery's preload may be stale. Read, migrate, and initialize
+                // under one ownership interval so no accepted tail is overwritten.
+                const entries = loadEntriesUnlocked(this.sessionFile);
+                // If file was empty, initialize it with a valid session header. If it was
+                // non-empty but did not parse as a pi session, fail without modifying it.
+                if (entries.length === 0) {
+                    const explicitPath = this.sessionFile;
+                    if (statSync(explicitPath).size > 0) {
+                        throw new Error(`Session file is not a valid ${APP_NAME} session: ${explicitPath}`);
+                    }
+                    this.newSession();
+                    this.sessionFile = explicitPath;
+                    this._rewriteFileUnlocked();
+                    this.flushed = true;
+                    return;
                 }
-                this.newSession();
-                this.sessionFile = explicitPath;
-                this._rewriteFile();
+                this._loadEntries(entries, undefined, true);
                 this.flushed = true;
-                return;
             }
-            this._loadEntries(entries);
-            this.flushed = true;
-        }
-        else {
-            const explicitPath = this.sessionFile;
-            this.newSession();
-            this.sessionFile = explicitPath; // preserve explicit path from --session flag
-        }
+            else {
+                const explicitPath = this.sessionFile;
+                this.newSession();
+                this.sessionFile = explicitPath; // preserve explicit path from --session flag
+            }
+        });
     }
     newSession(options) {
+        this.persistenceError = undefined;
         if (options?.id !== undefined) {
             assertValidSessionId(options.id);
         }
@@ -671,13 +682,15 @@ export class SessionManager {
         }
         return this.sessionFile;
     }
-    _loadEntries(entries, options) {
+    _loadEntries(entries, options, writeLocked = false) {
+        this.persistenceError = undefined;
         const header = entries.find((e) => e.type === "session");
         if (header) {
             this.fileEntries = entries;
             this.sessionId = header.id;
             if (migrateToCurrentVersion(this.fileEntries)) {
-                this._rewriteFile();
+                if (writeLocked) this._rewriteFileUnlocked();
+                else this._rewriteFile();
             }
         }
         else {
@@ -711,6 +724,10 @@ export class SessionManager {
     _rewriteFile() {
         if (!this.persist || !this.sessionFile)
             return;
+        return withSessionWriteLock(this.sessionFile, () => this._rewriteFileUnlocked());
+    }
+    _rewriteFileUnlocked() {
+        if (!this.persist || !this.sessionFile) return;
         const fd = openSync(this.sessionFile, "w", 0o600);
         try {
             for (const entry of this.fileEntries) {
@@ -739,32 +756,80 @@ export class SessionManager {
     getSessionFile() {
         return this.sessionFile;
     }
-    _persist(entry) {
+    _persist(entry, durable = false) {
         if (!this.persist || !this.sessionFile)
             return;
+        if (this.persistenceError) throw this.persistenceError;
         if (this.flushed) {
-            appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-            return;
+            return withSessionWriteLock(this.sessionFile, () => {
+                const fd = openSync(this.sessionFile, "a", 0o600);
+                let size;
+                try {
+                    size = fstatSync(fd).size;
+                    writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+                    if (durable) fsyncSync(fd);
+                }
+                catch (error) {
+                    // A failed/partial append is not an accepted history entry.
+                    // Refuse further writes if restoring the prior tail also fails.
+                    try { if (size !== undefined) { ftruncateSync(fd, size); if (durable) fsyncSync(fd); } }
+                    catch (rollback) { this.persistenceError = new Error(`Session persistence rollback failed: ${rollback.message}`, { cause: error }); }
+                    throw this.persistenceError ?? error;
+                }
+                finally {
+                    // fsync, when requested, is the commit point. A later close
+                    // error must not roll memory back and replay a committed receipt.
+                    try { closeSync(fd); }
+                    catch (error) { console.warn(`Session file close failed: ${error.message}`); }
+                }
+            });
         }
         const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
         if (!hasAssistant)
             return;
-        const fd = openSync(this.sessionFile, "wx", 0o600);
-        try {
-            for (const e of this.fileEntries) {
-                writeFileSync(fd, `${JSON.stringify(e)}\n`);
-            }
-        }
-        finally {
-            closeSync(fd);
-        }
-        this.flushed = true;
+        this.flush();
     }
-    _appendEntry(entry) {
+    /** Persist buffered history before acknowledging an externally durable receipt. */
+    flush() {
+        if (!this.persist || !this.sessionFile || this.flushed) return;
+        if (this.persistenceError) throw this.persistenceError;
+        return withSessionWriteLock(this.sessionFile, () => {
+            const fd = openSync(this.sessionFile, "wx", 0o600);
+            try {
+                for (const e of this.fileEntries) {
+                    writeFileSync(fd, `${JSON.stringify(e)}\n`);
+                }
+                fsyncSync(fd);
+                const directory = openSync(dirname(this.sessionFile), "r");
+                try { fsyncSync(directory); }
+                finally { try { closeSync(directory); } catch (error) { console.warn(`Session directory close failed: ${error.message}`); } }
+            }
+            catch (error) {
+                // This wx open created the path. A failed first flush must not
+                // poison every future attempt with an incomplete EEXIST file.
+                try { unlinkSync(this.sessionFile); }
+                catch (cleanup) { this.persistenceError = new Error(`Session flush cleanup failed: ${cleanup.message}`, { cause: error }); }
+                throw this.persistenceError ?? error;
+            }
+            finally {
+                try { closeSync(fd); }
+                catch (error) { console.warn(`Session file close failed: ${error.message}`); }
+            }
+            this.flushed = true;
+        });
+    }
+    _appendEntry(entry, durable = false) {
+        const previousLeaf = this.leafId;
         this.fileEntries.push(entry);
         this.byId.set(entry.id, entry);
         this.leafId = entry.id;
-        this._persist(entry);
+        try { this._persist(entry, durable); }
+        catch (error) {
+            this.fileEntries.pop();
+            this.byId.delete(entry.id);
+            this.leafId = previousLeaf;
+            throw error;
+        }
     }
     /** Append a message as child of current leaf, then advance leaf. Returns entry id.
      * Does not allow writing CompactionSummaryMessage and BranchSummaryMessage directly.
@@ -872,7 +937,10 @@ export class SessionManager {
      * @param details Optional extension-specific metadata (not sent to LLM)
      * @returns Entry id
      */
-    appendCustomMessageEntry(customType, content, display, details, excludeFromContext = false) {
+    appendCustomMessageEntry(customType, content, display, details, excludeFromContext = false, durable = false) {
+        // Persist prior buffered history first, before this receipt can be
+        // mistaken for accepted by getBranch()/restore after a failed write.
+        if (durable) this.flush();
         const entry = {
             type: "custom_message",
             customType,
@@ -884,7 +952,7 @@ export class SessionManager {
             parentId: this.leafId,
             timestamp: new Date().toISOString(),
         };
-        this._appendEntry(entry);
+        this._appendEntry(entry, durable);
         return entry.id;
     }
     // =========================================================================

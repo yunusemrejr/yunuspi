@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { inspectPageState } from "./render-page-state.mjs";
+import { inspectDesignState } from "./render-design-state.mjs";
 import { renderNavigationFailure } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
@@ -102,6 +103,14 @@ export async function renderCapture(p, output, signal) {
     renderer = "Poppler pdftoppm";
   let stage = "source";
   let navigationFailure;
+  const requireDesignDocument = (supported) => {
+    if (p.designAudit && !supported) {
+      const failure = {stage:"source-validation",kind:"unsupported-design-source",outcome:"not-audited",
+        reason:"Design measurements require an HTML, XHTML or SVG document, not a raster image or PDF.",
+        nextStep:"Use render_see for image/PDF pixels, or provide the original HTML page for rendered design measurements."};
+      throw Object.assign(Error(failure.reason), {failure});
+    }
+  };
   const start = Date.now();
   const abort = () => {
     browser?.close().catch(() => {});
@@ -113,6 +122,7 @@ export async function renderCapture(p, output, signal) {
       !/^https?:\/\//i.test(p.source) &&
       path.extname(p.source).toLowerCase() === ".pdf"
     ) {
+      requireDesignDocument(false);
       if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined)
         throw Error("Browser media and animation settings are unavailable for PDF");
       if (outputMode !== "image")
@@ -154,6 +164,7 @@ export async function renderCapture(p, output, signal) {
       if (local) {
         ({ target, fragment } = await resolveLocalRenderSource(p.source));
         if (fragment) conditions.fragmentApplied = true;
+        requireDesignDocument(/\.(?:html?|svg)$/i.test(target));
         if (!/\.(html?|svg|png|jpe?g|gif|webp|bmp)$/i.test(target))
           throw Error(
             "Unsupported local type: HTML, SVG, PNG/JPEG/GIF/WebP/BMP or PDF required",
@@ -487,6 +498,7 @@ export async function renderCapture(p, output, signal) {
           conditions.selectorCaptureNote = "Viewport scrolled to the first matching selector; surrounding content may be visible and oversized elements may be clipped. DOM inspection remains selector-scoped.";
       }
       stage = "inspection";
+      if (p.designAudit) requireDesignDocument(await page.evaluate(() => ["text/html", "application/xhtml+xml", "image/svg+xml"].includes(document.contentType)));
       if (outputMode !== "image")
         pageState = await page
           .locator(p.selector ?? ":root")
@@ -494,6 +506,7 @@ export async function renderCapture(p, output, signal) {
           .evaluate(inspectPageState, {
             selector: p.selector ?? null,
           });
+      if (p.designAudit && pageState) pageState.design = await page.locator(p.selector ?? ":root").first().evaluate(inspectDesignState);
       stage = "capture";
       if (outputMode !== "text")
         await page.screenshot({

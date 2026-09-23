@@ -297,6 +297,8 @@ export interface ExtensionCommandContext extends ExtensionContext {
 export interface ReplacedSessionContext extends ExtensionCommandContext {
     sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
+        /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
+        onAccepted?: () => void;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
@@ -984,6 +986,8 @@ export interface ExtensionAPI {
     /** Send a custom message to the session. */
     sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
+        /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
+        onAccepted?: () => void;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     /**
@@ -1198,6 +1202,8 @@ export interface ExtensionShortcut {
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
     triggerTurn?: boolean;
+        /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
+        onAccepted?: () => void;
     deliverAs?: "steer" | "followUp" | "nextTurn";
 }) => Promise<void>;
 export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {

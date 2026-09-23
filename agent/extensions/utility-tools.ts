@@ -2,7 +2,7 @@ import { TOOLS } from './lib/utility-mcp/catalog.mjs';
 import { UtilityClient } from './lib/utility-client.ts';
 import fs from 'node:fs';
 
-// Identical guidelines let Pi deduplicate this shared advice across all eight tools.
+// Identical guidelines let Pi deduplicate this shared advice across the utility tools.
 const UTILITY_GUIDANCE = 'Prefer utility probes and env_audit over shell/Python inspection snippets. Use explicit paths for files; inspect truncation flags and narrow or paginate incomplete results.';
 
 /** Native tool exposure, MCP lifecycle and prompt guidance share one catalog. */

@@ -20,7 +20,7 @@ export function spawnProcessSync(command, args, options) {
  * us reading, while a quiet inherited handle (e.g. a Windows daemonized descendant
  * that never lets `close` fire) still releases us after the grace elapses.
  */
-export function waitForChildProcess(child) {
+export function waitForChildProcess(child, options = {}) {
     return new Promise((resolve, reject) => {
         let settled = false;
         let exited = false;
@@ -60,7 +60,12 @@ export function waitForChildProcess(child) {
         const armIdleTimer = () => {
             if (postExitTimer)
                 clearTimeout(postExitTimer);
-            postExitTimer = setTimeout(() => finalize(exitCode), EXIT_STDIO_GRACE_MS);
+            postExitTimer = setTimeout(() => {
+                // A paused pipe awaiting its consumer is not an idle inherited
+                // handle. Do not destroy unread output while the sink drains.
+                if (options.isOutputBackpressured?.()) armIdleTimer();
+                else finalize(exitCode);
+            }, EXIT_STDIO_GRACE_MS);
         };
         const onData = () => {
             // Output is still arriving after exit; defer finalizing so we don't

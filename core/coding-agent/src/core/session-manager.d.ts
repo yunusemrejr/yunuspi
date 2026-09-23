@@ -170,7 +170,7 @@ export declare function buildContextEntries(entries: SessionEntry[], leafId?: st
 export declare function buildSessionContext(entries: SessionEntry[], leafId?: string | null, byId?: Map<string, SessionEntry>): SessionContext;
 export declare function getDefaultSessionDir(cwd: string, agentDir?: string): string;
 /** Exported for testing */
-export declare function loadEntriesFromFile(filePath: string): FileEntry[];
+export declare function loadEntriesFromFile(filePath: string, options?: { readOnly?: boolean }): FileEntry[];
 /** Exported for testing */
 export declare function findMostRecentSession(sessionDir: string, cwd?: string): string | null;
 export type SessionListProgress = (loaded: number, total: number) => void;
@@ -192,6 +192,7 @@ export declare class SessionManager {
     private cwd;
     private persist;
     private flushed;
+    private persistenceError;
     private fileEntries;
     private byId;
     private labelsById;
@@ -205,13 +206,16 @@ export declare class SessionManager {
     private _loadEntries;
     private _buildIndex;
     private _rewriteFile;
+    private _rewriteFileUnlocked;
     isPersisted(): boolean;
     getCwd(): string;
     getSessionDir(): string;
     usesDefaultSessionDir(): boolean;
     getSessionId(): string;
     getSessionFile(): string | undefined;
-    _persist(entry: SessionEntry): void;
+    _persist(entry: SessionEntry, durable?: boolean): void;
+    /** Persist buffered history without waiting for the first assistant; no-op for in-memory sessions. */
+    flush(): void;
     private _appendEntry;
     /** Append a message as child of current leaf, then advance leaf. Returns entry id.
      * Does not allow writing CompactionSummaryMessage and BranchSummaryMessage directly.
@@ -241,7 +245,7 @@ export declare class SessionManager {
      * @param excludeFromContext Keep the entry in the transcript while omitting it from LLM context
      * @returns Entry id
      */
-    appendCustomMessageEntry<T = unknown>(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: T, excludeFromContext?: boolean): string;
+    appendCustomMessageEntry<T = unknown>(customType: string, content: string | (TextContent | ImageContent)[], display: boolean, details?: T, excludeFromContext?: boolean, durable?: boolean): string;
     getLeafId(): string | null;
     getLeafEntry(): SessionEntry | undefined;
     getEntry(id: string): SessionEntry | undefined;

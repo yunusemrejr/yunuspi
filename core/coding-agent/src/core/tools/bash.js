@@ -26,10 +26,12 @@ function resolveTimeoutMs(timeout) {
 const bashSchema = Type.Object({
     command: Type.String({ description: "Shell command to execute" }),
     timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
+    maxOutputBytes: Type.Optional(Type.Integer({ minimum: 256, maximum: DEFAULT_MAX_BYTES, description: "Returned output budget; default 51200. Use 8192 for verbose checks; complete output is saved locally." })),
+    outputMode: Type.Optional(Type.Union([Type.Literal("tail"), Type.Literal("head-tail")], { description: "tail (default), or beginning and end with an explicit omitted-middle marker" })),
 });
 export const bashToolSystemPromptContribution = {
     snippet: "Execute bash commands (ls, grep, find, etc.)",
-    guidelines: ["You can inspect PI_* environment variables for current model and session details."],
+    guidelines: ["You can inspect PI_* environment variables for current model and session details.", "For verbose build/test output, use maxOutputBytes:8192 and outputMode:head-tail; inspect the saved full output if needed."],
 };
 /** Shared process execution used by the built-in shell tools. */
 export function createLocalShellOperations(shellName, resolveShellConfig) {
@@ -46,6 +48,8 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
             catch {
                 throw new Error(`Working directory does not exist: ${cwd}\nCannot execute ${shellName} commands.`);
             }
+            // Stop can arrive while asynchronous cwd validation is pending.
+            if (signal?.aborted) throw new Error("aborted");
             const commandFromStdin = shellConfig.commandTransport === "stdin";
             const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
                 cwd,
@@ -62,6 +66,26 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 trackDetachedChildPid(child.pid);
             let timedOut = false;
             let timeoutHandle;
+            const pendingOutput = new Set();
+            let outputError;
+            const forward = (data) => {
+                try {
+                    const pending = onData(data);
+                    if (!pending || typeof pending.then !== "function") return;
+                    child.stdout?.pause(); child.stderr?.pause();
+                    const task = Promise.resolve(pending).catch(error => {
+                        outputError ??= error;
+                        if (child.pid) killProcessTree(child.pid);
+                    }).finally(() => {
+                        pendingOutput.delete(task);
+                        if (pendingOutput.size === 0) { child.stdout?.resume(); child.stderr?.resume(); }
+                    });
+                    pendingOutput.add(task);
+                } catch (error) {
+                    outputError ??= error;
+                    if (child.pid) killProcessTree(child.pid);
+                }
+            };
             const onAbort = () => {
                 if (child.pid)
                     killProcessTree(child.pid);
@@ -76,8 +100,8 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                     }, timeoutMs);
                 }
                 // Stream stdout and stderr.
-                child.stdout?.on("data", onData);
-                child.stderr?.on("data", onData);
+                child.stdout?.on("data", forward);
+                child.stderr?.on("data", forward);
                 // Handle abort signal by killing the entire process tree.
                 if (signal) {
                     if (signal.aborted)
@@ -87,7 +111,9 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 }
                 // Handle shell spawn errors and wait for the process to terminate without hanging
                 // on inherited stdio handles held by detached descendants.
-                const exitCode = await waitForChildProcess(child);
+                const exitCode = await waitForChildProcess(child, { isOutputBackpressured: () => pendingOutput.size > 0 });
+                await Promise.all(pendingOutput);
+                if (outputError) throw outputError;
                 if (signal?.aborted) {
                     throw new Error("aborted");
                 }
@@ -152,10 +178,12 @@ export function createShellToolDefinition(cwd, config, options) {
         promptGuidelines: exposeSessionEnvironment && config.promptGuidelines ? [...config.promptGuidelines] : undefined,
         parameters: bashSchema,
         constrainedSampling: getExperimentalToolSampling(),
-        async execute(_toolCallId, { command, timeout }, signal, onUpdate, ctx) {
+        async execute(_toolCallId, { command, timeout, maxOutputBytes, outputMode }, signal, onUpdate, ctx) {
+            if (maxOutputBytes !== undefined && (!Number.isInteger(maxOutputBytes) || maxOutputBytes < 256 || maxOutputBytes > DEFAULT_MAX_BYTES)) throw new Error("maxOutputBytes must be an integer from 256 to 51200");
+            if (outputMode !== undefined && !["tail", "head-tail"].includes(outputMode)) throw new Error("outputMode must be tail or head-tail");
             const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
             const spawnContext = resolveSpawnContext(resolvedCommand, ctx?.cwd || cwd, spawnHook, exposeSessionEnvironment, ctx);
-            const output = new OutputAccumulator({ tempFilePrefix: config.tempFilePrefix });
+            const output = new OutputAccumulator({ tempFilePrefix: config.tempFilePrefix, maxBytes: maxOutputBytes, outputMode });
             let acceptingOutput = true;
             let updateTimer;
             let updateDirty = false;
@@ -171,6 +199,7 @@ export function createShellToolDefinition(cwd, config, options) {
                     details: {
                         truncation: snapshot.truncation.truncated ? snapshot.truncation : undefined,
                         fullOutputPath: snapshot.fullOutputPath,
+                        captureError: snapshot.captureError,
                     },
                 });
             };
@@ -201,35 +230,40 @@ export function createShellToolDefinition(cwd, config, options) {
             const handleData = (data) => {
                 if (!acceptingOutput)
                     return;
-                output.append(data);
+                const pending = output.append(data);
                 scheduleOutputUpdate();
+                return pending;
             };
             const finishOutput = async () => {
                 acceptingOutput = false;
                 output.finish();
                 clearUpdateTimer();
                 emitOutputUpdate();
-                const snapshot = output.snapshot({ persistIfTruncated: true });
+                output.snapshot({ persistIfTruncated: true });
                 await output.closeTempFile();
-                return snapshot;
+                return output.snapshot();
             };
             const formatOutput = (snapshot, emptyText = "(no output)") => {
                 const truncation = snapshot.truncation;
                 let text = snapshot.content || emptyText;
                 let details;
                 if (truncation.truncated) {
-                    details = { truncation, fullOutputPath: snapshot.fullOutputPath };
+                    details = { truncation, fullOutputPath: snapshot.fullOutputPath, captureError: snapshot.captureError, outputMode: snapshot.outputMode };
+                    const fullOutput = snapshot.captureError ?? `Full output: ${snapshot.fullOutputPath}`;
                     const startLine = truncation.totalLines - truncation.outputLines + 1;
                     const endLine = truncation.totalLines;
-                    if (truncation.lastLinePartial) {
+                    if (snapshot.outputMode === "head-tail") {
+                        text += `\n\n[Showing beginning and end within ${formatSize(truncation.maxBytes)} of ${formatSize(truncation.totalBytes)}. ${fullOutput}]`;
+                    }
+                    else if (truncation.lastLinePartial) {
                         const lastLineSize = formatSize(output.getLastLineBytes());
-                        text += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
+                        text += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). ${fullOutput}]`;
                     }
                     else if (truncation.truncatedBy === "lines") {
-                        text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
+                        text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. ${fullOutput}]`;
                     }
                     else {
-                        text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
+                        text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(truncation.maxBytes)} limit). ${fullOutput}]`;
                     }
                 }
                 return { text, details };

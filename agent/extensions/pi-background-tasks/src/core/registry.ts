@@ -1,7 +1,7 @@
 import { taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
@@ -60,6 +60,14 @@ export const MAX_OUTPUT_BYTES = Number.isSafeInteger(configuredOutputBytes) && c
 export const KILL_GRACE_MS = 3000;
 export const STOP_WAIT_MS = KILL_GRACE_MS + 1500;
 export const MAX_RECENT_TASKS = 100;
+export const MAX_ADMISSION_RECORDS = 4096;
+export class BackgroundAdmissionCapacityError extends Error {
+  readonly code = "BACKGROUND_ADMISSION_CAPACITY";
+  constructor(readonly capacity: number) {
+    super(`Background task admission capacity reached (${capacity} identities). Existing task identities remain available; no new process was started.`);
+    this.name = "BackgroundAdmissionCapacityError";
+  }
+}
 // Node clamps larger delays to 1ms, which would immediately kill the task.
 export const MAX_TASK_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
 const TELEMETRY_BUFFER_CHARS = 512 * 1024;
@@ -78,6 +86,7 @@ export interface BackgroundTaskModelRegistry
 export interface BackgroundTaskContext {
   cwd: string;
   sessionId?: string;
+  sessionManager?: { getSessionId(): string };
   modelRegistry: BackgroundTaskModelRegistry;
   model?: ExtensionContext["model"] | undefined;
 }
@@ -156,6 +165,8 @@ export interface BackgroundTaskRegistryOptions {
   now?: () => number;
   maxOutputBytes?: number;
   maxRecentTasks?: number;
+  /** Bound identity tombstones without evicting entries that could execute twice. */
+  maxAdmissionRecords?: number;
   killGraceMs?: number;
   stopWaitMs?: number;
   logger?: Pick<Console, "error">;
@@ -164,6 +175,13 @@ export interface BackgroundTaskRegistryOptions {
 interface RuntimeDir {
   abs: string;
   display: string;
+}
+interface BackgroundAdmissionRecord {
+  fingerprint: string;
+  publicationGateId: number;
+  pending?: Promise<BgTask>;
+  taskId?: string;
+  error?: string;
 }
 
 interface ModelWindowIndex {
@@ -701,6 +719,11 @@ function noopOnChange(): void {
 
 export class BackgroundTaskRegistry {
   private readonly tasks = new Map<string, BgTask>();
+  // Tombstones contain only identity/hash/result handles after startup. They
+  // prevent ambiguous retries even when old terminal tasks leave the UI cache.
+  private readonly admissions = new Map<string, BackgroundAdmissionRecord>();
+  private readonly publicationGateIds = new WeakMap<Promise<void>, number>();
+  private nextPublicationGateId = 1;
   private runtimeDir: RuntimeDir | undefined;
   private runtimeDirKey: string | undefined;
   private shuttingDown = false;
@@ -713,6 +736,7 @@ export class BackgroundTaskRegistry {
   private readonly now: () => number;
   private readonly maxOutputBytes: number;
   private readonly maxRecentTasks: number;
+  private readonly maxAdmissionRecords: number;
   private readonly killGraceMs: number;
   private readonly stopWaitMs: number;
   private readonly logger: Pick<Console, "error">;
@@ -724,6 +748,9 @@ export class BackgroundTaskRegistry {
   private readonly terminalPublishAbandoned = new WeakSet<BgTask>();
 
   constructor(options: BackgroundTaskRegistryOptions) {
+    if (options.maxAdmissionRecords !== undefined && (!Number.isSafeInteger(options.maxAdmissionRecords)
+        || options.maxAdmissionRecords < 1 || options.maxAdmissionRecords > MAX_ADMISSION_RECORDS))
+      throw new Error(`maxAdmissionRecords must be an integer from 1 to ${MAX_ADMISSION_RECORDS}`);
     if (options.maxOutputBytes !== undefined &&
         (!Number.isSafeInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0))
       throw new Error("maxOutputBytes must be a positive safe integer byte limit");
@@ -744,6 +771,7 @@ export class BackgroundTaskRegistry {
     this.now = options.now ?? Date.now;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.maxRecentTasks = options.maxRecentTasks ?? MAX_RECENT_TASKS;
+    this.maxAdmissionRecords = options.maxAdmissionRecords ?? MAX_ADMISSION_RECORDS;
     this.killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
     this.stopWaitMs = options.stopWaitMs ?? STOP_WAIT_MS;
     this.logger = options.logger ?? console;
@@ -773,7 +801,7 @@ export class BackgroundTaskRegistry {
     // both the project and session so a task started after switching worktrees
     // cannot write into the previous session's .pi/tasks directory.
     const sessionId = sanitizePathSegment(
-      ctx.sessionId ?? `session-${String(process.pid)}`,
+      ctx.sessionId ?? ctx.sessionManager?.getSessionId() ?? `session-${String(process.pid)}`,
     );
     const runtimeDirKey = `${ctx.cwd}\0${sessionId}`;
     if (this.runtimeDir && this.runtimeDirKey === runtimeDirKey) return this.runtimeDir;
@@ -790,6 +818,95 @@ export class BackgroundTaskRegistry {
     ctx: BackgroundTaskContext,
     command: string,
     options: StartTaskOptions = {},
+  ): Promise<BgTask> {
+    // Extension contexts expose lazy sessionManager/cwd getters. Capture the
+    // launch owner before any await so a session switch cannot rebind admission.
+    ctx = { cwd: ctx.cwd, sessionId: ctx.sessionId ?? ctx.sessionManager?.getSessionId(), modelRegistry: ctx.modelRegistry, model: ctx.model };
+    this.assertAdmissionActive();
+    if (options.toolCallId === undefined) {
+      this.assertAdmissionActive(options.signal);
+      return this.startTaskOnce(ctx, command, options);
+    }
+    if (typeof options.toolCallId !== "string" || !options.toolCallId.length || options.toolCallId.length > 512)
+      throw new Error("Background tool-call identity must contain 1..512 characters");
+    if (!ctx.sessionId) throw new Error("Background tool admission requires a session identity");
+    const normalizedCommand = command.trim();
+    const fingerprint = createHash("sha256").update(JSON.stringify({
+      command: normalizedCommand,
+      name: normalizeTaskName(options.name) ?? normalizeTaskName(options.description) ?? deriveTaskNameFromCommand(normalizedCommand),
+      description: options.description?.trim() || undefined,
+      isAgent: options.isAgent ?? false,
+      timeoutSeconds: options.timeoutSeconds,
+      notifyOnCompletion: options.notifyOnCompletion ?? true,
+      triggerOnCompletion: options.triggerOnCompletion ?? false,
+      triggerOnCompletionExplicit: options.triggerOnCompletionExplicit ?? options.triggerOnCompletion !== undefined,
+    })).digest("hex");
+    const key = createHash("sha256").update(JSON.stringify([ctx.cwd, ctx.sessionId, options.toolCallId])).digest("hex");
+    const gate = options.terminalPublicationGate;
+    const knownGateId = gate === undefined ? 0 : (this.publicationGateIds.get(gate) ?? -1);
+    const previous = this.admissions.get(key);
+    if (previous) {
+      if (previous.fingerprint !== fingerprint || previous.publicationGateId !== knownGateId)
+        throw new Error("Background tool-call identity was reused with conflicting arguments or publication gate");
+      if (previous.pending) return this.waitForAdmission(previous.pending, options.signal);
+      if (previous.taskId) {
+        const task = this.tasks.get(previous.taskId);
+        if (task) return this.waitForAdmission(Promise.resolve(task), options.signal);
+        throw new Error(`Background task ${previous.taskId} was already admitted; inspect its durable task record instead of relaunching it`);
+      }
+      throw new Error(previous.error ?? "Background task admission previously failed; use a new tool-call identity only for an intentional retry");
+    }
+    this.assertAdmissionActive(options.signal);
+    if (this.admissions.size >= this.maxAdmissionRecords) throw new BackgroundAdmissionCapacityError(this.maxAdmissionRecords);
+    let publicationGateId = knownGateId;
+    if (gate !== undefined && knownGateId < 0) {
+      publicationGateId = this.nextPublicationGateId++;
+      this.publicationGateIds.set(gate, publicationGateId);
+    }
+    const admission: BackgroundAdmissionRecord = { fingerprint, publicationGateId };
+    this.admissions.set(key, admission);
+    const pending = this.startTaskOnce(ctx, command, options);
+    admission.pending = pending;
+    void pending.then(task => {
+      admission.taskId = task.id;
+      delete admission.pending;
+    }, error => {
+      admission.error = BackgroundTaskRegistry.errorMessage(error).slice(0, 4096);
+      delete admission.pending;
+    });
+    return pending;
+  }
+
+  private waitForAdmission(pending: Promise<BgTask>, signal?: AbortSignal): Promise<BgTask> {
+    if (!signal) return pending;
+    return new Promise((resolve, reject) => {
+      const aborted = () => {
+        signal.removeEventListener("abort", aborted);
+        const error = new Error("Background admission wait cancelled; the original request still owns any shared task");
+        error.name = "AbortError";
+        reject(error);
+      };
+      if (signal.aborted) { aborted(); return; }
+      signal.addEventListener("abort", aborted, { once: true });
+      void pending.then(task => { signal.removeEventListener("abort", aborted); resolve(task); }, error => {
+        signal.removeEventListener("abort", aborted); reject(error);
+      });
+    });
+  }
+
+  private assertAdmissionActive(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      const error = new Error("Background task admission aborted before process start");
+      error.name = "AbortError";
+      throw error;
+    }
+    if (this.shuttingDown) throw new Error("Cannot start a background task while Pi is shutting down");
+  }
+
+  private async startTaskOnce(
+    ctx: BackgroundTaskContext,
+    command: string,
+    options: StartTaskOptions,
   ): Promise<BgTask> {
     const normalizedCommand = command.trim();
     if (!normalizedCommand) throw new Error("Background command is empty");
@@ -824,6 +941,7 @@ export class BackgroundTaskRegistry {
         : undefined;
 
     const dir = await this.ensureRuntimeDir(ctx);
+    this.assertAdmissionActive(options.signal);
     const id = this.makeTaskIdFn();
     const outputAbsPath = join(dir.abs, `${id}.output`);
     const metadataAbsPath = join(dir.abs, `${id}.json`);
@@ -894,6 +1012,7 @@ export class BackgroundTaskRegistry {
         });
       }
       if (outputFailure !== undefined) throw new Error(outputFailure);
+      this.assertAdmissionActive(options.signal);
       let commandToSpawn = normalizedCommand;
       if (piTelemetryRequested) {
         if (baseInvocation.dialect === "posix") {
@@ -924,6 +1043,7 @@ export class BackgroundTaskRegistry {
           : shellInvocation(commandToSpawn, this.platform, this.env);
       if (outputFailure !== undefined) throw new Error(outputFailure);
       const guarded = guardedCommand(invocation.shell, invocation.args);
+      this.assertAdmissionActive(options.signal);
       const child = this.spawn(guarded.command, guarded.args, {
         cwd: ctx.cwd,
         detached: this.platform !== "win32",
@@ -1042,6 +1162,10 @@ export class BackgroundTaskRegistry {
           throw new Error(`Failed to start background task: ${task.error}`);
         }
       } else {
+        if (options.signal?.aborted) {
+          task.notifyOnCompletion = false;
+          task.triggerOnCompletion = false;
+        }
         await this.finalizeTask(task, "failed", null, undefined, message);
       }
       throw new Error(`Failed to start background task: ${message}`);

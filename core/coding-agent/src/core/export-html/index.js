@@ -400,7 +400,7 @@ export async function exportFromFile(inputPath, options) {
         throw new Error(`File not found: ${resolvedInputPath}`);
     }
     // Loading an export must not migrate/rewrite the original session file.
-    const fileEntries = loadEntriesFromFile(resolvedInputPath).filter(entry => entry && typeof entry === "object" && !Array.isArray(entry));
+    const fileEntries = loadEntriesFromFile(resolvedInputPath, { readOnly: true }).filter(entry => entry && typeof entry === "object" && !Array.isArray(entry));
     if (!fileEntries.some(entry => entry.type === "session")) {
         throw new Error(`Session file is empty or invalid: ${resolvedInputPath}`);
     }

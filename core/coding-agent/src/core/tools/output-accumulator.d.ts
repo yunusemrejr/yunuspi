@@ -3,11 +3,14 @@ export interface OutputAccumulatorOptions {
     maxLines?: number;
     maxBytes?: number;
     tempFilePrefix?: string;
+    outputMode?: "tail" | "head-tail";
 }
 export interface OutputSnapshot {
     content: string;
     truncation: TruncationResult;
     fullOutputPath?: string;
+    outputMode: "tail" | "head-tail";
+    captureError?: string;
 }
 /**
  * Incrementally tracks streaming output with bounded memory.
@@ -35,8 +38,10 @@ export declare class OutputAccumulator {
     private finished;
     private tempFilePath;
     private tempFileStream;
+    private tempFileOpened;
     constructor(options?: OutputAccumulatorOptions);
-    append(data: Buffer): void;
+    /** Producers should await a returned promise before delivering more data. */
+    append(data: Buffer): void | Promise<void>;
     finish(): void;
     snapshot(options?: {
         persistIfTruncated?: boolean;
@@ -48,4 +53,11 @@ export declare class OutputAccumulator {
     private getSnapshotText;
     private shouldUseTempFile;
     private ensureTempFile;
+    private failCapture;
+    private waitForDrain;
+    private bytePrefix;
+    private captureError;
+    private headText;
+    private outputMode;
+    private pendingDrain;
 }

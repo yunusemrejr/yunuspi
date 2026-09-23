@@ -16,14 +16,32 @@ export function createCompletionNotifier(
   pi: ExtensionAPI,
   context: () => ExtensionContext | undefined,
 ) {
-  let blocked = false, compactionBlocked = false, active = true, flushing = false,
-    pending = 0, generation = 0;
+  let blocked = false, compactionBlocked = false, active = true,
+    pending = 0, generation = 0, drainRequested = false;
+  let inFlight: object | undefined;
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   const clearWake = () => { if (wakeTimer) clearTimeout(wakeTimer); wakeTimer = undefined; };
   const flush = async () => {
-    if (!active || flushing || !pending || blocked || compactionBlocked || context()?.signal?.aborted || !context()?.isIdle()) return;
+    if (inFlight) { drainRequested = true; return; }
+    if (!active || !pending || blocked || compactionBlocked || context()?.signal?.aborted || !context()?.isIdle()) return;
     const count = pending, ticket = generation;
-    flushing = true;
+    const delivery = {};
+    inFlight = delivery;
+    drainRequested = false;
+    let delivered = false, finished = false, rejected = false;
+    const finish = () => {
+      if (inFlight !== delivery) return;
+      inFlight = undefined;
+      const requested = drainRequested;
+      drainRequested = false;
+      if (requested && (delivered || ticket !== generation) && active && pending) void flush();
+    };
+    const accepted = () => {
+      if (delivered || rejected || inFlight !== delivery) return;
+      delivered = true;
+      if (ticket === generation) pending = Math.max(0, pending - count);
+      if (finished) finish();
+    };
     try {
       await pi.sendMessage(
       {
@@ -31,21 +49,23 @@ export function createCompletionNotifier(
         content: `${count} background task completion(s) were recorded above. Use their durable terminal results; do not rerun completed work.`,
         display: false,
       },
-      { deliverAs: "followUp", triggerTurn: true },
+      { deliverAs: "followUp", triggerTurn: true, onAccepted: accepted },
       );
-      // A completion is consumed only after the queue accepts the wake. A
-      // rejected delivery remains pending for the next settled boundary.
-      if (ticket === generation) pending = Math.max(0, pending - count);
     } catch {
-      console.warn("[background-tasks] Completion wake deferred: message delivery failed.");
+      // A model error after acceptance must not replay this already-recorded wake.
+      rejected = !delivered;
+      if (rejected && inFlight === delivery) console.warn("[background-tasks] Completion wake deferred: message delivery failed.");
+      finished = true;
+      finish();
+      return;
     } finally {
-      flushing = false;
-      // A newer request may have recorded completions while this acknowledgement was pending.
-      if (ticket !== generation && active && pending) void flush();
+      // A resolved send may mean only volatile queue admission. Keep this
+      // delivery single-flight until its actual history acceptance callback.
+      if (!finished) { finished = true; if (delivered) finish(); }
     }
   };
   pi.on("session_start", (_event, ctx) => {
-    generation++; clearWake(); active = true; compactionBlocked = false; pending = 0;
+    generation++; clearWake(); inFlight = undefined; drainRequested = false; active = true; compactionBlocked = false; pending = 0;
     const last = [...ctx.sessionManager.getBranch()]
       .reverse()
       .find(
@@ -63,7 +83,7 @@ export function createCompletionNotifier(
   });
   pi.on("input", (event) => {
     if (event.source !== "extension") {
-      generation++; clearWake(); blocked = false; compactionBlocked = false;
+      generation++; clearWake(); inFlight = undefined; drainRequested = false; blocked = false; compactionBlocked = false;
       pending = 0;
     }
   });
@@ -80,7 +100,7 @@ export function createCompletionNotifier(
   });
   pi.on("agent_settled", flush);
   pi.on("session_shutdown", () => {
-    generation++; clearWake(); active = false; pending = 0;
+    generation++; clearWake(); inFlight = undefined; drainRequested = false; active = false; pending = 0;
   });
   return (message: any, options: { triggerTurn: boolean }) => {
     if (!active) return;
@@ -93,11 +113,11 @@ export function createCompletionNotifier(
     }
     // triggerTurn:false also bypasses the follow-up queue during an active run.
     // Thus completions queued before a later invalid request cannot re-wake it.
-    // Older test doubles and third-party hosts may still return void here.
-    // Normalize that compatibility shape while retaining rejection telemetry
-    // for the Promise-returning extension API.
     const ticket = generation;
+    let acknowledged = false;
     const accepted = () => {
+      if (acknowledged) return;
+      acknowledged = true;
       // Never wake a newer request for an old receipt or before its results arrive.
       if (active && ticket === generation && options.triggerTurn) {
         pending++;
@@ -105,9 +125,8 @@ export function createCompletionNotifier(
       }
     };
     try {
-      const receipt = pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false });
-      if (receipt && typeof receipt.then === "function") void receipt.then(accepted).catch(() => {});
-      else accepted();
+      const receipt = pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false, onAccepted: accepted });
+      void Promise.resolve(receipt).catch(() => {});
     } catch {
       // The durable task record remains authoritative when a UI/session queue
       // is already closing; the next session_start will rediscover it.

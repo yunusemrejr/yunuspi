@@ -30,6 +30,7 @@
  *
  * Dependency-free and pure (node:crypto only, via failure-cause).
  */
+import { hasRecordedTokenUsage } from "../../../../lib/cost-evidence.ts";
 import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
 import { buildChildTaskIdentity } from "./child-identity.ts";
 import { buildExecutionEvidence, type ExecutionEvidence } from "../../../../lib/execution-evidence.ts";
@@ -431,7 +432,7 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 						if (outcome.exitCode !== undefined) attempt.exitCode = outcome.exitCode;
 					}
 					const row = asRecord(event.row);
-					const usageRow = asRecord(row.usage);
+					const usageRow = hasRecordedTokenUsage(row.usage, row.childProcessStarted === false && row.stage === "launch") ? asRecord(row.usage) : {};
 					const mergedUsage = {...attempt.usage};
 					for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoning", "turns"] as const) {
 						const value = asNumber(usageRow[key]);
@@ -692,7 +693,7 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 					childId: asString(row.childId, 160),
 				});
 				push({ type: "launch", taskId: identity.taskId, attempt: identity.attempt, label: identity.label, ...(identity.scopeId ? { scopeId: identity.scopeId } : {}) });
-				const usage = asRecord(row.usage);
+				const usage = hasRecordedTokenUsage(row.usage, row.childProcessStarted === false && row.stage === "launch") ? asRecord(row.usage) : {};
 				const costLaunch = launchFor(undefined, runId, index);
 				push({
 					type: "accounting",

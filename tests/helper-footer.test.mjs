@@ -25,7 +25,8 @@ test('source and built terminal footer agree with receipt collectors for retries
  assert.equal(collectSessionCost(retries).pending,0);
  assert.equal(collectSessionMetrics(retries).childTokens,32);
  const cases=[retries,[receipt('quality-review-fixture',{index:0,status:'failed',usage:{}})],
-  [receipt('quality-review-fixture',{index:0,status:'failed',stage:'launch',childProcessStarted:false,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}})]];
+  [receipt('quality-review-fixture',{index:0,status:'failed',stage:'launch',childProcessStarted:false,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0,costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true,estimatedUsage:false}}})],
+  [receipt('started-timeout',{index:0,error:true,timedOut:true,exitCode:1,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}})]];
  for(const entries of cases){
   const session={state:{model:{id:'fixture',provider:'fixture',contextWindow:10000}},getContextUsage:()=>({percent:0,contextWindow:10000}),modelRuntime:{isUsingSubscription:()=>false},sessionManager:{getEntries:()=>entries,getBranch:()=>entries,getCwd:()=>'/workspace/fixture',getSessionName:()=>undefined,getSessionId:()=> 'fixture'}};
   const data={getGitBranch:()=>undefined,getAvailableProviderCount:()=>1,getExtensionStatuses:()=>new Map()};

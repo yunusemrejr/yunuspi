@@ -19,7 +19,7 @@ try {
     if (result.error) throw Error(result.error);
   } else if (name === 'net_probe') result = await (await import('./net.mjs')).netProbe(args);
   else {
-    const [module, method] = { package_probe: ['package', 'packageProbe'], openapi_probe: ['openapi', 'openapiProbe'], coverage_probe: ['coverage', 'coverageProbe'], contract_diff: ['contract', 'contractDiff'], env_audit: ['env', 'envAudit'] }[name];
+    const [module, method] = { workflow_probe: ['workflow','workflowProbe'], web_asset_check: ['web-assets','webAssetCheck'], package_probe: ['package', 'packageProbe'], openapi_probe: ['openapi', 'openapiProbe'], coverage_probe: ['coverage', 'coverageProbe'], contract_diff: ['contract', 'contractDiff'], env_audit: ['env', 'envAudit'] }[name];
     result = await (await import(`./${module}.mjs`))[method](files, args);
     result.input_hash = files.fingerprint(name, args);
   }

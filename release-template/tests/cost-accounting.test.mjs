@@ -213,3 +213,46 @@ test('helper wrapper accounting settles linked native runs without unattributed 
  assert.equal(flying.unknown,true);assert.equal(flying.pending,2);
  assert.ok(flying.rows.every(r=>r.route!=='unattributed child'));
 });
+
+test('a launched child with initial zero counters stays unknown through aggregation and persistence',async()=>{
+ const {readCostEvidence}=await load('extensions/lib/cost-evidence.ts');
+ const {buildUsedSummary}=await load('extensions/session-signals.ts');
+ const {collectSessionMetrics}=await load('extensions/lib/session-metrics.ts');
+ const {projectTranscriptChildren,reduceChildEvents}=await load('extensions/pi-subagents/src/runs/shared/child-ledger.ts');
+ const initial=empty();
+ assert.equal(readCostEvidence(initial).seen,false);
+ assert.equal(readCostEvidence(initial).unknown,true);
+ const aggregated=empty();addUsageCost(aggregated,initial);
+ assert.equal(aggregated.costDetails.seen,false);assert.equal(aggregated.costDetails.unknown,true);
+ assert.equal(aggregated.costByModel[0].evidence.unknown,true);
+ const entries=[],state={currentSessionId:'fixture',completionOwnerId:'owner'};
+ const persist=(runId,row)=>persistSubagentCost({appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},state,{sessionId:'fixture',completionOwnerId:'owner',runId,mode:'single',results:[row]});
+ persist('started',{error:true,timedOut:true,exitCode:1,usage:aggregated});
+ const unknown=collect(entries);
+ assert.equal(unknown.formatted,'$?');assert.equal(unknown.unknown,true);assert.equal(unknown.pending,0);
+ const row=buildUsedSummary(entries).runs[0];assert.equal(row.usageRecorded,false);assert.equal(row.costUsd,undefined);
+ assert.equal(collectSessionMetrics(entries).childRowsWithUsage,0);
+ assert.equal(reduceChildEvents(projectTranscriptChildren(entries)).tasks[0].attempts[0].usage,undefined);
+ persist('no-child',{error:true,stage:'launch',childProcessStarted:false,usage:empty()});
+ const noChild=entries.slice(-1), proof=collect(noChild);
+ assert.equal(proof.formatted,'$0.000');assert.equal(proof.unknown,false);
+ assert.equal(buildUsedSummary(noChild).runs[0].usageRecorded,true);
+ assert.equal(reduceChildEvents(projectTranscriptChildren(noChild)).tasks[0].attempts[0].usage.turns,0);
+ assert.equal(collectSessionMetrics(noChild).childRowsWithUsage,1);
+ persist('priced',{exitCode:0,usage:usage(.03)});
+ const partial=collect(entries);assert.equal(partial.total,.03);assert.equal(partial.unknown,true);assert.match(partial.formatted,/\+\?/);
+ const sameAttempt=empty();addUsageCost(sameAttempt,usage(.03));addUsageCost(sameAttempt,initial);
+ assert.equal(sameAttempt.cost,.03);assert.equal(sameAttempt.costDetails.unknown,true);
+ assert.equal(collect([receipt('aggregate',[{usage:sameAttempt}])]).unknown,true);
+});
+
+test('provider zero receipts and complete free pricing remain known even with zero counters',async()=>{
+ const {readCostEvidence,hasRecordedTokenUsage}=await load('extensions/lib/cost-evidence.ts');
+ for(const cost of [{total:0,source:'provider-reported'},{total:0,source:'provider-estimate'},{total:0,complete:true}]){
+  const u={...empty(),cost};
+  assert.equal(readCostEvidence(u).seen,true);assert.equal(readCostEvidence(u).unknown,false);
+  assert.equal(hasRecordedTokenUsage(u),true);
+ }
+ assert.equal(readCostEvidence({...empty(),cost:{total:0,complete:false}}).unknown,true);
+ assert.equal(hasRecordedTokenUsage({cost:{total:0,source:'provider-reported'}}),false,'cost-only receipt cannot establish token counts');
+});

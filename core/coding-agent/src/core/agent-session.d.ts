@@ -402,9 +402,14 @@ export declare class AgentSession {
      */
     sendCustomMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
         triggerTurn?: boolean;
+        /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
+        onAccepted?: () => void;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     private _appendCustomMessage;
+    private _acknowledgeCustomMessage;
+    private _customMessageAcceptances;
+    private _persistCustomMessage;
     /**
      * Append custom messages queued while the agent was running.
      * Called once the current turn's tool results are in agent state and session history.

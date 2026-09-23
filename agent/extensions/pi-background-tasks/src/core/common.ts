@@ -180,6 +180,10 @@ export interface BgKillDetails {
 }
 
 export interface StartTaskOptions {
+  /** @internal Live-session admission identity; never used to replay commands after a restart. */
+  toolCallId?: string | undefined;
+  /** @internal Cancellation applies until the process is started, not to admitted detached work. */
+  signal?: AbortSignal | undefined;
   name?: string | undefined;
   description?: string | undefined;
   isAgent?: boolean | undefined;

@@ -16,6 +16,7 @@
     "pidusage": "4.0.1",
     "playwright": "1.63.0",
     "promise.try": "2.0.1",
+    "three": "0.180.0",
     "turndown": "7.2.4",
     "typebox": "1.3.18",
     "undici": "8.10.0",

@@ -1,0 +1,7 @@
+# Disposable CI runner: permit the pinned browser to create its own sandbox.
+# Keep the host's global restricted-user-namespace policy enabled.
+abi <abi/4.0>,
+include <tunables/global>
+profile yunuspi-playwright-chromium /home/*/.cache/ms-playwright/**/chrome flags=(unconfined) {
+  userns,
+}

@@ -407,6 +407,8 @@ export class AgentSession {
     }
     // Track last assistant message for auto-compaction check
     _lastAssistantMessage = undefined;
+    /** Exact message identity owns its durable-acceptance callback across queues. */
+    _customMessageAcceptances = new WeakMap();
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event) => {
         try { await this._guardian?.observeAgentEvent(event); }
@@ -444,7 +446,7 @@ export class AgentSession {
             // Check if this is a custom message from extensions
             if (event.message.role === "custom") {
                 // Persist as CustomMessageEntry
-                this.sessionManager.appendCustomMessageEntry(event.message.customType, event.message.content, event.message.display, event.message.details, event.message.excludeFromContext);
+                this._persistCustomMessage(event.message);
             }
             else if (event.message.role === "user" ||
                 event.message.role === "assistant" ||
@@ -1275,6 +1277,7 @@ export class AgentSession {
             ...(message.excludeFromContext ? { excludeFromContext: true } : {}),
             timestamp: Date.now(),
         };
+        if (options?.onAccepted) this._customMessageAcceptances.set(appMessage, options.onAccepted);
         if (options?.deliverAs === "nextTurn") {
             this._pendingNextTurnMessages.push(appMessage);
         }
@@ -1302,9 +1305,30 @@ export class AgentSession {
     }
     _appendCustomMessage(appMessage) {
         this.agent.state.messages.push(appMessage);
-        this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display, appMessage.details, appMessage.excludeFromContext);
+        this._persistCustomMessage(appMessage);
         this._emit({ type: "message_start", message: appMessage });
         this._emit({ type: "message_end", message: appMessage });
+    }
+    _persistCustomMessage(appMessage) {
+        try {
+            this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display, appMessage.details, appMessage.excludeFromContext, this._customMessageAcceptances.has(appMessage));
+            this._acknowledgeCustomMessage(appMessage);
+        }
+        catch (error) {
+            this.agent.state.messages = this.agent.state.messages.filter(message => message !== appMessage);
+            throw error;
+        }
+    }
+    _acknowledgeCustomMessage(appMessage) {
+        const accepted = this._customMessageAcceptances.get(appMessage);
+        if (!accepted) return;
+        // Fresh persistent sessions ordinarily defer their first disk write
+        // until an assistant exists. Receipt acknowledgement cannot do that.
+        this.sessionManager.flush();
+        this._customMessageAcceptances.delete(appMessage);
+        // Observer failure must not undo a committed message or stop inference.
+        try { accepted?.(); }
+        catch (error) { console.warn("Custom message acceptance callback failed:", error); }
     }
     /**
      * Append custom messages queued while the agent was running.
@@ -1315,8 +1339,12 @@ export class AgentSession {
             return;
         const pending = this._pendingCustomMessages;
         this._pendingCustomMessages = [];
-        for (const appMessage of pending) {
-            this._appendCustomMessage(appMessage);
+        for (let i = 0; i < pending.length; i++) {
+            try { this._appendCustomMessage(pending[i]); }
+            catch (error) {
+                this._pendingCustomMessages = [...pending.slice(i), ...this._pendingCustomMessages];
+                throw error;
+            }
         }
     }
     /**

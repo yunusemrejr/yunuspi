@@ -225,7 +225,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
      * - "sequential": execute tool calls one by one
      * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
      *   emit `tool_execution_end` in tool completion order after each tool is finalized,
-     *   then emit tool-result message artifacts later in assistant source order
+     *   then emit tool-result message artifacts later in assistant source order;
+     *   tools declaring sequential execution form exclusive barriers between parallel groups
      *
      * Default: "parallel"
      */
@@ -315,6 +316,8 @@ export interface AgentState {
 }
 /** Final or partial result produced by a tool. */
 export interface AgentToolResult<T> {
+    /** Explicit execution failure returned with structured evidence; omitted means success. */
+    isError?: boolean;
     /** Text or image content returned to the model. */
     content: (TextContent | ImageContent)[];
     /** Arbitrary structured details for logs or UI rendering. */

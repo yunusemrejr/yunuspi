@@ -41,7 +41,7 @@ test('hypothetical newer upstream release is ignored without even invoking trans
 test('core identity distinguishes product, core revision, source digest and historical origin',()=>{
  const result=spawnSync(process.execPath,[path.join(root,'core/coding-agent/dist/cli.js'),'--core-info'],{encoding:'utf8',timeout:30000});
  assert.equal(result.status,0,result.stderr);const info=JSON.parse(result.stdout);
- assert.equal(info.product.name,'YunusPi');assert.equal(info.core.version,'0.1.0');
+ assert.equal(info.product.name,'YunusPi');assert.equal(info.core.version,JSON.parse(fs.readFileSync(path.join(root,'core/identity.json'),'utf8')).version);
  assert.equal(info.core.forkOrigin.commit,'d981de1229ef899957bbe968bc8dcda02a21f477');
  assert.match(info.core.sourceDigest,/^[a-f0-9]{64}$/);
  assert.equal(info.core.releaseAuthority,'yunusemrejr/yunuspi');

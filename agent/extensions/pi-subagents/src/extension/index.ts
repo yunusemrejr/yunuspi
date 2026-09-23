@@ -487,7 +487,21 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 
 	const supervisorChannel = createNativeSupervisorChannel(pi, state);
-	const waitSubscriptionManager = createWaitSubscriptionManager(pi, state);
+	const waitSubscriptionManager = createWaitSubscriptionManager(pi, state, {
+		acceptedTokens: () => {
+			const tokens = new Set<string>();
+			withLastUiContext((ctx) => {
+				if (ctx.sessionManager.getSessionId() !== state.currentSessionId) return;
+				for (const entry of ctx.sessionManager.getBranch()) {
+					if (entry.type === "custom_message" && entry.customType === "subagent-wait-subscription"
+						&& typeof (entry.details as { token?: unknown } | undefined)?.token === "string") {
+						tokens.add((entry.details as { token: string }).token);
+					}
+				}
+			});
+			return tokens;
+		},
+	});
 	const mainWatchdog = registerMainWatchdog(pi);
 	const resultDeliveryOwnership = createResultDeliveryOwnership(state);
 	const completionNotifier = registerSubagentNotify(pi, state, { batchConfig: config.completionBatch, ownership: resultDeliveryOwnership });

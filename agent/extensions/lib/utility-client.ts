@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { UTILITY_CONCURRENCY } from './utility-mcp/catalog.mjs';
+import { TOOLS, UTILITY_CONCURRENCY } from './utility-mcp/catalog.mjs';
 
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 /** Owns exactly one MCP process for a harness session, with bounded restart. */
@@ -55,7 +55,7 @@ export class UtilityClient {
       if (initialized?.serverInfo?.name !== 'yunuspi-utility-mcp') throw Error('Unexpected utility server');
       this.notify('notifications/initialized', {});
       const catalog = await this.request('tools/list', {}, 2000);
-      if (catalog?.tools?.length !== 8) throw Error('Incomplete utility catalog');
+      if (!Array.isArray(catalog?.tools) || catalog.tools.length !== TOOLS.length || TOOLS.some(tool => !catalog.tools.some((item:any) => item.name === tool.name))) throw Error('Incomplete utility catalog');
     } catch (error) {
       // Retire a failed handshake before yielding: kill() delivers exit later,
       // and a concurrent call must never reuse this uninitialized process.

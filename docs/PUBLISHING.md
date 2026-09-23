@@ -16,6 +16,12 @@ Normal publication to `main` does not create a formal release. When a release is
 
 Use Semantic Versioning according to intended public behavior, not commit count or calendar age: patch for compatible fixes, documentation/test corrections and internal reliability work with no intentional public-contract change; minor for new user-visible capabilities or meaningful behavior/compatibility changes while the project remains pre-1.0; major only when an explicitly stabilized public contract later receives an incompatible change. Feature branches, PR numbers, CI run numbers, private installation state and generated capability counts are not versions. Mutable counts should remain code-owned rather than copied into prose.
 
+## Version consistency and tagged releases
+
+Run `node scripts/version-release.mjs X.Y.Z --write` to update the product, six owned packages, owned workspace dependency versions, lockfile and template metadata together. Without `--write`, the command checks consistency and fails on drift. It never changes the historical upstream attribution or third-party dependency versions.
+
+The public safety workflow tests both ordinary pushes and version tags. On a `vX.Y.Z` tag, its separate release job receives contents-write permission only after the safety job succeeds. It checks the tag against the package version and publishes the corresponding changelog section for that exact commit. Existing release notes must match on rerun; the job does not move tags or rewrite releases. Push the tested commit to `main`, wait for CI, then push its annotated tag.
+
 ## Export changes
 
 Use a fresh staging directory:

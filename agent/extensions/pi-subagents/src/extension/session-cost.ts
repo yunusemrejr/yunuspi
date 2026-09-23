@@ -1,6 +1,6 @@
 import { sessionObservability } from '../../../lib/session-observability.ts';
 import { sumResultsCost } from "../shared/utils.ts";
-import { readCostEvidence } from "../../../lib/cost-evidence.ts";
+import { readCostEvidence, hasRecordedTokenUsage } from "../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
 import { failureOf, projectRunEvidence } from "../runs/shared/run-history.ts";
 
@@ -10,10 +10,10 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
   if (!payload || payload.sessionId !== state.currentSessionId || payload.completionOwnerId !== state.completionOwnerId) return;
   const runId = payload.runId ?? payload.id;
   if (typeof runId !== 'string' || !Array.isArray(payload.results)) return;
-  const hasUsage = (row: any) => row?.usage && (["input","output","cacheRead","cacheWrite","turns"].some(key => typeof row.usage[key] === 'number' && Number.isFinite(row.usage[key]) && row.usage[key] >= 0) || readCostEvidence(row.usage).seen);
+  const hasUsage = (row: any) => row?.usage && (hasRecordedTokenUsage(row.usage) || readCostEvidence(row.usage).seen || readCostEvidence(row.usage).subscription || row.usage.costDetails);
   const results = payload.results.map((input: any, index: number) => {
-    const r = input?.childProcessStarted === false && input?.stage === 'launch' && !hasUsage(input)
-      ? {...input, usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}} : input;
+    const r = input?.childProcessStarted === false && input?.stage === 'launch' && !hasRecordedTokenUsage(input?.usage)
+      ? {...input, usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0,costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true,estimatedUsage:false}}} : input;
     return ({
     index: r?.index ?? index,
     ...(r?.childProcessStarted === false ? {childProcessStarted:false} : {}),
@@ -61,7 +61,6 @@ export function restoreSubagentCosts(pi: any, state: any, entries: any[], lookup
  * plans are not child launches; the tracker supplies observed started rows. */
 export function persistSubagentActivity(pi: any, state: any, payload: any): void {
   if (!payload || payload.sessionId !== state.currentSessionId || typeof payload.runId !== 'string' || !Array.isArray(payload.results)) return;
-  const hasUsage = (row: any) => row?.usage && (["input","output","cacheRead","cacheWrite","turns"].some(key => typeof row.usage[key] === 'number' && Number.isFinite(row.usage[key]) && row.usage[key] >= 0) || readCostEvidence(row.usage).seen);
   const results = payload.results.map((r:any,index:number)=>({index:r.index??index,
     ...(typeof r.runId==='string'?{runId:r.runId}:{}),
     ...(typeof r.workflowKey==='string'?{workflowKey:r.workflowKey}:{}),

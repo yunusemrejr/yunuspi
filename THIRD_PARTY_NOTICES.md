@@ -24,3 +24,9 @@ External office/CAD/media applications and optional model weights are not bundle
 The six packages in `core/` descend from Pi 0.85.1, commit `d981de1229ef899957bbe968bc8dcda02a21f477` in https://github.com/earendil-works/pi. Original copyright (c) 2025 Mario Zechner; package authorship also credits Earendil Works for Chord. Full original MIT notices are retained in each package's LICENSE. YunusPi modifications are maintained in this repository under MIT; this does not claim original authorship of Pi.
 
 `core/identity.json` records exact source/package provenance. The runtime `clankolas.png` asset is preserved byte-for-byte from that baseline and has a pinned public-scanner fingerprint. Provider SDKs and other third-party libraries remain separately licensed dependencies with integrity-pinned lockfile entries.
+
+## Creative studio and async design references
+
+Three.js 0.180.0 is an exact-pinned MIT dependency downloaded by npm, with lockfile integrity. Standalone scene HTML includes the full Three.js license and the scene export also writes `THREE-LICENSE.txt`. Chromium/Playwright and FFmpeg remain separately licensed runtime dependencies; FFmpeg is supplied by the host.
+
+Async improvements were informed by an independent source review of [Unreal Agent](https://github.com/unreallabsai/unreal-agent/tree/b7c9bf1c5c2fa4127255c07727a7c8413e23944a), MIT, copyright 2026 Unreal Labs. YunusPi implements these ideas in its existing JavaScript/TypeScript owners; no Unreal source code or Go runtime is bundled. The comparison and limitations are documented in `docs/ASYNC-AND-STUDIO.md`.

@@ -5,9 +5,11 @@ permissions:
 jobs:
   safety:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -18,15 +20,42 @@ jobs:
       - name: Install execution isolation prerequisite
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap python3 apparmor
+          sudo apt-get install -y bubblewrap python3 apparmor ffmpeg
           sudo apparmor_parser -r config/bwrap.apparmor
       - name: Start disposable sandbox resource manager
         run: |
           sudo systemctl start "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Install the pinned browser for real render and media checks
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          sudo apparmor_parser -r config/playwright-chromium.apparmor
+      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
       - run: npm run build:core
       - run: npm test
         env:
           PI_REQUIRE_ISOLATION_TEST: '1'
           PI_SANDBOX_REQUIRE: '1'
+          PI_REQUIRE_MEDIA_TEST: '1'
+          PI_RENDER_BROWSER_CHANNEL: chromium
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Publish the tested version tag
+        run: node scripts/publish-github-release.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

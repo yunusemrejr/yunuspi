@@ -11,6 +11,7 @@ const template = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')]
   .find(p => fs.existsSync(path.join(p, 'extensions/lib/utility-client.ts')));
 const filename = path.join(agent, 'extensions/lib/utility-client.ts');
+const { TOOLS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/utility-mcp/catalog.mjs')));
 const source = stripTypeScriptTypes(fs.readFileSync(filename, 'utf8'))
   .replace(/^import .*;\n/gm, '')
   .replace('export class UtilityClient', 'class UtilityClient')
@@ -41,7 +42,7 @@ function fixture({ invalidFirst = false, holdInitialize = false, holdCalls = fal
       if (message.id !== undefined) queueMicrotask(() => {
         if (message.method === 'initialize') {
           if (!holdInitialize) child.respond(message.id, { serverInfo: { name: invalidFirst && children[0] === child ? 'wrong-server' : 'yunuspi-utility-mcp' } });
-        } else if (message.method === 'tools/list') child.respond(message.id, { tools: Array(8).fill({}) });
+        } else if (message.method === 'tools/list') child.respond(message.id, { tools: TOOLS.map(({name})=>({name})) });
         else if (!holdCalls) child.respond(message.id, { ok: true });
       });
       return true;
@@ -49,7 +50,7 @@ function fixture({ invalidFirst = false, holdInitialize = false, holdCalls = fal
     children.push(child); return child;
   };
   const UtilityClient = vm.runInNewContext(source + '\nUtilityClient', {
-    spawn, fs, fileURLToPath, URL, process, Buffer, UTILITY_CONCURRENCY: 2,
+    spawn, fs, fileURLToPath, URL, process, Buffer, TOOLS, UTILITY_CONCURRENCY: 2,
     setTimeout: schedule, clearTimeout: cancelTimer,
   });
   const client = new UtilityClient(template);

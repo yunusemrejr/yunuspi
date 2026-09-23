@@ -93,9 +93,9 @@ with tarfile.open(p/'bundle.tar.gz','w:gz') as t:
 });
 after(() => { client.close(); fs.rmSync(root, { recursive: true, force: true }); });
 
-test('single MCP exposes all eight bounded read-only tool schemas', async () => {
-  assert.equal(TOOLS.length, 8);
-  assert.equal(new Set(TOOLS.map(t => t.name)).size, 8);
+test('single MCP exposes all ten bounded read-only tool schemas', async () => {
+  assert.equal(TOOLS.length, 10);
+  assert.equal(new Set(TOOLS.map(t => t.name)).size, 10);
   for (const tool of TOOLS) assert.equal(tool.annotations.readOnlyHint, true);
   const first = client.child.pid;
   await call('package_probe', { package: 'demo' });
@@ -282,7 +282,7 @@ test('extension prewarms automatically and closes its MCP process at shutdown', 
   const { default: extension } = await import(pathToFileURL(path.join(agent, 'extensions/utility-tools.ts')));
   const events = new Map(), registered = new Map();
   extension({ on: (name, fn) => events.set(name, fn), registerTool: t => registered.set(t.name, t) });
-  assert.equal(registered.size, 8);
+  assert.equal(registered.size, 10);
   await events.get('session_start')({}, { cwd: root });
   try {
     const value = await registered.get('package_probe').execute('id', { package: 'demo' }, undefined, undefined, { cwd: root });

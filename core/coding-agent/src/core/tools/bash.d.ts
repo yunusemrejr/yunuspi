@@ -6,15 +6,19 @@ import { type TruncationResult } from "./truncate.ts";
 declare const bashSchema: Type.TObject<{
     command: Type.TString;
     timeout: Type.TOptional<Type.TNumber>;
+    maxOutputBytes: Type.TOptional<Type.TInteger>;
+    outputMode: Type.TOptional<Type.TUnion<[Type.TLiteral<"tail">, Type.TLiteral<"head-tail">]>>;
 }>;
 export declare const bashToolSystemPromptContribution: {
     readonly snippet: "Execute bash commands (ls, grep, find, etc.)";
-    readonly guidelines: readonly ["You can inspect PI_* environment variables for current model and session details."];
+    readonly guidelines: readonly string[];
 };
 export type BashToolInput = Static<typeof bashSchema>;
 export interface BashToolDetails {
     truncation?: TruncationResult;
     fullOutputPath?: string;
+    captureError?: string;
+    outputMode?: "tail" | "head-tail";
 }
 /**
  * Pluggable operations for the bash tool.
@@ -29,7 +33,7 @@ export interface BashOperations {
      * @returns Promise resolving to exit code (null if killed)
      */
     exec: (command: string, cwd: string, options: {
-        onData: (data: Buffer) => void;
+        onData: (data: Buffer) => void | Promise<void>;
         signal?: AbortSignal;
         timeout?: number;
         env?: NodeJS.ProcessEnv;

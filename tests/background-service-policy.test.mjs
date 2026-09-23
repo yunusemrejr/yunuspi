@@ -30,7 +30,7 @@ test('persistent server defaults and legacy snapshots never promise an automatic
 function notifier() {
   const sent = [], ui = [], hooks = new Map();
   const ctx = { isIdle: () => true, ui: { notify: text => ui.push(text) }, sessionManager: { getBranch: () => [] } };
-  const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage: (message, options) => sent.push({message,options}) };
+  const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage: (message, options) => { sent.push({message,options}); options.onAccepted?.(); } };
   return { sent, ui, hooks, ctx, notify: createCompletionNotifier(pi, () => ctx) };
 }
 
@@ -70,13 +70,14 @@ test('old completion acknowledgement cannot consume work from a newer user reque
   let wakes = 0;
   const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
     sent.push({ message, options });
-    if (options.triggerTurn && ++wakes === 1) return firstWake.promise;
+    if (options.triggerTurn && ++wakes === 1) return firstWake.promise.then(() => options.onAccepted?.());
+    options.onAccepted?.();
   } };
   const notify = createCompletionNotifier(pi, () => ctx);
   notify({ content: 'first receipt' }, { triggerTurn: true });
   hooks.get('input')({ source: 'interactive', text: 'Continue with the updated task' });
   notify({ content: 'second receipt' }, { triggerTurn: true });
-  assert.equal(wakes, 1, 'one wake is still waiting for acceptance');
+  assert.equal(wakes, 2, 'a fresh request does not inherit the old delivery lock');
   firstWake.resolve();
   await tick();
   await hooks.get('agent_settled')();
@@ -89,7 +90,8 @@ test('completion wake waits until its durable receipt is accepted and ignores st
   const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
   const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
     sent.push({ message, options });
-    if (!options.triggerTurn) return receipt.promise;
+    if (!options.triggerTurn) return receipt.promise.then(() => options.onAccepted?.());
+    options.onAccepted?.();
   } };
   const notify = createCompletionNotifier(pi, () => ctx);
   notify({ content: 'delayed receipt' }, { triggerTurn: true });
@@ -108,10 +110,74 @@ test('a failed completion receipt cannot trigger inference with missing results'
   const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
     sent.push({ message, options });
     if (!options.triggerTurn) return Promise.reject(new Error('Receipt unavailable'));
+    options.onAccepted?.();
   } };
   const notify = createCompletionNotifier(pi, () => ctx);
   notify({ content: 'failed receipt' }, { triggerTurn: true });
   await tick();
   await hooks.get('agent_settled')();
   assert.equal(sent.length, 1);
+});
+
+test('same-generation completion arriving during a wake drains after the settled event', async () => {
+  const hooks = new Map(), firstWake = deferred(); let idle = true, wakes = 0;
+  const ctx = { isIdle: () => idle, sessionManager: { getBranch: () => [] } };
+  const notify = createCompletionNotifier({ on: (name, fn) => hooks.set(name, fn), sendMessage(_message, options) {
+    if (options.triggerTurn && ++wakes === 1) { idle = false; options.onAccepted?.(); return firstWake.promise; }
+    options.onAccepted?.();
+  } }, () => ctx);
+  notify({ content: 'A' }, { triggerTurn: true });
+  notify({ content: 'B' }, { triggerTurn: true });
+  idle = true;
+  await hooks.get('agent_settled')();
+  firstWake.resolve(); await tick();
+  assert.equal(wakes, 2, 'B must not wait forever for another unrelated settled event');
+  await hooks.get('agent_settled')();
+  assert.equal(wakes, 2, 'accepted wakes are consumed once');
+});
+
+test('failed wake does not spin, and abort or shutdown prevents a latched continuation', async () => {
+  for (const end of ['rejection', 'abort', 'shutdown']) {
+    const hooks = new Map(), firstWake = deferred(); let wakes = 0;
+    const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
+    const notify = createCompletionNotifier({ on: (name, fn) => hooks.set(name, fn), sendMessage(_message, options) {
+      if (options.triggerTurn) { wakes++; return firstWake.promise; }
+      options.onAccepted?.();
+    } }, () => ctx);
+    notify({ content: 'A' }, { triggerTurn: true });
+    notify({ content: 'B' }, { triggerTurn: true });
+    await hooks.get('agent_settled')();
+    if (end === 'abort') hooks.get('message_end')({ message: { role: 'assistant', stopReason: 'aborted' } });
+    if (end === 'shutdown') hooks.get('session_shutdown')();
+    if (end === 'rejection') firstWake.reject(new Error('fixture unavailable'));
+    else firstWake.resolve();
+    await tick(); await tick();
+    assert.equal(wakes, 1, end);
+  }
+});
+
+test('accepted wake is consumed before a failed model promise and cannot start inference twice',async()=>{
+ const hooks=new Map();let wakes=0;
+ const ctx={isIdle:()=>true,sessionManager:{getBranch:()=>[]}};
+ const notify=createCompletionNotifier({on:(name,fn)=>hooks.set(name,fn),sendMessage(_message,options){
+  options.onAccepted?.();
+  if(options.triggerTurn){wakes++;return Promise.reject(new Error('model failed after persisted receipt'));}
+  return Promise.resolve();
+ }},()=>ctx);
+ notify({content:'terminal receipt'},{triggerTurn:true});await tick();
+ for(let i=0;i<4;i++)await hooks.get('agent_settled')();
+ assert.equal(wakes,1);
+});
+
+test('volatile receipt admission cannot wake and volatile wake admission remains single-flight',async()=>{
+ const hooks=new Map(),callbacks=[];let wakes=0;
+ const ctx={isIdle:()=>true,sessionManager:{getBranch:()=>[]}};
+ const notify=createCompletionNotifier({on:(name,fn)=>hooks.set(name,fn),sendMessage(_message,options){
+  callbacks.push(options.onAccepted);if(options.triggerTurn)wakes++;return Promise.resolve();
+ }},()=>ctx);
+ notify({content:'queued receipt'},{triggerTurn:true});await tick();
+ assert.equal(wakes,0);callbacks[0]();await tick();assert.equal(wakes,1);
+ for(let i=0;i<4;i++)await hooks.get('agent_settled')();
+ assert.equal(wakes,1);callbacks[1]();await tick();
+ await hooks.get('agent_settled')();assert.equal(wakes,1);
 });

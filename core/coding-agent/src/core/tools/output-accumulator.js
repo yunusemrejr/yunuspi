@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, unlink } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
@@ -36,11 +36,17 @@ export class OutputAccumulator {
     finished = false;
     tempFilePath;
     tempFileStream;
+    tempFileOpened = false;
+    captureError;
+    headText = "";
+    outputMode;
+    pendingDrain;
     constructor(options = {}) {
         this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
         this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
         this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
         this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
+        this.outputMode = options.outputMode ?? "tail";
     }
     append(data) {
         if (this.finished) {
@@ -50,7 +56,15 @@ export class OutputAccumulator {
         this.appendDecodedText(this.decoder.decode(data, { stream: true }));
         if (this.tempFileStream || this.shouldUseTempFile()) {
             this.ensureTempFile();
-            this.tempFileStream?.write(data);
+            const stream = this.tempFileStream;
+            if (!stream) return;
+            // Owned producers await this promise and pause both pipes. A legacy
+            // adapter ignoring backpressure must not create an unbounded queue.
+            if (stream.writableLength + data.length > 2 * 1024 * 1024) {
+                this.failCapture("producer ignored output backpressure", stream);
+                return;
+            }
+            if (!stream.write(data)) return this.waitForDrain(stream);
         }
         else if (data.length > 0) {
             this.rawChunks.push(data);
@@ -84,13 +98,29 @@ export class OutputAccumulator {
             maxLines: this.maxLines,
             maxBytes: this.maxBytes,
         };
+        let content = truncation.content;
+        if (truncated && this.outputMode === "head-tail") {
+            const marker = "\n[... middle output omitted ...]\n";
+            const budget = Math.max(0, this.maxBytes - byteLength(marker));
+            const head = this.bytePrefix(this.headText, Math.floor(budget / 2));
+            const tail = truncateTail(this.getSnapshotText(), {
+                maxLines: Math.max(1, Math.floor(this.maxLines / 2)),
+                maxBytes: budget - byteLength(head),
+            }).content;
+            content = head + marker + tail;
+            truncation.content = content;
+            truncation.outputBytes = byteLength(content);
+            truncation.outputLines = content.split("\n").length;
+        }
         if (options.persistIfTruncated && truncation.truncated) {
             this.ensureTempFile();
         }
         return {
-            content: truncation.content,
+            content,
             truncation,
-            fullOutputPath: this.tempFilePath,
+            outputMode: this.outputMode,
+            fullOutputPath: this.captureError ? undefined : this.tempFilePath,
+            captureError: this.captureError,
         };
     }
     async closeTempFile() {
@@ -98,20 +128,18 @@ export class OutputAccumulator {
             return;
         }
         const stream = this.tempFileStream;
-        this.tempFileStream = undefined;
-        await new Promise((resolve, reject) => {
-            const onError = (error) => {
-                stream.off("finish", onFinish);
-                reject(error);
-            };
-            const onFinish = () => {
-                stream.off("error", onError);
+        await new Promise((resolve) => {
+            const done = () => {
+                clearTimeout(timer);
+                stream.off("error", done); stream.off("finish", done); stream.off("close", done);
                 resolve();
             };
-            stream.once("error", onError);
-            stream.once("finish", onFinish);
-            stream.end();
+            const timer = setTimeout(() => { this.failCapture("capture flush timed out", stream); done(); }, 30000);
+            stream.once("error", done); stream.once("finish", done); stream.once("close", done);
+            if (stream.destroyed || stream.writableFinished) done();
+            else stream.end();
         });
+        if (this.tempFileStream === stream) this.tempFileStream = undefined;
     }
     getLastLineBytes() {
         return this.currentLineBytes;
@@ -121,6 +149,8 @@ export class OutputAccumulator {
             return;
         }
         const bytes = byteLength(text);
+        if (byteLength(this.headText) < this.maxBytes)
+            this.headText = this.bytePrefix(this.headText + text, this.maxBytes);
         this.totalDecodedBytes += bytes;
         this.tailText += text;
         this.tailBytes += bytes;
@@ -170,24 +200,51 @@ export class OutputAccumulator {
         return (this.totalRawBytes > this.maxBytes || this.totalDecodedBytes > this.maxBytes || this.totalLines > this.maxLines);
     }
     ensureTempFile() {
-        if (this.tempFilePath) {
+        if (this.tempFilePath || this.captureError) {
             return;
         }
         this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
-        // closeTempFile() only attaches its error handler once closing starts, so
-        // a write failure before that (ENOSPC, EIO) is an unhandled stream error
-        // that kills the session, and after it leaves closeTempFile pending. The
-        // spill file is optional: drop the stream and keep the truncated output.
-        const stream = createWriteStream(this.tempFilePath);
-        stream.on("error", () => {
-            if (this.tempFileStream === stream) {
-                this.tempFileStream = undefined;
-            }
-        });
+        const stream = createWriteStream(this.tempFilePath, { flags: "wx", mode: 0o600 });
+        stream.once("open", () => { this.tempFileOpened = true; });
+        stream.on("error", (error) => this.failCapture(error.code ?? "write failed", stream));
         this.tempFileStream = stream;
         for (const chunk of this.rawChunks) {
             stream.write(chunk);
         }
         this.rawChunks = [];
+    }
+    failCapture(reason, stream) {
+        this.captureError ??= `Full output unavailable: ${reason}`;
+        if (this.tempFileStream === stream) this.tempFileStream = undefined;
+        stream.destroy();
+        // Never advertise a partial file as complete evidence.
+        if (this.tempFilePath) {
+            // EEXIST/EACCES can fail before opening. Such a path is not ours.
+            // Check at close, since destroy can race the asynchronous open.
+            const remove = () => { if (this.tempFileOpened) unlink(this.tempFilePath, () => {}); };
+            if (stream.closed) remove(); else stream.once("close", remove);
+        }
+    }
+    waitForDrain(stream) {
+        if (this.pendingDrain) return this.pendingDrain;
+        const pending = new Promise(resolve => {
+            const done = () => {
+                clearTimeout(timer);
+                for (const event of ["drain", "error", "close"]) stream.off(event, done);
+                resolve();
+            };
+            const timer = setTimeout(() => { this.failCapture("capture drain timed out", stream); done(); }, 30000);
+            for (const event of ["drain", "error", "close"]) stream.once(event, done);
+            if (stream.destroyed || !stream.writableNeedDrain) done();
+        });
+        this.pendingDrain = pending;
+        pending.finally(() => { if (this.pendingDrain === pending) this.pendingDrain = undefined; });
+        return pending;
+    }
+    bytePrefix(text, maxBytes) {
+        const bytes = Buffer.from(text);
+        let end = Math.min(maxBytes, bytes.length);
+        while (end > 0 && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+        return bytes.subarray(0, end).toString("utf8");
     }
 }

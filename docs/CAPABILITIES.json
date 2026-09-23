@@ -1095,7 +1095,9 @@
             "devices",
             "listeners",
             "services",
-            "processes"
+            "processes",
+            "service_detail",
+            "journal"
           ],
           "summary": "Read host resources, network/power/session metadata or device candidates without opening devices."
         },
@@ -2064,6 +2066,147 @@
       "doc": "docs/ISOLATION-AND-WEB.md"
     },
     {
+      "id": "creative-studio",
+      "group": "web_media",
+      "summary": "Author editable local 3D scenes and fixed-clock animations, render H.264 video and posters, compose clip transitions and mix local audio. Three.js studio/clay/toon/wireframe styles, keyframes, camera and lights; no hosted generation or model calls.",
+      "entrypoints": [
+        "scene_create",
+        "scene_render",
+        "video_compose",
+        "audio_mix"
+      ],
+      "tools": [
+        "scene_create",
+        "scene_render",
+        "video_compose",
+        "audio_mix",
+        "music_compose",
+        "media_info",
+        "video_frames",
+        "audio_analyze"
+      ],
+      "options": [
+        {
+          "name": "scene",
+          "summary": "Versioned declarative objects, materials, camera, lights and keyframes; inspect the live schema for bounds."
+        },
+        {
+          "name": "outputDir",
+          "summary": "Fresh workspace artifact directory; originals preserved."
+        },
+        {
+          "name": "path",
+          "summary": "Local scene or media source, never a URL."
+        },
+        {
+          "name": "clips|tracks",
+          "summary": "Explicit bounded timeline and audio inputs, with decode verification."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "artifact-numeric-checks",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/media-tools.ts",
+        "agent/extensions/lib/scene-studio.ts",
+        "agent/extensions/lib/media-timeline.ts",
+        "agent/scripts/scene-runtime.mjs"
+      ],
+      "doc": "docs/ASYNC-AND-STUDIO.md",
+      "commands": []
+    },
+    {
+      "id": "rendered-design-review",
+      "group": "engineering",
+      "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow and motion evidence for accessible and anti-slop UI review. Compare viewport/state screenshots using design skills; no aesthetic score or compliance claim.",
+      "entrypoints": [
+        "design_audit"
+      ],
+      "tools": [
+        "design_audit",
+        "render_see",
+        "browser_session",
+        "web_asset_check"
+      ],
+      "options": [
+        {
+          "name": "source",
+          "summary": "Local HTML or HTTP(S) page, inspected in the existing isolated browser."
+        },
+        {
+          "name": "width|height|colorScheme|reducedMotion",
+          "summary": "Explicit responsive/theme/motion test condition."
+        },
+        {
+          "name": "output",
+          "values": [
+            "text",
+            "both"
+          ],
+          "summary": "text for measurements; both includes pixels for vision-capable models."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "source-intelligence"
+      ],
+      "sourceFiles": [
+        "agent/extensions/render-and-wait.ts",
+        "agent/scripts/render-design-state.mjs"
+      ],
+      "doc": "docs/ASYNC-AND-STUDIO.md",
+      "commands": []
+    },
+    {
+      "id": "delivery-preflight",
+      "group": "engineering",
+      "summary": "Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset references for hosting, and Ubuntu unit/journal metadata without running workflows, publishing sites or mutating services. Source-backed findings with explicit unresolved expressions.",
+      "entrypoints": [
+        "workflow_probe",
+        "web_asset_check",
+        "sys_probe"
+      ],
+      "tools": [
+        "workflow_probe",
+        "web_asset_check",
+        "sys_probe",
+        "git_info",
+        "package_probe",
+        "env_audit"
+      ],
+      "options": [
+        {
+          "name": "path|project",
+          "summary": "Explicit workflow YAML and project root."
+        },
+        {
+          "name": "files|asset_root|public_path",
+          "summary": "Explicit HTML/CSS/manifest sources and hosting asset boundary."
+        },
+        {
+          "name": "sys_probe.action",
+          "values": [
+            "service_detail",
+            "journal"
+          ],
+          "summary": "Inspect systemd unit fields or metadata-only journal pages."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "safety-bounds",
+        "rendered-design-review"
+      ],
+      "sourceFiles": [
+        "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "agent/extensions/sys-probe.ts"
+      ],
+      "doc": "docs/ASYNC-AND-STUDIO.md",
+      "commands": []
+    },
+    {
       "id": "local-intelligence",
       "group": "models",
       "summary": "Local ML/statistical evidence ranking, context scoring and extractive handoffs; optional Kompress SLM paragraph selection. Automatic helpers run only when configured and eligible; discovery neither loads models nor starts inference.",
@@ -2634,7 +2777,7 @@
       {
         "name": "archive_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 26,
+        "line": 30,
         "kind": "catalog"
       },
       {
@@ -2652,26 +2795,32 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 215,
+        "line": 218,
+        "kind": "factory"
+      },
+      {
+        "name": "audio_mix",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 236,
         "kind": "factory"
       },
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 556,
+        "line": 576,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 797,
+        "line": 799,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 751,
+        "line": 753,
         "kind": "literal"
       },
       {
@@ -2683,7 +2832,7 @@
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 720,
+        "line": 722,
         "kind": "literal"
       },
       {
@@ -2737,13 +2886,13 @@
       {
         "name": "contract_diff",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 20,
+        "line": 24,
         "kind": "catalog"
       },
       {
         "name": "coverage_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 18,
+        "line": 22,
         "kind": "catalog"
       },
       {
@@ -2771,9 +2920,15 @@
         "kind": "factory"
       },
       {
+        "name": "design_audit",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 218,
+        "kind": "literal"
+      },
+      {
         "name": "env_audit",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 22,
+        "line": 26,
         "kind": "catalog"
       },
       {
@@ -2817,7 +2972,7 @@
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 214,
+        "line": 217,
         "kind": "factory"
       },
       {
@@ -2829,13 +2984,13 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 216,
+        "line": 219,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 212,
+        "line": 215,
         "kind": "factory"
       },
       {
@@ -2883,13 +3038,13 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 219,
+        "line": 222,
         "kind": "factory"
       },
       {
         "name": "net_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 24,
+        "line": 28,
         "kind": "catalog"
       },
       {
@@ -2901,19 +3056,19 @@
       {
         "name": "openapi_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 16,
+        "line": 20,
         "kind": "catalog"
       },
       {
         "name": "package_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 14,
+        "line": 18,
         "kind": "catalog"
       },
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 584,
+        "line": 604,
         "kind": "literal"
       },
       {
@@ -2937,7 +3092,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 86,
+        "line": 217,
         "kind": "literal"
       },
       {
@@ -2951,6 +3106,18 @@
         "source": "agent/extensions/sandbox.ts",
         "line": 9,
         "kind": "literal"
+      },
+      {
+        "name": "scene_create",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 232,
+        "kind": "factory"
+      },
+      {
+        "name": "scene_render",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 233,
+        "kind": "factory"
       },
       {
         "name": "scratchpad",
@@ -2998,7 +3165,7 @@
       {
         "name": "sqlite_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 12,
+        "line": 16,
         "kind": "catalog"
       },
       {
@@ -3016,7 +3183,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 743,
+        "line": 757,
         "kind": "definition"
       },
       {
@@ -3040,7 +3207,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 250,
+        "line": 254,
         "kind": "literal"
       },
       {
@@ -3062,9 +3229,15 @@
         "kind": "factory"
       },
       {
+        "name": "video_compose",
+        "source": "agent/extensions/media-tools.ts",
+        "line": 235,
+        "kind": "factory"
+      },
+      {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 213,
+        "line": 216,
         "kind": "factory"
       },
       {
@@ -3072,6 +3245,12 @@
         "source": "agent/extensions/render-and-wait.ts",
         "line": 59,
         "kind": "literal"
+      },
+      {
+        "name": "web_asset_check",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 14,
+        "kind": "catalog"
       },
       {
         "name": "web_probe",
@@ -3097,6 +3276,12 @@
         "source": "agent/extensions/scoped-snapshots.ts",
         "line": 12,
         "kind": "literal"
+      },
+      {
+        "name": "workflow_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 12,
+        "kind": "catalog"
       }
     ],
     "literalRegistrations": [
@@ -3133,13 +3318,13 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 797,
+        "line": 799,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 751,
+        "line": 753,
         "kind": "literal"
       },
       {
@@ -3151,7 +3336,7 @@
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 720,
+        "line": 722,
         "kind": "literal"
       },
       {
@@ -3182,6 +3367,12 @@
         "name": "context_score",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 9,
+        "kind": "literal"
+      },
+      {
+        "name": "design_audit",
+        "source": "agent/extensions/render-and-wait.ts",
+        "line": 218,
         "kind": "literal"
       },
       {
@@ -3259,7 +3450,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 584,
+        "line": 604,
         "kind": "literal"
       },
       {
@@ -3283,7 +3474,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 86,
+        "line": 217,
         "kind": "literal"
       },
       {
@@ -3349,7 +3540,7 @@
       {
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
-        "line": 250,
+        "line": 254,
         "kind": "literal"
       },
       {
@@ -3405,7 +3596,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          559
+          579
         ],
         "knownNames": [
           "bash",
@@ -3418,14 +3609,18 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          202
+          205
         ],
         "knownNames": [
           "audio_analyze",
+          "audio_mix",
           "image_ocr",
           "media_edit",
           "media_info",
           "music_compose",
+          "scene_create",
+          "scene_render",
+          "video_compose",
           "video_frames"
         ]
       },
@@ -3461,7 +3656,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          793
+          807
         ],
         "knownNames": [
           "subagent"
@@ -3553,16 +3748,18 @@
           "net_probe",
           "openapi_probe",
           "package_probe",
-          "sqlite_probe"
+          "sqlite_probe",
+          "web_asset_check",
+          "workflow_probe"
         ]
       }
     ],
     "coverage": {
-      "sourceFiles": 592,
-      "registrationSites": 63,
+      "sourceFiles": 598,
+      "registrationSites": 64,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 82,
-      "uniqueStableTools": 81,
+      "stableRegistrationRows": 89,
+      "uniqueStableTools": 88,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -3924,6 +4121,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/media-timeline.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/metrics-panel.ts",
         "exists": true
       },
@@ -4028,6 +4229,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/scene-studio.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/scope-deliberation.ts",
         "exists": true
       },
@@ -4037,6 +4242,10 @@
       },
       {
         "path": "agent/extensions/lib/self-mutation-guard.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/service-probe.ts",
         "exists": true
       },
       {
@@ -4306,6 +4515,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/utility-mcp/local-reference.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/utility-mcp/net.mjs",
         "exists": true
       },
@@ -4330,7 +4543,15 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/utility-mcp/web-assets.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/utility-mcp/worker.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "exists": true
       },
       {
@@ -4518,6 +4739,10 @@
         "exists": true
       },
       {
+        "path": "agent/scripts/render-design-state.mjs",
+        "exists": true
+      },
+      {
         "path": "agent/scripts/render-page-state.mjs",
         "exists": true
       },
@@ -4527,6 +4752,14 @@
       },
       {
         "path": "agent/scripts/sandbox-runner.py",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/scene-model.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/scene-runtime.mjs",
         "exists": true
       },
       {
@@ -4587,6 +4820,7 @@
       "pidusage",
       "playwright",
       "promise.try",
+      "three",
       "turndown",
       "typebox",
       "undici",
@@ -4838,6 +5072,12 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/harness-capabilities.ts",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/jev-client.ts",
         "signals": [
           "wrapper/adapter"
@@ -4893,6 +5133,12 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/utility-mcp/local-reference.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/utility-mcp/net.mjs",
         "signals": [
           "MCP"
@@ -4923,7 +5169,19 @@
         ]
       },
       {
+        "source": "agent/extensions/lib/utility-mcp/web-assets.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
         "source": "agent/extensions/lib/utility-mcp/worker.mjs",
+        "signals": [
+          "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "signals": [
           "MCP"
         ]
@@ -5850,6 +6108,10 @@
       {
         "name": "ACTION-PLANS.md",
         "path": "docs/ACTION-PLANS.md"
+      },
+      {
+        "name": "ASYNC-AND-STUDIO.md",
+        "path": "docs/ASYNC-AND-STUDIO.md"
       },
       {
         "name": "AUDIT-CHANGED-FILES.md",

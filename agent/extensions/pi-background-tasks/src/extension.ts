@@ -301,7 +301,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     options: StartTaskOptions = {},
   ): Promise<BgTask> {
     currentCtx = ctx;
-    return registry.startTask(ctx, command, options);
+    return registry.startTask({ cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), modelRegistry: ctx.modelRegistry, model: ctx.model }, command, options);
   }
 
   async function openTaskManager(
@@ -672,13 +672,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         prepared.triggerOnCompletion = input.triggerOnCompletion;
       return prepared;
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
       if (typeof params.isAgent !== "boolean") {
         throw new Error(
           "bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
         );
       }
       const taskOptions: StartTaskOptions = {
+        toolCallId,
+        signal,
         name: params.name,
         isAgent: params.isAgent,
         notifyOnCompletion: params.notifyOnCompletion ?? true,

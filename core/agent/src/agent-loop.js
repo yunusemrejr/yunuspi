@@ -292,8 +292,28 @@ async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
 async function executeToolCalls(currentContext, assistantMessage, config, signal, emit) {
     const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
     const hasSequentialToolCall = toolCalls.some((tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential");
-    if (config.toolExecution === "sequential" || hasSequentialToolCall) {
+    if (config.toolExecution === "sequential") {
         return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
+    }
+    if (hasSequentialToolCall) {
+        const groups = [];
+        for (let index = 0; index < toolCalls.length;) {
+            const sequential = currentContext.tools?.find((tool) => tool.name === toolCalls[index].name)?.executionMode === "sequential";
+            const start = index++;
+            if (!sequential) {
+                while (index < toolCalls.length && currentContext.tools?.find((tool) => tool.name === toolCalls[index].name)?.executionMode !== "sequential") index++;
+            }
+            // A sequential tool is a full barrier: earlier execution and
+            // finalization settle before its preflight; later preflight waits
+            // for the barrier too. Independent calls retain parallel execution.
+            const execute = sequential ? executeToolCallsSequential : executeToolCallsParallel;
+            groups.push(await execute(currentContext, assistantMessage, toolCalls.slice(start, index), config, signal, emit));
+            if (signal?.aborted) break;
+        }
+        return {
+            messages: groups.flatMap((group) => group.messages),
+            terminate: groups.length > 0 && groups.every((group) => group.terminate),
+        };
     }
     return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
 }
@@ -481,7 +501,7 @@ async function executePreparedToolCall(prepared, signal, emit) {
         });
         acceptingUpdates = false;
         await Promise.all(updateEvents);
-        return { result, isError: false };
+        return { result, isError: result.isError === true };
     }
     catch (error) {
         acceptingUpdates = false;

@@ -247,6 +247,8 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					`Working directory does not exist: ${cwd}\nCannot execute bash commands.`,
 				);
 			}
+			// A stop accepted during cwd admission must not launch a new process.
+			if (signal?.aborted) throw new Error("aborted");
 			const active = activeJobCount();
 			if (active >= MAX_ACTIVE_JOBS) {
 				throw new Error(
@@ -295,14 +297,30 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			let deadlineTimer: NodeJS.Timeout | undefined;
 			let graceTimer: NodeJS.Timeout | undefined;
 			let cancelTimer: NodeJS.Timeout | undefined;
+			let pendingOutput = 0;
+			let outputError: unknown;
+			const forward = (data: Buffer) => {
+				try {
+					const pending = onData(data);
+					if (!pending || typeof pending.then !== "function") return;
+					pendingOutput++;
+					child.stdout?.pause(); child.stderr?.pause();
+					Promise.resolve(pending).catch(error => {
+						outputError ??= error;
+						if (child.pid) killTree(child.pid);
+					}).finally(() => {
+						if (--pendingOutput === 0) { child.stdout?.resume(); child.stderr?.resume(); }
+					});
+				} catch (error) { outputError ??= error; if (child.pid) killTree(child.pid); }
+			};
 
 			const feed = (data: Buffer) => {
 				job.out.append(data);
-				onData(data);
+				forward(data);
 			};
 			const feedErr = (data: Buffer) => {
 				job.err.append(data);
-				onData(data);
+				forward(data);
 			};
 			child.stdout?.on("data", feed);
 			child.stderr?.on("data", feedErr);
@@ -370,7 +388,9 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					}
 					if (detached) return;
 					settled = true;
-					if (job.state === "timed_out") {
+					if (outputError) {
+						reject(outputError);
+					} else if (job.state === "timed_out") {
 						reject(new Error(`timeout:${timeout}`));
 					} else if (job.state === "killed") {
 						reject(new Error(`Command killed (signal ${sig ?? "unknown"})`));
@@ -555,7 +575,7 @@ export default function (pi: ExtensionAPI) {
 	const register = (cwd: string) => {
 		const def = createBashToolDefinition(cwd, { operations });
 		def.description =
-			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands such as wait_for may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; output is truncated to the last 2000 lines or 50KB, full output saved to a temp file if larger.";
+			"Execute a bash command in the current working directory with ordinary sequential shell semantics; it waits for the command's terminal result, bounded by `timeout`. For explicit background work use `bg_run` and manage it with bg_status/bg_logs/bg_kill. Internal helper commands such as wait_for may return a supervised managed-job handle for the `process` tool. Stdout+stderr are returned; default last 2000 lines or 50KB. For verbose checks use maxOutputBytes:8192 and outputMode:head-tail. Truncated full output is saved privately; capture failures are explicit.";
 		pi.registerTool(def);
 	};
 	register(process.cwd());

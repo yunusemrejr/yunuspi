@@ -1,4 +1,5 @@
 // @ts-nocheck
+import {hasRecordedTokenUsage} from './cost-evidence.ts';
 /** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
@@ -109,7 +110,7 @@ export function collectSessionMetrics(entries, live) {
    // placeholders without usage (measured 81 of 166 rows on 2026-09-14), so a
    // bare total would read as "zero child traffic" when it is really "no usage
    // recorded yet for these rows".
-   m.childRows++;if(r.usage)m.childRowsWithUsage++;
+   m.childRows++;if(hasRecordedTokenUsage(r.usage, r.childProcessStarted === false && r.stage === 'launch'))m.childRowsWithUsage++;
    let status=normalizedState(r.status??r.state);
    if(r.stopped||status==='stopped')status='stopped';
    else if(r.interrupted||status==='paused')status='paused';

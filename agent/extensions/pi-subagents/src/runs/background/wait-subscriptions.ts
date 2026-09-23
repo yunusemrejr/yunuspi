@@ -21,6 +21,7 @@ import {
 
 const SUBSCRIPTION_VERSION = 1;
 const RECONCILE_INTERVAL_MS = 1_000;
+const MAX_DELIVERY_ATTEMPTS = 3;
 /**
  * How often the subscriptions directory is re-scanned for expired records left
  * by other sessions. Rare compared to RECONCILE_INTERVAL_MS because it costs a
@@ -57,6 +58,8 @@ interface WaitSubscriptionManagerOptions {
 	now?: () => number;
 	pollIntervalMs?: number;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
+	/** Tokens already persisted in this session; used to finish interrupted cleanup without replaying inference. */
+	acceptedTokens?: () => ReadonlySet<string>;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -110,6 +113,11 @@ export function createWaitSubscriptionManager(
 	const unresolvedRestoredForegroundTokens = new Set<string>();
 	let disposed = false;
 	let lastForeignSweepAt = 0;
+	let generation = 0;
+	let reconcileScheduled = false;
+	const inFlight = new Map<string, object>();
+	const accepted = new Set<string>();
+	const failedAttempts = new Map<string, number>();
 
 	/**
 	 * Remove expired records armed by another session.
@@ -178,15 +186,29 @@ export function createWaitSubscriptionManager(
 	};
 
 	const settle = (record: WaitSubscriptionRecord, outcome: string, detail: string, completion?: WaitCompletion) => {
-		if (disposed || state.currentSessionId !== record.sessionId) return;
+		if (disposed || state.currentSessionId !== record.sessionId || inFlight.has(record.token)
+			|| (failedAttempts.get(record.token) ?? 0) >= MAX_DELIVERY_ATTEMPTS) return;
+		const ticket = generation;
+		const delivery = {};
+		inFlight.set(record.token, delivery);
+		const current = () => !disposed && ticket === generation && state.currentSessionId === record.sessionId
+			&& subscriptions.get(record.token) === record && inFlight.get(record.token) === delivery;
+		const acknowledge = () => {
+			if (!current()) return;
+			accepted.add(record.token);
+			failedAttempts.delete(record.token);
+			inFlight.delete(record.token);
+			try { remove(record); accepted.delete(record.token); }
+			catch (error) { console.error(`Failed to clear accepted wait subscription '${record.token}'; cleanup will retry:`, error); }
+		};
+		const rejected = (error: unknown) => {
+			if (!current()) return; // A committed message can be followed by a failed model turn.
+			inFlight.delete(record.token);
+			failedAttempts.set(record.token, (failedAttempts.get(record.token) ?? 0) + 1);
+			console.error(`Failed to deliver wait subscription '${record.token}'; it remains armed:`, error);
+		};
 		try {
-			remove(record);
-		} catch (error) {
-			console.error(`Failed to clear wait subscription '${record.token}'; it remains armed:`, error);
-			return;
-		}
-		try {
-			pi.sendMessage({
+			const result = pi.sendMessage({
 				customType: "subagent-wait-subscription",
 				content: `Wait subscription ${record.token} fired for run ${record.runId}: ${outcome}. ${detail}`,
 				display: true,
@@ -196,9 +218,12 @@ export function createWaitSubscriptionManager(
 					outcome,
 					...(completion ? { completions: [completion] } : {}),
 				},
-			}, { triggerTurn: true });
+			}, { triggerTurn: true, onAccepted: acknowledge });
+			// Resolution may mean only volatile queue admission. The durable
+			// callback owns cleanup; asynchronous rejection owns retry eligibility.
+			void Promise.resolve(result).catch(rejected);
 		} catch (error) {
-			console.error(`Failed to deliver wait subscription '${record.token}' after clearing it:`, error);
+			rejected(error);
 		}
 	};
 
@@ -266,12 +291,25 @@ export function createWaitSubscriptionManager(
 		if (!state.currentSessionId) return;
 		for (const record of [...subscriptions.values()]) {
 			try {
+				if (record.sessionId === state.currentSessionId && accepted.has(record.token)) {
+					// Preserve the accepted marker across cleanup failures. A replay
+					// after reload checks the durable session receipt instead.
+					accepted.add(record.token);
+					try { remove(record); accepted.delete(record.token); inFlight.delete(record.token); }
+					catch (error) { console.error(`Failed to clear accepted wait subscription '${record.token}':`, error); }
+					continue;
+				}
 				reconcileRecord(record);
 			} catch (error) {
 				console.error(`Failed to reconcile wait subscription '${record.token}':`, error);
 				settle(record, "reconciliation failed", "The targeted run could not be reconciled. Inspect its status before taking follow-up action.");
 			}
 		}
+	};
+	const scheduleReconcile = () => {
+		if (disposed || reconcileScheduled) return;
+		reconcileScheduled = true;
+		queueMicrotask(() => { reconcileScheduled = false; reconcile(); });
 	};
 
 	const wakeChannels = [
@@ -282,12 +320,13 @@ export function createWaitSubscriptionManager(
 		SUBAGENT_CONTROL_INTERCOM_EVENT,
 		SUBAGENT_RESULT_INTERCOM_EVENT,
 	];
-	const unsubscribes = wakeChannels.map((channel) => pi.events.on(channel, reconcile));
-	const interval = setInterval(reconcile, options.pollIntervalMs ?? RECONCILE_INTERVAL_MS);
+	const unsubscribes = wakeChannels.map((channel) => pi.events.on(channel, scheduleReconcile));
+	const interval = setInterval(scheduleReconcile, options.pollIntervalMs ?? RECONCILE_INTERVAL_MS);
 	interval.unref?.();
 
 	return {
 		arm(input) {
+			if (disposed) throw new Error("Wait subscription manager is disposed.");
 			const sessionId = state.currentSessionId;
 			if (!sessionId) throw new Error("A wait subscription requires an active session identity.");
 			const createdAt = now();
@@ -307,6 +346,12 @@ export function createWaitSubscriptionManager(
 			return record;
 		},
 		restore() {
+			if (disposed) return;
+			generation++;
+			inFlight.clear();
+			accepted.clear();
+			failedAttempts.clear();
+			for (const token of options.acceptedTokens?.() ?? []) accepted.add(token);
 			subscriptions.clear();
 			unresolvedRestoredForegroundTokens.clear();
 			// Unconditional: a process that starts without a session identity should
@@ -338,6 +383,10 @@ export function createWaitSubscriptionManager(
 		dispose() {
 			if (disposed) return;
 			disposed = true;
+			generation++;
+			inFlight.clear();
+			accepted.clear();
+			failedAttempts.clear();
 			clearInterval(interval);
 			for (const unsubscribe of unsubscribes) {
 				try { unsubscribe(); } catch { /* best effort */ }

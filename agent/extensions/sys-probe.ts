@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Type } from "typebox";
+import { serviceProbe, type ServiceProbeOptions } from './lib/service-probe.ts';
 import {
   parsePsTop,
   parseServiceList,
@@ -26,7 +27,7 @@ import {
 } from "./lib/sys-probe.ts";
 
 const execFileP = promisify(execFile);
-const COMMANDS = ["listeners", "services", "processes", "host", "devices"] as const;
+const COMMANDS = ["listeners", "services", "service_detail", "journal", "processes", "host", "devices"] as const;
 const TOOLCHAINS = ["arduino-cli", "pio", "platformio", "esptool", "esptool.py", "idf.py", "openocd", "arm-none-eabi-gcc", "cmake", "ninja", "python3", "ssh", "rsync", "docker", "podman"];
 type Facts = { action: string; rows: (Listener | ServiceRow | ProcessRow | Record<string, unknown>)[]; truncated?: boolean; guidance?: string[]; warnings?: string[] };
 
@@ -212,9 +213,12 @@ export async function runSysProbe(
   action: string,
   limit: number,
   signal?: AbortSignal,
+  options: ServiceProbeOptions = {},
 ): Promise<Facts> {
   signal?.throwIfAborted();
   limit = Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 200) : 100;
+  if (action === 'service_detail' || action === 'journal') return serviceProbe(action,limit,options,signal);
+  if (['unit','user','cursor','lookbackSeconds'].some(key => (options as any)[key] !== undefined)) throw Error('Unit, manager and journal options apply only to service_detail/journal');
   if (action === "host") return hostFacts(signal);
   if (action === "devices") return deviceFacts(limit, signal);
   if (action === "listeners") {
@@ -251,7 +255,7 @@ export default function sysProbe(pi: any) {
     name: "sys_probe",
     label: "System Probe",
     description:
-      "Read-only Linux facts: host (resources, session dependencies, toolchain presence), devices (serial/GPIO/I2C/SPI/GPU nodes without opening them), listeners, services or processes. Use before host/embedded operations or instead of parsing ss/systemctl/ps. Bounded metadata and compact rows; never flashes, controls or stress-tests hardware.",
+      "Read-only Linux facts: host, devices, listeners, services, processes; service_detail inspects one exact systemd unit, journal pages its metadata using an optional cursor. Journal messages and service commands/environment are never returned. Bounded metadata; never starts, restarts or changes services or hardware.",
     promptSnippet:
       "Inspect host/session dependencies, hardware nodes, ports, services or processes",
     promptGuidelines: [
@@ -262,17 +266,23 @@ export default function sysProbe(pi: any) {
       action: Type.Union([
         Type.Literal("listeners"),
         Type.Literal("services"),
+        Type.Literal("service_detail"),
+        Type.Literal("journal"),
         Type.Literal("processes"),
         Type.Literal("host"),
         Type.Literal("devices"),
       ]),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+      unit: Type.Optional(Type.String({minLength:1,maxLength:240,description:'One exact systemd unit, e.g. example.service; required for service_detail/journal. No patterns.'})),
+      user: Type.Optional(Type.Boolean({description:'Inspect current user manager/journal instead of system; service_detail/journal only.'})),
+      cursor: Type.Optional(Type.String({minLength:1,maxLength:1024,description:'journal only: next_cursor from a previous page; results begin after it.'})),
+      lookbackSeconds: Type.Optional(Type.Integer({minimum:1,maximum:86400,description:'journal only: bounded recent window. Defaults to 3600 for first page; cursor pages retain no implicit time filter.'})),
     }),
-    async execute(_id: any, params: { action: string; limit?: number }, signal?: AbortSignal) {
+    async execute(_id: any, params: { action: string; limit?: number } & ServiceProbeOptions, signal?: AbortSignal) {
       try {
         const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 200);
         const deadline = AbortSignal.timeout(5000);
-        const result = await runSysProbe(params.action, limit, signal ? AbortSignal.any([signal, deadline]) : deadline);
+        const result = await runSysProbe(params.action, limit, signal ? AbortSignal.any([signal, deadline]) : deadline, params);
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
           details: { action: params.action, rows: result.rows.length },

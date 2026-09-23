@@ -7,7 +7,7 @@ import {
   reportText,
 } from "./lib/session-report.ts";
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
-import { readCostEvidence } from "./lib/cost-evidence.ts";
+import { readCostEvidence, hasRecordedTokenUsage } from "./lib/cost-evidence.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import {
   reduceChildEvents,
@@ -579,7 +579,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel): U
     const previous = runRows.get(key);
     const modelText = bounded(result.model, 240) ?? launchModel(args, childIndex) ?? (previous?.provider && previous?.model ? `${previous.provider}/${previous.model}` : previous?.model);
     const slash = modelText?.indexOf("/") ?? -1;
-    const usage = [result.usage, result.evidence?.usage].find(value => value && typeof value === "object" && ["input", "output", "cacheRead", "cacheWrite", "turns"].some(field => isNonnegative(value[field])));
+    const usage = [result.usage, result.evidence?.usage].find(value => hasRecordedTokenUsage(value, result.childProcessStarted === false && result.stage === "launch"));
     const tokens = usage ? ["input", "output", "cacheRead", "cacheWrite"].reduce((sum, field) => sum + finite(usage[field]), 0) : 0;
     const totalCostEvidence = readCostEvidence({cost:result.totalCost?.costUsd,costDetails:result.totalCost?.costDetails});
     const ownCostEvidence = readCostEvidence(result.usage);

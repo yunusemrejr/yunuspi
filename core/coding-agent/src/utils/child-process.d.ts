@@ -14,4 +14,6 @@ export declare function spawnProcessSync(command: string, args: string[], option
  * us reading, while a quiet inherited handle (e.g. a Windows daemonized descendant
  * that never lets `close` fire) still releases us after the grace elapses.
  */
-export declare function waitForChildProcess(child: ChildProcess): Promise<number | null>;
+export declare function waitForChildProcess(child: ChildProcess, options?: {
+    isOutputBackpressured?: () => boolean;
+}): Promise<number | null>;

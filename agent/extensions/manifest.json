@@ -90,6 +90,7 @@
     "local-intelligence.mjs",
     "local-models.ts",
     "media-process.ts",
+    "media-timeline.ts",
     "metrics-panel.ts",
     "mini-preprocessor.ts",
     "model-facts.ts",
@@ -116,9 +117,11 @@
     "request-compat.ts",
     "retry-policy.ts",
     "review-coordinator.ts",
+    "scene-studio.ts",
     "scope-deliberation.ts",
     "scoped-snapshots.ts",
     "self-mutation-guard.ts",
+    "service-probe.ts",
     "session-audit.ts",
     "session-cost.ts",
     "session-diagnostics.ts",
@@ -194,15 +197,16 @@
     "minimatch",
     "p-limit",
     "pidusage",
+    "playwright",
     "promise.try",
+    "three",
     "turndown",
     "typebox",
     "undici",
     "unpdf",
     "vscode-jsonrpc",
     "web-tree-sitter",
-    "yaml",
-    "playwright"
+    "yaml"
   ],
   "retired": [
     {
@@ -514,6 +518,12 @@
     "extensions/lib/micro-intelligence/advisory.ts",
     "extensions/lib/micro-intelligence/review.ts",
     "extensions/lib/micro-intelligence/status.ts",
-    "extensions/lib/micro-intelligence/intent.ts"
+    "extensions/lib/micro-intelligence/intent.ts",
+    "scripts/render-design-state.mjs",
+    "scripts/scene-model.mjs",
+    "scripts/scene-runtime.mjs",
+    "extensions/lib/utility-mcp/local-reference.mjs",
+    "extensions/lib/utility-mcp/web-assets.mjs",
+    "extensions/lib/utility-mcp/workflow.mjs"
   ]
 }
