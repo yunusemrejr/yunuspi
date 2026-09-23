@@ -16,6 +16,7 @@ const aiRoot = path.join(core, "../ai/dist");
 const sdk = await import(path.join(core, "dist/index.js")),
  ai = await import(path.join(aiRoot, "index.js"));
 const chat = await import(path.join(aiRoot, "api/openai-completions.js"));
+const openrouterImages = await import(path.join(aiRoot, "api/openrouter-images.js"));
 const responses = await import(path.join(aiRoot, "api/openai-responses.js"));
 const anthropic = await import(path.join(aiRoot, "api/anthropic-messages.js"));
 const model = {
@@ -50,7 +51,7 @@ const chunk = (usage) => ({
 });
 const chatSse = (usage) =>
  "data: " + JSON.stringify(chunk(usage)) + "\n\ndata: [DONE]\n\n";
-function stub(body, status = 200) {
+function stub(body, status = 200, contentType = "text/event-stream") {
  const requests = [];
  const headers = [];
  return {
@@ -64,7 +65,7 @@ function stub(body, status = 200) {
     return new Response(body, {
      status,
      headers: {
-      "content-type": status === 200 ? "text/event-stream" : "application/json",
+      "content-type": status === 200 ? contentType : "application/json",
      },
     });
    } catch (error) {
@@ -153,6 +154,29 @@ try {
    "PASS " + name + " cache normalization, no double counting, one fetch",
   );
  }
+ const imageUsageMock = stub(JSON.stringify({
+  id: "fixture-image",
+  object: "chat.completion",
+  created: 1,
+  model: "fixture-image",
+  choices: [{ index: 0, message: { role: "assistant", content: "" }, finish_reason: "stop" }],
+  usage: { prompt_tokens: 100, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 10 } },
+ }), 200, "application/json");
+ const imageUsage = await openrouterImages.generateImages({
+  id: "fixture-image", provider: "openrouter", api: "openrouter-images",
+  baseUrl: "https://openrouter.ai/api/v1", input: ["text"], output: ["image"],
+  cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
+ }, { input: [{ type: "text", text: "fixture" }] }, {
+  apiKey: "TEST_fixture-only", fetch: imageUsageMock.fetch,
+ });
+ assert.equal(imageUsage.stopReason, "stop", imageUsage.errorMessage);
+ assert.deepEqual(
+  [imageUsage.usage.input, imageUsage.usage.cacheRead, imageUsage.usage.cacheWrite],
+  [10, 80, 10],
+  "OpenRouter cache reads and writes are independent usage counters",
+ );
+ assert.equal(imageUsage.usage.totalTokens, 101);
+ console.log("PASS OpenRouter image usage keeps cache reads and writes independent");
  const deepinfraMock=stub(chatSse({prompt_tokens:100,completion_tokens:20,cached_tokens:80,reasoning_tokens:12,estimated_cost:0.00123456}));
  const deepinfraResult=await chat.stream({...model,provider:'deepinfra',baseUrl:'https://api.deepinfra.com/v1/openai'},context,{apiKey:'TEST_fixture-only',fetch:deepinfraMock.fetch,sessionId:'deepinfra-stable'}).result();
  assert.equal(deepinfraResult.stopReason,'stop',deepinfraResult.errorMessage);

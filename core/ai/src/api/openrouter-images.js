@@ -109,7 +109,9 @@ function parseUsage(rawUsage, model) {
     const promptTokens = rawUsage.prompt_tokens || 0;
     const reportedCachedTokens = rawUsage.prompt_tokens_details?.cached_tokens || 0;
     const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
-    const cacheReadTokens = cacheWriteTokens > 0 ? Math.max(0, reportedCachedTokens - cacheWriteTokens) : reportedCachedTokens;
+    // OpenRouter reports cache hits and writes as independent counters. Keep
+    // both counts intact when calculating billable input and cache costs.
+    const cacheReadTokens = reportedCachedTokens;
     const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
     const output = rawUsage.completion_tokens || 0;
     const usage = {
