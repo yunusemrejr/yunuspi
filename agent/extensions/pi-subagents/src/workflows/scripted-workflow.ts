@@ -1132,8 +1132,9 @@ export interface RunWorkflowScriptOptions {
 	onMetric?: (kind: "swarms" | "fusions" | "recoveries") => void;
 }
 
-function combinedAbortSignal(signals: AbortSignal[]): AbortSignal {
+export function combinedAbortSignal(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
 	const controller = new AbortController();
+	const listeners = new Map<AbortSignal, () => void>();
 	const abort = (signal: AbortSignal): void => {
 		if (controller.signal.aborted) return;
 		controller.abort(signal.reason);
@@ -1143,9 +1144,17 @@ function combinedAbortSignal(signals: AbortSignal[]): AbortSignal {
 			abort(signal);
 			break;
 		}
-		signal.addEventListener("abort", () => abort(signal), { once: true });
+		const listener = () => abort(signal);
+		listeners.set(signal, listener);
+		signal.addEventListener("abort", listener, { once: true });
 	}
-	return controller.signal;
+	return {
+		signal: controller.signal,
+		dispose: () => {
+			for (const [signal, listener] of listeners) signal.removeEventListener("abort", listener);
+			listeners.clear();
+		},
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2202,6 +2211,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				if (batch) batchAdmissions.set(batch.id, admission);
 			}
 			let resolvedResumeLineage: string[] | undefined;
+			let disposeChildSignal = () => {};
 			const promise = admission.then(async () => {
 				if (settled || finishing || stoppedLaunches.has(key)) {
 					const reason = childController.signal.reason;
@@ -2210,7 +2220,9 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				}
 				const childStopController = new AbortController();
 				childStopControllers.set(key, childStopController);
-				const childSignal = combinedAbortSignal([childController.signal, childStopController.signal]);
+				const combined = combinedAbortSignal([childController.signal, childStopController.signal]);
+				disposeChildSignal = combined.dispose;
+				const childSignal = combined.signal;
 				const resolvedResumeValue = resumeReference
 					? await Promise.resolve().then(() => {
 						if (!options.resolveResume) throw new Error("Keyed workflow receipt resume is unavailable in this host.");
@@ -2276,7 +2288,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				trace.push({ operation: "run", key, state: "failed", durationMs: Date.now() - startedAt, ...workflowStringMetadata(params), ...(generatedLaneKey ? { generatedLaneKey } : {}), error: text });
 				traceChanged();
 				return failure;
-			});
+			}).finally(() => disposeChildSignal());
 			launches.set(key, { fingerprint, promise, observed: callObserved, ...(generatedLaneKey ? { generatedLaneKey } : {}) });
 			childOrder.push(key);
 			trace.push({ operation: "run", key, state: "started", ...workflowStringMetadata(params), ...(generatedLaneKey ? { generatedLaneKey } : {}) });

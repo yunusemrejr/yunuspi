@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getEventListeners } from "node:events";
 import { pathToFileURL } from "node:url";
 
 const repo = path.resolve(import.meta.dirname, "..");
@@ -17,6 +18,7 @@ const load = (name) => import(pathToFileURL(path.join(agent, "extensions/pi-suba
 const discovery = await load("agents/agents.ts");
 const { handleManagementAction } = await load("agents/agent-management.ts");
 const retry = await load("shared/file-system-retry.ts");
+const { combinedAbortSignal } = await load("workflows/scripted-workflow.ts");
 
 test("invalid user overrides retain the builtin and expose the broken file", () => {
 	const directory = path.join(process.env.PI_CODING_AGENT_DIR, "agents");
@@ -68,4 +70,17 @@ test("filesystem retries bound parent stalls and preserve child durability", () 
 	assert.equal(attempts, child.length + 1);
 	assert.equal(total(waits), 100);
 	assert.equal(retry.runFileSystemOperationWithRetry(() => "written"), "written");
+});
+
+test("combined workflow cancellation detaches every source listener when disposed", () => {
+	const parent = new AbortController();
+	const child = new AbortController();
+	const combined = combinedAbortSignal([parent.signal, child.signal]);
+	// Inspect registration directly instead of relying on GC timing.
+	assert.equal(getEventListeners(parent.signal, "abort").length, 1);
+	child.abort(new Error("child stopped"));
+	assert.equal(combined.signal.reason.message, "child stopped");
+	combined.dispose();
+	assert.equal(getEventListeners(parent.signal, "abort").length, 0);
+	assert.equal(getEventListeners(child.signal, "abort").length, 0);
 });
