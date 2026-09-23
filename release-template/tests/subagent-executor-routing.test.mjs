@@ -21,6 +21,9 @@ const { createSubagentExecutor } = await import(pathToFileURL(path.join(base, "r
 const { clearExclusions } = await import(pathToFileURL(path.join(base, "runs/shared/model-exclusions.ts")).href);
 const { SessionManager } = await import("../core/coding-agent/src/core/session-manager.js");
 const { createEventBus } = await import("../core/coding-agent/src/core/event-bus.js");
+const { failureOf, projectRunEvidence } = await import(pathToFileURL(path.join(base, "runs/shared/run-history.ts")).href);
+const { resultFilePath } = await import(pathToFileURL(path.join(base, "runs/background/result-files.ts")).href);
+const { DIRS } = await import(pathToFileURL(path.join(base, "shared/types.ts")).href);
 
 const route = "openrouter/org/executor-fixture";
 const model = { provider: "openrouter", id: "org/executor-fixture", name: "Executor fixture", fullId: route,
@@ -32,7 +35,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t) {
+function fixture(t, { stopReason = "stop" } = {}) {
   clearExclusions();
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
@@ -51,8 +54,9 @@ const request = handlers.get("before_provider_request")?.({ type: "before_provid
 appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider }) + "\\n");
 if (candidate?.providerRouting?.only?.[0] === "together") { process.stderr.write("429 rate limit"); process.exit(1); }
 process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", provider: model.provider, model: model.id,
-  api: "openai-completions", timestamp: Date.now(), content: [{ type: "text", text: "Child completed" }], stopReason: "stop",
+  api: "openai-completions", timestamp: Date.now(), content: [{ type: "text", text: "Child completed" }], stopReason: ${JSON.stringify(stopReason)},
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } }) + "\\n");
+process.exitCode = ${stopReason === "length" ? 1 : 0};
 `, { mode: 0o700 });
   process.env.PI_SUBAGENT_PI_BINARY = fakePi;
   const agent = { name: "route-fixture", description: "Read-only route fixture", source: "runtime",
@@ -97,6 +101,39 @@ for (const background of [false, true]) test(`real ${background ? "background" :
   assert.equal(attempts.length, 2);
   assert.deepEqual(attempts.map(attempt => attempt.candidate), pins);
   assert.deepEqual(attempts.map(attempt => attempt.provider), pins.map(pin => pin.providerRouting));
+});
+
+for (const background of [false, true]) test(`native ${background ? "background" : "foreground"} child length stops retain their typed cause in terminal receipts`, { timeout: 30_000 }, async t => {
+  const f = fixture(t, { stopReason: "length" });
+  const result = await f.executor.executeDelegated("length-request", {
+    agent: "route-fixture", task: "Read the source and return a concise observation", context: "fresh", async: background,
+    artifacts: false, model: route, modelOrigin: "inherited", modelRouteCandidates: [pins[1]], timeoutMs: 10_000,
+  }, new AbortController().signal, undefined, f.ctx);
+  let row;
+  if (background) {
+    assert.notEqual(result.isError, true, "background admission is not terminal success");
+    let status;
+    for (const deadline = Date.now() + 20_000; Date.now() < deadline;) {
+      status = JSON.parse(fs.readFileSync(path.join(result.details.asyncDir, "status.json"), "utf8"));
+      if (status.state === "failed" && status.processTerminal?.state === "observed") break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(status?.state, "failed");
+    assert.equal(status?.processTerminal?.state, "observed");
+    row = JSON.parse(fs.readFileSync(resultFilePath(DIRS.results, result.details.runId), "utf8")).results[0];
+  } else {
+    assert.equal(result.isError, true);
+    row = result.details.results[0];
+  }
+  assert.equal(row.messages, undefined, "actual executor returns a compact transcript receipt");
+  assert.equal(row.stopReason, "length");
+  assert.equal(row.modelAttempts.length, 1);
+  assert.equal(row.modelAttempts[0].stopReason, "length");
+  assert.equal(failureOf(row).cause.category, "output-truncated");
+  assert.equal(failureOf(row).cause.truncation, "length-stop");
+  assert.equal(projectRunEvidence(row).attempts[0].outcomeReason, "truncated");
+  assert.deepEqual(failureOf(row).cause.healthScopes, {});
+  assert.equal(f.records().length, 1, "diagnostic preservation does not add a launch");
 });
 
 test("ordinary public execution still launches and ignores caller-supplied private route candidates", { timeout: 15_000 }, async t => {

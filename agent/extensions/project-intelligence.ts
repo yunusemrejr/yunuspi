@@ -136,7 +136,6 @@ export default function projectIntelligence(pi: any) {
     cwd = "",
     session = "",
     capsule = "",
-    capsuleRevision = -1,
     task = "",
     activityState = "idle",
     generation = 0,
@@ -190,7 +189,6 @@ export default function projectIntelligence(pi: any) {
     scope.cancel();
     closed = false;
     capsule = "";
-    capsuleRevision = -1;
     identity = undefined;
     task = "";
     retrieval = { query: "", options: {} };
@@ -218,7 +216,6 @@ export default function projectIntelligence(pi: any) {
     assertCurrent(current, epoch, ctx);
     identity = info.identity;
     capsule = bounded(info.overview, 1100);
-    capsuleRevision = Number(info.overview?.revision ?? -1);
     // Discovery starts for unknown projects automatically; no tool call required.
     refreshPromise = refresh(ctx).catch(() => {});
     heartbeat = setInterval(() => {
@@ -264,24 +261,19 @@ export default function projectIntelligence(pi: any) {
         },
         { timeout: 1500 },
       );
-      // Cache stability: same-revision retrievals keep the anchored bytes,
-      // so per-query briefs never churn the block mid-history (each byte
-      // change would move the block and invalidate the provider cache
-      // prefix). Freshness: a newer graph revision (newly indexed evidence)
-      // invalidates the committed capsule. Committing only the first-ever
-      // retrieval froze the pre-index overview permanently.
+      // A stable graph revision does not imply a stable target: an already
+      // indexed file can have completely different consumers/dependencies.
+      // The anchor preserves byte-identical evidence; changed evidence replaces
+      // the single bounded capsule instead of accumulating context messages.
       if (epoch === generation && serial === retrievalSerial) {
-        const revision = Number(result?.revision ?? -1);
-        if (!capsule || revision > capsuleRevision) {
-          capsule = bounded(result);
-          capsuleRevision = revision;
-        }
+        capsule = bounded(result);
       }
       return result;
     } catch {
-      if (!capsule && epoch === generation && serial === retrievalSerial)
+      if (epoch === generation && serial === retrievalSerial) {
         capsule =
           "Current graph retrieval unavailable; inspect source dependencies directly or retry project_intel. Previous context is not evidence for this target.";
+      }
     }
   }
   async function refresh(ctx: any, force = false) {
@@ -737,7 +729,7 @@ export default function projectIntelligence(pi: any) {
     name: "project_intel",
     label: "Project intelligence",
     description:
-      "Persistent evidence-backed project knowledge. Query relevant architecture/history; impact finds consumers/dependents before changes or removals. Record durable discoveries (inferences, not automatic proof); concurrent contradictory sources remain visible. refresh rescans changed evidence; inspect returns entity evidence or a source and its current version; update replaces an agent record with expectedVersion. history can filter sourceId. Use focus (ID or exact key), hops, types/relations and maxChars to control retrieval. Data stays local and project-scoped.",
+      "Persistent evidence-backed project knowledge. Query relevant architecture/history; impact finds consumers/dependents before changes or removals. Record durable discoveries (inferences, not automatic proof); concurrent contradictory sources remain visible. refresh rescans changed evidence; inspect returns entity declarations, confidence and versioned provenance, or a source and its current version; update replaces an agent record with expectedVersion. history can filter sourceId. Use focus (ID or exact key), hops, types/relations and maxChars to control retrieval. Data stays local and project-scoped.",
     parameters: Type.Object({
       action: Type.Union(
         [

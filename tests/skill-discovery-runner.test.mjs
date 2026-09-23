@@ -168,7 +168,7 @@ test('optional TUI activity is balanced on completion, failure and cancellation 
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
 });
 
-test('dedicated agent omits inherited context and native request caps discovery output to 1024', () => {
+test('dedicated discovery bounds answers without starving configured reasoning or exceeding provider limits', () => {
   const { frontmatter, body } = parseFrontmatter(fs.readFileSync(path.join(source, 'agents/automatic-skill-discovery.md'), 'utf8'));
   assert.deepEqual(parseFrontmatterList(frontmatter.tools), []);
   for (const key of ['inheritProjectContext', 'inheritGlobalContext', 'inheritSkills']) assert.equal(frontmatter[key], 'false');
@@ -189,6 +189,21 @@ test('dedicated agent omits inherited context and native request caps discovery 
       assert.equal(cap({ model: model.id, [key]: 256 }, model)[key], 256);
     }
   }
+  const reasoningModel = { ...model, reasoning: true, api: 'openai-responses', cost: { input: .01, output: .02, cacheRead: 0, cacheWrite: 0 } };
+  const request = { model: model.id, max_output_tokens: 8192, reasoning: { effort: 'high' } };
+  const capped = cap(request, reasoningModel);
+  assert.equal(capped.max_output_tokens, 4096, 'reasoning and final JSON share the wire allowance');
+  assert.equal(capped.reasoning.effort, 'high', 'configured thinking remains authoritative');
+  assert.equal(request.max_output_tokens, 8192, 'source request is not mutated');
+  assert.equal(cap({ model: model.id }, reasoningModel).max_output_tokens, 4096);
+  assert.equal(cap(request, { ...reasoningModel, maxTokens: 2048 }).max_output_tokens, 2048);
+  assert.equal(cap({ ...request, max_output_tokens: 512 }, reasoningModel).max_output_tokens, 512, 'caller may impose a smaller ceiling');
+  const anthropic = { model: model.id, max_tokens: 8192, thinking: { type: 'enabled', budget_tokens: 7000 } };
+  const thinking = cap(anthropic, { ...reasoningModel, api: 'anthropic-messages' });
+  assert.equal(thinking.max_tokens, 4096);
+  assert.equal(thinking.thinking.budget_tokens, 3072, 'explicit reasoning leaves 1024 answer tokens');
+  assert.equal(anthropic.thinking.budget_tokens, 7000);
+  assert.throws(() => cap({ ...anthropic, max_tokens: 1024 }, reasoningModel), /cannot fit enabled thinking/);
 });
 
 test('terminal discovery outcomes emit health telemetry; gate refusals stay silent', async () => {
@@ -259,6 +274,24 @@ test('consecutive instant failures walk distinct routes up to the attempt bound'
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
 });
 
+test('reasoning-only or billed attempts without visible text cannot trigger another provider', async () => {
+  for (const evidence of [
+    { stopReason: 'length' },
+    { usage: { input: 10, output: 1024, turns: 1 } },
+    { usage: { cacheRead: 20, output: 0 } },
+    { usage: { reasoning: 1024, input: 0, output: 0 } },
+    { messages: [{ role: 'assistant', stopReason: 'length', content: [] }] },
+    { messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'Synthetic reasoning without a visible answer.' }] }] },
+  ]) {
+    const f = fixture({ models: [model, { ...model, id: 'free/text-only' }], launch: async () => ({
+      isError: true, details: { results: [{ exitCode: 1, output: '', ...evidence }] },
+    }) });
+    assert.equal(await f.runner({ brief: 'Select a supplied skill.' }, f.ctx), undefined);
+    assert.equal(f.calls.length, 1, JSON.stringify(evidence));
+    assert.equal(f.entries.filter(entry => entry.type === 'subagent-lifecycle-v1' && entry.data.state === 'failed').length, 1);
+  }
+});
+
 test('skill discovery preserves configured Friendli routes through dispatch admission', async () => {
   const prefs = await mod('runs/shared/llm-preferences.ts');
   const fallback = await mod('runs/shared/model-fallback.ts');
@@ -320,7 +353,7 @@ test('native helper launches coalesce with wrapper receipts while retry usage st
  const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{
   const attempt=++calls, runId=`native-fixture-${attempt}`, status=attempt===1?'failed':'completed';
   f.entries.push({type:'subagent-lifecycle-v1',data:{runId,mode:'single',state:status,results:[{index:0,status}]}});
-  const row={exitCode:attempt===1?1:0,...(attempt===1?{error:'provider unavailable'}:{output:'{"skills":[]}'}),usage:{input:attempt*10,output:attempt,cacheRead:0,cacheWrite:0,cost:attempt*.01,turns:1}};
+  const row={exitCode:attempt===1?1:0,...(attempt===1?{error:'provider unavailable'}:{output:'{"skills":[]}'}),usage:{input:attempt===1?0:20,output:attempt===1?0:2,cacheRead:0,cacheWrite:0,cost:attempt===1?0:.02,turns:attempt===1?0:1}};
   // Native accounting can also arrive independently of its wrapper.
   f.entries.push({type:'subagent-cost-v1',data:{runId,mode:'single',results:[row]}});
   return {isError:attempt===1,details:{runId,results:[row]}};
@@ -331,14 +364,14 @@ test('native helper launches coalesce with wrapper receipts while retry usage st
  assert.equal(ledger.tasks.length,1,'native and wrapper rows describe one logical task');
  assert.equal(ledger.tasks[0].attempts.length,2);
  assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.runId),['native-fixture-1','native-fixture-2']);
- assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.usage.input),[10,20]);
- const metrics=collectSessionMetrics(entries);assert.equal(metrics.childTokens,33,'both attempts count exactly once');
- const costs=collectSessionCost(entries);assert.equal(costs.total,.03);assert.equal(costs.pending,0);assert.equal(costs.unknown,false);
+ assert.deepEqual(ledger.tasks[0].attempts.map(a=>a.usage?.input),[undefined,20], 'a startup failure does not invent provider usage');
+ const metrics=collectSessionMetrics(entries);assert.equal(metrics.childTokens,22,'startup retry and completed attempt count exactly once');
+ const costs=collectSessionCost(entries);assert.equal(costs.total,.02);assert.equal(costs.pending,0);assert.equal(costs.unknown,true,'provider usage absent from the failed startup remains unknown');
  const report=buildUsedSummary(entries);
  assert.equal(report.agents.total,1);
  assert.equal(report.runs.length,2,'forensic rows also coalesce native and wrapper accounting');
  const rows=report.runs.filter(r=>r.runId.startsWith('skill-discovery-'));
- assert.deepEqual(rows.map(r=>r.tokens),[11,22]);assert.deepEqual(rows.map(r=>r.attempt),[1,2]);
+ assert.deepEqual(rows.map(r=>r.tokens),[0,22]);assert.deepEqual(rows.map(r=>r.attempt),[1,2]);
 });
 
 test('host spawn failures do not change provider routes',async()=>{

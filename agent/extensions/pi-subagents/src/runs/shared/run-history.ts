@@ -4,7 +4,7 @@ import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "./pi-spawn.
 import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../../shared/file-system-retry.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
+import { getAgentDir, lastAssistantStopReason, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
 import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
@@ -36,6 +36,7 @@ const LEGACY_REASON: Record<string, string> = {
 function structuredEvidenceOf(r: any): StructuredFailureEvidence {
 	const text = (value: unknown, max = 128): string | undefined =>
 		typeof value === "string" && value.length <= 4096 ? value.slice(0, max) : undefined;
+	const stopReason = text(r?.stopReason ?? r?.finishReason ?? r?.completionReason ?? lastAssistantStopReason(r?.messages), 64);
 	return {
 		...(typeof r?.stage === "string" ? { stage: r.stage } : {}),
 		...(text(r?.runtimeError, 32) ? { runtimeError: text(r.runtimeError, 32) } : {}),
@@ -52,7 +53,7 @@ function structuredEvidenceOf(r: any): StructuredFailureEvidence {
 		...(r?.toolBudgetBlocked || r?.turnBudgetExceeded || r?.budgetExhausted ? { budgetExhausted: true } : {}),
 		...(r?.timedOut ? { timedOut: true } : {}),
 		...(r?.contextOverflow ? { contextOverflow: true } : {}),
-		...(text(r?.stopReason ?? r?.finishReason ?? r?.completionReason, 64) ? { stopReason: text(r?.stopReason ?? r?.finishReason ?? r?.completionReason, 64) } : {}),
+		...(stopReason ? { stopReason } : {}),
 		...(typeof r?.maxTokens === "number" ? { maxTokens: r.maxTokens } : {}),
 		...(typeof r?.usage?.output === "number" ? { outputTokens: r.usage.output } : {}),
 		...(r?.structuredOutputFailed ? { structuredOutputFailed: true } : {}),

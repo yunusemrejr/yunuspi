@@ -430,7 +430,10 @@ async function run(op, payload, signal) {
             : Date.now() - stats.at > 86400000
               ? "Evidence has not refreshed in over a day. "
               : "";
-      const graph = snapshot(payload.allScopes === true, payload.includeInactive === true);
+      const graph = op === "inspect"
+        ? store.snapshot({ ...(payload.allScopes === true ? {} : { scope: identity.checkoutId }),
+            includeInactive: payload.includeInactive === true, includeNodeProvenance: true })
+        : snapshot(payload.allScopes === true, payload.includeInactive === true);
       if (op === "brief") return agentBrief(graph, {
         ...payload, query: safeText(payload.query ?? "", 1000), caveat,
         maxChars: Math.min(6000, Math.max(400, payload.maxChars ?? 1800)),

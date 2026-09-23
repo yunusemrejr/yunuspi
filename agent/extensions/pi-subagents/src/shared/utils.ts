@@ -381,6 +381,19 @@ export function sumResultsCost(results: SingleResult[]): NonNullable<Details["to
 	return {...total, costDetails:{reported:evidence.reported,estimated:evidence.estimated,unknown:evidence.unknown,subscription:evidence.subscription,seen:evidence.seen,estimatedUsage:evidence.estimatedUsage}};
 }
 
+/** Read transport metadata only. An older failed turn must not override the
+ * final assistant, and a missing terminal reason stays unknown. */
+export function lastAssistantStopReason(messages: Message[] | undefined): string | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	for (let index = messages.length - 1; index >= Math.max(0, messages.length - 64); index--) {
+		const message = messages[index];
+		if (message?.role !== "assistant") continue;
+		return typeof message.stopReason === "string" && /^[a-zA-Z_-]{1,64}$/.test(message.stopReason)
+			? message.stopReason : undefined;
+	}
+	return undefined;
+}
+
 export function compactForegroundResult(result: SingleResult): SingleResult {
 	if (result.progress?.status === "running") return result;
 	const toolCalls = result.toolCalls?.length ? result.toolCalls : extractToolCallSummaries(result.messages);
@@ -403,8 +416,10 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
 	}
 	for (const id of duplicateIds) completed.delete(id);
 	const sourceReads = result.messages ? completed.size : result.reviewEvidence?.sourceReads ?? 0;
+	const stopReason = result.stopReason ?? lastAssistantStopReason(result.messages);
 	return {
 		...result,
+		...(stopReason === undefined ? {} : { stopReason }),
 		reviewEvidence: { sourceReads },
 		task: "[prompt redacted]",
 		messages: undefined,

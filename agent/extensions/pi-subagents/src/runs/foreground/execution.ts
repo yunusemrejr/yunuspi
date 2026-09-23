@@ -1202,6 +1202,8 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			if (evt.type === "message_end" && evt.message) {
 				result.messages!.push(evt.message);
 				if (evt.message.role === "assistant") {
+					result.stopReason = typeof evt.message.stopReason === "string" && /^[a-zA-Z_-]{1,64}$/.test(evt.message.stopReason)
+						? evt.message.stopReason : undefined;
 					addUsageCost(result.usage, evt.message.usage, evt.message.provider, evt.message.model);
 					result.usage.turns++;
 					progress.turnCount = result.usage.turns;
@@ -2141,6 +2143,7 @@ async function runSyncCompletionInner(
 				model: result.model ?? candidate ?? agent.model ?? "default",
 				success: attemptSucceeded,
 				exitCode: result.exitCode,
+				stopReason: result.stopReason,
 				error: result.error,
 				usage: { ...result.usage },
 			};

@@ -963,8 +963,17 @@ function storeSnapshot(db, options = {}) {
   const nodeRows = rowsForSources(db, selectedSources, 'source_nodes');
   const claimRows = rowsForSources(db, selectedSources, 'source_claims');
   const nodesById = new Map();
+  const declarations = options.includeNodeProvenance ? new Map() : null;
   for (const row of nodeRows) {
     if (!selectedSourceIds.has(row.source_id)) continue;
+    // Opt-in entity inspection shares this read transaction with the graph.
+    // Ordinary queries/automatic briefs keep their compact node representation.
+    if (declarations) {
+      const entry = declarations.get(row.node_id) ?? { provenance: [], count: 0 };
+      entry.count++;
+      if (entry.provenance.length < 8) entry.provenance.push(provenanceFromRow(row));
+      declarations.set(row.node_id, entry);
+    }
     const sourceTimestamp = dateMs(row.observed_at) ?? 0;
     const existing = nodesById.get(row.node_id);
     const candidate = {
@@ -1003,7 +1012,11 @@ function storeSnapshot(db, options = {}) {
   }
   const nodes = [...nodesById.values()]
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map(({ _sourceTimestamp: _a, _sourceId: _b, ...node }) => node);
+    .map(({ _sourceTimestamp: _a, _sourceId: _b, ...node }) => {
+      const declaration = declarations?.get(node.id);
+      return declaration ? { ...node, provenance: declaration.provenance,
+        ...(declaration.count > declaration.provenance.length ? { provenanceTruncated: true } : {}) } : node;
+    });
 
   const conflictRows = deriveConflicts(claimRows);
   const conflictKeys = new Set(conflictRows.map(item => stableJson([item.scope, item.subject, item.predicate, item.objects])));

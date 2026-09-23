@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 — 2026-09-23
+
+Isolated skill helpers restore only their selected provider's cached model metadata, preserving tool isolation and provider routing constraints. Reasoning models retain a bounded allowance for both reasoning and an answer; a consumed, textless attempt no longer triggers additional provider attempts. Direct prompt-analysis requests enforce proven free-route price caps at dispatch. Foreground and background child receipts preserve output-limit causes. Guardian notes distinguish a standby failure detector from unavailable WASM, and output limits are displayed as limits rather than broken models.
+
+Automatic project intelligence now follows the current file even when the graph revision is unchanged. Entity inspection includes versioned declaration provenance from the same graph used by `/graph`, within the existing output budget.
+
+The [async integration review](docs/UNREAL-INTEGRATION-REVIEW.md) maps Unreal Agent-inspired behavior to executed YunusPi paths and tests, including completion batching, parallel tool barriers, cache stability and OS-isolated experiments. It documents foreground steering limits and makes no unmeasured billing-savings claim.
+
 ## 0.4.0 — 2026-09-23
 
 Agents gain bounded workspace and local-mail search, hash-checked message reading, inert SSH connection planning and explicit SSH banner inspection. `claim_check` verifies exact quotations and current file provenance; interpretations remain subject to review. Tools stay behind existing discovery, utility workers and authority boundaries.

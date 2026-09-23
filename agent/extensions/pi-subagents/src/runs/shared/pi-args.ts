@@ -33,7 +33,7 @@ import {
 	type ResolvedToolBudget,
 	type RunFanoutBudgetDescriptor,
 } from "../../shared/types.ts";
-import { THINKING_LEVELS } from "../../shared/model-info.ts";
+import { THINKING_LEVELS, splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { decodeThinkingCeiling, intersectThinkingCeilings, SUBAGENT_THINKING_CEILING_ENV } from "../../shared/thinking-ceiling.ts";
 import { encodeRunFanoutBudgetDescriptor, RUN_FANOUT_BUDGET_ENV } from "./run-fanout-budget.ts";
 import {
@@ -63,7 +63,7 @@ import {
 	type PermissionRules,
 } from "./permissions.ts";
 import { PI_GIT_AUTHORITY_ENV } from "../../../../lib/git-authority.ts";
-import { encodeSubagentModelRouteCandidate, SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV, type ModelRouteCandidate } from "../../shared/model-route.ts";
+import { decodeSubagentModelRouteCandidate, encodeSubagentModelRouteCandidate, SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import {
 	SUBAGENT_CAPABILITY_CEILING_ENV,
 	capabilityCeilingAgentRestrictionSources,
@@ -741,6 +741,9 @@ function escapeXmlAttr(value: string): string {
 export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	const encodedRouteCandidate = encodeSubagentModelRouteCandidate(input.modelRouteCandidate);
 	if (input.modelRouteCandidate && !encodedRouteCandidate) throw new Error("The child model route or provider constraints cannot be encoded safely; the child was not launched.");
+	const routeCandidate = decodeSubagentModelRouteCandidate(encodedRouteCandidate);
+	if (routeCandidate && (!input.model || splitKnownThinkingSuffix(input.model).baseModel !== routeCandidate.route))
+		throw new Error("The child model does not match its selected route; the child was not launched.");
 	const args = [...input.baseArgs];
 
 	if (input.sessionFile) {
@@ -758,6 +761,9 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 
 	const modelArg = applyThinkingSuffix(input.model, input.thinking);
 	if (modelArg) {
+		// A managed candidate is already registry-qualified. Pin its provider
+		// explicitly so CLI fuzzy lookup cannot cross providers if it is absent.
+		if (routeCandidate) args.push("--provider", routeCandidate.route.slice(0, routeCandidate.route.indexOf("/")));
 		args.push("--model", modelArg);
 	}
 
@@ -852,6 +858,9 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	const env: Record<string, string | undefined> = {};
 	env[OPERATIONAL_ECONOMY_ROUTES_ENV] = operationalAdmissionRoutes([...(input.model ? [input.model] : []), ...(input.modelCandidates ?? [])]);
 	env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV] = encodedRouteCandidate;
+	// An isolated child still needs the selected provider's cached model data.
+	// Never inherit this flag into an ordinary child with ambient extensions.
+	env.PI_SUBAGENT_CACHED_MODEL_PROVIDER = toolPlan.disableAmbientExtensions && encodedRouteCandidate ? "1" : undefined;
 	env[PI_SUBAGENT_EXTENSION_BINDINGS_ENV] = encodeExtensionBindings(input.extensionBindings);
 	const piPackageRoot =
 		process.env[PI_CODING_AGENT_PACKAGE_ROOT_ENV] ?? resolvePiPackageRoot();

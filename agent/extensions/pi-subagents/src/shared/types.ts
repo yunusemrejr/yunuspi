@@ -966,6 +966,8 @@ export interface ModelAttempt {
 	model: string;
 	success: boolean;
 	exitCode?: number | null;
+	/** Last assistant transport stop reason for this attempt, separate from process exit. */
+	stopReason?: string;
 	error?: string;
 	usage?: Usage;
 }
@@ -1233,6 +1235,8 @@ export interface SingleResult {
 	/** Resolved launch context for this child. */
 	context?: "fresh" | "fork";
 	exitCode: number;
+	/** Last assistant transport stop reason, retained after transcript compaction. */
+	stopReason?: string;
 	processSignal?: string | null;
 	timeoutRecovery?: TimeoutRecoverySummary;
 	detached?: boolean;

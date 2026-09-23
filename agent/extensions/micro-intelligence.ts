@@ -31,6 +31,7 @@ import { resolvePromptAnalysisPreferenceChain } from "./pi-subagents/src/runs/sh
 import { loadModelEconomyConfig } from "./pi-subagents/src/runs/shared/model-economy.ts";
 import { selectAffordableModel } from "./pi-subagents/src/runs/shared/model-selection.ts";
 import { findModelInfo, toModelInfo } from "./pi-subagents/src/shared/model-info.ts";
+import { capFreeRequest, isProvenFreeRoute } from "./pi-subagents/src/runs/shared/free-route-evidence.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 const PROMPT_ANALYSIS_EVENT = "guardian:prompt-analysis:v1";
@@ -289,6 +290,10 @@ function makeCandidate(
   metrics: ReturnType<typeof microMetrics>,
   completePromptAnalysis: MicroDependencies["completePromptAnalysis"],
 ): PromptAnalysisCandidate {
+  // This direct SDK request does not pass through the agent's provider hooks.
+  // Retain the admission-time free obligation across asynchronous auth, then
+  // revalidate the actual wire model and current price evidence before dispatch.
+  const requireFreeDispatch = isProvenFreeRoute(entry.model);
   return {
     route: entry.route,
     complete: async ({ prompt: analysisPrompt, maxTokens, signal }) => {
@@ -297,7 +302,13 @@ function makeCandidate(
         ? { ...entry.model, compat: { ...(entry.model.compat ?? {}), openRouterRouting: entry.providerRouting } }
         : entry.model;
       const context = { messages: [{ role: "user", content: [{ type: "text", text: analysisPrompt }], timestamp: Date.now() }] };
-      const options = { maxTokens, signal, ...(entry.thinking ? { reasoning: entry.thinking } : {}) };
+      const options = { maxTokens, signal, ...(entry.thinking ? { reasoning: entry.thinking } : {}),
+        ...(requireFreeDispatch ? { onPayload: (payload: Record<string, any>, model: any) => {
+          if (model?.provider !== entry.model.provider || model?.id !== entry.model.id)
+            throw Object.assign(new Error("Prompt analysis free route changed before dispatch"), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
+          return capFreeRequest(payload, model);
+        } } : {}),
+      };
       // The registry owns native provider dispatch, OAuth/base URL overrides
       // and auth cancellation. Using the global compatibility API bypasses
       // providers registered by this session. Keep a legacy adapter for older

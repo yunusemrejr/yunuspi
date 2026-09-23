@@ -79,6 +79,13 @@ test('registered activity renderer produces bounded TUI lines for each flowing l
   }
   assert.match(plain(new CustomMessageComponent(sent.find(message=>message.details.kind==='intelligence.activity'&&message.details.detail.includes('added to model context')),renderer).render(120)),/added to model context.*2048 characters saved/);
   assert.match(plain(new CustomMessageComponent(sent.find(message=>message.details.detail.includes('returned exact excerpts')),renderer).render(120)),/returned exact excerpts.*1234 characters omitted/);
+  activity.note('model.skip',{route:'fixture/reasoning-model',outcome:'length-stop'});
+  const limited = sent.at(-1);
+  assert.equal(limited.details.status,'skip','an output ceiling is not a failed model route');
+  assert.match(plain(new CustomMessageComponent(limited,renderer).render(120)),/output limit reached/);
+  assert.equal(limited.excludeFromContext,true);
+  activity.note('model.skip',{route:'fixture/failed-model',outcome:'provider-error'});
+  assert.equal(sent.at(-1).details.status,'error','real provider errors stay visible');
  } finally {
   activity?.dispose();
   for(const extension of extensions)for(const shutdown of extension.handlers.get('session_shutdown')??[])await shutdown({type:'session_shutdown'},{});

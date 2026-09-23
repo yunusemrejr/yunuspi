@@ -233,6 +233,7 @@ interface SubagentRunConfig {
 }
 
 interface StepResult {
+	stopReason?: string;
 	agent: string;
 	/** Human-readable display name for the child session, when derived at launch. */
 	sessionName?: string;
@@ -554,6 +555,7 @@ interface ChildEvent {
 }
 
 interface RunPiStreamingResult {
+	stopReason?: string;
 	stderr: string;
 	exitCode: number | null;
 	messages: Message[];
@@ -715,6 +717,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 		const messages: Message[] = [];
 		const usage = emptyUsage();
 		let model: string | undefined;
+		let stopReason: string | undefined;
 		let writerRegistrationError: string | undefined;
 		if (typeof child.pid === "number") {
 			processTreeController = createOwnedProcessTreeController(child.pid);
@@ -914,6 +917,8 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				if (text) writeOutputText(text);
 
 				if (event.type !== "message_end" || event.message.role !== "assistant") return;
+				stopReason = typeof event.message.stopReason === "string" && /^[a-zA-Z_-]{1,64}$/.test(event.message.stopReason)
+					? event.message.stopReason : undefined;
 				const hasToolCall = assistantStartsToolCall(event.message);
 				if (event.message.model) {
 					model = event.message.provider && !event.message.model.startsWith(`${event.message.provider}/`) ? `${event.message.provider}/${event.message.model}` : event.message.model;
@@ -1184,6 +1189,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				stderr,
 				exitCode: timedOut || stopped ? 1 : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? 0 : forcedTerminationSignal || signal ? (exitCode ?? 1) : exitCode,
 				messages,
+				stopReason,
 				usage,
 				toolCount,
 				durationMs: Date.now() - startedAt,
@@ -1229,7 +1235,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();
 			const spawnErrorMessage = spawnError instanceof Error ? spawnError.message : String(spawnError);
 			__piSubagentGate.release(__subagentSlot);
-			resolve(omitUndefinedProperties({ stderr, exitCode: 1, messages, usage, toolCount, durationMs: Date.now() - startedAt, model, error: stopped ? (stopMessage ?? "Subagent stopped by user.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : error ?? assistantError ?? spawnErrorMessage, protocolError, finalOutput: (timedOut || stopped) && !finalOutput.trim() ? (stopped ? stopMessage ?? "Subagent stopped by user." : timeoutMessage ?? "Subagent timed out.") : finalOutput, outputState: finalOutput.trim() ? "present" : "absent", timedOut, stopped, observedMutationAttempt, structuredOutputToolInvoked, structuredOutputMessageStartIndex, watchdog: childWatchdogState, processInstanceId, processTree: { state: "unknown", reason: "verification-failed", diagnostic: spawnErrorMessage } }));
+			resolve(omitUndefinedProperties({ stderr, exitCode: 1, messages, stopReason, usage, toolCount, durationMs: Date.now() - startedAt, model, error: stopped ? (stopMessage ?? "Subagent stopped by user.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : error ?? assistantError ?? spawnErrorMessage, protocolError, finalOutput: (timedOut || stopped) && !finalOutput.trim() ? (stopped ? stopMessage ?? "Subagent stopped by user." : timeoutMessage ?? "Subagent timed out.") : finalOutput, outputState: finalOutput.trim() ? "present" : "absent", timedOut, stopped, observedMutationAttempt, structuredOutputToolInvoked, structuredOutputMessageStartIndex, watchdog: childWatchdogState, processInstanceId, processTree: { state: "unknown", reason: "verification-failed", diagnostic: spawnErrorMessage } }));
 		});
 	});
 }
@@ -1450,6 +1456,7 @@ async function runSingleStepInner(
 				model: imported.model,
 				attemptedModels: imported.attemptedModels,
 				modelAttempts: imported.modelAttempts,
+				stopReason: imported.modelAttempts?.at(-1)?.stopReason,
 				contextOverflow: imported.contextOverflow,
 				totalCost: imported.totalCost,
 				usage: imported.usage,
@@ -2066,6 +2073,7 @@ async function runSingleStepInner(
 			model: candidate ?? run.model ?? step.model ?? "default",
 			success: effectiveExitCode === 0 && !error,
 			exitCode: effectiveExitCode,
+			stopReason: run.stopReason,
 			error,
 			usage: run.usage,
 		});
@@ -2329,6 +2337,7 @@ async function runSingleStepInner(
 		output: outputForSummary,
 		outputState,
 		exitCode: effectiveFinalExitCode,
+		stopReason: finalResult?.stopReason,
 		error: effectiveFinalError,
 		protocolError: finalResult?.protocolError,
 		sessionFile: step.sessionFile,
@@ -2995,6 +3004,7 @@ async function runSubagent(
 				model: step.model,
 				attemptedModels: step.attemptedModels,
 				modelAttempts: step.modelAttempts,
+				stopReason: step.modelAttempts?.at(-1)?.stopReason,
 				usage: usageFromAttempts(step.modelAttempts),
 				contextOverflow: step.contextOverflow,
 			})),
@@ -4632,6 +4642,7 @@ async function runSubagent(
 					model: pr.model,
 					attemptedModels: pr.attemptedModels,
 					modelAttempts: pr.modelAttempts,
+					stopReason: pr.stopReason,
 					contextOverflow: pr.contextOverflow,
 					totalCost: pr.totalCost,
 					usage: pr.usage,
@@ -5073,6 +5084,7 @@ async function runSubagent(
 						model: pr.model,
 						attemptedModels: pr.attemptedModels,
 						modelAttempts: pr.modelAttempts,
+						stopReason: pr.stopReason,
 						contextOverflow: pr.contextOverflow,
 						totalCost: pr.totalCost,
 						usage: pr.usage,
@@ -5326,6 +5338,7 @@ async function runSubagent(
 				model: singleResult.model,
 				attemptedModels: singleResult.attemptedModels,
 				modelAttempts: singleResult.modelAttempts,
+				stopReason: singleResult.stopReason,
 				contextOverflow: singleResult.contextOverflow,
 				totalCost: singleResult.totalCost,
 				usage: singleResult.usage,
@@ -5746,6 +5759,7 @@ async function runSubagent(
 				model: r.model,
 				attemptedModels: r.attemptedModels,
 				modelAttempts: r.modelAttempts,
+				stopReason: r.stopReason,
 				contextOverflow: r.contextOverflow,
 				totalCost: r.totalCost,
 				usage: r.usage,

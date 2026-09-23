@@ -19,7 +19,7 @@ The `project_intel` tool supports:
 | --- | --- |
 | `query` | Relevant architecture, dependencies, configuration and durable history |
 | `impact` | Incoming consumers/dependents around an entity before changes |
-| `inspect` | Entity evidence by exact key/ID, or source claims and the current source version |
+| `inspect` | Entity declarations, confidence and versioned provenance by exact key/ID, or source claims and the current source version |
 | `update` | Replace an agent record using its source ID and observed version |
 | `record` | A concise durable decision, constraint, finding or relationship |
 | `retract` | Withdraw an observed agent record using its source ID and version |
@@ -32,6 +32,7 @@ Example queries:
 ```json
 {"action":"query","query":"authentication deployment"}
 {"action":"impact","focus":"src/api.ts","hops":2,"relations":["imports"]}
+{"action":"inspect","focus":"src/api.ts","hops":0,"maxChars":3000}
 {"action":"query","query":"production","allScopes":true}
 ```
 
@@ -50,6 +51,15 @@ A bounded result marks omitted evidence; unrelated project data is not treated
 as omitted search results. `includeInactive` includes retained stale or expired
 evidence. Retracted claims leave the graph; inspect their source and history for
 the withdrawal receipt.
+
+Agents and `/graph` read the same project store. A focused `inspect` includes
+declaration sources even when an entity has no relationships or literal facts;
+their versions, observation times and checkout scopes explain where the entity
+came from. These declarations are read in the same snapshot as the returned
+graph revision. At most eight declaration sources per entity enter the result;
+`truncated` marks additional or budget-omitted evidence. Use a returned `sourceId`
+with `inspect` or `history` for details. Confidence and observed status describe
+the recorded evidence, not an independent proof that it is currently correct.
 
 An agent can add information that files do not adequately express:
 
@@ -115,6 +125,9 @@ evidence into child handoffs. The viewer is an optional inspection surface.
   their actual file set. Refresh preserves this focus until the task or tool
   changes it. An unavailable retrieval is labeled instead of reusing old context
   as evidence for a different target. Missing links never prove independence.
+  A different indexed target replaces the capsule even when the graph revision
+  has not changed. Identical evidence retains its cache anchor; new results
+  replace one bounded capsule rather than accumulating graph messages.
 - Native write/edit observations contribute historical change-to-file links.
   These record observed writes, not a claim that tests or deployment succeeded.
 - Git, shell, memory and child completion events schedule a debounced refresh.

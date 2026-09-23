@@ -200,17 +200,26 @@ export function registerSkillDiscoveryRunner(pi: any, deps: SkillDiscoveryRunner
       };
       let current = await runAttempt();
       if (current.stale) return;
-      // Bounded retries on instant failure only: no output text means the
-      // child never really ran (provider outage, dead credits, unresolvable
-      // route), so each untried member is a new attempt at the SAME unit —
+      // Bounded retries on startup failure only. A reasoning-only answer can
+      // consume the output allowance without visible text; it is a genuine
+      // attempt, not a free retry. Each untried member is the SAME unit —
       // same runId/grant, same budget claim, same deadline — never a new
       // flow. A child that produced text made a genuine attempt and is never
       // retried. Each superseded attempt is journaled as "retried" telemetry
       // (metrics only, no indicator line); the final outcome alone decides
       // the receipt and any indicator.
       const localFailure = (attempt: any) => ['internal','permission','dependency'].includes(failureOf(attempt.row ?? helperLaunchFailure(attempt.thrown, runId)).cause.category);
+      const consumedAttempt = (attempt: any) => {
+        const row = attempt.row;
+        if (failureOf(row).cause.category === 'output-truncated') return true;
+        if (['input','output','reasoning','cacheRead','cacheWrite','cost'].some(key => typeof row?.usage?.[key] === 'number' && row.usage[key] > 0)) return true;
+        return Array.isArray(row?.messages) && row.messages.some((message: any) => message?.role === 'assistant' && (
+          ['length','max_tokens'].includes(message.stopReason)
+          || Array.isArray(message.content) && message.content.some((part: any) => part?.type === 'toolCall' || typeof part?.thinking === 'string' && part.thinking.trim().length > 0)
+        ));
+      };
       const tried = new Set<string>([member!.route.split(":")[0]]);
-      while (!current.ok && !current.body && !localFailure(current) && !signal.aborted && owns() && attempts < SKILL_DISCOVERY_LIMITS.attempts) {
+      while (!current.ok && !current.body && !consumedAttempt(current) && !localFailure(current) && !signal.aborted && owns() && attempts < SKILL_DISCOVERY_LIMITS.attempts) {
         const backup = selectBackup?.(tried);
         if (!backup || tried.has(backup.route.split(":")[0])) break;
         receipt("failed", current.row, (current as { thrown?: unknown }).thrown);

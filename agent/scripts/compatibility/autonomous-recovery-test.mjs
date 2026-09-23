@@ -16,6 +16,10 @@ delete process.env.PI_SUBAGENT_CHILD;
 // earlier run (e.g. a leaked 401) must not refuse this run's synthetic routes.
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "model-exclusions.json");
 process.env.PI_PROVIDER_STATE_FILE = path.join(root, "provider-health.json");
+process.env.PI_LLM_PREFERENCES_FILE = path.join(root, "llm-preferences.json");
+process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(root, "economy.json");
+fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, "{}");
+fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, "{}");
 // The offline guard below forbids non-loopback sockets. Proxy variables would
 // tunnel those requests through the proxy host instead, so the suite that
 // asserts hermetic offline behavior must not inherit them.
@@ -690,6 +694,8 @@ try {
   "REAL async helpers stay bounded while provider recovery cancels pending work",
   exit === 0 && requests.filter((r) => r.model.startsWith("free/") && !isParent(r)).length <= 2,
  );
+ if(requests.some(r=>r.model.startsWith("free/")&&(r.provider?.max_price?.prompt!==0||r.provider?.max_price?.completion!==0)))
+  console.log("FREE CAP DIAGNOSTIC",JSON.stringify(requests.map(r=>({model:r.model,parent:isParent(r),provider:r.provider,max_tokens:r.max_tokens,max_completion_tokens:r.max_completion_tokens}))));
  check(
   "REAL free wire zero caps",
   requests
@@ -712,7 +718,7 @@ try {
    .readFileSync(path.join(root, "session.jsonl"), "utf8")
    .includes("503 unavailable"),
  );
- const workerEnv={...env,PI_SUBAGENT_CHILD:"1",PI_AUTONOMOUS_FREE_ASSIST:"0",PI_SUBAGENT_RECOVERY_ROUTES:JSON.stringify(["openrouter/free/a","openrouter/free/b"]),PI_PROVIDER_STATE_FILE:path.join(root,"worker-health.json")};
+ const workerEnv={...env,PI_SUBAGENT_CHILD:"1",PI_AUTONOMOUS_FREE_ASSIST:"0",PI_SUBAGENT_MODEL_ROUTE_CANDIDATE:JSON.stringify({route:"openrouter/free/a"}),PI_SUBAGENT_RECOVERY_ROUTES:JSON.stringify(["openrouter/free/a","openrouter/free/b"]),PI_PROVIDER_STATE_FILE:path.join(root,"worker-health.json")};
  const worker=spawn(wrapper,["-p","--offline","--mode","json","--provider","openrouter","--model","free/a","--thinking","off","--tools","read","--no-extensions","-e",path.join(agent,"extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts"),"--session",path.join(root,"worker-session.jsonl"),`${workerMarker}: Read ${workerDataPath} once, then report its evidence.`],{cwd:root,env:workerEnv,stdio:["ignore","pipe","pipe"],detached:true});
  let workerOut="",workerErr="";worker.stdout.on("data",b=>workerOut+=b);worker.stderr.on("data",b=>workerErr+=b);
  const workerTimer=setTimeout(()=>{try{process.kill(-worker.pid,"SIGKILL");}catch{}},120000);

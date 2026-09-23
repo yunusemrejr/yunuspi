@@ -111,14 +111,14 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 		const activity = session => session.messages.filter(message => message.customType === "harness-activity");
 		const guardian = activity(a.session).filter(message => message.details.kind === "guardian.observing");
 		assert.equal(guardian.length, 2);
-		assert.match(guardian[0].details.detail, /1 tool results.*WASM not needed/);
-		assert.match(guardian[1].details.detail, /2 tool results.*WASM not needed/);
+		assert.match(guardian[0].details.detail, /1 tool results.*failure detector on standby/);
+		assert.match(guardian[1].details.detail, /2 tool results.*failure detector on standby/);
 		assert.equal(activity(b.session).filter(message => message.details.kind.startsWith("guardian.")).length, 0);
 		assert.equal(activity(a.session).filter(message => message.details.label === "Fuzzy matching").length, 2);
 		assert.equal(activity(b.session).filter(message => message.details.label === "Fuzzy matching").length, 1);
 		assert.ok(activity(a.session).every(message => message.excludeFromContext === true));
 		assert.equal(a.calls(), 4); assert.equal(b.calls(), 2);
-		assert.doesNotMatch(JSON.stringify(a.contexts), /guardian\.observing|Fuzzy matching|WASM not needed/);
+		assert.doesNotMatch(JSON.stringify(a.contexts), /guardian\.observing|Fuzzy matching|failure detector on standby/);
 		assert.equal(a.session._guardian.handleCommand("/guardian stats").stats.classifierEvaluations, 0);
 		assert.equal(a.session._guardian.handleCommand("/guardian status").kernel, "lazy");
 		const failing = await makeSession(true);

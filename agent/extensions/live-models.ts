@@ -1606,6 +1606,26 @@ function refreshFor(
 
 // ── Registration ───────────────────────────────────────────────────────
 
+/** Restore the selected dynamic provider for an extension-isolated child.
+ * This is catalog data, not an ambient extension: no tools, commands, session
+ * hooks, network refreshes or inference probes are installed. Unknown routes
+ * remain unresolved; the ordinary CLI resolver still owns model selection. */
+export function registerCachedChildModelProvider(pi: Pick<ExtensionAPI, "registerProvider">, route: string): boolean {
+	const slash = route.indexOf("/");
+	if (slash < 1) return false;
+	const provider = route.slice(0, slash), id = route.slice(slash + 1);
+	if (!id || !Object.hasOwn(REFRESHERS, provider)) return false;
+	const wire = wireFor(provider);
+	const refresh = refreshFor(provider);
+	pi.registerProvider(provider, {
+		baseUrl: wire.baseUrl,
+		api: wire.api,
+		refreshModels: async context => (await refresh({ ...context, allowNetwork: false }))
+			.filter(model => model.id === id),
+	} satisfies ProviderConfig);
+	return true;
+}
+
 export default async function registerLiveModels(
 	pi: ExtensionAPI,
 ): Promise<void> {

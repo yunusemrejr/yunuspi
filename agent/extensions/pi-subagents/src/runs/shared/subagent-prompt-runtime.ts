@@ -60,13 +60,26 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
    payload.provider={...provider,max_price:cap};
   }
  }
- const outputLimit = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery" ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens;
+ // Reasoning tokens share the provider's output allowance. A 1024-token
+ // discovery cap can consume the whole response before producing any JSON,
+ // especially when an explicitly configured route requests high reasoning.
+ // Keep the ordinary helper ceiling for those models; the parent still owns
+ // the cumulative token, cost and deadline budgets and the bounded JSON result.
+ const discovery = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery";
+ const outputLimit = discovery && !model.reasoning ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens;
  const fields=["max_tokens","max_completion_tokens","max_output_tokens"].filter(key=>Object.hasOwn(payload,key));
  if(!fields.length) fields.push(model.api==="openai-responses"?"max_output_tokens":"max_tokens");
  for(const field of fields) {
   const prior=payload[field];
   if(prior!==undefined && (!Number.isSafeInteger(prior)||prior<=0))throw new Error("Invalid helper output budget");
   payload={...payload,[field]:Math.min(prior??outputLimit,outputLimit,model.maxTokens || outputLimit)};
+ }
+ // Anthropic's explicit thinking budget must remain below max_tokens after
+ // the helper cap. Reserve the same short answer allowance as discovery.
+ if(payload.thinking?.type === "enabled" && Number.isSafeInteger(payload.thinking.budget_tokens) && payload.thinking.budget_tokens > 0 && Number.isSafeInteger(payload.max_tokens)) {
+  const budget = Math.min(payload.thinking.budget_tokens, payload.max_tokens - 1024);
+  if(budget < 1024) throw new Error("Helper output budget cannot fit enabled thinking and an answer");
+  payload={...payload,thinking:{...payload.thinking,budget_tokens:budget}};
  }
  return payload;
 }
@@ -201,13 +214,22 @@ export function rewriteSubagentModelRouteRequest(
 	return { ...(event.payload as Record<string, unknown>), provider: candidate.providerRouting };
 }
 
-/** The candidate is bound to one exact route in this child process and only
- * rewrites that route's outgoing request. This remains correct across model
- * refreshes and cannot mutate registry-shared model metadata. */
+/** Validate the parent's exact route at the first dispatch, before any model
+ * request. Later admitted recovery remains owned by registerAutonomousRecovery;
+ * the original upstream pin applies only to its own route and is never copied
+ * to a recovery route. Model refreshes do not reset this startup check. */
 export function registerSubagentModelRouteOverride(pi: ExtensionAPI): void {
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: unknown, ctx?: ExtensionContext) => unknown) => void;
 	const candidate = decodeSubagentModelRouteCandidate(process.env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV]);
-	onRuntimeEvent("before_provider_request", (event, ctx) => rewriteSubagentModelRouteRequest(event as BeforeProviderRequestEvent, ctx, candidate));
+	let initialRouteValidated = !candidate;
+	onRuntimeEvent("before_provider_request", (event, ctx) => {
+		if (!initialRouteValidated) {
+			if (!ctx?.model || `${ctx.model.provider}/${ctx.model.id}` !== candidate!.route)
+				throw Object.assign(new Error("Blocked: child model does not match its selected route; no provider request was sent."), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
+			initialRouteValidated = true;
+		}
+		return rewriteSubagentModelRouteRequest(event as BeforeProviderRequestEvent, ctx, candidate);
+	});
 }
 
 function findSectionEnd(prompt: string, startIndex: number, nextHeaders: string[]): number {
@@ -801,7 +823,17 @@ export function registerGitAuthorityGate(pi: ExtensionAPI): void {
 	);
 }
 
-export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
+export async function registerSubagentCachedModelProvider(pi: ExtensionAPI): Promise<void> {
+	if (process.env.PI_SUBAGENT_CHILD !== "1" || process.env.PI_SUBAGENT_CACHED_MODEL_PROVIDER !== "1") return;
+	const candidate = decodeSubagentModelRouteCandidate(process.env[SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV]);
+	if (!candidate) throw new Error("Isolated child is missing its selected model route.");
+	const { registerCachedChildModelProvider } = await import("../../../../live-models.ts");
+	registerCachedChildModelProvider(pi, candidate.route);
+}
+
+export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): Promise<void> {
+	if (process.env.PI_SUBAGENT_CHILD === "1" && process.env.PI_SUBAGENT_CACHED_MODEL_PROVIDER === "1")
+		await registerSubagentCachedModelProvider(pi);
 	registerRuntimeExtensionAcknowledgements(pi);
 	registerSteeringInbox(pi);
 	registerPermissionGate(pi);

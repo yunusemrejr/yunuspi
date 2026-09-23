@@ -11,6 +11,33 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find((p) =>
 assert.ok(agent, 'agent tree with failure-cause.ts is present');
 const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/')).href;
 const { classifyFailure, hashRequestShape, mayRetryShape, healthImpactForCause } = await import(shared + 'failure-cause.ts');
+const { failureOf, projectRunEvidence } = await import(shared + 'run-history.ts');
+const { compactForegroundResult, lastAssistantStopReason } = await import(shared + '../../shared/utils.ts');
+
+test('last assistant transport truncation survives compact receipts without treating token counts or text as evidence', () => {
+  const terminal = stopReason => ({ role: 'assistant', stopReason, content: [{ type: 'text', text: 'private fixture output' }] });
+  for (const stopReason of ['length', 'max_tokens']) {
+    const original = { exitCode: 1, error: 'child-error', messages: [terminal(stopReason)], usage: { output: 1024, reasoning: 1021 } };
+    const compact = compactForegroundResult(original);
+    assert.equal(compact.stopReason, stopReason);
+    assert.equal(compact.messages, undefined);
+    assert.equal(compactForegroundResult(compact).stopReason, stopReason);
+    for (const result of [original, compact]) {
+      const { cause, reason } = failureOf(result);
+      assert.equal(reason, 'truncated');
+      assert.equal(cause.category, 'output-truncated');
+      assert.equal(cause.truncation, 'length-stop');
+      assert.deepEqual(healthImpactForCause(cause), { cool: false, scope: 'none' });
+      assert.doesNotMatch(JSON.stringify(projectRunEvidence(result)), /private fixture output/);
+    }
+  }
+  const recovered = { exitCode: 0, messages: [terminal('length'), terminal('stop')] };
+  assert.equal(failureOf(compactForegroundResult(recovered)).reason, undefined);
+  assert.equal(failureOf({ exitCode: 1, messages: [terminal('length'), terminal(undefined)] }).reason, 'unknown');
+  assert.equal(failureOf({ exitCode: 1, maxTokens: 1024, usage: { output: 1024, reasoning: 1021 }, messages: [{ role: 'toolResult', stopReason: 'length', content: [{ type: 'text', text: 'stopReason: length' }] }] }).reason, 'unknown');
+  assert.equal(lastAssistantStopReason([terminal('length'), ...Array.from({ length: 64 }, () => ({ role: 'toolResult' }))]), undefined, 'legacy lookup scans a bounded tail');
+  assert.equal(lastAssistantStopReason([terminal('length'.repeat(100))]), undefined, 'transport metadata stays bounded');
+});
 
 test('structured evidence outranks incidental text', () => {
   const cause = classifyFailure({ providerCode: 503, exitCode: 1, message: 'select schema, budget from t; all good' });

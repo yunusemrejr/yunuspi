@@ -174,7 +174,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     if (kind === "guardian.observing" || kind === "guardian.evaluated") {
       const count = Number.isSafeInteger(data.count) && Number(data.count) >= 0 ? Number(data.count) : 0;
       const evaluations = Number.isSafeInteger(data.evaluations) && Number(data.evaluations) >= 0 ? Number(data.evaluations) : 0;
-      const wasm = decision === "lazy" ? "WASM not needed" : decision === "quarantined" ? "WASM unavailable"
+      const wasm = decision === "lazy" ? "failure detector on standby" : decision === "quarantined" ? "WASM unavailable"
         : decision === "initializing" ? "WASM initializing" : `${evaluations} WASM evaluations`;
       return { label: kind === "guardian.evaluated" ? "evaluated" : "observing", status: decision === "quarantined" ? "error" : "ok", detail: `${count} tool results · ${wasm}` };
     }
@@ -218,6 +218,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     }
     if (kind === "model.skip") {
       const reason = clean(outcome || decision || "skipped", 24);
+      if (reason === "length-stop") return { label: clean(route || "?", 80), status: "skip", detail: "output limit reached" };
       return { label: clean(route || "?", 80), status: ROUTINE_SKIP.has(reason) ? "skip" : "error", detail: reason };
     }
     if (kind === "local.refresh") {
@@ -356,7 +357,9 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       const lineLabel = d.label;
       const policy = LINE_POLICY[kind];
       if (!policy) return;
-      if (policy === "error" && d.status !== "error") return;
+      // Output exhaustion is visible as a limit, without reporting a broken
+      // model. Ordinary admission skips remain quiet.
+      if (policy === "error" && d.status !== "error" && !(kind === "model.skip" && data.outcome === "length-stop")) return;
       // Child sessions have no TUI: lines would only bloat child context.
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
       const lineStatus = d.status;

@@ -348,7 +348,7 @@ function fitQueryBudget(result, budget) {
   candidate.truncated = true;
   // Provenance is valuable, but one compact source reference is more useful
   // than dropping every relationship/fact to make room for repeated entries.
-  for (const item of [...candidate.edges, ...candidate.facts]) {
+  for (const item of [...candidate.nodes, ...candidate.edges, ...candidate.facts]) {
     if (Array.isArray(item.provenance) && item.provenance.length > 1) item.provenance = item.provenance.slice(0, 1);
   }
   if (Array.isArray(candidate.health?.conflicts)) {
@@ -400,7 +400,7 @@ function fitQueryBudget(result, budget) {
     fitSummary();
   }
   if (serialize(candidate).length > target) {
-    for (const item of [...candidate.edges, ...candidate.facts]) delete item.provenance;
+    for (const item of [...candidate.nodes, ...candidate.edges, ...candidate.facts]) delete item.provenance;
     fitSummary();
   }
   if (serialize(candidate).length > target && candidate.health && Object.keys(candidate.health).length) {
@@ -495,14 +495,15 @@ export function queryGraph(snapshot, options = {}) {
   const relevantFacts = graph.facts.filter(fact => selectedIds.has(fact.subject));
   const poolSize = overview ? ranked.length : traversed.nodes.length;
   const omittedByLimit = candidates.length > roots.length || poolSize > selectedNodes.length || relevantFacts.length > facts.length;
+  const omitted = Boolean(omittedByLimit || selectedNodes.some(node => node.provenanceTruncated));
   const result = {
     revision: Number(snapshot?.revision ?? 0),
-    nodes: selectedNodes.map(node => ({ ...node, ...(traversed.distances.has(node.id) ? { distance: traversed.distances.get(node.id) } : {}), ...(traversed.via.has(node.id) ? { via: traversed.via.get(node.id) } : {}) })),
+    nodes: selectedNodes.map(node => ({ ...compactEvidence(node, graph.sources, Boolean(safeOptions.includeInactive)), ...(traversed.distances.has(node.id) ? { distance: traversed.distances.get(node.id) } : {}), ...(traversed.via.has(node.id) ? { via: traversed.via.get(node.id) } : {}) })),
     edges: edges.map(edge => compactEvidence(edge, graph.sources, Boolean(safeOptions.includeInactive))),
     facts: facts.map(fact => compactEvidence(fact, graph.sources, Boolean(safeOptions.includeInactive))),
     health: compactHealth(snapshot?.health),
-    truncated: Boolean(omittedByLimit),
-    summary: summaryText(Number(snapshot?.revision ?? 0), query, safeOptions.focus, selectedNodes, edges, facts, snapshot?.health, snapshot?.activity, Boolean(omittedByLimit)),
+    truncated: omitted,
+    summary: summaryText(Number(snapshot?.revision ?? 0), query, safeOptions.focus, selectedNodes, edges, facts, snapshot?.health, snapshot?.activity, omitted),
     _query: query,
     _focus: safeOptions.focus,
     _activity: snapshot?.activity,

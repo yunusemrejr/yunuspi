@@ -33,11 +33,11 @@ async function fixture(run) {
   const opened = [];
   const ctxFor = (id, root = cwd) => ({ cwd: root, sessionManager: { getSessionId: () => id }, ui: { notify() {} } });
   function open(id, root = cwd) {
-    const hooks = new Map();
-    projectIntelligence({ on: (n, fn) => hooks.set(n, fn), registerTool() {}, registerCommand() {}, appendEntry() {} });
+    const hooks = new Map(), tools = new Map();
+    projectIntelligence({ on: (n, fn) => hooks.set(n, fn), registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {}, appendEntry() {} });
     const service = globalThis[key], ctx = ctxFor(id, root);
     opened.push(hooks);
-    return { hooks, ctx, service, call: (request, signal) => service(request, ctx, signal) };
+    return { hooks, tools, ctx, service, call: (request, signal) => service(request, ctx, signal) };
   }
   try { await run({ temp, cwd, other, ctxFor, open }); }
   finally {
@@ -135,4 +135,42 @@ test('project context keeps unchanged evidence anchored across synthetic tool re
   assert.deepEqual(next.messages.slice(first.messages.length), [call, result]);
   const repeated = await context(next.messages);
   assert.deepEqual(repeated.messages, next.messages, 'reprocessing wire context cannot duplicate the capsule');
+}));
+
+test('automatic graph context follows a different indexed target at the same revision and drops unrelated evidence on failure', () => fixture(async ({ open, cwd }) => {
+  for (const target of ['alpha', 'beta']) {
+    await fs.writeFile(path.join(cwd, `${target}.js`), `import { value } from './${target}-dependency.js';\nexport { value };\n`);
+    await fs.writeFile(path.join(cwd, `${target}-dependency.js`), 'export const value = 1;\n');
+  }
+  const session = open('changing-target');
+  await session.tools.get('project_intel').execute('refresh', { action: 'refresh' }, undefined, undefined, session.ctx);
+  const original = IntelligenceClient.prototype.request;
+  const revisions = [];
+  IntelligenceClient.prototype.request = function(op, payload, options) {
+    if (op === 'brief' && payload.focus?.includes('unavailable.js')) return Promise.reject(Error('fixture retrieval failure'));
+    const result = original.call(this, op, payload, options);
+    return op === 'brief' ? result.then(value => { revisions.push(value.revision); return value; }) : result;
+  };
+  try {
+    const user = { role: 'user', content: 'Inspect source dependencies' };
+    const inspect = async (target, messages = [user]) => {
+      await session.hooks.get('tool_call')({ toolName: 'read', toolCallId: target, input: { path: `${target}.js` } }, session.ctx);
+      return session.hooks.get('context')({ messages }, session.ctx);
+    };
+    const first = await inspect('alpha');
+    assert.match(first.messages.find(m => m.customType === 'project-intelligence-context').content, /alpha-dependency/);
+    const second = await inspect('beta', first.messages);
+    const capsule = second.messages.filter(m => m.customType === 'project-intelligence-context');
+    assert.equal(revisions.at(-1), revisions.at(-2), 'changing focus must work without a database write');
+    assert.equal(capsule.length, 1, 'replacement remains one bounded capsule');
+    assert.match(capsule[0].content, /beta-dependency/);
+    assert.match(capsule[0].content, /focus=\["beta\.js"\]/);
+    assert.doesNotMatch(capsule[0].content, /^entity: alpha\.js/m, 'the previous target must not remain the root (it can still be a 2-hop neighbour)');
+    const stable = await inspect('beta', second.messages);
+    assert.deepEqual(stable.messages, second.messages, 'unchanged target/evidence keeps the cache anchor byte-identical');
+    const failed = await inspect('unavailable', stable.messages);
+    const warning = failed.messages.find(m => m.customType === 'project-intelligence-context').content;
+    assert.match(warning, /Current graph retrieval unavailable/);
+    assert.doesNotMatch(warning, /beta-dependency|alpha-dependency/);
+  } finally { IntelligenceClient.prototype.request = original; }
 }));

@@ -2497,7 +2497,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1613
+        "line": 1633
       },
       {
         "name": "claude-cache",
@@ -2542,7 +2542,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 860
+        "line": 852
       },
       {
         "name": "harness-backup",
@@ -3116,7 +3116,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 387,
+        "line": 398,
         "kind": "literal"
       },
       {
@@ -3158,7 +3158,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 736,
+        "line": 728,
         "kind": "literal"
       },
       {
@@ -3261,7 +3261,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 865,
+        "line": 897,
         "kind": "literal"
       },
       {
@@ -3540,7 +3540,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 387,
+        "line": 398,
         "kind": "literal"
       },
       {
@@ -3558,7 +3558,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 736,
+        "line": 728,
         "kind": "literal"
       },
       {
@@ -3630,7 +3630,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 865,
+        "line": 897,
         "kind": "literal"
       },
       {
@@ -6374,6 +6374,10 @@
       {
         "name": "SUBAGENT-CONTRACTS.md",
         "path": "docs/SUBAGENT-CONTRACTS.md"
+      },
+      {
+        "name": "UNREAL-INTEGRATION-REVIEW.md",
+        "path": "docs/UNREAL-INTEGRATION-REVIEW.md"
       }
     ]
   }

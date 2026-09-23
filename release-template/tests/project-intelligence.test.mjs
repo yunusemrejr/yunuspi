@@ -813,6 +813,47 @@ test("agents inspect and correct shared evidence across sessions without stale o
     );
   }));
 
+test("entity inspection exposes declaration provenance from the graph snapshot, with scope and hard output bounds", () =>
+  fixture(async ({ client }) => {
+    const c = client(), info = await c.ready;
+    const store = openStore(info.identity.dbPath);
+    const id = nodeId("component", "standalone-module");
+    const source = (name, scope, options = {}) => ({
+      id: name, scope, kind: "file", locator: `file:src/${name}.js`, fingerprint: name,
+      nodes: [{ id, type: "component", key: "standalone-module", label: "Standalone module", status: "inferred", confidence: 0.65 }],
+      claims: [], ...options,
+    });
+    try {
+      store.replaceSource(source("local-declaration", info.identity.checkoutId));
+      store.replaceSource(source("foreign-declaration", "another-checkout"));
+      store.replaceSource(source("expired-declaration", info.identity.checkoutId, { expiresAt: Date.now() - 1000 }));
+      const options = { focus: "standalone-module", hops: 0, maxChars: 6000 };
+      const inspected = await c.request("inspect", options);
+      assert.equal(inspected.nodes.length, 1);
+      assert.equal(inspected.edges.length, 0);
+      assert.equal(inspected.facts.length, 0);
+      assert.equal(inspected.nodes[0].status, "inferred");
+      assert.equal(inspected.nodes[0].confidence, 0.65);
+      assert.deepEqual(inspected.nodes[0].provenance.map(p => p.sourceId), ["local-declaration"]);
+      assert.equal(inspected.nodes[0].provenance[0].version, 1);
+      assert.equal(inspected.nodes[0].provenance[0].scope, info.identity.checkoutId);
+      assert.match(inspected.nodes[0].provenance[0].observedAt, /^\d{4}-/);
+      assert.equal(inspected.revision, store.revision());
+      assert.doesNotMatch(JSON.stringify(inspected), /foreign-declaration|expired-declaration/);
+      assert.equal((await c.request("query", options)).nodes[0].provenance, undefined, "ordinary queries do not pay for declaration inspection");
+      const all = await c.request("inspect", { ...options, allScopes: true, includeInactive: true });
+      assert.deepEqual(all.nodes[0].provenance.map(p => p.sourceId), ["expired-declaration", "foreign-declaration", "local-declaration"]);
+      for (let i = 0; i < 12; i++) store.replaceSource(source(`extra-${i}`, info.identity.checkoutId));
+      const crowded = await c.request("inspect", options);
+      assert.equal(crowded.truncated, true);
+      assert.ok(crowded.nodes[0].provenance.length <= 8);
+      for (const maxChars of [400, 700, 1800, 6000]) {
+        const bounded = await c.request("inspect", { ...options, maxChars });
+        assert.ok(JSON.stringify(bounded).length <= maxChars, `inspection exceeds ${maxChars} characters`);
+      }
+    } finally { store.close(); }
+  }));
+
 test("retrieval distinguishes missing evidence, directed reachability and paged matches", () => {
   const snapshot = {
     revision: 1,
