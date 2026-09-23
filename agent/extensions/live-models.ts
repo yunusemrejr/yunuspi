@@ -1615,6 +1615,12 @@ export function registerCachedChildModelProvider(pi: Pick<ExtensionAPI, "registe
 	if (slash < 1) return false;
 	const provider = route.slice(0, slash), id = route.slice(slash + 1);
 	if (!id || !Object.hasOwn(REFRESHERS, provider)) return false;
+	// The native composer already owns explicit models.json entries and their
+	// endpoint/compatibility overrides. Installing a cache-only refresh here
+	// would replace that valid list with [] when the cached route is absent.
+	// Leave configured models to their existing owner; no cache is required.
+	const configuredModels = providerConfigJson(provider)?.models;
+	if (Array.isArray(configuredModels) && configuredModels.some(model => model?.id === id)) return false;
 	const wire = wireFor(provider);
 	const refresh = refreshFor(provider);
 	pi.registerProvider(provider, {

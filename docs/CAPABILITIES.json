@@ -2497,7 +2497,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1633
+        "line": 1639
       },
       {
         "name": "claude-cache",
@@ -3861,7 +3861,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 602,
+      "sourceFiles": 603,
       "registrationSites": 65,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 94,

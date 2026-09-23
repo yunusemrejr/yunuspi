@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1 — 2026-09-23
+
+Model routing now distinguishes local catalog/startup errors from provider failures. Historical exclusions created by the CLI's own missing-model diagnostics are reconciled automatically; real provider failures retain their exclusions. Concurrent sessions update the latest exclusion state instead of overwriting it with stale snapshots.
+
+Preference matching accepts provider separator aliases, colon/dot prefixes before vendor namespaces, and model word/number formatting differences. Exact namespace matches take priority, ambiguous aliases remain unresolved, and explicit model revisions, provider boundaries, thinking settings and backend pins remain intact. Dispatch uses the exact catalog ID.
+
+Isolated helpers preserve models explicitly configured in `models.json` when their cached catalog lacks the selected route. Native child startup regressions verify both reported Friendli and OrcaRouter model identities without network requests or inference tokens.
+
 ## 0.5.0 — 2026-09-23
 
 A periodic session observer offers short tool, skill and process advice during active main-agent work. It runs asynchronously about every 4½ minutes, defaults to official DeepSeek Flash with high thinking, and is configured through the existing `/models` role editor or JSON. Idle and unchanged sessions do not trigger inference; requests have bounded context, a deadline and no retry cascade.

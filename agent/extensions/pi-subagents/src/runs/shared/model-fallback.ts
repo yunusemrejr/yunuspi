@@ -6,6 +6,7 @@ import { getSupportedThinkingLevels, splitKnownThinkingSuffix, type ModelInfo as
 import type { Usage } from "../../shared/types.ts";
 import { getAgentDir } from "../../shared/utils.ts";
 import { filterFallbackCandidates, findModelExclusion, parseModelKey, recordModelFailure } from "./model-exclusions.ts";
+import { isLocalModelResolutionFailure } from "./local-model-failure.ts";
 import { checkModelScope, type ModelScopeCheckRule, type ModelScopeViolation, type ModelSource } from "./model-scope.ts";
 import { redactSecretValues } from "./permissions.ts";
 import {
@@ -123,7 +124,10 @@ interface ModelAttemptSummary {
 }
 
 export function splitThinkingSuffix(model: string): { baseModel: string; thinkingSuffix: string } {
-	return splitKnownThinkingSuffix(model);
+	const colon = model.lastIndexOf(":");
+	if (colon < 0) return splitKnownThinkingSuffix(model);
+	const parsed = splitKnownThinkingSuffix(`${model.slice(0, colon)}:${model.slice(colon + 1).toLowerCase()}`);
+	return parsed.thinkingSuffix ? parsed : { baseModel: model, thinkingSuffix: "" };
 }
 
 export function formatSubagentModelVerificationError(expectedModel: string, observedModel: string, availableModels: AvailableModelInfo[] | undefined): string | undefined {
@@ -187,9 +191,16 @@ function stripTrailingDateStamp(segment: string): string {
 	return segment;
 }
 
-function isRegisteredProvider(provider: string, availableModels: AvailableModelInfo[]): boolean {
-	const normalized = normalizeModelSegment(provider);
-	return availableModels.some((entry) => normalizeModelSegment(entry.provider) === normalized);
+/** Formatting aliases are accepted only when they identify one provider.
+ * Literal/case-only names take precedence over separator aliases. */
+function resolveProviderName(provider: string, availableModels: AvailableModelInfo[], names = [...new Set(availableModels.map(entry => entry.provider))]): string | false | undefined {
+	provider = provider.trim();
+	if (names.includes(provider)) return provider;
+	const folded = names.filter(name => name.toLowerCase() === provider.toLowerCase());
+	if (folded.length) return folded.length === 1 ? folded[0] : false;
+	const key = (name: string) => name.toLowerCase().replace(/[._\s-]+/g, "");
+	const formatted = names.filter(name => key(name) === key(provider));
+	return formatted.length === 1 ? formatted[0] : formatted.length ? false : undefined;
 }
 
 /**
@@ -200,22 +211,15 @@ function isRegisteredProvider(provider: string, availableModels: AvailableModelI
 function splitQualifiedModelQuery(
 	baseModel: string,
 	availableModels: AvailableModelInfo[],
-): { queryProvider?: string; queryIdRaw: string } {
-	const slashIdx = baseModel.indexOf("/");
-	if (slashIdx !== -1) {
-		const providerPart = baseModel.slice(0, slashIdx);
-		if (isRegisteredProvider(providerPart, availableModels)) {
-			return { queryProvider: normalizeModelSegment(providerPart), queryIdRaw: baseModel.slice(slashIdx + 1) };
-		}
-		return { queryIdRaw: baseModel };
-	}
-	const providerSeparators = [":", "."];
-	for (const separator of providerSeparators) {
-		const separatorIdx = baseModel.indexOf(separator);
-		if (separatorIdx <= 0) continue;
-		const providerPart = baseModel.slice(0, separatorIdx);
-		if (!isRegisteredProvider(providerPart, availableModels)) continue;
-		return { queryProvider: normalizeModelSegment(providerPart), queryIdRaw: baseModel.slice(separatorIdx + 1) };
+): { queryProvider?: string; queryIdRaw: string; ambiguousProvider?: boolean } {
+	// Prefer the longest registered provider prefix: providers may themselves
+	// contain dots, and a colon/dot prefix may precede a namespaced vendor ID.
+	const providers = [...new Set(availableModels.map(entry => entry.provider))];
+	for (let index = baseModel.length - 1; index > 0; index--) {
+		if (!"/:.".includes(baseModel[index]!)) continue;
+		const provider = resolveProviderName(baseModel.slice(0, index), availableModels, providers);
+		if (provider === false) return { ambiguousProvider: true, queryIdRaw: baseModel.slice(index + 1) };
+		if (provider) return { queryProvider: provider, queryIdRaw: baseModel.slice(index + 1) };
 	}
 	return { queryIdRaw: baseModel };
 }
@@ -227,7 +231,9 @@ function resolveExactIdMatches(
 ): string | undefined {
 	const exactMatches = availableModels.filter((entry) => entry.id === baseModel);
 	if (preferredProvider) {
-		const preferredMatch = exactMatches.find((entry) => entry.provider === preferredProvider);
+		const provider = resolveProviderName(preferredProvider, availableModels);
+		if (provider === false) return undefined;
+		const preferredMatch = exactMatches.find((entry) => entry.provider === provider);
 		if (preferredMatch) return preferredMatch.fullId;
 	}
 	if (exactMatches.length === 1) return exactMatches[0]!.fullId;
@@ -257,9 +263,31 @@ function leafSegment(normalizedId: string): string {
 	return idx === -1 ? normalizedId : normalizedId.slice(idx + 1);
 }
 
+/** Word/number boundaries may be separated differently by catalogs. Preserve
+ * digit groups so versions 3.8, 3.5 and 38 never become the same key. */
+function modelFormatKey(id: string): string {
+	const normalized = normalizeModelSegment(id.split("/").map(segment => segment.trim()).join("/").replace(/\s+/g, "-"))
+		.replace(/([a-z])(\d)/g, "$1-$2").replace(/(\d)([a-z])/g, "$1-$2");
+	return normalized.replace(/-(\d{4})(\d{2})(\d{2})$/, (match, year, month, day) =>
+		isPlausibleDateStamp(year, month, day) ? `-${year}-${month}-${day}` : match);
+}
+
+function modelMatchRank(query: string, id: string): number | undefined {
+	if (id.toLowerCase() === query.toLowerCase()) return 0;
+	if (normalizeModelSegment(id) === normalizeModelSegment(query)) return 1;
+	const wanted = modelFormatKey(query), candidate = modelFormatKey(id);
+	if (candidate === wanted) return 2;
+	const undated = stripTrailingDateStamp(candidate);
+	const acceptsDateAlias = stripTrailingDateStamp(wanted) === wanted;
+	if (acceptsDateAlias && undated === wanted) return 3;
+	if (leafSegment(candidate) === leafSegment(wanted)) return 4;
+	if (acceptsDateAlias && leafSegment(undated) === leafSegment(wanted)) return 5;
+	return undefined;
+}
+
 /**
  * Fuzzy-resolve a base model id (thinking suffix already stripped) against the
- * registry, tolerating separator, case, and optional date-stamp differences so
+ * registry, tolerating separator, case, and unambiguous undated aliases so
  * users do not have to spell provider/model exactly. A slash is a provider
  * prefix only when that prefix is a registered provider; otherwise the whole
  * string is the model id (Hugging Face `owner/name`). When full ids differ,
@@ -267,37 +295,37 @@ function leafSegment(normalizedId: string): string {
  * `zai-org/`) and bare-id configs. A qualified provider query only matches
  * within the named provider — this never silently switches providers for
  * security/cost-sensitive configs. Returns the matched `fullId`, or
- * `undefined` when there is no match or the match is ambiguous across
- * providers (and no `preferredProvider` disambiguates).
+ * `undefined` when there is no match or equally specific identities remain
+ * ambiguous. An explicit dated revision never resolves to a different date.
  */
 export function fuzzyResolveModel(
 	baseModel: string,
 	availableModels: AvailableModelInfo[],
 	preferredProvider?: string,
 ): string | undefined {
-	const { queryProvider, queryIdRaw } = splitQualifiedModelQuery(baseModel, availableModels);
-	const queryId = normalizeModelSegment(queryIdRaw);
-	const queryIdNoDate = stripTrailingDateStamp(queryId);
-	const queryLeaf = leafSegment(queryIdNoDate);
-
-	const candidates = availableModels.filter((entry) => {
-		const entryId = normalizeModelSegment(entry.id);
-		const entryNoDate = stripTrailingDateStamp(entryId);
-		if (entryId !== queryId && entryNoDate !== queryIdNoDate) {
-			const entryLeaf = leafSegment(entryNoDate);
-			if (!queryLeaf || entryLeaf !== queryLeaf) return false;
-		}
-		if (queryProvider !== undefined && normalizeModelSegment(entry.provider) !== queryProvider) return false;
-		return true;
+	const { queryProvider, queryIdRaw, ambiguousProvider } = splitQualifiedModelQuery(baseModel.trim(), availableModels);
+	if (ambiguousProvider || !queryIdRaw) return undefined;
+	// An unknown leading provider in provider/owner/model must not disappear
+	// through leaf matching. Exact nested vendor namespaces still work. An
+	// ambient preferred provider is not authority to discard an unknown scope.
+	const segments = queryIdRaw.split("/");
+	const unresolvedScope = queryProvider === undefined
+		&& (segments.length > 2 || segments.length > 1 && /[.:]/.test(segments[0]!));
+	let candidates = availableModels.flatMap(entry => {
+		if (queryProvider !== undefined && entry.provider !== queryProvider) return [];
+		const rank = modelMatchRank(queryIdRaw, entry.id);
+		return rank === undefined || unresolvedScope && rank >= 4 ? [] : [{ entry, rank }];
 	});
 	if (candidates.length === 0) return undefined;
 	if (preferredProvider) {
-		const preferredProviderNorm = normalizeModelSegment(preferredProvider);
-		const preferred = candidates.filter((entry) => normalizeModelSegment(entry.provider) === preferredProviderNorm);
-		if (preferred.length) return preferred.length === 1 ? preferred[0]!.fullId : undefined;
+		const provider = resolveProviderName(preferredProvider, availableModels);
+		if (provider === false) return undefined;
+		const preferred = candidates.filter(({ entry }) => entry.provider === provider);
+		if (preferred.length) candidates = preferred;
 	}
-	if (candidates.length === 1) return candidates[0]!.fullId;
-	return undefined;
+	const rank = Math.min(...candidates.map(candidate => candidate.rank));
+	const routes = new Set(candidates.filter(candidate => candidate.rank === rank).map(candidate => candidate.entry.fullId));
+	return routes.size === 1 ? [...routes][0] : undefined;
 }
 
 /**
@@ -341,7 +369,7 @@ function resolveSubagentModelCandidate(
 	const constrain = (route: string | undefined): string | undefined => {
 		if (!route || !preferredProvider || queryNamesProvider !== undefined) return route;
 		const winner = availableModels.find((entry) => entry.fullId === route);
-		if (winner && normalizeModelSegment(winner.provider) !== normalizeModelSegment(preferredProvider)) return undefined;
+		if (winner && winner.provider !== resolveProviderName(preferredProvider, availableModels)) return undefined;
 		return route;
 	};
 	const resolvedWhole = resolveBaseModelCandidate(model, availableModels, preferredProvider);
@@ -495,7 +523,7 @@ function resolvePreferenceEntries(role: string, availableModels: AvailableModelI
 		};
 		// The provider field is authoritative even when the vendor model ID
 		// contains an owner namespace which is also a registered provider.
-		const provider = entry.provider ? availableModels.find(model => normalizeModelSegment(model.provider) === normalizeModelSegment(entry.provider!))?.provider ?? entry.provider : undefined;
+		const provider = entry.provider ? resolveProviderName(entry.provider, availableModels) || entry.provider : undefined;
 		const query = provider ? `${provider}/${stripProviderPrefix(entry.model ?? "", provider)}` : (entry.model ?? "");
 		if (!query) continue;
 		const suffix = splitThinkingSuffix(query);
@@ -613,12 +641,24 @@ export function resolveSessionObserverPreferenceChain(availableModels: Available
 		const reportSkip = (route: string, reason: string) => {
 			try { options?.onSkip?.({ role: SESSION_OBSERVER_ROLE, priority: entryIndex + 1, route, reason }); } catch { /* diagnostics must not affect selection */ }
 		};
-		// Aliases are already expanded. Unlike the general preference resolver,
-		// this optional paid observer never fuzzy-matches a model or provider.
+		// Aliases are already expanded. Only canonical formatting is flexible:
+		// observer routes never use owner/leaf or undated revision substitutions.
 		const query = splitThinkingSuffix(entry.model ?? "").baseModel;
-		const exact = models.filter(model => entry.provider
-			? normalizeModelSegment(model.provider) === normalizeModelSegment(entry.provider) && (model.id === query || `${model.provider}/${model.id}` === query)
-			: `${model.provider}/${model.id}` === query || model.id === query);
+		const qualified = splitQualifiedModelQuery(query, models);
+		const provider = entry.provider ? resolveProviderName(entry.provider, models) : qualified.queryProvider;
+		if (provider === false || entry.provider && !provider || !entry.provider && qualified.ambiguousProvider) {
+			reportSkip(query, "configured provider is unavailable or ambiguous");
+			continue;
+		}
+		const formatted = models.flatMap(model => {
+			if (provider && model.provider !== provider) return [];
+			if (source === "default" && (model.provider !== SESSION_OBSERVER_DEFAULT.provider || model.id !== SESSION_OBSERVER_DEFAULT.model)) return [];
+			const queries = [query, ...(qualified.queryProvider === model.provider ? [qualified.queryIdRaw] : [])];
+			const rank = Math.min(...queries.map(value => modelMatchRank(value, model.id) ?? Infinity));
+			return rank <= 2 ? [{ model, rank }] : [];
+		});
+		const bestRank = Math.min(...formatted.map(candidate => candidate.rank));
+		const exact = formatted.filter(candidate => candidate.rank === bestRank).map(candidate => candidate.model);
 		if (new Set(exact.map(model => `${model.provider}/${model.id}`)).size > 1) {
 			reportSkip(query, "model ID is ambiguous; configure its provider");
 			continue;
@@ -1191,6 +1231,7 @@ const TOOL_FAILURE_PREFIX = /^[\w.:@/-]+ failed (?:(?:\(exit \d+\):)|(?:with exi
 
 export function isRetryableModelFailure(error: string | undefined): boolean {
 	if (!error) return false;
+	if (isLocalModelResolutionFailure(error)) return true;
 	if (TOOL_FAILURE_PREFIX.test(error.trim())) return false;
 	return RETRYABLE_MODEL_FAILURE_PATTERNS.some((pattern) => pattern.test(error));
 }
@@ -1202,6 +1243,9 @@ function messageError(message: unknown): string | undefined {
 }
 
 export function isRetryableModelFailureAttempt(input: { error: string | undefined; messages?: readonly unknown[]; toolCount?: number }): boolean {
+	// A failed local launch may advance the already-admitted route chain, but
+	// cannot justify replaying a child that has started model or tool work.
+	if (isLocalModelResolutionFailure(input.error)) return (input.toolCount ?? 0) === 0 && (input.messages?.length ?? 0) === 0;
 	if (!isRetryableModelFailure(input.error)) return false;
 	if ((input.toolCount ?? 0) > 0) return false;
 	if (input.error === "Subagent produced no output (possible model cold-start or empty response)." || /^Subagent produced no output after terminal assistant stopReason "[^"]+"\.$/.test(input.error ?? "")) return true;
@@ -1211,6 +1255,7 @@ export function isRetryableModelFailureAttempt(input: { error: string | undefine
 }
 
 export function recordRetryableModelFailure(model: string | undefined, error: string | undefined): void {
+	if (isLocalModelResolutionFailure(error)) return;
 	if (!model || !isRetryableModelFailure(error)) return;
 	// A terminal "length" stop means the harness output budget was exhausted
 	// before the model emitted text — a budget fault, never a model defect.

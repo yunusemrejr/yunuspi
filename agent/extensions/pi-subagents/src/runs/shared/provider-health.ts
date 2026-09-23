@@ -1,4 +1,5 @@
 import {estimateReliability} from "../../../../lib/local-intelligence.mjs";
+import { isLocalModelResolutionFailure } from "./local-model-failure.ts";
 /**
  * provider-health.ts — shared, executable provider cooldown/rate state.
  *
@@ -282,6 +283,7 @@ const DETERMINISTIC_RE =
 export function classifyFailure(errorMessage: string | undefined | null): FailureClassification | undefined {
 	const text = typeof errorMessage === "string" ? errorMessage : "";
 	if (!text) return undefined;
+	if (isLocalModelResolutionFailure(text)) return undefined;
 	// The gate's own denial message must never be re-recorded as a provider
 	// failure (it would extend the very cooldown the gate is waiting on).
 	if (text.includes("provider-gate")) return undefined;

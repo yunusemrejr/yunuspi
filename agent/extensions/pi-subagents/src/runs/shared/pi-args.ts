@@ -210,6 +210,8 @@ export interface BuildPiArgsInput {
 	structuredOutput?: StructuredOutputRuntime;
 	fast?: boolean;
 	modelCandidates?: readonly string[];
+	/** Exact route metadata for this process attempt; carried to the child hook. */
+	modelRouteCandidate?: ModelRouteCandidate;
 	toolBudget?: ResolvedToolBudget;
 	allowZeroToolBudget?: boolean;
 	permissionRules?: PermissionRules;
@@ -330,8 +332,6 @@ export interface ResolvePiLaunchToolPlanInput {
 	fast?: boolean;
 	model?: string;
 	modelCandidates?: readonly string[];
-	/** Exact route metadata for this process attempt; carried to the child hook. */
-	modelRouteCandidate?: ModelRouteCandidate;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	inheritedCapabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	agentName?: string;

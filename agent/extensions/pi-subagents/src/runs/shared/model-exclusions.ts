@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { TEMP_ROOT_DIR } from "../../shared/types.ts";
+import { isLocalModelResolutionFailure } from "./local-model-failure.ts";
 
 export const EXCLUSIONS_PATH_ENV = "PI_MODEL_EXCLUSIONS_PATH";
 
@@ -20,6 +21,9 @@ type RecordModelFailureOptions = ModelExclusionTarget & {
 
 let exclusions: ModelExclusion[] = [];
 let loaded = false;
+let loadedPath = "";
+let loadedStamp = "";
+let lastReadWarning = "";
 /** Default duration for a new model exclusion when no per-record TTL is supplied. */
 export const DEFAULT_MODEL_EXCLUSION_TTL_MS = 24 * 60 * 60_000;
 /** Keeps a new expiry safely below JavaScript's maximum Date timestamp. */
@@ -27,7 +31,7 @@ export const MAX_MODEL_EXCLUSION_TTL_MS = 8_000_000_000_000_000;
 const MAX_DATE_TIMESTAMP_MS = 8_640_000_000_000_000;
 let defaultTTLMs = DEFAULT_MODEL_EXCLUSION_TTL_MS;
 let loadedTTLCeilingMs: number | undefined;
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
+const lockWait = new Int32Array(new SharedArrayBuffer(4));
 let persistSeq = 0;
 
 /**
@@ -43,7 +47,7 @@ export function setDefaultTTL(ms: number, options?: { shortenExisting?: boolean 
 	}
 	defaultTTLMs = ms;
 	loadedTTLCeilingMs = options?.shortenExisting ? ms : undefined;
-	if (loaded && loadedTTLCeilingMs !== undefined && shortenExclusionsToTTL(exclusions, loadedTTLCeilingMs, Date.now())) schedulePersist();
+	if (loaded && loadedTTLCeilingMs !== undefined) flushPersist();
 }
 
 /**
@@ -57,70 +61,132 @@ export function getExclusionsFilePath(): string {
 	return path.join(TEMP_ROOT_DIR, "model-exclusions.json");
 }
 
-/**
- * Persist exclusions to disk immediately (atomic write via tmp + rename).
- * The store otherwise debounces writes; call this when durability matters
- * (and in tests).
- */
+/** Reconcile the latest durable store, never a stale process-local snapshot. */
 export function flushPersist(): void {
-	const file = getExclusionsFilePath();
-	try {
-		fs.mkdirSync(path.dirname(file), { recursive: true });
-		const tmpPath = `${file}.${process.pid}.${persistSeq++}.tmp`;
-		fs.writeFileSync(tmpPath, JSON.stringify({
-			version: 1,
-			exclusions: deduplicate(exclusions),
-		}, null, 2), "utf-8");
-		fs.renameSync(tmpPath, file);
-	} catch (error) {
-		console.error(`[model-exclusions] Failed to persist exclusions to ${file}:`, error);
+	mutateExclusions(items => items);
+}
+
+function fileStamp(file: string): string {
+	try { const stat = fs.statSync(file); return `${stat.dev}:${stat.ino}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`; }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw error; }
+}
+
+function validTarget(entry: { modelId?: unknown; provider?: unknown }): boolean {
+	const valid = (value: unknown, limit: number) => typeof value === "string" && value.length > 0 && value.length <= limit && value.trim() === value && !/[\x00-\x1f\x7f-\x9f]/.test(value);
+	if (entry.modelId !== undefined && !valid(entry.modelId, 512)) return false;
+	if (entry.provider !== undefined && !valid(entry.provider, 128)) return false;
+	return entry.modelId !== undefined || entry.provider !== undefined;
+}
+
+function readExclusions(file: string): { exists: boolean; entries: ModelExclusion[] } {
+	let raw: string;
+	try { raw = fs.readFileSync(file, "utf-8"); }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, entries: [] }; throw error; }
+	const data = JSON.parse(raw);
+	if (data?.version !== 1 || !Array.isArray(data.exclusions)) throw new Error("Unsupported or malformed model exclusion store.");
+	for (const entry of data.exclusions) {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Invalid model exclusion entry.");
+		if (!validTarget(entry)) throw new Error("Invalid model exclusion target.");
+		if (entry.reason !== undefined && typeof entry.reason !== "string") throw new Error("Invalid model exclusion reason.");
+		for (const field of ["recordedAt", "expiresAt"] as const) {
+			const value = entry[field];
+			if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > MAX_DATE_TIMESTAMP_MS) throw new Error("Invalid model exclusion timestamp.");
+		}
+	}
+	return { exists: true, entries: data.exclusions };
+}
+
+function normalizeExclusions(items: ModelExclusion[]): ModelExclusion[] {
+	const now = Date.now();
+	const current = items.filter(entry => entry.expiresAt > now && !isLocalModelResolutionFailure(entry.reason)).map(entry => ({ ...entry }));
+	if (loadedTTLCeilingMs !== undefined) shortenExclusionsToTTL(current, loadedTTLCeilingMs, now);
+	return deduplicate(current);
+}
+
+/** Short synchronous read-modify-write. Contention times out without deleting
+ * another writer's lock. A crashed lock requires explicit repair: age/PID
+ * checks cannot atomically distinguish it from a replacement live lock. */
+function acquireLock(file: string): () => void {
+	const directory = `${file}.lock`, deadline = Date.now() + 2000;
+	for (;;) {
+		try {
+			fs.mkdirSync(directory, { mode: 0o700 });
+			const owned = fs.statSync(directory);
+			return () => {
+				try {
+					const current = fs.statSync(directory);
+					if (current.dev === owned.dev && current.ino === owned.ino) fs.rmSync(directory, { recursive: true, force: true });
+				} catch {}
+			};
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if (Date.now() >= deadline) throw new Error("Model exclusion store lock timeout.");
+			Atomics.wait(lockWait, 0, 0, 10);
+		}
 	}
 }
 
-function schedulePersist(): void {
-	if (persistTimer) clearTimeout(persistTimer);
-	persistTimer = setTimeout(() => {
-		persistTimer = null;
-		flushPersist();
-	}, 5000);
-	// Never hold the process open just to flush exclusions.
-	persistTimer.unref?.();
+function invalidateCache(file: string): void {
+	if (loadedPath !== file) { exclusions = []; loadedPath = file; loadedStamp = ""; }
+	loaded = false;
+}
+
+function mutateExclusions(change: (items: ModelExclusion[]) => ModelExclusion[]): boolean {
+	const file = getExclusionsFilePath();
+	let release: (() => void) | undefined, tmpPath: string | undefined;
+	try {
+		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+		release = acquireLock(file);
+		const disk = readExclusions(file);
+		const next = normalizeExclusions(change(normalizeExclusions(disk.entries)));
+		if (!disk.exists || JSON.stringify(next) !== JSON.stringify(disk.entries)) {
+			tmpPath = `${file}.${process.pid}.${persistSeq++}.tmp`;
+			fs.writeFileSync(tmpPath, JSON.stringify({ version: 1, exclusions: next }, null, 2), { mode: 0o600 });
+			fs.renameSync(tmpPath, file); tmpPath = undefined;
+		}
+		exclusions = next; loaded = true; loadedPath = file; loadedStamp = fileStamp(file);
+		return true;
+	} catch (error) {
+		// Never overwrite a malformed/locked store with an empty cached snapshot.
+		invalidateCache(file);
+		console.error(error instanceof Error && error.message === "Model exclusion store lock timeout."
+			? "[model-exclusions] Store is locked; writes skipped and existing state retained. An abandoned lock requires explicit repair."
+			: "[model-exclusions] Could not update the model exclusion store; existing state was retained.");
+		return false;
+	} finally {
+		if (tmpPath) try { fs.unlinkSync(tmpPath); } catch {}
+		release?.();
+	}
 }
 
 function ensureLoaded(): void {
-	if (loaded) return;
-	loaded = true;
+	const file = getExclusionsFilePath();
+	let stamp = "unreadable";
 	try {
-		const raw = fs.readFileSync(getExclusionsFilePath(), "utf-8");
-		const data = JSON.parse(raw);
-		if (data.version === 1) {
-			if (!Array.isArray(data.exclusions)) throw new Error("Model exclusion store version 1 must contain an exclusions array.");
-			for (let index = 0; index < data.exclusions.length; index++) {
-				const entry = data.exclusions[index];
-				if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Model exclusion store entry ${index} must be an object.`);
-				if (entry.reason !== undefined && typeof entry.reason !== "string") throw new Error(`Model exclusion store entry ${index} has an invalid reason.`);
-				for (const field of ["recordedAt", "expiresAt"] as const) {
-					const timestamp = entry[field];
-					if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp <= 0 || timestamp > MAX_DATE_TIMESTAMP_MS) {
-						throw new Error(`Model exclusion store entry ${index} has an invalid ${field}.`);
-					}
-				}
-			}
-			const now = Date.now();
-			exclusions = (data.exclusions ?? []).filter((e: ModelExclusion) => e.expiresAt > now);
-			const shortened = loadedTTLCeilingMs !== undefined && shortenExclusionsToTTL(exclusions, loadedTTLCeilingMs, now);
-			exclusions = deduplicate(exclusions);
-			if (shortened) schedulePersist();
+		stamp = fileStamp(file);
+		if (loaded && loadedPath === file && loadedStamp === stamp) return;
+		const disk = readExclusions(file);
+		const current = normalizeExclusions(disk.entries);
+		exclusions = current; loaded = true; loadedPath = file; loadedStamp = stamp;
+		lastReadWarning = "";
+		// Exact historical CLI failures are not evidence against a provider.
+		// Re-read under the writer lock before persisting their removal.
+		if (disk.exists && JSON.stringify(current) !== JSON.stringify(disk.entries) && !mutateExclusions(items => items)) {
+			// A read may identify obsolete local failures while a writer owns the
+			// file. Cache this stamp so ordinary lookups do not retry a locked
+			// reconciliation on every render. Any changed durable file is re-read.
+			exclusions = current; loaded = true; loadedPath = file; loadedStamp = stamp;
 		}
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-			console.error(`[model-exclusions] Failed to load exclusions from ${getExclusionsFilePath()}:`, error);
-		}
+	} catch {
+		invalidateCache(file);
+		const warning = JSON.stringify([file, stamp]);
+		if (lastReadWarning !== warning) console.error("[model-exclusions] Could not read the model exclusion store; existing file and last valid same-path state were retained.");
+		lastReadWarning = warning;
 	}
 }
 
 function dedupKey(entry: ModelExclusion): string {
-	return `${entry.provider ?? ""}|${entry.modelId ?? ""}`;
+	return JSON.stringify([entry.provider ?? "", entry.modelId ?? ""]);
 }
 
 function deduplicate(items: ModelExclusion[]): ModelExclusion[] {
@@ -142,50 +208,32 @@ function deduplicate(items: ModelExclusion[]): ModelExclusion[] {
  * removes matching candidates from fallback lists.
  */
 export function recordModelFailure(options: RecordModelFailureOptions): void {
+	if (!validTarget(options)) throw new Error("Model exclusion target must name a non-empty model or provider.");
 	if (options.ttlMs !== undefined && (!Number.isFinite(options.ttlMs) || options.ttlMs <= 0 || options.ttlMs > MAX_MODEL_EXCLUSION_TTL_MS)) {
 		throw new Error(`Model exclusion TTL must be a finite positive number no greater than ${MAX_MODEL_EXCLUSION_TTL_MS}.`);
 	}
-	ensureLoaded();
-	// The store is per-process but the file is per-user: re-read and merge
-	// before append+flush, or sequential cross-session records silently drop
-	// each other's exclusions (last-writer-wins).
-	const pending = exclusions;
-	loaded = false;
-	ensureLoaded();
-	exclusions = deduplicate([...exclusions, ...pending]);
+	if (isLocalModelResolutionFailure(options.reason)) return;
 	const ttl = options.ttlMs ?? defaultTTLMs;
 	const now = Date.now();
 	const target: ModelExclusionTarget = options.modelId !== undefined
 		? { modelId: options.modelId, ...(options.provider ? { provider: options.provider } : {}) }
 		: { provider: options.provider };
-	const exclusion: ModelExclusion = {
-		...target,
-		reason: options.reason ?? "runtime-failure",
-		recordedAt: now,
-		expiresAt: now + ttl,
-	};
-	exclusions.unshift(exclusion);
-	exclusions = deduplicate(exclusions);
-	if (exclusions.length > 200) exclusions.length = 200;
-	flushPersist();
+	const exclusion: ModelExclusion = { ...target, reason: options.reason ?? "runtime-failure", recordedAt: now, expiresAt: now + ttl };
+	mutateExclusions(items => deduplicate([exclusion, ...items]).sort((a, b) => b.recordedAt - a.recordedAt).slice(0, 200));
 }
 
 /**
- * Drop all expired exclusions from memory and schedule a persist.
+ * Drop expired exclusions from the latest durable state.
  */
 export function clearExpiredExclusions(): void {
-	ensureLoaded();
-	prune(exclusions, Date.now());
-	schedulePersist();
+	flushPersist();
 }
 
 /**
  * Remove every exclusion (e.g. after the operator fixes credentials).
  */
 export function clearExclusions(): void {
-	ensureLoaded();
-	exclusions.length = 0;
-	schedulePersist();
+	mutateExclusions(() => []);
 }
 
 /**
@@ -232,8 +280,7 @@ export function findModelExclusion(fullId: string, now = Date.now()): Readonly<M
  */
 export function getExcludedCount(): number {
 	ensureLoaded();
-	clearExpiredExclusions();
-	return exclusions.length;
+	return exclusions.filter(entry => entry.expiresAt > Date.now()).length;
 }
 
 /**
@@ -281,11 +328,10 @@ export function filterFallbackCandidates(candidates: string[], opts?: {
 
 /**
  * Reload exclusions from disk (for tests and config hot-reload).
- * Discards any in-memory-only exclusions that were not yet persisted.
+ * Discards the read cache; all mutations already persist under the writer lock.
  */
 export function reloadFromDisk(): void {
 	loaded = false;
-	exclusions = [];
 	ensureLoaded();
 }
 

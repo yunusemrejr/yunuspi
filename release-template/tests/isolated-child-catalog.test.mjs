@@ -27,9 +27,9 @@ fs.writeFileSync(path.join(root, 'live-model-catalog.json'), JSON.stringify({ ve
 } }));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-function launch() {
+function launch(selectedRoute = route, thinking) {
   return buildPiArgs({ baseArgs: [], task: 'Choose from the supplied synthetic identifiers.',
-    model: route, modelRouteCandidate: { route }, sessionEnabled: false, tools: [],
+    model: selectedRoute, thinking, modelRouteCandidate: { route: selectedRoute }, sessionEnabled: false, tools: [],
     inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false,
     capabilityCeiling: { version: 1, allowedTools: [], denyExtensions: true, sources: ['fixture-advisor'] },
   });
@@ -135,4 +135,44 @@ test('real CLI resolves a cached dynamic advisor with the no-tools and no-extens
       'a same-provider fuzzy match is denied by the native request gate');
     assert.equal(fs.existsSync(calls), false, 'the rejected substitute never reaches the provider transport');
   } finally { cleanupTempDir(request.tempDir); }
+});
+
+test('an explicit configured model remains usable in isolated children when its live cache is missing', {timeout:20000},()=>{
+  const request=launch();
+  const guard=path.join(root,'configured-network-guard.mjs'),calls=path.join(root,'configured-network-calls');
+  fs.writeFileSync(guard,`import fs from 'node:fs';globalThis.fetch=async()=>{fs.appendFileSync(${JSON.stringify(calls)},'fetch\\n');throw Error('Fixture network forbidden');};`);
+  fs.writeFileSync(path.join(root,'models.json'),JSON.stringify({providers:{orcarouter:{baseUrl:model.baseUrl,api:model.api,models:[model],modelOverrides:{[model.id]:{maxTokens:4096}}}}}));
+  fs.writeFileSync(path.join(root,'live-model-catalog.json'),JSON.stringify({version:1,providers:{}}));
+  try {
+    const env={...process.env,...request.env,PI_OFFLINE:'1',PI_CODING_AGENT_DIR:root};
+    for(const key of Object.keys(env))if(env[key]===undefined)delete env[key];
+    const result=spawnSync(process.execPath,['--import',guard,path.join(repo,'core/coding-agent/dist/cli.js'),...request.args.slice(0,-1),'--mode','rpc'],{cwd:root,env,input:'{"id":"state","type":"get_state"}\n',encoding:'utf8',timeout:12000});
+    assert.equal(result.status,0,result.stdout+result.stderr);
+    const response=result.stdout.trim().split('\n').map(line=>JSON.parse(line)).find(row=>row.id==='state');
+    assert.equal(response.data.model.provider,'orcarouter');assert.equal(response.data.model.id,model.id);assert.equal(response.data.model.baseUrl,model.baseUrl);assert.equal(response.data.model.maxTokens,4096);
+    assert.equal(response.data.messageCount,0);assert.equal(fs.existsSync(calls),false);
+  } finally {cleanupTempDir(request.tempDir);}
+});
+
+test('native isolated CLI preserves exact mixed-case and provider-namespaced cached IDs with thinking', {timeout:30000},()=>{
+  const cases=[['friendli','zai-org/GLM-5.3-Flash'],['orcarouter','qwen/qwen3.8-flash'],['friendli','friendli/fixture']];
+  const guard=path.join(root,'namespaced-network-guard.mjs'),calls=path.join(root,'namespaced-network-calls');
+  fs.writeFileSync(guard,`import fs from 'node:fs';globalThis.fetch=async()=>{fs.appendFileSync(${JSON.stringify(calls)},'fetch\\n');throw Error('Fixture network forbidden');};`);
+  for(const[provider,id]of cases){
+    const selected={...model,id,reasoning:true,thinkingLevelMap:{off:'none',high:'high'}};
+    fs.writeFileSync(path.join(root,'auth.json'),JSON.stringify({[provider]:{type:'api_key',key:'synthetic-key'}}));
+    fs.writeFileSync(path.join(root,'models.json'),JSON.stringify({providers:{[provider]:{baseUrl:model.baseUrl,api:model.api,compat:{supportsDeveloperRole:false}}}}));
+    fs.writeFileSync(path.join(root,'live-model-catalog.json'),JSON.stringify({version:1,providers:{[provider]:{ts:1,rawCompat:true,models:[selected,{...selected,id:id+'-other'}]}}}));
+    const request=launch(`${provider}/${id}`,'high');
+    try{
+      const env={...process.env,...request.env,PI_OFFLINE:'1',PI_CODING_AGENT_DIR:root};
+      for(const key of Object.keys(env))if(env[key]===undefined)delete env[key];
+      const result=spawnSync(process.execPath,['--import',guard,path.join(repo,'core/coding-agent/dist/cli.js'),...request.args.slice(0,-1),'--mode','rpc'],{cwd:root,env,input:'{"id":"state","type":"get_state"}\n{"id":"commands","type":"get_commands"}\n',encoding:'utf8',timeout:12000});
+      assert.equal(result.status,0,result.stdout+result.stderr);
+      const responses=result.stdout.trim().split('\n').map(line=>JSON.parse(line)),state=responses.find(row=>row.id==='state').data;
+      assert.equal(state.model.provider,provider);assert.equal(state.model.id,id);assert.equal(state.model.baseUrl,model.baseUrl);assert.equal(state.thinkingLevel,'high');assert.equal(state.model.compat.supportsDeveloperRole,false);assert.equal(state.messageCount,0);
+      assert.ok(!responses.find(row=>row.id==='commands').data.commands.some(command=>command.name==='catalog-status'));
+      assert.equal(fs.existsSync(calls),false,'cached native startup never fetches models or runs inference');
+    }finally{cleanupTempDir(request.tempDir);}
+  }
 });

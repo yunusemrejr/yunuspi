@@ -25,9 +25,10 @@ only `deepseek/deepseek-flash` through the official DeepSeek API with `high`
 thinking. An explicit role uses its own ordered routes; it never inherits the
 main model, Subagents list or autonomous alternatives. Missing authentication,
 unsupported configured thinking or unavailable routes skip the observation.
-Observer model IDs must match exactly after aliases are expanded; ambiguous
-provider-free IDs and near matches are rejected. Other roles retain their
-existing matching behavior.
+Observer model IDs accept unambiguous case and separator formatting after
+aliases are expanded. Owner/leaf substitutions, dated revision aliases and
+ambiguous provider-free IDs are rejected. The default remains the exact
+official DeepSeek Flash route.
 Observer routes require at least 12,288 context tokens and 4,096 output tokens.
 The native `openai-codex-responses` API cannot enforce a finite output allowance
 and is unavailable for this role; ordinary model roles retain Codex support.
@@ -53,6 +54,29 @@ tool support is unknown (another provider, or stale/missing evidence)
 still passes validation — the explicit configuration is the positive
 evidence — and only a known-negative blocks it. Autonomous selection
 without configured preferences keeps requiring positive tool proof.
+
+## Catalog names and local failures
+
+Preference routes are resolved against the current registry before dispatch.
+Case and separator variations can identify the same provider or model: for
+example, `orca-router:qwen/Qwen-3_8-Flash` resolves to the registered
+`orcarouter/qwen/qwen3.8-flash` when that identity is unambiguous. The provider
+must exist in the registry. Exact namespace matches take precedence over
+owner aliases; an explicit provider never falls through to a different one.
+Version numbers, free/paid suffixes and explicit dated revisions remain
+distinct. A collision between equally plausible routes requires a more
+specific configuration. The provider receives its exact catalog spelling.
+
+The CLI's own missing-model and unknown-provider diagnostics describe a
+local discovery problem. They do not justify a provider exclusion. Previously
+persisted exclusions carrying those exact diagnostics are reconciled on load.
+Actual provider errors, including remote 404s, authorization failures and
+quota limits, retain their normal handling. This reconciliation does not
+refresh catalogs, change credentials or spend inference tokens.
+
+An isolated helper restores only its selected cached provider route. If the
+model is explicitly configured in `models.json`, native configuration remains
+authoritative even when that route is absent from the cache.
 
 ## State vs policy
 
