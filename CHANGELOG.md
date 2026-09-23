@@ -8,6 +8,12 @@ Preference matching accepts provider separator aliases, colon/dot prefixes befor
 
 Isolated helpers preserve models explicitly configured in `models.json` when their cached catalog lacks the selected route. Native child startup regressions verify both reported Friendli and OrcaRouter model identities without network requests or inference tokens.
 
+Idle callbacks retain exclusive lane ownership across nested calls, including cancellation and failures. Workflow child abort listeners are disposed after completion, duplicate signals share one listener, and health-log shutdown invalidates pending asynchronous startup.
+
+Image usage accounting preserves independent cache reads and writes, bounds malformed counters, uses shared tiered pricing and honors charges reported by the official OpenRouter endpoint. Missing pricing remains explicitly incomplete.
+
+Prompt analysis now keeps a literal instruction when the same wording first appears inside a quoted example. Subagent thinking choices follow the owned core's supported levels, so unmapped `xhigh` and nonreasoning routes cannot be presented as supported. Unused model-editor helpers were removed.
+
 ## 0.5.0 — 2026-09-23
 
 A periodic session observer offers short tool, skill and process advice during active main-agent work. It runs asynchronously about every 4½ minutes, defaults to official DeepSeek Flash with high thinking, and is configured through the existing `/models` role editor or JSON. Idle and unchanged sessions do not trigger inference; requests have bounded context, a deadline and no retry cascade.

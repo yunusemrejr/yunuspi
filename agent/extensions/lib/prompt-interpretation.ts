@@ -149,14 +149,20 @@ function quotedRanges(prompt: string): Array<[number, number]> {
   return ranges;
 }
 
-function isExampleSpan(prompt: string, start: number, end: number): boolean {
-  const lineStart = prompt.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-  const nextNewline = prompt.indexOf("\n", end);
-  const lineEnd = nextNewline < 0 ? prompt.length : nextNewline;
-  const line = prompt.slice(lineStart, lineEnd);
-  const before = prompt.slice(Math.max(0, lineStart - 120), lineStart);
-  return /^\s*(?:for example|e\.g\.|example\s*:)/i.test(line)
-    || /(?:for example|e\.g\.|example\s*:)[^\n]*$/i.test(before)
+function isExampleSpan(
+  prompt: string, start: number, end: number,
+  line: { start: number; end: number; example: boolean },
+): boolean {
+  if (start < line.start || start >= line.end) {
+    line.start = prompt.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const nextNewline = prompt.indexOf("\n", end);
+    line.end = nextNewline < 0 ? prompt.length : nextNewline;
+    const text = prompt.slice(line.start, line.end);
+    const before = prompt.slice(Math.max(0, line.start - 120), line.start);
+    line.example = /^\s*(?:for example|e\.g\.|example\s*:)/i.test(text)
+      || /(?:for example|e\.g\.|example\s*:)[^\n]*$/i.test(before);
+  }
+  return line.example
     || /\b(?:example|e\.g\.)\s*[:—-]\s*$/i.test(prompt.slice(Math.max(0, start - 32), start));
 }
 
@@ -183,12 +189,28 @@ function omitsNegationOrCondition(prompt: string, start: number, end: number, te
 function locateLiteralConstraint(prompt: string, candidate: unknown): PromptAnalysisConstraint | undefined {
   const text = cleanAnalysisText(candidate, ANALYSIS_ITEM_LIMIT);
   if (!text || text.length < 2) return undefined;
-  const start = prompt.indexOf(text);
-  if (start < 0) return undefined;
-  const end = start + text.length;
-  const quoted = quotedRanges(prompt).some(([from, to]) => start >= from && end <= to) || isExampleSpan(prompt, start, end);
-  if (!quoted && omitsNegationOrCondition(prompt, start, end, text)) return undefined;
-  return { text, source: "literal-user", start, end, quoted };
+  const firstStart = prompt.indexOf(text);
+  if (firstStart < 0) return undefined;
+  const ranges = quotedRanges(prompt).sort(([a], [b]) => a - b);
+  let quotedMatch: PromptAnalysisConstraint | undefined;
+  let rangeIndex = 0;
+  let quotedThrough = -1;
+  const line = { start: -1, end: -1, example: false };
+  // The same wording can appear repeatedly in examples before an instruction.
+  // Walk every exact span; sorted quote ranges and cached line checks keep the
+  // work linear in the number of spans and ranges.
+  for (let start = firstStart; start >= 0; start = prompt.indexOf(text, start + text.length)) {
+    const end = start + text.length;
+    while (rangeIndex < ranges.length && ranges[rangeIndex]![0] <= start) {
+      quotedThrough = Math.max(quotedThrough, ranges[rangeIndex]![1]);
+      rangeIndex++;
+    }
+    const quoted = end <= quotedThrough || isExampleSpan(prompt, start, end, line);
+    const match: PromptAnalysisConstraint = { text, source: "literal-user", start, end, quoted };
+    if (quoted) quotedMatch ??= match;
+    else if (!omitsNegationOrCondition(prompt, start, end, text)) return match;
+  }
+  return quotedMatch;
 }
 
 /** Strict bounded JSON parser. Unknown fields are discarded; literal

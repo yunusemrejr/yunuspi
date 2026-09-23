@@ -25,6 +25,7 @@ const shared = pathToFileURL(path.join(agent, "extensions/pi-subagents/src/runs/
 
 const prefs = await import(shared + "llm-preferences.ts");
 const fallback = await import(shared + "model-fallback.ts");
+const modelInfo = await import(shared + "../../shared/model-info.ts");
 const { clearLlmPreferencesCache } = prefs;
 
 const model = (id, provider = "openrouter", extra = {}) => ({
@@ -113,6 +114,25 @@ test("thinking values map to harness levels or dynamic logic", () => {
 	const chain = fallback.resolveLlmPreferenceChain("fusion", registry);
 	assert.equal(chain.length, 1);
 	assert.equal(chain[0].dynamicThinking, true);
+});
+
+test("thinking choices agree with core when a model has no extended-level map", () => {
+	const plain = registry[0];
+	assert.deepEqual(modelInfo.getSupportedThinkingLevels(plain), ["off", "minimal", "low", "medium", "high"]);
+	assert.deepEqual(modelInfo.getSupportedThinkingLevels({ ...plain, reasoning: false }), ["off"]);
+	assert.deepEqual(modelInfo.getSupportedThinkingLevels(undefined), ["off"]);
+	const extended = { ...plain, thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" } };
+	assert.deepEqual(modelInfo.getSupportedThinkingLevels(extended), ["minimal", "low", "medium", "high", "xhigh", "max"]);
+	writePrefs({
+		version: 1,
+		models: { extended: { provider: plain.provider, model: plain.id, thinking: "xhigh" } },
+		preferences: { subagents: { models: ["extended"] } },
+	});
+	const unsupported = fallback.resolveLlmPreferenceChain("subagents", [plain]);
+	assert.equal(unsupported[0].thinking, undefined);
+	assert.equal(unsupported[0].dynamicThinking, true);
+	const supported = fallback.resolveLlmPreferenceChain("subagents", [extended]);
+	assert.equal(supported[0].thinking, "xhigh");
 });
 
 test("provider options translate to existing OpenRouter routing vocabulary", () => {

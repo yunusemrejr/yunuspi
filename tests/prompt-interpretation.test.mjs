@@ -39,6 +39,32 @@ test('analysis parser discards unknown fields and gates weak follow-up relations
 	assert.equal(strong.relation, 'status-question');
 });
 
+test('literal constraints prefer an actionable repetition over an earlier quoted example', () => {
+	const prompt = 'Example: "Keep the cache warm".\nKeep the cache warm.';
+	const text = 'Keep the cache warm';
+	const parsed = mod.parsePromptAnalysis(JSON.stringify({
+		intent: 'Maintain the cache', explicitConstraints: [text],
+	}), prompt, 'initial');
+	const start = prompt.lastIndexOf(text);
+	assert.deepEqual(parsed.explicitConstraints, [{
+		text, source: 'literal-user', start, end: start + text.length, quoted: false,
+	}]);
+	assert.match(mod.renderPromptAnalysis(parsed, 'prompt_analysis'), /Keep the cache warm/);
+});
+
+test('literal constraints reach instructions between long runs of quoted examples', () => {
+	const text = 'Keep the cache warm';
+	const examples = Array.from({ length: 140 }, () => `Example: "${text}".`).join('\n');
+	const prompt = `${examples}\n${text}.\n${examples}`;
+	const parsed = mod.parsePromptAnalysis(JSON.stringify({
+		intent: 'Maintain the cache', explicitConstraints: [text],
+	}), prompt, 'initial');
+	const start = examples.length + 1;
+	assert.deepEqual(parsed.explicitConstraints, [{
+		text, source: 'literal-user', start, end: start + text.length, quoted: false,
+	}]);
+});
+
 test('full context projection remains valid JSON and includes every bounded advisory category', () => {
 	const prompt = 'Implement the endpoint. Preserve the existing response body.';
 	const parsed = mod.parsePromptAnalysis(JSON.stringify({
