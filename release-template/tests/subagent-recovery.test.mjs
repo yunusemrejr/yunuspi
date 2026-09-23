@@ -18,7 +18,7 @@ const load = (name) => import(pathToFileURL(path.join(agent, "extensions/pi-suba
 const discovery = await load("agents/agents.ts");
 const { handleManagementAction } = await load("agents/agent-management.ts");
 const retry = await load("shared/file-system-retry.ts");
-const { combinedAbortSignal } = await load("workflows/scripted-workflow.ts");
+const { combinedAbortSignal, runWorkflowScript } = await load("workflows/scripted-workflow.ts");
 
 test("invalid user overrides retain the builtin and expose the broken file", () => {
 	const directory = path.join(process.env.PI_CODING_AGENT_DIR, "agents");
@@ -83,4 +83,74 @@ test("combined workflow cancellation detaches every source listener when dispose
 	combined.dispose();
 	assert.equal(getEventListeners(parent.signal, "abort").length, 0);
 	assert.equal(getEventListeners(child.signal, "abort").length, 0);
+});
+
+test("combined workflow cancellation deduplicates sources and disposal is idempotent", () => {
+	const source = new AbortController();
+	const combined = combinedAbortSignal([source.signal, source.signal]);
+	assert.equal(getEventListeners(source.signal, "abort").length, 1);
+	combined.dispose();
+	combined.dispose();
+	assert.equal(getEventListeners(source.signal, "abort").length, 0);
+	source.abort(new Error("after disposal"));
+	assert.equal(combined.signal.aborted, false);
+});
+
+test("combined workflow cancellation preserves an already aborted source reason", () => {
+	const live = new AbortController();
+	const stopped = new AbortController();
+	const reason = new Error("already stopped");
+	stopped.abort(reason);
+	const combined = combinedAbortSignal([live.signal, stopped.signal, live.signal]);
+	assert.equal(combined.signal.aborted, true);
+	assert.equal(combined.signal.reason, reason);
+	combined.dispose();
+	assert.equal(getEventListeners(live.signal, "abort").length, 0);
+	assert.equal(getEventListeners(stopped.signal, "abort").length, 0);
+});
+
+test("workflow child success, failure and cancellation release their source listeners", async () => {
+	const OriginalController = globalThis.AbortController;
+	for (const mode of ["success", "failure", "cancel", "stop-child", "already-aborted"]) {
+		const parent = new OriginalController();
+		const controllers = [];
+		let launched = 0;
+		let stopChild;
+		if (mode === "already-aborted") parent.abort(new Error("fixture pre-cancelled"));
+		// Track controllers created by the real workflow without changing signal semantics.
+		globalThis.AbortController = class extends OriginalController {
+			constructor() { super(); controllers.push(this); }
+		};
+		try {
+			const running = runWorkflowScript({
+				script: 'const child = await runs.run("one", { agent: "worker", task: "fixture" }); return child.ok;',
+				timeoutMs: 2000,
+				signal: parent.signal,
+				registerStopChild: (stop) => { stopChild = stop; },
+				launch: async (key, _params, signal) => {
+					launched++;
+					if (mode === "failure") throw new Error("fixture failure");
+					if (mode === "cancel") parent.abort(new Error("fixture cancelled"));
+					if (mode === "stop-child") assert.equal(stopChild(key, "fixture stopped"), true);
+					signal.throwIfAborted();
+					return { key, ok: true, output: "fixture", artifactPaths: [] };
+				},
+				status: async () => { throw new Error("unused status"); },
+			});
+			if (mode === "success") assert.equal((await running).value, true);
+			else if (mode === "stop-child") {
+				const result = await running;
+				assert.equal(result.value, false);
+				assert.equal(result.children[0].stopped, true);
+				assert.equal(result.children[0].error, "fixture stopped");
+			}
+			else await assert.rejects(running, /fixture (?:failure|cancelled|stopped|pre-cancelled)/);
+			await new Promise((resolve) => setImmediate(resolve));
+			assert.equal(launched, mode === "already-aborted" ? 0 : 1, mode);
+			assert.equal(getEventListeners(parent.signal, "abort").length, 0, mode);
+			for (const controller of controllers) assert.equal(getEventListeners(controller.signal, "abort").length, 0, mode);
+		} finally {
+			globalThis.AbortController = OriginalController;
+		}
+	}
 });

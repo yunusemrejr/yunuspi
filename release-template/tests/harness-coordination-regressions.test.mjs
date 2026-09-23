@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { AssistantMessageEventStream } from "@yunuspi/ai";
 import { AgentHarness } from "@yunuspi/agent-core";
-import { BACKGROUND_CONTEXT } from "@yunuspi/agent-core/harness/context";
+import { BACKGROUND_CONTEXT, withCancel } from "@yunuspi/agent-core/harness/context";
 import { MemorySessionRepo } from "@yunuspi/agent-core/harness/session";
 import { HookRegistry } from "../core/agent/src/harness/hooks.js";
 import { createGate } from "../core/agent/src/harness/execution/effect-gate.js";
@@ -199,6 +199,79 @@ test("runWhenIdle callbacks can issue lane commands without waiting on their own
     assert.equal(await fixture.lane.getThinkingLevel(context), "high");
   } finally {
     clearTimeout(timeout);
+    await fixture.harness.close(context);
+    await fixture.repo.close(context);
+  }
+});
+
+test("nested idle callbacks retain the outer exclusive claim through errors and cancellation", { timeout: 3000 }, async () => {
+  const fixture = await openHarness();
+  let ready, release;
+  const outerReady = new Promise(resolve => { ready = resolve; });
+  const outerGate = new Promise(resolve => { release = resolve; });
+  const outer = fixture.lane.runWhenIdle(async owned => {
+    await fixture.lane.runWhenIdle(async nested => {
+      assert.equal(nested, owned, "nested callbacks keep the outer capability");
+      await fixture.lane.setThinkingLevel("medium", nested);
+    }, owned);
+    await assert.rejects(fixture.lane.runWhenIdle(async () => { throw Error("nested fixture failure"); }, owned), /nested fixture failure/);
+    const cancelled = withCancel(owned);
+    cancelled.cancel(Error("nested fixture cancelled"));
+    await assert.rejects(fixture.lane.runWhenIdle(() => { throw Error("cancelled callback ran"); }, cancelled.context), /nested fixture cancelled/);
+    ready();
+    await outerGate;
+  }, context);
+  let external;
+  try {
+    await Promise.race([outerReady, outer]);
+    let externalFinished = false;
+    external = fixture.lane.setThinkingLevel("high", context).then(() => { externalFinished = true; });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(externalFinished, false, "unrelated commands remain blocked after the inner callback returns");
+    release();
+    await outer;
+    await external;
+    assert.equal(await fixture.lane.getThinkingLevel(context), "high");
+  } finally {
+    release();
+    await outer;
+    await external;
+    await fixture.harness.close(context);
+    await fixture.repo.close(context);
+  }
+});
+
+test("nested idle callbacks still wait for a drive started under the outer claim", { timeout: 3000 }, async () => {
+  const m = model();
+  let stream;
+  const fixture = await openHarness({ model: m, models: {
+    getModel: () => m,
+    streamSimple: () => {
+      stream = new AssistantMessageEventStream();
+      stream.push({ type: "start", partial: assistantMessage(m, "") });
+      return stream;
+    },
+  } });
+  try {
+    await fixture.lane.runWhenIdle(async owned => {
+      const run = fixture.lane.prompt("fixture held stream", undefined, owned);
+      await waitFor(() => stream !== undefined);
+      const cancelled = withCancel(owned);
+      const waiting = fixture.lane.runWhenIdle(() => { throw Error("cancelled callback ran"); }, cancelled.context);
+      const rejected = assert.rejects(waiting, /nested wait cancelled/);
+      cancelled.cancel(Error("nested wait cancelled"));
+      await rejected;
+      let nestedRan = false;
+      const nested = fixture.lane.runWhenIdle(() => { nestedRan = true; }, owned);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(nestedRan, false, "reusing ownership does not bypass active-drive checks");
+      stream.push({ type: "done", message: assistantMessage(m) });
+      await run;
+      await nested;
+      assert.equal(nestedRan, true);
+    }, context);
+  } finally {
+    stream?.push({ type: "error", reason: "aborted", error: assistantMessage(m, "", "aborted") });
     await fixture.harness.close(context);
     await fixture.repo.close(context);
   }

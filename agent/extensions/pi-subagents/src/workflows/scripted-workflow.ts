@@ -1140,6 +1140,7 @@ export function combinedAbortSignal(signals: AbortSignal[]): { signal: AbortSign
 		controller.abort(signal.reason);
 	};
 	for (const signal of signals) {
+		if (listeners.has(signal)) continue;
 		if (signal.aborted) {
 			abort(signal);
 			break;

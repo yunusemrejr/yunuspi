@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { calculateCost } from "../models.js";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.js";
 import { retryProviderRequest } from "../utils/provider-retry.js";
@@ -106,28 +107,54 @@ function buildParams(model, context) {
     };
 }
 function parseUsage(rawUsage, model) {
-    const promptTokens = rawUsage.prompt_tokens || 0;
-    const reportedCachedTokens = rawUsage.prompt_tokens_details?.cached_tokens || 0;
-    const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
+    let countsComplete = true;
+    const validCount = value => Number.isSafeInteger(value) && value >= 0;
+    const count = (value, required = false) => {
+        if (value === undefined && !required) return 0;
+        if (validCount(value)) return value;
+        countsComplete = false;
+        return 0;
+    };
+    const promptTokens = count(rawUsage.prompt_tokens, true);
+    const completionTokens = count(rawUsage.completion_tokens, true);
+    const output = Math.min(completionTokens, Number.MAX_SAFE_INTEGER - promptTokens);
+    const details = rawUsage.prompt_tokens_details;
+    if (details !== undefined && (!details || typeof details !== "object" || Array.isArray(details))) countsComplete = false;
+    const reportedCachedTokens = count(details?.cached_tokens);
+    const reportedWriteTokens = count(details?.cache_write_tokens);
     // OpenRouter reports cache hits and writes as independent counters. Keep
-    // both counts intact when calculating billable input and cache costs.
-    const cacheReadTokens = reportedCachedTokens;
-    const input = Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
-    const output = rawUsage.completion_tokens || 0;
+    // them disjoint, bounded by the reported prompt, and flag malformed counts
+    // as partial instead of publishing negative costs or concatenated totals.
+    const cacheReadTokens = Math.min(reportedCachedTokens, promptTokens);
+    const cacheWriteTokens = Math.min(reportedWriteTokens, promptTokens - cacheReadTokens);
+    if (cacheReadTokens !== reportedCachedTokens || cacheWriteTokens !== reportedWriteTokens || output !== completionTokens) countsComplete = false;
+    const input = promptTokens - cacheReadTokens - cacheWriteTokens;
     const usage = {
         input,
         output,
         cacheRead: cacheReadTokens,
         cacheWrite: cacheWriteTokens,
-        totalTokens: input + output + cacheReadTokens + cacheWriteTokens,
-        cost: {
-            input: (model.cost.input / 1000000) * input,
-            output: (model.cost.output / 1000000) * output,
-            cacheRead: (model.cost.cacheRead / 1000000) * cacheReadTokens,
-            cacheWrite: (model.cost.cacheWrite / 1000000) * cacheWriteTokens,
-            total: 0,
-        },
+        totalTokens: promptTokens + output,
+        cacheReadReported: validCount(details?.cached_tokens) && cacheReadTokens === reportedCachedTokens,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     };
-    usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
+    calculateCost(model, usage);
+    usage.cost.complete = usage.cost.complete && countsComplete;
+    // The official account charge includes routing discounts/fees which a
+    // catalog estimate cannot reconstruct. Upstream cost is separate evidence.
+    let official = false;
+    try {
+        const endpoint = new URL(model.baseUrl);
+        official = model.provider === "openrouter" && endpoint.protocol === "https:" && endpoint.hostname === "openrouter.ai";
+    } catch {}
+    if (official && Number.isFinite(rawUsage.cost) && rawUsage.cost >= 0) {
+        usage.cost.estimatedTotal = usage.cost.total;
+        usage.cost.total = rawUsage.cost;
+        usage.cost.source = "provider-reported";
+        usage.cost.complete = true;
+        const upstream = rawUsage.cost_details?.upstream_inference_cost;
+        if (Number.isFinite(upstream) && upstream >= 0) usage.cost.upstreamInferenceCost = upstream;
+        if (rawUsage.is_byok === true) usage.cost.byok = true;
+    }
     return usage;
 }

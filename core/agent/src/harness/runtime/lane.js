@@ -1255,6 +1255,12 @@ export class Lane {
                         result: { kind: "wait", drive: this.activeDrive, change: this.stateChange },
                     };
                 }
+                // A nested idle callback shares its caller's exclusive claim.
+                // Replacing it would let the inner finally release the lane
+                // while the outer callback is still using that capability.
+                if (this.idleOwner !== undefined && context.value(IDLE_OWNER_CONTEXT) === this.idleOwner) {
+                    return { kind: "return", result: { kind: "reused" } };
+                }
                 let release;
                 const claimed = new Promise((resolve) => {
                     release = resolve;
@@ -1265,6 +1271,12 @@ export class Lane {
                 this.signalStateChange();
                 return { kind: "return", result: { kind: "claimed" } };
             }, context);
+            if (observation.kind === "reused") {
+                this.assertOpen();
+                await awaitWithContext(Promise.resolve(), context);
+                await callback(context);
+                return;
+            }
             if (observation.kind === "claimed")
                 break;
             await awaitWithContext(observation.drive === undefined ? observation.change : observation.drive.completion.then(() => undefined), context);
@@ -1274,6 +1286,7 @@ export class Lane {
         }
         try {
             this.assertOpen();
+            await awaitWithContext(Promise.resolve(), context);
             await callback(withContextValue(IDLE_OWNER_CONTEXT, owner, context));
         }
         finally {
