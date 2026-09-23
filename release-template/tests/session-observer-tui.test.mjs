@@ -32,7 +32,11 @@ test('installed observer renderer shows advice and request states at narrow and 
       'Observer started: deepseek/deepseek-flash · high thinking',
       `Observer returned a note\n${advice}`,
       'Observer unavailable: Observer timed out',
-      'Observer completed: No useful addition',
+      'Observer reviewed: Chunk 2: no useful new reminder.',
+      'Observer reviewed: Session advanced during review; outdated advice discarded.',
+      'Observer checked: Provider has not acknowledged cancellation; overlapping observer calls are paused.',
+      'Observer coverage: 44 earlier events exceeded the queue; historical coverage is incomplete.',
+      'Observer returned a note\nWould discovering the parser checker help?\nDiscoverable tools (not active): parser_check.',
       `Observer returned a note\n${boundedObserverText('Inspect \x1b[2Jthe café parser and 東京 input.', 1200)}`,
     ];
     for (const content of fixtures) {

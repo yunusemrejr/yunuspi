@@ -31,7 +31,7 @@
  * Dependency-free and pure (node:crypto only, via failure-cause).
  */
 import { hasRecordedTokenUsage } from "../../../../lib/cost-evidence.ts";
-import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
+import { classifyFailure, readFailureCause, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
 import { buildChildTaskIdentity } from "./child-identity.ts";
 import { buildExecutionEvidence, type ExecutionEvidence } from "../../../../lib/execution-evidence.ts";
 
@@ -216,7 +216,11 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 		...(typeof row.diagnosticRef === "string" ? { diagnosticRef: row.diagnosticRef } : {}),
 		...(typeof row.error === "string" ? { message: row.error } : {}),
 	};
-	const cause = classifyFailure(evidence);
+	const classified = classifyFailure(evidence);
+	const retained = readFailureCause(row.cause ?? asRecord(row.evidence).cause);
+	// Cost rows deliberately redact raw errors to "child-error". The already
+	// classified cause must survive that projection instead of becoming unknown.
+	const cause = classified.category === "unknown" && retained ? retained : classified;
 
 	let execution: ExecutionOutcome;
 	if (stopped || paused) {

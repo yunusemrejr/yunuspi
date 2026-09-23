@@ -97,9 +97,12 @@ test('real SDK dispatches configured native analysis providers, preserves raw au
   const main = f.calls.at(-1).context.messages;
   assert.ok(main.some((message) => message.role === 'user' && message.content.some((part) => part.text === raw)));
   assert.ok(main.some((message) => message.content.some((part) => part.text?.includes('Auxiliary interpretation (advisory only'))));
-  assert.equal(f.notices.length, 1);
+  assert.equal(f.notices.length, 0, 'one persistent analysis row replaces duplicate transient notifications');
   assert.equal(f.events.length, 1);
   assert.equal(f.session.sessionManager.getEntries().filter((entry) => entry.type === 'custom_message' && entry.customType === 'prompt-analysis').length, 1);
+  const shown = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
+  assert.deepEqual(shown.details.attempts.map(attempt => attempt.outcome), ['failed', 'malformed', 'complete']);
+  assert.ok(main.some(message => message.content.some(part => part.text?.includes(shown.details.advisory))), 'visible expanded advisory exactly matches text in the main agent request, including when adjacent user messages are merged');
   await f.session.prompt('Automatic background result.', { source: 'extension' });
   assert.equal(f.calls.filter((call) => call.id !== 'main').length, 3, 'automatic messages do not invoke analysis recursively');
   preferences(['third']);
@@ -107,7 +110,28 @@ test('real SDK dispatches configured native analysis providers, preserves raw au
   assert.equal(f.calls.at(-2).id, 'third');
   assert.equal(f.calls.at(-2).options.maxTokens, 320);
   assert.equal(f.events.length, 2);
+  const followup = f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').at(-1);
+  assert.match(followup.content, /followup.*model/);
+  assert.match(followup.content, /Relation: continue/);
+  assert.ok(f.calls.at(-1).context.messages.some(message => message.content.some(part => part.text?.includes(followup.details.advisory))));
   assert.deepEqual(f.errors, []);
+});
+
+test('fallback visibly explains route failure and long input while preserving the literal request', async t => {
+  preferences(['first']);
+  const f = await fixture(t, { complete: selected => { if (selected.id !== 'main') throw new Error('HTTP 400 invalid_request_error private diagnostic'); } });
+  const raw = '<mindset>' + 'Reusable work guidance. '.repeat(1400) + '</mindset>\nImplement menu navigation.';
+  await f.session.prompt(raw);
+  const shown = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
+  assert.match(shown.content, /Primary: Implement menu navigation/);
+  assert.match(shown.content, /Fallback reason: audit-fixture\/first: failed \(invalid-request\)/);
+  assert.match(shown.content, /Long request: analysis used/);
+  assert.doesNotMatch(shown.content, /private diagnostic/);
+  const main = f.calls.at(-1).context.messages;
+  assert.ok(main.some(message => message.role === 'user' && message.content.some(part => part.text === raw)));
+  assert.ok(main.some(message => message.content.some(part => part.text?.includes(shown.details.advisory))));
+  const renderer = f.session.extensionRunner.getMessageRenderer('prompt-analysis');
+  assert.ok(renderer(shown, { expanded: true }).render(100).join('\n').includes('Exact advisory sent to the main agent'));
 });
 
 test('real preflight handled after analysis cancels lineage before the next genuine request', async (t) => {

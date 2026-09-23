@@ -3,6 +3,7 @@ import { sessionObservability } from './lib/session-observability.ts';
  * Only core-provenanced interactive/RPC prompts enter this path. */
 import { completeSimple } from "@yunuspi/ai/compat";
 import { Type } from "typebox";
+import { Text } from "@yunuspi/tui";
 import { createHash } from "node:crypto";
 import {
   deterministicRequestPass,
@@ -26,7 +27,7 @@ import {
   type PromptAnalysisKind,
   type PromptAnalysisPrevious,
 } from "./lib/prompt-interpretation.ts";
-import type { PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
+import type { PromptAnalysisAttempt, PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
 import { resolvePromptAnalysisPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
 import { loadModelEconomyConfig } from "./pi-subagents/src/runs/shared/model-economy.ts";
 import { selectAffordableModel } from "./pi-subagents/src/runs/shared/model-selection.ts";
@@ -94,6 +95,10 @@ interface PendingPromptAnalysis {
   preferenceSource: "prompt_analysis" | "subagents" | "autonomous";
   route?: string;
   status: "model" | "fallback";
+  attempts: PromptAnalysisAttempt[];
+  advisory: string;
+  inputChars: number;
+  excerpted: boolean;
   generation: number;
   signal: AbortSignal;
   emitted: boolean;
@@ -356,6 +361,10 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
     kind: pending.analysis.kind,
     source,
     status: pending.status,
+    attempts: pending.attempts,
+    advisory: pending.advisory,
+    inputChars: pending.inputChars,
+    excerpted: pending.excerpted,
     confidence: pending.analysis.confidence,
     taskLabel: pending.analysis.taskLabel,
     intent: pending.analysis.intent,
@@ -394,6 +403,14 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
   let activeAdvisoryRequestIds = new Set<string>();
   let knownPendingRequestIds = new Set<string>();
   let retainedAnalysisChars = 0;
+
+  pi.registerMessageRenderer?.("prompt-analysis", (message: any, { expanded }: { expanded: boolean }) => {
+    const summary = typeof message.content === "string" ? message.content : "Intent analysis";
+    const advisory = message.details?.advisory;
+    return new Text(summary + (typeof advisory === "string"
+      ? expanded ? `\n\nExact advisory sent to the main agent:\n${advisory}` : "\nExpand to see the exact advisory sent to the main agent."
+      : ""), 0, 0);
+  });
 
   pi.registerTool({
     name: "micro_status",
@@ -551,6 +568,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
       const startedAt = Date.now();
+      const attempts: PromptAnalysisAttempt[] = [];
       const result = await runPromptAnalysis({
         prompt,
         kind,
@@ -564,6 +582,9 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         signal,
         onAttempt: (attempt) => {
           if (!owns()) return;
+          // Keep the bounded initial outcome for the visible explanation;
+          // late usage reconciliation cannot turn a timeout into success.
+          if (!attempt.outcome.startsWith("late-")) attempts.push({ ...attempt });
           noteHealth("ml.prompt.analysis.attempt", {
             requestId: event.requestId,
             route: attempt.route,
@@ -574,6 +595,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
             ...(attempt.inputTokens !== undefined ? { inputTokens: attempt.inputTokens } : {}),
             ...(attempt.outputTokens !== undefined ? { outputTokens: attempt.outputTokens } : {}),
             count: 1,
+            ...(attempt.failureCategory ? { reason: attempt.failureCategory } : {}),
           });
         },
       });
@@ -604,6 +626,10 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         preferenceSource: selected.source,
         ...(result.route ? { route: result.route } : {}),
         status: result.status,
+        attempts,
+        advisory: renderPromptAnalysisContext(analysis, selected.source, result.route),
+        inputChars: prompt.length,
+        excerpted: prompt.length > (kind === "initial" ? 24_000 : 8_000),
         generation: currentGeneration,
         signal,
         emitted: false,
@@ -612,7 +638,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       };
       const previousPending = pendingContext.get(pending.requestId);
       if (previousPending) retainedAnalysisChars -= previousPending.retainedChars;
-      pending.retainedChars = JSON.stringify(analysis).length;
+      pending.retainedChars = JSON.stringify(analysis).length + pending.advisory.length;
       pendingContext.set(pending.requestId, pending);
       retainedAnalysisChars += pending.retainedChars;
       while (pendingContext.size > MAX_RETAINED_ANALYSES || retainedAnalysisChars > MAX_RETAINED_ANALYSIS_CHARS) {
@@ -677,7 +703,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       );
       if (!requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
         const details = analysisDetails(pending, pending.preferenceSource);
-        const content = renderPromptAnalysisContext(pending.analysis, pending.preferenceSource, pending.route);
+        const content = pending.advisory;
         inserts.push({
           index: request.messageIndex,
           message: {
@@ -707,8 +733,14 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
       if (!pending.displayed && !pending.signal.aborted && !ctx.signal?.aborted) {
         pending.displayed = true;
-        const concise = renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route);
-        try { ctx.ui?.notify?.(concise, "info"); } catch { /* UI metadata must not gate inference. */ }
+        const reasons = pending.attempts.map((attempt) => `${attempt.route}: ${attempt.outcome}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
+        const concise = [
+          renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route),
+          ...(pending.analysis.kind === "followup" && !pending.analysis.relation ? ["Relationship: uncertain; earlier user scope remains authoritative."] : []),
+          ...(pending.status === "fallback" ? [`Fallback reason: ${reasons.join("; ") || "no eligible analysis route"}.`] : reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
+          ...(pending.excerpted ? ["Long request: analysis used the beginning, end and extracted task focus; the omitted middle may contain additional constraints."] : []),
+          "Original user prompt preserved. This advisory informs the main agent; it does not replace the request.",
+        ].join("\n");
         const details = analysisDetails(pending, pending.preferenceSource);
         try {
           await pi.sendMessage({

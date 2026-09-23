@@ -42,7 +42,7 @@ export interface GuardianSupervisorOptions {
     cwd?: string;
     emit?: (event: { type: "guardian_intervention"; content: string; detail: GuardianInterventionDetail; child: boolean }) => void | Promise<void>;
     /** Display-only receipt after an owned tool result; successful WASM calls are counted separately from observations. */
-    observe?: (data: { count: number; evaluations: number; similarityEvaluations: number; decision: "lazy" | "initializing" | "ready" | "quarantined"; outcome: "observed" | "evaluated" }) => void | Promise<void>;
+    observe?: (data: { count: number; evaluations: number; similarityEvaluations: number; promptCoverage: "complete" | "bounded-out"; decision: "lazy" | "initializing" | "ready" | "quarantined"; outcome: "observed" | "evaluated" }) => void | Promise<void>;
     clock?: () => number;
     childRelay?: (reason: "guardian_intervention" | "intelligence_used", message: string) => GuardianChildRelay | undefined;
     awaitParentVisibility?: (relay: GuardianChildRelay, options?: { timeoutMs?: number; stillCurrent?: () => boolean }) => boolean | Promise<boolean>;
@@ -61,6 +61,8 @@ export declare class GuardianSupervisor {
     acceptRequest(requestId: string): boolean;
     cancelRequest(requestId: string): boolean;
     observePromptAnalysis(event: unknown): boolean;
+    /** Count addressed peer communication without accepting it as task authority. */
+    observePeerMessage(event: unknown): boolean;
     observeAgentEvent(event: AgentEvent): Promise<void>;
     analyzeToolActivity(activity: { taskId?: string; toolName: string; args: unknown; toolCallId?: string; succeeded: boolean; observedAt?: number }): Promise<boolean>;
     handleCommand(text: string): { command: string; enabled: boolean; debug: boolean; stats: Record<string, number>; kernel: string; taskCount: number; activeTaskId?: string; guardianInstanceId?: string; debugInfo?: { relation?: string; analysisConfidence?: number; verifiedConstraints: number; observedSignals?: { fileTypes: string[]; skills: string[]; toolCalls: number }; recentDecisions: unknown[] } } | undefined;

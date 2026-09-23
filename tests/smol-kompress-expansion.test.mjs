@@ -81,6 +81,29 @@ test("direct offer selects lines from a numeric listing", async () => {
   assert.equal(sp.inspect().accepted, 1);
 });
 
+test("Smol UNKNOWN is a visible abstention while malformed selection is a failure", async () => {
+  const activityKey = Symbol.for('yunus-pi.activity.v1'), healthKey = Symbol.for('yunus-pi.health.v1');
+  const previousActivity = globalThis[activityKey], previousHealth = globalThis[healthKey];
+  const outcomes = [], events = [];
+  globalThis[activityKey] = () => outcome => outcomes.push(outcome);
+  globalThis[healthKey] = (kind, data) => events.push({ kind, data });
+  try {
+    for (const content of ['{"status":"UNKNOWN","lineIds":[]}', '{"status":"SELECT","lineIds":[99999]}']) {
+      const client = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
+        fetch: async () => new Response(JSON.stringify({ content })) });
+      const raw = listing();
+      client.offer('smoke', raw, 1);
+      assert.equal(await client.takeAsync('smoke', raw, 2000), undefined, 'both outcomes retain the original source');
+      client.reset();
+    }
+    assert.deepEqual(outcomes, ['skipped', 'error']);
+    assert.deepEqual(events.filter(event => event.kind === 'ml.smol.inference').map(event => event.data.reason), ['unknown', 'invalid-line-ids']);
+  } finally {
+    if (previousActivity === undefined) delete globalThis[activityKey]; else globalThis[activityKey] = previousActivity;
+    if (previousHealth === undefined) delete globalThis[healthKey]; else globalThis[healthKey] = previousHealth;
+  }
+});
+
 test("tiny-model input is bounded, task-aware and deduplicates exact rows", () => {
   const raw = ["inventory begins", ...Array(35).fill("Background activity handles ordinary application housekeeping and general administration."), "Deployment remains pending verification."].join("\n");
   const source = ext.prepareSmolExtraction(raw, [1, 37]);

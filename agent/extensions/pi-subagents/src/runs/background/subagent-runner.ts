@@ -1207,7 +1207,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				watchdog: childWatchdogState,
 				processInstanceId,
 				processCloseObservedAt,
-				processSignal: signal,
+				processSignal: forcedTerminationSignal && forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal ? undefined : signal,
 				processTree,
 				currentTool,
 				currentToolArgs,

@@ -12,6 +12,17 @@ assert.ok(agent, 'agent tree with child-ledger.ts is present');
 const shared = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/')).href;
 const { reduceChildEvents, deriveAttemptOutcome, deriveLogicalState, summarizeLedger, projectTranscriptChildren } = await import(shared + 'child-ledger.ts');
 const { buildChildTaskIdentity, nextAttemptIdentity, labelChildTask } = await import(shared + 'child-identity.ts');
+const { classifyFailure } = await import(shared + 'failure-cause.ts');
+
+test('persisted redacted failure retains its category without accepting arbitrary diagnostic text', () => {
+  const cause=classifyFailure({stage:'provider',providerCode:400,error:true});
+  const retained=deriveAttemptOutcome({status:'failed',exitCode:1,error:'child-error',cause:{...cause,privateText:'do not expose'}});
+  assert.equal(retained.execution.cause.category,'invalid-request');
+  assert.equal(retained.execution.cause.providerCode,'400');
+  assert.doesNotMatch(JSON.stringify(retained),/do not expose/);
+  assert.equal(deriveAttemptOutcome({status:'stopped',cause}).execution.cause.category,'stopped');
+  assert.equal(deriveAttemptOutcome({status:'failed',error:'child-error',cause:{category:'fabricated'}}).execution.cause.category,'unknown');
+});
 
 test('terminal states are never overwritten by secondary flags', () => {
   const ledger = reduceChildEvents([

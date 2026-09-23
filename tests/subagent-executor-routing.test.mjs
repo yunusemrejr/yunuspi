@@ -35,7 +35,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop" } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false } = {}) {
   clearExclusions();
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
@@ -57,6 +57,7 @@ process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "ass
   api: "openai-completions", timestamp: Date.now(), content: [{ type: "text", text: "Child completed" }], stopReason: ${JSON.stringify(stopReason)},
   usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } }) + "\\n");
 process.exitCode = ${stopReason === "length" ? 1 : 0};
+${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
 `, { mode: 0o700 });
   process.env.PI_SUBAGENT_PI_BINARY = fakePi;
   const agent = { name: "route-fixture", description: "Read-only route fixture", source: "runtime",
@@ -74,6 +75,30 @@ process.exitCode = ${stopReason === "length" ? 1 : 0};
   t.after(() => { for (const timer of state.cleanupTimers.values()) clearTimeout(timer); });
   return { cwd, agent, executor, ctx, hasLaunched: () => fs.existsSync(recordPath), records: () => fs.readFileSync(recordPath, "utf8").trim().split("\n").map(line => JSON.parse(line)) };
 }
+
+for (const background of [false, true]) test(`successful ${background ? 'background' : 'foreground'} post-final cleanup is not a process failure`, {timeout:30_000}, async t => {
+  const f=fixture(t,{lingerAfterStop:true});
+  const result=await f.executor.executeDelegated('cleanup-request',{
+    agent:'route-fixture',task:'Read the source and return a concise observation',context:'fresh',async:background,
+    artifacts:false,model:route,modelOrigin:'inherited',modelRouteCandidates:[pins[1]],timeoutMs:15_000,
+    acceptance:{level:'none',reason:'Read-only cleanup fixture; no implementation deliverable.'},
+  },new AbortController().signal,undefined,f.ctx);
+  let row=result.details.results?.[0];
+  if(background){
+    let status;
+    for(const deadline=Date.now()+20_000;Date.now()<deadline;){
+      status=JSON.parse(fs.readFileSync(path.join(result.details.asyncDir,'status.json'),'utf8'));
+      if(['complete','completed','failed'].includes(status.state)&&status.processTerminal?.state==='observed')break;
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    assert.ok(['complete','completed'].includes(status?.state),JSON.stringify(status));
+    row=JSON.parse(fs.readFileSync(resultFilePath(DIRS.results,result.details.runId),'utf8')).results[0];
+  }
+  if(!background)assert.equal(row.exitCode,0);
+  assert.equal(row.processSignal,undefined);
+  assert.equal(failureOf(row).cause.category,'none');
+  assert.equal(f.records().length,1);
+});
 
 for (const background of [false, true]) test(`real ${background ? "background" : "foreground"} executor preserves delegated upstream retry pins`, { timeout: 30_000 }, async t => {
   const f = fixture(t);

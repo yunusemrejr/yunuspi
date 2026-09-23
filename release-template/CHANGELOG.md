@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.2 — 2026-09-23
+
+The session observer reviews chronological chunks during active work, with a 30-second minimum review gap and visible checks within 120 seconds. It remains a conversational reviewer with no tools or execution authority. Advice is consumed once, repeated suggestions are suppressed, and stale or incomplete evidence is identified. Its packet includes current work, actual tool availability, source-backed council/swarm/fusion capabilities, configured model preferences and measured usage. Long foreground commands prompt conditional background-work advice, not automatic interruption.
+
+Initial and follow-up prompt analysis shows task interpretation, route/fallback outcomes and an expandable copy of the exact advisory delivered to the main agent. The original prompt remains unchanged. Reusable mindset preambles no longer become the fallback task. Large inputs are excerpted visibly and user-constraint scanning remains incremental.
+
+Independent sessions can discover and explicitly address peers across projects through `session_coordinate`. Messages are visible to both main agents and their observers, with owner-scoped Guardian receipts. Session epochs reject stale deliveries; peer text remains untrusted advice and does not merge tasks, permissions or private state.
+
+Guardian supervision registers long requests instead of silently disabling the task. Oversized raw-span constraint checks abstain explicitly while tool monitoring and conservative retry detection continue. JEV and Needle admission/fallback outcomes are visible; routine Smol eligibility and lexical-match notices are deduplicated without dropping recorded metrics. Fuzzy counts describe actual lexical matches, and a Smol `UNKNOWN` response is an abstention that preserves the original output.
+
+Read-only council helpers no longer require code edits to count as completed. Native and wrapper child records share their task identity, failed council peers retain useful labels, and owned cleanup after a final response no longer creates a false process failure. Real provider errors and unavailable inference remain visible failures or fallbacks.
+
+Symbol search now reloads an initially missing word index after its background build completes. Long quality-review retry explanations are reduced to a disclosed head/tail excerpt instead of being rejected by a 600-character schema limit; the original tool call retains the full rationale.
+
 ## 0.5.1 — 2026-09-23
 
 Model routing now distinguishes local catalog/startup errors from provider failures. Historical exclusions created by the CLI's own missing-model diagnostics are reconciled automatically; real provider failures retain their exclusions. Concurrent sessions update the latest exclusion state instead of overwriting it with stale snapshots.

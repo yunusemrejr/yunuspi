@@ -105,7 +105,10 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 	try {
 		const a = await makeSession(), b = await makeSession();
 		await b.session.prompt("/guardian off", { source: "rpc" });
-		await Promise.all([a.session.prompt("Read the fixture.", { source: "rpc" }), b.session.prompt("Read the fixture.", { source: "rpc" })]);
+		// A realistic long instruction preamble must not silently detach Guardian.
+		const longRequest = `${"Synthetic background context. ".repeat(700)}\nRead the fixture.`;
+		assert.ok(longRequest.length > 16_384);
+		await Promise.all([a.session.prompt(longRequest, { source: "rpc" }), b.session.prompt("Read the fixture.", { source: "rpc" })]);
 		now += 61_000;
 		await a.session.prompt("Read the fixture again.", { source: "rpc" });
 		const activity = session => session.messages.filter(message => message.customType === "harness-activity");

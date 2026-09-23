@@ -1474,11 +1474,12 @@
     {
       "id": "session-coordination",
       "group": "coordination",
-      "summary": "Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes, explicit-input native check receipts and a local Markdown board; peers are advisory, not remote messaging or locks.",
+      "summary": "Coordinate independent Pi sessions through checkout scope/check receipts and explicitly addressed asynchronous local peer messages across projects. Each session keeps its own goals, plans, observer and guardian state; peer advice carries no user authority.",
       "entrypoints": [
         "session_coordinate",
         "sibling-bridge",
-        "todo-plan-changed"
+        "todo-plan-changed",
+        "session-peer-message"
       ],
       "tools": [
         "session_coordinate"
@@ -1490,9 +1491,22 @@
             "status",
             "publish",
             "clear",
-            "prepare_check"
+            "prepare_check",
+            "send"
           ],
           "summary": "Coordination operation."
+        },
+        {
+          "name": "scope",
+          "values": [
+            "checkout",
+            "all"
+          ],
+          "summary": "Default checkout discovery; all explicitly lists independent roots across projects."
+        },
+        {
+          "name": "to|recipientEpoch|message",
+          "summary": "Send 1–2000 characters of untrusted peer advice to the full session ID and current epoch from status. Atomic inbox delivery is visible, does not wake idle inference, and never merges goals. Stale/absent recipients and full inboxes return errors."
         },
         {
           "name": "objective",
@@ -2567,52 +2581,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113705
+        "line": 113713
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113409
+        "line": 113417
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113466
+        "line": 113474
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113501
+        "line": 113509
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113478
+        "line": 113486
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113620
+        "line": 113628
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113434
+        "line": 113442
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113402
+        "line": 113410
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113639
+        "line": 113647
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113416
+        "line": 113424
       },
       {
         "name": "logs",
@@ -3116,7 +3130,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 398,
+        "line": 415,
         "kind": "literal"
       },
       {
@@ -3218,7 +3232,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 632,
+        "line": 758,
         "kind": "literal"
       },
       {
@@ -3540,7 +3554,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 398,
+        "line": 415,
         "kind": "literal"
       },
       {
@@ -3606,7 +3620,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 632,
+        "line": 758,
         "kind": "literal"
       },
       {
@@ -3861,7 +3875,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 603,
+      "sourceFiles": 604,
       "registrationSites": 65,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 94,
@@ -4284,6 +4298,10 @@
       },
       {
         "path": "agent/extensions/lib/observation-retrieval.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/observer-model-evidence.ts",
         "exists": true
       },
       {

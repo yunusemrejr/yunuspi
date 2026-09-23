@@ -103321,6 +103321,14 @@ function enforceWarmWordIndexLruCap() {
 function acquireWarmWordIndex(cwd) {
   const key3 = path180.resolve(cwd);
   let entry = warmWordIndexes.get(key3);
+  // A cold query can finish before the asynchronous index build. Revisit
+  // that missing value without replacing an entry held by another lease.
+  // Positive warm entries still avoid snapshot IO on subsequent queries.
+  if (entry && !entry.index) {
+    const snapshot = loadProjectSnapshot(key3);
+    const index = deserializeWordIndex(snapshot?.wordIndex);
+    if (index?.forward) entry.index = index;
+  }
   if (!entry) {
     const snapshot = loadProjectSnapshot(key3);
     const index = deserializeWordIndex(snapshot?.wordIndex) ?? void 0;

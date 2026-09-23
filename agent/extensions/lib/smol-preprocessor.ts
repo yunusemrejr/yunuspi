@@ -129,14 +129,24 @@ export async function loadSmolRuntime(): Promise<SmolRuntime | undefined> {
 const SMOL_LINE_TOOLS = new Set(['bash', 'read', 'grep', 'find', 'ls']);
 
 export function safeSmolOutput(tool: string, raw: string, isError: boolean, details: unknown, maxChars = 4096): boolean {
-  if (!SMOL_LINE_TOOLS.has(tool) || isError || raw.length < 3000 || raw.length > maxChars || /[^\x09\x0a\x0d\x20-\x7e]/.test(raw)) return false;
-  if (details != null && (typeof details !== 'object' || Array.isArray(details))) return false;
-  try { if (JSON.stringify({isError: false, details: details ?? {}}).length > 500) return false; } catch { return false; }
-  if (/<\||\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/i.test(raw)) return false;
+  return smolOutputSkipReason(tool, raw, isError, details, maxChars) === undefined;
+}
+
+/** Preserve the extraction safety gates while reporting the actual boundary
+ * that rejected an offer; a short ordinary output is not protected content. */
+export function smolOutputSkipReason(tool: string, raw: string, isError: boolean, details: unknown, maxChars = 4096): string | undefined {
+  if (!SMOL_LINE_TOOLS.has(tool)) return 'unsupported-tool';
+  if (isError) return 'protected-content';
+  if (raw.length < 3000) return 'too-small-to-benefit';
+  if (raw.length > maxChars) return 'input-budget';
+  if (/[^\x09\x0a\x0d\x20-\x7e]/.test(raw)) return 'input-shape-unsupported';
+  if (details != null && (typeof details !== 'object' || Array.isArray(details))) return 'input-shape-unsupported';
+  try { if (JSON.stringify({isError: false, details: details ?? {}}).length > 500) return 'metadata-budget'; } catch { return 'input-shape-unsupported'; }
+  if (/<\||\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/i.test(raw)) return 'protected-content';
   const d = details as Record<string, unknown> | undefined;
-  if (d?.truncation || d?.truncated || d?.cancelled || d?.aborted || (d?.exitCode !== undefined && d.exitCode !== 0)) return false;
+  if (d?.truncation || d?.truncated || d?.cancelled || d?.aborted || (d?.exitCode !== undefined && d.exitCode !== 0)) return 'protected-content';
   // Error stacks, source patches, instructions and stateful diagnostics are never candidates.
-  return !/\b(?:error|exception|fatal|panic|fail(?:ed|ure)?|warning|warn|traceback|assertion|secret|password|token|authorization|instruction|ignore|must|should|decision|goal|todo)\b|^\s*(?:at\s+\S+\s*\(|diff --git|@@|#!)/im.test(raw);
+  return /\b(?:error|exception|fatal|panic|fail(?:ed|ure)?|warning|warn|traceback|assertion|secret|password|token|authorization|instruction|ignore|must|should|decision|goal|todo)\b|^\s*(?:at\s+\S+\s*\(|diff --git|@@|#!)/im.test(raw) ? 'protected-content' : undefined;
 }
 
 const runtimeDirectory = fileURLToPath(new URL('../../local-models/smollm2-135m/', import.meta.url));
@@ -226,7 +236,8 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     offer(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash') {
       microMetrics().offer('smol');
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') { microMetrics().skip('smol','disabled'); return; }
-      if (!safeSmolOutput(tool, raw, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'protected-content'}); return; }
+      const ineligible = smolOutputSkipReason(tool, raw, false, undefined);
+      if (ineligible) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:ineligible}); return; }
       if (!validSmolRuntime(runtime)) { noteHealth('ml.smol.offer', {decision:'no-runtime',reason:'model-unavailable'}); return; }
       if (slots.has(key) || slots.size >= 64) { microMetrics().skip('smol',slots.has(key)?'existing-slot':'slot-capacity'); return; }
       const background = runtime.version === 2;
@@ -341,10 +352,10 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
         finally {
           clearTimeout(timer);
           stats.lastOutcome = expired ? 'timeout' : abort.signal.aborted ? 'cancelled' : outcome;
-          finishActivity?.(epoch !== generation || abort.signal.aborted && !expired ? 'cancelled' : accepted ? 'ok' : !expired && (outcome === 'insufficient-savings' || outcome === 'model-unknown') ? 'skipped' : 'error');
+          finishActivity?.(epoch !== generation || abort.signal.aborted && !expired ? 'cancelled' : accepted ? 'ok' : !expired && (outcome === 'insufficient-savings' || outcome === 'unknown') ? 'skipped' : 'error');
           if (requested) microMetrics().run('smol',Math.max(0,now()-lastCall),raw.length);
           if (!accepted && requested) microMetrics().skip('smol',stats.lastOutcome);
-          if (requested) noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',reason:stats.lastOutcome,durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});
+          if (requested) noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',reason:stats.lastOutcome.replaceAll('_','-'),durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});
           if (!accepted && epoch === generation) stats.fallbacks++;
           busy = false;
           if (slot.state === 'pending') slot.state = 'raw';
@@ -391,7 +402,8 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
     offerWindowed(key: string, raw: string, mainInputUsdPerMillion: unknown, task = '', tool = 'bash', details?: unknown) {
       if (process.env.PI_SMOL_PREPROCESSOR === 'off') return;
       if (windows.has(key) || windows.size >= 64) return;
-      if (!safeSmolOutput(tool, raw, false, details, 32768)) { noteHealth('ml.smol.offer', {decision:'ineligible-source',reason:'protected-content'}); return; }
+      const ineligible = smolOutputSkipReason(tool, raw, false, details, 32768);
+      if (ineligible) { noteHealth('ml.smol.offer', {decision:'ineligible-source',reason:ineligible}); return; }
       const lines = raw.split('\n');
       const taskAware = process.env.PI_LOCAL_INTELLIGENCE !== 'off';
       const scores = taskAware ? relevanceScores(lines, task) : [];
@@ -399,7 +411,8 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       if (taskAware && scores.length !== lines.length) { noteHealth('ml.smol.offer', {decision:'task-budget'}); return; }
       const window = prepareSmolWindow(raw, scores.flatMap((score: number, index: number) => score > 0 ? [index + 1] : []));
       if (!window) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
-      if (!safeSmolOutput(tool, window.text, false, undefined)) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'protected-content'}); return; }
+      const windowIneligible = smolOutputSkipReason(tool, window.text, false, undefined);
+      if (windowIneligible) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:windowIneligible}); return; }
       const source = prepareSmolExtraction(window.text);
       if (!source) { noteHealth('ml.smol.offer', {decision:'ineligible',reason:'input-shape-unsupported'}); return; }
       const slotKey = `${key}:window`;

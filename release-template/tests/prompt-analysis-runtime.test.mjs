@@ -165,3 +165,50 @@ test('throwing observability callbacks cannot discard a valid analysis or break 
 	assert.equal(result.status, 'model');
 	assert.equal(result.route, 'valid');
 });
+
+test('a sole configured route gets the available total budget before falling back', async () => {
+	const result = await runtime.runPromptAnalysis({
+		prompt: 'Keep the endpoint behavior.', kind: 'initial',
+		budget: { totalMs: 250, perAttemptMs: 10 },
+		candidates: [{ route: 'single', complete: async () => {
+			await new Promise(resolve => setTimeout(resolve, 30));
+			return { text: reply('Keep the endpoint behavior.') };
+		} }],
+	});
+	assert.equal(result.status, 'model');
+});
+
+test('mindset scaffolding does not become the task, and original literal spans stay exact', () => {
+	const raw = '<mindset>Work carefully. Preserve existing behavior.</mindset>\nImplement keyboard navigation in the menu. Keep the title unchanged.';
+	assert.match(interpretation.fallbackPromptAnalysis(raw, 'initial').intent, /^Implement keyboard navigation/);
+	const request = JSON.parse(interpretation.buildPromptAnalysisRequest(raw, 'initial').split('\n').at(-1));
+	assert.equal(request.currentPrompt, raw);
+	assert.equal(request.requestFocus, 'Implement keyboard navigation in the menu. Keep the title unchanged.');
+	const analysis = interpretation.parsePromptAnalysis(reply('Keep the title unchanged.'), raw, 'initial');
+	assert.equal(raw.slice(analysis.explicitConstraints[0].start, analysis.explicitConstraints[0].end), 'Keep the title unchanged.');
+	assert.equal(interpretation.promptRequestFocus('<instructions>Implement the requested parser.</instructions>'), '<instructions>Implement the requested parser.</instructions>');
+	assert.match(interpretation.promptRequestFocus('<mindset>Unclosed guidance. Implement the parser.'), /Implement the parser/);
+});
+
+test('oversized input keeps the tail objective and verifiable constraints without a silent size rejection', () => {
+	const raw = '<mindset>' + 'General guidance. '.repeat(60_000) + '</mindset>\nImplement a bounded parser. Preserve exact offsets.';
+	const request = JSON.parse(interpretation.buildPromptAnalysisRequest(raw, 'initial').split('\n').at(-1));
+	assert.ok(request.currentPrompt.length <= 24_000);
+	assert.match(request.currentPrompt, /middle omitted/);
+	assert.match(request.requestFocus, /^Implement a bounded parser/);
+	assert.match(interpretation.fallbackPromptAnalysis(raw, 'initial').intent, /^Implement a bounded parser/);
+	const parsed = interpretation.parsePromptAnalysis(reply('Preserve exact offsets.'), raw, 'initial');
+	assert.equal(parsed.explicitConstraints.length, 1);
+	assert.equal(raw.slice(parsed.explicitConstraints[0].start, parsed.explicitConstraints[0].end), 'Preserve exact offsets.');
+});
+
+test('route errors preserve a safe category without copying provider response bodies', async () => {
+	const outcomes = [];
+	const result = await runtime.runPromptAnalysis({ prompt: 'Inspect the endpoint.', kind: 'initial',
+		candidates: [{ route: 'fixture/model', complete: async () => { throw new Error('HTTP 400 invalid_request_error: private response body'); } }],
+		onAttempt: attempt => outcomes.push(attempt),
+	});
+	assert.equal(result.status, 'fallback');
+	assert.equal(outcomes[0].failureCategory, 'invalid-request');
+	assert.doesNotMatch(JSON.stringify(outcomes), /private response body/);
+});

@@ -644,11 +644,13 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "session-coordination",
 		group: "coordination",
-		summary: "Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes, explicit-input native check receipts and a local Markdown board; peers are advisory, not remote messaging or locks.",
-		entrypoints: ["session_coordinate", "sibling-bridge", "todo-plan-changed"],
+		summary: "Coordinate independent Pi sessions through checkout scope/check receipts and explicitly addressed asynchronous local peer messages across projects. Each session keeps its own goals, plans, observer and guardian state; peer advice carries no user authority.",
+		entrypoints: ["session_coordinate", "sibling-bridge", "todo-plan-changed", "session-peer-message"],
 		tools: ["session_coordinate"],
 		options: [
-			option("action", "Coordination operation.", ["status", "publish", "clear", "prepare_check"]),
+			option("action", "Coordination operation.", ["status", "publish", "clear", "prepare_check", "send"]),
+			option("scope", "Default checkout discovery; all explicitly lists independent roots across projects.", ["checkout", "all"]),
+			option("to|recipientEpoch|message", "Send 1–2000 characters of untrusted peer advice to the full session ID and current epoch from status. Atomic inbox delivery is visible, does not wake idle inference, and never merges goals. Stale/absent recipients and full inboxes return errors."),
 			option("objective", "Bounded objective text, up to 240 characters."),
 			option("note", "Bounded handoff note, up to 500 characters."),
 			option("files", "Up to 32 absolute or cwd-resolved scopes; prepare_check requires 1–8 regular input files <=256 KiB each."),

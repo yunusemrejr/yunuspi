@@ -114,6 +114,11 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   const reason = typeof data.reason === "string" && /^[a-z-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
   const status: ActivityStatus = data.isError === true ? "error" : "ok";
   if (data.disabled === true || data.shadow === true || data.isError === true) return;
+  if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped") {
+    const failed = ["unavailable", "unhealthy", "timeout", "no-key", "invalid-input"].includes(String(data.reason));
+    return { label: kind === "ml.jev.skipped" ? "JEV" : "Needle3", status: failed ? "error" : "skip", ms,
+      detail: `${failed ? "unavailable; fallback retained" : "skipped"}${reason ? ` · ${reason}` : ""}` };
+  }
   if ((kind === "ml.evidence.delivered" || kind === "ml.evidence.returned") && typeof data.helper === "string" && Object.hasOwn(helpers, data.helper)) {
     const saved = amount("savedChars");
     return { label: helpers[data.helper], status, detail: `${kind === "ml.evidence.returned" ? "returned exact excerpts" : "added to model context"}${saved === undefined ? "" : ` · ${saved} characters ${kind === "ml.evidence.returned" ? "omitted" : "saved"}`}${data.cached === true ? " · cached selection" : ""}` };
@@ -125,10 +130,11 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   }
   if (kind === "ml.jev.used") return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached judgment" : "remote judgment ready"}${amount("questions") === undefined ? "" : ` · ${amount("questions")} questions`}` };
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
-    label: kind === "ml.smol.inference" ? "Smol" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status : "skip", ms,
+    label: kind === "ml.smol.inference" ? "Smol" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status
+      : kind === "ml.smol.inference" && reason && !["unknown", "model unknown", "insufficient savings", "cancelled"].includes(reason) ? "error" : "skip", ms,
     detail: `${data.cached === true || decision === "cache-hit" ? "cached selection" : decision === "selected" ? "local selection ready" : "local selection unused"}${reason ? ` · ${reason}` : ""}`,
   };
-  if (kind === "ml.smol.offer" && decision !== "accepted") return { label: "Smol", status: decision === "cache-hit" ? "ok" : "skip", detail: decision === "cache-hit" ? "cached selection ready" : `skipped${reason ? ` · ${reason}` : ""}` };
+  if (kind === "ml.smol.offer" && decision !== "accepted") return { label: "Smol", status: decision === "cache-hit" ? "ok" : decision === "no-runtime" ? "error" : "skip", detail: decision === "cache-hit" ? "cached selection ready" : `skipped${reason ? ` · ${reason}` : ""}` };
   if (kind === "ml.wasm.completed" && data.runtime === "tree-sitter-wasm" && data.helper === "source-check") return {
     label: "WASM source check", status, ms, detail: `${data.cached === true ? "cached" : "local parse complete"}${amount("findings") === undefined ? "" : ` · ${amount("findings")} findings`}`,
   };
@@ -176,7 +182,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
       const evaluations = Number.isSafeInteger(data.evaluations) && Number(data.evaluations) >= 0 ? Number(data.evaluations) : 0;
       const wasm = decision === "lazy" ? "failure detector on standby" : decision === "quarantined" ? "WASM unavailable"
         : decision === "initializing" ? "WASM initializing" : `${evaluations} WASM evaluations`;
-      return { label: kind === "guardian.evaluated" ? "evaluated" : "observing", status: decision === "quarantined" ? "error" : "ok", detail: `${count} tool results · ${wasm}` };
+      return { label: kind === "guardian.evaluated" ? "evaluated" : "observing", status: decision === "quarantined" ? "error" : "ok", detail: `${count} tool results · ${wasm}${data.promptCoverage === "bounded-out" ? " · prompt too large for constraint checks" : ""}` };
     }
     if (kind === "skill.read") {
       const name = skillNameFromPath(skill) ?? skill;
@@ -331,7 +337,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
           if (row && (row[key] !== undefined || Object.keys(row).length < 16)) row[key] = (row[key] ?? 0) + 1;
         }
       }
-      const d = describeActivity(kind, data);
+      const visibleIntelligence = describeIntelligenceActivity(kind, data);
+      const d = visibleIntelligence ?? describeActivity(kind, data);
       const rec: ActivityRecord = {
         t: now, kind: kind.slice(0, 64), label: d.label, status: d.status,
         ...(d.ms !== undefined ? { ms: d.ms } : {}),
@@ -348,9 +355,24 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
         const key = d.label || "local";
         local[key] = { outcome: d.detail ?? "ok", count: (local[key]?.count ?? 0) + 1, at: now };
       }
-      const visibleIntelligence = describeIntelligenceActivity(kind, data);
       if (visibleIntelligence) {
-        if (process.env.PI_SUBAGENT_CHILD !== "1") queueIntelligence(visibleIntelligence);
+        if (process.env.PI_SUBAGENT_CHILD === "1") return;
+        // Eligibility checks and lexical ranking can run on every tool result.
+        // Keep their full counters/ring, but repeat a stable status at most
+        // once a minute (five minutes for routine Smol ineligibility). Actual
+        // inference and context-delivery receipts remain individually visible.
+        const cooldown = kind === "ml.smol.offer" && data.decision !== "cache-hit" ? 300_000
+          : ["ml.fuzzy.used", "ml.jev.skipped", "ml.needle.skipped"].includes(kind) ? 60_000 : 0;
+        if (cooldown) {
+          const key = `intelligence\0${kind}\0${visibleIntelligence.status}\0${kind === "ml.fuzzy.used" ? "" : visibleIntelligence.detail}`;
+          const last = lastLine.get(key);
+          if (last !== undefined && now - last < cooldown) return;
+          while (lineAt.length && now - lineAt[0]! > 60_000) lineAt.shift();
+          if (lineAt.length >= LINE_BUDGET_PER_MIN) { dropped++; return; }
+          lastLine.set(key, now); lineAt.push(now);
+          if (lastLine.size > 512) lastLine.delete(lastLine.keys().next().value!);
+        }
+        queueIntelligence(visibleIntelligence);
         return;
       }
       const lineKind = kind;

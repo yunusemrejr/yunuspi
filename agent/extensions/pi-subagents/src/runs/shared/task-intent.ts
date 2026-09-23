@@ -32,6 +32,7 @@ export function classifyTaskIntent(task: string, agent?: string): TaskIntent {
 
 const REVIEW_ONLY_PATTERNS = [
 	/\breview only\b/i,
+	/(?:^|\n)\s*read[- ]only advisory work\./i,
 	/\bsuggest fixes only\b/i,
 	/\bonly return findings\b/i,
 	/\breturn findings only\b/i,
@@ -53,7 +54,7 @@ const REVIEWER_REQUIRED_EDIT_PATTERNS = [
 // being swallowed as the object.
 // Accept serialized line separators too: workflow prompts can carry literal
 // `\\n`/`\\r\\n` between clauses instead of decoded newlines.
-const NO_EDIT_PROHIBITION_PATTERN = /(?:\b|\\(?:r\\n|n))(?:do not|don't|must not)\s+(?:edit|modify|write(?:\s+to)?|touch|change)\b((?:(?!\b(?:but|and|then)\b|\\(?:r\\n|n))[^.;,:!?\n–—-])*)/gi;
+const NO_EDIT_PROHIBITION_PATTERN = /(?:\b|\\(?:r\\n|n))(?:do not|don't|must not|never)\s+(?:edit|modify|write(?:\s+to)?|touch|change)\b((?:(?!\b(?:but|and|then)\b|\\(?:r\\n|n))[^.;,:!?\n–—-])*)/gi;
 
 /** Objects of a no-edit prohibition that mean "the codebase in general" rather than a named scope. */
 const GENERIC_PROHIBITION_OBJECT = /^\s*(?:(?:any|all|the|these|those|your|our|existing|project|product|source|sources|config|configs|repo|repository)[\s/,-]*)*(?:files?|code|codebase|sources?|anything|repo(?:sitory)?)?\s*$/i;

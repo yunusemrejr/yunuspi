@@ -7,7 +7,10 @@ import { getGuardianKernelRuntime } from "./guardian-kernels.js";
 
 export const GUARDIAN_REQUEST_META = Symbol.for("yunuspi.guardian.request-meta.v1");
 const MAX_TASKS = 64;
-const MAX_RAW_PROMPT = 16_384;
+// Long user requests must not silently disable all tool supervision. Retain
+// complete prompts within this bound; larger inputs still get observation
+// receipts and chunked retry checks, without manufacturing constraint authority.
+const MAX_RAW_PROMPT = 131_072;
 const MAX_ATTEMPTS = 8;
 const MAX_INTERVENTION_HISTORY = 32;
 const MAX_PATH_EVIDENCE_AGE_MS = 120_000;
@@ -235,6 +238,7 @@ export class GuardianSupervisor {
 		this._activeTaskId = undefined;
 		this._latestAcceptedTaskId = undefined;
 		this._inFlight = new Map();
+		this._peerReceipts = new Set();
 		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0 };
 		this._admittedAtByKind = new Map();
 		this._window = { startedAt: this._clock(), evaluations: 0 };
@@ -247,6 +251,22 @@ export class GuardianSupervisor {
 	get enabled() { return this._enabled; }
 	get debug() { return this._debug; }
 
+	/** Peer communication is diagnostic evidence, never user instruction,
+	 * constraint authority, a new task, or a reason to mutate another session. */
+	observePeerMessage(event) {
+		if (!this._enabled || this._disposed || this._quarantined || !this._handle(this.sessionId)
+			|| event?.sessionId !== this.sessionId || event.cwd !== this.cwd
+			|| !["sent", "received"].includes(event.direction) || !safeId(event.messageId)
+			|| !safeId(event.peerSessionId) || event.peerSessionId === this.sessionId) return false;
+		const key = `${event.direction}:${event.messageId}`;
+		if (this._peerReceipts.has(key)) return false;
+		this._peerReceipts.add(key);
+		while (this._peerReceipts.size > 128) this._peerReceipts.delete(this._peerReceipts.values().next().value);
+		const counter = event.direction === "sent" ? "peerMessagesSent" : "peerMessagesReceived";
+		this._stats[counter] = (this._stats[counter] ?? 0) + 1;
+		return true;
+	}
+
 	_notifyObservation(evaluationsBefore) {
 		try {
 			const states = this._kernelRuntime ? Object.values(this._kernelRuntime.status()) : [];
@@ -254,6 +274,7 @@ export class GuardianSupervisor {
 				: states.length ? "ready" : this._kernelPromise ? "initializing" : "lazy";
 			const result = this._observe({ count: this._stats.toolResults, evaluations: this._stats.classifierEvaluations,
 				similarityEvaluations: this._stats.similarityEvaluations, decision,
+				promptCoverage: typeof this._tasks.get(this._activeTaskId)?.rawPrompt === "string" ? "complete" : "bounded-out",
 				outcome: this._stats.classifierEvaluations > evaluationsBefore ? "evaluated" : "observed" });
 			if (result?.then) void Promise.resolve(result).catch(() => {});
 		} catch { /* display-only activity cannot affect supervision */ }
@@ -317,14 +338,16 @@ export class GuardianSupervisor {
 	}
 
 	beginRequest({ requestId, turnId = requestId, sessionId = this.sessionId, source = "rpc", originalText = "" } = {}) {
-		if (!this._handle(sessionId) || !safeId(requestId) || typeof originalText !== "string" || originalText.length > MAX_RAW_PROMPT) return undefined;
+		if (!this._handle(sessionId) || !safeId(requestId) || typeof originalText !== "string") return undefined;
 		// Extension-generated messages keep their explicit provenance but never
 		// become authoritative Guardian tasks or replace the current user lineage.
 		if (source === "extension") return { requestId, turnId, sessionId: this.sessionId, processId: this.processId, guardianOwnerId: this.ownerId };
 		let task = this._tasks.get(requestId);
 		if (!task) {
 			const parentTaskId = this._latestAcceptedTaskId ?? this._activeTaskId;
-			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: sha256(originalText), rawPrompt: originalText, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set() };
+			const rawPrompt = originalText.length <= MAX_RAW_PROMPT ? originalText : undefined;
+			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set() };
+			task.retryDirective = hasExplicitRetryDirective(originalText);
 			this._tasks.set(requestId, task);
 			while (this._tasks.size > MAX_TASKS) {
 				const removedId = [...this._tasks.keys()].find((id) => id !== this._activeTaskId && id !== this._latestAcceptedTaskId && id !== requestId);
@@ -494,7 +517,6 @@ export class GuardianSupervisor {
 		if (!this._enabled || attempts.length < 3 || attempts.slice(-3).filter((attempt) => attempt.responseSeen).length < 2) return;
 		const dedupeKey = `repeated-failure:${sha256(`${task.requestId}:${attempts.at(-1).fingerprint}:${attempts.at(-1).errorHash}`)}`;
 		if (task.emittedFailureKeys.has(dedupeKey)) { this._stats.suppressedHistory++; return; }
-		const prompt = task.rawPrompt ?? "";
 		const generation = this._stateGeneration;
 		this._stats.candidates++;
 		if (!this._windowAllows("repeated-identical-failure")) { this._stats.suppressedWindow++; return; }
@@ -507,7 +529,7 @@ export class GuardianSupervisor {
 		const similarity = runtime.similarity(attempts.at(-2).shape, attempts.at(-1).shape);
 		if (similarity === undefined) { this._stats.quarantined++; return; }
 		this._stats.similarityEvaluations++;
-		const scored = runtime.evaluate(makeRepeatedFailureFeatures({ priorAttempts: attempts.slice(-3), shapeSimilarity: similarity, activeTaskId: task.requestId, now: this._clock(), userRetryDirective: hasExplicitRetryDirective(prompt) }));
+		const scored = runtime.evaluate(makeRepeatedFailureFeatures({ priorAttempts: attempts.slice(-3), shapeSimilarity: similarity, activeTaskId: task.requestId, now: this._clock(), userRetryDirective: task.retryDirective }));
 		if (!scored) { this._stats.abstained++; return; }
 		this._stats.classifierEvaluations++;
 		if (scored.probability < scored.threshold) { this._stats.abstained++; return; }
@@ -651,6 +673,7 @@ export class GuardianSupervisor {
 		if (sessions?.size === 0) guardianSessionOwners.delete(this._sessionOwner);
 		this._kernelRuntime = undefined; this._kernelPromise = undefined;
 		this._tasks.clear(); this._inFlight.clear(); this._activeTaskId = undefined; this._latestAcceptedTaskId = undefined;
+		this._peerReceipts.clear();
 		this._arbiterCycleId = undefined;
 		this._arbiter.releaseAll();
 	}

@@ -134,6 +134,7 @@ export function createNeedleRuntime(options: {
 
   const skip = (reason: NeedleSkipReason, detail?: string): NeedleResult<never> => {
     stats.skipReasons[reason] = (stats.skipReasons[reason] ?? 0) + 1;
+    noteHealth("ml.needle.skipped", { reason, count: 1 });
     return { ok: false, reason, ...(detail ? { detail } : {}) };
   };
 
@@ -415,8 +416,7 @@ export function createNeedleRuntime(options: {
     if (!response.ok) {
       const error = typeof response.error === "string" ? response.error : "malformed worker response";
       const reason: NeedleSkipReason = error === "timeout" ? "timeout" : "unavailable";
-      stats.skipReasons[reason] = (stats.skipReasons[reason] ?? 0) + 1;
-      return { ok: false, reason, detail: error.slice(0, 160) };
+      return skip(reason, error.slice(0, 160));
     }
     stats.calls++;
     if (policy.shadow) stats.shadow++;

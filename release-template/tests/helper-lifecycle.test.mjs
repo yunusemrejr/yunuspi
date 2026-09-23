@@ -183,7 +183,14 @@ test('only core-provenanced interactive and RPC inputs receive one structured ad
 	assert.equal(f.typedEvents[0].event.promptHash, createHash('sha256').update(promptA).digest('hex'));
 	assert.equal(f.customMessages.length, 2);
 	assert.ok(f.customMessages.every(({ options, message }) => options.triggerTurn === false && message.excludeFromContext === true));
-	assert.equal(f.uiNotices.length, 2);
+	assert.equal(f.uiNotices.length, 0, 'persistent analysis rows replace duplicate transient notifications');
+	assert.deepEqual(f.customMessages.map(({ message }) => message.details.kind), ['initial', 'followup']);
+	for (const { message } of f.customMessages) {
+		const injected = rewritten.messages.find(row => row.customType === 'prompt-analysis-context' && row.details.requestId === message.details.requestId);
+		assert.ok(injected.content[0].text.startsWith(message.details.advisory), 'visible expandable advice matches the model advisory');
+		assert.match(message.content, /Original user prompt preserved/);
+	}
+
 
 	const replay = await f.emit('context', { ...batch, messages: rewritten.messages });
 	assert.equal(replay, undefined, 'replaying the same request IDs does not insert duplicate context');

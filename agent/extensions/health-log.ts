@@ -27,7 +27,7 @@ export default function healthLog(pi:any) {
   if(!name||kind==='ml.smol.offer')return;
   const ownerId=guardianOwnerForSession(activeSessionId,activeSessionOwner);
   if(!ownerId)return;
-  const stage=kind==='ml.evidence.returned'?'returned':kind==='ml.evidence.delivered'?'delivered':data.cached===true?'cached':activity!.status==='skip'?'skipped':kind==='ml.needle.call'||kind==='ml.jev.used'||kind==='ml.smol.inference'||kind==='ml.mini.select'||kind==='ml.wasm.completed'?'result':'applied';
+  const stage=kind==='ml.evidence.returned'?'returned':kind==='ml.evidence.delivered'?'delivered':data.cached===true?'cached':activity!.status!=='ok'?'skipped':kind==='ml.needle.call'||kind==='ml.jev.used'||kind==='ml.smol.inference'||kind==='ml.mini.select'||kind==='ml.wasm.completed'?'result':'applied';
   const source=name==='JEV'?'remote':name==='Needle3'||name==='WASM source check'?'wasm':'local';
   const key=[name,stage,source].join(':');
   const pending=childPending.get(key);

@@ -261,6 +261,7 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
   // Statistical tie-break only after all rarity, fuzzy-match and availability gates.
   out.sort((a, b) => b.score - a.score || ranked.get(b.skill.name)!-ranked.get(a.skill.name)! || a.skill.name.localeCompare(b.skill.name));
   const selected = out.slice(0, Math.max(1, limit));
-  if(selected.some(item=>item.matched.some(term=>term.includes("~"))))try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:selected.length});}catch{/* optional visibility */}
+  const fuzzyMatches = selected.filter(item => item.matched.some(term => term.includes("~"))).length;
+  if(fuzzyMatches)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:fuzzyMatches});}catch{/* optional visibility */}
   return selected;
 }

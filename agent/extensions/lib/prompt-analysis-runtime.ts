@@ -6,6 +6,7 @@ import {
   type PromptAnalysisKind,
   type PromptAnalysisPrevious,
 } from "./prompt-interpretation.ts";
+import { classifyFailure, type FailureCategory } from "../pi-subagents/src/runs/shared/failure-cause.ts";
 
 export interface PromptAnalysisCandidate {
   route: string;
@@ -24,6 +25,8 @@ export interface PromptAnalysisAttempt {
   usage: "known" | "unknown" | "pending";
   inputTokens?: number;
   outputTokens?: number;
+  /** Private-safe category; provider error bodies are never copied to UI. */
+  failureCategory?: FailureCategory;
 }
 
 export interface PromptAnalysisRun {
@@ -167,11 +170,11 @@ export async function runPromptAnalysis(input: {
         ...(usedOutput !== undefined ? { outputTokens: usedOutput } : {}),
       });
       return result;
-    }, () => {
+    }, (error) => {
       settled = true;
       usageStates.set(attempt, "unknown");
       if (stopped) reportAttempt({ attempt, route: candidate.route, outcome: "late-failed", usage: "unknown" });
-      throw new Error("Prompt analysis route failed");
+      throw error;
     });
     // The observer above intentionally runs even if the timeout wins. Attach
     // a terminal rejection observer so the late rejection is never unhandled.
@@ -179,7 +182,10 @@ export async function runPromptAnalysis(input: {
 
     // Reserve a fair share for each configured fallback. Otherwise the first
     // two slow providers consume the entire budget and priority 3 is dead code.
-    const attemptBudget = Math.min(perAttempt, remaining / (candidates.length - attempt + 1));
+    // The final route has no fallback to reserve time for. In particular a
+    // single configured provider should receive the full advertised budget.
+    const routesLeft = candidates.length - attempt + 1;
+    const attemptBudget = routesLeft === 1 ? remaining : Math.min(perAttempt, remaining / routesLeft);
     const timeout = Symbol("prompt-analysis-timeout");
     const timeoutPromise = new Promise<typeof timeout>((resolve) => {
       timer = setTimeout(() => resolve(timeout), attemptBudget);
@@ -233,7 +239,10 @@ export async function runPromptAnalysis(input: {
       }
       if (!stopped) {
         usageStates.set(attempt, "unknown");
-        reportAttempt({ attempt, route: candidate.route, outcome: "failed", usage: "unknown" });
+        const message = error instanceof Error ? error.message : "Prompt analysis route failed";
+        const providerCode = /(?:\bHTTP\s+|\bAPI error\s*\()([45]\d\d)\b/i.exec(message)?.[1];
+        const failureCategory = classifyFailure({ stage: "provider", error: true, providerCode, message }).category;
+        reportAttempt({ attempt, route: candidate.route, outcome: "failed", usage: "unknown", failureCategory });
       }
     } finally {
       if (timer) clearTimeout(timer);

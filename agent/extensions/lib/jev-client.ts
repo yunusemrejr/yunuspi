@@ -401,6 +401,20 @@ export async function askJev(
   questions: Record<string, unknown>,
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
+  const started = deps.now();
+  const result = await askJevShared(site, state, questions, opts);
+  // Report every caller's result in its session scope, including admission
+  // failures which never reached the transient transport/footer indicator.
+  // Only the controlled reason is emitted: state and provider errors stay out.
+  try {
+    sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(result.ok ? "ml.jev.used" : "ml.jev.skipped", result.ok
+      ? { count: 1, cached: result.usage.cached, durationMs: result.usage.ms, questions: Object.keys(questions).length }
+      : { count: 1, reason: result.skipped, durationMs: Math.max(0, deps.now() - started) });
+  } catch { /* optional visibility */ }
+  return result;
+}
+
+async function askJevShared(site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
   // A caller can leave its own wait without cancelling an identical shared
   // transport. The last cancelled waiter aborts the underlying request so a
   // stale advisory cannot keep consuming network/provider time.
@@ -444,7 +458,6 @@ export async function askJev(
     aborted=waited.aborted;
     if (aborted) return {ok:false,skipped:'aborted'};
     const result=waited.result!;
-    if(result.ok)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.jev.used",{count:1,cached:!leader||result.usage.cached,durationMs:result.usage.ms,questions:Object.keys(questions).length});}catch{/* optional visibility */}
     if(leader || !result.ok)return result;
     const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
     ledger(opts.pi,{site,...usage});

@@ -357,3 +357,29 @@ test('invalid request errors do not cascade aliases or expose provider-echoed in
  assert.equal(count,1);
  assert.doesNotMatch(jev.jevHealth().lastError,/PRIVATE-ECHOED-STATE|invalid request/);
 });
+
+test('Jev admission failures, remote failures and recovery publish sanitized persistent diagnostics', async () => {
+  const key = Symbol.for('yunus-pi.health.v1'), previous = globalThis[key], events = [];
+  globalThis[key] = (kind, data) => events.push({ kind, data });
+  try {
+    harness(async () => httpFail(500, 'PRIVATE-PROVIDER-ECHO'));
+    const args = ['visibility', 'PRIVATE-INPUT-TEXT', { ping: { type: 'noul' } }];
+    assert.equal((await jev.askJev(...args)).skipped, 'unavailable');
+    assert.equal(events.at(-1).kind, 'ml.jev.skipped');
+    assert.equal(events.at(-1).data.reason, 'unavailable');
+    assert.equal((await jev.askJev(...args)).skipped, 'unhealthy');
+    assert.equal(events.at(-1).data.reason, 'unhealthy');
+    process.env.PI_JEV = 'off';
+    assert.equal((await jev.askJev(...args)).skipped, 'disabled');
+    assert.equal(events.at(-1).data.reason, 'disabled');
+    delete process.env.PI_JEV;
+    harness(async () => decisionsOk());
+    assert.equal((await jev.askJev(...args)).ok, true);
+    assert.equal(events.at(-1).kind, 'ml.jev.used');
+    assert.equal(events.at(-1).data.questions, 1);
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE-/);
+  } finally {
+    delete process.env.PI_JEV;
+    if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
+  }
+});

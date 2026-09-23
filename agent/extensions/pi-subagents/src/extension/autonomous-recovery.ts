@@ -113,36 +113,83 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 	});
 }
 
-/** Conservative explicit constraints, recovered from native active-branch user
- * messages rather than a second policy ledger. Unknown/oversized history blocks
- * automatic model changes; the selected route can still be retried. */
+/** Scan every user-text segment without copying a full transcript or making
+ * size itself a model/delegation restriction. Whitespace and long
+ * fallback modifier runs are normalized so a fixed carry also handles clauses
+ * split across arbitrary chunk boundaries. Evidence stays per-message: the
+ * existing conservative deny-over-allow precedence within one message holds. */
+function restrictionEvidence(parts: Iterable<string>) {
+ const flags = { allowFallback: false, fixedRoute: false, sameModel: false, freeOnly: false, allowDelegation: false, noDelegation: false };
+ let carry = "", includesStart = true;
+ const scan = (normalized: string, final: boolean) => {
+  // A retained suffix is neither a fresh sentence nor a fresh word. Matches
+  // ending at a chunk boundary wait for the next character to prove the word
+  // ended ("free" may still become "freedom").
+  const text = (includesStart ? "" : "_") + normalized;
+  const saw = (pattern: RegExp) => {
+   for (const match of text.matchAll(new RegExp(pattern.source, pattern.flags + "g"))) {
+    if (final || match.index! + match[0].length < text.length) return true;
+   }
+   return false;
+  };
+  if (saw(/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:model\s+)?fallback\b/i)) flags.allowFallback = true;
+  if (saw(/\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?provider\b|\b(?:same|current|this)\s+provider\s+only\b/i)) flags.fixedRoute = true;
+  if (saw(/\b(?:same|current|this)\s+model\s+only\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?model\b|\b(?:only use|use only|stick to|stay on)\b[^\n.!?]{0,160}\b(?:model|provider)\b/i)) flags.sameModel = true;
+  if (saw(/\bfree[- ]only\b|\bonly\s+(?:use\s+)?free\b|\b(?:no|never use|do not use|don't use)\s+paid\b/i)) flags.freeOnly = true;
+  // Only the leading target decides whether an exclusive request is a cost
+  // constraint or a route pin; don't retain an unbounded rest-of-line match.
+  for (const match of text.matchAll(/\b(?:only use|use only|stick to|stay on)\s+/gi)) {
+   const target = text.slice(match.index! + match[0].length, match.index! + match[0].length + 16);
+   if (!target || /^[\n.!?]/.test(target)) continue;
+   if (/^(?:the\s+)?free(?=\W)/i.test(target) || final && /^(?:the\s+)?free$/i.test(target)) flags.freeOnly = true;
+   else if (final || !["free", "the free"].some(word => word.startsWith(target.toLowerCase()))) flags.fixedRoute = true;
+  }
+  if (saw(/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:delegation|subagents|swarm)\b/i)) flags.allowDelegation = true;
+  if (saw(/\b(?:do not|don't|never)\s+(?:delegate|(?:allow|enable|use)\s+(?:automatic\s+)?(?:subagents|swarm|delegation))\b|\bno\s+(?:subagents|swarm|delegation)\b/i)) flags.noDelegation = true;
+ };
+ for (const part of parts) for (let at = 0; at < part.length; at += 16_384) {
+  const normalized = (carry + part.slice(at, at + 16_384))
+   .replace(/\s+/g, gap => /[\r\n]/.test(gap) ? "\n" : " ")
+   .replace(/\b((?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?)(?:(?:automatic|model|provider)\s+){2,}/gi, "$1automatic ");
+  scan(normalized, false);
+  if (normalized.length > 512) includesStart = false;
+  carry = normalized.slice(-512);
+ }
+ scan(carry, true);
+ return flags;
+}
+
+function* userTextParts(message: any): Generator<string> {
+ if (typeof message?.content === "string") { yield message.content; return; }
+ if (!Array.isArray(message?.content)) return;
+ let seen = false;
+ for (const block of message.content) if (block?.type === "text" && typeof block.text === "string") {
+  if (seen) yield "\n";
+  yield block.text; seen = true;
+ }
+}
+
+/** Conservative explicit constraints from the native current branch. Missing
+ * history still blocks automatic route/delegation changes; large history is
+ * inspected incrementally instead of being treated as an instruction. */
 function recoveryConstraints(ctx: ExtensionContext, prompt: string, primary: Model): { fixedRoute: boolean; sameModel: boolean; freeOnly: boolean; noDelegation: boolean } {
-	const constraints = { fixedRoute: false, sameModel: false, freeOnly: isProvenFreeRoute(primary), noDelegation: false };
-	let texts: string[] = [];
-	try {
-		texts = (ctx.sessionManager.getBranch?.() ?? []).flatMap((entry: any) => entry.type === "message" && entry.message?.role === "user"
-			? [typeof entry.message.content === "string" ? entry.message.content : entry.message.content?.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") ?? ""] : []);
-	} catch { constraints.fixedRoute = true; constraints.noDelegation = true; }
-	texts.push(prompt);
-	let bytes = 0;
-	for (const text of texts) {
-		bytes += text.length;
-		if (bytes > 1_000_000) { constraints.fixedRoute = true; constraints.noDelegation = true; break; }
-		if (/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:model\s+)?fallback\b/i.test(text)) { constraints.fixedRoute = false; constraints.sameModel = false; }
-		if (/\b(?:no|disable|do not|don't|never)\s+(?:(?:allow|enable)\s+)?(?:(?:automatic|model|provider)\s+)*fallbacks?\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?provider\b|\b(?:same|current|this)\s+provider\s+only\b/i.test(text)) constraints.fixedRoute = true;
-		if (/\b(?:same|current|this)\s+model\s+only\b|\b(?:do not|don't|never)\s+(?:switch|change)\s+(?:the\s+)?model\b|\b(?:only use|use only|stick to|stay on)\b[^\n.!?]{0,160}\b(?:model|provider)\b/i.test(text)) constraints.sameModel = true;
-		if (/\bfree[- ]only\b|\bonly\s+(?:use\s+)?free\b|\b(?:no|never use|do not use|don't use)\s+paid\b/i.test(text)) constraints.freeOnly = true;
-		// An exclusive bare target ("only use qwen3") is still a restriction.
-		// Do not guess whether it names a provider, model, or family and silently
-		// replace it. "Only use free ..." remains a cost constraint, not a pin.
-		for (const match of text.matchAll(/\b(?:only use|use only|stick to|stay on)\s+([^\n.!?]+)/gi)) {
-			if (/^(?:the\s+)?free\b/i.test(match[1]!.trim())) constraints.freeOnly = true;
-			else constraints.fixedRoute = true;
-		}
-		if (/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:delegation|subagents|swarm)\b/i.test(text)) constraints.noDelegation = false;
-		if (/\b(?:do not|don't|never)\s+(?:delegate|(?:allow|enable|use)\s+(?:automatic\s+)?(?:subagents|swarm|delegation))\b|\bno\s+(?:subagents|swarm|delegation)\b/i.test(text)) constraints.noDelegation = true;
-	}
-	return constraints;
+ const constraints = { fixedRoute: false, sameModel: false, freeOnly: isProvenFreeRoute(primary), noDelegation: false };
+ const apply = (parts: Iterable<string>) => {
+  const flags = restrictionEvidence(parts);
+  if (flags.allowFallback) { constraints.fixedRoute = false; constraints.sameModel = false; }
+  if (flags.fixedRoute) constraints.fixedRoute = true;
+  if (flags.sameModel) constraints.sameModel = true;
+  if (flags.freeOnly) constraints.freeOnly = true;
+  if (flags.allowDelegation) constraints.noDelegation = false;
+  if (flags.noDelegation) constraints.noDelegation = true;
+ };
+ try {
+  for (const entry of ctx.sessionManager.getBranch?.() ?? []) {
+   if (entry?.type === "message" && (entry as any).message?.role === "user") apply(userTextParts((entry as any).message));
+  }
+ } catch { constraints.fixedRoute = true; constraints.noDelegation = true; }
+ apply([prompt]);
+ return constraints;
 }
 /** Root lifecycle controller. Native executor owns processes, fleet slots and cancellation; one parent remains writer. */
 export function registerAutonomousRecovery(pi: ExtensionAPI, launch: Launch, deps: { now?: () => number; wait?: typeof wait; judge?: typeof askJev; childRoutes?: readonly string[]; endpoints?: (modelId:string, signal:AbortSignal)=>Promise<Endpoint[]> } = {}): void {

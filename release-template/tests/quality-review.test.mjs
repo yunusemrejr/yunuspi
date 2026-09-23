@@ -1135,6 +1135,24 @@ test('an explicit retry can recover refunded capacity while later edits do not a
  assert.equal(f.state().reports[0].outcome,'pass'); assert.equal(f.state().status,'awaiting_assessment');
 });
 
+test('a long retry explanation is excerpted visibly instead of rejecting the review', async t => {
+ let available=false;
+ const f=await fixture(t,{runner:async req=>req.aspects.map(a=>available?pass(a.id):{aspect:a.id,ok:false,text:'',gap:'No permitted reviewer has capacity.',unattempted:true})});
+ await f.mutate(); await f.tool({action:'review'});
+ available=true;
+ const retryReason='Corrected the reviewer launch configuration. ' + 'Diagnostic context. '.repeat(90) + 'Confirmed that a reviewer slot is available.';
+ const result=await f.tool({action:'review',retryReason});
+ assert.equal(f.state().status,'awaiting_assessment');
+ assert.equal(f.calls.length,2);
+ assert.equal(result.details.retryRationale.inputChars,retryReason.length);
+ assert.match(result.details.retryRationale.excerpt,/Corrected the reviewer.*[\s\S]*Middle omitted[\s\S]*slot is available/);
+ assert.ok(result.details.retryRationale.excerpt.length<=600);
+ assert.equal(JSON.parse(result.content[0].text).retryRationale.coverage,result.details.retryRationale.coverage,'excerpt coverage is visible in the tool result');
+ assert.equal(f.calls[1][0].retryReason,undefined,'retry rationale is a local correction gate, not a reviewer instruction');
+ assert.ok(!JSON.stringify(f.calls[1][0]).includes('Corrected the reviewer launch configuration.'),'neither raw rationale nor excerpt enters the independent reviewer packet');
+ assert.equal(f.tools.quality_review.parameters.args[0].retryReason.args[0].args[0].maxLength,undefined);
+});
+
 test('malformed report fields preserve valid blockers as unknown and normalization is stable', () => {
  const finding = {severity:'blocking',file:'src/window.cpp',detail:'The resize handler writes through the previous allocation after replacing its dimensions.'};
  const raw = {outcome:'failure', evidence:{path:'src/window.cpp'}, findings:[{...finding,file:'../private'},finding], gap:''};

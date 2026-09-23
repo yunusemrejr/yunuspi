@@ -164,11 +164,20 @@ export function makeRepeatedFailureFeatures({
 
 export function hasExplicitRetryDirective(text) {
 	if (typeof text !== "string" || !text) return false;
+	if (text.length > 131_072) {
+		// Inspect every chunk, including the tail, without allocating multiple
+		// full-size masked copies. A quoted match may conservatively suppress a
+		// reminder; it can never authorize an action or manufacture a constraint.
+		for (let start = 0; start < text.length; start += 16_384) {
+			if (/\b(?:retr(?:y(?:ing)?|ies)|repeat(?:ing|ed)?|try\s+again)\b/i.test(text.slice(Math.max(0, start - 64), start + 16_384))) return true;
+		}
+		return false;
+	}
 	let content = text;
 	// Mask fenced and inline code before checking. An unclosed fence masks to EOF.
 	content = content.replace(/```[\s\S]*?(?:```|$)/g, (match) => " ".repeat(match.length));
 	content = content.replace(/`[^`]*`/g, (match) => " ".repeat(match.length));
 	// Quoted examples are not user constraints. This is a conservative veto only.
 	content = content.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, (match) => " ".repeat(match.length));
-	return /\b(?:retry|repeat|try\s+again)\b/i.test(content);
+	return /\b(?:retr(?:y(?:ing)?|ies)|repeat(?:ing|ed)?|try\s+again)\b/i.test(content);
 }

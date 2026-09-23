@@ -142,6 +142,7 @@ export class AgentSession {
     _modelRuntime;
     _guardian;
     _guardianAnalysisUnsubscribe;
+    _guardianPeerUnsubscribe;
     _pendingInputControllers = new Set();
     _inputQueueTail = Promise.resolve();
     // Tool registry for extension getTools/setTools
@@ -663,6 +664,8 @@ export class AgentSession {
         this._extensionRunner.invalidate("This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().");
         this._guardianAnalysisUnsubscribe?.();
         this._guardianAnalysisUnsubscribe = undefined;
+        this._guardianPeerUnsubscribe?.();
+        this._guardianPeerUnsubscribe = undefined;
         this._guardian?.dispose();
         this._disconnectFromAgent();
         this._eventListeners = [];
@@ -2416,6 +2419,10 @@ export class AgentSession {
         this._guardianAnalysisUnsubscribe?.();
         this._guardianAnalysisUnsubscribe = extensionsResult.runtime.onEvent("guardian:prompt-analysis:v1", (event) => {
             try { this._guardian?.observePromptAnalysis(event); } catch { /* a malformed advisory event is an abstention */ }
+        });
+        this._guardianPeerUnsubscribe?.();
+        this._guardianPeerUnsubscribe = extensionsResult.runtime.onEvent("session-peer-message", (event) => {
+            try { this._guardian?.observePeerMessage(event); } catch { /* peers cannot interrupt this session */ }
         });
         if (this._extensionRunnerRef) {
             this._extensionRunnerRef.current = this._extensionRunner;

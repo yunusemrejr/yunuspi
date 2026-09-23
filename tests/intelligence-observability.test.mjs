@@ -157,6 +157,58 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
   } finally { activity.dispose(); }
 });
 
+test('repeated eligibility and lexical checks stay counted without drowning out helper results', async () => {
+  const sent = [], activity = createActivityIndicators(message => sent.push(message));
+  const originalNow = Date.now;
+  let now = 1000;
+  Date.now = () => now;
+  try {
+    for (let i = 0; i < 50; i++) {
+      activity.note('ml.smol.offer', { decision: 'ineligible-source', reason: 'protected-content' });
+      activity.note('ml.fuzzy.used', { count: i % 6 + 1 });
+      await Promise.resolve();
+    }
+    assert.equal(sent.length, 2, 'same routine status is visible once, not once per tool result');
+    assert.equal(activity.counters().events['ml.smol.offer'], 50);
+    assert.equal(activity.counters().events['ml.fuzzy.used'], 50);
+    assert.equal(activity.snapshot().length, 100);
+    now += 60_000;
+    activity.note('ml.fuzzy.used', { count: 2 });
+    activity.note('ml.smol.offer', { decision: 'ineligible-source', reason: 'protected-content' });
+    await Promise.resolve();
+    assert.equal(sent.length, 3, 'lexical activity refreshes after one minute; unchanged Smol skips wait five');
+    activity.note('ml.smol.offer', { decision: 'no-runtime', reason: 'model-unavailable' });
+    activity.note('ml.jev.skipped', { reason: 'timeout', durationMs: 15000, raw: 'PRIVATE-EVIDENCE' });
+    activity.note('ml.needle.skipped', { reason: 'unavailable', detail: 'PRIVATE-WORKER-ERROR' });
+    await Promise.resolve();
+    assert.equal(sent.length, 6, 'new outage states are visible immediately');
+    assert.ok(sent.slice(-3).every(message => message.details.status === 'error'));
+    assert.match(sent.at(-2).details.detail, /fallback retained.*timeout/);
+    assert.equal(activity.counters().errors.length, 3, 'failures persist in the diagnostics ring');
+    assert.doesNotMatch(JSON.stringify(sent), /PRIVATE-/);
+    activity.note('ml.jev.used', { durationMs: 200, questions: 2 });
+    await Promise.resolve();
+    assert.equal(sent.at(-1).details.status, 'ok', 'recovery is not hidden by a failure cooldown');
+    assert.ok(sent.every(message => message.excludeFromContext && message.display));
+  } finally { Date.now = originalNow; activity.dispose(); }
+});
+
+test('skill fuzzy receipts count fuzzy candidates rather than the whole selected list', () => {
+  const rows = [], previous = globalThis[HEALTH];
+  globalThis[HEALTH] = (kind, data) => rows.push({ kind, data });
+  try {
+    const index = buildSkillIndex([
+      { name: 'orbital-mechanics', file: '/fixture/orbital/SKILL.md', description: 'orbital ephemeris propagation integrator' },
+      { name: 'database-design', file: '/fixture/database/SKILL.md', description: 'relational database schema indexes' },
+      ...Array.from({ length: 6 }, (_, i) => ({ name: `generic-${i}`, file: `/fixture/${i}/SKILL.md`, description: 'workflow evidence checks' })),
+    ]);
+    const selected = rankSkills(index, 'orbitl ephemeri relational database schema', 6);
+    const fuzzyCount = selected.filter(item => item.matched.some(term => term.includes('~'))).length;
+    assert.ok(selected.length > fuzzyCount && fuzzyCount > 0);
+    assert.deepEqual(rows, [{ kind: 'ml.fuzzy.used', data: { count: fuzzyCount } }]);
+  } finally { if (previous === undefined) delete globalThis[HEALTH]; else globalThis[HEALTH] = previous; }
+});
+
  test('semantic identifier typo recovery emits only after a real fuzzy result', () => {
   const rows = [], previous = globalThis[HEALTH];
   globalThis[HEALTH] = (kind, data) => rows.push({ kind, data });

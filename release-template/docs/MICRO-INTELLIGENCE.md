@@ -31,6 +31,16 @@ Responses contain exact UTF-16 source ranges, a SHA256 source hash, original err
 
 Actual completed intelligence work produces small, flowing session notes. They distinguish local WASM operations, remote JEV judgments, cache hits, selected/abstained results, exact excerpts returned by a tool and evidence first added to model context. A context projection is not proof that a provider accepted a request. Character savings or omissions are not token or billing measurements. Only simultaneous event bursts aggregate; later meaningful uses remain visible. Child notes require the matching live owner, and display-only notes are excluded from provider input, replay conversion and compaction. They do not wake the model.
 
+JEV is invoked for eligible semantic judgments, not on every prompt or tool call. Admission failures now leave a visible reason as well as diagnostics. Needle unavailable states likewise retain a reason and the caller's fallback. Fuzzy skill matching is local lexical JavaScript; its match count includes only fuzzy matches, not every skill selected by another route. It is not a WASM inference claim.
+
+Repeated unchanged lexical and unavailable notices are limited to once per minute, and routine Smol eligibility reasons to once per five minutes. Counters remain recorded; actual inference and context-delivery results remain individually visible. Smol distinguishes short inputs, unsupported shapes, budget boundaries and protected content. An `UNKNOWN` response means no safe useful selection was returned, so the full original remains available.
+
+## Inspectable prompt analysis
+
+Initial and follow-up analyses produce one persistent TUI message. It shows the task interpretation, follow-up relationship, model route or categorized fallback cause, and whether a long input was excerpted. Expand the message to inspect the exact advisory inserted next to the corresponding original user message. No approval step is introduced and no replacement prompt is substituted for the user's text.
+
+The advisory separates concrete work from reusable mindset scaffolding and quoted examples. This extraction is a heuristic, not authority: omitted content may contain additional requirements, and the main agent still receives the original. A bounded model attempt may time out; deterministic analysis remains explicitly labeled and the final configured route gets the remaining preflight budget. Late responses cannot turn an already delivered fallback into a model success.
+
 ## Needle3 — local semantic reflex
 
 Needle3 (Cactus Compute, Apache-2.0) runs in a process-local worker when

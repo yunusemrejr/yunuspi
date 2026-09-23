@@ -598,7 +598,7 @@ export interface SessionObserverPreferenceSelection {
 	reason?: string;
 }
 
-/** Shared observer admission floor for its 6,000-byte packet and bounded answer. */
+/** Shared observer admission floor for its 8,000-byte packet and bounded answer. */
 export const SESSION_OBSERVER_REQUIREMENTS: Readonly<LlmPreferenceRequirements> = Object.freeze({
 	inputModalities: ["text"], minContextWindow: 12288, minOutputTokens: 4096,
 });

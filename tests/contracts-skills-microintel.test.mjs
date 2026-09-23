@@ -94,6 +94,25 @@ test('smol offers carry structured skip reasons on the live gates', async () => 
   assert.ok(byKey, 'hook observed all offers');
 });
 
+test('Smol reports size and shape eligibility separately without weakening protected evidence gates', async () => {
+  const smol = await import(pathToFileURL(path.join(agent, 'extensions/lib/smol-preprocessor.ts')));
+  const clean = 'Routine output line with ordinary words. '.repeat(90);
+  const cases = [
+    ['bash', 'short output', false, undefined, 'too-small-to-benefit'],
+    ['bash', clean.repeat(2), false, undefined, 'input-budget'],
+    ['bash', clean + 'é', false, undefined, 'input-shape-unsupported'],
+    ['bash', clean, false, { truncated: true }, 'protected-content'],
+    ['bash', clean + ' warning: inspect this evidence', false, undefined, 'protected-content'],
+    ['bash', clean, true, undefined, 'protected-content'],
+    ['custom', clean, false, undefined, 'unsupported-tool'],
+    ['bash', clean, false, undefined, undefined],
+  ];
+  for (const [tool, raw, isError, details, reason] of cases) {
+    assert.equal(smol.smolOutputSkipReason(tool, raw, isError, details), reason);
+    assert.equal(smol.safeSmolOutput(tool, raw, isError, details), reason === undefined);
+  }
+});
+
 test('smol/kompress ineligibility is structured', () => {
   let ledger = { version: 1, samples: [] };
   for (const reason of ['input-shape-unsupported', 'protected-content', 'already-compact', 'latency-budget-exceeded', 'confidence-too-low', 'model-unavailable']) {

@@ -11,6 +11,8 @@ if(!agent) throw new Error('Scope council runner source is missing');
 const extension=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/')).href;
 const shared=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/')).href;
 const {registerScopeCouncilRunner,SCOPE_COUNCIL_LIMITS,SCOPE_COUNCIL_RUNNER}=await import(extension+'scope-council-runner.ts');
+const {classifyTaskMutationIntent,taskMayMutate}=await import(shared+'task-intent.ts');
+const {reduceChildEvents,projectTranscriptChildren}=await import(shared+'child-ledger.ts');
 const {registerAutonomousRecovery}=await import(extension+'autonomous-recovery.ts');
 const {publishFreeEvidence,FREE_BASE_URL,FREE_CATALOG_URL}=await import(shared+'free-route-evidence.ts');
 const {resetSharedControl}=await import(pathToFileURL(path.join(agent,'extensions/lib/intervention-shared.ts')));
@@ -263,6 +265,40 @@ test('failed peers keep the categorized row and name the underlying failure',asy
   assert.ok(costs.length>=1,'failed peers persist cost rows');
   assert.equal(costs[0].data.results[0].exitCode,1,'raw executor row survives instead of a generic placeholder');
   assert.equal(costs[0].data.results[0].usage.input,5,'usage survives for accounting');
+});
+
+test('read-only councils retain the parent implementation request without requiring child edits', async () => {
+  const calls=[];
+  registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{available:()=>models,constraints:()=>({}),rankPerspectives:null,
+    launch:async(_id,params)=>{calls.push(params);return result('The current source requires the requested navigation update; this is advice only.');}});
+  const objective='Implement keyboard navigation and update the tests. Preserve the existing title.';
+  const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task:objective},context());
+  assert.equal(output.status,'complete');
+  for(const params of calls) {
+    assert.ok(params.task.includes(objective),'the parent task is still present verbatim');
+    assert.equal(classifyTaskMutationIntent(params.agent,params.task).kind,'read-only');
+    assert.equal(taskMayMutate(params.task),false);
+  }
+  assert.equal(classifyTaskMutationIntent('worker',objective).kind,'implementation');
+  assert.equal(classifyTaskMutationIntent('worker','Never edit tests; implement the source fix.').kind,'implementation');
+  assert.equal(taskMayMutate('Never edit tests; implement the source fix.'),true);
+});
+
+test('failed council wrappers link to native child identities with visible role labels', async () => {
+  const entries=[];
+  const pi={getActiveTools:()=>['subagent'],appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})};
+  let sequence=0;
+  registerScopeCouncilRunner(pi,{available:()=>models,constraints:()=>({}),rankPerspectives:null,launch:async()=>{
+    const runId=`native-fixture-${++sequence}`;
+    pi.appendEntry('subagent-lifecycle-v1',{runId,mode:'single',state:'running',results:[{index:0,status:'running'}]});
+    pi.appendEntry('subagent-lifecycle-v1',{runId,mode:'single',state:'failed',results:[{index:0,status:'failed'}]});
+    return {isError:true,details:{runId,results:[{index:0,exitCode:1,error:'HTTP 400 invalid_request_error',model:'fixture/route'}]}};
+  }});
+  await globalThis[SCOPE_COUNCIL_RUNNER]({task},context());
+  const ledger=reduceChildEvents(projectTranscriptChildren(entries));
+  assert.equal(ledger.tasks.length,2,'two real peers remain two tasks rather than four wrapper/native duplicates');
+  assert.ok(ledger.tasks.every(task=>task.label.startsWith('Scope council:')));
+  assert.ok(ledger.tasks.every(task=>task.attempts.length===1&&task.attempts[0].runId.startsWith('native-fixture-')));
 });
 
 process.on('exit',()=>{

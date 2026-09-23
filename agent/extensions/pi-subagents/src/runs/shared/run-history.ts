@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { getAgentDir, lastAssistantStopReason, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
-import { classifyFailure, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
+import { classifyFailure, readFailureCause, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
 
 /** Legacy outcomeReason strings are preserved for existing consumers; the
  * structured `cause` beside them carries the full machine-readable detail. */
@@ -76,7 +76,9 @@ export function failureOf(result: any): { cause: FailureCause; reason: string | 
 	if (result?.detached || result?.status === "detached") {
 		return { cause: classifyFailure({ status: "detached" }), reason: undefined };
 	}
-	const cause = classifyFailure(structuredEvidenceOf(result));
+	const classified = classifyFailure(structuredEvidenceOf(result));
+	const retained = readFailureCause(result?.cause ?? result?.evidence?.cause);
+	const cause = classified.category === "unknown" && retained ? retained : classified;
 	if (cause.category === "none") return { cause, reason: undefined };
 	return { cause, reason: LEGACY_REASON[cause.category] ?? "unknown" };
 }

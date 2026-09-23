@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.5.1 repairs model discovery, formatting aliases and stale local-error exclusions. It includes the bounded periodic session observer configured through `/models`, async jobs, project intelligence and creative tools. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Async and creative tools](docs/ASYNC-AND-STUDIO.md)
+Version 0.5.2 makes prompt analysis inspectable, reviews active work in short observer chunks, and adds explicitly addressed communication between independent sessions. It also repairs Guardian coverage for large requests and misleading helper/child failure reports. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 

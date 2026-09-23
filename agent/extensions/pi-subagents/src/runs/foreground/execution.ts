@@ -1474,7 +1474,10 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			let closeError = result.error ?? toolDiagnosticError ?? assistantError;
 			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !closeError;
 			const forcedDrainAfterEmptyTerminal = forcedDrainAfterFinalSuccess && hasEmptyTerminalAssistantResponse(result.messages ?? []);
-			if (signal) result.processSignal = signal;
+			// An owned post-final drain is cleanup, not a process failure. Keeping
+			// its signal on a successful result misclassifies later acceptance
+			// failures and even clean completions in the canonical child ledger.
+			if (signal && !(forcedTerminationSignal && forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal)) result.processSignal = signal;
 			if (!closeError && forcedDrainAfterEmptyTerminal && stderr.trim()) {
 				closeError = stderr.trim();
 			}

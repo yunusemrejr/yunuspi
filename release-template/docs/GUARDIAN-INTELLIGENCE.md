@@ -1,6 +1,7 @@
 # Guardian Intelligence
 
-Guardian Intelligence is YunusPi's supervisory layer. It observes a running session and, only
+Guardian Intelligence provides narrow, event-driven checks. The independent conversational
+quality reviewer is the [session observer](SESSION-OBSERVER.md). Guardians observe a running session and, only
 when verified evidence accumulates, injects one short piece of bounded guidance. It is not an
 agent: it never plans, never calls a model for its own decisions, never spawns work, and cannot
 block a tool call.
@@ -31,7 +32,11 @@ Guardian state is per session and per request lineage. For the active user reque
 - typed tool failures and whether an assistant response intervened;
 - session, process, agent and project identity.
 
-It retains at most 64 bounded user prompts (up to 16,384 characters each) in session memory.
+It retains at most 64 bounded user prompts (up to 131,072 characters each) in session memory.
+Larger requests still register a supervised task: retry instructions are scanned in bounded
+chunks across the entire input, and tool monitoring and WASM failure checks continue. The TUI
+reports reduced exact constraint coverage; unretained text cannot establish verified path
+constraints. The original user request still reaches the main agent unchanged.
 Tool argument values and typed error text are hashed; only bounded type shapes and path evidence
 are retained. Sensitive argument keys are excluded from shapes. Guardian itself writes no prompt
 or tool-content log. Skill names and file extensions are diagnostic signals, not activation rules.
@@ -81,6 +86,8 @@ constraint.
 ## Observability
 
 - Guidance appears in the transcript as a `guardian_intervention` custom message.
+- Routine monitoring and actual WASM evaluations have separate visible receipts, so standby
+  is not confused with successful inference. Reduced prompt coverage is explicit.
 - Child-subagent guidance is relayed to the parent session through the subagent supervisor channel.
 - Internal intelligence components (JEV, Needle3, Smol, Kompress, fuzzy/neural helpers, the intent
   classifier) report a single bounded `activity` line per real use, deduplicated per component.

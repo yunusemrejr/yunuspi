@@ -95,6 +95,26 @@ export interface FailureCause {
 	healthScopes?: HealthScope;
 }
 
+/** Read compact persisted causes after raw provider text has been redacted.
+ * Do not copy unknown fields or arbitrary strings into the UI projection. */
+export function readFailureCause(value: unknown): FailureCause | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const row = value as Record<string, unknown>;
+	const stages = ["classify", "select", "preflight", "launch", "execute", "tool", "provider", "parse", "validate", "accept", "budget", "recover"];
+	const categories = ["invalid-request", "schema-incompatible", "unsupported-field", "auth", "quota", "rate-limit", "overload", "transport", "timeout", "context-overflow", "output-truncated", "budget-exhausted", "permission", "dependency", "internal", "process-signal", "acceptance", "interrupted", "stopped", "unknown", "none"];
+	if (!stages.includes(String(row.stage)) || !categories.includes(String(row.category))) return undefined;
+	if (typeof row.retryable !== "boolean" || typeof row.deterministicShape !== "boolean" || typeof row.outputPresent !== "boolean") return undefined;
+	if (!["none", "length-stop", "answer-budget", "structural-cutoff"].includes(String(row.truncation)) || !["none", "pending", "passed", "failed"].includes(String(row.acceptance))) return undefined;
+	return {
+		stage: row.stage as FailureStage, category: row.category as FailureCategory,
+		retryable: row.retryable, deterministicShape: row.deterministicShape, outputPresent: row.outputPresent,
+		truncation: row.truncation as TruncationState, acceptance: row.acceptance as AcceptanceState,
+		...(Number.isSafeInteger(row.attempt) && Number(row.attempt) > 0 ? { attempt: Number(row.attempt) } : {}),
+		...Object.fromEntries(["providerCode", "backend", "tool", "schemaField", "diagnosticRef", "shapeHash"].flatMap(key =>
+			typeof row[key] === "string" && /^[a-z0-9_.:/@+-]{1,256}$/i.test(row[key] as string) ? [[key, row[key]]] : [])),
+	};
+}
+
 export interface StructuredFailureEvidence {
 	stage?: FailureStage;
 	/** Tool validator machine code (e.g. invalid-params, schema-mismatch). */

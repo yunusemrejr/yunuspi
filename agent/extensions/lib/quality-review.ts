@@ -528,9 +528,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   pi.on?.('session_compact', () => { noted = ''; });
   pi.registerTool({name:'quality_review',label:'Quality Review',description:'Run or inspect automatic, bounded, read-only aspect reviews of observed changes; assess evidence before declaring completion. Reviewer receipts come from the native economy-gated executor, never a parent-supplied pass. Two rounds per user turn. Missing evidence is blocked, not accepted; optional improvements do not require endless polishing.',
-    parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,maxLength:600,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
+    parameters:Type.Object({action:Type.Union(['inspect','review','assess'].map(x=>Type.Literal(x))),disposition:Type.Optional(Type.Union([Type.Literal('accepted'),Type.Literal('blocked')])),reason:Type.Optional(Type.String({minLength:20,maxLength:1200,description:"Concise evidence-based assessment, 20–1200 characters; reference retained reports rather than repeat them."})),dismissals:Type.Optional(Type.Array(Type.Object({id:Type.String(),reason:Type.String({minLength:20,maxLength:600})}),{maxItems:30})),retryReason:Type.Optional(Type.String({minLength:20,description:'Concrete launch or capacity correction since an unavailable review. Required to retry when no independent reviewer returned; new code or screenshots alone are not a correction. Long explanations are reduced to a disclosed head/tail excerpt.'})),evidence:Type.Optional(Type.Array(Type.String({maxLength:256}),{maxItems:8,description:"Outcome evidence for reviewers to judge (renders, logs, test output): existing regular files inside the project, given as relative paths with no parent traversal. Rejected or missing paths are reported explicitly. New or updated evidence can reopen an incomplete review within the two-round budget."}))}),
     async execute(_id: string, params: any, signal: any, update: any, ctx: any) {
       const ticket = generation;
+      const rawRetryReason = typeof params.retryReason === 'string' ? params.retryReason.trim() : '';
+      const retryReason = rawRetryReason.length <= 600 ? rawRetryReason : `${rawRetryReason.slice(0, 350)}\n[Middle omitted]\n${rawRetryReason.slice(-220)}`;
+      const retryRationale = rawRetryReason.length > 600 ? { inputChars: rawRetryReason.length, excerpt: retryReason, coverage: 'head and tail; full rationale remains in the original tool call' } : undefined;
       const checkCurrent = () => {
         signal?.throwIfAborted();
         if (ticket !== generation || !active) throw Error('Quality review cancelled by user input, session change or shutdown.');
@@ -540,7 +543,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         const validation = validateReviewEvidence(ctx.cwd, params.evidence);
         if (validation.rejected.length && validation.paths.length === 0) throw Error(`No usable outcome evidence was accepted. ${validation.rejected.join(' ')}`);
         if (typeof update === 'function') { progressListeners.add(update); emitProgress(); }
-        try { await run(ctx,signal,false,validation.paths,validation.rejected,params.retryReason ?? ''); }
+        try { await run(ctx,signal,false,validation.paths,validation.rejected,retryReason); }
         finally { if (typeof update === 'function') progressListeners.delete(update); }
         checkCurrent();
       }
@@ -583,7 +586,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         disposition = params.disposition; reason = params.reason.trim().slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
       }
-      signal?.throwIfAborted(); const data=summary(true);return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
+      signal?.throwIfAborted(); const data={...summary(true),...(retryRationale ? {retryRationale} : {})};return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
     }
   });
   return api;

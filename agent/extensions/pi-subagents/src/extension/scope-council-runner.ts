@@ -343,7 +343,9 @@ function appendLifecycle(pi: any, runId: string, status: string, row?: any): voi
 			runId,
 			mode: "single",
 			state: status,
-			results: [{ index: 0, status, ...(typeof row?.runId === "string" ? { runId: row.runId } : {}) }],
+			results: [{ index: 0, status,
+				...Object.fromEntries(["agent", "label", "scopeId", "model", "runId"].flatMap(key => typeof row?.[key] === "string" ? [[key, row[key]]] : [])),
+				...(Number.isSafeInteger(row?.attempt) ? { attempt: row.attempt } : {}) }],
 		});
 	} catch { /* lifecycle telemetry cannot change the advisory result */ }
 }
@@ -521,7 +523,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text: "", gap: "Scope council peer skipped: the automatic assistance budget for this request is already spent." };
 			}
 			const runId = `scope-council-${phase}-${randomUUID()}`;
-			if (current()) appendCost(pi, sessionFile, runId, { index: 0, status: "running" }, "running");
+			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1,
+				label: phase === "preservation" ? "Scope council: preserve requirements" : phase === "meaningful-change" ? "Scope council: assess changes" : "Scope council: critique advice",
+				scopeId: phase, model: member.route };
+			if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
 			let row: any;
 			try {
 				const remaining = Math.max(1, Math.floor(deadlineAt - now()));
@@ -533,12 +538,15 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 					: Math.min(120_000, Math.max(1, remaining - 30_000));
 				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
-				row = resultRow(result);
-				const rawRow = rawResultRow(result);
+				const returnedRow = rawResultRow(result);
+				const rawRow = { ...identity, ...returnedRow,
+					...(typeof result?.details?.runId === "string" ? { runId: result.details.runId } : {}),
+					...(!returnedRow ? { exitCode: 1, error: result?.details?.launchFailure ?? result?.error ?? true } : {}) };
+				row = resultRow(result) ? rawRow : undefined;
 				const text = row ? cleanBody(row, phase === "peer-critique" ? limits.discussionChars : limits.proposalChars) : "";
 				if (!row || !text) {
 					if (current()) {
-						appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", row);
+						appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", rawRow);
 						appendCost(pi, sessionFile, runId, rawRow ?? row, signal.aborted ? "stopped" : "failed");
 					}
 					return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `This council peer failed or returned no usable advisory text.${failureSuffix(result, rawRow)}` };
@@ -550,8 +558,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text, row };
 			} catch (error) {
 				if (current()) {
-					appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", row);
-					appendCost(pi, sessionFile, runId, row, signal.aborted ? "stopped" : "failed");
+					const failed = { ...identity, ...row, exitCode: 1, error: error instanceof Error ? error.message : "Council peer launch failed" };
+					appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", failed);
+					appendCost(pi, sessionFile, runId, failed, signal.aborted ? "stopped" : "failed");
 				}
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
 			}
