@@ -11,14 +11,14 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'pi-memory-exit-budget-'));
 register('data:text/javascript,'+encodeURIComponent(`export function resolve(name,ctx,next){
  const sources={
  '@yunuspi/coding-agent':'export function convertToLlm(v){return v};export function serializeConversation(){return "fixture conversation"};export function getAgentDir(){return ${JSON.stringify(root)}};export function withFileMutationQueue(_p,fn){return fn()}',
- '@yunuspi/ai':'export const Type={Object:()=>({}),Optional:v=>v,String:()=>({}),Number:()=>({}),Integer:()=>({})};export function StringEnum(v){return v}',
  '@yunuspi/ai/compat':'export async function complete(...args){return globalThis.__exitBudgetComplete(...args)}'};
  return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
 }`),import.meta.url);
 const memory=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/index.ts')));
 const {registerPriming}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/priming.ts')));
 const original=Object.fromEntries(['PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY_MODEL','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
-// All provider imports are fixture-only; isolate host/offline runner settings.
+// Keep the real schema constructors; only provider completion is intercepted.
+// Isolate host/offline runner settings without weakening the runtime contract.
 delete process.env.PI_MEMORY_EXIT_SUMMARY_MODEL;
 delete process.env.PI_OFFLINE;
 process.env.PI_MEMORY_EXIT_SUMMARY='1';
