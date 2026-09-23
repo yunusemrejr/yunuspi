@@ -52,9 +52,7 @@ import {
 	SESSION_STOP_ENTRY,
 	STOP_ALL_RUNS,
 	isSessionStopped,
-	markStopUnlockAnnounced,
 	noteSessionStopped,
-	shouldAnnounceStopUnlock,
 	stopGates,
 	stopInputUnlocks,
 	unlockSessionStop,
@@ -363,17 +361,17 @@ function registerHistory(
 		name: "session_stop",
 		label: "Stop Session",
 		promptGuidelines: [
-			"Completion stop: when ALL requested work is done and verified with nothing remaining, session_stop({action:\"stop\", reason:\"...\"}) ends the session cleanly — active subagent runs stop and automatic quality/test follow-ups stay silent. Locked until BOTH hold: (1) at least one completed quality review with reviewer evidence, (2) at least one completed subagent run. session_stop({action:\"status\"}) shows the gates; any new user message unlocks a stopped session as a normal continuation.",
+			"When requested work is complete, session_stop({action:\"stop\", reason:\"...\"}) ends the session cleanly, stopping its active subagent runs and silencing automatic quality/test follow-ups. State observed verification and any remaining gaps honestly. Do not launch reviews, delegates, optional polish or repeated checks just to qualify for stopping; prior review and delegation are informational, not prerequisites. Any new user message resumes the session normally.",
 		],
 		description:
-			"End the main session once all work is done and verified. action:status reports the stop gates and current state; action:stop (with a concrete 20+ character reason) stops this session's active subagent runs, records the stop, silences automatic quality/test follow-ups and ends the turn. Locked until at least one quality review completed with reviewer evidence AND at least one subagent run completed — failed, stopped or never-attempted work satisfies neither gate. Main session only. Any new user message unlocks a stop as a standard continuation.",
+			"End the main session when requested work is complete, with honest verification and remaining gaps. action:status reports current state and informational review/delegation evidence; action:stop (concrete 20+ character reason) stops this session's active subagent runs, records the stop, silences automatic quality/test follow-ups and ends the turn. It requires no extra review or delegation to become available and does not certify the work. Main session only. Any new user message resumes normally.",
 		parameters: Type.Object({
 			action: StringEnum(["status", "stop"]),
 			reason: Type.Optional(
 				Type.String({
 					minLength: 20,
 					maxLength: 1200,
-					description: "Required for stop: what is done and verified, 20–1200 characters.",
+						description: "Required for stop: completed work, observed verification and any remaining gaps, 20–1200 characters.",
 				}),
 			),
 		}),
@@ -387,7 +385,7 @@ function registerHistory(
 			try {
 				branch = ctx.sessionManager.getBranch();
 			} catch {
-				throw new Error("Cannot verify stop gates: the session branch is unavailable.");
+				branch = undefined;
 			}
 			const gates = stopGates(branch);
 			if (params.action === "status") {
@@ -400,10 +398,6 @@ function registerHistory(
 			const reason = typeof params.reason === "string" ? params.reason.trim() : "";
 			if (reason.length < 20)
 				throw new Error("Stopping requires a concrete reason of at least 20 characters: what is done and verified.");
-			if (!gates.met)
-				throw new Error(
-					`Session stop is locked: quality [${gates.quality.detail}], subagent [${gates.subagent.detail}]. Complete a quality review with reviewer evidence and a subagent run first.`,
-				);
 			const sessionId = ctx.sessionManager.getSessionId?.();
 			const runs: { stopped: string[]; failed: { id: string; error: string }[]; bridge: string } = {
 				stopped: [],
@@ -661,28 +655,8 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", async (event, ctx) => {
 		// A stopped session stays silent: no test/review follow-ups revive it.
 		if (isSessionStopped(ctx)) return;
-		const quiet = !SHADOW && process.env.PI_SUBAGENT_CHILD !== "1" &&
-			ctx.isIdle?.() === true && !ctx.hasPendingMessages?.();
 		await projectTests.settled(event, ctx);
 		await quality.settled(event, ctx);
-		if (!quiet || !shouldAnnounceStopUnlock(ctx)) return;
-		let gates;
-		try {
-			gates = stopGates(ctx.sessionManager.getBranch?.() ?? []);
-		} catch {
-			return;
-		}
-		if (!gates.met) return;
-		markStopUnlockAnnounced(ctx);
-		try {
-			pi.sendMessage({
-				customType: "session-stop-unlock",
-				content: `[session stop] Completion stop is now unlocked (${gates.quality.detail}; ${gates.subagent.detail}). When all work is done and verified with nothing remaining, session_stop({action:"stop", reason:"..."}) ends the session: this session's active subagent runs stop and automatic quality/test follow-ups stay silent. Any new user message unlocks a stopped session as a normal continuation.`,
-				display: false,
-			}, { deliverAs: "followUp", triggerTurn: false });
-		} catch {
-			// The gates remain met; the agent can still discover session_stop via its tool description.
-		}
 	});
 	pi.on("before_agent_start", async (_event, ctx) => {
 		pending.delete("unverified-edits");

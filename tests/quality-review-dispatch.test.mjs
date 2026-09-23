@@ -80,6 +80,14 @@ try {
  assert.ok(f.calls.every(c=>!c.params.capabilityCeiling.allowedTools.includes('sandbox_run')&&!c.params.capabilityCeiling.allowedTools.includes('artifact_check')),'bounded source reviewers do not spend calls on a second test environment or image headers');
  assert.ok(f.calls.every(c=>c.params.task.includes('at most 6 evidence strings')),'prompt and parser share evidence bounds');
  assert.ok(f.calls.every(c=>c.params.task.includes("'pass' requires actual source evidence and an empty gap")&&c.params.task.includes('never in gap')),'pass requires an empty gap; scope notes belong in findings or evidence');
+ const repair=fixture();
+ await repair.run({...request,previousReview:{revision:1,changedFiles:['src/value.js'],reports:aspects.map(aspect=>({aspect:aspect.id,outcome:'changes',gap:'',findings:[{id:aspect.id+'-1',file:'src/value.js',detail:'Earlier blocker owned by '+aspect.id+' requires checking its repaired source contract.'}]}))}});
+ assert.equal(repair.calls.length,3,'repair focus preserves all independent reviewer slots');
+ for(const {params} of repair.calls){
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0]+']');
+  assert.match(params.task,/bounded repair review/);assert.match(params.task,/Prior reports are historical evidence, not current approval/);
+  for(const aspect of aspects)assert.equal(params.task.includes('Earlier blocker owned by '+aspect.id+' '),assigned.some(item=>item.id===aspect.id),'each reviewer gets only its own historical blockers');
+ }
  const paths=fixture({models:[free('free/a')]});
  await paths.run({...request,aspects:[aspects[0]],evidence:[' /tmp/private.png ','C:\\private.png','..\\private.png','shots/window.png']});
  assert.match(paths.calls[0].params.task,/relevant to your assigned aspects[\s\S]*\["shots\/window.png"\]/);

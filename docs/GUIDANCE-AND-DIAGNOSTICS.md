@@ -68,6 +68,14 @@ single bounded error-review suggestion; transient failures and trivial work
 stay quiet. Trivial formatting, linting or cleanup requests never trigger
 automatic reviews or councils. See [Reviews and councils](REVIEWS-AND-COUNCILS.md).
 
+Independent review emits transient tool progress with each aspect's state and the
+remaining deadline; these updates do not enter model context or start turns. A
+repair round receives only its assigned prior blockers/gaps and a content-hash
+comparison of changed files, while retaining full aspect coverage and current
+source-read requirements. Once the two-round budget is spent, the receipt directs
+assessment of retained evidence and honest reporting of gaps; optional polish
+and unavailable reviewer capacity do not reopen completed requested work.
+
 Skill matching can recover one typo in sufficiently long terms, but requires
 distinct concepts and discounts fuzzy matches. Restored guidance filters stale
 skill receipts and bounds history work. The local semantic index validates its
@@ -110,7 +118,7 @@ The terminal status area shows short action labels for tools and automatic work,
 
 Four further commands open separate-window popups instead of terminal overlays: `/sys-prompt` shows the system prompt captured at the session's first agent run (exactly what the agent saw initially, with model and tool names); `/used` opens an expandable session inventory with clear totals and drill-downs for current and previously used model routes, token traffic and routing settings, fully opened versus partial-only versus suggestion-only skills, deduplicated child-agent runs with recorded model/thinking/status/usage/cost, tool results and failures, Harness activity, session totals and hook measurements; `/errors` opens a detailed newest-first error list with per-error drill-downs (failed payload, owning module, cause and recovery) plus the full bounded JSON with a copy button; `/commands` lists every registered slash command with its description. The `/used` and `/errors` controls are native keyboard-accessible disclosure rows. Missing provenance or usage stays visibly “not recorded,” never guessed or displayed as zero.
 
-The main agent can end its own session with `session_stop` once all work is done and verified. The stop is locked until at least one quality review completed with reviewer evidence and at least one subagent run completed; stopping ends active subagent runs, silences automatic quality/test follow-ups and ends the turn. Any new user message unlocks a stopped session as a standard continuation, with quality triggers active again.
+The main agent can end its own session with `session_stop` when requested work is complete, stating observed verification and any remaining gaps. Review and delegation receipts are informational; stopping never requires an extra review or subagent run and does not certify completion. It ends this session's active subagent runs, silences automatic quality/test follow-ups and ends the turn. Any new user message resumes the session normally, with quality triggers active again.
 
 Memory append receipts no longer echo existing memory into model context. Native reads share the per-file mutation queue so concurrent edits cannot expose temporarily truncated files. Shell path validation respects quotes inside command substitutions.
 

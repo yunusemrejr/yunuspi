@@ -6,6 +6,8 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { Type } from 'typebox';
 import { readSourceFiles } from '../pi-lens/context-code.mjs';
+import {codeNoiseSupported, inspectCodeNoise} from './code-noise.mjs';
+import {sessionObservability} from './session-observability.ts';
 
 type Outcome = {status:'passed'|'failed'|'unavailable'|'incomplete'; checker:string; diagnostics:string[]};
 const PYTHON = `import sys,json
@@ -41,6 +43,12 @@ const compact = (value: unknown) => {
   const text = String(value).replace(/\x1b\[[0-9;]*[A-Za-z]/g,'');
   return text.length>900 ? text.slice(0,875)+'… [diagnostic truncated]' : text;
 };
+function noiseActivity(noise: any) {
+  if (noise?.runtime !== 'tree-sitter-wasm') return;
+  try {sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('ml.wasm.completed',{
+    helper:'source-check',runtime:noise.runtime,count:1,findings:noise.findings.length,durationMs:noise.durationMs,decision:noise.status,
+  });} catch { /* Activity visibility must not change the source-check outcome. */ }
+}
 
 /** Ignore relative/project PATH entries and interpreter startup variables.
  * Never resolve an executable from the workspace or its dependencies. */
@@ -55,7 +63,7 @@ async function executable(command: string, cwd: string) {
       if (!(await fs.stat(candidate)).isFile()) continue;
       await fs.access(candidate,1);
       return candidate;
-    } catch {}
+    } catch { /* A missing or inaccessible PATH candidate does not rule out later trusted directories. */ }
   }
   return undefined;
 }
@@ -155,7 +163,12 @@ export async function sourceCheck({paths,cwd,signal}: {paths:string[];cwd:string
     const remaining = 10000-(Date.now()-started);
     const outcome: Outcome = remaining <= 0 ? {status:'incomplete',checker:'none',diagnostics:['Batch time budget exceeded']}
       : await checkSourceText(file.path,file.source,cwd,signal,Math.min(3000,remaining));
-    results.push({path:file.path,digest:file.digest,...outcome});
+    const noise = codeNoiseSupported(file.path) && outcome.status === 'passed'
+      ? await inspectCodeNoise(file.path,file.source) : undefined;
+    noiseActivity(noise);
+    // Keep clean-file receipts small; detailed bounds accompany findings.
+    const noiseReceipt = noise?.findings.length ? noise : noise ? {status:noise.status,truncated:noise.truncated} : undefined;
+    results.push({path:file.path,digest:file.digest,...outcome,...(noiseReceipt ? {noise:noiseReceipt} : {})});
   }
   for(const error of data.errors) results.push({path:error.path,status:'unavailable' as const,checker:'file',diagnostics:[compact(error.error)]});
   const counts = {passed:0,failed:0,unavailable:0,incomplete:0};
@@ -170,8 +183,53 @@ export async function sourceCheck({paths,cwd,signal}: {paths:string[];cwd:string
 
 export default function registerSourceCheck(pi: any) {
   if (process.env.PI_REASONING_AIDS === 'off') return;
+  // Successful edits get a small advisory receipt on their existing result,
+  // never a steering message or mandatory repair loop. State belongs to this
+  // extension/session and is fenced across session changes and async reads.
+  let generation = 0, checks = 0;
+  const seen = new Set<string>();
+  const reset = () => {generation++; checks = 0; seen.clear();};
+  for (const event of ['session_start','session_switch','session_tree','session_shutdown']) pi.on(event,reset);
+  pi.on('before_agent_start',() => {checks = 0;});
+  pi.on('tool_result',async (event: any,ctx: any) => {
+    if (process.env.PI_REASONING_AIDS === 'off' || event.isError || !['write','edit'].includes(event.toolName) || checks >= 4 || seen.size >= 512) return;
+    const filename = event.input?.path;
+    if (typeof filename !== 'string' || !codeNoiseSupported(filename)) return;
+    const owner = generation;
+    checks++;
+    try {
+      const data = await readSourceFiles(ctx.cwd,[filename],undefined,codeNoiseSupported);
+      const file = data.files[0];
+      if (owner !== generation || !file || Buffer.byteLength(file.source) > 65536) return;
+      let changedLines: [number,number] | undefined;
+      if (event.toolName === 'edit') {
+        const replacement = event.input?.newText;
+        // Only diagnose the changed region. An ambiguous repeated replacement
+        // cannot establish which existing code belongs to this edit.
+        if (typeof replacement !== 'string' || !replacement) return;
+        const offset = file.source.indexOf(replacement);
+        if (offset < 0 || file.source.indexOf(replacement,offset + 1) !== -1) return;
+        const start = file.source.slice(0,offset).split('\n').length;
+        changedLines = [start,start + replacement.replace(/\n$/,'').split('\n').length - 1];
+      }
+      const key = `${ctx.sessionManager?.getSessionId?.() ?? 'current'}:${ctx.cwd}:${file.path}:${file.digest}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const noise = await inspectCodeNoise(file.path,file.source);
+      if (owner !== generation) return;
+      if (changedLines) {
+        noise.findings = noise.findings.filter(f => f.line >= changedLines[0] && f.line <= changedLines[1]);
+        noise.scope += ' Automatic edit findings are restricted to the unambiguous replacement span.';
+      }
+      noiseActivity(noise);
+      if (!noise.findings.length) return;
+      const locations = noise.findings.map(f => `L${f.line} ${f.kind}`).join('; ');
+      return {content:[...event.content,{type:'text',text:`Code noise review (advisory): ${locations}. Inspect the edited file; keep intentional behavior. No automatic retry is required.`}],
+        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise}}};
+    } catch { /* Advisory inspection must not turn a successful edit into a failed tool. */ }
+  });
   pi.registerTool({name:'syntax_check',label:'Syntax check',
-    description:'Batch syntax checks for explicit JS/TS/JSX/TSX, Python, Bash, Ruby, PHP, Go, JSON, YAML and TOML files. Installed parsers only; never executes project code, installs tools or writes files. Reports missing parsers and incomplete checks. Syntax does not replace project types/tests or configuration schema validation.',
+    description:'Batch syntax checks for explicit JS/TS/JSX/TSX, Python, Bash, Ruby, PHP, Go, JSON, YAML and TOML files. Installed parsers only; never executes project code, installs tools or writes files. Includes bounded advisory AST checks for comments restating returns and undocumented empty catches in JS/TS/Python. Noise findings do not fail syntax checks. Reports missing parsers and incomplete checks. Syntax does not replace project types/tests or configuration schema validation.',
     parameters:Type.Object({paths:Type.Array(Type.String({minLength:1,maxLength:1024}),{minItems:1,maxItems:20})}),
     async execute(_id: any,params: any,signal: AbortSignal,_onUpdate: any,ctx: any) {
       try {

@@ -103,6 +103,7 @@
     "needle-types.ts",
     "needle-worker.mjs",
     "numeric-checks.ts",
+    "observation-retrieval.ts",
     "output-distiller.ts",
     "project-tests.ts",
     "prompt-analysis-runtime.ts",
@@ -433,6 +434,7 @@
   "supportFiles": [
     "scripts/render-capture.mjs",
     "scripts/render-page-state.mjs",
+    "scripts/render-noise-state.mjs",
     "scripts/browser-session-runner.mjs",
     "scripts/browser-session-lease.mjs",
     "scripts/browser-diagnostics.mjs",

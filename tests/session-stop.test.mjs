@@ -124,13 +124,13 @@ test('session_stop status reports gates without terminating', async () => {
   assert.equal(result.details.stopped, false);
 });
 
-test('session_stop refuses locked gates, short reasons and children', async () => {
+test('session_stop does not require extra review or delegation, but rejects short reasons and children', async () => {
   const { tools } = loadCheckpoints();
-  const ctx = scopeCtx([costEntry('run-1', 'completed')], 'stop-tool-2');
-  await assert.rejects(
-    tools.session_stop.execute('id', { action: 'stop', reason: 'everything is done and verified here' }, undefined, undefined, ctx),
-    /locked/,
-  );
+  const ctx = scopeCtx([], 'stop-tool-2');
+  const result = await tools.session_stop.execute('id', { action: 'stop', reason: 'Requested work is complete; independent review was not needed.' }, undefined, undefined, ctx);
+  assert.equal(result.terminate, true);
+  assert.equal(result.details.gates.met, false, 'missing verification remains visible');
+  assert.equal(result.details.gates.required, false, 'historical receipts are not permission to stop');
   const gated = scopeCtx(gatedBranch(), 'stop-tool-3');
   await assert.rejects(
     tools.session_stop.execute('id', { action: 'stop', reason: 'too short' }, undefined, undefined, gated),
@@ -145,6 +145,16 @@ test('session_stop refuses locked gates, short reasons and children', async () =
   } finally {
     delete process.env.PI_SUBAGENT_CHILD;
   }
+});
+
+test('session_stop retains unavailable review evidence without forcing a new attempt', async () => {
+  const { tools } = loadCheckpoints();
+  const ctx = scopeCtx([reviewEntry([unknownReport], { disposition: 'blocked' }), costEntry('r1', 'failed')], 'stop-unavailable');
+  const result = await tools.session_stop.execute('id', { action: 'stop', reason: 'Requested edits and local checks are complete; independent review was unavailable.' }, undefined, undefined, ctx);
+  assert.equal(result.terminate, true);
+  assert.equal(result.details.gates.quality.met, false);
+  assert.equal(result.details.gates.subagent.met, false);
+  assert.equal(result.details.stopped, true);
 });
 
 test('session_stop records the stop, ledgers it and terminates the turn', async () => {
@@ -173,9 +183,9 @@ test('a stopped session emits no settled follow-ups until user input unlocks', a
   assert.equal(sent.length, 0, 'stopped sessions stay silent at settle');
   hooks.input({ source: 'interactive', text: 'one more thing' }, ctx);
   await hooks.agent_settled({}, ctx);
+  assert.equal(stop.isSessionStopped(ctx), false, 'genuine input resumes normal work');
   const unlocks = sent.filter((s) => s.message?.customType === 'session-stop-unlock');
-  assert.equal(unlocks.length, 1, 'unlock notice fires exactly once after user continuation');
-  assert.equal(unlocks[0].options.triggerTurn, false);
+  assert.equal(unlocks.length, 0, 'stopping is always available and needs no eligibility reminder');
   sent.length = 0;
   await hooks.agent_settled({}, ctx);
   assert.equal(sent.filter((s) => s.message?.customType === 'session-stop-unlock').length, 0);

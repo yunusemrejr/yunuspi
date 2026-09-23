@@ -68,3 +68,53 @@ test('remote raster documents cannot masquerade as rendered page design evidence
   });
  }finally{await new Promise(resolve=>server.close(resolve));}
 });
+
+test('ordinary capture automatically reports exact visible noise candidates without another render',async()=>{
+ const source=path.join(root,'noise.html');
+ fs.writeFileSync(source,`<!doctype html><title>Noise fixture</title><main>
+ <h2>Invoices</h2><h2>Invoices</h2>
+ <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
+ <nav><a href="/invoices">Open invoices</a><a href="/invoices">Open invoices</a></nav>
+ <label for="customer">Customer</label><label for="customer">Customer</label><input id="customer" value="PRIVATE_VALUE">
+ </main>`);
+ const rendered=await renderCapture({source,output:'text'},path.join(root,'unused-noise.png'));
+ assert.equal(rendered.pageState.design,undefined,'automatic noise review does not expand the full design scan');
+ assert.deepEqual(rendered.noise.findings.map(f=>f.kind),['repeated-adjacent-label','placeholder-copy','repeated-adjacent-link','repeated-adjacent-label']);
+ for(const finding of rendered.noise.findings) assert.match(finding.selector,/:nth-of-type\(/);
+ assert.equal(JSON.stringify(rendered.noise).includes('Invoices'),false,'no copied page text in the noise receipt');
+ assert.equal(JSON.stringify(rendered.noise).includes('PRIVATE_VALUE'),false);
+ const image=await renderCapture({source,output:'image',width:400,height:300},path.join(root,'noise.png'));
+ assert.equal(image.noise.findings.length,4,'vision output gets the same automatic advisory');
+ const previous=process.env.PI_CODING_AGENT_DIR;
+ process.env.PI_CODING_AGENT_DIR=path.join(root,'native-agent');
+ try {
+  const tools=new Map();registerRender({registerTool:tool=>tools.set(tool.name,tool),on(){}});
+  const result=await tools.get('render_see').execute('noise-fixture',{source,output:'text'},undefined,undefined,{cwd:root,model:{input:['text']},sessionManager:{getSessionId:()=> 'noise-fixture'}});
+  assert.deepEqual(result.details.noise.findings,rendered.noise.findings);
+  assert.equal(JSON.parse(result.content[0].text).noise.findings.length,4,'advisories reach the actual native tool result');
+ } finally {if(previous===undefined)delete process.env.PI_CODING_AGENT_DIR;else process.env.PI_CODING_AGENT_DIR=previous;}
+});
+
+test('noise review abstains on hidden clones, separate regions, different actions and code examples',async()=>{
+ const source=path.join(root,'intentional.html');
+ fs.writeFileSync(source,`<!doctype html><title>Intentional repetition</title>
+ <h2>Invoices</h2><h2 hidden>Invoices</h2>
+ <div style="opacity:0"><h2>Hidden</h2><h2>Hidden</h2><p>Your title here</p></div>
+ <nav><a href="/one?view=a">Open</a><a href="/one?view=b">Open</a></nav>
+ <nav><a href="/one">Open</a></nav><footer><a href="/one">Open</a></footer>
+ <h3 role="presentation">Decorative</h3><h3 role="presentation">Decorative</h3>
+ <label for="first">Name</label><label for="second">Name</label>
+ <pre>Lorem ipsum dolor sit amet</pre><code>Your title here</code><blockquote>Lorem ipsum dolor sit amet</blockquote>
+ <p>The history of lorem ipsum is documented here.</p><input value="Placeholder text" placeholder="Your title here">
+ <button>Save</button><button>Save</button>`);
+ const ordinary=await renderCapture({source,output:'text'},path.join(root,'unused-intentional.png'));
+ assert.equal(ordinary.noise,undefined,'clean automatic checks add no context payload');
+ const explicit=await renderCapture({source,output:'text',designAudit:true},path.join(root,'unused-intentional-audit.png'));
+ assert.deepEqual(explicit.noise.findings,[]);
+ assert.match(explicit.noise.scope,/intentional/);
+ const bounded=path.join(root,'noise-bounded.html');
+ fs.writeFileSync(bounded,'<!doctype html>'+Array.from({length:100},()=>'<p>Your title here</p>').join(''));
+ const many=await renderCapture({source:bounded,output:'text'},path.join(root,'unused-noise-bounded.png'));
+ assert.equal(many.noise.findings.length,6);assert.equal(many.noise.truncated,true);assert.ok(many.noise.visited<=600);
+ assert.ok(JSON.stringify(many).length<=14000);
+});

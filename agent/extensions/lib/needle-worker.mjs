@@ -36,6 +36,9 @@ let dim = 0;
 /** sha256(text) -> Float32Array copy. Bounded LRU; embeddings only. */
 const cache = new Map();
 let cacheHits = 0;
+// Counts real embedding forward passes, including initialization warmup. An
+// operation is fully cached only when this counter does not advance.
+let embeddingInferences = 0;
 
 const hashText = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -87,6 +90,7 @@ function embedOne(text) {
   const outPtr = M._malloc(dim * 4);
   if (!outPtr) throw new Error("wasm out of memory");
   try {
+    embeddingInferences++;
     const rc = M.ccall("needle_embed", "number", ["string", "number", "number"], [text, outPtr, dim]);
     if (rc !== dim) throw new Error(`needle_embed returned unexpected dimension (rc=${rc}, expected=${dim})`);
     const vec = heapF32(M, outPtr, dim);
@@ -262,6 +266,7 @@ function opComplete(input, toolsJson, system, maxTokens) {
 
 async function handle(message) {
   const started = Date.now();
+  const inferenceStart = embeddingInferences;
   const fail = (error) => ({ id: message?.id ?? -1, ok: false, error: err(error), ms: Date.now() - started });
   try {
     if (!message || typeof message !== "object" || !Number.isSafeInteger(message.id)) return fail("malformed request");
@@ -279,17 +284,17 @@ async function handle(message) {
           if (!text) return fail("embed input is empty or oversized");
           vectors.push(Array.from(embedOne(text)));
         }
-        return { id: message.id, ok: true, result: { dim, vectors }, ms: Date.now() - started };
+        return { id: message.id, ok: true, result: { dim, vectors }, cached: embeddingInferences === inferenceStart, ms: Date.now() - started };
       }
       case "rank": {
         const result = opRank(message.query, message.candidates, message.topK);
-        return { id: message.id, ok: true, result, ms: Date.now() - started };
+        return { id: message.id, ok: true, result, cached: embeddingInferences === inferenceStart, ms: Date.now() - started };
       }
       case "classify": {
         const acceptAt = typeof message.acceptAt === "number" ? message.acceptAt : 0.93;
         const marginAt = typeof message.marginAt === "number" ? message.marginAt : 0.02;
         const result = opClassify(message.text, message.labels, acceptAt, marginAt);
-        return { id: message.id, ok: true, result, ms: Date.now() - started };
+        return { id: message.id, ok: true, result, cached: embeddingInferences === inferenceStart, ms: Date.now() - started };
       }
       case "extract": {
         const result = opExtract(message.text, message.name, message.schema, message.system);
@@ -305,7 +310,7 @@ async function handle(message) {
         return { id: message.id, ok: true, result: { reset: true }, ms: Date.now() - started };
       }
       case "ping":
-        return { id: message.id, ok: true, result: { ready: dim > 0, dim, cacheHits, cached: cache.size }, ms: Date.now() - started };
+        return { id: message.id, ok: true, result: { ready: dim > 0, dim, cacheHits, embeddingInferences, cached: cache.size }, ms: Date.now() - started };
       default:
         return fail(`unknown op: ${String(message.op).slice(0, 32)}`);
     }

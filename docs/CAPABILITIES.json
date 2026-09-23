@@ -1806,7 +1806,7 @@
     {
       "id": "source-intelligence",
       "group": "engineering",
-      "summary": "Inspect bounded syntax, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
+      "summary": "Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
       "entrypoints": [
         "syntax_check",
         "context_slice",
@@ -1866,6 +1866,7 @@
       ],
       "sourceFiles": [
         "agent/extensions/lib/source-check.ts",
+        "agent/extensions/lib/code-noise.mjs",
         "agent/extensions/pi-lens/context-tools.ts",
         "agent/extensions/git-tools.ts"
       ],
@@ -2120,7 +2121,7 @@
     {
       "id": "rendered-design-review",
       "group": "engineering",
-      "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow and motion evidence for accessible and anti-slop UI review. Compare viewport/state screenshots using design skills; no aesthetic score or compliance claim.",
+      "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition evidence. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
       "entrypoints": [
         "design_audit"
       ],
@@ -2154,7 +2155,8 @@
       ],
       "sourceFiles": [
         "agent/extensions/render-and-wait.ts",
-        "agent/scripts/render-design-state.mjs"
+        "agent/scripts/render-design-state.mjs",
+        "agent/scripts/render-noise-state.mjs"
       ],
       "doc": "docs/ASYNC-AND-STUDIO.md",
       "commands": []
@@ -2571,7 +2573,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 900
+        "line": 923
       },
       {
         "name": "or-provider",
@@ -2856,7 +2858,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 207,
+        "line": 205,
         "kind": "literal"
       },
       {
@@ -3086,7 +3088,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 506,
+        "line": 530,
         "kind": "literal"
       },
       {
@@ -3146,7 +3148,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 362,
+        "line": 360,
         "kind": "literal"
       },
       {
@@ -3183,7 +3185,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 757,
+        "line": 759,
         "kind": "definition"
       },
       {
@@ -3201,7 +3203,7 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 173,
+        "line": 231,
         "kind": "literal"
       },
       {
@@ -3354,7 +3356,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 207,
+        "line": 205,
         "kind": "literal"
       },
       {
@@ -3468,7 +3470,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 506,
+        "line": 530,
         "kind": "literal"
       },
       {
@@ -3516,7 +3518,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 362,
+        "line": 360,
         "kind": "literal"
       },
       {
@@ -3534,7 +3536,7 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 173,
+        "line": 231,
         "kind": "literal"
       },
       {
@@ -3656,7 +3658,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          807
+          809
         ],
         "knownNames": [
           "subagent"
@@ -3755,7 +3757,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 598,
+      "sourceFiles": 600,
       "registrationSites": 64,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 89,
@@ -4170,6 +4172,10 @@
       },
       {
         "path": "agent/extensions/lib/numeric-checks.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/observation-retrieval.ts",
         "exists": true
       },
       {
@@ -4740,6 +4746,10 @@
       },
       {
         "path": "agent/scripts/render-design-state.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/render-noise-state.mjs",
         "exists": true
       },
       {

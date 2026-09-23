@@ -38,6 +38,25 @@ test('health flush and close drain events recorded during an earlier flush exact
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('health logs retain bounded ML evidence without copying model content or arbitrary fields', async () => {
+  const dir = temp();
+  try {
+    const log = createHealthLog(dir, 'fixture');
+    log.record('ml.evidence.route', { shape: 'prose', smol: true, kompress: true, needle: false, jev: false,
+      reasons: ['smol:eligible', 'kompress:prose-shaped', 'PRIVATE PAYLOAD'], raw: 'PRIVATE PAYLOAD' });
+    log.record('ml.needle.call', { op: 'rank', cached: true, shadow: false, durationMs: 4, count: 1 });
+    log.record('ml.evidence.delivered', { helper: 'smol', savedChars: 4096, count: 1 });
+    log.record('ml.smol.offer', { decision: 'ineligible', reason: 'protected-content' });
+    await log.close();
+    const events = readHealth(log.file);
+    assert.deepEqual(events[0].reasons, ['smol:eligible', 'kompress:prose-shaped']);
+    assert.equal(events[0].shape, 'prose'); assert.equal(events[0].smol, true); assert.equal(events[0].needle, false);
+    assert.equal(events[1].cached, true); assert.equal(events[1].op, 'rank');
+    assert.equal(events[2].savedChars, 4096); assert.equal(events[3].reason, 'protected-content');
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE PAYLOAD/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('health write failures retain the batch until storage recovers', async () => {
   const dir = temp(), blocked = path.join(dir, 'blocked');
   try {

@@ -23,6 +23,14 @@ model's own latency. Cheap layers propose; deterministic owners dispose;
 nothing below the main model establishes truth, authorization, completion,
 test success, or permission.
 
+## Exact observation queries and visible activity
+
+`obs_read({id:17,query:"authentication failure",limit:3000,maxMatches:3})` searches the active branch's original result. Existing binary TF-IDF with explicit vocabulary expansion selects candidates; the shared Needle3 worker may reorder a bounded head when its score and margin clear the existing acceptance thresholds. Weak or unavailable inference keeps lexical order. Raw observations are never sent to JEV for this query path. There is no separate evidence store, embedding cache or background model turn.
+
+Responses contain exact UTF-16 source ranges, a SHA256 source hash, original error/exit metadata, actual scanned-prefix length and an explicit incomplete-evidence warning. At most 524,288 UTF-16 code units and 1,024 overlapping source windows are considered; a lower window cap reports the shorter actual prefix. Queries return at most six excerpts and 20,000 source characters, defaulting to three and 6,000. No lexical match does not establish absence. Keep `obs_read({id:17,offset:0,limit:20000})` for original pagination, including evidence omitted from a query. Ranking never changes previously rendered provider history.
+
+Actual completed intelligence work produces small, flowing session notes. They distinguish local WASM operations, remote JEV judgments, cache hits, selected/abstained results, exact excerpts returned by a tool and evidence first added to model context. A context projection is not proof that a provider accepted a request. Character savings or omissions are not token or billing measurements. Only simultaneous event bursts aggregate; later meaningful uses remain visible. Child notes require the matching live owner, and display-only notes are excluded from provider input, replay conversion and compaction. They do not wake the model.
+
 ## Needle3 — local semantic reflex
 
 Needle3 (Cactus Compute, Apache-2.0) runs in a process-local worker when

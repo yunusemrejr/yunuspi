@@ -677,6 +677,41 @@ test("a peer deadline preserves completed aspect evidence but rejects late resul
  await late;
  assert.equal(JSON.stringify(f.state()), snapshot);
 });
+test("slow review streams aspect progress to the tool UI without adding model messages", async (t) => {
+ let finish;
+ const f = await fixture(t, {runner: req => new Promise(resolve => {
+  req.onResult(pass('correctness'));
+  finish = () => { req.onResult({aspect:'content',ok:false,gap:'The configured reviewer is unavailable.'}); resolve([]); };
+ })});
+ await f.mutate(); await f.mutate('README.md', 'Document the behavior.');
+ const updates = [];
+ const pending = f.tools.quality_review.execute('progress', {action:'review'}, undefined, value => updates.push(structuredClone(value)), f.ctx);
+ while (!finish) await new Promise(resolve => setImmediate(resolve));
+ assert.ok(updates.some(update => update.details.reviewProgress.aspects.correctness === 'received'));
+ assert.ok(updates.some(update => update.details.reviewProgress.aspects.content === 'pending'));
+ assert.ok(updates.every(update => update.details.reviewProgress.deadlineMs === REVIEW_LIMITS.deadlineMs));
+ assert.equal(f.sent.length, 0, 'progress must not trigger model work');
+ finish(); await pending;
+ assert.equal(updates.at(-1).details.reviewProgress.aspects.content, 'unavailable');
+ assert.equal(f.sent.length, 0);
+ const count = updates.length;
+ await f.tool({action:'inspect'});
+ assert.equal(updates.length, count, 'finished review releases its tool observer');
+});
+test("repair review carries earlier blockers and hashes only actual changed source", async (t) => {
+ const f = await fixture(t, {runner: req => req.aspects.map(aspect => aspect.id === 'correctness' ? {...pass(aspect.id),text:JSON.stringify({outcome:'changes',evidence:['src/value.js:1 input reaches the unchecked computation.'],findings:[{severity:'blocking',file:'src/value.js',detail:'A negative input reaches an unchecked allocation and throws.'},{severity:'improvement',file:'src/value.js',detail:'Optional naming cleanup would make this easier to read.'}],gap:''})} : pass(aspect.id))});
+ await f.mutate(); await f.mutate('README.md', 'Document the behavior.');
+ await f.tool({action:'review'});
+ assert.equal(f.calls[0][0].previousReview, undefined);
+ await f.mutate('src/value.js', 'export const value = 2;');
+ await f.tool({action:'review'});
+ const previous = f.calls[1][0].previousReview;
+ assert.equal(previous.revision < f.state().revision, true);
+ assert.deepEqual(previous.changedFiles, ['src/value.js']);
+ assert.equal(previous.reports.find(report => report.aspect === 'correctness').findings.length, 1, 'optional polish does not become a repair task');
+ assert.match(f.state().nextAction, /rounds are exhausted.*Assess/);
+ assert.match(f.state().nextAction, /Do not add optional polish/);
+});
 test("Stop cancels a noncooperative runner; late output and extension messages cannot resume it", async (t) => {
  let started, finish;
  const f = await fixture(t, {

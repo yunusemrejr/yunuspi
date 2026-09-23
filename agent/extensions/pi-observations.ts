@@ -25,6 +25,7 @@ import {
 import { routeEvidence } from "./lib/micro-intelligence/evidence.ts";
 import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { needleClassify } from "./lib/needle-runtime.ts";
+import { retrieveObservation } from "./lib/observation-retrieval.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -608,7 +609,7 @@ export default function piObservationsExtension(
 		// the agent's reasoning gap, and a nearly-done request is worth a short
 		// wait. The sequential map below keeps source-order seals untouched.
 		// Take coverage is a superset of rendered messages (late status checks
-		// still apply in the map); ml.smol.used, not take transitions, is the
+		// still apply in the map); ml.evidence.delivered, not take transitions, is the
 		// rendered-usefulness signal, and frozen selections stay re-readable.
 		const smolReady = new Map<number, string | undefined>();
 		if (process.env.PI_SMOL_PREPROCESSOR !== "off") {
@@ -776,14 +777,11 @@ export default function piObservationsExtension(
 				!delta && !summary && !message.isError && process.env.PI_MINI_PREPROCESSOR !== "off"
 					? miniProjection(raw, selection)
 					: undefined;
-			if (miniRendered) noteHealth("ml.mini.used", { count: 1 });
 			const jevLines = jevReady.get(index);
 			const selected =
 				!delta && !summary && !message.isError
 					? (miniRendered ?? localLines ?? jevLines)
 					: undefined;
-			if (selected && !miniRendered && localLines) noteHealth("ml.smol.used", { count: 1 });
-			if (selected && !miniRendered && !localLines && jevLines) noteHealth("ml.jev.used", { count: 1 });
 			if (!delta && !summary && !selected) {
 				if (
 					!message.isError &&
@@ -829,10 +827,12 @@ export default function piObservationsExtension(
 					text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}${needleHint ? `\n${needleHint}` : ""}`,
 				},
 			];
-			if (!sealed) microMetrics().rendered(
-				selected ? miniRendered ? "kompress" : localLines ? "smol" : "jev" : "deterministic",
-				raw.length - textOf(projected),
-			);
+			if (!sealed) {
+				const helper = selected ? miniRendered ? "kompress" : localLines ? "smol" : "jev" : "deterministic";
+				const savedChars = Math.max(0, raw.length - textOf(projected).length);
+				microMetrics().rendered(helper, savedChars);
+				noteHealth("ml.evidence.delivered", { helper, savedChars, count: 1 });
+			}
 			sealFirstRender(
 				ref.id,
 				ref.resultHash,
@@ -848,13 +848,15 @@ export default function piObservationsExtension(
 		name: "obs_read",
 		label: "Read Observation",
 		description:
-			"Retrieve exact original tool output by observation id from the current session branch, including before compaction/reload. Long output is paginated with offset/limit (characters).",
+			"Retrieve original tool output by observation id from this session branch. Use query for bounded, locally ranked exact excerpts before rereading a large result. Excerpts omit context and do not prove absence. Omit query for exact original pagination with offset/limit (characters).",
 		parameters: Type.Object({
 			id: Type.Integer({ minimum: 1 }),
 			offset: Type.Optional(
 				Type.Integer({ minimum: 0, description: "Character offset (default 0)" }),
 			),
 			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: PAGE_CHARS })),
+			query: Type.Optional(Type.String({ minLength: 3, maxLength: 512, description: "Find relevant exact excerpts; cannot combine with offset" })),
+			maxMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 6, description: "Query excerpt count (default 3)" })),
 		}),
 		async execute(_id, params, signal, _update, ctx) {
 			signal?.throwIfAborted();
@@ -871,6 +873,27 @@ export default function piObservationsExtension(
 				);
 			}
 			const text = textOf(entry.message.content);
+			if (params.query !== undefined) {
+				if (params.offset !== undefined) throw new Error("query and offset cannot be combined; omit query for original pagination");
+				const result = await retrieveObservation(text, params.query, { limit: params.limit, maxMatches: params.maxMatches, signal });
+				signal?.throwIfAborted();
+				// A branch switch while local inference ran cannot return stale evidence.
+				if (!ctx.sessionManager.getBranch().some(item => item === entry ||
+					(item.id === entry.id && reference(item)?.id === params.id && item.type === "message" && item.message.role === "toolResult" && textOf(item.message.content) === text)))
+					throw new Error("Observation branch changed during retrieval; retry in the current branch");
+				const originalIsError = entry.message.isError === true;
+				const content = `[observation #${params.id}; query excerpts; omitted context is not verified; originalIsError=${originalIsError}; scanned ${result.scannedChars}/${text.length} characters; offsets are UTF-16 code units]\n` +
+					(result.spans.length ? result.spans.map(span => `[${span.start},${span.end})\n${text.slice(span.start, span.end)}`).join("\n\n") : "No lexical candidates in the scanned prefix. This does not establish absence.") +
+					`\n[Full original: obs_read({id:${params.id},offset:0}); ranking=${result.ranking}]`;
+				// Completion is returned as evidence, distinct from a ranker merely running.
+				if (result.spans.length) noteHealth("ml.evidence.returned", { helper: result.ranking === "needle" ? "needle" : "deterministic", savedChars: Math.max(0, text.length - content.length), count: 1 });
+				return { content: [{ type: "text" as const, text: content }], details: {
+					observationId: params.id, sourceHash: createHash("sha256").update(text).digest("hex"),
+					originalIsError, originalExitCode: entry.message.details?.exitCode,
+					incomplete: true, ...result,
+				} };
+			}
+			if (params.maxMatches !== undefined) throw new Error("maxMatches requires query");
 			const offset = params.offset ?? 0;
 			if (offset > text.length)
 				throw new Error(`offset exceeds observation length ${text.length}`);

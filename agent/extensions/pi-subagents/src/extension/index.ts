@@ -711,9 +711,11 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 				? theme.fg("dim", "○")
 				: theme.fg("success", "✓");
 		const parts: string[] = [];
-		if (details.ms !== undefined) parts.push(`${details.ms}ms`);
+		if (details.ms !== undefined) parts.push(`${details.ms}ms${(details.count ?? 0) > 1 ? " total" : ""}`);
 		if (details.detail) parts.push(details.detail);
-		let text = details.kind === "intelligence.used"
+		let text = details.kind === "intelligence.activity"
+			? `${icon} ${theme.bold(details.label)}`
+			: details.kind === "intelligence.used"
 			? `${icon} ${theme.bold(`${details.label} used`)}`
 			: `${icon} ${theme.bold(ACTIVITY_TAGS[details.kind] ?? details.kind)} ${details.label}`;
 		if (parts.length > 0) text += ` ${theme.fg("dim", "·")} ${parts.map((part) => theme.fg("dim", part)).join(` ${theme.fg("dim", "·")} `)}`;

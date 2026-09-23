@@ -188,10 +188,18 @@ async function waitForRelayVisibility(relay, { timeoutMs = CHILD_ACK_TIMEOUT_MS,
 	return false;
 }
 
-const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "Smol", "retrieval", "Neural ranker", "Intent classifier"]);
+const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "Smol", "retrieval", "Neural ranker", "Intent classifier", "WASM source check", "Deterministic selection"]);
 export function relayIntelligenceUsageFromChild(input) {
 	if (!input || !ALLOWED_INTELLIGENCE.has(input.name) || typeof input.sessionId !== "string" || !liveGuardianSessions.get(input.sessionId)?.has(input.ownerId)) return false;
-	return atomicRelay("intelligence_used", `Internal intelligence used: ${input.name}.`);
+	const stages = { result: "result ready", cached: "cached result ready", applied: "result applied", delivered: "added to model context", returned: "returned exact excerpts", skipped: "selection unused" };
+	const sources = { remote: "remote", local: "local", wasm: "local WASM" };
+	const stage = Object.hasOwn(stages, input.stage) ? stages[input.stage] : "result applied";
+	const source = Object.hasOwn(sources, input.source) ? sources[input.source] : undefined;
+	const details = [source, stage];
+	if (Number.isSafeInteger(input.count) && input.count > 1 && input.count <= 4096) details.push(`${input.count} completions`);
+	if (typeof input.durationMs === "number" && Number.isFinite(input.durationMs) && input.durationMs >= 0 && input.durationMs <= 3_600_000) details.push(`${Math.round(input.durationMs)}ms`);
+	if ((input.stage === "delivered" || input.stage === "returned") && Number.isSafeInteger(input.savedChars) && input.savedChars >= 0 && input.savedChars <= 1_000_000_000) details.push(`${input.savedChars} characters ${input.stage === "returned" ? "omitted" : "saved"}`);
+	return atomicRelay("intelligence_used", `Internal intelligence · ${input.name} · ${details.filter(Boolean).join(" · ")}.`);
 }
 
 export class GuardianSupervisor {

@@ -5,10 +5,10 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {createHealthLog,HEALTH_SINK} from './lib/health-log.ts';
 import {sharedCapabilityHealth} from './lib/capability-health.ts';
-import {createActivityIndicators,intelligenceUseForEvent,skillNameFromPath} from './lib/activity-indicators.ts';
-const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Smol'|'retrieval'|'Neural ranker'|'Intent classifier'>={
+import {createActivityIndicators,describeIntelligenceActivity,skillNameFromPath} from './lib/activity-indicators.ts';
+const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Smol'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
  'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress','Smol':'Smol',
- 'Retrieval intelligence':'retrieval','Neural ranker':'Neural ranker','Intent classifier':'Intent classifier',
+ 'Retrieval intelligence':'retrieval','Neural ranker':'Neural ranker','Intent classifier':'Intent classifier','WASM source check':'WASM source check','Deterministic selection':'Deterministic selection',
 };
 export default function healthLog(pi:any) {
  registerSessionTelemetry(pi);
@@ -19,16 +19,29 @@ export default function healthLog(pi:any) {
  let activeSessionId:string|undefined;
  let activeSessionOwner:object|undefined;
  let epoch=0, sink:typeof emit|undefined;
- const childRelayedAt=new Map<string,number>();
+ const childPending=new Map<string,Parameters<typeof relayIntelligenceUsageFromChild>[0]>();
+ let childFlushPending=false;
  const relayChildUse=(kind:string,data:Record<string,unknown>)=>{
   if(process.env.PI_SUBAGENT_CHILD!=='1'||!activeSessionId)return;
-  const component=intelligenceUseForEvent(kind,data),name=component?childRelayNames[component]:undefined;
-  if(!name)return;
-  const now=Date.now();if(now-(childRelayedAt.get(component)??-Infinity)<60_000)return;
-  try{
-   const ownerId=guardianOwnerForSession(activeSessionId,activeSessionOwner);
-   if(ownerId&&relayIntelligenceUsageFromChild({name,sessionId:activeSessionId,ownerId}))childRelayedAt.set(component,now);
-  }catch{/* child observability must not interrupt helper execution */}
+  const activity=describeIntelligenceActivity(kind,data),name=activity?childRelayNames[activity.label]:undefined;
+  if(!name||kind==='ml.smol.offer')return;
+  const ownerId=guardianOwnerForSession(activeSessionId,activeSessionOwner);
+  if(!ownerId)return;
+  const stage=kind==='ml.evidence.returned'?'returned':kind==='ml.evidence.delivered'?'delivered':data.cached===true?'cached':activity!.status==='skip'?'skipped':kind==='ml.needle.call'||kind==='ml.jev.used'||kind==='ml.smol.inference'||kind==='ml.mini.select'||kind==='ml.wasm.completed'?'result':'applied';
+  const source=name==='JEV'?'remote':name==='Needle3'||name==='WASM source check'?'wasm':'local';
+  const key=[name,stage,source].join(':');
+  const pending=childPending.get(key);
+  if(pending){pending.count=(pending.count??0)+1;if(activity!.ms!==undefined)pending.durationMs=(pending.durationMs??0)+activity!.ms;if(typeof data.savedChars==='number'&&Number.isFinite(data.savedChars)&&data.savedChars>=0)pending.savedChars=(pending.savedChars??0)+data.savedChars;}
+  else if(childPending.size<64)childPending.set(key,{name,sessionId:activeSessionId,ownerId,stage,source,count:1,durationMs:activity!.ms,savedChars:typeof data.savedChars==='number'?data.savedChars:undefined});
+  if(childFlushPending)return;
+  childFlushPending=true;
+  const generation=epoch;
+  queueMicrotask(()=>{
+   if(generation!==epoch)return;
+   childFlushPending=false;
+   const entries=[...childPending.values()];childPending.clear();
+   for(const entry of entries)try{relayIntelligenceUsageFromChild(entry);}catch{/* display-only diagnostics never interrupt helpers */}
+  });
  };
  const emit=(kind:string,data:Record<string,unknown>={})=>{log?.record(kind,data);activity.note(kind,data);relayChildUse(kind,data);};
  let warn:((message:string)=>void)|undefined;
@@ -42,7 +55,7 @@ export default function healthLog(pi:any) {
  };
  const start=async(_:unknown,ctx:any)=>{
   const generation=++epoch;
-  if(timer)clearInterval(timer);await flush(true);calls.clear();activity.reset();childRelayedAt.clear();
+  if(timer)clearInterval(timer);await flush(true);calls.clear();activity.reset();childPending.clear();childFlushPending=false;
   const id=ctx.sessionManager?.getSessionId?.();
   activeSessionId=typeof id==='string'?id:undefined;
   activeSessionOwner=ctx.sessionManager;
@@ -64,5 +77,5 @@ export default function healthLog(pi:any) {
   if(e.toolName==='subagent')emit('subagent.result',{isError:!!e.isError,count:e.details?.results?.length??0});
  });
  pi.on('message_end',(e:any)=>{if(e.message?.role==='assistant')emit('inference.end',{outcome:e.message.stopReason,inputTokens:e.message.usage?.input,outputTokens:e.message.usage?.output});});
- pi.on('session_shutdown',async()=>{if(timer)clearInterval(timer);emit('session.end');epoch++;await flush(true);activity.dispose();if(sessionObservability()[HEALTH_SINK]===sink)delete sessionObservability()[HEALTH_SINK];});
+ pi.on('session_shutdown',async()=>{if(timer)clearInterval(timer);emit('session.end');epoch++;childPending.clear();childFlushPending=false;await flush(true);activity.dispose();if(sessionObservability()[HEALTH_SINK]===sink)delete sessionObservability()[HEALTH_SINK];});
 }

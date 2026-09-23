@@ -148,6 +148,21 @@ const lineRaw = [
 ].join("\n");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test("declined local lease does not claim Smol inference ran", async () => {
+ const key = Symbol.for('yunus-pi.health.v1'), before = globalThis[key], events = [];
+ globalThis[key] = (kind, data) => events.push({kind, data});
+ try {
+  const client = createSmolPreprocessor({runtime: smolRuntime, acquireLease: async () => false,
+   fetch: async () => { throw Error('a declined lease must not call inference'); }});
+  client.offer('unleased', lineRaw, 0);
+  await flush();
+  assert.equal(client.inspect().requests, 0);
+  assert.ok(events.some(event => event.kind === 'ml.smol.offer' && event.data.decision === 'no-lease'));
+  assert.equal(events.filter(event => event.kind === 'ml.smol.inference').length, 0);
+  client.reset();
+ } finally { if (before === undefined) delete globalThis[key]; else globalThis[key] = before; }
+});
+
 test("background SLM freezes first exposure and reuses validated source/task cache without more inference", async () => {
  let finish,
   calls = 0,

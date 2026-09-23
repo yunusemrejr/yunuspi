@@ -444,7 +444,7 @@ export async function askJev(
     aborted=waited.aborted;
     if (aborted) return {ok:false,skipped:'aborted'};
     const result=waited.result!;
-    if(result.ok)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.jev.used",{count:1});}catch{/* optional visibility */}
+    if(result.ok)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.jev.used",{count:1,cached:!leader||result.usage.cached,durationMs:result.usage.ms,questions:Object.keys(questions).length});}catch{/* optional visibility */}
     if(leader || !result.ok)return result;
     const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
     ledger(opts.pi,{site,...usage});

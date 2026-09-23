@@ -103,6 +103,7 @@ export interface NeedleStats {
   rankCalls: number;
   classifyCalls: number;
   extractCalls: number;
+  /** Successful operations served entirely by cached embeddings, counted once per call. */
   cacheHits: number;
   /** Non-shadow successful operations; classifications must clear thresholds. */
   accepted: number;
@@ -154,5 +155,5 @@ export type NeedleWorkerRequest =
   | { id: number; op: "ping" };
 
 export type NeedleWorkerResponse =
-  | { id: number; ok: true; result: unknown; ms: number }
+  | { id: number; ok: true; result: unknown; ms: number; /** True only when embed/rank/classify performed no embedding forward pass. */ cached?: boolean }
   | { id: number; ok: false; error: string; ms: number };

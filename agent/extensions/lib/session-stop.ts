@@ -1,10 +1,7 @@
-// Session self-stop: gated completion marker for the main session.
-//
-// The agent may end its own session only after BOTH gates hold on the
-// current branch: (1) at least one quality review round completed with
-// reviewer evidence (pass OR changes — the verdict does not matter, only
-// that a real assessment happened); (2) at least one subagent run
-// completed. Failed, stopped or never-attempted work satisfies neither.
+// Session self-stop: explicit completion marker for the main session.
+// Review and delegation receipts are informational evidence, not permission
+// to stop. Requiring either would create unnecessary model work just to end
+// a simple task, or trap completion when independent capacity is unavailable.
 //
 // Enforcement is process-local (per cwd+session scope). The branch ledger
 // entry ('session-stop-v1') is evidence only, never control state: a
@@ -18,7 +15,7 @@ export const SESSION_STOP_ENTRY = "session-stop-v1";
 export const STOP_ALL_RUNS = Symbol.for("yunus-pi.subagent-stop-all.v1");
 
 export type StopGate = { met: boolean; detail: string };
-export type StopGates = { quality: StopGate; subagent: StopGate; met: boolean };
+export type StopGates = { quality: StopGate; subagent: StopGate; met: boolean; required: false };
 
 const states = new Map<string, { stopId: string; at: string; announced: boolean }>();
 
@@ -75,7 +72,9 @@ export function subagentStopGate(entries: unknown): StopGate {
 export function stopGates(entries: unknown): StopGates {
   const quality = qualityStopGate(entries);
   const subagent = subagentStopGate(entries);
-  return { quality, subagent, met: quality.met && subagent.met };
+  // Preserve the historical `gates` response shape for observers while making
+  // its advisory status explicit. Missing receipts never mean verified work.
+  return { quality, subagent, met: quality.met && subagent.met, required: false };
 }
 
 /** Suppression fails open: an unidentifiable scope is never treated as

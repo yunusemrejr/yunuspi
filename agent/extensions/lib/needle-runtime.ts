@@ -334,6 +334,11 @@ export function createNeedleRuntime(options: {
     return Math.min(policy.maxOpTimeoutMs, Math.max(policy.opTimeoutMs, 400 + Math.ceil(chars * 5)));
   };
 
+  // Only embedding-backed operations can be served from this worker cache.
+  // Missing/malformed metadata and disabled caches are conservatively uncached.
+  const cachedResponse = (response: NeedleWorkerResponse, op: string): boolean =>
+    response.ok && response.cached === true && policy.workerCacheMax > 0 && (op === "embed" || op === "rank" || op === "classify");
+
   const dispatch = (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleWorkerResponse> =>
     new Promise((settle) => {
       const id = nextId++;
@@ -343,7 +348,7 @@ export function createNeedleRuntime(options: {
         return;
       }
       const finish = beginHarnessActivity('needle');
-      const resolve = (response: NeedleWorkerResponse) => { finish(response.ok ? 'ok' : closed ? 'cancelled' : 'error'); settle(response); };
+      const resolve = (response: NeedleWorkerResponse) => { finish(response.ok ? cachedResponse(response, op) ? 'cached' : 'ok' : closed ? 'cancelled' : 'error'); settle(response); };
       const budget = budgetFor(request, op);
       const timer = setTimeout(() => {
         pending.delete(id);
@@ -411,7 +416,7 @@ export function createNeedleRuntime(options: {
     }
     stats.calls++;
     if (policy.shadow) stats.shadow++;
-    return { ok: true, value: response.result as never, cached: false, ms, shadow: policy.shadow };
+    return { ok: true, value: response.result as never, cached: cachedResponse(response, op), ms, shadow: policy.shadow };
   };
 
   const call = (request: Omit<NeedleWorkerRequest, "id">, op: string): Promise<NeedleResult<never>> => {
@@ -431,8 +436,9 @@ export function createNeedleRuntime(options: {
   const finished = <T>(result: NeedleResult<never>, counter: "embedCalls" | "rankCalls" | "classifyCalls" | "extractCalls"): NeedleResult<T> => {
     if (result.ok) {
       stats[counter]++;
+      if (result.cached) stats.cacheHits++;
       if (!result.shadow && (counter !== "classifyCalls" || (result.value as NeedleClassifyResult).accepted)) stats.accepted++;
-      noteHealth("ml.needle.call", { op: counter.replace("Calls", ""), cached: result.cached, shadow: result.shadow, durationMs: result.ms, count: 1 });
+      noteHealth("ml.needle.call", { op: counter.replace("Calls", ""), cached: result.cached, shadow: result.shadow, durationMs: result.ms, count: 1, ...(counter === "classifyCalls" ? { accepted: (result.value as NeedleClassifyResult).accepted } : {}) });
       return result as NeedleResult<T>;
     }
     return result as NeedleResult<T>;
@@ -471,7 +477,6 @@ export function createNeedleRuntime(options: {
         });
         if (!missing.length) {
           beginHarnessActivity('needle')('cached');
-          stats.cacheHits++;
           stats.calls++;
           if (policy.shadow) stats.shadow++;
           return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: true, ms: 0, shadow: policy.shadow }, "embedCalls");
@@ -495,7 +500,7 @@ export function createNeedleRuntime(options: {
           if (embedCache.size > policy.embedCacheMax) embedCache.delete(embedCache.keys().next().value!);
         }
       });
-      return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: false, ms: result.ms, shadow: result.shadow }, "embedCalls");
+      return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: result.cached, ms: result.ms, shadow: result.shadow }, "embedCalls");
     },
     async rank(input) {
       const query = needleText(input?.query, policy.maxTextChars);

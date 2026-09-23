@@ -207,7 +207,7 @@ test("malformed worker results degrade to skips", async () => {
   const factory = fakeWorkerFactory({
     onPost: (message, _w, reply) => {
       if (message.op === "init") return reply({ id: message.id, ok: true, result: { dim: 4 }, ms: 1 });
-      return reply({ id: message.id, ok: true, result: { garbage: true }, ms: 1 });
+      return reply({ id: message.id, ok: true, result: { garbage: true }, cached: true, ms: 1 });
     },
   });
   const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
@@ -215,7 +215,36 @@ test("malformed worker results degrade to skips", async () => {
   assert.equal(await settled(handle), "healthy");
   assert.equal((await handle.embed(["alpha beta"])).reason, "unavailable");
   assert.equal((await handle.rank({ query: "screenshot now", candidates: [{ id: "a", text: "take one" }, { id: "b", text: "bake two" }] })).reason, "unavailable");
+  assert.equal(handle.stats().cacheHits, 0, "malformed cached results cannot inflate cache statistics");
   await handle.shutdown();
+});
+
+test("runtime accepts only boolean worker cache evidence and counts successful operations once", async () => {
+  let cached;
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    const result = message.op === "init" ? { dim: 2 }
+      : message.op === "embed" ? { dim: 2, vectors: message.texts.map(() => [1, 2]) }
+      : { ranked: message.candidates.slice(0, message.topK).map((candidate, index) => ({ id: candidate.id, score: 1 - index / 2 })), margin: .5 };
+    reply({ id: message.id, ok: true, result, ms: 1, cached });
+  }});
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const input = { query: "cache evidence", candidates: [{ id: "a", text: "first candidate" }, { id: "b", text: "second candidate" }] };
+  try {
+    for (const value of [undefined, "true", 1, false]) { cached = value; assert.equal((await handle.rank(input)).cached, false); }
+    assert.equal(handle.stats().cacheHits, 0);
+    cached = true;
+    assert.equal((await handle.rank(input)).cached, true);
+    assert.equal(handle.stats().cacheHits, 1);
+    assert.equal((await handle.embed(["worker-cached vector"])).cached, true);
+    assert.equal(handle.stats().cacheHits, 2, "worker cache hit is counted once after vector validation");
+    assert.equal((await handle.embed(["worker-cached vector"])).cached, true);
+    assert.equal(handle.stats().cacheHits, 3, "main-thread cached result is also counted once");
+    const noCache = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), workerCacheMax: 0 }, workerFactory: factory, assetDir: fixtureAssets() });
+    try {
+      assert.equal((await noCache.rank(input)).cached, false, "disabled worker cache rejects even true metadata");
+      assert.equal(noCache.stats().cacheHits, 0);
+    } finally { await noCache.shutdown(); }
+  } finally { await handle.shutdown(); }
 });
 
 test("ops queue while warming and respect the queue bound", async () => {
@@ -420,7 +449,7 @@ test("live needle wasm embeds, ranks and classifies (asset-gated)", { skip: !has
   handle.warmup();
   assert.equal(await settled(handle, "healthy", 120000), "healthy");
   assert.ok(handle.health().dim > 0);
-  const rank = await handle.rank({
+  const rankInput = {
     query: "take a screenshot of the browser page",
     candidates: [
       { id: "shot", text: "capture a browser screenshot to a file" },
@@ -428,17 +457,30 @@ test("live needle wasm embeds, ranks and classifies (asset-gated)", { skip: !has
       { id: "test", text: "run unit tests with coverage" },
     ],
     topK: 3,
-  });
+  };
+  const rank = await handle.rank(rankInput);
   assert.equal(rank.ok, true);
+  assert.equal(rank.cached, false);
+  const rankCached = await handle.rank(rankInput);
+  assert.equal(rankCached.cached, true, "repeated ranks reuse all worker embeddings");
+  assert.deepEqual(rankCached.value, rank.value);
+  const partial = await handle.rank({ ...rankInput, candidates: [...rankInput.candidates, { id: "fresh", text: "schedule a dental appointment" }] });
+  assert.equal(partial.cached, false, "one new candidate requires an actual forward pass");
   assert.equal(rank.ok && rank.value.ranked[0].id, "shot");
-  const classify = await handle.classify({
+  const classifyInput = {
     text: "fix the failing authentication test",
     labels: [
       { id: "implementation", text: "write, edit, implement, build or fix code, files, configuration or tests" },
       { id: "research", text: "research, compare, search the web, gather information or summarize knowledge" },
     ],
-  });
+  };
+  const classify = await handle.classify(classifyInput);
   assert.equal(classify.ok && classify.value.label, "implementation");
+  assert.equal(classify.cached, false);
+  assert.equal((await handle.classify(classifyInput)).cached, true, "repeated classifications reuse all embeddings");
+  assert.equal(handle.stats().cacheHits, 2);
+  assert.equal((await handle.embed([rankInput.query])).cached, true, "embed can consume a rank-populated worker cache");
+  assert.equal(handle.stats().cacheHits, 3);
   await handle.shutdown();
 });
 
@@ -490,6 +532,8 @@ test("live worker honors disabled cache and topK-independent margins", { skip: !
     const one = await call({ ...request, topK: 1 });
     const two = await call({ ...request, topK: 2 });
     assert.equal(one.ok, true);
+    assert.equal(one.cached, false);
+    assert.equal(two.cached, false, "disabled cache never claims an all-cache operation");
     assert.ok(one.result.margin > 0);
     assert.equal(one.result.margin, two.result.margin);
     const health = await call({ op: "ping" });

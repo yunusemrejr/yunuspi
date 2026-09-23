@@ -114,11 +114,11 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 		assert.match(guardian[0].details.detail, /1 tool results.*WASM not needed/);
 		assert.match(guardian[1].details.detail, /2 tool results.*WASM not needed/);
 		assert.equal(activity(b.session).filter(message => message.details.kind.startsWith("guardian.")).length, 0);
-		assert.equal(activity(a.session).filter(message => message.content === "Fuzzy matching used").length, 2);
-		assert.equal(activity(b.session).filter(message => message.content === "Fuzzy matching used").length, 1);
+		assert.equal(activity(a.session).filter(message => message.details.label === "Fuzzy matching").length, 2);
+		assert.equal(activity(b.session).filter(message => message.details.label === "Fuzzy matching").length, 1);
 		assert.ok(activity(a.session).every(message => message.excludeFromContext === true));
 		assert.equal(a.calls(), 4); assert.equal(b.calls(), 2);
-		assert.doesNotMatch(JSON.stringify(a.contexts), /guardian\.observing|Fuzzy matching used|WASM not needed/);
+		assert.doesNotMatch(JSON.stringify(a.contexts), /guardian\.observing|Fuzzy matching|WASM not needed/);
 		assert.equal(a.session._guardian.handleCommand("/guardian stats").stats.classifierEvaluations, 0);
 		assert.equal(a.session._guardian.handleCommand("/guardian status").kernel, "lazy");
 		const failing = await makeSession(true);

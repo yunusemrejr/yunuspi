@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-09-23
+
+Slow independent reviews now show aspect progress and elapsed/deadline information in the existing tool display. Repair rounds receive prior blockers and changed-source context. Exhausted review rounds ask for an honest assessment of remaining gaps; stopping a session no longer requires manufacturing a review or child run.
+
+Actual intelligence activity appears immediately as display-only session notes, including during long-running tools. Notes distinguish remote JEV, local Needle3/WASM, cached selections, returned excerpts and evidence added to model context. They remain outside provider input and compaction; concurrent child notes preserve session ownership. Closely timed background completions share one fixed 200 ms grace window before waking the model.
+
+`obs_read` gains optional local query ranking with exact source ranges, hashes, bounded prefix coverage and unchanged full-original pagination. It reuses existing lexical retrieval and Needle3, without sending raw observations to a remote judge or rewriting cached history. Actual parser/render hooks now report narrow, advisory code and UI noise findings using existing WASM parsing and browser captures, with no added model calls or mandatory repair loops.
+
+Details and verification limits: [session recovery audit](docs/SESSION-RECOVERY-AUDIT.md), [micro-intelligence](docs/MICRO-INTELLIGENCE.md), [async and studio](docs/ASYNC-AND-STUDIO.md).
+
 ## 0.2.0 — 2026-09-23
 
 YunusPi gains persisted asynchronous delivery receipts, coalesced background wait events, mixed parallel/exclusive tool batches, duplicate-safe background admission and backpressured shell capture with optional head/tail context. These changes extend the existing runtime and preserve normal session, model, provider, skill and hook usage.

@@ -16,6 +16,8 @@ The design review examined [Unreal Agent at b7c9bf1](https://github.com/unrealla
 bash({ command: "npm test", maxOutputBytes: 8192, outputMode: "head-tail" })
 ```
 
+Finite background completions use a fixed 200 ms grace window after the first accepted durable receipt. Further completions join that batch without extending its deadline. Busy sessions resume through their existing settled/compaction events; cancellation, new user input and shutdown fence old continuations. This independently implements the useful fixed-deadline batching idea in [Unreal Agent's coordinator](https://github.com/unreallabsai/unreal-agent/blob/b7c9bf1c5c2fa4127255c07727a7c8413e23944a/harness/coordinator/grace_test.go). It adds no polling or new orchestration layer. A regression with eight separate-tick completions records one model wake; this fixture does not imply a universal reduction in model bills.
+
 ## 3D, sound and motion
 
 | Tool | Produces |
@@ -45,6 +47,10 @@ The renderer uses pinned Three.js 0.180.0 and the existing sandboxed Playwright 
 ## Design and delivery evidence
 
 `design_audit` shares the existing `render_see` browser path. It returns bounded evidence about rendered typography, spacing, surfaces, overflow and motion. `output:"text"` returns measurements without a screenshot; `output:"both"` also saves a screenshot and delivers its pixels only to a vision-capable model. Use local HTML or SVG, or an HTTP(S) page serving HTML, XHTML or SVG. Raster images and PDFs require `render_see` and cannot establish page-style measurements. Solid-color text contrast is measured only where foreground and effective background can be resolved conservatively. Gradients, overlays, masks, alternate text paints and other ambiguous cases are explicitly indeterminate. Use design skills and the actual pixels for visual judgment; this is neither an aesthetic score nor an accessibility certification. It scans the main document, not every iframe or shadow tree.
+
+Each existing HTML capture also checks for literal placeholder copy and exact adjacent duplicate headings, labels for the same input, or links to the same complete destination. These are locations worth inspecting, not an instruction to remove intentional repetition. The scan returns at most six candidates from 600 elements or 40 ms, excludes hidden/transparent content, input values and code/quotation examples, and performs no extra render or model call. Clean automatic checks add no response payload; explicit `design_audit` includes the bounded coverage receipt. Nested labels and ambiguous action semantics are left for human or visual review.
+
+`syntax_check` also returns advisory AST evidence for comments that exactly restate a following return and undocumented empty catches. Successful native `write`/`edit` tools run the same local WASM parser automatically on at most four source files per turn, up to 64 KiB per file, 20,000 AST nodes, 20 ms of traversal and three findings. Edit advice is restricted to an unambiguous replacement span. Explained catches, JSDoc, reasons and quoted source are exempt. Source revisions are deduplicated within the current session; activity notes report actual parser completions. Findings never fail a syntax check, launch another model or impose a repair loop. These narrow checks do not infer authorship or certify overall code/design quality.
 
 ```js
 tool_search({ names: ["design_audit", "workflow_probe", "web_asset_check", "sys_probe"] })

@@ -19,7 +19,22 @@ This audit follows a real interactive test drive after the Guardian implementati
 | Render recovery | Oversized decoded source-image failures encouraged retries that changed only screenshot dimensions. | Identify the source-image dimensions and explain that viewport/full-page changes do not resize the input asset. Preserve image limits and test rejection plus a corrected smaller asset. |
 | Guardian visibility | Normal observation had no visible event; only interventions proved activity in the transcript. | Emit bounded, display-only observation status after actual owned tool results. Distinguish lazy WASM from actual successful kernel calls; preserve disabled and session-owner behavior. |
 
-## Verification scope
+## Follow-up runtime audit (0.3.0)
+
+A second incident trace showed a slow, bounded reviewer, followed by additional parent edits and assessment failures. Two independent rounds actually launched; repeated assessment calls did not reset the round budget. Treating every visible tool error as a harness defect would have hidden the distinction between normal stale-edit/schema rejection, unavailable independent evidence and actual runtime faults. Private session content remains outside this repository.
+
+| Confirmed boundary | Repair | Exercised behavior |
+| --- | --- | --- |
+| Long quality-review tool wait | Stream aspect completion and elapsed/deadline progress into transient tool UI. Send prior blockers and changed-source hashes to bounded repair reviews; preserve every assigned aspect and current-evidence requirements. | Real owned SDK tool dispatch, partial deadline, stale acceptance, native aspect fanout and no progress text in provider context. |
+| Stop eligibility | Make quality/child history informational for `session_stop`; missing independent evidence is reported honestly and cannot require an unrelated paid run just to end a session. | Actual write/review/stop SDK path, stop ownership and continuation cancellation. |
+| Hidden intelligence activity | Append explicitly display-only messages after durable acceptance even while a model/tool is running. Keep strict context exclusion and distinguish inference, caches, returned excerpts and first context inclusion. | Persistence failure injection, pending tool ordering, abort/reload/compaction, equal-ID session isolation and validated live child relay. |
+| Separate-tick completions | One non-sliding 200 ms grace window joins accepted finite-task results. | Eight completions produce one wake; cancellation, compaction, volatile admission and model failure do not replay it. |
+| Large repeated observation reads | Add exact query excerpts using existing local lexical/Needle ranking. Preserve raw pagination, source hash, error metadata, actual scan bounds and active-branch ownership. | Real installed Needle WASM plus unavailable/aborted ranker, narrow budgets, Unicode/expanded queries, branch changes and exact source ranges. |
+| Noise in existing work | Reuse actual rendered DOM and source WASM parses for bounded advisory duplicate/placeholder/comment/empty-catch findings. | Real Chromium and native render receipts, real parser, edit-hook session fencing, intentional examples/hidden content exempted. |
+
+Independent review of the new query implementation caught and repaired a nonnumeric savings calculation, short excerpts that omitted the matching text, overstated prefix coverage at the candidate cap and no-match searches incorrectly reported as evidence delivery. No model setting is silently reduced; remote JEV remains remote and billed according to its existing routing, and local helpers abstain when their eligibility or confidence is insufficient.
+
+## Verification scope and remaining limits
 
 The tests exercise real owned editor and SDK boundaries, real foreground/background launchers, real local Chromium rendering and actual shipped Guardian WASM. Provider-failure injection is a deterministic process boundary, not a claim that every hosted model/provider is healthy.
 

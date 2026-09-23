@@ -757,7 +757,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "source-intelligence",
 		group: "engineering",
-		summary: "Inspect bounded syntax, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
+		summary: "Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, callers/callees and Git structure without executing project code; output limits and omitted coverage remain visible.",
 		entrypoints: ["syntax_check", "context_slice", "symbol_expand", "ast_diff", "git_info"],
 		tools: ["syntax_check", "context_slice", "symbol_expand", "ast_diff", "git_info"],
 		options: [
@@ -772,6 +772,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		related: ["quality-review", "project-intelligence", "safety-bounds"],
 		sourceFiles: [
 			"agent/extensions/lib/source-check.ts",
+			"agent/extensions/lib/code-noise.mjs",
 			"agent/extensions/pi-lens/context-tools.ts",
 			"agent/extensions/git-tools.ts",
 		],
@@ -843,12 +844,12 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "rendered-design-review",
 		group: "engineering",
-		summary: "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow and motion evidence for accessible and anti-slop UI review. Compare viewport/state screenshots using design skills; no aesthetic score or compliance claim.",
+		summary: "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition evidence. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
 		entrypoints: ["design_audit"],
 		tools: ["design_audit", "render_see", "browser_session", "web_asset_check"],
 		options: [option("source", "Local HTML or HTTP(S) page, inspected in the existing isolated browser."), option("width|height|colorScheme|reducedMotion", "Explicit responsive/theme/motion test condition."), option("output", "text for measurements; both includes pixels for vision-capable models.", ["text", "both"])],
 		related: ["web-and-media", "source-intelligence"],
-		sourceFiles: ["agent/extensions/render-and-wait.ts", "agent/scripts/render-design-state.mjs"],
+		sourceFiles: ["agent/extensions/render-and-wait.ts", "agent/scripts/render-design-state.mjs", "agent/scripts/render-noise-state.mjs"],
 		doc: "agent/public-template/docs/ASYNC-AND-STUDIO.md",
 	}),
 	capability({

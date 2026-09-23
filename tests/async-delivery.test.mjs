@@ -7,6 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createWaitSubscriptionManager } from '../agent/extensions/pi-subagents/src/runs/background/wait-subscriptions.ts';
+import { convertToLlm } from '../core/coding-agent/dist/core/messages.js';
 import { createAgentSession } from '../core/coding-agent/dist/core/sdk.js';
 import { SessionManager } from '../core/coding-agent/dist/core/session-manager.js';
 import { SettingsManager } from '../core/coding-agent/dist/core/settings-manager.js';
@@ -92,14 +93,14 @@ test('queued old-session acknowledgements cannot consume a restored subscription
   callbacks[1](); assert.equal(f.state.waitSubscriptions.size, 0);
 });
 
-async function sdkFixture(t, transport, persistent = false) {
+async function sdkFixture(t, transport, persistent = false, customTools = []) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-accept-'));
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
   const loader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true });
   await loader.reload();
   const model = { id: 'fixture', name: 'Fixture', api: 'openai-completions', provider: 'fixture', baseUrl: 'https://invalid.example', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 1000 };
   const modelRuntime = { getModel: () => model, getAvailable: () => [model], hasConfiguredAuth: () => true, isUsingSubscription: () => false, getAuth: async () => ({ auth: { apiKey: ['synthetic', 'fixture'].join('-') } }), streamSimple: transport };
-  const { session } = await createAgentSession({ cwd, agentDir: cwd, model, modelRuntime, settingsManager, resourceLoader: loader, sessionManager: persistent ? SessionManager.create(cwd, cwd) : SessionManager.inMemory(cwd), tools: [], thinkingLevel: 'off' });
+  const { session } = await createAgentSession({ cwd, agentDir: cwd, model, modelRuntime, settingsManager, resourceLoader: loader, sessionManager: persistent ? SessionManager.create(cwd, cwd) : SessionManager.inMemory(cwd), tools: customTools.map(tool => tool.name), customTools, thinkingLevel: 'off' });
   t.after(() => { session.dispose(); fs.rmSync(cwd, { recursive: true, force: true }); });
   return session;
 }
@@ -136,6 +137,76 @@ test('real SDK queued receipts acknowledge only on persistence, including abort 
   await session.sendCustomMessage({ customType: 'deferred', content: 'next request', display: false }, { deliverAs: 'nextTurn', onAccepted: () => accepted++ });
   assert.equal(accepted, 1, 'next-turn message remains unacknowledged while queued');
   await session.prompt('next request'); assert.equal(accepted, 2);
+});
+
+test('display-only SDK messages flow during inference, persist before acceptance and never reach provider context', async t => {
+  const model = deferred(), events = [];
+  let calls = 0, accepted = 0;
+  const session = await sdkFixture(t, () => { calls++; return response(model.promise, 'aborted'); }, true);
+  session.subscribe(event => events.push(event));
+  const running = session.prompt('fixture request'); await tick(); await tick();
+  assert.equal(session.isStreaming, true);
+  await session.sendCustomMessage({ customType: 'harness-activity', content: 'Needle3 rank ready', display: true, excludeFromContext: true }, {
+    triggerTurn: false, onAccepted() {
+      accepted++;
+      assert.match(fs.readFileSync(session.sessionManager.getSessionFile(), 'utf8'), /Needle3 rank ready/);
+    },
+  });
+  assert.equal(accepted, 1);
+  assert.equal(events.filter(event => event.type === 'message_end' && event.message?.customType === 'harness-activity').length, 1);
+  assert.equal(convertToLlm(session.agent.state.messages).some(message => JSON.stringify(message).includes('Needle3 rank ready')), false);
+  assert.equal(calls, 1, 'display-only completion does not trigger inference');
+  model.resolve(); await running;
+  assert.equal(accepted, 1);
+  assert.equal(session.sessionManager.getBranch().filter(entry => entry.customType === 'harness-activity').length, 1, 'abort flush must not duplicate already displayed activity');
+  const restored = SessionManager.open(session.sessionManager.getSessionFile());
+  assert.equal(JSON.stringify(restored.buildSessionContext().messages).includes('Needle3 rank ready'), false);
+});
+
+test('display-only activity flows while a real SDK tool is pending without splitting provider call/result order', async t => {
+  const entered = deferred(), release = deferred(), contexts = [];
+  let requests = 0;
+  const session = await sdkFixture(t, (_model, context) => {
+    contexts.push(JSON.parse(JSON.stringify(context)));
+    const message = { role: 'assistant', provider: 'fixture', api: 'openai-completions', model: 'fixture',
+      content: ++requests === 1 ? [{ type: 'toolCall', id: 'slow-helper-call', name: 'fixture_slow_helper', arguments: {} }] : [{ type: 'text', text: 'done' }],
+      stopReason: requests === 1 ? 'toolUse' : 'stop', timestamp: Date.now(), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    return { async *[Symbol.asyncIterator]() { yield { type: 'done', message }; }, result: async () => message };
+  }, true, [{ name: 'fixture_slow_helper', description: 'Synthetic bounded pending helper', parameters: { type: 'object', properties: {} },
+    async execute() { entered.resolve(); await release.promise; return { content: [{ type: 'text', text: 'tool result' }], details: {} }; } }]);
+  const seen = []; session.subscribe(event => seen.push(event));
+  const running = session.prompt('Use the fixture helper.');
+  await Promise.race([entered.promise, running.then(() => { throw new Error('fixture helper was not invoked'); })]);
+  await session.sendCustomMessage({ customType: 'harness-activity', content: 'local helper completed', display: true, excludeFromContext: true }, { triggerTurn: false });
+  assert.equal(requests, 1);
+  assert.equal(seen.filter(event => event.type === 'message_end' && event.message?.customType === 'harness-activity').length, 1);
+  assert.equal(seen.some(event => event.type === 'tool_execution_end'), false, 'the activity is visible before the slow tool completes');
+  release.resolve(); await running;
+  assert.equal(requests, 2);
+  assert.deepEqual(contexts[1].messages.map(message => message.role), ['user', 'assistant', 'toolResult']);
+  assert.equal(contexts[1].messages[2].toolCallId, 'slow-helper-call');
+  assert.doesNotMatch(JSON.stringify(contexts), /local helper completed|harness-activity/);
+});
+
+test('display-only persistence failure during streaming emits no ghost or acceptance and permits one retry', async t => {
+  const model = deferred(), events = [];
+  const session = await sdkFixture(t, () => response(model.promise), true);
+  const running = session.prompt('fixture request'); await tick(); await tick();
+  session.subscribe(event => events.push(event));
+  const original = fs.fsyncSync;
+  let accepted = 0;
+  const message = { customType: 'harness-activity', content: 'fixture display receipt', display: true, excludeFromContext: true };
+  try {
+    fs.fsyncSync = () => { throw new Error('fixture display sync failure'); }; syncBuiltinESMExports();
+    await assert.rejects(session.sendCustomMessage(message, { triggerTurn: false, onAccepted: () => accepted++ }), /fixture display sync failure/);
+  } finally { fs.fsyncSync = original; syncBuiltinESMExports(); }
+  assert.equal(accepted, 0);
+  assert.equal(events.filter(event => event.message?.customType === 'harness-activity').length, 0);
+  assert.equal(session.agent.state.messages.filter(message => message.customType === 'harness-activity').length, 0);
+  await session.sendCustomMessage(message, { triggerTurn: false, onAccepted: () => accepted++ });
+  assert.equal(accepted, 1);
+  model.resolve(); await running;
+  assert.equal(session.sessionManager.getBranch().filter(entry => entry.customType === 'harness-activity').length, 1);
 });
 
 test('real SDK follow-up receipt is unacknowledged until consumed and persisted', async t => {

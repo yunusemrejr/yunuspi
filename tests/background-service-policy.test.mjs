@@ -27,11 +27,11 @@ test('persistent server defaults and legacy snapshots never promise an automatic
   assert.equal(taskTriggersCompletion({command,isAgent:false,notifyOnCompletion:false,triggerOnCompletion:true,triggerOnCompletionExplicit:true}), false);
 });
 
-function notifier() {
+function notifier(options = {graceMs:0}) {
   const sent = [], ui = [], hooks = new Map();
   const ctx = { isIdle: () => true, ui: { notify: text => ui.push(text) }, sessionManager: { getBranch: () => [] } };
   const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage: (message, options) => { sent.push({message,options}); options.onAccepted?.(); } };
-  return { sent, ui, hooks, ctx, notify: createCompletionNotifier(pi, () => ctx) };
+  return { sent, ui, hooks, ctx, notify: createCompletionNotifier(pi, () => ctx, options) };
 }
 
 test('legacy service exit is UI-only even when old registry asks to wake', () => {
@@ -73,7 +73,7 @@ test('old completion acknowledgement cannot consume work from a newer user reque
     if (options.triggerTurn && ++wakes === 1) return firstWake.promise.then(() => options.onAccepted?.());
     options.onAccepted?.();
   } };
-  const notify = createCompletionNotifier(pi, () => ctx);
+  const notify = createCompletionNotifier(pi, () => ctx, {graceMs:0});
   notify({ content: 'first receipt' }, { triggerTurn: true });
   hooks.get('input')({ source: 'interactive', text: 'Continue with the updated task' });
   notify({ content: 'second receipt' }, { triggerTurn: true });
@@ -93,7 +93,7 @@ test('completion wake waits until its durable receipt is accepted and ignores st
     if (!options.triggerTurn) return receipt.promise.then(() => options.onAccepted?.());
     options.onAccepted?.();
   } };
-  const notify = createCompletionNotifier(pi, () => ctx);
+  const notify = createCompletionNotifier(pi, () => ctx, {graceMs:0});
   notify({ content: 'delayed receipt' }, { triggerTurn: true });
   await tick();
   assert.equal(sent.length, 1, 'a wake cannot precede the receipt it refers to');
@@ -112,7 +112,7 @@ test('a failed completion receipt cannot trigger inference with missing results'
     if (!options.triggerTurn) return Promise.reject(new Error('Receipt unavailable'));
     options.onAccepted?.();
   } };
-  const notify = createCompletionNotifier(pi, () => ctx);
+  const notify = createCompletionNotifier(pi, () => ctx, {graceMs:0});
   notify({ content: 'failed receipt' }, { triggerTurn: true });
   await tick();
   await hooks.get('agent_settled')();
@@ -125,7 +125,7 @@ test('same-generation completion arriving during a wake drains after the settled
   const notify = createCompletionNotifier({ on: (name, fn) => hooks.set(name, fn), sendMessage(_message, options) {
     if (options.triggerTurn && ++wakes === 1) { idle = false; options.onAccepted?.(); return firstWake.promise; }
     options.onAccepted?.();
-  } }, () => ctx);
+  } }, () => ctx, {graceMs:0});
   notify({ content: 'A' }, { triggerTurn: true });
   notify({ content: 'B' }, { triggerTurn: true });
   idle = true;
@@ -143,7 +143,7 @@ test('failed wake does not spin, and abort or shutdown prevents a latched contin
     const notify = createCompletionNotifier({ on: (name, fn) => hooks.set(name, fn), sendMessage(_message, options) {
       if (options.triggerTurn) { wakes++; return firstWake.promise; }
       options.onAccepted?.();
-    } }, () => ctx);
+    } }, () => ctx, {graceMs:0});
     notify({ content: 'A' }, { triggerTurn: true });
     notify({ content: 'B' }, { triggerTurn: true });
     await hooks.get('agent_settled')();
@@ -163,7 +163,7 @@ test('accepted wake is consumed before a failed model promise and cannot start i
   options.onAccepted?.();
   if(options.triggerTurn){wakes++;return Promise.reject(new Error('model failed after persisted receipt'));}
   return Promise.resolve();
- }},()=>ctx);
+ }},()=>ctx,{graceMs:0});
  notify({content:'terminal receipt'},{triggerTurn:true});await tick();
  for(let i=0;i<4;i++)await hooks.get('agent_settled')();
  assert.equal(wakes,1);
@@ -174,10 +174,122 @@ test('volatile receipt admission cannot wake and volatile wake admission remains
  const ctx={isIdle:()=>true,sessionManager:{getBranch:()=>[]}};
  const notify=createCompletionNotifier({on:(name,fn)=>hooks.set(name,fn),sendMessage(_message,options){
   callbacks.push(options.onAccepted);if(options.triggerTurn)wakes++;return Promise.resolve();
- }},()=>ctx);
+ }},()=>ctx,{graceMs:0});
  notify({content:'queued receipt'},{triggerTurn:true});await tick();
  assert.equal(wakes,0);callbacks[0]();await tick();assert.equal(wakes,1);
  for(let i=0;i<4;i++)await hooks.get('agent_settled')();
  assert.equal(wakes,1);callbacks[1]();await tick();
  await hooks.get('agent_settled')();assert.equal(wakes,1);
+});
+
+const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
+const wakesOf = fixture => fixture.sent.filter(item => item.options.triggerTurn);
+
+test('default completion grace batches separate-tick receipts and settled events cannot bypass it',async()=>{
+  const f=notifier({}),started=performance.now();
+  try {
+    for(let i=0;i<8;i++) {
+      f.notify({content:`receipt ${i}`},{triggerTurn:true});
+      f.hooks.get('agent_settled')();
+      await tick();
+    }
+    assert.equal(wakesOf(f).length,0,'the default 200 ms window is still open');
+    await delay(220);
+    assert.equal(wakesOf(f).length,1);
+    assert.match(wakesOf(f)[0].message.content,/^8 background task completion/);
+    assert.equal(f.sent.length,9,'eight durable receipts produce one inference wake');
+    assert.ok(performance.now()-started>=190);
+  } finally {f.hooks.get('session_shutdown')();}
+});
+
+test('steady arrivals do not slide the first accepted completion deadline',async()=>{
+  const f=notifier({graceMs:80});
+  let count=0,producing=true;
+  const send=()=>f.notify({content:`receipt ${++count}`},{triggerTurn:true});
+  send();await tick();send();
+  const interval=setInterval(send,12);
+  const producerEnd=setTimeout(()=>{producing=false;clearInterval(interval);},300);
+  try {
+    // A sliding debounce would remain silent throughout this arrival stream.
+    await delay(130);
+    assert.equal(producing,true);
+    assert.equal(wakesOf(f).length,1,'the first batch wakes while arrivals continue');
+    const batched=Number.parseInt(wakesOf(f)[0].message.content,10);
+    assert.ok(batched>=2);assert.ok(batched<count,'later arrivals belong to a new grace window');
+  } finally {clearInterval(interval);clearTimeout(producerEnd);f.hooks.get('session_shutdown')();}
+});
+
+test('input, abort and shutdown cancel grace work without waking a stale session',async()=>{
+  for(const reason of ['input','abort','signal','shutdown']) {
+    const f=notifier({graceMs:25}),controller=new AbortController();
+    f.ctx.signal=controller.signal;
+    f.notify({content:'old receipt'},{triggerTurn:true});
+    if(reason==='input') f.hooks.get('input')({source:'interactive',text:'new request'});
+    if(reason==='abort') f.hooks.get('message_end')({message:{role:'assistant',stopReason:'aborted'}});
+    if(reason==='signal') controller.abort();
+    if(reason==='shutdown') f.hooks.get('session_shutdown')();
+    await delay(40);f.hooks.get('agent_settled')();await tick();
+    assert.equal(wakesOf(f).length,0,reason);
+    if(reason==='input') {
+      f.notify({content:'new receipt'},{triggerTurn:true});await delay(40);
+      assert.equal(wakesOf(f).length,1);
+      assert.match(wakesOf(f)[0].message.content,/^1 background task completion/,'old input cannot enter the new batch');
+    }
+    f.hooks.get('session_shutdown')();
+  }
+});
+
+test('compaction preserves the original grace deadline and resumes after its busy boundary',async()=>{
+  const f=notifier({graceMs:35});let idle=false;
+  f.ctx.isIdle=()=>idle;
+  try {
+    f.notify({content:'receipt'},{triggerTurn:true});
+    f.hooks.get('session_compact_failed')();
+    await delay(50);
+    assert.equal(wakesOf(f).length,0);
+    f.hooks.get('session_compact')();
+    idle=true; // Core releases the busy flag after emitting session_compact.
+    await delay(5);
+    assert.equal(wakesOf(f).length,1,'elapsed grace does not restart after compaction');
+    const next=notifier({graceMs:35});
+    try {
+      next.notify({content:'fresh receipt'},{triggerTurn:true});
+      next.hooks.get('session_compact')();await delay(5);
+      assert.equal(wakesOf(next).length,0,'the compaction bridge cannot shorten unelapsed grace');
+      await delay(45);assert.equal(wakesOf(next).length,1);
+    } finally {next.hooks.get('session_shutdown')();}
+  } finally {f.hooks.get('session_shutdown')();}
+});
+
+test('an expired grace waits for lifecycle progress without polling a busy session',async()=>{
+  const f=notifier({graceMs:20});let idle=false,checks=0;
+  f.ctx.isIdle=()=>{checks++;return idle;};
+  try {
+    f.notify({content:'receipt while another turn is running'},{triggerTurn:true});
+    await delay(35);
+    assert.equal(wakesOf(f).length,0);const afterDeadline=checks;
+    await delay(35);assert.equal(checks,afterDeadline,'there is no recurring idle probe');
+    idle=true;f.hooks.get('agent_settled')();
+    assert.equal(wakesOf(f).length,1,'the elapsed grace is ready on the next settled event');
+  } finally {f.hooks.get('session_shutdown')();}
+});
+
+test('grace expiration during an in-flight wake drains accepted new completions once',async()=>{
+  const hooks=new Map(),sent=[],firstWake=deferred();let idle=true;
+  const ctx={isIdle:()=>idle,sessionManager:{getBranch:()=>[]}};
+  const notify=createCompletionNotifier({on:(name,fn)=>hooks.set(name,fn),sendMessage(message,options){
+    sent.push({message,options});options.onAccepted?.();
+    if(options.triggerTurn && sent.filter(item=>item.options.triggerTurn).length===1){idle=false;return firstWake.promise;}
+  }},()=>ctx,{graceMs:25});
+  try {
+    notify({content:'A'},{triggerTurn:true});await delay(40);
+    notify({content:'B'},{triggerTurn:true});await tick();notify({content:'C'},{triggerTurn:true});
+    await delay(40);
+    assert.equal(sent.filter(item=>item.options.triggerTurn).length,1);
+    idle=true;hooks.get('agent_settled')();firstWake.resolve();await tick();
+    const wakes=sent.filter(item=>item.options.triggerTurn);
+    assert.equal(wakes.length,2);assert.match(wakes[1].message.content,/^2 background task completion/);
+    hooks.get('agent_settled')();await delay(35);
+    assert.equal(sent.filter(item=>item.options.triggerTurn).length,2);
+  } finally {firstWake.resolve();hooks.get('session_shutdown')();}
 });

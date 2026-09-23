@@ -49,7 +49,7 @@ export interface GuardianSupervisorOptions {
 }
 export declare function tagGuardianRequestMessage<T extends object>(message: T, metadata: GuardianRequestMetadata): T;
 export declare function guardianRequestMessages(messages: unknown[]): Array<{ requestId: string; turnId: string; messageIndex: number }>;
-export declare function relayIntelligenceUsageFromChild(input: { name: "JEV" | "Needle3" | "FuzzyML" | "Kompress" | "Smol" | "retrieval" | "Neural ranker" | "Intent classifier"; sessionId: string; ownerId: string }): boolean;
+export declare function relayIntelligenceUsageFromChild(input: { name: "JEV" | "Needle3" | "FuzzyML" | "Kompress" | "Smol" | "retrieval" | "Neural ranker" | "Intent classifier" | "WASM source check" | "Deterministic selection"; sessionId: string; ownerId: string; stage?: "result" | "cached" | "applied" | "delivered" | "returned" | "skipped"; source?: "remote" | "local" | "wasm"; count?: number; durationMs?: number; savedChars?: number }): boolean;
 export declare function guardianOwnerForSession(sessionId: string, sessionOwner?: object): string | undefined;
 export declare class GuardianSupervisor {
     constructor(options: GuardianSupervisorOptions);

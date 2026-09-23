@@ -12,8 +12,8 @@ import { sessionObservability } from './session-observability.ts';
  *
  * These lines are display-only: `details` carry renderer data and
  * `excludeFromContext` keeps the compact label out of LLM context. Sends
- * always use `{ triggerTurn: false }` so a line defers to end-of-turn while
- * streaming.
+ * always use `{ triggerTurn: false }`; display-only lines can flow while a
+ * tool is running without becoming provider input.
  * Pure module: no pi imports, safe for offline tests. The renderer lives
  * next to the other custom renderers in pi-subagents extension/index.ts.
  */
@@ -71,9 +71,7 @@ const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, er
 /** Infrastructure states flap slowly; a 10s window would re-log every check. */
 const DEDUPE_OVERRIDE: Array<[string, number]> = [
   ["guardian.", 60_000],
-  ["intelligence.used", 60_000],
   ["local.refresh", 600_000],
-  ["ml.smol.offer", 600_000],
   ["reminder.", 300_000],
 ];
 const LINE_BUDGET_PER_MIN = 24;
@@ -87,11 +85,9 @@ const clean = (value: unknown, max = 80): string =>
     .trim()
     .slice(0, max);
 
-/** Only success records that prove an intelligence result was consumed may
- * become transcript markers. A cached result counts when a caller used it;
- * offers, skips, shadow evaluations and infrastructure state never do. The
- * component labels are fixed so event payloads cannot leak prompts, routes,
- * paths or model names. */
+/** Legacy component classification for successful internal results. This is
+ * not a provider-delivery receipt: the stage-aware projection below separates
+ * inference completion from context delivery. Labels never carry source text. */
 export function intelligenceUseForEvent(kind: string, data: Record<string, unknown>): string | undefined {
   if (data.isError === true || data.disabled === true || data.shadow === true) return undefined;
   switch (kind) {
@@ -105,6 +101,42 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
     case "ml.radar.rank": return data.decision === "on" && typeof data.count === "number" && data.count > 0 ? "Neural ranker" : undefined;
     default: return undefined;
   }
+}
+
+/** Fixed labels and bounded numeric evidence only: no prompt, selected text,
+ * model output, file path or arbitrary payload enters the transcript. A
+ * completed call is not proof that its result reached the main model. */
+export function describeIntelligenceActivity(kind: string, data: Record<string, unknown>): DescribedActivity | undefined {
+  const ms = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? Math.round(data.durationMs) : undefined;
+  const helpers: Record<string, string> = { needle: "Needle3", smol: "Smol", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection" };
+  const amount = (key: string) => Number.isSafeInteger(data[key]) && Number(data[key]) >= 0 ? Number(data[key]) : undefined;
+  const decision = typeof data.decision === "string" ? data.decision : "";
+  const reason = typeof data.reason === "string" && /^[a-z-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
+  const status: ActivityStatus = data.isError === true ? "error" : "ok";
+  if (data.disabled === true || data.shadow === true || data.isError === true) return;
+  if ((kind === "ml.evidence.delivered" || kind === "ml.evidence.returned") && typeof data.helper === "string" && Object.hasOwn(helpers, data.helper)) {
+    const saved = amount("savedChars");
+    return { label: helpers[data.helper], status, detail: `${kind === "ml.evidence.returned" ? "returned exact excerpts" : "added to model context"}${saved === undefined ? "" : ` · ${saved} characters ${kind === "ml.evidence.returned" ? "omitted" : "saved"}`}${data.cached === true ? " · cached selection" : ""}` };
+  }
+  if (kind === "ml.needle.call" && data.count !== 0) {
+    const op = typeof data.op === "string" && ["embed", "rank", "classify", "extract"].includes(data.op) ? data.op : "result";
+    return { label: "Needle3", status: data.accepted === false ? "skip" : status, ms,
+      detail: `${data.cached === true ? "cached embeddings" : "local WASM"} · ${op} ${data.accepted === false ? "abstained" : "ready"}` };
+  }
+  if (kind === "ml.jev.used") return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached judgment" : "remote judgment ready"}${amount("questions") === undefined ? "" : ` · ${amount("questions")} questions`}` };
+  if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
+    label: kind === "ml.smol.inference" ? "Smol" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status : "skip", ms,
+    detail: `${data.cached === true || decision === "cache-hit" ? "cached selection" : decision === "selected" ? "local selection ready" : "local selection unused"}${reason ? ` · ${reason}` : ""}`,
+  };
+  if (kind === "ml.smol.offer" && decision !== "accepted") return { label: "Smol", status: decision === "cache-hit" ? "ok" : "skip", detail: decision === "cache-hit" ? "cached selection ready" : `skipped${reason ? ` · ${reason}` : ""}` };
+  if (kind === "ml.wasm.completed" && data.runtime === "tree-sitter-wasm" && data.helper === "source-check") return {
+    label: "WASM source check", status, ms, detail: `${data.cached === true ? "cached" : "local parse complete"}${amount("findings") === undefined ? "" : ` · ${amount("findings")} findings`}`,
+  };
+  if (kind === "ml.smol.used" || kind === "ml.mini.used") return { label: kind === "ml.smol.used" ? "Smol" : "Kompress", status, detail: "selection applied" };
+  if (kind === "ml.fuzzy.used") return { label: "Fuzzy matching", status, detail: `local match applied${amount("count") === undefined ? "" : ` · ${amount("count")} matches`}` };
+  if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: "ranking applied" };
+  if (kind === "ml.radar.rank" && decision === "on" && (amount("count") ?? 0) > 0) return { label: "Neural ranker", status, detail: `ranking applied · ${amount("count")} results` };
+  if (kind === "ml.intent") return { label: "Intent classifier", status, detail: "local route selected" };
 }
 
 /** Skill name from a read-tool path (parent dir of SKILL.md). Undefined when
@@ -237,6 +269,35 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
   const lineAt: number[] = [];
   let lines = 0;
   let dropped = 0;
+  let generation = 0;
+  let pendingFlush = false;
+  const pendingIntelligence = new Map<string, { activity: DescribedActivity; count: number }>();
+  const emitIntelligence = (activity: DescribedActivity, count: number): void => {
+    const detail = [activity.detail, count > 1 ? `${count} ${activity.status === "skip" ? "events" : "completions"}` : undefined].filter(Boolean).join(" · ");
+    lines++;
+    try {
+      const result = send({ customType: ACTIVITY_MESSAGE_TYPE, content: clean(`${activity.label} · ${detail}`, 240),
+        display: true, excludeFromContext: true, details: { kind: "intelligence.activity", label: activity.label,
+          status: activity.status, ...(activity.ms !== undefined ? { ms: activity.ms } : {}), detail, count } }, { triggerTurn: false });
+      if (result && typeof (result as PromiseLike<unknown>).then === "function") (result as PromiseLike<unknown>).then(undefined, () => { dropped++; });
+    } catch { dropped++; }
+  };
+  const queueIntelligence = (activity: DescribedActivity): void => {
+    const key = `${activity.label}\0${activity.status}\0${activity.detail ?? ""}`;
+    const existing = pendingIntelligence.get(key);
+    if (existing) { existing.count++; if (activity.ms !== undefined) existing.activity.ms = (existing.activity.ms ?? 0) + activity.ms; }
+    else if (pendingIntelligence.size < 64) pendingIntelligence.set(key, { activity: { ...activity }, count: 1 });
+    else { dropped++; return; }
+    if (pendingFlush) return;
+    pendingFlush = true;
+    const epoch = generation;
+    queueMicrotask(() => {
+      if (generation !== epoch) return;
+      pendingFlush = false;
+      const batch = [...pendingIntelligence.values()]; pendingIntelligence.clear();
+      for (const item of batch) emitIntelligence(item.activity, item.count);
+    });
+  };
 
   const dedupeMs = (kind: string, status: ActivityStatus): number => {
     for (const [prefix, ms] of DEDUPE_OVERRIDE) if (kind.startsWith(prefix)) return ms;
@@ -286,15 +347,19 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
         const key = d.label || "local";
         local[key] = { outcome: d.detail ?? "ok", count: (local[key]?.count ?? 0) + 1, at: now };
       }
-      const intelligence = intelligenceUseForEvent(kind, data);
-      const lineKind = intelligence ? "intelligence.used" : kind;
-      const lineLabel = intelligence ?? d.label;
-      const policy = intelligence ? "all" : LINE_POLICY[kind];
+      const visibleIntelligence = describeIntelligenceActivity(kind, data);
+      if (visibleIntelligence) {
+        if (process.env.PI_SUBAGENT_CHILD !== "1") queueIntelligence(visibleIntelligence);
+        return;
+      }
+      const lineKind = kind;
+      const lineLabel = d.label;
+      const policy = LINE_POLICY[kind];
       if (!policy) return;
       if (policy === "error" && d.status !== "error") return;
       // Child sessions have no TUI: lines would only bloat child context.
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
-      const lineStatus = intelligence ? "ok" : d.status;
+      const lineStatus = d.status;
       const key = `${lineKind}\0${lineLabel}\0${lineStatus}`;
       const last = lastLine.get(key);
       if (last !== undefined && now - last < dedupeMs(lineKind, lineStatus)) return;
@@ -310,9 +375,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       }
       lineAt.push(now);
       lines++;
-      const content = intelligence
-        ? clean(`${lineLabel} used`, 64)
-        : clean(`activity ${kind} ${d.label} ${d.status}`, 64);
+      const content = clean(`activity ${kind} ${d.label} ${d.status}`, 64);
       try {
         const result = send(
           {
@@ -322,8 +385,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
             excludeFromContext: true,
             details: {
               kind: lineKind, label: lineLabel, status: lineStatus,
-              ...(!intelligence && rec.ms !== undefined ? { ms: rec.ms } : {}),
-              ...(!intelligence && rec.detail ? { detail: rec.detail } : {}),
+              ...(rec.ms !== undefined ? { ms: rec.ms } : {}),
+              ...(rec.detail ? { detail: rec.detail } : {}),
             },
           },
           { triggerTurn: false },
@@ -340,6 +403,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
   };
 
   const reset = (): void => {
+    generation++; pendingIntelligence.clear(); pendingFlush = false;
     sessionObservability()[ACTIVITY_VIEW] = counters;
     ring.length = 0;
     errors.length = 0;
@@ -357,6 +421,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
     note,
     reset,
     dispose: () => {
+      generation++; pendingIntelligence.clear(); pendingFlush = false;
       if (sessionObservability()[ACTIVITY_VIEW] === counters) {
         delete sessionObservability()[ACTIVITY_VIEW];
       }
@@ -369,6 +434,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
 /** Transcript-line payload. The renderer paints from these details; the
  * corresponding custom message is explicitly excluded from LLM context. */
 export interface ActivityDetails {
+  count?: number;
   kind: string;
   label: string;
   status: ActivityStatus;

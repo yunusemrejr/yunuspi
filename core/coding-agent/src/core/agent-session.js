@@ -1258,7 +1258,7 @@ export class AgentSession {
      *
      * Handles four cases:
      * - Streaming: queues message, processed when loop pulls from queue
-     * - Streaming + triggerTurn false: appended to state/session once the current turn ends
+     * - Streaming + triggerTurn false: display-only messages append immediately; context messages wait for turn end
      * - Not streaming + triggerTurn: appends to state/session, starts new turn
      * - Not streaming + no trigger: appends to state/session, no turn
      *
@@ -1291,6 +1291,12 @@ export class AgentSession {
         }
         else if (options?.triggerTurn) {
             await this._runAgentPrompt(appMessage);
+        }
+        else if (message.excludeFromContext === true && options?.triggerTurn === false) {
+            // Display-only activity can flow during a slow tool. Every provider,
+            // replay and compaction path filters this flag before validating tool
+            // ordering, so it cannot split the provider's call/result sequence.
+            this._appendCustomMessage(appMessage);
         }
         else if (this.isStreaming) {
             // Appending now would put the message between an assistant tool call and its

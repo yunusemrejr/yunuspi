@@ -392,7 +392,7 @@ export declare class AgentSession {
      *
      * Handles four cases:
      * - Streaming: queues message, processed when loop pulls from queue
-     * - Streaming + triggerTurn false: appended to state/session once the current turn ends
+     * - Streaming + triggerTurn false: display-only messages append immediately; context messages wait for turn end
      * - Not streaming + triggerTurn: appends to state/session, starts new turn
      * - Not streaming + no trigger: appends to state/session, no turn
      *

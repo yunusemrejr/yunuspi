@@ -344,7 +344,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
           finishActivity?.(epoch !== generation || abort.signal.aborted && !expired ? 'cancelled' : accepted ? 'ok' : !expired && (outcome === 'insufficient-savings' || outcome === 'model-unknown') ? 'skipped' : 'error');
           if (requested) microMetrics().run('smol',Math.max(0,now()-lastCall),raw.length);
           if (!accepted && requested) microMetrics().skip('smol',stats.lastOutcome);
-          noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});
+          if (requested) noteHealth('ml.smol.inference', {decision:accepted?'selected':'raw',reason:stats.lastOutcome,durationMs:Math.max(0,Math.round(now()-lastCall)),count:1});
           if (!accepted && epoch === generation) stats.fallbacks++;
           busy = false;
           if (slot.state === 'pending') slot.state = 'raw';
