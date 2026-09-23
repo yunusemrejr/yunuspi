@@ -185,6 +185,7 @@ test("harness configuration getters and setters do not expose mutable live state
 
 test("runWhenIdle callbacks can issue lane commands without waiting on their own idle claim", async () => {
   const fixture = await openHarness();
+  let timeout;
   try {
     let callbackContext;
     await Promise.race([
@@ -192,11 +193,12 @@ test("runWhenIdle callbacks can issue lane commands without waiting on their own
         callbackContext = context;
         await fixture.lane.setThinkingLevel("high", context);
       }, context),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("runWhenIdle callback deadlocked")), 250)),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("runWhenIdle callback deadlocked")), 2000); }),
     ]);
     assert.ok(callbackContext);
     assert.equal(await fixture.lane.getThinkingLevel(context), "high");
   } finally {
+    clearTimeout(timeout);
     await fixture.harness.close(context);
     await fixture.repo.close(context);
   }

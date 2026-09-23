@@ -176,6 +176,8 @@ try {
   "OpenRouter cache reads and writes are independent usage counters",
  );
  assert.equal(imageUsage.usage.totalTokens, 101);
+ assert.ok(Math.abs(imageUsage.usage.cost.total - 0.0000325) < 1e-12, "image cost uses separate read and write prices");
+ assert.equal(imageUsageMock.requests.length, 1);
  console.log("PASS OpenRouter image usage keeps cache reads and writes independent");
  const deepinfraMock=stub(chatSse({prompt_tokens:100,completion_tokens:20,cached_tokens:80,reasoning_tokens:12,estimated_cost:0.00123456}));
  const deepinfraResult=await chat.stream({...model,provider:'deepinfra',baseUrl:'https://api.deepinfra.com/v1/openai'},context,{apiKey:'TEST_fixture-only',fetch:deepinfraMock.fetch,sessionId:'deepinfra-stable'}).result();
