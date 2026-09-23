@@ -81,7 +81,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     ctx = context; const raw = typeof (event.originalText ?? event.text) === 'string' ? (event.originalText ?? event.text) : '';
     let restrictions: any = {}, blocked = raw.length > 1_000_000 || noObserver(raw);
     try { restrictions = explicitRecoveryConstraints(context, raw, context.model); } catch { blocked = true; }
-    runtime.stop();
+    runtime.stop('New user input');
     const id = event.requestId;
     const abort = () => { pending.get(id)?.cleanup(); pending.delete(id); if (owns(context) && userRequest && !pending.size && context.isIdle?.() === false) runtime.start(); };
     const cleanup = () => event.signal?.removeEventListener('abort', abort);
@@ -126,6 +126,6 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   });
   // Native agent_end may be followed by retry/compaction/queued continuation.
   // Only agent_settled closes the current active run and its observer cadence.
-  pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop(); streaming = []; } });
+  pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; } });
   pi.on('session_shutdown', () => { runtime.close(); clearPending(); closed = true; recent = []; streaming = []; request = ''; });
 }

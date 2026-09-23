@@ -169,7 +169,12 @@ export function createSessionObserver(ports: ObserverPorts) {
   return {
     begin(nextOwner: string) { closed = false; generation++; owner = nextOwner; current = undefined; lastHash = ''; adviceHash = ''; lastNotice = ''; flight?.controller.abort(Error('Observer task changed')); active = false; stopTimer(); },
     start() { if (closed || active) return; active = true; arm(); },
-    stop() { active = false; current = undefined; generation++; stopTimer(); flight?.controller.abort(Error('Observer work ended')); },
+    stop(reason = 'Current work ended') {
+      // Resolve the visible start note while this owner is still current. An
+      // abort signal cannot prove the provider has stopped or stopped billing.
+      if (active && flight && !flight.controller.signal.aborted) notice('stopped', `${reason}; cancellation requested`);
+      active = false; current = undefined; generation++; stopTimer(); flight?.controller.abort(Error('Observer work ended'));
+    },
     close() { closed = true; active = false; current = undefined; generation++; stopTimer(); flight?.controller.abort(Error('Observer session closed')); },
     context() { return active && current?.generation === generation && now() - current.at <= interval * 2 ? current.text : undefined; },
   };
