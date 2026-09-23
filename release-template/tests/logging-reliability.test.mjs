@@ -161,6 +161,22 @@ async function withHistory(fn) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test('shutdown during health startup cannot leave a stale log for the next session', async () => withHistory(async dir => {
+  const hooks = new Map();
+  healthExtension({ on(name, fn) { hooks.set(name, [...(hooks.get(name) ?? []), fn]); }, registerCommand() {}, appendEntry() {}, sendMessage() {} });
+  const context = { sessionManager: { getSessionId: () => 'fixture' }, ui: { notify() {} } };
+  const start = hooks.get('session_start').at(-1);
+  const shutdown = hooks.get('session_shutdown').at(-1);
+
+  await Promise.all([start({}, context), shutdown({}, context)]);
+  await start({}, context);
+  await shutdown({}, context);
+
+  const files = fs.readdirSync(path.join(dir, 'logs/health'));
+  assert.equal(files.length, 1, 'the closed first session must not be reopened by a late startup');
+  assert.deepEqual(readHealth(path.join(dir, 'logs/health', files[0])).map(event => event.kind), ['session.start', 'session.end']);
+}));
 const legacy = (agent, ts = 1) => ({ agent, task: 'fixture private task', ts, status: 'ok', duration: 1 });
 
 test('health extension honors the configured agent directory and reports final write failure', async () => withHistory(async dir => {

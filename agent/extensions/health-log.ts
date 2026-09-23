@@ -55,7 +55,10 @@ export default function healthLog(pi:any) {
  };
  const start=async(_:unknown,ctx:any)=>{
   const generation=++epoch;
-  if(timer)clearInterval(timer);await flush(true);calls.clear();activity.reset();childPending.clear();childFlushPending=false;
+  if(timer)clearInterval(timer);
+  await flush(true);
+  if(generation!==epoch)return;
+  calls.clear();activity.reset();childPending.clear();childFlushPending=false;
   const id=ctx.sessionManager?.getSessionId?.();
   activeSessionId=typeof id==='string'?id:undefined;
   activeSessionOwner=ctx.sessionManager;
