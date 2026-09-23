@@ -12,6 +12,7 @@ fs.mkdirSync(path.join(repo,'agent/scripts/lib'),{recursive:true});fs.copyFileSy
 fs.writeFileSync(path.join(repo,'scripts/build-core.mjs'),'// owned build fixture');
 fs.mkdirSync(path.join(repo,'docs'));fs.writeFileSync(path.join(repo,'docs/INSTALL.md'),'YunusPi source installation');
 fs.writeFileSync(path.join(repo,'AGENTS.md'),'Owned-source development');
+fs.writeFileSync(path.join(repo,'CHANGELOG.md'),'# Changelog\n\nRelease notes fixture');
 for(const name of ['package.json','package-lock.json'])fs.writeFileSync(path.join(repo,name),'{}');
 fs.mkdirSync(path.join(repo,'core/coding-agent/src'),{recursive:true});
 fs.writeFileSync(path.join(repo,'core/coding-agent/package.json'),JSON.stringify({name:'@yunuspi/coding-agent',version:'0.1.0'}));
@@ -39,6 +40,7 @@ assert.equal(JSON.parse(fs.readFileSync(path.join(target,'runtime/core/coding-ag
 assert.equal(fs.readlinkSync(path.join(target,'bin/pi')),'yunuspi');
 assert.equal(fs.readFileSync(path.join(target,'runtime/docs/INSTALL.md'),'utf8'),'YunusPi source installation');
 assert.equal(fs.readFileSync(path.join(target,'runtime/AGENTS.md'),'utf8'),'Owned-source development');
+for(const file of ['runtime/CHANGELOG.md','runtime/release-template/CHANGELOG.md'])assert.equal(fs.readFileSync(path.join(target,file),'utf8'),'# Changelog\n\nRelease notes fixture');
 assert.equal(fs.readFileSync(path.join(target,'runtime/release-template/docs/INSTALL.md'),'utf8'),'YunusPi source installation');
 assert.equal(fs.readFileSync(path.join(target,'runtime/release-template/scripts/install.mjs'),'utf8'),fs.readFileSync(script,'utf8'));
 assert.match(fs.readFileSync(path.join(target,'runtime/.npmrc'),'utf8'),/^ignore-scripts=true/m);

@@ -66,6 +66,7 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     let opened;
     try { opened = await raw({ action: 'open', url, visible: process.env.PI_BROWSER_VISIBLE === '1' }); }
     catch (error) { if (process.env.PI_BROWSER_REQUIRE === '1') throw error; t.skip('Chromium unavailable; PI_BROWSER_REQUIRE=1 makes it required'); return; }
+    assert.notEqual(opened.isError, true, JSON.stringify(opened.details));
     session = opened.details.session;
     const tab = opened.details.tab;
     const search = opened.details.targets.find(target => target.name === 'Search');

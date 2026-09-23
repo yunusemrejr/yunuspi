@@ -1,7 +1,9 @@
 import { APP_NAME } from "../config.js";
 import { configureHttpDispatcher } from "../core/http-dispatcher.js";
 export function setupCli() {
-    process.title = APP_NAME;
+    // On Linux this overwrites /proc/<pid>/cmdline. Preserve the entrypoint
+    // arguments so installation updates can identify this active core owner.
+    if (process.platform !== "linux") process.title = APP_NAME;
     process.env.PI_CODING_AGENT = "true";
     process.env.AI_AGENT = "yunuspi";
     process.emitWarning = (() => { });

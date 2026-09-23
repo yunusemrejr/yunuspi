@@ -412,6 +412,7 @@ test(
         );
         return;
       }
+      assert.notEqual(opened.isError, true, JSON.stringify(opened.details));
       const one = opened.details.session;
       assert.equal(opened.details.pageState.itemsOmitted, true);
       assert.match(JSON.stringify(await call({ action: "snapshot", session: one })), /Fresh/);

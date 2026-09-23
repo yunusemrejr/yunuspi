@@ -9,6 +9,34 @@ import { createRenderQueue } from "./render-queue.ts";
 
 export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
 
+/** Preserve installed binaries while keeping browser state in a private home.
+ * Linux is the supported browser-session host. Playwright resolves its binary
+ * cache before launch, independently of Chromium's disposable user profile. */
+export function isolatedBrowserEnvironment(
+  directory: string,
+  visible = false,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const installed = source.PLAYWRIGHT_BROWSERS_PATH;
+  const binaryCache = installed === "0" ? "0" : path.resolve(
+    source.INIT_CWD || process.cwd(),
+    installed || path.join(source.XDG_CACHE_HOME || path.join(source.HOME || os.homedir(), ".cache"), "ms-playwright"),
+  );
+  const inherited = Object.fromEntries(
+    ["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL", ...(visible ? ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"] : [])]
+      .filter(key => source[key] !== undefined)
+      .map(key => [key, source[key]]),
+  );
+  return {
+    ...inherited,
+    PLAYWRIGHT_BROWSERS_PATH: binaryCache,
+    HOME: directory,
+    TMPDIR: directory,
+    XDG_CACHE_HOME: path.join(directory, "cache"),
+    XDG_CONFIG_HOME: path.join(directory, "config"),
+  };
+}
+
 const ACTIONS_WITH_FOLLOWUP_OBSERVATION = new Set([
   "open", "navigate", "new_tab", "switch_tab", "back", "forward", "reload",
   "click", "fill", "press", "select", "check", "hover", "scroll", "drag",
@@ -288,11 +316,6 @@ export function registerBrowserSession(pi: any) {
         }
         // mkdtemp already creates a private 0700 directory.
 
-        const env = Object.fromEntries(
-          ["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL", ...(p.visible ? ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR"] : [])]
-            .filter((key) => process.env[key] !== undefined)
-            .map((key) => [key, process.env[key]]),
-        );
         const child = spawn(
           process.execPath,
           [
@@ -306,13 +329,7 @@ export function registerBrowserSession(pi: any) {
           {
             cwd: dir,
             detached: true,
-            env: {
-              ...env,
-              HOME: dir,
-              TMPDIR: dir,
-              XDG_CACHE_HOME: path.join(dir, "cache"),
-              XDG_CONFIG_HOME: path.join(dir, "config"),
-            },
+            env: isolatedBrowserEnvironment(dir, p.visible === true),
             stdio: ["pipe", "pipe", "pipe"],
           },
         );

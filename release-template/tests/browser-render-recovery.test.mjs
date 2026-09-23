@@ -4,16 +4,51 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find(dir => fs.existsSync(path.join(dir, "extensions/lib/browser-session.ts")));
 const load = relative => import(pathToFileURL(path.join(agent, relative)));
-const { registerBrowserSession } = await load("extensions/lib/browser-session.ts");
+const { registerBrowserSession, isolatedBrowserEnvironment } = await load("extensions/lib/browser-session.ts");
 function unavailableBrowser(t, error) {
   if (process.env.PI_BROWSER_REQUIRE === "1" || !/browserType\.launch|browser startup failure/i.test(String(error.message))) throw error;
   t.skip("Chromium unavailable; PI_BROWSER_REQUIRE=1 requires it");
 }
+
+test("isolated browser children resolve the installed executable without inheriting private state", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "browser-binary-cache-"));
+  const script = `import { createRequire } from 'node:module';
+    const { chromium } = createRequire(${JSON.stringify(path.join(agent, "npm/package.json"))})('playwright');
+    console.log(JSON.stringify({ executable: chromium.executablePath(), home: process.env.HOME,
+      cache: process.env.XDG_CACHE_HOME, config: process.env.XDG_CONFIG_HOME, keys: Object.keys(process.env) }));`;
+  const probe = (env, cwd) => {
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd, env, encoding: "utf8" });
+    assert.equal(child.status, 0, child.stderr);
+    return JSON.parse(child.stdout);
+  };
+  try {
+    const source = { PATH: process.env.PATH, HOME: path.join(scratch, "original"), PI_RENDER_BROWSER_CHANNEL: "chromium",
+      NODE_OPTIONS: "--trace-warnings", GITHUB_TOKEN: "YOUR_GITHUB_TOKEN", DISPLAY: ":99" };
+    for (const setting of [{}, { XDG_CACHE_HOME: path.join(scratch, "shared-cache") },
+      { PLAYWRIGHT_BROWSERS_PATH: path.join(scratch, "explicit-binaries") }, { PLAYWRIGHT_BROWSERS_PATH: "0" },
+      { PLAYWRIGHT_BROWSERS_PATH: "relative-binaries" }, { PLAYWRIGHT_BROWSERS_PATH: "relative-binaries", INIT_CWD: scratch }]) {
+      const original = { ...source, ...setting };
+      const privateHome = path.join(scratch, "private-home");
+      const isolated = isolatedBrowserEnvironment(privateHome, false, original);
+      // Different child cwd must not reinterpret a relative caller cache path.
+      const before = probe(original, process.cwd());
+      const after = probe(isolated, scratch);
+      assert.equal(after.executable, before.executable, JSON.stringify(setting));
+      assert.equal(after.home, privateHome);
+      assert.equal(after.cache, path.join(privateHome, "cache"));
+      assert.equal(after.config, path.join(privateHome, "config"));
+      for (const key of ["NODE_OPTIONS", "GITHUB_TOKEN", "DISPLAY", "INIT_CWD"]) assert.ok(!after.keys.includes(key), key);
+      assert.equal(isolated.PI_RENDER_BROWSER_CHANNEL, "chromium");
+    }
+    assert.equal(isolatedBrowserEnvironment(scratch, true, source).DISPLAY, ":99");
+  } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+});
 
 test("browser validates before dispatch and resolves private aliases with compact fresh action observations", { timeout: 60000 }, async t => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "browser-alias-"));

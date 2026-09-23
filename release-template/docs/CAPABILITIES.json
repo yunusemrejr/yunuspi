@@ -2844,7 +2844,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 108,
+        "line": 136,
         "kind": "literal"
       },
       {
@@ -3342,7 +3342,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 108,
+        "line": 136,
         "kind": "literal"
       },
       {

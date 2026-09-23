@@ -1,4 +1,4 @@
-import {registerBrowserSession} from "./lib/browser-session.ts";
+import {registerBrowserSession, isolatedBrowserEnvironment} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
@@ -23,7 +23,7 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
     let stopped: string | undefined;
     const child = execFile(process.execPath, [path.join(scripts, "render-capture.mjs"), encode(params), output], {
       cwd, detached: process.platform !== "win32", encoding: "utf8", maxBuffer: 65536,
-      env: {...Object.fromEntries(["PATH", "LANG", "LC_ALL", "PI_RENDER_BROWSER_CHANNEL"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])), TMPDIR: tempRoot, HOME: tempRoot, XDG_CACHE_HOME: path.join(tempRoot,"cache"), XDG_CONFIG_HOME: path.join(tempRoot,"config")},
+      env: isolatedBrowserEnvironment(tempRoot),
     }, (error, stdout, stderr) => {
       clearTimeout(deadline); clearTimeout(hardKill);
       signal?.removeEventListener("abort", abort);

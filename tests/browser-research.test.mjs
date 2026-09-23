@@ -117,6 +117,7 @@ test("real forum workflow preserves drafts across renewal and reconciles a timed
       t.skip("Chromium unavailable; set PI_BROWSER_REQUIRE=1 to require it");
       return;
     }
+    assert.notEqual(opened.isError, true, JSON.stringify(opened.details));
     const session = opened.details.session;
     assert.equal(opened.details.lease.generation, 1);
     const control = { session, role: "combobox", name: "Category" };
@@ -499,6 +500,7 @@ test(
         t.skip("Chromium unavailable; set PI_BROWSER_REQUIRE=1 to require it");
         return;
       }
+      assert.notEqual(opened.isError, true, JSON.stringify(opened.details));
       const session = opened.details.session;
       let info = await call({
         action: "inspect",

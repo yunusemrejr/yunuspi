@@ -38,6 +38,7 @@ jobs:
           PI_REQUIRE_ISOLATION_TEST: '1'
           PI_SANDBOX_REQUIRE: '1'
           PI_REQUIRE_MEDIA_TEST: '1'
+          PI_BROWSER_REQUIRE: '1'
           PI_RENDER_BROWSER_CHANNEL: chromium
 
   release:

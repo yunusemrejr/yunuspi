@@ -6,6 +6,8 @@ import path from 'node:path';
 import {spawnSync,spawn} from 'node:child_process';
 
 const source=path.resolve(import.meta.dirname,'..');
+const cliSetupUrl=new URL('../core/coding-agent/dist/cli/setup.js',import.meta.url).href;
+const activeCliFixture=`import(${JSON.stringify(cliSetupUrl)}).then(({setupCli})=>{setupCli();console.log('ready');setInterval(()=>{},10000);});`;
 function fixture(t, additions=[]){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'yunuspi-state-update-'));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -147,12 +149,12 @@ test('Python caches never become managed source or block a state-preserving upda
     assert.equal(fs.existsSync(path.join(f.target,file)),false);
 });
 
-test('direct CLI processes block replacement for absolute, relative and symlink entrypoints; exit permits retry',async t=>{
+test('real CLI setup preserves detection for absolute, relative and symlink entrypoints; exit permits retry',async t=>{
   const f=fixture(t), core=path.join(f.target,'runtime/core/coding-agent'), cli=path.join(core,'dist/cli.js');
-  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',"console.log('ready');setInterval(()=>{},10000);");
+  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',activeCliFixture);
   const linked=path.join(f.root,'linked-cli.js');fs.symlinkSync(cli,linked);
-  for(const entry of [cli,'dist/cli.js',linked]){
-    const child=spawn(process.execPath,[entry],{cwd:core,stdio:['ignore','pipe','pipe']});
+  for(const entry of [cli,path.relative(f.root,cli),linked]){
+    const child=spawn(process.execPath,[entry],{cwd:f.root,stdio:['ignore','pipe','pipe']});
     try{
       await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error(`Fixture process exited ${code}`)));});
       const inode=fs.statSync(f.target).ino,updated=f.update();
@@ -165,7 +167,7 @@ test('direct CLI processes block replacement for absolute, relative and symlink 
 
 test('a direct CLI started during dependency staging is caught again before activation',t=>{
   const f=fixture(t),cli=path.join(f.target,'runtime/core/coding-agent/dist/cli.js');
-  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',"console.log('ready');setInterval(()=>{},10000);");
+  f.write(f.target,'runtime/core/coding-agent/dist/cli.js',activeCliFixture);
   const bin=path.join(f.root,'bin'),pidFile=path.join(f.root,'direct.pid');fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin,'npm'),`#!${process.execPath}\nconst fs=require('node:fs');if(process.argv[2]==='ci'){const child=require('node:child_process').spawn(process.execPath,[${JSON.stringify(cli)}],{detached:true,stdio:['ignore','pipe','ignore']});child.stdout.once('data',()=>{fs.writeFileSync(${JSON.stringify(pidFile)},String(child.pid));child.unref();process.exit(0);});}`,{mode:0o755});
   try{

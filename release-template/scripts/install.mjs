@@ -219,7 +219,7 @@ try {
   fs.writeFileSync(path.join(runtime, '.npmrc'), 'ignore-scripts=true\naudit=false\nfund=false\n');
   fs.mkdirSync(path.join(runtime, 'agent/npm'), { recursive: true });
   for (const name of ['package.json', 'package-lock.json', 'scripts/build-core.mjs']) fs.copyFileSync(path.join(repo, name), path.join(runtime, name));
-  for (const name of ['README.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
+  for (const name of ['README.md', 'CHANGELOG.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
     const file = path.join(repo, name);
     if (!fs.existsSync(file)) continue;
     if (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink()) throw Error(`Documentation input must be a regular file: ${name}`);
@@ -236,7 +236,7 @@ try {
   if (!fs.lstatSync(templateRoot).isDirectory() || fs.lstatSync(templateRoot).isSymbolicLink()) throw Error('Release template root must be a regular directory');
   const templateTarget = path.join(runtime, 'release-template');
   fs.mkdirSync(templateTarget);
-  for (const name of ['.github', '.githooks', '.gitignore', '.npmrc', 'config', 'docs', 'scripts', 'tests', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
+  for (const name of ['.github', '.githooks', '.gitignore', '.npmrc', 'config', 'docs', 'scripts', 'tests', 'package.json', 'package-lock.json', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM-PORTING.md']) {
     const file = path.join(templateRoot, name);
     if (!fs.existsSync(file)) continue;
     const info = fs.lstatSync(file);

@@ -10,4 +10,6 @@ The release also includes the independent Guardian/routing/intent audit and subs
 
 Product metadata, six owned core packages and the workspace lock now use the same release version. CI requires real isolation, browser and audiovisual checks and creates release notes only after a version tag passes checks. Pi 0.85.1 remains the immutable historical origin.
 
+Deployment checks also synchronize standalone extension dependency locks, preserve the changelog through installation and public export, retain the installed browser location inside isolated sessions, and keep Linux CLI command arguments available for active-installation protection.
+
 Details and limits: [async and studio](docs/ASYNC-AND-STUDIO.md), [Guardian audit](docs/GUARDIAN-IMPLEMENTATION-AUDIT.md), [session recovery audit](docs/SESSION-RECOVERY-AUDIT.md).
