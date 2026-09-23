@@ -1,7 +1,7 @@
 import { reduceAssistantMessageFrames, } from "@yunuspi/ai";
 import { prepareBranchEntries } from "../compaction/branch-summarization.js";
 import { prepareCompaction } from "../compaction/compaction.js";
-import { awaitWithContext } from "../context.js";
+import { awaitWithContext, createContextKey, withContextValue } from "../context.js";
 import { toolResultFromMessage } from "../execution/tools.js";
 import { formatPromptTemplateInvocation } from "../prompt-templates.js";
 import { Closed, HarnessClosed, HarnessFault, InvalidMessage, InvalidNavigation, LaneBusy, NoActiveOperation, NothingToCompact, NothingToResume, OperationMismatch, Result, UnknownSkill, UnknownTarget, UnknownTemplate, } from "../result.js";
@@ -19,6 +19,7 @@ function isPromiseLike(value) {
         return false;
     return "then" in value && typeof value.then === "function";
 }
+const IDLE_OWNER_CONTEXT = createContextKey("yunuspi.agent.idleOwner");
 function inboxItems(inbox, kind) {
     return inbox.filter((item) => item.kind === kind);
 }
@@ -185,7 +186,7 @@ export class Lane {
     }
     async command(plan, context) {
         this.assertOpen();
-        while (this.idleOwner !== undefined) {
+        while (this.idleOwner !== undefined && context.value(IDLE_OWNER_CONTEXT) !== this.idleOwner) {
             await awaitWithContext(Promise.race([this.idleOwner, this.stateChange]), context);
             this.assertOpen();
         }
@@ -193,7 +194,7 @@ export class Lane {
         try {
             outcome = await this.session.mutate(async (mutator) => {
                 this.assertOpen();
-                if (this.idleOwner !== undefined) {
+                if (this.idleOwner !== undefined && context.value(IDLE_OWNER_CONTEXT) !== this.idleOwner) {
                     return { kind: "idle_blocked", owner: this.idleOwner, change: this.stateChange };
                 }
                 try {
@@ -1273,7 +1274,7 @@ export class Lane {
         }
         try {
             this.assertOpen();
-            await callback(context);
+            await callback(withContextValue(IDLE_OWNER_CONTEXT, owner, context));
         }
         finally {
             if (this.idleOwner === owner)

@@ -183,6 +183,25 @@ test("harness configuration getters and setters do not expose mutable live state
   }
 });
 
+test("runWhenIdle callbacks can issue lane commands without waiting on their own idle claim", async () => {
+  const fixture = await openHarness();
+  try {
+    let callbackContext;
+    await Promise.race([
+      fixture.lane.runWhenIdle(async (context) => {
+        callbackContext = context;
+        await fixture.lane.setThinkingLevel("high", context);
+      }, context),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("runWhenIdle callback deadlocked")), 250)),
+    ]);
+    assert.ok(callbackContext);
+    assert.equal(await fixture.lane.getThinkingLevel(context), "high");
+  } finally {
+    await fixture.harness.close(context);
+    await fixture.repo.close(context);
+  }
+});
+
 test("one drive pass uses a stable tool catalogue despite concurrent configuration changes", async () => {
   const m = model();
   const alpha = {
