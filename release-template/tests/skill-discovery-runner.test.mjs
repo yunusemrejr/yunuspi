@@ -208,6 +208,14 @@ test('dedicated discovery bounds answers without starving configured reasoning o
   assert.equal(cap({ ...anthropic, max_tokens: 4096 }, { ...reasoningModel, api: 'anthropic-messages' }).thinking.budget_tokens, 3072, 'explicit reasoning leaves 1024 answer tokens');
   assert.equal(anthropic.thinking.budget_tokens, 7000);
   assert.throws(() => cap({ ...anthropic, max_tokens: 1024 }, reasoningModel), /cannot fit enabled thinking/);
+  const adaptive = { model: model.id, max_tokens: 32000, thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'high' } };
+  const adaptiveModel = { ...reasoningModel, api: 'anthropic-messages', maxTokens: 64000 };
+  const adaptiveCapped = cap(adaptive, adaptiveModel);
+  assert.equal(adaptiveCapped.max_tokens, 12288, 'native adaptive thinking also shares the reviewer output allowance');
+  assert.deepEqual(adaptiveCapped.thinking, adaptive.thinking, 'adaptive provider controls remain unchanged');
+  assert.equal(adaptiveCapped.output_config.effort, 'high');
+  assert.equal(cap({ ...adaptive, max_tokens: 2048 }, adaptiveModel).max_tokens, 2048, 'a smaller caller ceiling still wins');
+  assert.equal(cap({ ...adaptive, thinking: { type: 'disabled' } }, adaptiveModel).max_tokens, 4096, 'disabled thinking never widens');
 });
 
 test('terminal discovery outcomes emit health telemetry; gate refusals stay silent', async () => {

@@ -32,6 +32,8 @@ test('installed observer renderer shows advice and request states at narrow and 
       'Observer started: deepseek/deepseek-flash · high thinking',
       `Observer returned a note\n${advice}`,
       'Observer unavailable: Observer timed out',
+      'Observer unavailable: Observer response rejected: evidence contains an identifier absent from this packet; evidence retained for the next review.',
+      'Observer unavailable: Observer response was truncated; evidence retained for the next review.',
       'Observer reviewed: Chunk 2: no useful new reminder.',
       'Observer reviewed: Session advanced during review; outdated advice discarded.',
       'Observer checked: Provider has not acknowledged cancellation; overlapping observer calls are paused.',

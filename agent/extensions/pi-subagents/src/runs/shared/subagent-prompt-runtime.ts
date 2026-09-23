@@ -88,7 +88,7 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
 function requestEnablesReasoning(payload: any): boolean {
  const off = (value: unknown) => value === undefined || value === null || value === false || value === "none" || value === "off" || value === "minimal";
  return !off(payload?.reasoning_effort) || (payload?.reasoning && typeof payload.reasoning === "object" && (!off(payload.reasoning.effort) || payload.reasoning.enabled === true || Number(payload.reasoning.max_tokens) > 0))
-  || payload?.thinking?.type === "enabled" || payload?.enable_thinking === true;
+  || ["enabled", "adaptive"].includes(payload?.thinking?.type) || payload?.enable_thinking === true;
 }
 
 const SUBAGENT_INHERIT_PROJECT_CONTEXT_ENV = "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT";

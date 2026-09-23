@@ -18,9 +18,10 @@ export interface ModelRoutingCatalogItem {
 	providerHost?: string;
 	contextWindow?: number;
 	maxTokens?: number;
+	outputLimitEstimated?: boolean;
 	reasoning?: boolean;
 	input?: string[];
-	cost?: { input?: number; output?: number; knownFree?: boolean };
+	cost?: { input?: number; output?: number; knownFree?: boolean; missing?: string[] };
 	enabled: boolean;
 	availability?: "available" | "blocked" | "unavailable" | "unconfigured";
 	availabilityLabel?: string;
@@ -65,10 +66,14 @@ function publicModel(model: any, enabled: boolean): ModelRoutingCatalogItem | un
 	const provider = safeString(model?.provider, 128);
 	const id = safeString(model?.id, 512);
 	if (!provider || !id || id.includes("\n")) return undefined;
+	const missing = Array.isArray(model?.cost?.missing)
+		? [...new Set(model.cost.missing.filter((key: unknown) => typeof key === "string" && ["input", "output", "cacheRead", "cacheWrite"].includes(key)))] as string[]
+		: [];
 	const cost = model?.cost && typeof model.cost === "object" ? {
-		...(typeof model.cost.input === "number" && Number.isFinite(model.cost.input) && model.cost.input >= 0 ? { input: model.cost.input } : {}),
-		...(typeof model.cost.output === "number" && Number.isFinite(model.cost.output) && model.cost.output >= 0 ? { output: model.cost.output } : {}),
-		...(typeof model.cost.knownFree === "boolean" ? { knownFree: model.cost.knownFree } : {}),
+		...(!missing.includes("input") && typeof model.cost.input === "number" && Number.isFinite(model.cost.input) && model.cost.input >= 0 ? { input: model.cost.input } : {}),
+		...(!missing.includes("output") && typeof model.cost.output === "number" && Number.isFinite(model.cost.output) && model.cost.output >= 0 ? { output: model.cost.output } : {}),
+		...(typeof model.cost.knownFree === "boolean" ? { knownFree: !missing.length && model.cost.knownFree } : {}),
+		...(missing.length ? { missing } : {}),
 	} : undefined;
 	const routing = model?.compat?.openRouterRouting;
 	return {
@@ -80,6 +85,7 @@ function publicModel(model: any, enabled: boolean): ModelRoutingCatalogItem | un
 		...(providerHost(model?.baseUrl) ? { providerHost: providerHost(model.baseUrl) } : {}),
 		...(Number.isSafeInteger(model?.contextWindow) && model.contextWindow > 0 ? { contextWindow: model.contextWindow } : {}),
 		...(Number.isSafeInteger(model?.maxTokens) && model.maxTokens > 0 ? { maxTokens: model.maxTokens } : {}),
+		...(typeof model?.outputLimitEstimated === "boolean" ? { outputLimitEstimated: model.outputLimitEstimated } : {}),
 		...(typeof model?.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
 		...(Array.isArray(model?.input) ? { input: model.input.filter((item: unknown) => typeof item === "string" && item.length <= 32).slice(0, 8) } : {}),
 		...(cost ? { cost } : {}),

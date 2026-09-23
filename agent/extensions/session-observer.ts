@@ -1,4 +1,5 @@
 import { Text } from '@yunuspi/tui';
+import { createHash, randomUUID } from 'node:crypto';
 import { projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
@@ -15,6 +16,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let ctx: any, manager: any, owner = '', ownerIdentity = '', epoch = 0, taskEpoch = 0, request = '', userRequest = false, recent: ObserverEvidence[] = [], sequence = 0;
   let skills: ObserverCapability[] = [], streaming: ObserverEvidence[] = [], closed = false, revision = 0, dropped = 0, reportedDropped = 0;
   let todos: any[] = [], adviceHistory: string[] = [];
+  let latestAdviceId: string | undefined;
+  let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   const completed = new Map<string, string>(), toolInputs = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
@@ -56,7 +59,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; completed.clear(); toolInputs.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; runtime.begin(owner); };
   const runtime = createSessionObserver({
     ...testing,
     snapshot() {
@@ -142,9 +145,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     },
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
-      if (advice) { adviceHistory.push(observerAdviceText(advice)); if (adviceHistory.length > 8) adviceHistory.shift(); }
+      if (advice) { latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; adviceHistory.push(observerAdviceText(advice)); if (adviceHistory.length > 8) adviceHistory.shift(); }
       const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
-      pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: boundedObserverText(detail, 140) } }, { triggerTurn: false });
+      const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: boundedObserverText(detail, 140),
+        ...(advice ? { adviceId: latestAdviceId, note: advice.note, evidence: advice.evidence, tools: advice.tools, skills: advice.skills, ...(advice.discoverableTools?.length ? { discoverableTools: advice.discoverableTools } : {}) } : {}) } }, { triggerTurn: false });
+      void Promise.resolve(delivery).catch(() => { /* Native delivery reports display failures independently. */ });
     },
     receipt(data: any, origin: string) {
       // The exposed append owner is the current session only. Retain an honest
@@ -163,6 +168,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     let restrictions: any = {}, blocked = noObserver(raw);
     try { restrictions = explicitRecoveryConstraints(context, raw, context.model); } catch { blocked = true; }
     runtime.stop('New user input');
+    latestAdviceId = undefined; preparedAdvice = undefined;
     const id = event.requestId;
     const abort = () => { pending.get(id)?.cleanup(); pending.delete(id); if (owns(context) && userRequest && !pending.size && context.isIdle?.() === false) runtime.start(); };
     const cleanup = () => event.signal?.removeEventListener('abort', abort);
@@ -231,12 +237,27 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   });
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== OBSERVER_CONTEXT && message.customType !== OBSERVER_MESSAGE);
-    const note = owns(context) ? runtime.context() : undefined;
+    const note = owns(context) ? runtime.context(false) : undefined;
     if (!note) return messages.length !== event.messages.length ? { messages } : undefined;
-    return { messages: anchor(messages, { role: 'custom', customType: OBSERVER_CONTEXT, content: `[Observer advice — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`) };
+    const content = `[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
+    const prepared = anchor(messages, { role: 'custom', customType: OBSERVER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
+    // This attests context preparation, not provider acceptance or action by the
+    // main agent. A later context hook or cancelled request can still omit it.
+    if (latestAdviceId) {
+      if (preparedAdvice?.id !== latestAdviceId) try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'prepared-context', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+      preparedAdvice = { id: latestAdviceId, sha256: createHash('sha256').update(content).digest('hex'), taskEpoch, signal: context.signal };
+    }
+    return { messages: prepared };
+  });
+  pi.on('after_provider_response', (event: any, context: any) => {
+    if (!owns(context) || context.signal?.aborted || !preparedAdvice || preparedAdvice.id !== latestAdviceId || preparedAdvice.taskEpoch !== taskEpoch || preparedAdvice.signal !== context.signal || !runtime.context(false) || event.status < 200 || event.status >= 300) return;
+    if (event.provider !== context.model?.provider || event.model !== context.model?.id) return;
+    if (!event.observerAdviceReceipts?.some((receipt: any) => receipt.id === preparedAdvice!.id && receipt.sha256 === preparedAdvice!.sha256)) return;
+    try { pi.appendEntry('session-observer-delivery-v1', { adviceId: preparedAdvice.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
+    runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined;
   });
   // Native agent_end may be followed by retry/compaction/queued continuation.
   // Only agent_settled closes the current active run and its observer cadence.
-  pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; } });
+  pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; latestAdviceId = undefined; preparedAdvice = undefined; } });
   pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); closed = true; recent = []; streaming = []; request = ''; });
 }

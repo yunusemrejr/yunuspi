@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { Agent, setDefaultStreamFn } from "@yunuspi/agent-core";
 import { clampThinkingLevel, streamSimple } from "@yunuspi/ai/compat";
 import { getAgentDir } from "../config.js";
@@ -28,6 +29,21 @@ createCodingTools, createReadOnlyTools, createReadTool, createBashTool, createEd
 // Helper Functions
 function getDefaultAgentDir() {
     return getAgentDir();
+}
+// Observer delivery receipts contain only an opaque ID and content digest.
+// Inspect text fields, never image/audio/base64 data or arbitrary payload trees.
+function requestText(payload) {
+    const text = [];
+    for (const key of ["messages", "input", "contents"]) {
+        if (!Array.isArray(payload?.[key])) continue;
+        for (const message of payload[key]) {
+            if (typeof message?.content === "string") text.push(message.content);
+            for (const parts of [message?.content, message?.parts]) if (Array.isArray(parts)) {
+                for (const part of parts) if (typeof part?.text === "string") text.push(part.text);
+            }
+        }
+    }
+    return text;
 }
 /**
  * Create an AgentSession with the specified options.
@@ -222,12 +238,37 @@ export async function createAgentSession(options = {}) {
             const timeoutMs = options?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
             const websocketConnectTimeoutMs = options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
             const headerRunner = extensionRunnerRef.current;
+            const requestSessionId = sessionManager.getSessionId();
+            let capsules = [];
+            try {
+                capsules = requestText({ messages: context.messages }).filter(text => text.length <= 4096)
+                    .map(text => ({ text, id: /^\[Observer advice receipt=(observer-advice-[0-9a-f-]{36})\b/.exec(text)?.[1] }))
+                    .filter(row => row.id).slice(-4);
+            } catch { /* Optional receipt metadata cannot fail inference. */ }
+            let observerAdviceReceipts = [];
             return modelRuntime.streamSimple(model, context, {
                 ...options,
                 timeoutMs,
                 websocketConnectTimeoutMs,
                 maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
                 maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
+                onPayload: async (payload, actualModel) => {
+                    observerAdviceReceipts = [];
+                    const finalPayload = (await options?.onPayload?.(payload, actualModel)) ?? payload;
+                    try { if (capsules.length && !options?.signal?.aborted && actualModel?.provider === model.provider && actualModel?.id === model.id) {
+                        const text = requestText(finalPayload);
+                        observerAdviceReceipts = capsules.filter(capsule => text.some(part => part.includes(capsule.text)))
+                            .map(capsule => ({ id: capsule.id, sha256: createHash("sha256").update(capsule.text).digest("hex") }));
+                    } } catch { /* A receipt failure leaves delivery unknown. */ }
+                    return finalPayload;
+                },
+                onResponse: async (response, actualModel) => {
+                    const current = !options?.signal?.aborted && headerRunner === extensionRunnerRef.current && requestSessionId === sessionManager.getSessionId()
+                        && actualModel?.provider === model.provider && actualModel?.id === model.id;
+                    await options?.onResponse?.({ ...response,
+                        observerAdviceReceipts: current && response.status >= 200 && response.status < 300 ? observerAdviceReceipts : [],
+                    }, actualModel);
+                },
                 transformHeaders: async (requestHeaders) => {
                     const headers = mergeProviderAttributionHeaders(model, settingsManager, options?.sessionId, requestHeaders);
                     return headerRunner?.hasHandlers("before_provider_headers")
@@ -314,6 +355,7 @@ export async function createAgentSession(options = {}) {
                 type: "after_provider_response",
                 status: response.status,
                 headers: response.headers,
+                ...(response.observerAdviceReceipts?.length ? { observerAdviceReceipts: response.observerAdviceReceipts, provider: _model?.provider, model: _model?.id } : {}),
             });
         },
         sessionId: sessionManager.getSessionId(),

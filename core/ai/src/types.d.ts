@@ -712,6 +712,8 @@ export interface ModelCostTier extends ModelCostRates {
     inputTokensAbove: number;
 }
 export interface ModelCost extends ModelCostRates {
+    /** Rates absent from discovery metadata; zero placeholders are not free-price evidence. */
+    missing?: Array<keyof ModelCostRates>;
     /** Request-wide pricing tiers. The highest matching input threshold applies to the full request. */
     tiers?: ModelCostTier[];
 }
@@ -731,6 +733,8 @@ export interface Model<TApi extends Api> {
     cost: ModelCost;
     contextWindow: number;
     maxTokens: number;
+    /** A conservative client output allowance when the provider catalog omits its actual limit. */
+    outputLimitEstimated?: boolean;
     /** Default sampling parameters for this model. See {@link StreamOptions.samplingParams}; per-request keys override these. */
     samplingParams?: Record<string, unknown>;
     headers?: Record<string, string>;

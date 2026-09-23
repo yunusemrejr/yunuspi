@@ -8,6 +8,7 @@ import { ModelConfig } from "./model-config.js";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.js";
 import { composeModelProvider, configuredRequestAuthStatus, resolveCompatibilityRequestConfig, resolveConfiguredModelHeaders, validateExtensionProvider, } from "./provider-composer.js";
 import { withRemoteCatalog } from "./remote-catalog-provider.js";
+import { withOpenAICodexCatalog } from "./codex-catalog-provider.js";
 import { RuntimeCredentials } from "./runtime-credentials.js";
 /** Credentials changed successfully, but the local model/auth snapshot could not be synchronized. */
 export class CredentialSynchronizationError extends Error {
@@ -84,6 +85,8 @@ export class ModelRuntime {
             .builtinProviders()
             .map((provider) => provider.id === "radius"
             ? provider
+            : provider.id === "openai-codex"
+                ? withOpenAICodexCatalog(provider)
             : withRemoteCatalog(provider, options.catalogBaseUrl, builtinModelDataGeneratedAt));
         const runtime = new ModelRuntime(credentials, config, modelsPath, modelsStore, providers, process.env.PI_OFFLINE === undefined);
         runtime.configureRadiusProviders();

@@ -4,6 +4,8 @@
 
 Add custom providers and models (Ollama, vLLM, LM Studio, proxies) via `~/.pi/agent/models.json`.
 
+OpenAI Codex discovers visible models directly from the configured OAuth account's official model catalog. Discovery makes no inference request. The saved list is scoped to that account and restores offline; changing accounts cannot reuse another account's list. Explicit custom models and overrides still apply. Newly listed models with missing prices remain unpriced, and a missing output limit uses a visibly marked conservative client allowance until explicit metadata supplies it.
+
 ## Table of Contents
 
 - [Minimal Example](#minimal-example)

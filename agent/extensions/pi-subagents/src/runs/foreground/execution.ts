@@ -736,6 +736,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 		let timeoutTerminationTimer: NodeJS.Timeout | undefined;
 		let timeoutHardKillTimer: NodeJS.Timeout | undefined;
 		let protocolHardKillTimer: NodeJS.Timeout | undefined;
+		let abortHardKillTimer: NodeJS.Timeout | undefined;
 		const clearTimeoutTimers = () => {
 			if (timeoutTimer) {
 				clearTimeout(timeoutTimer);
@@ -904,6 +905,10 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			if (protocolHardKillTimer) {
 				clearTimeout(protocolHardKillTimer);
 				protocolHardKillTimer = undefined;
+			}
+			if (abortHardKillTimer) {
+				clearTimeout(abortHardKillTimer);
+				abortHardKillTimer = undefined;
 			}
 			if (activityTimer) {
 				clearInterval(activityTimer);
@@ -1525,8 +1530,14 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 				// the completed work must not be recorded as a process-signal failure.
 				if (cleanTerminalAssistantStopReceived || agentSettledReceived) forcedTerminationSignal = true;
 				else abortedBySignal = true;
-				proc.kill("SIGTERM");
-				setTimeout(() => !proc.killed && proc.kill("SIGKILL"), 3000);
+				trySignalChild(proc, "SIGTERM");
+				// ChildProcess.killed records successful signal delivery, not exit.
+				// A child may handle SIGTERM and remain alive; only lifecycle events
+				// prove it no longer needs the bounded hard-kill fallback.
+				abortHardKillTimer = setTimeout(() => {
+					if (!childExited && !processClosed && !lifecycleFinished) trySignalChild(proc, "SIGKILL");
+				}, HARD_KILL_MS);
+				abortHardKillTimer.unref?.();
 			};
 			if (options.signal.aborted) kill();
 			else {

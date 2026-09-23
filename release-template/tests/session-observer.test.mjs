@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { completeSimple } from '@yunuspi/ai/compat';
 import { tagGuardianRequestMessage } from '../core/coding-agent/src/core/guardian/guardian-supervisor.js';
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-runtime-'));
@@ -16,7 +17,7 @@ delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_OBSERVER;
 delete process.env.PI_SUBAGENT_CHILD;
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
-const { buildObserverPacket, parseObserverAdvice, createSessionObserver, observerDispatch, observerUsage } = await import('../agent/extensions/lib/session-observer.ts');
+const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage } = await import('../agent/extensions/lib/session-observer.ts');
 const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
 
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
@@ -37,6 +38,46 @@ test('observer packet and validated advice are bounded, cited, catalog-specific 
   const bounded = buildObserverPacket('task '.repeat(5000), [{ id: 't', kind: 'provider-returned thinking', text: thinking }], Array.from({length:1000},(_,i)=>({name:`tool${i}`,description:'task '.repeat(100)})), []);
   assert.ok(bounded.text.length <= 8000); assert.ok(bounded.evidence[1].text.length <= 450);
   assert.equal(parseObserverAdvice(JSON.stringify({note:thinking.slice(-80),evidence:['t'],tools:[],skills:[]}),bounded),undefined);
+});
+
+test('observer recovers presentation differences but requires actual packet evidence and advertised capabilities', () => {
+  const p = buildObserverPacket('Fix parser validation.', packet().evidence.filter(row => row.id !== 'request'),
+    [{ name: 'todo', description: 'Track work items', availability: 'discoverable' }], []);
+  assert.equal(p.tools.some(tool => tool.name === 'todo'), false, 'the relevance shortlist omitted this tool');
+  assert.ok(p.harness.some(group => group.tools.some(tool => tool.name === 'todo' && tool.availability === 'discoverable')), 'the actual packet still advertises the registered harness tool');
+  const answer = { note: 'Have you checked the outstanding\nvalidation tasks?', evidence: ['read-1'], tools: ['todo'], status: 'advisory' };
+  const parsed = validateObserverAdvice('```json\n' + JSON.stringify(answer) + '\n```', p);
+  assert.equal(parsed.advice.note, 'Have you checked the outstanding validation tasks?');
+  assert.deepEqual(parsed.advice.skills, []);
+  assert.deepEqual(parsed.advice.discoverableTools, ['todo'], 'registered catalog tools shown in the harness map are valid suggestions');
+  assert.equal(parsed.advice.status, undefined, 'extra provider metadata never enters advice');
+  for (const [patch, reason] of [
+    [{ evidence: ['invented'] }, /evidence contains an identifier/],
+    [{ evidence: [] }, /no evidence citations/],
+    [{ tools: ['quality_review'] }, /tools contains an identifier/],
+    [{ skills: ['imaginary'] }, /skills contains an identifier/],
+    [{ note: 'Bad\u0000control' }, /control characters/],
+  ]) {
+    const result = validateObserverAdvice(JSON.stringify({ ...answer, ...patch }), p);
+    assert.equal(result.advice, undefined); assert.match(result.reason, reason);
+  }
+  const broken = validateObserverAdvice('{"note":"Sensitive fixture without closing JSON', p);
+  assert.match(broken.reason, /complete JSON object/);
+  assert.doesNotMatch(broken.reason, /Sensitive fixture/);
+});
+
+test('observer contract failures explain the safe category and retry retained evidence without an extra request', async () => {
+  const time = clock(), notices = []; let calls = 0, reviewed = 0;
+  const observer = createSessionObserver({ ...time, snapshot: () => ({ packet: packet(), route, reviewed: () => reviewed++ }),
+    notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => ++calls === 1
+      ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: 'Inspect a fixture.', evidence: ['invented'], tools: [], skills: [] }) }] }
+      : { ...reply(), content: [{ type: 'text', text: '```json\n' + reply().content[0].text + '\n```' }] } });
+  observer.begin('owner'); observer.start(); await time.advance(30000);
+  assert.equal(reviewed, 0); assert.equal(observer.context(), undefined);
+  assert.match(notices.at(-1)[1], /evidence contains an identifier absent from this packet; evidence retained/);
+  await time.advance(29999); assert.equal(calls, 1, 'no hidden format-repair request');
+  await time.advance(1); assert.equal(calls, 2); assert.equal(reviewed, 1);
+  assert.match(observer.context(), /required field/); assert.equal(observer.context(), undefined); observer.close();
 });
 
 test('periodic observer is async, one call per changed snapshot, idle-silent and clears advice at task boundaries', async () => {
@@ -149,10 +190,23 @@ test('native accepted input lifecycle observes exposed streaming evidence and in
   assert.equal(h.packets.length,1);assert.ok(h.packets[0].evidence.some(x=>x.kind==='provider-returned thinking'));assert.deepEqual(h.packets[0].tools.map(x=>[x.name,x.availability]),[['read','active'],['dormant_parser','discoverable']]);assert.deepEqual(h.packets[0].skills.map(x=>x.name),['validation']);
   assert.equal(h.sent.length,2);for(const[msg,options]of h.sent){assert.equal(msg.excludeFromContext,true);assert.equal(options.triggerTurn,false);assert.doesNotMatch(msg.content,/Exposed provider analysis/);}
   assert.match(h.sent[1][0].content,/Observer returned a note/);
+  const returned=h.sent[1][0].details;
+  assert.match(returned.adviceId,/^observer-advice-/);assert.deepEqual(returned.evidence,['request']);assert.deepEqual(returned.tools,['read']);assert.match(returned.note,/validation/);
+  assert.equal(h.receipts.filter(([type])=>type==='session-observer-delivery-v1').length,0,'returned advice is not yet prepared for the main context');
   const first=h.emit('context',{messages:[{role:'user',content:'work'}]}).messages;
   assert.equal(first.filter(x=>x.customType==='session-observer-context').length,1);
+  assert.deepEqual(h.receipts.filter(([type])=>type==='session-observer-delivery-v1').map(([,data])=>data),[{adviceId:returned.adviceId,status:'prepared-context',at:30000}]);
+  const capsule=first.find(x=>x.customType==='session-observer-context').content;
+  const receipt={id:returned.adviceId,sha256:createHash('sha256').update(capsule).digest('hex')};
+  h.emit('after_provider_response',{status:503,provider:model.provider,model:model.id,observerAdviceReceipts:[receipt]});
+  assert.ok(h.emit('context',{messages:first}).messages.some(x=>x.customType==='session-observer-context'),'an error response does not consume the note');
+  assert.equal(h.receipts.filter(([type])=>type==='session-observer-delivery-v1').length,1,'retries do not spam prepared receipts');
+  h.emit('after_provider_response',{status:200,provider:model.provider,model:model.id,observerAdviceReceipts:[{...receipt,sha256:'wrong'}]});
+  assert.equal(h.receipts.filter(([type])=>type==='session-observer-delivery-v1').length,1,'a changed capsule does not count as delivery');
+  h.emit('after_provider_response',{status:200,provider:model.provider,model:model.id,observerAdviceReceipts:[receipt]});
   const second=h.emit('context',{messages:[...first,{role:'assistant',content:[]},h.sent[1][0]]}).messages;
   assert.equal(second.filter(x=>x.customType==='session-observer-context').length,0);assert.ok(!second.some(x=>x.customType==='session-observer'));
+  assert.equal(h.receipts.filter(([type])=>type==='session-observer-delivery-v1').length,2,'returned advice gets one prepared and one verified provider receipt');
   const nextTask=h.input('Continue fixing parser validation with updated evidence.');
   assert.equal((h.emit('context',{messages:second})?.messages ?? second).filter(x=>x.customType==='session-observer-context').length,0);
   await h.advance(30000);assert.equal(h.packets.length,2,'accepted steering restarts without another agent_start');
@@ -230,7 +284,9 @@ test('overlapping later work keeps paid advice with an explicit may-be-addressed
   h.emit('tool_result',{toolName:'read',input:{path:'/fixture/parser.ts',offset:1,limit:200},content:[{type:'text',text:'The exact parser source was read successfully.'}]});
   resolve({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Have you read the parser source yet?',evidence:['request'],tools:['read'],skills:[]})}]});await flush();
   assert.match(h.sent.at(-1)[0].content,/returned a note.*later work continued on "parser" meanwhile/);
-  assert.match(h.emit('context',{messages:[]}).messages.at(-1).content,/later work continued on "parser" after this snapshot, so it may already be addressed/);
+  const capsule=h.emit('context',{messages:[]}).messages.at(-1).content;
+  assert.match(capsule,/later work continued on "parser" after this snapshot, so it may already be addressed/);
+  h.emit('after_provider_response',{status:200,provider:model.provider,model:model.id,observerAdviceReceipts:[{id:h.sent.at(-1)[0].details.adviceId,sha256:createHash('sha256').update(capsule).digest('hex')}]});
   assert.equal(h.emit('context',{messages:[]}),undefined,'an accepted note is consumed once');h.close();
   const queued=harness();queued.input('Fix parser validation.');await queued.advance(30000);
   queued.emit('tool_result',{toolName:'edit',input:{path:'/fixture/parser.ts'},content:[{type:'text',text:'Validation now implemented.'}]});
@@ -248,7 +304,7 @@ test('review cadence has a 30-second floor and 120-second visible ceiling with t
   for(let i=1;i<notices.length;i++)assert.ok(notices[i][0]-notices[i-1][0]<=120000);
   finish(reply());await flush();await time.advance(15000);assert.equal(calls,2,'actual settlement restores the next bounded review');runtime.close();finish(reply());await flush();assert.equal(time.jobs.size,0);
   const instant=clock(),notes=[];let n=0;
-  const repeated=createSessionObserver({...instant,snapshot:()=>({packet:buildObserverPacket(`Fix parser validation ${n++}`,[{id:'read-1',kind:'tool result',text:'Missing required field.'}],[],[]),route}),notice:(...args)=>notes.push([instant.now(),...args]),receipt:()=>{},dispatch:async()=>({...reply(),content:[{type:'text',text:JSON.stringify({note:n%2?'Have you checked the required field before parsing?':'Have you checked the required field before parsing! ',evidence:['read-1'],tools:[],skills:[]})}]})});
+  const repeated=createSessionObserver({...instant,snapshot:()=>({packet:buildObserverPacket(`Fix parser validation ${n++}`,[{id:'read-1',kind:'tool result',text:'Missing required field.'}],[],[]),route}),notice:(...args)=>notes.push([instant.now(),...args]),receipt:()=>{},dispatch:async()=>({...reply(),content:[{type:'text',text:JSON.stringify({note:n%2?'Have you checked the required field before parsing?':'Have you checked\nthe required field before parsing! ',evidence:['read-1'],tools:[],skills:[]})}]})});
   repeated.begin('same');repeated.start();await instant.advance(90000);assert.equal(notes.filter(row=>row[1]==='completed').length,1);assert.ok(notes.some(row=>/repeated advice suppressed/.test(row[2])));repeated.close();
 });
 

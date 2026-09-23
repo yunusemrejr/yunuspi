@@ -100,6 +100,38 @@ test("unknown registry models are skipped, not fatal", () => {
 	assert.deepEqual(fallback.resolveLlmPreferenceChain("swarm", registry), []);
 });
 
+test("preference inspection explains missing routes without claiming runtime activity or consuming warnings", () => {
+	const warnings = [], activity = [], skipped = [];
+	const warn = console.warn, key = Symbol.for('yunus-pi.health.v1'), sink = globalThis[key];
+	console.warn = message => warnings.push(String(message));
+	globalThis[key] = (kind, data) => activity.push({ kind, data });
+	fallback.clearEconomyWarnings();
+	try {
+		writePrefs({ preferences: { subagents: { models: [
+			{ provider: 'fixture-unconfigured', model: 'missing' },
+			{ provider: 'deepseek', model: 'deepseek-chat' },
+		] } } });
+		const options = { diagnostics: 'inspect', onSkip: event => skipped.push(event) };
+		const routes = fallback.resolveLlmPreferenceChain('subagents', registry, options);
+		assert.equal(routes[0].route, 'deepseek/deepseek-chat');
+		assert.match(skipped[0].reason, /fixture-unconfigured.*no models/);
+		assert.equal(warnings.length, 0);
+		assert.equal(activity.length, 0);
+		skipped.length = 0;
+		assert.deepEqual(fallback.resolveLlmPreferenceChain('subagents', [], options), []);
+		assert.equal(skipped.length, 2, 'an empty registry still explains every inspected priority');
+		assert.equal(warnings.length, 0);
+		assert.equal(activity.length, 0);
+		fallback.resolveLlmPreferenceChain('subagents', registry);
+		assert.equal(warnings.length, 1, 'inspection cannot consume a subsequent real selection warning');
+		assert.equal(activity.length, 1);
+		assert.equal(activity[0].data.route, 'fixture-unconfigured/missing');
+	} finally {
+		console.warn = warn;
+		if (sink === undefined) delete globalThis[key]; else globalThis[key] = sink;
+	}
+});
+
 test("thinking values map to harness levels or dynamic logic", () => {
 	assert.deepEqual(prefs.normalizeThinking(undefined), { dynamic: true });
 	assert.deepEqual(prefs.normalizeThinking("auto"), { dynamic: true });

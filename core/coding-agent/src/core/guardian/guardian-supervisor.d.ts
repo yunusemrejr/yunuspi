@@ -42,7 +42,7 @@ export interface GuardianSupervisorOptions {
     cwd?: string;
     emit?: (event: { type: "guardian_intervention"; content: string; detail: GuardianInterventionDetail; child: boolean }) => void | Promise<void>;
     /** Display-only receipt after an owned tool result; successful WASM calls are counted separately from observations. */
-    observe?: (data: { count: number; evaluations: number; similarityEvaluations: number; promptCoverage: "complete" | "bounded-out"; decision: "lazy" | "initializing" | "ready" | "quarantined"; outcome: "observed" | "evaluated" }) => void | Promise<void>;
+    observe?: (data: { guardianInstanceId: string; stats: Record<string, number>; count: number; evaluations: number; similarityEvaluations: number; promptCoverage: "complete" | "bounded-out"; decision: "lazy" | "initializing" | "ready" | "quarantined"; outcome: "observed" | "evaluated" }) => void | Promise<void>;
     clock?: () => number;
     childRelay?: (reason: "guardian_intervention" | "intelligence_used", message: string) => GuardianChildRelay | undefined;
     awaitParentVisibility?: (relay: GuardianChildRelay, options?: { timeoutMs?: number; stillCurrent?: () => boolean }) => boolean | Promise<boolean>;

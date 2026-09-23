@@ -38,6 +38,7 @@ function applyModelOverride(model, override) {
             }
             : model.cost,
         /* PI_LOCAL_ALLOCATION */contextWindow:Math.min((Number.isSafeInteger(model._piAllocatedContext)&&model._piAllocatedContext>0?model._piAllocatedContext:Infinity),override.contextWindow??model.contextWindow),maxTokens:Math.min(override.maxTokens??model.maxTokens,Math.min((Number.isSafeInteger(model._piAllocatedContext)&&model._piAllocatedContext>0?model._piAllocatedContext:Infinity),override.contextWindow??model.contextWindow)),
+        ...(override.maxTokens !== undefined ? { outputLimitEstimated: false } : {}),
         samplingParams: override.samplingParams
             ? { ...model.samplingParams, ...override.samplingParams }
             : model.samplingParams,
@@ -81,9 +82,17 @@ function findModelDefaults(models, modelId, api) {
         models.find((model) => model.api === "openai-completions") ??
         models[0]);
 }
-function applyModelsJson(providerId, baseModels, config) {
+function applyModelsJson(providerId, baseModels, config, hasBaseProvider = false) {
     if (!config)
         return [...baseModels];
+    // An empty overlay does not replace a registered provider's native
+    // catalog, authentication or wire defaults. Empty override collections
+    // can remain after clearing a pin in an older installation.
+    if (hasBaseProvider && Object.entries(config).every(([key, value]) =>
+        key === "models" && Array.isArray(value) && value.length === 0 ||
+        key === "modelOverrides" && value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0)) {
+        return [...baseModels];
+    }
     if (config.oauth && !config.baseUrl) {
         throw new Error(`Provider ${providerId}: "baseUrl" is required when "oauth" is set.`);
     }
@@ -284,7 +293,7 @@ export function validateExtensionProvider(providerId, base, modelsConfig, extens
     if (extension.streamSimple && !extension.api) {
         throw new Error(`Provider ${providerId}: "api" is required when registering streamSimple.`);
     }
-    applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], modelsConfig), extension);
+    applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], modelsConfig, Boolean(base)), extension);
 }
 /** Compose built-in, models.json, and extension layers without reading credentials. */
 export function composeModelProvider(providerId, base, modelConfig, extension) {
@@ -295,7 +304,7 @@ export function composeModelProvider(providerId, base, modelConfig, extension) {
     // models.json modelOverrides are the topmost user-config layer: they apply once,
     // after custom-model upserts, extension model replacement, and legacy OAuth projection.
     const getModels = () => {
-        let models = applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], config), currentExtension());
+        let models = applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], config, Boolean(base)), currentExtension());
         if (extensionOAuthCredential && extension?.oauth?.modifyModels) {
             models = extension.oauth.modifyModels(models, extensionOAuthCredential);
         }
@@ -347,7 +356,7 @@ export function composeModelProvider(providerId, base, modelConfig, extension) {
                     update: () => {
                         if (refreshed) {
                             // Validate before publishing the new synchronous list.
-                            applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], config), {
+                            applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], config, Boolean(base)), {
                                 ...extension,
                                 models: refreshed,
                             });

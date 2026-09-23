@@ -44,6 +44,7 @@ export type Issue = { severity: "error" | "warn" | "info"; scene?: string; messa
 export type TimedScene = { id: string; component: string; seconds: number; start: number; end: number; narrationAudio?: string | null; narrationOffset?: number; narrationSeconds?: number | null; narration?: string | null; cues?: Record<string, number> };
 
 const words = (text: unknown) => typeof text === "string" ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+const validSceneId = (id: unknown): id is string => typeof id === "string" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(id);
 /** Heuristic English syllable count. Perceived pace tracks syllables per
  * second (≈3.3-4.3 is comfortable narration), not words per minute. */
 export function syllables(text: unknown): number {
@@ -70,7 +71,7 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
   let at = 0;
   for (const raw of spec.scenes) {
     const id = typeof raw?.id === "string" ? raw.id : "";
-    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id)) { err(`scene id ${JSON.stringify(raw?.id)} must be lowercase kebab-case`); continue; }
+    if (!validSceneId(id)) { err(`scene id ${JSON.stringify(raw?.id)} must be lowercase kebab-case`); continue; }
     if (ids.has(id)) err("duplicate scene id", id);
     ids.add(id);
     const seconds = Number(raw.seconds);
@@ -80,6 +81,7 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
       if (typeof value !== "number" || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
     }
     const offset = raw.narrationOffset ?? 0;
+    if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) { err("narrationOffset must be a non-negative number", id); continue; }
     if (raw.narrationAudio) {
       if (!exists(raw.narrationAudio)) err(`narration audio public/${raw.narrationAudio} is missing`, id);
       const spoken = Number(raw.narrationSeconds);
@@ -94,8 +96,11 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
       const needed = syllables(raw.narration) / 3.8 + offset + 0.6;
       if (needed > seconds) warn(`narration text (~${needed.toFixed(1)}s at a comfortable pace) likely exceeds the ${seconds}s scene`, id);
     }
-    scenes.push({ id, component: raw.component, seconds, start: at, end: at + seconds, narration: raw.narration ?? null, narrationAudio: raw.narrationAudio ?? null, narrationOffset: offset, narrationSeconds: raw.narrationSeconds ?? null, cues: raw.cues ?? {} });
-    at += seconds;
+    // Match src/timeline.ts: Remotion rounds each scene to whole frames before
+    // summing them. Rounding only the total drifts for fractional durations.
+    const duration = Number.isInteger(spec.fps) && spec.fps > 0 ? Math.max(1, Math.round(seconds * spec.fps)) / spec.fps : seconds;
+    scenes.push({ id, component: raw.component, seconds: duration, start: at, end: at + duration, narration: raw.narration ?? null, narrationAudio: raw.narrationAudio ?? null, narrationOffset: offset, narrationSeconds: raw.narrationSeconds ?? null, cues: raw.cues ?? {} });
+    at += duration;
   }
   if (at > 1800) err(`total duration ${at.toFixed(1)}s exceeds 30 minutes`);
   const audio = spec.audio ?? {};
@@ -272,6 +277,16 @@ async function projectDir(value: unknown, cwd: string, mustExist = true): Promis
 async function readSpec(dir: string) {
   return JSON.parse(await fs.readFile(path.join(dir, "video.json"), "utf8"));
 }
+
+/** Project-owned output paths must remain inside the physical project, even
+ * when an output directory or existing output file is a symbolic link. */
+function projectWritePath(dir: string, ...parts: string[]): string {
+  const target = canonicalMutationPath(path.join(dir, ...parts));
+  if (!containsPath(dir, target)) throw new Error(`Video output must stay inside the project: ${parts.join("/")}`);
+  const denial = selfMutationDenial(target, dir);
+  if (denial) throw new Error(denial);
+  return target;
+}
 async function registeredComponents(dir: string): Promise<Set<string>> {
   const source = await fs.readFile(path.join(dir, "src/scenes/index.ts"), "utf8").catch(() => "");
   const block = /scenes\s*:[^=]*=\s*\{([\s\S]*?)\}/.exec(source)?.[1] ?? "";
@@ -354,7 +369,7 @@ async function contactSheet(images: Array<{ path: string; label: string }>, outp
 }
 
 async function freshOut(dir: string, kind: string) {
-  const out = path.join(dir, "out", `${kind}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`);
+  const out = projectWritePath(dir, "out", `${kind}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(3).toString("hex")}`);
   await fs.mkdir(out, { recursive: true });
   return out;
 }
@@ -407,6 +422,7 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
 }
 
 async function runRenderer(dir: string, request: any, signal: AbortSignal | undefined, report: Progress, timeoutMs: number) {
+  projectWritePath(dir, ".video-cache");
   const requestPath = path.join(request.outDir, "render-request.json");
   await fs.writeFile(requestPath, JSON.stringify(request));
   let result: any;
@@ -525,23 +541,32 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     return { ...(await piperStatus()), installedVoice: voice };
   }
   if (action !== "synthesize") throw new Error("action must be status, install or synthesize");
-  if (!existsSync(piperPython()) || !voiceFiles(voice).every((f) => existsSync(f.path))) throw new Error(`Piper voice ${voice} is not installed; run narration_tts action:"install" voice:"${voice}" (downloads a pinned local model once)`);
   const dir = await projectDir(params.dir, cwd);
   const spec = await readSpec(dir);
   const only = Array.isArray(params.scenes) ? new Set(params.scenes) : undefined;
+  if (!Array.isArray(spec.scenes)) throw new Error("scenes must be an array");
+  const selected = spec.scenes.filter((scene: any) => !only || only.has(scene?.id));
+  const ids = new Set<string>();
+  for (const scene of selected) {
+    if (!validSceneId(scene?.id)) throw new Error(`scene id ${JSON.stringify(scene?.id)} must be lowercase kebab-case`);
+    if (ids.has(scene.id)) throw new Error(`duplicate scene id ${scene.id}`);
+    ids.add(scene.id);
+    if (scene.narrationOffset !== undefined && (typeof scene.narrationOffset !== "number" || !Number.isFinite(scene.narrationOffset) || scene.narrationOffset < 0)) throw new Error(`narrationOffset for ${scene.id} must be a non-negative number`);
+  }
+  const specPath = projectWritePath(dir, "video.json");
+  const outDir = projectWritePath(dir, "public", "audio", "narration");
+  if (!existsSync(piperPython()) || !voiceFiles(voice).every((f) => existsSync(f.path))) throw new Error(`Piper voice ${voice} is not installed; run narration_tts action:"install" voice:"${voice}" (downloads a pinned local model once)`);
   // Piper voices default to ~200+ wpm. speed 1 is calibrated to a documentary
   // pace (~150-170 wpm); lower is slower. Sentence pauses stay fixed.
   const lengthScale = 1.2 / (typeof params.speed === "number" ? Math.min(1.5, Math.max(0.6, params.speed)) : 1);
-  const outDir = path.join(dir, "public", "audio", "narration");
   await fs.mkdir(outDir, { recursive: true });
   const results: any[] = [];
-  for (const scene of spec.scenes) {
-    if (only && !only.has(scene.id)) continue;
+  for (const scene of selected) {
     const text = typeof scene.narration === "string" ? scene.narration.trim() : "";
     if (!text) continue;
     progress?.(`Narrating ${scene.id}…`);
-    const textPath = path.join(outDir, `.${scene.id}.txt`);
-    const wav = path.join(outDir, `${scene.id}.wav`);
+    const textPath = projectWritePath(dir, "public", "audio", "narration", `.${scene.id}.txt`);
+    const wav = projectWritePath(dir, "public", "audio", "narration", `${scene.id}.wav`);
     await fs.writeFile(textPath, text + "\n");
     try {
       await runGuarded(piperPython(), ["-m", "piper", "-m", voiceFiles(voice)[0].path, "-f", wav, "--length-scale", String(lengthScale), "--sentence-silence", "0.45", "-i", textPath], { cwd: dir, signal, timeoutMs: 300_000 });
@@ -558,7 +583,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     results.push({ scene: scene.id, audio: scene.narrationAudio, seconds: scene.narrationSeconds,
       sentences: sentences.map((sentence) => ({ ...sentence, at: Number((sentence.at + offset).toFixed(2)) })), words: words(text), syllablesPerSecond: Number((syllables(text) / seconds).toFixed(2)), sceneSeconds: scene.seconds, ...(adjusted ? { lengthenedTo: adjusted } : needed > scene.seconds ? { overrun: Number((needed - scene.seconds).toFixed(2)) } : {}) });
   }
-  await fs.writeFile(path.join(dir, "video.json"), JSON.stringify(spec, null, 2) + "\n");
+  await fs.writeFile(specPath, JSON.stringify(spec, null, 2) + "\n");
   return { voice, narrated: results, note: "Durations are measured from the synthesized audio and written to video.json. Cues are scene-relative seconds: re-time cues to the narration's key words, then render stills/previews again. Listen-check pronunciation of names and acronyms (spell them phonetically in the narration text if needed)." };
 }
 
@@ -589,10 +614,10 @@ export async function audioSynth(params: any, cwd: string, signal?: AbortSignal)
   } else if (params.kind === "sfx") Object.assign(spec, { type: params.type, seconds: params.seconds, pitch: params.pitch });
   else throw new Error("kind must be music or sfx");
   for (const key of Object.keys(spec)) if (spec[key] === undefined) delete spec[key];
-  const outDir = path.join(dir, "public", "audio");
+  const outDir = projectWritePath(dir, "public", "audio");
   await fs.mkdir(outDir, { recursive: true });
-  const specPath = path.join(outDir, `.${name}.json`);
-  const output = path.join(outDir, `${name}.wav`);
+  const specPath = projectWritePath(dir, "public", "audio", `.${name}.json`);
+  const output = projectWritePath(dir, "public", "audio", `${name}.wav`);
   await fs.writeFile(specPath, JSON.stringify(spec));
   try {
     const result = await runGuarded("python3", ["-I", VIDEO_PATHS.synth, specPath, output], { cwd: dir, signal, timeoutMs: 300_000 });

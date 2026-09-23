@@ -2,6 +2,7 @@ import { sessionObservability } from './lib/session-observability.ts';
 /** Request-init micro-intelligence and mandatory user-prompt understanding.
  * Only core-provenanced interactive/RPC prompts enter this path. */
 import { completeSimple } from "@yunuspi/ai/compat";
+import { clampThinkingLevel } from "@yunuspi/ai";
 import { Type } from "typebox";
 import { Text } from "@yunuspi/tui";
 import { createHash } from "node:crypto";
@@ -263,7 +264,9 @@ function analysisCandidates(
     // implicit expensive fallback.
     const maxEstimatedUsd = kind === "initial" ? 0.01 : 0.003;
     const estimatedInputTokens = Math.ceil(request.length / 2);
-    const estimatedCostTokens = estimatedInputTokens + maxOutputTokens;
+    // Admission includes the largest supported reasoning reserve and the
+    // compact recovery answer allowance, not only visible JSON tokens.
+    const estimatedCostTokens = estimatedInputTokens + maxOutputTokens * 2 + 8192;
     const requestRateCap = maxEstimatedUsd * 1_000_000 / estimatedCostTokens;
     const configuredEconomy = loadModelEconomyConfig();
     const boundedEconomy = {
@@ -307,7 +310,12 @@ function makeCandidate(
         ? { ...entry.model, compat: { ...(entry.model.compat ?? {}), openRouterRouting: entry.providerRouting } }
         : entry.model;
       const context = { messages: [{ role: "user", content: [{ type: "text", text: analysisPrompt }], timestamp: Date.now() }] };
-      const options = { maxTokens, signal, ...(entry.thinking ? { reasoning: entry.thinking } : {}),
+      // Some providers cannot turn reasoning off. Their reasoning and answer
+      // share maxTokens, so reserve answer room instead of exhausting the
+      // entire tiny JSON allowance before the first answer token.
+      const reasoning = clampThinkingLevel(entry.model, (entry.thinking ?? "off") as any);
+      const reasoningAllowance = reasoning === "off" ? 0 : reasoning === "minimal" ? 2048 : reasoning === "low" ? 4096 : 8192;
+      const options = { maxTokens: Math.min(entry.model.maxTokens || 32768, maxTokens + reasoningAllowance), signal, ...(reasoning === "off" ? {} : { reasoning }), maxRetries: 0,
         ...(requireFreeDispatch ? { onPayload: (payload: Record<string, any>, model: any) => {
           if (model?.provider !== entry.model.provider || model?.id !== entry.model.id)
             throw Object.assign(new Error("Prompt analysis free route changed before dispatch"), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
@@ -324,7 +332,7 @@ function makeCandidate(
         if (response?.stopReason === "error") throw new Error(response.errorMessage || "Prompt analysis model request failed");
         // An aborted stream is the timeout/cancel echo, not a late completion.
         if (response?.stopReason === "aborted") throw Object.assign(new Error("Prompt analysis request aborted"), { name: "AbortError" });
-        return { text: toText(response), inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
+        return { text: toText(response), stopReason: response.stopReason, reasoningTokens: response.usage?.reasoning, inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
       }
       const authRequest = Promise.resolve(ctx.modelRegistry.getApiKeyAndHeaders(entry.model));
       let onAbort: (() => void) | undefined;
@@ -347,7 +355,8 @@ function makeCandidate(
         ...options,
       });
       if (response?.stopReason === "error") throw new Error(response.errorMessage || "Prompt analysis model request failed");
-      return { text: response?.stopReason === "aborted" ? "" : toText(response), inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
+      if (response?.stopReason === "aborted") throw Object.assign(new Error("Prompt analysis request aborted"), { name: "AbortError" });
+      return { text: toText(response), stopReason: response?.stopReason, reasoningTokens: response?.usage?.reasoning, inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
     },
   };
 }
@@ -405,6 +414,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
   let activeAdvisoryRequestIds = new Set<string>();
   let knownPendingRequestIds = new Set<string>();
   let retainedAnalysisChars = 0;
+  let clearAnalysisProgress: (() => void) | undefined;
 
   pi.registerMessageRenderer?.("prompt-analysis", (message: any, { expanded }: { expanded: boolean }) => {
     const summary = typeof message.content === "string" ? message.content : "Intent analysis";
@@ -445,6 +455,8 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
   });
 
   const reset = (ctx?: any, reason?: string) => {
+    clearAnalysisProgress?.();
+    clearAnalysisProgress = undefined;
     sessionController.abort(new Error("Prompt-analysis session owner changed"));
     sessionController = new AbortController();
     generation++;
@@ -463,6 +475,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
   pi.on("session_start", (event: any, ctx: any) => {
     reset(ctx, event?.reason);
+    try { ctx.ui?.setStatus?.("prompt-analysis", undefined); } catch { /* optional UI */ }
     resetMicroMetrics();
     try { deps.warmup(); } catch { /* warmup is optional */ }
   });
@@ -470,6 +483,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
   // the old runtime shuts down; a veto must preserve the current task state.
   pi.on("session_tree", (_event: any, ctx: any) => {
     reset(ctx, "resume");
+    try { ctx.ui?.setStatus?.("prompt-analysis", undefined); } catch { /* optional UI */ }
     resetMicroMetrics();
   });
   pi.on("session_shutdown", () => {
@@ -572,6 +586,16 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
       const startedAt = Date.now();
       const attempts: PromptAnalysisAttempt[] = [];
+      let progress: { attempt: number; route: string; recovery?: string } | undefined;
+      const showProgress = () => {
+        try { if (owns() && progress) ctx.ui?.setStatus?.("prompt-analysis", `Intent analysis · ${progress.route} · attempt ${progress.attempt}${progress.recovery ? " · compact retry" : ""} · ${Math.floor((Date.now() - startedAt) / 1000)}s`); } catch { /* UI must not stop analysis */ }
+      };
+      const progressTimer = setInterval(showProgress, 1000);
+      const clearProgress = () => {
+        clearInterval(progressTimer);
+        try { ctx.ui?.setStatus?.("prompt-analysis", undefined); } catch { /* optional UI */ }
+      };
+      clearAnalysisProgress = clearProgress;
       const result = await runPromptAnalysis({
         prompt,
         kind,
@@ -583,6 +607,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         } : resumedAnalysisContext,
         candidates: selected.routes,
         signal,
+        onStart: detail => { progress = detail; showProgress(); },
         onAttempt: (attempt) => {
           if (!owns()) return;
           // Keep the bounded initial outcome for the visible explanation;
@@ -599,8 +624,12 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
             ...(attempt.outputTokens !== undefined ? { outputTokens: attempt.outputTokens } : {}),
             count: 1,
             ...(attempt.failureCategory ? { reason: attempt.failureCategory } : {}),
+            ...(attempt.reasoningTokens !== undefined ? { reasoningTokens: attempt.reasoningTokens } : {}),
           });
         },
+      }).finally(() => {
+        clearInterval(progressTimer);
+        if (clearAnalysisProgress === clearProgress) { clearProgress(); clearAnalysisProgress = undefined; }
       });
       if (!owns() || result.status === "cancelled" || !result.analysis) {
         if (currentGeneration === generation && activeOwnerId === guardianOwnerId && lastRequest === state) {
@@ -738,7 +767,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
       if (!pending.displayed && !pending.signal.aborted && !ctx.signal?.aborted) {
         pending.displayed = true;
-        const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
+        const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome === "truncated" ? `output limit reached${attempt.reasoningTokens ? ` (${attempt.reasoningTokens} reasoning tokens)` : ""}` : attempt.outcome === "empty" ? "returned no answer" : attempt.outcome}${attempt.recovery ? "; retrying with compact response" : ""}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
         const concise = pending.status === "fallback" ? [
           `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
           "Nothing was added to the main agent's context; it works from your prompt as written.",

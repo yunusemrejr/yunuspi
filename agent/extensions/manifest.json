@@ -78,6 +78,7 @@
     "harness-invariants.ts",
     "harness-orientation.ts",
     "health-log.ts",
+    "helper-usage.ts",
     "hook-events.ts",
     "hook-ledger.ts",
     "host-operation-safety.ts",

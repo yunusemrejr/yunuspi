@@ -569,3 +569,29 @@ test('catalog visibility never mislabels unavailable or unknown authentication a
   assert.equal(unknown.models[0].availability, 'unavailable');
   assert.match(unknown.models[0].availabilityLabel, /availability not confirmed/);
 });
+
+test('opening and refreshing the editor keeps unavailable preferences visible without runtime warning or health events', async t => {
+  const f = fixture();
+  f.doc.preferences.prompt_analysis = { models: [{ provider: 'unconfigured-region', model: 'fixture-flash' }] };
+  fs.writeFileSync(f.configPath, JSON.stringify(f.doc));
+  const warnings = [], activity = [], key = Symbol.for('yunus-pi.health.v1');
+  const originalWarn = console.warn, originalSink = globalThis[key];
+  console.warn = message => warnings.push(String(message));
+  globalThis[key] = (kind, data) => activity.push({ kind, data });
+  const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath });
+  t.after(async () => {
+    console.warn = originalWarn;
+    if (originalSink === undefined) delete globalThis[key]; else globalThis[key] = originalSink;
+    await handle.close(); fs.rmSync(f.root, { recursive: true, force: true });
+  });
+  const page = await openPage(t, handle.url);
+  await page.getByRole('button', { name: 'Prompt Analysis', exact: true }).click();
+  assert.match(await page.locator('.diagnostics:not(#routing-diagnostics)').innerText(), /unconfigured-region.*no models/);
+  const token = new URL(handle.url).pathname.slice(1);
+  const response = await post(handle.url, token, 'snapshot', {});
+  assert.equal(response.status, 200);
+  const snapshot = await response.json();
+  assert.ok(snapshot.resolvedByRole.prompt_analysis.skipped.some(item => item.route === 'unconfigured-region/fixture-flash'));
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(activity, []);
+});

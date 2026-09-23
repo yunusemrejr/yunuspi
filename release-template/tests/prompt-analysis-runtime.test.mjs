@@ -137,11 +137,11 @@ test('literal constraints keep exact offsets and abstain on quoted, example, con
 	assert.equal(event.promptHash, interpretation.promptAnalysisHash(prompt));
 });
 
-test('two timed-out priorities leave budget for the third configured route', async () => {
+test('later priorities run when earlier attempt allowances leave time', async () => {
 	const calls = [];
 	const result = await runtime.runPromptAnalysis({
 		prompt: 'Keep the endpoint behavior.', kind: 'initial',
-		budget: { totalMs: 150, perAttemptMs: 75 },
+		budget: { totalMs: 250, perAttemptMs: 75 },
 		candidates: ['one', 'two', 'three'].map((route) => ({ route, complete: async () => {
 			calls.push(route);
 			if (route !== 'three') return new Promise(() => {});

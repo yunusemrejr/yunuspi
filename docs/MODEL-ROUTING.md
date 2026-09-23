@@ -95,3 +95,5 @@ full-LLM arbiter, with asymmetric bars. None of these layers delay
 provider startup: slow or missing helpers degrade to skips, and the
 `micro_status` tool plus `docs/MICRO-INTELLIGENCE.md` show what ran,
 what skipped, and why.
+
+Codex discovery uses the official authenticated account catalog rather than a generic catalog overlay. Verified visible IDs are cached only for the matching account; stale or failed refreshes keep that account's last usable catalog. Newly discovered models with no advertised prices remain unknown-cost, and a conservative output allowance is labelled estimated until explicit metadata replaces it. Empty overrides for existing providers are no-ops. The routing editor collects skip diagnostics without emitting runtime warnings for roles merely being inspected.

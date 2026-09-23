@@ -2583,12 +2583,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1726
+        "line": 1743
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1328
+        "line": 1345
       },
       {
         "name": "curator",
@@ -2603,7 +2603,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1700
+        "line": 1717
       },
       {
         "name": "export-json",
@@ -2708,7 +2708,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 418
+        "line": 419
       },
       {
         "name": "obs",
@@ -2718,7 +2718,7 @@
       {
         "name": "or-provider",
         "source": "agent/extensions/provider-cmd.ts",
-        "line": 647
+        "line": 654
       },
       {
         "name": "prompt-workflow",
@@ -2728,7 +2728,7 @@
       {
         "name": "provider",
         "source": "agent/extensions/provider-cmd.ts",
-        "line": 646
+        "line": 653
       },
       {
         "name": "provider-health",
@@ -2753,7 +2753,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1653
+        "line": 1670
       },
       {
         "name": "subagent-cost",
@@ -2838,7 +2838,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1658
+        "line": 1675
       },
       {
         "name": "tasks",
@@ -2848,7 +2848,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1677
+        "line": 1694
       },
       {
         "name": "websearch",
@@ -3192,7 +3192,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 418,
+        "line": 428,
         "kind": "literal"
       },
       {
@@ -3288,7 +3288,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1818,
+        "line": 1835,
         "kind": "literal"
       },
       {
@@ -3300,7 +3300,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1755,
+        "line": 1772,
         "kind": "literal"
       },
       {
@@ -3616,7 +3616,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 418,
+        "line": 428,
         "kind": "literal"
       },
       {
@@ -3676,7 +3676,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1818,
+        "line": 1835,
         "kind": "literal"
       },
       {
@@ -3688,7 +3688,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1755,
+        "line": 1772,
         "kind": "literal"
       },
       {
@@ -3946,7 +3946,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 606,
+      "sourceFiles": 607,
       "registrationSites": 66,
       "indirectRegistrationSites": 17,
       "stableRegistrationRows": 94,
@@ -4261,6 +4261,10 @@
       },
       {
         "path": "agent/extensions/lib/health-log.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/helper-usage.ts",
         "exists": true
       },
       {
@@ -5411,6 +5415,12 @@
         "source": "agent/extensions/lib/utility-mcp/workflow.mjs",
         "signals": [
           "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/live-models.ts",
+        "signals": [
+          "wrapper/adapter"
         ]
       },
       {

@@ -21,8 +21,13 @@ never raw reasoning dumps. The parent verifies, decides and owns changes.
 The first prompt of a session carries one short orientation line naming
 native-tool preference and the availability of reviews, councils, swarms and
 fusion. It appears once per session, costs negligible context and never
-repeats. Automatic behavior stays quiet otherwise; the main agent invokes
-these workflows deliberately when they fit.
+repeats. The main agent invokes these workflows deliberately when they fit.
+When an automatic scope council runs, its transcript shows each phase and
+member starting and finishing, including the selected model/thinking and elapsed
+time. Successful members show a short advice preview that expands to the
+bounded full report; completion, partial results and cancellation remain visible
+after the footer clears. These persisted display messages do not enter model
+context or wake the agent. They expose returned advice, never hidden thinking.
 
 ## Automatic behavior and anti-spam
 

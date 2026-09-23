@@ -541,6 +541,11 @@ export interface AfterProviderResponseEvent {
     type: "after_provider_response";
     status: number;
     headers: Record<string, string>;
+    /** Exact observer capsules verified in the final payload of this successful
+     * active main request. Digests attest transport inclusion, never agent action. */
+    observerAdviceReceipts?: Array<{ id: string; sha256: string }>;
+    provider?: string;
+    model?: string;
 }
 /** Fired after user submits prompt but before agent loop. */
 export interface BeforeAgentStartEvent {

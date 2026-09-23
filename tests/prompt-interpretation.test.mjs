@@ -34,7 +34,7 @@ test('analysis parser discards unknown fields and gates weak follow-up relations
 	const weak = mod.parsePromptAnalysis(JSON.stringify(base), prompt, 'followup');
 	assert.equal(weak.relation, undefined);
 	assert.deepEqual(weak.explicitConstraints, [{ text: 'Keep the existing API behavior', source: 'literal-user', start: 0, end: prompt.indexOf('.'), quoted: false }]);
-	assert.equal(mod.parsePromptAnalysis(JSON.stringify({ ...base, unknown: true }), prompt, 'followup'), undefined);
+	assert.deepEqual(mod.parsePromptAnalysis(JSON.stringify({ ...base, unknown: true }), prompt, 'followup'), weak);
 	const strong = mod.parsePromptAnalysis(JSON.stringify({ ...base, confidence: 0.8, relation: 'status-question' }), prompt, 'followup');
 	assert.equal(strong.relation, 'status-question');
 });

@@ -14,10 +14,12 @@ export interface PromptAnalysisCandidate {
     text: string;
     inputTokens?: number;
     outputTokens?: number;
+    stopReason?: string;
+    reasoningTokens?: number;
   }>;
 }
 
-export type PromptAnalysisAttemptOutcome = "complete" | "malformed" | "failed" | "timeout" | "late-complete" | "late-failed";
+export type PromptAnalysisAttemptOutcome = "complete" | "malformed" | "truncated" | "empty" | "failed" | "timeout" | "late-complete" | "late-failed";
 export interface PromptAnalysisAttempt {
   attempt: number;
   route: string;
@@ -29,6 +31,8 @@ export interface PromptAnalysisAttempt {
   failureCategory?: FailureCategory;
   /** Wall-clock allowance that expired for a timeout outcome. */
   timeoutMs?: number;
+  recovery?: "compact-retry";
+  reasoningTokens?: number;
 }
 
 export interface PromptAnalysisRun {
@@ -46,10 +50,10 @@ export interface PromptAnalysisRun {
   attempts: number;
 }
 
-const INITIAL_BUDGET_MS = 11_000;
-const FOLLOWUP_BUDGET_MS = 7_000;
-const INITIAL_ATTEMPT_MS = 5_500;
-const FOLLOWUP_ATTEMPT_MS = 3_500;
+const INITIAL_BUDGET_MS = 30_000;
+const FOLLOWUP_BUDGET_MS = 24_000;
+const INITIAL_ATTEMPT_MS = 15_000;
+const FOLLOWUP_ATTEMPT_MS = 12_000;
 const MAX_ROUTE_ATTEMPTS = 4;
 
 function aborted(signal?: AbortSignal): boolean {
@@ -112,6 +116,7 @@ export async function runPromptAnalysis(input: {
   /** Called once per attempt outcome. Timed-out requests may produce a second
    * late-* event that reconciles pending usage for the same attempt number. */
   onAttempt?: (detail: PromptAnalysisAttempt) => void;
+  onStart?: (detail: { attempt: number; route: string; timeoutMs: number; recovery?: "compact-retry" }) => void;
 }): Promise<PromptAnalysisRun> {
   const now = input.now ?? Date.now;
   const startedAt = now();
@@ -119,7 +124,9 @@ export async function runPromptAnalysis(input: {
   const perAttempt = input.budget?.perAttemptMs ?? (input.kind === "initial" ? INITIAL_ATTEMPT_MS : FOLLOWUP_ATTEMPT_MS);
   const maxTokens = input.budget?.maxTokens ?? (input.kind === "initial" ? 768 : 320);
   const request = buildPromptAnalysisRequest(input.prompt, input.kind, input.previous);
-  const candidates = input.candidates.slice(0, input.budget?.maxAttempts ?? MAX_ROUTE_ATTEMPTS);
+  const maxAttempts = input.budget?.maxAttempts ?? MAX_ROUTE_ATTEMPTS;
+  const candidates = input.candidates.slice(0, maxAttempts).map(candidate => ({ ...candidate, repair: false }));
+  let repaired = false;
   const usageStates = new Map<number, "known" | "unknown" | "pending">();
   let attempts = 0;
   let inputTokens = 0;
@@ -132,11 +139,12 @@ export async function runPromptAnalysis(input: {
   };
 
   for (const candidate of candidates) {
+    if (attempts >= maxAttempts) break;
     if (aborted(input.signal)) {
       return snapshot({ startedAt, now, status: "cancelled", attempts, inputTokens, outputTokens, knownUsageObserved, usageStates });
     }
     const remaining = totalBudget - (now() - startedAt);
-    if (remaining <= 0) break;
+    if (remaining < Math.min(1000, totalBudget / 20)) break;
     attempts++;
     const attempt = attempts;
     const controller = new AbortController();
@@ -149,9 +157,18 @@ export async function runPromptAnalysis(input: {
     // Run the attempt inside a resolved promise so a synchronous throw from
     // complete() and a rejecting provider promise follow the same path, and a
     // never-settling fake/provider promise stays covered by our own deadline.
-    let operation: Promise<{ text: string; inputTokens?: number; outputTokens?: number }>;
+    const routesLeft = candidates.length - attempt + 1;
+    // Preference order owns the allowance. Adding fallbacks must not make a
+    // healthy preferred route time out sooner. Fast failures leave later
+    // routes the remaining budget; a single absolute deadline bounds the run.
+    const attemptBudget = routesLeft === 1 ? remaining : Math.min(perAttempt, remaining);
+    try { input.onStart?.({ attempt, route: candidate.route, timeoutMs: Math.round(attemptBudget), ...(candidate.repair ? { recovery: "compact-retry" as const } : {}) }); } catch { /* optional UI */ }
+    let operation: ReturnType<PromptAnalysisCandidate["complete"]>;
     try {
-      operation = Promise.resolve().then(() => candidate.complete({ prompt: request, maxTokens, signal: controller.signal }));
+      operation = Promise.resolve().then(() => candidate.complete({
+        prompt: candidate.repair ? request + "\nRecovery: return only intent, taskLabel, confidence and up to two exact explicitConstraints. Omit everything else. No reasoning prose." : request,
+        maxTokens: candidate.repair ? maxTokens * 2 : maxTokens, signal: controller.signal,
+      }));
     } catch (error) {
       operation = Promise.reject(error);
     }
@@ -182,12 +199,6 @@ export async function runPromptAnalysis(input: {
     // a terminal rejection observer so the late rejection is never unhandled.
     void observed.catch(() => {});
 
-    // Reserve a fair share for each configured fallback. Otherwise the first
-    // two slow providers consume the entire budget and priority 3 is dead code.
-    // The final route has no fallback to reserve time for. In particular a
-    // single configured provider should receive the full advertised budget.
-    const routesLeft = candidates.length - attempt + 1;
-    const attemptBudget = routesLeft === 1 ? remaining : Math.min(perAttempt, remaining / routesLeft);
     const timeout = Symbol("prompt-analysis-timeout");
     const timeoutPromise = new Promise<typeof timeout>((resolve) => {
       timer = setTimeout(() => resolve(timeout), attemptBudget);
@@ -215,15 +226,20 @@ export async function runPromptAnalysis(input: {
         if (!settled) usageStates.set(attempt, "pending");
         return snapshot({ startedAt, now, status: "cancelled", attempts, inputTokens, outputTokens, knownUsageObserved, usageStates });
       }
-      const result = response as { text: string; inputTokens?: number; outputTokens?: number };
-      const analysis = parsePromptAnalysis(result.text, input.prompt, input.kind);
+      const result = response;
+      const analysis = result.stopReason === "length" ? undefined : parsePromptAnalysis(result.text, input.prompt, input.kind);
       if (!analysis) {
+        const outcome = result.stopReason === "length" ? "truncated" : !result.text?.trim() ? "empty" : "malformed";
+        const retry = !repaired && attempts < maxAttempts && outcome === "truncated" && totalBudget - (now() - startedAt) >= Math.min(3000, totalBudget / 4);
         reportAttempt({
-          attempt, route: candidate.route, outcome: "malformed",
+          attempt, route: candidate.route, outcome,
+          ...(retry ? { recovery: "compact-retry" } : {}),
+          ...(tokenCount(result.reasoningTokens) !== undefined ? { reasoningTokens: result.reasoningTokens } : {}),
           usage: usageStates.get(attempt) ?? "unknown",
           ...(tokenCount(result.inputTokens) !== undefined ? { inputTokens: result.inputTokens } : {}),
           ...(tokenCount(result.outputTokens) !== undefined ? { outputTokens: result.outputTokens } : {}),
         });
+        if (retry) { repaired = true; candidates.splice(attempt, 0, { ...candidate, repair: true }); }
         continue;
       }
       reportAttempt({

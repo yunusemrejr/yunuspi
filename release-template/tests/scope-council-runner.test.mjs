@@ -4,13 +4,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {visibleWidth, stripTerminalSequences} from '@yunuspi/tui';
+import {createAgentSession} from '../core/coding-agent/src/core/sdk.js';
+import {SessionManager} from '../core/coding-agent/src/core/session-manager.js';
+import {SettingsManager} from '../core/coding-agent/src/core/settings-manager.js';
+import {DefaultResourceLoader} from '../core/coding-agent/src/core/resource-loader.js';
+import {convertToLlm} from '../core/coding-agent/src/core/messages.js';
+import {CustomMessageComponent} from '../core/coding-agent/src/modes/interactive/components/custom-message.js';
+import {initTheme} from '../core/coding-agent/src/modes/interactive/theme/theme.js';
 
 const release=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(release,'agent'),path.resolve(release,'..')].find(p=>fs.existsSync(path.join(p,'extensions/pi-subagents/src/extension/scope-council-runner.ts')));
 if(!agent) throw new Error('Scope council runner source is missing');
 const extension=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/')).href;
 const shared=pathToFileURL(path.join(agent,'extensions/pi-subagents/src/runs/shared/')).href;
-const {registerScopeCouncilRunner,SCOPE_COUNCIL_LIMITS,SCOPE_COUNCIL_RUNNER}=await import(extension+'scope-council-runner.ts');
+const {registerScopeCouncilRunner,SCOPE_COUNCIL_LIMITS,SCOPE_COUNCIL_RUNNER,SCOPE_COUNCIL_PROGRESS}=await import(extension+'scope-council-runner.ts');
 const {classifyTaskMutationIntent,taskMayMutate}=await import(shared+'task-intent.ts');
 const {reduceChildEvents,projectTranscriptChildren}=await import(shared+'child-ledger.ts');
 const {registerAutonomousRecovery}=await import(extension+'autonomous-recovery.ts');
@@ -48,6 +56,88 @@ const models=ids.map(model);
 const task='Rework src/widget.ts?mode=wide while preserving the exact title "Keep title" and reconsider the assistant-selected easing.';
 const context=()=>({cwd:root,model:model('parent'),sessionManager:{getSessionId:()=> 'session-1',getSessionFile:()=>path.join(root,'session.json')},ui:{setStatus(){}}});
 const result=(text,usage={input:30,output:40,cacheRead:0,cacheWrite:0,cost:0,turns:1})=>({details:{results:[{exitCode:0,output:text,usage}]}});
+
+test('council progress persists during inference, expands member advice and never wakes or enters model context', async t=>{
+  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'scope-council-ui-'));
+  const settingsManager=SettingsManager.inMemory({compaction:{enabled:false},retry:{enabled:false}});
+  const loader=new DefaultResourceLoader({cwd,agentDir:cwd,settingsManager,noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true});
+  await loader.reload();
+  let finishModel,modelCalls=0;
+  const gate=new Promise(resolve=>{finishModel=resolve;});
+  const selected=model('parent');
+  const modelRuntime={getModel:()=>selected,getAvailable:()=>[selected],hasConfiguredAuth:()=>true,isUsingSubscription:()=>false,
+    getAuth:async()=>({auth:{apiKey:'synthetic-fixture'}}),streamSimple:()=>{
+      modelCalls++;
+      const message={role:'assistant',provider:selected.provider,model:selected.id,api:selected.api,content:[{type:'text',text:'Fixture complete.'}],stopReason:'stop',timestamp:Date.now(),usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
+      return {async *[Symbol.asyncIterator](){await gate;yield {type:'done',message};},result:async()=>message};
+    }};
+  const {session}=await createAgentSession({cwd,agentDir:cwd,model:selected,modelRuntime,settingsManager,resourceLoader:loader,sessionManager:SessionManager.create(cwd,cwd),tools:[],thinkingLevel:'off'});
+  t.after(()=>{finishModel();session.dispose();fs.rmSync(cwd,{recursive:true,force:true});});
+  const prompt=session.prompt('Synthetic fixture request.');
+  const tick=()=>new Promise(resolve=>setImmediate(resolve));
+  await tick(); await tick();
+  assert.equal(session.isStreaming,true);
+  const renderers=new Map(),events=[],sends=[],deliveries=[],peers=[];
+  session.subscribe(event=>events.push(event));
+  const pi={getActiveTools:()=>['subagent'],appendEntry:(type,data)=>session.sessionManager.appendCustomEntry(type,data),
+    registerMessageRenderer:(type,renderer)=>renderers.set(type,renderer),
+    sendMessage:(message,options)=>{sends.push({message,options});const delivery=session.sendCustomMessage(message,options);deliveries.push(delivery);return delivery;}};
+  const ctx={...context(),cwd,sessionManager:session.sessionManager};
+  registerScopeCouncilRunner(pi,{available:()=>models,constraints:()=>({}),rankPerspectives:null,
+    launch:()=>new Promise(resolve=>peers.push(resolve))});
+  const pending=globalThis[SCOPE_COUNCIL_RUNNER]({task},ctx);
+  await tick();
+  assert.equal(peers.length,2);
+  assert.equal(sends.filter(row=>row.message.details.status==='started').length,3,'council and independent members are visible before they finish');
+  assert.equal(events.filter(event=>event.type==='message_end'&&event.message?.customType===SCOPE_COUNCIL_PROGRESS).length,3);
+  const advice='Keep the source-backed acceptance criteria visible. '.repeat(6)+'Review final fixture evidence.';
+  peers[0](result(advice)); peers[1](result('Check the fixture edge cases.'));
+  await tick();
+  assert.equal(peers.length,3);
+  assert.equal(sends.filter(row=>row.message.details.status==='completed').length,2);
+  assert.match(sends.at(-1).message.content,/Critique perspectives.*started/);
+  peers[2](result('The fixture perspectives agree on validation; check their assumptions.'));
+  assert.equal((await pending).status,'complete');
+  await Promise.all(deliveries);
+  assert.match(sends.at(-1).message.content,/Council.*completed/);
+  resetSharedControl(); peers.length=0;
+  const controller=new AbortController();
+  const cancelled=globalThis[SCOPE_COUNCIL_RUNNER]({task},ctx,controller.signal);
+  await tick(); assert.equal(peers.length,2); controller.abort();
+  assert.equal((await cancelled).status,'unavailable');
+  await Promise.all(deliveries);
+  assert.match(sends.at(-1).message.content,/Council.*stopped/);
+  const countAfterCancellation=sends.length;
+  for(const finish of peers) finish(result('A late response must never appear.'));
+  await tick(); assert.equal(sends.length,countAfterCancellation);
+  assert.ok(sends.every(row=>row.message.display&&row.message.excludeFromContext&&row.options.triggerTurn===false));
+  assert.equal(modelCalls,1,'progress does not trigger a model turn');
+  assert.doesNotMatch(JSON.stringify(convertToLlm(session.agent.state.messages)),/Scope council:|Keep the source-backed/);
+  const renderer=renderers.get(SCOPE_COUNCIL_PROGRESS);
+  assert.equal(typeof renderer,'function');
+  initTheme('dark');
+  for(const {message} of sends){
+    const component=new CustomMessageComponent(message,renderer);
+    for(const expanded of [false,true]){
+      component.setExpanded(expanded);
+      for(const width of [12,20,42,120]){
+        const lines=component.render(width);
+        for(const line of lines){assert.ok(visibleWidth(line)<=width);assert.doesNotMatch(line.replace(/\x1b\[[0-9;]*m/g,''),/[\x00-\x1f\x7f-\x9f]/);}
+        assert.match(lines.map(stripTerminalSequences).join('\n'),/Scope/);
+      }
+    }
+    if(message.details.advice===advice){
+      component.setExpanded(false);assert.match(component.render(120).map(stripTerminalSequences).join(' ').replace(/\s+/g,' '),/Expand for the full council advice/);
+      component.setExpanded(true);assert.match(component.render(120).map(stripTerminalSequences).join(' ').replace(/\s+/g,' '),/Review final fixture evidence/);
+    }
+  }
+  finishModel(); await prompt;
+  const restored=SessionManager.open(session.sessionManager.getSessionFile());
+  const persisted=restored.getBranch().filter(entry=>entry.customType===SCOPE_COUNCIL_PROGRESS);
+  assert.equal(persisted.length,sends.length);
+  assert.equal(persisted.find(entry=>entry.details?.advice===advice)?.excludeFromContext,true);
+  assert.doesNotMatch(JSON.stringify(restored.buildSessionContext().messages),/Scope council:|Keep the source-backed/);
+});
 
 test('dispatches two independent scope opinions and a synthesis peer under read-only ceilings',async()=>{
   const calls=[],entries=[],published=[];
@@ -339,7 +429,8 @@ test('cancelled councils clear their status without erasing a replacement owner 
   for(const mode of ['abort','replace']){
     resetSharedControl();
     const statuses=[],controller=new AbortController(),ctx={...context(),ui:{setStatus:(_key,value)=>statuses.push(value)}};
-    const pi={getActiveTools:()=>['subagent'],appendEntry(){}};
+    const messages=[];
+    const pi={getActiveTools:()=>['subagent'],appendEntry(){},sendMessage:message=>messages.push(message)};
     const deps={available:()=>models,constraints:()=>({}),rankPerspectives:null,launch:()=>new Promise(()=>{})};
     registerScopeCouncilRunner(pi,deps);
     const pending=globalThis[SCOPE_COUNCIL_RUNNER]({task},ctx,controller.signal);
@@ -347,7 +438,15 @@ test('cancelled councils clear their status without erasing a replacement owner 
     if(mode==='abort')controller.abort();else registerScopeCouncilRunner(pi,deps);
     await pending;
     assert.equal(statuses.at(-1),undefined,mode);
+    assert.equal(messages.filter(message=>message.details.status==='stopped').length,1,mode);
   }
+});
+
+test('council progress delivery failures do not reject successful advisory work',async()=>{
+  registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){},sendMessage:()=>Promise.reject(new Error('Synthetic display failure'))},
+    {available:()=>models,constraints:()=>({}),rankPerspectives:null,launch:async()=>result('Bounded fixture advice.')});
+  assert.equal((await globalThis[SCOPE_COUNCIL_RUNNER]({task},context())).status,'complete');
+  await new Promise(resolve=>setImmediate(resolve));
 });
 
 test('configured council routes survive economy admission without changing their role order',async()=>{

@@ -376,3 +376,52 @@ setInterval(() => {}, 1000);
   assert.equal(result.processSignal, undefined, "the completed answer keeps its success classification");
   assert.equal(JSON.parse(fs.readFileSync(envLog, "utf8")).tokenBudget, "48000", "the parent's hard token budget reaches the child");
 });
+
+test("a cancelled active child that ignores SIGTERM is killed after the grace period", async t => {
+  const fakePiPath = path.join(root, "fake-pi-ignore-term.mjs");
+  const pidPath = path.join(root, "ignore-term-pid.json");
+  fs.writeFileSync(fakePiPath, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+process.on("SIGTERM", () => {});
+writeFileSync(${JSON.stringify(pidPath)}, JSON.stringify({ pid: process.pid }));
+process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+setInterval(() => {}, 1000);
+`, { mode: 0o700 });
+  const keys = ["PI_SUBAGENT_PI_BINARY", "PI_PROVIDER_STATE_FILE", "PI_MODEL_EXCLUSIONS_PATH"];
+  const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.PI_SUBAGENT_PI_BINARY = fakePiPath;
+  process.env.PI_PROVIDER_STATE_FILE = path.join(root, "ignore-term-health.json");
+  process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "ignore-term-exclusions.json");
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  });
+  const agentConfig = {
+    name: "ignore-term-fixture", description: "Synthetic active child", source: "runtime",
+    filePath: path.join(root, "ignore-term-fixture.md"), systemPrompt: "", systemPromptMode: "replace",
+    inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, model: route,
+  };
+  const controller = new AbortController();
+  const pending = runSync(process.cwd(), [agentConfig], agentConfig.name, "Inspect the synthetic task", {
+    runId: "ignore-term-abort-test", availableModels: registry, modelOverride: route,
+    timeoutMs: 30_000, signal: controller.signal,
+  });
+  let deadlineTimer;
+  try {
+    const startupDeadline = Date.now() + 5000;
+    while (!fs.existsSync(pidPath) && Date.now() < startupDeadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(fs.existsSync(pidPath), 'synthetic child started');
+    controller.abort();
+    const result = await Promise.race([pending, new Promise(resolve => { deadlineTimer = setTimeout(() => resolve(undefined), 5000); })]);
+    assert.ok(result, 'sending SIGTERM must not be mistaken for child exit; escalate after the 3s grace period');
+    assert.equal(result.processSignal, 'SIGKILL');
+    assert.notEqual(result.exitCode, 0, 'an aborted active task is not successful final-answer cleanup');
+  } finally {
+    clearTimeout(deadlineTimer);
+    controller.abort();
+    if (fs.existsSync(pidPath)) {
+      const { pid } = JSON.parse(fs.readFileSync(pidPath, 'utf8'));
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+    }
+    await pending;
+  }
+});

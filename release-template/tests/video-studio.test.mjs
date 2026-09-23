@@ -90,6 +90,113 @@ test("stills sample settled frames and contact sheets stay legible", () => {
   assert.doesNotMatch(studio.contactSheetFilter(["bad'label;[x]"]), /bad'|\[x\]/, "labels cannot inject filter syntax");
 });
 
+test("fractional scene durations use the renderer's per-scene frame rounding", () => {
+  const spec = baseSpec();
+  spec.fps = 3;
+  spec.scenes = Array.from({ length: 10 }, (_, i) => ({ id: `scene-${i}`, component: "A", seconds: 0.5 }));
+  const result = studio.validateVideoSpec(spec, new Set(["A"]), () => true);
+  const expected = spec.scenes.map((s) => Math.max(1, Math.round(s.seconds * spec.fps)));
+  let frame = 0;
+  for (const [i, scene] of result.scenes.entries()) {
+    assert.equal(Math.round(scene.start * spec.fps), frame);
+    frame += expected[i];
+    assert.equal(Math.round(scene.end * spec.fps), frame);
+  }
+  assert.equal(Math.round(result.seconds * spec.fps), 20);
+  assert.deepEqual(studio.planStillFrames(result.scenes, spec.fps, { times: [999] }).map((p) => p.frame), [19]);
+  spec.scenes[0].narrationOffset = "0.4";
+  assert.match(studio.validateVideoSpec(spec, new Set(["A"]), () => true).issues.map((i) => i.message).join(), /narrationOffset must be a non-negative number/);
+});
+
+test("video project writes reject escaping scene names and symbolic output paths before work starts", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "video-paths-"));
+  try {
+    const project = path.join(root, "project"), outside = path.join(root, "outside");
+    fs.mkdirSync(path.join(project, "src/scenes"), { recursive: true });
+    fs.mkdirSync(path.join(project, "node_modules/@remotion/renderer"), { recursive: true });
+    fs.mkdirSync(outside);
+    const sentinel = path.join(outside, "keep.txt");
+    fs.writeFileSync(sentinel, "unchanged");
+    const specFile = path.join(project, "video.json");
+    const spec = baseSpec();
+    fs.writeFileSync(path.join(project, "src/scenes/index.ts"), "export const scenes: Record<string, unknown> = { A };");
+    spec.scenes[0].id = "../../../outside/escape";
+    fs.writeFileSync(specFile, JSON.stringify(spec));
+    await assert.rejects(studio.narrationTts({ action: "synthesize", dir: project }, root), /scene id .* must be lowercase kebab-case/);
+    assert.equal(fs.existsSync(path.join(project, "public")), false, "no narration files or directories were created");
+    spec.scenes[0].id = "one";
+    fs.writeFileSync(specFile, JSON.stringify(spec));
+    fs.symlinkSync(outside, path.join(project, "public"));
+    await assert.rejects(studio.audioSynth({ dir: project, kind: "sfx", type: "tick" }, root), /Video output must stay inside the project/);
+    await assert.rejects(studio.narrationTts({ action: "synthesize", dir: project }, root), /Video output must stay inside the project/);
+    fs.unlinkSync(path.join(project, "public"));
+    fs.symlinkSync(outside, path.join(project, "out"));
+    await assert.rejects(studio.videoRender({ dir: project, mode: "preview" }, root), /Video output must stay inside the project/);
+    fs.unlinkSync(path.join(project, "out"));
+    fs.symlinkSync(outside, path.join(project, ".video-cache"));
+    await assert.rejects(studio.videoRender({ dir: project, mode: "preview" }, root), /Video output must stay inside the project/);
+    assert.deepEqual(fs.readdirSync(outside), ["keep.txt"]);
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "unchanged");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("render runner rebuilds failed bundles and preserves published bundles used by other sessions", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "video-cache-"));
+  try {
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(path.join(root, "src/index.ts"), "fixture");
+    fs.writeFileSync(path.join(root, "package.json"), "{}");
+    fs.writeFileSync(path.join(root, "video.json"), "{}");
+    const modules = {
+      bundler: `import fs from "node:fs"; import path from "node:path";
+        export async function bundle({outDir}) {
+          const counter = path.join(process.cwd(), "build-count");
+          const n = Number(fs.existsSync(counter) ? fs.readFileSync(counter, "utf8") : 0) + 1;
+          fs.writeFileSync(counter, String(n));
+          fs.mkdirSync(outDir, {recursive:true});
+          fs.writeFileSync(path.join(outDir, "index.html"), "partial");
+          if(n === 1) throw Error("synthetic failure after index was written");
+          fs.writeFileSync(path.join(outDir, "bundle.js"), "complete");
+          return outDir;
+        }`,
+      renderer: `import fs from "node:fs"; import path from "node:path";
+        export async function selectComposition({serveUrl}) {
+          if(!fs.existsSync(path.join(serveUrl, "bundle.js"))) throw Error("incomplete bundle was reused");
+          return {id:"Main",fps:30,width:320,height:180,durationInFrames:30};
+        }
+        export async function renderStill({output}) { fs.writeFileSync(output, "frame"); }`,
+    };
+    for (const [name, source] of Object.entries(modules)) {
+      const dir = path.join(root, "node_modules/@remotion", name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "module", main: "index.js" }));
+      fs.writeFileSync(path.join(dir, "index.js"), source);
+    }
+    const request = path.join(root, "request.json");
+    fs.writeFileSync(request, JSON.stringify({ project: root, outDir: path.join(root, "out"), mode: "stills", composition: "Main", frames: [0] }));
+    const render = () => {
+      const run = spawnSync(process.execPath, [studio.VIDEO_PATHS.runner, request], { cwd: root, encoding: "utf8" });
+      const line = run.stdout.split("\n").find((s) => s.startsWith("VIDEO_RENDER_RESULT "));
+      assert.ok(line, run.stderr);
+      return { status: run.status, result: JSON.parse(line.slice(20)) };
+    };
+    const failed = render();
+    assert.equal(failed.status, 1);
+    assert.match(failed.result.error, /synthetic failure/);
+    assert.deepEqual(fs.readdirSync(path.join(root, ".video-cache")), [], "failed staging bundles are removed");
+    const retried = render();
+    assert.equal(retried.status, 0, JSON.stringify(retried.result));
+    assert.equal(retried.result.bundleCached, false);
+    assert.equal(fs.readFileSync(path.join(root, "build-count"), "utf8"), "2");
+    assert.equal(render().result.bundleCached, true);
+    const published = fs.readdirSync(path.join(root, ".video-cache"));
+    fs.writeFileSync(path.join(root, "video.json"), '{"title":"new version"}');
+    assert.equal(render().status, 0);
+    for (const previous of published) assert.ok(fs.existsSync(path.join(root, ".video-cache", previous, "bundle.js")), "new builds leave concurrent readers' bundles intact");
+    assert.equal(fs.readFileSync(path.join(root, "build-count"), "utf8"), "3");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("QA parsing and findings separate defects from intentional structure", () => {
   const log = [
     "[blackdetect @ 0x1] black_start:0 black_end:0.5 black_duration:0.5",

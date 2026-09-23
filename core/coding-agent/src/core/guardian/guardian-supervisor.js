@@ -239,7 +239,7 @@ export class GuardianSupervisor {
 		this._latestAcceptedTaskId = undefined;
 		this._inFlight = new Map();
 		this._peerReceipts = new Set();
-		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0 };
+		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0, peerMessagesSent: 0, peerMessagesReceived: 0 };
 		this._admittedAtByKind = new Map();
 		this._window = { startedAt: this._clock(), evaluations: 0 };
 		this._kernelPromise = undefined;
@@ -272,7 +272,7 @@ export class GuardianSupervisor {
 			const states = this._kernelRuntime ? Object.values(this._kernelRuntime.status()) : [];
 			const decision = this._kernelError || states.some(({ state }) => state === "quarantined") ? "quarantined"
 				: states.length ? "ready" : this._kernelPromise ? "initializing" : "lazy";
-			const result = this._observe({ count: this._stats.toolResults, evaluations: this._stats.classifierEvaluations,
+			const result = this._observe({ guardianInstanceId: this.ownerId, stats: { ...this._stats }, count: this._stats.toolResults, evaluations: this._stats.classifierEvaluations,
 				similarityEvaluations: this._stats.similarityEvaluations, decision,
 				promptCoverage: typeof this._tasks.get(this._activeTaskId)?.rawPrompt === "string" ? "complete" : "bounded-out",
 				outcome: this._stats.classifierEvaluations > evaluationsBefore ? "evaluated" : "observed" });
@@ -650,7 +650,7 @@ export class GuardianSupervisor {
 			for (const task of this._tasks.values()) { task.attempts = []; task.episodeKey = undefined; task.evidenceVersion++; task.constraintEvidence.clear(); }
 		}
 		else if (command === "debug") this._debug = !this._debug;
-		return { command, enabled: this._enabled, debug: this._debug, stats: { ...this._stats }, activeTaskId: this._debug ? this._activeTaskId : undefined, taskCount: this._tasks.size, guardianInstanceId: this._debug ? this.ownerId : undefined, debugInfo: this._debug ? { relation: this._tasks.get(this._activeTaskId)?.relation, analysisConfidence: this._tasks.get(this._activeTaskId)?.analysisConfidence, verifiedConstraints: this._tasks.get(this._activeTaskId)?.effectiveConstraints.length ?? 0, observedSignals: this._observedSignals(), recentDecisions: this._arbiter.journal().slice(-8) } : undefined, kernel: this._quarantined ? `quarantined:${this._quarantineReason}` : this._kernelError ? `quarantined:${this._kernelError}` : this._kernelRuntime ? Object.entries(this._kernelRuntime.status()).map(([name, status]) => `${name}:${status.state}${status.error ? `:${status.error}` : ""}`).join(",") : this._kernelPromise ? "initializing" : "lazy" };
+		return { command, enabled: this._enabled, debug: this._debug, stats: { ...this._stats }, activeTaskId: this._debug ? this._activeTaskId : undefined, taskCount: this._tasks.size, guardianInstanceId: this.ownerId, debugInfo: this._debug ? { relation: this._tasks.get(this._activeTaskId)?.relation, analysisConfidence: this._tasks.get(this._activeTaskId)?.analysisConfidence, verifiedConstraints: this._tasks.get(this._activeTaskId)?.effectiveConstraints.length ?? 0, observedSignals: this._observedSignals(), recentDecisions: this._arbiter.journal().slice(-8) } : undefined, kernel: this._quarantined ? `quarantined:${this._quarantineReason}` : this._kernelError ? `quarantined:${this._kernelError}` : this._kernelRuntime ? Object.entries(this._kernelRuntime.status()).map(([name, status]) => `${name}:${status.state}${status.error ? `:${status.error}` : ""}`).join(",") : this._kernelPromise ? "initializing" : "lazy" };
 	}
 
 	quarantine(error) {

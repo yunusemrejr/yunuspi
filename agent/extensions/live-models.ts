@@ -1326,11 +1326,11 @@ function outputLimitStatus(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
 	catalogStatus(ctx);
 	const model = ctx.model;
-	const fallback = model && ((model as typeof model & { piUnlistedModel?: boolean }).piUnlistedModel ? model.maxTokens : outputFallbacks.get(`${model.provider}/${model.id}`));
+	const fallback = model && ((model as typeof model & { piUnlistedModel?: boolean; outputLimitEstimated?: boolean }).piUnlistedModel || (model as typeof model & { outputLimitEstimated?: boolean }).outputLimitEstimated ? model.maxTokens : outputFallbacks.get(`${model.provider}/${model.id}`));
 	const explicit = model && providerConfigJson(model.provider);
 	const configured = explicit?.modelOverrides?.[model.id]?.maxTokens ?? (Array.isArray(explicit?.models) ? explicit.models.find((m) => m.id === model.id)?.maxTokens : undefined);
 	ctx.ui.setStatus("model-output-limit", fallback && !tokenLimit(configured)
-		? `Output limit unverified: ${model.maxTokens} tokens (fallback); set models.json modelOverrides.maxTokens if known.`
+		? `Output limit unverified: ${model.maxTokens} tokens (client allowance); set models.json modelOverrides.maxTokens if known.`
 		: undefined);
 }
 function minimalModel(
@@ -1697,15 +1697,17 @@ export default async function registerLiveModels(
 		routerRefreshPending = false;
 		lastRouterRefresh = Date.now();
 		if (!automaticRefreshAllowed()) { outputLimitStatus(ctx); return; }
+		routerRefreshPending = true;
 		void ctx.modelRegistry
 			.refresh({ allowNetwork: true, providers: refreshScope(ctx), signal: researchController.signal })
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
-			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); });
+			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
+			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });
 		outputLimitStatus(ctx);
 	});
 	// Refresh discovery during long sessions without timers, inference probes,
 	// or waiting on the next provider request. One bounded attempt per interval.
-	pi.on("before_agent_start", (_event, ctx) => {
+	const refreshDuringSession = (_event: unknown, ctx: ExtensionContext) => {
 		if (!automaticRefreshAllowed()) return;
 		const timestamp = Date.now();
 		if (routerRefreshPending || timestamp - lastRouterRefresh < ROUTER_CATALOG_TTL_MS) return;
@@ -1716,7 +1718,9 @@ export default async function registerLiveModels(
 			.then(() => { if (generation === sessionGeneration) { outputLimitStatus(ctx); void refreshModelResearch(ctx.modelRegistry.getAvailable().map(toModelInfo),researchController.signal); } })
 			.catch(() => { if (generation === sessionGeneration) failedRegistryRefresh(ctx); })
 			.finally(() => { if (generation === sessionGeneration) routerRefreshPending = false; });
-	});
+	};
+	pi.on("before_agent_start", refreshDuringSession);
+	pi.on("turn_end", refreshDuringSession);
 	pi.on("model_select", (_event, ctx) => outputLimitStatus(ctx));
 	pi.on("session_shutdown", (_event, ctx) => { sessionGeneration++; researchController.abort(); if (ctx.hasUI) { ctx.ui.setStatus("model-output-limit", undefined); ctx.ui.setStatus("model-catalog", undefined); } });
 }

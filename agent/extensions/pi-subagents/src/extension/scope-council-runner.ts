@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { guardianOwnerForSession } from "@yunuspi/coding-agent";
+import { Text } from "@yunuspi/tui";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { assistanceMemberRouteCandidate, selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
@@ -21,6 +22,12 @@ import type { ActivityOutcome, FinishActivity } from '../../../lib/harness-activ
  * an extra council or choose its roster. The parent decides when to ask for a
  * brief, and this owner decides whether a bounded, permitted team exists. */
 export const SCOPE_COUNCIL_RUNNER = Symbol.for("yunus-pi.scope-council-runner.v1");
+export const SCOPE_COUNCIL_PROGRESS = "scope-council-progress";
+const visibleText = (value: unknown, limit: number) => typeof value === "string" ? value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "").slice(0, limit) : "";
+export function renderScopeCouncilProgress(message: any, options: { expanded?: boolean } = {}) {
+	const advice = visibleText(message.details?.advice, 2500);
+	return new Text(visibleText(message.content, 500) + (advice ? `\n${options.expanded ? advice : advice.slice(0, 220) + (advice.length > 220 ? "… Expand for the full council advice." : "")}` : ""), 0, 0);
+}
 
 export const SCOPE_COUNCIL_LIMITS = Object.freeze({
 	// 2026-09-16: all-sessions audit showed 48/48 councils unavailable — a
@@ -424,11 +431,13 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
  * The service is intentionally not a Pi tool and cannot be called by a child. */
 export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
+	pi.registerMessageRenderer?.(SCOPE_COUNCIL_PROGRESS, renderScopeCouncilProgress);
 	const previous = (globalThis as any)[SCOPE_COUNCIL_RUNNER];
 	previous?.dispose?.();
 	const lifetime = new AbortController();
 	let statusOwner: object | undefined;
 	let clearOwnedStatus: (() => void) | undefined;
+	let stopOwnedProgress: (() => void) | undefined;
 	const now = deps.now ?? Date.now;
 	const enabled = () => scopeCouncilEnabled();
 	const runner = async (request: ScopeCouncilRequest, ctx: ExtensionContext, parentSignal?: AbortSignal): Promise<ScopeCouncilResult> => {
@@ -507,6 +516,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			if (statusOwner !== statusToken) return;
 			if (ownsContext()) { try { ctx.ui?.setStatus?.("scope-council", undefined); } catch {} }
 			statusOwner = undefined;
+			stopOwnedProgress = undefined;
 			if (clearOwnedStatus === clearStatus) clearOwnedStatus = undefined;
 		};
 		if (current()) {
@@ -514,6 +524,17 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			statusOwner = statusToken;
 			try { ctx.ui?.setStatus?.("scope-council", `Scope council: ${team.slice(0, 3).map(member => formatModelThinking(member.route)).join(" + ")}`); } catch { /* UI is optional. */ }
 		}
+		const progress = (phase: string, status: string, member?: AssistanceMember, elapsedMs?: number, advice?: string) => {
+			if (!ownsContext() || statusOwner !== statusToken || (signal.aborted && status !== "stopped")) return;
+			const detail = [phase, status, member ? formatModelThinking(member.route) : "", elapsedMs === undefined ? "" : `${Math.round(elapsedMs / 1000)}s`].filter(Boolean).join(" · ");
+			try {
+				const delivery = pi.sendMessage?.({ customType: SCOPE_COUNCIL_PROGRESS, content: `Scope council: ${visibleText(detail, 420)}`,
+					display: true, excludeFromContext: true, details: { phase, status, ...(advice ? { advice: visibleText(advice, 2500) } : {}) } }, { triggerTurn: false });
+				void Promise.resolve(delivery).catch(() => { /* Display persistence cannot change advisory execution. */ });
+			} catch { /* Visible diagnostics cannot change a council's result. */ }
+		};
+		if (statusOwner === statusToken) stopOwnedProgress = () => progress("Council", "stopped");
+		progress("Independent perspectives", "started");
 		// Marked harness flow (step 21; D-010): one assistance unit per
 		// council execution per cycle, shared by all peers under the grant.
 		const councilFlowId = `scope-council-${randomUUID()}`;
@@ -523,6 +544,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text: "", gap: "Scope council peer skipped: the automatic assistance budget for this request is already spent." };
 			}
 			const runId = `scope-council-${phase}-${randomUUID()}`;
+			const startedAt = now();
+			const phaseLabel = phase === "preservation" ? "Preserve requirements" : phase === "meaningful-change" ? "Assess changes" : "Critique perspectives";
+			progress(phaseLabel, "started", member);
 			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1,
 				label: phase === "preservation" ? "Scope council: preserve requirements" : phase === "meaningful-change" ? "Scope council: assess changes" : "Scope council: critique advice",
 				scopeId: phase, model: member.route };
@@ -545,6 +569,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				row = resultRow(result) ? rawRow : undefined;
 				const text = row ? cleanBody(row, phase === "peer-critique" ? limits.discussionChars : limits.proposalChars) : "";
 				if (!row || !text) {
+					if (!signal.aborted) progress(phaseLabel, "unavailable", member, now() - startedAt);
 					if (current()) {
 						appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", rawRow);
 						appendCost(pi, sessionFile, runId, rawRow ?? row, signal.aborted ? "stopped" : "failed");
@@ -555,8 +580,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 					appendLifecycle(pi, runId, "completed", row);
 					appendCost(pi, sessionFile, runId, row, "completed");
 				}
+				progress(phaseLabel, "completed", member, now() - startedAt, text);
 				return { text, row };
 			} catch (error) {
+				if (!signal.aborted) progress(phaseLabel, "unavailable", member, now() - startedAt);
 				if (current()) {
 					const failed = { ...identity, ...row, exitCode: 1, error: error instanceof Error ? error.message : "Council peer launch failed" };
 					appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", failed);
@@ -635,6 +662,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
+			progress("Council", signal.aborted ? "stopped" : activityOutcome === "ok" ? "completed" : activityOutcome === "skipped" ? "partial" : "unavailable");
 			clearStatus();
       try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
 			controller.abort();
@@ -643,7 +671,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 	// The runner owns the council's limits; the lifecycle reads the shared
 	// deadline from here instead of declaring a second copy that can drift.
 	(runner as any).limits = SCOPE_COUNCIL_LIMITS;
-	(runner as any).dispose = () => { clearOwnedStatus?.(); lifetime.abort(); };
+	(runner as any).dispose = () => { stopOwnedProgress?.(); clearOwnedStatus?.(); lifetime.abort(); };
 	(globalThis as any)[SCOPE_COUNCIL_RUNNER] = runner;
 	pi.on?.("session_shutdown", () => {
 		(runner as any).dispose();

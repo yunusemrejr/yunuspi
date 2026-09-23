@@ -36,19 +36,31 @@ async function bundled() {
   hashTree(hash, path.join(project, "public"), project);
   const key = hash.digest("hex").slice(0, 16);
   const cache = path.join(project, ".video-cache");
-  const outDir = path.join(cache, `bundle-${key}`);
-  if (fs.existsSync(path.join(outDir, "index.html"))) return { serveUrl: outDir, cached: true };
+  const outDir = path.join(cache, `bundle-v2-${key}`);
+  const complete = () => fs.existsSync(path.join(outDir, "index.html")) && fs.existsSync(path.join(outDir, ".complete"));
+  if (complete()) return { serveUrl: outDir, cached: true };
   fs.mkdirSync(cache, { recursive: true });
-  for (const old of fs.readdirSync(cache)) if (old.startsWith("bundle-")) fs.rmSync(path.join(cache, old), { recursive: true, force: true });
   const { bundle } = await load("@remotion/bundler");
   const started = Date.now();
-  const serveUrl = await bundle({
-    entryPoint: path.join(project, "src/index.ts"),
-    outDir,
-    publicDir: path.join(project, "public"),
-    onProgress: (p) => emit("VIDEO_RENDER_PROGRESS", { stage: "bundle", percent: Math.round(p) }),
-  });
-  return { serveUrl, cached: false, bundleMs: Date.now() - started };
+  // index.html can exist before bundling succeeds. Publish only complete,
+  // immutable bundles; another session may still be rendering an older one.
+  const staging = fs.mkdtempSync(path.join(cache, "build-"));
+  try {
+    await bundle({
+      entryPoint: path.join(project, "src/index.ts"),
+      outDir: staging,
+      publicDir: path.join(project, "public"),
+      onProgress: (p) => emit("VIDEO_RENDER_PROGRESS", { stage: "bundle", percent: Math.round(p) }),
+    });
+    if (!fs.existsSync(path.join(staging, "index.html"))) throw new Error("Bundler completed without index.html");
+    fs.writeFileSync(path.join(staging, ".complete"), key);
+    if (!complete()) {
+      // Atomic directory publication: a concurrent complete publisher wins.
+      try { fs.renameSync(staging, outDir); }
+      catch (error) { if (!complete()) throw error; }
+    }
+    return { serveUrl: outDir, cached: false, bundleMs: Date.now() - started };
+  } finally { fs.rmSync(staging, { recursive: true, force: true }); }
 }
 
 async function main() {

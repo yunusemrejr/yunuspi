@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.5.3 puts configured, available model matches first and repairs cached catalog loss, including Xiaomi Token Plan model discovery. It includes inspectable prompt analysis, frequent observer reviews and explicitly addressed communication between independent sessions. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Version 0.6.1 repairs provider configuration, discovers Codex models from your account, and makes prompt-analysis recovery and council progress visible. The expanded `/used` dashboard shows helper, guardian and observer evidence through compact KPIs and drill-downs. It retains the code-first video studio, frequent observer reviews and explicitly addressed communication between independent sessions. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 

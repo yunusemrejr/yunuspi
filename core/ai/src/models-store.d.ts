@@ -1,6 +1,10 @@
 import type { Api, Model } from "./types.ts";
 export interface ModelsStoreEntry {
     models: readonly Model<Api>[];
+    /** Provider-owned catalog schema/source identifier for account-scoped discovery. */
+    catalogSource?: string;
+    /** One-way account scope; never a credential, token or plain account identifier. */
+    credentialScope?: string;
     /** Unix timestamp from the remote catalog's Last-Modified header. */
     lastModified?: number;
     /**

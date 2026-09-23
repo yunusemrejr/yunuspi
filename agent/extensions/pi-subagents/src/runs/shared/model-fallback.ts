@@ -473,6 +473,8 @@ export interface LlmPreferenceRoute {
 }
 
 export interface LlmPreferenceOptions {
+	/** Inspection collects onSkip details without warnings or runtime health events. */
+	diagnostics?: "runtime" | "inspect";
 	/** Explicit canonical document for editor diagnostics; runtime callers use the configured path. */
 	configPath?: string;
 	requirements?: LlmPreferenceRequirements;
@@ -502,11 +504,12 @@ export function resolveLlmPreferenceChain(
 	options?: LlmPreferenceOptions,
 ): LlmPreferenceRoute[] {
 	const loaded = loadLlmPreferences(options?.configPath);
-	if (!loaded.ok && !loaded.missing) warnOnceEconomy(`${loaded.path}::${loaded.reason ?? "unknown"}`, "preference-load", `[pi-subagents] llm_preferences (${role}): ignoring preference file (${loaded.reason ?? "unknown reason"}); autonomous selection applies`);
-	if (!loaded.ok || !loaded.config || !availableModels || availableModels.length === 0) return [];
-	for (const warning of loaded.warnings ?? []) warnOnceEconomy(`${loaded.path}::${warning}`, "preference-entry", `[pi-subagents] llm_preferences: ${warning}; valid entries remain active`);
+	if (options?.diagnostics !== "inspect" && !loaded.ok && !loaded.missing) warnOnceEconomy(`${loaded.path}::${loaded.reason ?? "unknown"}`, "preference-load", `[pi-subagents] llm_preferences (${role}): ignoring preference file (${loaded.reason ?? "unknown reason"}); autonomous selection applies`);
+	if (!loaded.ok || !loaded.config) return [];
+	if ((!availableModels || availableModels.length === 0) && options?.diagnostics !== "inspect") return [];
+	for (const warning of loaded.warnings ?? []) if (options?.diagnostics !== "inspect") warnOnceEconomy(`${loaded.path}::${warning}`, "preference-entry", `[pi-subagents] llm_preferences: ${warning}; valid entries remain active`);
 	const entries = preferenceEntriesFor(role, loaded.config);
-	return resolvePreferenceEntries(role, availableModels, options, entries);
+	return resolvePreferenceEntries(role, availableModels ?? [], options, entries);
 }
 
 function resolvePreferenceEntries(role: string, availableModels: AvailableModelInfo[], options: LlmPreferenceOptions | undefined, entries: LlmModelEntry[]): LlmPreferenceRoute[] {
@@ -529,17 +532,18 @@ function resolvePreferenceEntries(role: string, availableModels: AvailableModelI
 		const suffix = splitThinkingSuffix(query);
 		const resolved = resolveSubagentModelCandidate(suffix.baseModel, availableModels, provider);
 		if (!resolved) {
-			reportSkip(query, "unavailable in this session's model registry");
-			warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): ${describeUnresolvedPreference(query, entry.provider, availableModels)}; continuing chain`);
-			noteHealth("model.skip", { route: query, outcome: "unresolved" });
+			const reason = describeUnresolvedPreference(query, entry.provider, availableModels);
+			reportSkip(query, reason);
+			if (options?.diagnostics !== "inspect") warnOnceEconomy(query, "preference-unresolved", `[pi-subagents] llm_preferences (${role}): ${reason}; continuing chain`);
+			if (options?.diagnostics !== "inspect") noteHealth("model.skip", { route: query, outcome: "unresolved" });
 			continue;
 		}
 		const base = splitThinkingSuffix(resolved).baseModel;
 		const exclusion = findModelExclusion(base);
 		if (exclusion) {
 			reportSkip(base, `excluded until ${new Date(exclusion.expiresAt).toISOString()}${exclusion.reason ? `: ${exclusion.reason}` : ""}`);
-			warnOnceEconomy(base, "preference-excluded", `[pi-subagents] llm_preferences (${role}): skipping ${base} (excluded until ${new Date(exclusion.expiresAt).toISOString()}: ${exclusion.reason ?? "no reason"}); continuing chain`);
-			noteHealth("model.skip", { route: base, outcome: "excluded" });
+			if (options?.diagnostics !== "inspect") warnOnceEconomy(base, "preference-excluded", `[pi-subagents] llm_preferences (${role}): skipping ${base} (excluded until ${new Date(exclusion.expiresAt).toISOString()}: ${exclusion.reason ?? "no reason"}); continuing chain`);
+			if (options?.diagnostics !== "inspect") noteHealth("model.skip", { route: base, outcome: "excluded" });
 			continue;
 		}
 		const info = availableModels.find((entry) => entry.fullId === base);
@@ -557,8 +561,8 @@ function resolvePreferenceEntries(role: string, availableModels: AvailableModelI
 			const decision = evaluateRoute({ provider: info.provider, model: info.id, now }, health);
 			if (!decision.allowed) {
 				reportSkip(base, `provider cooling until ${new Date(decision.cooldownUntil).toISOString()}`);
-				warnOnceEconomy(base, "preference-cooling", `[pi-subagents] llm_preferences (${role}): skipping ${base} (route cooling until ${new Date(decision.cooldownUntil).toISOString()}); continuing chain`);
-				noteHealth("model.skip", { route: base, outcome: "cooling" });
+				if (options?.diagnostics !== "inspect") warnOnceEconomy(base, "preference-cooling", `[pi-subagents] llm_preferences (${role}): skipping ${base} (route cooling until ${new Date(decision.cooldownUntil).toISOString()}); continuing chain`);
+				if (options?.diagnostics !== "inspect") noteHealth("model.skip", { route: base, outcome: "cooling" });
 				continue;
 			}
 		} catch { reportSkip(base, "provider health could not be verified"); continue; }
@@ -572,8 +576,8 @@ function resolvePreferenceEntries(role: string, availableModels: AvailableModelI
 			: options?.freeOnly && !isProvenFreeRoute(info) ? "explicit free-only constraint" : undefined;
 		if (rejection) {
 			reportSkip(base, rejection);
-			warnOnceEconomy(`${role}:${base}`, `preference-${rejection}`, `[pi-subagents] llm_preferences (${role}): skipping ${base} (${rejection}); continuing chain`);
-			noteHealth("model.skip", { route: base, outcome: "ineligible", reason: rejection, role });
+			if (options?.diagnostics !== "inspect") warnOnceEconomy(`${role}:${base}`, `preference-${rejection}`, `[pi-subagents] llm_preferences (${role}): skipping ${base} (${rejection}); continuing chain`);
+			if (options?.diagnostics !== "inspect") noteHealth("model.skip", { route: base, outcome: "ineligible", reason: rejection, role });
 			continue;
 		}
 		const wanted = suffix.thinkingSuffix ? suffix.thinkingSuffix.slice(1) : entry.thinking;

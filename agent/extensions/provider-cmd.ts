@@ -139,6 +139,13 @@ function removePin(json: ModelsJson, modelId: string | undefined): number {
 		if (Object.keys(override).length === 0) delete overrides[key];
 		removed++;
 	}
+	if (removed && Object.keys(overrides).length === 0) {
+		const provider = json.providers!.openrouter!;
+		delete provider.modelOverrides;
+		// Retain connection settings and unrelated overrides; only remove the
+		// container this command emptied while clearing its last routing pin.
+		if (Object.keys(provider).length === 0) delete json.providers!.openrouter;
+	}
 	return removed;
 }
 

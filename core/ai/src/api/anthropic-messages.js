@@ -658,7 +658,7 @@ export const streamSimple = (model, context, options) => {
         ...buildBaseOptions(model, context, options, options?.apiKey),
         toolChoice: options?.toolChoice,
     };
-    if (!options?.reasoning) {
+    if (!options?.reasoning || options.reasoning === "off") {
         return stream(model, context, {
             ...base,
             thinkingEnabled: false,

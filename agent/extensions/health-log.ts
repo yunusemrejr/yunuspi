@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {createHealthLog,HEALTH_SINK} from './lib/health-log.ts';
 import {sharedCapabilityHealth} from './lib/capability-health.ts';
 import {createActivityIndicators,describeIntelligenceActivity,skillNameFromPath} from './lib/activity-indicators.ts';
+import {createHelperUsageLedger,HELPER_USAGE_ENTRY,HELPER_USAGE_VIEW} from './lib/helper-usage.ts';
 const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Smol'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
  'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress','Smol':'Smol',
  'Retrieval intelligence':'retrieval','Neural ranker':'Neural ranker','Intent classifier':'Intent classifier','WASM source check':'WASM source check','Deterministic selection':'Deterministic selection',
@@ -18,6 +19,8 @@ export default function healthLog(pi:any) {
  const calls=new Map<string,number>();
  let activeSessionId:string|undefined;
  let activeSessionOwner:object|undefined;
+ let helperUsage:ReturnType<typeof createHelperUsageLedger>|undefined,helperView:any;
+ const flushHelperUsage=()=>{try{helperUsage?.flush(data=>pi.appendEntry(HELPER_USAGE_ENTRY,data));}catch{/* Keep the ledger dirty for retry; diagnostics never interrupt lifecycle cleanup. */}};
  let epoch=0, sink:typeof emit|undefined;
  const childPending=new Map<string,Parameters<typeof relayIntelligenceUsageFromChild>[0]>();
  let childFlushPending=false;
@@ -43,7 +46,7 @@ export default function healthLog(pi:any) {
    for(const entry of entries)try{relayIntelligenceUsageFromChild(entry);}catch{/* display-only diagnostics never interrupt helpers */}
   });
  };
- const emit=(kind:string,data:Record<string,unknown>={})=>{log?.record(kind,data);activity.note(kind,data);relayChildUse(kind,data);};
+ const emit=(kind:string,data:Record<string,unknown>={})=>{helperUsage?.note(kind,data);log?.record(kind,data);activity.note(kind,data);relayChildUse(kind,data);};
  let warn:((message:string)=>void)|undefined;
  let writeWarning=false;
  const flush=async(closing=false)=>{
@@ -62,6 +65,8 @@ export default function healthLog(pi:any) {
   const id=ctx.sessionManager?.getSessionId?.();
   activeSessionId=typeof id==='string'?id:undefined;
   activeSessionOwner=ctx.sessionManager;
+  helperUsage=createHelperUsageLedger();
+  sessionObservability()[HELPER_USAGE_VIEW]=helperView=(sessionId:string)=>sessionId===activeSessionId?helperUsage?.snapshot():undefined;
   warn=message=>ctx.ui?.notify?.(message,'warning');writeWarning=false;
   log=createHealthLog(path.join(getAgentDir(),'logs/health'),activeSessionId??'unknown');
   sink=(kind,data={})=>{if(generation===epoch)emit(kind,data);};
@@ -69,7 +74,8 @@ export default function healthLog(pi:any) {
   emit('session.start');timer=setInterval(()=>{void flush();},5000);timer.unref();
  };
  pi.on('session_start',start);pi.on('session_switch',start);
- for(const hook of ['agent_start','agent_end','turn_start','turn_end','session_compact','model_select'])pi.on(hook,()=>{emit('hook',{hook});if(hook==='agent_end')void flush();});
+ for(const hook of ['agent_start','agent_end','turn_start','turn_end','session_compact','model_select'])pi.on(hook,()=>{emit('hook',{hook});if(hook==='agent_end')void flush();if(hook==='agent_end'||hook==='turn_end')flushHelperUsage();});
+ pi.on('session_before_switch',flushHelperUsage);pi.on('session_before_compact',flushHelperUsage);
  pi.on('tool_call',(e:any)=>{if(calls.size<1024)calls.set(e.toolCallId,Date.now());emit('tool.call',{tool:e.toolName});});
  pi.on('tool_result',(e:any)=>{
   const began=calls.get(e.toolCallId);calls.delete(e.toolCallId);
@@ -80,5 +86,14 @@ export default function healthLog(pi:any) {
   if(e.toolName==='subagent')emit('subagent.result',{isError:!!e.isError,count:e.details?.results?.length??0});
  });
  pi.on('message_end',(e:any)=>{if(e.message?.role==='assistant')emit('inference.end',{outcome:e.message.stopReason,inputTokens:e.message.usage?.input,outputTokens:e.message.usage?.output});});
- pi.on('session_shutdown',async()=>{if(timer)clearInterval(timer);emit('session.end');epoch++;childPending.clear();childFlushPending=false;await flush(true);activity.dispose();if(sessionObservability()[HEALTH_SINK]===sink)delete sessionObservability()[HEALTH_SINK];});
+ pi.on('session_shutdown',async()=>{
+  if(timer)clearInterval(timer);
+  try{emit('session.end');flushHelperUsage();}finally{
+   epoch++;childPending.clear();childFlushPending=false;activity.dispose();
+   if(sessionObservability()[HEALTH_SINK]===sink)delete sessionObservability()[HEALTH_SINK];
+   if(sessionObservability()[HELPER_USAGE_VIEW]===helperView)delete sessionObservability()[HELPER_USAGE_VIEW];
+   helperUsage=undefined;
+   await flush(true);
+  }
+ });
 }

@@ -716,6 +716,14 @@ test("long user requests retain Guardian ownership, WASM evaluation and honest b
 		assert.equal(stats().toolResults, 3, name);
 		assert.equal(observations.length, 3, name);
 		assert.equal(observations.at(-1).promptCoverage, coverage, name);
+		assert.equal(observations.at(-1).guardianInstanceId, supervisor.ownerId);
+		assert.equal(supervisor.handleCommand('/guardian stats').guardianInstanceId, supervisor.ownerId, 'normal status and observation snapshots share one identity');
+		assert.deepEqual(Object.keys(observations.at(-1).stats).sort(), Object.keys(stats()).sort(), 'receipts include all counters');
+		assert.equal(observations.at(-1).stats.toolResults, 3);
+		assert.equal(observations.at(-1).stats.admitted, expectedInterventions);
+		for (const [key, value] of Object.entries(observations.at(-1).stats)) assert.ok(value <= stats()[key], 'later assistant events cannot mutate an earlier snapshot');
+		assert.equal(observations[0].stats.toolResults, 1, 'earlier cumulative snapshots are immutable');
+		assert.ok(Object.values(observations.at(-1).stats).every(value => Number.isFinite(value) && value >= 0));
 		assert.equal(emitted.length, expectedInterventions, name);
 		if (coverage === "bounded-out") {
 			assert.equal(stats().classifierEvaluations, 1);
