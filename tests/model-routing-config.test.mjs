@@ -105,9 +105,97 @@ test("the graphical editor accepts every canonical server role alias", async () 
   const canonicalRole = new Function("roleId", `return x=>({${match[1]}}[roleId(x)]||roleId(x))`)(roleId);
   for (const alias of ["main", "main_fallback", "main_session_fallback", "subagent", "subagents", "swarms", "councils",
     "quality_reviews", "project_reviews", "error_reviews", "bug_review", "bug_reviews", "prompt_analysis",
-    "initial_intent_analysis", "follow_up_intent_analysis"]) {
+    "initial_intent_analysis", "follow_up_intent_analysis", "session_observer", "Session Observer"]) {
     assert.equal(canonicalRole(alias), normalizePreferenceRole(alias), alias);
   }
+});
+
+test("observer GUI edits the canonical role, thinking and opt-out without changing other preferences", async t => {
+  const f = fixture();
+  f.models.find(model => model.provider === "deepseek").reasoning = true;
+  const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath });
+  t.after(async () => { await handle.close(); fs.rmSync(f.root, { recursive: true, force: true }); });
+  const page = await openPage(t, handle.url);
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.getByRole("button", { name: "Session Observer", exact: true }).click();
+  await page.getByText("Default: official DeepSeek Flash, high thinking.", { exact: true }).waitFor();
+  assert.match(await page.locator(".diagnostics:not(#routing-diagnostics)").innerText(), /deepseek\/deepseek-flash/);
+
+  await page.getByRole("button", { name: "Disable observer", exact: true }).press("Enter");
+  await page.getByRole("status").filter({ hasText: "Observer disabled." }).waitFor();
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.configPath, "utf8")).preferences.session_observer.models, []);
+  await page.getByText("Observer is disabled.", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Reset role", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "Role reset" }).waitFor();
+  assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(f.configPath, "utf8")).preferences, "session_observer"), false);
+  await page.getByText("Default: official DeepSeek Flash, high thinking.", { exact: true }).waitFor();
+
+  await page.getByRole("searchbox", { name: "Search models" }).fill("deepseek flash official");
+  await page.locator(".result").filter({ hasText: "DeepSeek Official API" }).getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("status").filter({ hasText: "Route saved to Session Observer" }).waitFor();
+  let saved = JSON.parse(fs.readFileSync(f.configPath, "utf8"));
+  assert.deepEqual(saved.preferences.session_observer.models, [{ provider: "deepseek", model: "deepseek-flash", thinking: "high" }]);
+  const thinking = page.getByRole("combobox", { name: "Observer thinking" });
+  assert.equal(await thinking.inputValue(), "high");
+  assert.equal(await page.locator("#editor > .notice").count(), 0, "ordinary observer routing is plain prose, not a warning");
+  assert.equal(await page.locator(".route-row .first").count(), 0, "route ordinal already conveys first choice");
+  await thinking.selectOption("medium");
+  await page.getByRole("status").filter({ hasText: "Observer thinking saved" }).waitFor();
+  saved = JSON.parse(fs.readFileSync(f.configPath, "utf8"));
+  assert.equal(saved.preferences.session_observer.models[0].thinking, "medium");
+  assert.deepEqual(saved.models, f.doc.models);
+  assert.deepEqual(saved.preferences.subagents, f.doc.preferences.subagents);
+  assert.deepEqual(saved.preferences["Quality-Review"], f.doc.preferences["Quality-Review"]);
+  assert.deepEqual(saved.manualTopLevelField, f.doc.manualTopLevelField);
+  await page.screenshot({ path: "/var/tmp/yunuspi-session-observer-wide.png", fullPage: true });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Session Observer", exact: true }).click();
+  assert.equal(await thinking.inputValue(), "medium", "reloading preserves thinking from canonical JSON");
+  await page.setViewportSize({ width: 356, height: 820 });
+  await thinking.focus();
+  assert.equal(await thinking.evaluate(el => el === document.activeElement), true);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "observer controls fit narrow screens");
+  await page.screenshot({ path: "/var/tmp/yunuspi-session-observer-narrow.png", fullPage: true });
+  assert.deepEqual(errors, []);
+});
+
+test("observer resolver preview enforces the runtime context and output capacity", async t => {
+  const f = fixture();
+  const model = f.models.find(model => model.provider === "deepseek");
+  model.reasoning = true;
+  const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath });
+  t.after(async () => { await handle.close(); fs.rmSync(f.root, { recursive: true, force: true }); });
+  const token = new URL(handle.url).pathname.slice(1);
+  for (const capacity of [{ contextWindow: 8192, maxTokens: 8192 }, { contextWindow: 12287, maxTokens: 4096 }, { contextWindow: 12288, maxTokens: 2048 }, { contextWindow: 12288, maxTokens: 4096, api: "openai-codex-responses" }]) {
+    Object.assign(model, capacity);
+    const snapshot = await (await post(handle.url, token, "snapshot", {})).json();
+    assert.equal(snapshot.resolvedByRole.session_observer.status, "unavailable");
+    assert.deepEqual(snapshot.resolvedByRole.session_observer.routes, []);
+  }
+  Object.assign(model, { contextWindow: 12288, maxTokens: 4096, api: "openai-completions" });
+  const ready = await (await post(handle.url, token, "snapshot", {})).json();
+  assert.equal(ready.resolvedByRole.session_observer.status, "ready");
+});
+
+test("observer thinking edits honor suffix precedence and preserve shared aliases", async t => {
+  const f = fixture();
+  f.models.find(model => model.provider === "deepseek").reasoning = true;
+  f.doc.models.observer = { provider: "deepseek", model: "deepseek-flash:high", thinking: "low", futureField: "preserve" };
+  f.doc.preferences.session_observer = { models: ["observer"] };
+  fs.writeFileSync(f.configPath, JSON.stringify(f.doc));
+  const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath });
+  t.after(async () => { await handle.close(); fs.rmSync(f.root, { recursive: true, force: true }); });
+  const page = await openPage(t, handle.url);
+  await page.getByRole("button", { name: "Session Observer", exact: true }).click();
+  assert.equal(await page.getByRole("combobox", { name: "Observer thinking" }).inputValue(), "high");
+  assert.match(await page.locator(".route-row > .route-meta").innerText(), /resolver accepts this route/);
+  await page.getByRole("combobox", { name: "Observer thinking" }).selectOption("off");
+  await page.getByRole("status").filter({ hasText: "Observer thinking saved" }).waitFor();
+  const saved = JSON.parse(fs.readFileSync(f.configPath, "utf8"));
+  assert.deepEqual(saved.models, f.doc.models);
+  assert.deepEqual(saved.preferences.session_observer.models, [{ provider: "deepseek", model: "deepseek-flash", thinking: "off", futureField: "preserve" }]);
 });
 
 test("production server renders the routing GUI and serves verified, persistent upstream variants", async t => {

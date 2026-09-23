@@ -24,7 +24,10 @@ test('source and built terminal footer agree with receipt collectors for retries
  assert.equal(collectSessionCost(retries).total,.03);
  assert.equal(collectSessionCost(retries).pending,0);
  assert.equal(collectSessionMetrics(retries).childTokens,32);
- const cases=[retries,[receipt('quality-review-fixture',{index:0,status:'failed',usage:{}})],
+ const auxiliary=data=>({type:'custom',customType:'auxiliary-model-usage-v1',data:{id:'observer-1',owner:'session-observer',provider:'fixture',model:'observer',...data}});
+ const auxiliaryFinal=auxiliary({status:'completed',usage:{input:100,output:20,cacheRead:80,cacheWrite:0,reasoning:7,cost:{total:.04,source:'provider-reported'}}});
+ const auxiliaryCase=[auxiliary({status:'pending'}),auxiliaryFinal,auxiliaryFinal,auxiliary({status:'pending'})];
+ const cases=[retries,auxiliaryCase,[auxiliary({status:'timeout'})],[receipt('quality-review-fixture',{index:0,status:'failed',usage:{}})],
   [receipt('quality-review-fixture',{index:0,status:'failed',stage:'launch',childProcessStarted:false,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0,costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true,estimatedUsage:false}}})],
   [receipt('started-timeout',{index:0,error:true,timedOut:true,exitCode:1,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}})]];
  for(const entries of cases){
@@ -34,6 +37,7 @@ test('source and built terminal footer agree with receipt collectors for retries
    const rendered=new Component(session,data).render(240).join('\n');
    assert.ok(rendered.includes(`${collectSessionCost(entries).formatted} total`));
    for(const metric of collectSessionMetrics(entries).footer)assert.ok(rendered.includes(metric),metric);
+   if(entries===auxiliaryCase){for(const text of ['↑100','↓20','R80','Agents 0 (0 active)'])assert.ok(rendered.includes(text),text);assert.ok(!rendered.includes('↓27'));}
   }
  }
 });

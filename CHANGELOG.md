@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-09-23
+
+A periodic session observer offers short tool, skill and process advice during active main-agent work. It runs asynchronously about every 4½ minutes, defaults to official DeepSeek Flash with high thinking, and is configured through the existing `/models` role editor or JSON. Idle and unchanged sessions do not trigger inference; requests have bounded context, a deadline and no retry cascade.
+
+Observer notes appear in the TUI. Only the current advisory enters the next normal model request, without waking an idle agent or interrupting tools. Session changes invalidate pending advice, and actual auxiliary usage is accounted separately from spawned agents. See [the observer's behavior and limits](docs/SESSION-OBSERVER.md).
+
 ## 0.4.1 — 2026-09-23
 
 Isolated skill helpers restore only their selected provider's cached model metadata, preserving tool isolation and provider routing constraints. Reasoning models retain a bounded allowance for both reasoning and an answer; a consumed, textless attempt no longer triggers additional provider attempts. Direct prompt-analysis requests enforce proven free-route price caps at dispatch. Foreground and background child receipts preserve output-limit causes. Guardian notes distinguish a standby failure detector from unavailable WASM, and output limits are displayed as limits rather than broken models.

@@ -20,6 +20,23 @@ Invalid aliases, model entries and role lists are reported and skipped while
 valid entries remain active. Unsupported thinking levels retain the model and
 use dynamic child thinking, as described below.
 
+`session_observer` is an exception to autonomous fallback: an absent role uses
+only `deepseek/deepseek-flash` through the official DeepSeek API with `high`
+thinking. An explicit role uses its own ordered routes; it never inherits the
+main model, Subagents list or autonomous alternatives. Missing authentication,
+unsupported configured thinking or unavailable routes skip the observation.
+Observer model IDs must match exactly after aliases are expanded; ambiguous
+provider-free IDs and near matches are rejected. Other roles retain their
+existing matching behavior.
+Observer routes require at least 12,288 context tokens and 4,096 output tokens.
+The native `openai-codex-responses` API cannot enforce a finite output allowance
+and is unavailable for this role; ordinary model roles retain Codex support.
+Malformed observer configuration also skips it. Set
+`"session_observer": { "models": [] }` to disable the observer; removing the
+role restores the default. The `/models` editor exposes these controls under
+**Session Observer**, including the route's thinking level. Saving changes
+affects subsequent observations, not a request already in flight.
+
 A viable preference keeps its place across repeated requests and sessions.
 Usage frequency and random rotation do not move free alternatives ahead of it.
 Context, output, modality, tool-support and quota failures explain why an entry
@@ -84,7 +101,10 @@ normal main-session model:
     "quality_review": { "models": ["cheap_auto"] },
     "project_review": { "models": ["cheap_auto"] },
     "error_review": { "models": ["cheap_auto"] },
-    "prompt_analysis": { "models": ["cheap_auto"] }
+    "prompt_analysis": { "models": ["cheap_auto"] },
+    "session_observer": {
+      "models": [{ "provider": "deepseek", "model": "deepseek-flash", "thinking": "high" }]
+    }
   }
 }
 ```
@@ -97,7 +117,7 @@ normal main-session model:
 - `preferences.<role>.models` is an ordered list of aliases (or inline
   entries). Role names accept `subagents`, `council`, `swarm`, `fusion`,
   `quality_review`, `project_review`, `error_review` and
-  `main_session_fallback`, and `prompt_analysis` (dashes, case and
+  `main_session_fallback`, `prompt_analysis`, and `session_observer` (dashes, case and
   singular/plural variants are accepted). Unknown roles pass through for
   future mechanisms. When `prompt_analysis` has no explicit list, its
   low-cost, tool-free initial and follow-up checks inherit the ordered

@@ -2632,7 +2632,7 @@
       {
         "name": "models",
         "source": "agent/extensions/model-routing-config.ts",
-        "line": 412
+        "line": 419
       },
       {
         "name": "obs",
@@ -3861,7 +3861,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 600,
+      "sourceFiles": 602,
       "registrationSites": 65,
       "indirectRegistrationSites": 16,
       "stableRegistrationRows": 94,
@@ -3998,6 +3998,10 @@
       },
       {
         "path": "agent/extensions/session-hooks.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/session-observer.ts",
         "exists": true
       },
       {
@@ -4388,6 +4392,10 @@
       },
       {
         "path": "agent/extensions/lib/session-observability.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/session-observer.ts",
         "exists": true
       },
       {
@@ -6358,6 +6366,10 @@
       {
         "name": "SESSION-METRICS.md",
         "path": "docs/SESSION-METRICS.md"
+      },
+      {
+        "name": "SESSION-OBSERVER.md",
+        "path": "docs/SESSION-OBSERVER.md"
       },
       {
         "name": "SESSION-RECOVERY-AUDIT.md",

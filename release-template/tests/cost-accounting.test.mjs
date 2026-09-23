@@ -11,6 +11,8 @@ const {collectSessionCost:collect}=await load('extensions/lib/session-cost.ts');
 const {addUsageCost,addAuxiliaryUsage}=await load('extensions/pi-subagents/src/shared/cost-accounting.ts');
 const {sumResultsCost,sumResultsUsage,toAgentToolUsage}=await load('extensions/pi-subagents/src/shared/utils.ts');
 const {persistSubagentCost}=await load('extensions/pi-subagents/src/extension/session-cost.ts');
+const {collectAuxiliaryModelUsage}=await load('extensions/lib/cost-evidence.ts');
+const {collectSessionMetrics}=await load('extensions/lib/session-metrics.ts');
 const {toWaitCompletion}=await load('extensions/pi-subagents/src/runs/background/wait-completions.ts');
 const coreRoot=[path.join(root,'core'),path.join(agent,'runtime','core')].find(p=>fs.existsSync(path.join(p,'ai','src','models.js')));
 assert.ok(coreRoot,'owned core with ai/src/models.js not found');
@@ -24,6 +26,7 @@ const usage=(total,source='provider-reported',extra={})=>({input:100,output:20,c
 const empty=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,cost:0,turns:0});
 const message=(total,provider='openai',model='example',extra={})=>({type:'message',message:{role:'assistant',provider,model,usage:usage(total),...extra}});
 const receipt=(runId,results)=>({type:'custom',customType:'subagent-cost-v1',data:{runId,results}});
+const auxiliary=(id,status,usage,extra={})=>({type:'custom',customType:'auxiliary-model-usage-v1',data:{id,owner:'session-observer',provider:'deepseek',model:'deepseek-flash',status,...(usage?{usage}:{}),...extra}});
 const child=(runId,cost,extra={})=>({runId,usage:{input:100,output:20,cacheRead:0,cacheWrite:0,turns:1,cost},...extra});
 const model={provider:'openai',id:'gpt-5.6-sol',baseUrl:'https://api.openai.com/v1',cost:{input:4,output:20,cacheRead:.4,cacheWrite:5,tiers:[{inputTokensAbove:200000,input:8,output:30,cacheRead:.8,cacheWrite:10}]}};
 
@@ -255,4 +258,58 @@ test('provider zero receipts and complete free pricing remain known even with ze
  }
  assert.equal(readCostEvidence({...empty(),cost:{total:0,complete:false}}).unknown,true);
  assert.equal(hasRecordedTokenUsage({cost:{total:0,source:'provider-reported'}}),false,'cost-only receipt cannot establish token counts');
+});
+
+test('auxiliary pending, timeout and late completion reconcile one physical request without fake agents',()=>{
+ const pending=auxiliary('observer-1','pending'), timeout=auxiliary('observer-1','timeout');
+ for(const entries of [[pending],[pending,timeout]]){
+  const cost=collect(entries), metrics=collectSessionMetrics(entries);
+  assert.equal(cost.formatted,'$?');assert.equal(cost.unknown,true);
+  assert.equal(cost.pending,entries.length===1?1:0);
+  assert.equal(metrics.auxiliary.calls,1);assert.equal(metrics.auxiliary.unknownUsage,1);
+ }
+ const final=auxiliary('observer-1','completed',usage(.03,'provider-reported',{reasoning:7}));
+ const entries=[pending,timeout,final,final,pending,timeout];
+ const cost=collect(entries), metrics=collectSessionMetrics(entries);
+ close(cost.total,.03);close(cost.auxiliary.reported,.03);assert.equal(cost.unknown,false);assert.equal(cost.pending,0);
+ assert.deepEqual(cost.rows.map(r=>[r.scope,r.route]),[['auxiliary','deepseek/deepseek-flash']]);
+ assert.equal(metrics.auxiliary.calls,1);assert.equal(metrics.auxiliary.pending,0);assert.equal(metrics.auxiliary.usageRecorded,1);
+ assert.equal(metrics.auxiliary.tokens,200);assert.equal(metrics.auxiliary.output,20);assert.equal(metrics.auxiliary.reasoning,7);
+ for(const key of ['agents','agentsActive','agentsCompleted','agentsStopped','agentFailures','childTokens','childRows','responses','toolCalls','assistantTurns','input','output','reasoning'])assert.equal(metrics[key],0,key);
+ assert.equal(metrics.jev.hits,0);assert.match(metrics.detail.join('\n'),/Auxiliary model requests: 1/);
+ assert.deepEqual(collectAuxiliaryModelUsage(entries).rows.map(r=>r.status),['completed']);
+});
+
+test('auxiliary reported billing corrects estimates to zero and stale receipts cannot erase known usage',()=>{
+ const estimated=auxiliary('observer-2','completed',usage(.5,'provider-estimate',{reasoning:10}));
+ const reported=auxiliary('observer-2','completed',usage(0,'provider-reported',{reasoning:10}));
+ const entries=[estimated,reported,estimated,auxiliary('observer-2','cancelled'),auxiliary('observer-2','pending')];
+ const cost=collect(entries), metrics=collectSessionMetrics(entries);
+ assert.equal(cost.total,0);assert.equal(cost.estimated,0);assert.equal(cost.unknown,false);assert.equal(cost.formatted,'$0.000');
+ assert.equal(metrics.auxiliary.calls,1);assert.equal(metrics.auxiliary.tokens,200);assert.equal(metrics.auxiliary.reasoning,10);
+ const noTokens=collectSessionMetrics([auxiliary('cost-only','failed',{cost:{total:.1,source:'provider-reported'}})]);
+ assert.equal(noTokens.auxiliary.tokens,0);assert.equal(noTokens.auxiliary.usageRecorded,0);assert.equal(noTokens.auxiliary.unknownUsage,1);
+ const initial=collect([auxiliary('initial','timeout',empty())]);
+ assert.equal(initial.formatted,'$?');assert.equal(initial.unknown,true);
+});
+
+test('auxiliary identity bounds and immutable routes reject malformed metadata without misattribution',()=>{
+ const first=auxiliary('observer-3','completed',usage(.2));
+ const mismatch=auxiliary('observer-3','completed',usage(100),{model:'different-route'});
+ const malformed=auxiliary('x'.repeat(161),'completed',usage(100));
+ const entries=[first,mismatch,malformed,auxiliary('observer-3','completed',usage(.1),{owner:'other-helper'})];
+ const cost=collect(entries), metrics=collectSessionMetrics(entries);
+ close(cost.total,.3);assert.equal(cost.unknown,true);assert.equal(metrics.auxiliary.calls,2);assert.equal(metrics.auxiliary.truncated,true);
+ assert.deepEqual(cost.rows.map(r=>r.route),['deepseek/deepseek-flash']);
+ const secret=auxiliary('safe-fields','completed',{...usage(.1),prompt:'must-not-copy',response:'must-not-copy',cost:{total:.1,source:'provider-reported',endpoint:'must-not-copy'}});
+ assert.doesNotMatch(JSON.stringify(collectAuxiliaryModelUsage([secret])),/must-not-copy/);
+ assert.equal(collectAuxiliaryModelUsage([auxiliary('owner:id','completed',usage(.1),{owner:'first'}),auxiliary('id','completed',usage(.2),{owner:'first:owner'})]).rows.length,2);
+});
+
+test('retained auxiliary request totals do not evict old charges or double-count late updates',()=>{
+ const entries=Array.from({length:10001},(_,i)=>auxiliary(`request-${i}`,'completed',usage(.000001)));
+ entries.push(entries[0],auxiliary('request-0','pending'));
+ const result=collect(entries);
+ close(result.total,.010001);assert.equal(result.unknown,false);assert.equal(result.pending,0);
+ assert.equal(collectSessionMetrics(entries).auxiliary.calls,10001);
 });

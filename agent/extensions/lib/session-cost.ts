@@ -1,5 +1,5 @@
 // @ts-nocheck -- Pure collector, embedded in SDK/CLI; imports supplied by patch.
-import {readCostEvidence, mergeCostEvidence} from './cost-evidence.ts';
+import {readCostEvidence, mergeCostEvidence, collectAuxiliaryModelUsage} from './cost-evidence.ts';
 
 export function collectSessionCost(entries, subscription = false) {
   entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
@@ -116,6 +116,12 @@ export function collectSessionCost(entries, subscription = false) {
     const model = m?.model ?? usage?.cost?.model;
     addRow(isMain ? 'main' : 'auxiliary', provider && model ? `${provider}/${model}` : 'unattributed usage', evidence);
   }
+  const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
+  truncated ||= auxiliaryRequests.truncated;
+  for (const row of auxiliaryRequests.rows) {
+    auxiliary = mergeCostEvidence(auxiliary, row.evidence);
+    addRow('auxiliary', row.route, row.evidence);
+  }
   // Resolve inclusive tree snapshots into own charges. A shared descendant can
   // appear in both a workflow and a step; it is charged once for the session.
   const totals = new Map();
@@ -160,5 +166,5 @@ export function collectSessionCost(entries, subscription = false) {
   const total = evidence.reported + evidence.estimated;
   const amount = total > 0 && total < 0.000001 ? total.toExponential(3) : total > 0 && total < 1 ? total.toFixed(6) : total.toFixed(3);
   const formatted = evidence.seen ? `$${evidence.estimatedUsage ? '~' : ''}${amount}${evidence.unknown ? '+?' : ''}${evidence.subscription ? ' (sub)' : ''}` : evidence.subscription ? `sub${evidence.unknown ? '+?' : ''}` : '$?';
-  return {total, ...evidence, main, children, auxiliary, pending:pending.size, rows:[...rows.values()], formatted};
+  return {total, ...evidence, main, children, auxiliary, pending:pending.size + auxiliaryRequests.rows.filter(row=>row.status === 'pending').length, rows:[...rows.values()], formatted};
 }

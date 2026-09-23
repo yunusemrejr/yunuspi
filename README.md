@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.2.0 adds persisted async delivery receipts, bounded shell context, editable 3D animation with sound, and seven new media/design/deployment tools. The existing `sys_probe` gains service-detail and journal inspection. [What changed](CHANGELOG.md) · [Async and creative tools](docs/ASYNC-AND-STUDIO.md)
+Version 0.5.0 adds a bounded periodic session observer, configured through `/models`, alongside async jobs, project intelligence and creative tools. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Async and creative tools](docs/ASYNC-AND-STUDIO.md)
 
 ## How a session works
 

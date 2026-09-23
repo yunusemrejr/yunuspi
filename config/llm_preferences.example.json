@@ -1,5 +1,5 @@
 {
-  "_comment": "Explicit model/provider preferences layered over autonomous selection. Copy to ~/.pi/settings/llm_preferences.json and adapt. Missing file, malformed JSON, unknown aliases and unusable entries all fall back to the existing autonomous logic — never a failure. See docs/LLM-PREFERENCES.md.",
+  "_comment": "Explicit model/provider preferences layered over autonomous selection. Copy to ~/.pi/settings/llm_preferences.json and adapt. Most roles fall back to autonomous selection when unavailable. session_observer is optional: an absent role uses official DeepSeek Flash/high, an empty list disables it, and invalid or unavailable routes skip observation without fallback. See docs/LLM-PREFERENCES.md.",
   "version": 1,
   "models": {
     "cheap_auto": {
@@ -34,6 +34,11 @@
       "provider": "deepseek",
       "model": "deepseek-chat",
       "thinking": "auto"
+    },
+    "official_deepseek_flash": {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "thinking": "high"
     }
   },
   "preferences": {
@@ -60,6 +65,9 @@
     },
     "error_review": {
       "models": ["balanced_custom", "direct_deepseek", "cheap_auto"]
+    },
+    "session_observer": {
+      "models": ["official_deepseek_flash"]
     }
   },
   "metadata": {

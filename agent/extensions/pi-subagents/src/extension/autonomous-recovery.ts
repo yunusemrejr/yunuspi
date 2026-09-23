@@ -854,3 +854,6 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		ctx.ui.setStatus("autonomous-recovery", undefined);
 	});
 }
+
+// Shared read-only constraint projection for auxiliary session observers.
+export { recoveryConstraints as explicitRecoveryConstraints };

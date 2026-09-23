@@ -37,7 +37,8 @@
     "session-export-json.ts",
     "model-config.ts",
     "model-routing-config.ts",
-    "micro-intelligence.ts"
+    "micro-intelligence.ts",
+    "session-observer.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -131,6 +132,7 @@
     "session-hooks.ts",
     "session-metrics.ts",
     "session-observability.ts",
+    "session-observer.ts",
     "session-report.ts",
     "session-signals.ts",
     "session-stop.ts",

@@ -34,6 +34,8 @@ import { THINKING_LEVELS, type ThinkingLevel } from "../../shared/model-info.ts"
 
 export const LLM_PREFERENCES_ENV = "PI_LLM_PREFERENCES_FILE";
 export const LLM_PREFERENCES_VERSION = 1;
+export const SESSION_OBSERVER_ROLE = "session_observer";
+export const SESSION_OBSERVER_DEFAULT = Object.freeze({ provider: "deepseek", model: "deepseek-flash", thinking: "high" });
 
 /** Per-request OpenRouter backend control. Vocabulary matches the existing
  * `/provider` pins (provider-cmd.ts) and the wire path
@@ -123,6 +125,21 @@ export function clearLlmPreferencesCache(): void {
 	cache = undefined;
 	cacheKey = undefined;
 	cacheStamp = undefined;
+}
+
+/** Deployment opt-in for an absent observer role. Uses the same revision,
+ * lock and verified-backup writer as /models; never replaces an existing role
+ * (including an explicit empty list), aliases or unrelated user fields. */
+export async function ensureSessionObserverPreference(filePath = llmPreferencesPath()): Promise<LlmPreferencesDocumentSave & { changed: boolean }> {
+	const current = readLlmPreferencesDocument(filePath);
+	if (current.exists && !current.ok) return { ok: false, changed: false, reason: current.reason };
+	const document = structuredClone(current.document ?? { version: LLM_PREFERENCES_VERSION, models: {}, preferences: {} });
+	const preferences = document.preferences as Record<string, unknown> | undefined;
+	if (Object.keys(preferences ?? {}).some(role => normalizePreferenceRole(role) === SESSION_OBSERVER_ROLE))
+		return { ok: true, changed: false, revision: current.revision };
+	document.preferences = { ...(preferences ?? {}), [SESSION_OBSERVER_ROLE]: { models: [{ ...SESSION_OBSERVER_DEFAULT }] } };
+	const saved = await saveLlmPreferencesDocument(filePath, current.revision, document);
+	return { ...saved, changed: saved.ok };
 }
 
 /** Validate the public preference schema without normalizing the input object.
@@ -571,6 +588,8 @@ export function normalizePreferenceRole(role: unknown): string | undefined {
 		case "initialintentanalysis":
 		case "followupintentanalysis":
 			return "prompt_analysis";
+		case "sessionobserver":
+			return SESSION_OBSERVER_ROLE;
 		default:
 			return key;
 	}

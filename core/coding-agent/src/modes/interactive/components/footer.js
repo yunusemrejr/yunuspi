@@ -72,6 +72,49 @@ function hasRecordedTokenUsage(usage, noExecution = false) {
   return counts.length > 0 && (counts.some(n => n > 0) || noExecution || readCostEvidence(usage).seen);
 }
 
+/** Direct SDK calls are auxiliary requests, not assistant turns or child agents.
+ * Receipts contain only identity and provider accounting. A pending receipt is
+ * not a zero charge; a late final receipt replaces the same request once. */
+function collectAuxiliaryModelUsage(entries) {
+  const rows = new Map();
+  const fields = ['input','output','cacheRead','cacheWrite','reasoning'];
+  const statuses = new Set(['pending','completed','failed','cancelled','timeout']);
+  const identity = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && /^[a-zA-Z0-9_.:-]+$/.test(value);
+  const routePart = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\s\x00-\x1f\x7f]/.test(value);
+  const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const costQuality = evidence => evidence.unknown ? 0 : evidence.subscription ? 3 : evidence.estimatedUsage ? 1 : evidence.seen ? 2 : 0;
+  let truncated = false;
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry?.type !== 'custom' || entry.customType !== 'auxiliary-model-usage-v1') continue;
+    const data = entry.data;
+    if (!data || !identity(data.id,160) || !identity(data.owner,64) || !routePart(data.provider,128) || !routePart(data.model,256) || !statuses.has(data.status)) { truncated = true; continue; }
+    const key = JSON.stringify([data.owner,data.id]), route = `${data.provider}/${data.model}`;
+    const old = rows.get(key);
+    // Never guess a changed route or evict an earlier bill to fit a bound.
+    // The map is bounded by the retained transcript's distinct request IDs.
+    if (old && old.route !== route) { truncated = true; continue; }
+    const usage = Object.fromEntries(fields.filter(k => valid(data.usage?.[k])).map(k => [k,data.usage[k]]));
+    const evidence = readCostEvidence(data.usage, data.usage ? data.provider : undefined);
+    if (data.status === 'pending') evidence.unknown = true;
+    usage.costDetails = evidence;
+    const usageRecorded = hasRecordedTokenUsage(usage);
+    const tokens = fields.filter(k => k !== 'reasoning').reduce((sum,k) => sum + (usage[k] ?? 0),0);
+    const next = {id:data.id, owner:data.owner, route, status:data.status, usage, usageRecorded, tokens, evidence};
+    if (old) {
+      // Provider billing may correct an earlier estimate down to zero. Missing
+      // or replayed estimate receipts cannot erase already measured usage.
+      if (costQuality(evidence) < costQuality(old.evidence) || !evidence.seen && old.evidence.seen) next.evidence = old.evidence;
+      if (!usageRecorded || old.usageRecorded && tokens < old.tokens) {
+        next.usage = old.usage; next.usageRecorded = old.usageRecorded; next.tokens = old.tokens;
+      }
+      next.usage = {...next.usage, costDetails:next.evidence};
+      if (data.status === 'pending' || old.status === 'completed') next.status = old.status;
+    }
+    rows.set(key,next);
+  }
+  return {rows:[...rows.values()], truncated};
+}
+
 /**
  * Footer component that shows pwd, token stats, and context usage.
  * Computes token/context stats from session, gets git branch and extension statuses from provider.
@@ -118,6 +161,9 @@ export class FooterComponent {
             else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
                 addUsageToTotals(usageTotals, entry.usage);
             }
+        }
+        for (const row of collectAuxiliaryModelUsage(this.session.sessionManager.getEntries()).rows) {
+            for (const field of ['input','output','cacheRead','cacheWrite']) usageTotals[field] += row.usage[field] ?? 0;
         }
         // Calculate context usage from session (handles compaction correctly).
         // After compaction, tokens are unknown until the next LLM response.
@@ -293,6 +339,12 @@ function collectSessionCost(entries, subscription = false) {
     const model = m?.model ?? usage?.cost?.model;
     addRow(isMain ? 'main' : 'auxiliary', provider && model ? `${provider}/${model}` : 'unattributed usage', evidence);
   }
+  const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
+  truncated ||= auxiliaryRequests.truncated;
+  for (const row of auxiliaryRequests.rows) {
+    auxiliary = mergeCostEvidence(auxiliary, row.evidence);
+    addRow('auxiliary', row.route, row.evidence);
+  }
   // Resolve inclusive tree snapshots into own charges. A shared descendant can
   // appear in both a workflow and a step; it is charged once for the session.
   const totals = new Map();
@@ -337,7 +389,7 @@ function collectSessionCost(entries, subscription = false) {
   const total = evidence.reported + evidence.estimated;
   const amount = total > 0 && total < 0.000001 ? total.toExponential(3) : total > 0 && total < 1 ? total.toFixed(6) : total.toFixed(3);
   const formatted = evidence.seen ? `$${evidence.estimatedUsage ? '~' : ''}${amount}${evidence.unknown ? '+?' : ''}${evidence.subscription ? ' (sub)' : ''}` : evidence.subscription ? `sub${evidence.unknown ? '+?' : ''}` : '$?';
-  return {total, ...evidence, main, children, auxiliary, pending:pending.size, rows:[...rows.values()], formatted};
+  return {total, ...evidence, main, children, auxiliary, pending:pending.size + auxiliaryRequests.rows.filter(row=>row.status === 'pending').length, rows:[...rows.values()], formatted};
 }
 
 return collectSessionCost(entries,subscription).formatted;
@@ -609,6 +661,21 @@ function collectSessionMetrics(entries, live) {
    }
   }
  }
+ // Direct SDK helpers have separate accounting: no fabricated child runs,
+ // parent responses, cache-invalidation turns, JEV judgments, or tool calls.
+ const auxiliaryRequests=collectAuxiliaryModelUsage(entries);
+ m.auxiliary={calls:auxiliaryRequests.rows.length,pending:0,usageRecorded:0,unknownUsage:0,truncated:auxiliaryRequests.truncated,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,tokens:0};
+ const auxiliaryModels=new Map();
+ for(const row of auxiliaryRequests.rows){
+  if(row.status==='pending')m.auxiliary.pending++;
+  if(row.usageRecorded)m.auxiliary.usageRecorded++;else m.auxiliary.unknownUsage++;
+  const model=auxiliaryModels.get(row.route)??{route:row.route,calls:0,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0};
+  model.calls++;
+  for(const k of ['input','output','cacheRead','cacheWrite','reasoning']){m.auxiliary[k]+=number(row.usage[k]);model[k]+=number(row.usage[k]);}
+  m.auxiliary.tokens+=row.tokens;
+  if(auxiliaryModels.has(row.route)||auxiliaryModels.size<256)auxiliaryModels.set(row.route,model);
+ }
+ m.auxiliaryModels=[...auxiliaryModels.values()];
  if(live?.segment)segments.set(live.segment,live);
  for(const s of segments.values()){
   m.telemetry=true;
@@ -668,6 +735,7 @@ function collectSessionMetrics(entries, live) {
   `Compactions: ${m.compactions}; recorded child token traffic: ${m.childTokens.toLocaleString('en-US')} (from ${m.childRowsWithUsage.toLocaleString('en-US')} of ${m.childRows.toLocaleString('en-US')} recorded child row(s) carrying usage)`,
   `Parent + compaction token traffic: input ${m.input.toLocaleString('en-US')}, output ${m.output.toLocaleString('en-US')}, cached reads ${m.cacheRead.toLocaleString('en-US')}, cache writes ${m.cacheWrite.toLocaleString('en-US')}`,
   `Reported reasoning tokens: ${m.reasoning.toLocaleString('en-US')} (a subset of output, not additional traffic)`,
+  ...(m.auxiliary.calls||m.auxiliary.truncated?[`Auxiliary model requests: ${m.auxiliary.calls}; pending ${m.auxiliary.pending}; recorded token traffic ${m.auxiliary.tokens.toLocaleString('en-US')} from ${m.auxiliary.usageRecorded} request(s); usage unknown for ${m.auxiliary.unknownUsage}${m.auxiliary.truncated?'; receipt coverage incomplete':''}. Reported auxiliary reasoning ${m.auxiliary.reasoning.toLocaleString('en-US')} is a subset of output. These requests are not child agents or parent responses.`]:[]),
   `Cumulative prompt cache reuse: ${m.cacheRate===null?'unknown':m.cacheRate.toFixed(2)+'%'}; cached tokens were reused, not removed from traffic.`,
   `Cache detail: uncached input ${m.uncachedInput.toLocaleString('en-US')} tokens across ${m.assistantTurns} billed assistant turns; cached reuse ${m.cachedReuse.toLocaleString('en-US')} tokens; no-cache turns ${m.noCacheTurns} (${m.noCacheInput.toLocaleString('en-US')} uncached tokens on routes without caching); invalidation turns ${m.invalidationTurns} with ~${m.invalidationExcessTokens.toLocaleString('en-US')} excess uncached tokens (cached prefix stopped matching and was rebilled). New-content is chars/4 magnitude, not a tokenizer.`,
   `Estimated billed effect: reuse avoids full-price rebill of the matched prefix; it is NOT a billed-amount saving. Repeated projection churn must never be reported as unique savings. Actual billed amounts live in /cost and session-cost evidence, not here.`,

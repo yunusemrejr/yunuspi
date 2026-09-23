@@ -1,5 +1,5 @@
 // @ts-nocheck
-import {hasRecordedTokenUsage} from './cost-evidence.ts';
+import {hasRecordedTokenUsage, collectAuxiliaryModelUsage} from './cost-evidence.ts';
 /** Pure, transcript-backed accounting. Embedded verbatim in both footer builds.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
@@ -189,6 +189,21 @@ export function collectSessionMetrics(entries, live) {
    }
   }
  }
+ // Direct SDK helpers have separate accounting: no fabricated child runs,
+ // parent responses, cache-invalidation turns, JEV judgments, or tool calls.
+ const auxiliaryRequests=collectAuxiliaryModelUsage(entries);
+ m.auxiliary={calls:auxiliaryRequests.rows.length,pending:0,usageRecorded:0,unknownUsage:0,truncated:auxiliaryRequests.truncated,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,tokens:0};
+ const auxiliaryModels=new Map();
+ for(const row of auxiliaryRequests.rows){
+  if(row.status==='pending')m.auxiliary.pending++;
+  if(row.usageRecorded)m.auxiliary.usageRecorded++;else m.auxiliary.unknownUsage++;
+  const model=auxiliaryModels.get(row.route)??{route:row.route,calls:0,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0};
+  model.calls++;
+  for(const k of ['input','output','cacheRead','cacheWrite','reasoning']){m.auxiliary[k]+=number(row.usage[k]);model[k]+=number(row.usage[k]);}
+  m.auxiliary.tokens+=row.tokens;
+  if(auxiliaryModels.has(row.route)||auxiliaryModels.size<256)auxiliaryModels.set(row.route,model);
+ }
+ m.auxiliaryModels=[...auxiliaryModels.values()];
  if(live?.segment)segments.set(live.segment,live);
  for(const s of segments.values()){
   m.telemetry=true;
@@ -248,6 +263,7 @@ export function collectSessionMetrics(entries, live) {
   `Compactions: ${m.compactions}; recorded child token traffic: ${m.childTokens.toLocaleString('en-US')} (from ${m.childRowsWithUsage.toLocaleString('en-US')} of ${m.childRows.toLocaleString('en-US')} recorded child row(s) carrying usage)`,
   `Parent + compaction token traffic: input ${m.input.toLocaleString('en-US')}, output ${m.output.toLocaleString('en-US')}, cached reads ${m.cacheRead.toLocaleString('en-US')}, cache writes ${m.cacheWrite.toLocaleString('en-US')}`,
   `Reported reasoning tokens: ${m.reasoning.toLocaleString('en-US')} (a subset of output, not additional traffic)`,
+  ...(m.auxiliary.calls||m.auxiliary.truncated?[`Auxiliary model requests: ${m.auxiliary.calls}; pending ${m.auxiliary.pending}; recorded token traffic ${m.auxiliary.tokens.toLocaleString('en-US')} from ${m.auxiliary.usageRecorded} request(s); usage unknown for ${m.auxiliary.unknownUsage}${m.auxiliary.truncated?'; receipt coverage incomplete':''}. Reported auxiliary reasoning ${m.auxiliary.reasoning.toLocaleString('en-US')} is a subset of output. These requests are not child agents or parent responses.`]:[]),
   `Cumulative prompt cache reuse: ${m.cacheRate===null?'unknown':m.cacheRate.toFixed(2)+'%'}; cached tokens were reused, not removed from traffic.`,
   `Cache detail: uncached input ${m.uncachedInput.toLocaleString('en-US')} tokens across ${m.assistantTurns} billed assistant turns; cached reuse ${m.cachedReuse.toLocaleString('en-US')} tokens; no-cache turns ${m.noCacheTurns} (${m.noCacheInput.toLocaleString('en-US')} uncached tokens on routes without caching); invalidation turns ${m.invalidationTurns} with ~${m.invalidationExcessTokens.toLocaleString('en-US')} excess uncached tokens (cached prefix stopped matching and was rebilled). New-content is chars/4 magnitude, not a tokenizer.`,
   `Estimated billed effect: reuse avoids full-price rebill of the matched prefix; it is NOT a billed-amount saving. Repeated projection churn must never be reported as unique savings. Actual billed amounts live in /cost and session-cost evidence, not here.`,
