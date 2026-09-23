@@ -157,7 +157,7 @@ export function observerUsage(raw: any) {
   return usage;
 }
 interface ObserverPorts {
-  snapshot: () => { packet: ObserverPacket; route?: ObserverRoute; reason?: string; silent?: boolean; registry?: any; reviewKey?: string; current?: (advice?: ObserverAdvice) => boolean; reviewed?: () => void };
+  snapshot: () => { packet: ObserverPacket; route?: ObserverRoute; reason?: string; silent?: boolean; registry?: any; reviewKey?: string; current?: (advice?: ObserverAdvice) => boolean | string; reviewed?: () => void };
   notice: (status: string, detail: string, advice?: ObserverAdvice) => void;
   receipt: (data: any, owner: string) => void;
   now?: () => number; setTimeout?: typeof setTimeout; clearTimeout?: typeof clearTimeout;
@@ -176,7 +176,13 @@ export function createSessionObserver(ports: ObserverPorts) {
   let flight: { controller: AbortController; cancel: () => void } | undefined, lastHash = '', lastNotice = '';
   let lastReviewAt = -Infinity, lastCheckAt = 0, check = 0;
   const delivered = new Set<string>(), recentAdvice: Set<string>[] = [];
-  let current: { text: string; at: number; generation: number; valid?: () => boolean } | undefined;
+  let current: { evidence: string; body: string; at: number; generation: number; freshness: () => boolean | string | undefined } | undefined;
+  const deliverable = (note: NonNullable<typeof current>) => {
+    const freshness = note.freshness();
+    if (freshness === false) return undefined;
+    const overlap = typeof freshness === 'string' ? `${freshness} after this snapshot, so it may already be addressed; ` : '';
+    return `[Reviewed snapshot: ${note.evidence}; ${overlap}verify against newer work.]\n${note.body}`;
+  };
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, ' ').trim();
   const notice = (status: string, detail: string, advice?: ObserverAdvice) => { const key = `${status}:${detail}:${advice?.note ?? ''}`; if (lastNotice === key) return; lastNotice = key; lastCheckAt = now(); try { ports.notice(status, detail, advice); } catch {} };
   const checkIn = (detail: string) => { if (now() - lastCheckAt >= OBSERVER_MAX_GAP_MS - interval) notice('checked', `Review ${++check}: ${detail}`); };
@@ -223,14 +229,18 @@ export function createSessionObserver(ports: ObserverPorts) {
       const advice = parseObserverAdvice(text, snapshot.packet);
       if (!advice) { current = undefined; notice('unavailable', 'Observer response did not meet the evidence contract'); return; }
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
-      if (snapshot.current?.(advice) === false) { current = undefined; notice('reviewed', 'Session advanced during review; outdated advice discarded.'); return; }
+      // false: the cited state changed or coverage was lost, so the premise is
+      // gone. A string names overlapping later work; the review keeps its value.
+      const freshness = snapshot.current?.(advice);
+      if (freshness === false) { current = undefined; notice('reviewed', 'State cited by this review changed before it finished; advice no longer applies.'); return; }
+      const overlap = typeof freshness === 'string' ? freshness : undefined;
       if (!advice.note) { current = undefined; notice('reviewed', `Chunk ${++check}: no useful new reminder.`); return; }
       const body = observerAdviceText(advice), key = normalize(body), tokens = new Set(normalize(advice.note).split(' '));
       const repeated = delivered.has(key) || recentAdvice.some(previous => tokens.size >= 6 && [...tokens].filter(token => previous.has(token)).length / new Set([...tokens, ...previous]).size >= .8);
       if (repeated) { current = undefined; notice('reviewed', `Chunk ${++check}: repeated advice suppressed.`); return; }
       delivered.add(key); recentAdvice.push(tokens); if (recentAdvice.length > 256) recentAdvice.shift();
-      current = { text: `[Reviewed snapshot: ${advice.evidence.join(', ')}; verify against newer work.]\n${body}`, at: now(), generation: epoch, valid: () => snapshot.current?.(advice) !== false };
-      notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s`, advice);
+      current = { evidence: advice.evidence.join(', '), body, at: now(), generation: epoch, freshness: () => snapshot.current?.(advice) };
+      notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s${overlap ? ` · ${overlap} meanwhile` : ''}`, advice);
     } catch { if (!controller.signal.aborted && generation === epoch && active && owner === origin) notice('unavailable', 'Observer evidence could not be reconciled'); } finally { unschedule(deadline); if (!terminal && !cancelled && !timedOut) thisFlight.cancel(); }
   }
   return {
@@ -243,7 +253,7 @@ export function createSessionObserver(ports: ObserverPorts) {
     close() { closed = true; active = false; current = undefined; generation++; stopTimer(); flight?.cancel(); },
     context() {
       const note = current; current = undefined;
-      return active && note?.generation === generation && now() - note.at <= OBSERVER_MAX_GAP_MS && note.valid?.() !== false ? note.text : undefined;
+      return active && note?.generation === generation && now() - note.at <= OBSERVER_MAX_GAP_MS ? deliverable(note) : undefined;
     },
   };
 }

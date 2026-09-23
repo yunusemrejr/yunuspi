@@ -129,10 +129,15 @@ test("thinking choices agree with core when a model has no extended-level map", 
 		preferences: { subagents: { models: ["extended"] } },
 	});
 	const unsupported = fallback.resolveLlmPreferenceChain("subagents", [plain]);
-	assert.equal(unsupported[0].thinking, undefined);
-	assert.equal(unsupported[0].dynamicThinking, true);
+	assert.equal(unsupported[0].thinking, "high", "explicit strength clamps like core instead of silently becoming dynamic");
+	assert.equal(unsupported[0].dynamicThinking, false);
+	assert.ok(unsupported[0].explanation.includes("thinking high (requested xhigh is unsupported)"));
 	const supported = fallback.resolveLlmPreferenceChain("subagents", [extended]);
 	assert.equal(supported[0].thinking, "xhigh");
+	const noMax = { ...plain, thinkingLevelMap: { off: null, xhigh: "xhigh", max: null } };
+	assert.equal(modelInfo.clampSupportedThinkingLevel(noMax, "max"), "xhigh");
+	assert.equal(modelInfo.clampSupportedThinkingLevel(noMax, "off"), "minimal");
+	assert.equal(modelInfo.clampSupportedThinkingLevel({ ...plain, reasoning: false }, "high"), "off");
 });
 
 test("provider options translate to existing OpenRouter routing vocabulary", () => {

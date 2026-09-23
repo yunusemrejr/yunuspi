@@ -117,15 +117,20 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         const citedText = cited.filter(row => row.kind !== 'user request').map(row => row.text).join(' ');
         const targets = resources(`${citedText} ${advice?.note ?? ''}`), focus = relevantWords(advice?.note ?? '');
         const suggestedTools = new Set<string>(advice?.tools ?? []);
+        // Overlapping later work does not falsify a review: the note is still
+        // delivered, labelled so the agent checks whether it was already
+        // addressed. Only changed cited state or lost coverage discards it.
         for (const row of recent) {
           const index = Number(row.id.replace('event-', ''));
           if (index <= capturedSequence || !['tool started', 'tool result', 'tool error', 'assistant text'].includes(row.kind)) continue;
           const changedTargets = resources(row.text), changedFocus = relevantWords(row.text);
-          if ([...targets].some(target => changedTargets.has(target))) return false;
-          if ([...focus].some(word => changedFocus.has(word))) return false;
+          const target = [...targets].find(item => changedTargets.has(item));
+          if (target) return `later work touched ${target}`;
+          const word = [...focus].find(item => changedFocus.has(item));
+          if (word) return `later work continued on "${word}"`;
           // A suggested tool without a named resource may already be doing the
           // requested work. Distinct named resources permit unrelated progress.
-          if (row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size)) return false;
+          if (row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size)) return `a later ${row.tool} call may have covered this`;
         }
         return true;
       };
@@ -138,7 +143,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
       if (advice) { adviceHistory.push(observerAdviceText(advice)); if (adviceHistory.length > 8) adviceHistory.shift(); }
-      const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
+      const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
       pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: boundedObserverText(detail, 140) } }, { triggerTurn: false });
     },
     receipt(data: any, origin: string) {

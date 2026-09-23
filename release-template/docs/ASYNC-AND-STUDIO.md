@@ -28,6 +28,8 @@ For independent long-running project commands, use existing `bg_run`; keep depen
 
 ## 3D, sound and motion
 
+For complete narrated videos built from code (storyboard, master timeline, Remotion scenes, local narration, procedural audio and a visual QA loop), see [code-first video studio](VIDEO-STUDIO.md). The tools below remain the quick path for standalone 3D shots, clip timelines and mixes.
+
 | Tool | Produces |
 | --- | --- |
 | `scene_create` | Editable, validated scene JSON and a self-contained Three.js HTML preview with its MIT license. Start from `orbital`, `kinetic` or `sculpture`, or supply a scene. |

@@ -20,7 +20,7 @@ import {
 	writeChildToolDiagnostic,
 	type ChildToolDiagnostic,
 } from "./tool-availability.ts";
-import { TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
+import { TOKEN_BUDGET_ENV, TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
 import type { JsonSchemaObject, ResolvedToolBudget, SubagentState } from "../../shared/types.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
 import { getAgentDir, resolveWatchPath } from "../../shared/utils.ts";
@@ -66,7 +66,8 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
  // Keep the ordinary helper ceiling for those models; the parent still owns
  // the cumulative token, cost and deadline budgets and the bounded JSON result.
  const discovery = process.env[SUBAGENT_CHILD_AGENT_ENV] === "automatic-skill-discovery";
- const outputLimit = discovery && !model.reasoning ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens;
+ const reasoningEnabled = Boolean(model.reasoning) && requestEnablesReasoning(payload);
+ const outputLimit = discovery && !model.reasoning ? 1024 : AUTOMATIC_HELPER_LIMITS.outputTokens + (reasoningEnabled ? AUTOMATIC_HELPER_LIMITS.reasoningOutputTokens : 0);
  const fields=["max_tokens","max_completion_tokens","max_output_tokens"].filter(key=>Object.hasOwn(payload,key));
  if(!fields.length) fields.push(model.api==="openai-responses"?"max_output_tokens":"max_tokens");
  for(const field of fields) {
@@ -82,6 +83,12 @@ export function capAutomaticHelperRequest(raw: any, model: NonNullable<Extension
   payload={...payload,thinking:{...payload.thinking,budget_tokens:budget}};
  }
  return payload;
+}
+
+function requestEnablesReasoning(payload: any): boolean {
+ const off = (value: unknown) => value === undefined || value === null || value === false || value === "none" || value === "off" || value === "minimal";
+ return !off(payload?.reasoning_effort) || (payload?.reasoning && typeof payload.reasoning === "object" && (!off(payload.reasoning.effort) || payload.reasoning.enabled === true || Number(payload.reasoning.max_tokens) > 0))
+  || payload?.thinking?.type === "enabled" || payload?.enable_thinking === true;
 }
 
 const SUBAGENT_INHERIT_PROJECT_CONTEXT_ENV = "PI_SUBAGENT_INHERIT_PROJECT_CONTEXT";
@@ -556,6 +563,35 @@ export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget 
 	});
 }
 
+/** Automatic read-only helpers finalize before their reported-token budget is
+ * crossed. The parent only accounts the budget after exit, so without this a
+ * reviewer kept reading until its deadline and the whole paid review was lost. */
+export function registerTokenBudget(pi: ExtensionAPI, hard: number): void {
+	if (!Number.isSafeInteger(hard) || hard <= 0) return;
+	if (!["automatic-free-assistant", "automatic-skill-discovery"].includes(process.env[SUBAGENT_CHILD_AGENT_ENV] ?? "")) return;
+	let used = 0;
+	let finalized = false;
+	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { message?: any }) => unknown) => void;
+	onRuntimeEvent("message_end", (event) => {
+		const message = event.message;
+		if (finalized || message?.role !== "assistant") return;
+		const input = Number.isSafeInteger(message.usage?.input) ? message.usage.input : 0;
+		const output = Number.isSafeInteger(message.usage?.output) ? message.usage.output : 0;
+		used += input + output;
+		if (!message.content?.some((part: any) => part?.type === "toolCall")) return;
+		// The next request resends about this turn's uncached input plus an answer.
+		if (used + input + AUTOMATIC_HELPER_LIMITS.outputTokens < hard) return;
+		finalized = true;
+		pi.setActiveTools([]);
+		try {
+			sendUserMessage?.(`Token budget nearly used (${used} of ${hard} reported tokens). Tools are now disabled; write your final answer from the evidence you already have.`, { deliverAs: "steer" });
+		} catch {
+			// Removing tools is authoritative; the steer only explains it.
+		}
+	});
+}
+
 export function registerSteeringInbox(
 	pi: ExtensionAPI,
 	deps: {
@@ -839,6 +875,7 @@ export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): P
 	registerPermissionGate(pi);
 	registerGitAuthorityGate(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
+	registerTokenBudget(pi, Number(process.env[TOKEN_BUDGET_ENV]));
 	registerChildWatchdog(pi);
 	registerSubagentModelRouteOverride(pi);
 	const waitToolConfig = resolveWaitToolConfig();

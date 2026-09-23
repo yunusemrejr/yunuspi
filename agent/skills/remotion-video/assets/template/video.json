@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "title": "Untitled video",
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "theme": {
+    "background": "#0b0f17",
+    "surface": "#151c29",
+    "ink": "#eef2f8",
+    "muted": "#8b97aa",
+    "accent": "#5eead4",
+    "accent2": "#f5b544",
+    "danger": "#f87171",
+    "display": "Fraunces",
+    "text": "Inter",
+    "mono": "JetBrains Mono"
+  },
+  "audio": {
+    "music": null,
+    "musicVolume": 0.22,
+    "musicDuckedVolume": 0.07,
+    "narrationVolume": 1,
+    "sfx": []
+  },
+  "scenes": [
+    {
+      "id": "opening",
+      "component": "TitleCard",
+      "seconds": 5,
+      "narration": "Replace this line with the opening narration.",
+      "narrationAudio": null,
+      "narrationOffset": 0.4,
+      "props": { "kicker": "Chapter one", "title": "A title that states the idea", "subtitle": "One short supporting line" },
+      "cues": { "title": 0.3, "subtitle": 1.4 }
+    },
+    {
+      "id": "idea",
+      "component": "DiagramScene",
+      "seconds": 7,
+      "narration": "Describe what the diagram shows, in the order it appears.",
+      "narrationAudio": null,
+      "narrationOffset": 0.3,
+      "props": { "label": "Signals flow through the network", "layers": [3, 5, 5, 2] },
+      "cues": { "network": 0.2, "signal": 2.0, "label": 3.2 }
+    }
+  ]
+}

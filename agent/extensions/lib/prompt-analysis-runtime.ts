@@ -27,6 +27,8 @@ export interface PromptAnalysisAttempt {
   outputTokens?: number;
   /** Private-safe category; provider error bodies are never copied to UI. */
   failureCategory?: FailureCategory;
+  /** Wall-clock allowance that expired for a timeout outcome. */
+  timeoutMs?: number;
 }
 
 export interface PromptAnalysisRun {
@@ -204,7 +206,7 @@ export async function runPromptAnalysis(input: {
       if (response === timeout) {
         stopped = true;
         usageStates.set(attempt, "pending");
-        reportAttempt({ attempt, route: candidate.route, outcome: "timeout", usage: "pending" });
+        reportAttempt({ attempt, route: candidate.route, outcome: "timeout", usage: "pending", timeoutMs: Math.round(attemptBudget) });
         controller.abort(new Error("Prompt analysis route timed out"));
         continue;
       }

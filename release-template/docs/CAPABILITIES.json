@@ -2148,6 +2148,68 @@
       "commands": []
     },
     {
+      "id": "video-studio",
+      "group": "web_media",
+      "summary": "Produce code-first videos: Remotion projects driven by one master video.json timeline, reusable SVG/Canvas primitives, local Piper narration with measured durations, seeded procedural music/sfx, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.",
+      "entrypoints": [
+        "video_project",
+        "video_render",
+        "video_qa",
+        "narration_tts",
+        "audio_synth"
+      ],
+      "tools": [
+        "video_project",
+        "video_render",
+        "video_qa",
+        "narration_tts",
+        "audio_synth",
+        "video_frames",
+        "media_info",
+        "audio_analyze"
+      ],
+      "options": [
+        {
+          "name": "dir",
+          "summary": "Video project directory inside the workspace (video.json + src/)."
+        },
+        {
+          "name": "mode",
+          "values": [
+            "stills",
+            "preview",
+            "final"
+          ],
+          "summary": "stills with contact sheet, preview of a scene or seconds range, or final."
+        },
+        {
+          "name": "action",
+          "summary": "Project init/check/install or narration status/install/synthesize."
+        },
+        {
+          "name": "kind",
+          "values": [
+            "music",
+            "sfx"
+          ],
+          "summary": "Procedural audio music bed or sound effect."
+        }
+      ],
+      "related": [
+        "creative-studio",
+        "web-and-media",
+        "background-tasks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/video-studio.ts",
+        "agent/extensions/lib/video-studio.ts",
+        "agent/scripts/video-render.mjs",
+        "agent/skills/procedural-audio/scripts/synth.py"
+      ],
+      "doc": "docs/VIDEO-STUDIO.md",
+      "commands": []
+    },
+    {
       "id": "rendered-design-review",
       "group": "engineering",
       "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
@@ -2581,52 +2643,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113713
+        "line": 113729
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113417
+        "line": 113433
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113474
+        "line": 113490
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113509
+        "line": 113525
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113486
+        "line": 113502
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113628
+        "line": 113644
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113442
+        "line": 113458
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113410
+        "line": 113426
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113647
+        "line": 113663
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113424
+        "line": 113440
       },
       {
         "name": "logs",
@@ -3130,7 +3192,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 415,
+        "line": 418,
         "kind": "literal"
       },
       {
@@ -3275,7 +3337,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 897,
+        "line": 934,
         "kind": "literal"
       },
       {
@@ -3554,7 +3616,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 415,
+        "line": 418,
         "kind": "literal"
       },
       {
@@ -3644,7 +3706,7 @@
       {
         "name": "structured_output",
         "source": "agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts",
-        "line": 897,
+        "line": 934,
         "kind": "literal"
       },
       {
@@ -3872,15 +3934,24 @@
           "workflow_probe",
           "workspace_search"
         ]
+      },
+      {
+        "source": "agent/extensions/video-studio.ts",
+        "signals": [
+          "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
+        ],
+        "lines": [
+          11
+        ]
       }
     ],
     "coverage": {
-      "sourceFiles": 604,
-      "registrationSites": 65,
-      "indirectRegistrationSites": 16,
+      "sourceFiles": 606,
+      "registrationSites": 66,
+      "indirectRegistrationSites": 17,
       "stableRegistrationRows": 94,
       "uniqueStableTools": 93,
-      "dynamicOwnerCount": 12,
+      "dynamicOwnerCount": 13,
       "excludedGeneratedDirectories": [
         "dist",
         "build",
@@ -4040,6 +4111,10 @@
       },
       {
         "path": "agent/extensions/utility-tools.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/video-studio.ts",
         "exists": true
       }
     ],
@@ -4505,6 +4580,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/video-studio.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/workspace-write-lease.ts",
         "exists": true
       }
@@ -4916,6 +4995,10 @@
       },
       {
         "path": "agent/scripts/transaction.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/video-render.mjs",
         "exists": true
       },
       {
@@ -5700,6 +5783,10 @@
         "path": "agent/skills/cloudflare-platform-engineering/SKILL.md"
       },
       {
+        "name": "code-first-video",
+        "path": "agent/skills/code-first-video/SKILL.md"
+      },
+      {
         "name": "coding-practices",
         "path": "agent/skills/coding-practices/SKILL.md"
       },
@@ -6036,6 +6123,10 @@
         "path": "agent/skills/procedural-animation-math/SKILL.md"
       },
       {
+        "name": "procedural-audio",
+        "path": "agent/skills/procedural-audio/SKILL.md"
+      },
+      {
         "name": "product-ui-verification",
         "path": "agent/skills/product-ui-verification/SKILL.md"
       },
@@ -6062,6 +6153,10 @@
       {
         "name": "reinforcement-learning",
         "path": "agent/skills/reinforcement-learning/SKILL.md"
+      },
+      {
+        "name": "remotion-video",
+        "path": "agent/skills/remotion-video/SKILL.md"
       },
       {
         "name": "research",
@@ -6408,6 +6503,10 @@
       {
         "name": "UNREAL-INTEGRATION-REVIEW.md",
         "path": "docs/UNREAL-INTEGRATION-REVIEW.md"
+      },
+      {
+        "name": "VIDEO-STUDIO.md",
+        "path": "docs/VIDEO-STUDIO.md"
       }
     ]
   }

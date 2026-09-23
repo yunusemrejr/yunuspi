@@ -928,6 +928,27 @@ Author editable local 3D scenes and fixed-clock animations, render H.264 video a
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
+#### video-studio
+
+Produce code-first videos: Remotion projects driven by one master video.json timeline, reusable SVG/Canvas primitives, local Piper narration with measured durations, seeded procedural music/sfx, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.
+
+**Entrypoints:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `audio_synth`
+
+**Catalog tool pointers:** `video_project`, `video_render`, `video_qa`, `narration_tts`, `audio_synth`, `video_frames`, `media_info`, `audio_analyze`
+
+**Options:**
+
+- `dir`: Video project directory inside the workspace (video.json + src/).
+- `mode`: stills with contact sheet, preview of a scene or seconds range, or final. Values: `stills`, `preview`, `final`.
+- `action`: Project init/check/install or narration status/install/synthesize.
+- `kind`: Procedural audio music bed or sound effect. Values: `music`, `sfx`.
+
+**Related records:** `creative-studio`, `web-and-media`, `background-tasks`
+
+**Source:** [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts), [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts), [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs), [`agent/skills/procedural-audio/scripts/synth.py`](../../agent/skills/procedural-audio/scripts/synth.py)
+
+**Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
+
 #### research-toolkit
 
 Plan research angles and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research and verify primary sources.
@@ -1010,7 +1031,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2749; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2893; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2019; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 415; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 418; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 222; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 847; literal)
@@ -1034,7 +1055,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
-- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 897; literal)
+- `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 934; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 759; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
@@ -1069,6 +1090,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1659, 2247, 2401, 2800)
 - [`agent/extensions/rpiv-todo/todo.ts`](../../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 70)
 - [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
+- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 11)
 
 ### Literal slash commands
 
@@ -1091,16 +1113,16 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 76)
 - /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 553)
 - /kill — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 600)
-- /lens-allow-edit — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113713)
-- /lens-context-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113417)
-- /lens-drift — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113474)
-- /lens-health — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113509)
-- /lens-map — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113486)
-- /lens-perf — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113628)
-- /lens-tdi — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113442)
-- /lens-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113410)
-- /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113647)
-- /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113424)
+- /lens-allow-edit — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113729)
+- /lens-context-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113433)
+- /lens-drift — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113490)
+- /lens-health — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113525)
+- /lens-map — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113502)
+- /lens-perf — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113644)
+- /lens-tdi — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113458)
+- /lens-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113426)
+- /lens-tools — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113663)
+- /lens-widget-toggle — [`agent/extensions/pi-lens/dist/index.js`](../../agent/extensions/pi-lens/dist/index.js) (line 113440)
 - /logs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 568)
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../../agent/extensions/pi-memory/priming.ts) (line 184)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 58)
@@ -1258,6 +1280,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/thinking.ts`](../../agent/extensions/thinking.ts)
 - [`agent/extensions/timeout-guard.ts`](../../agent/extensions/timeout-guard.ts)
 - [`agent/extensions/utility-tools.ts`](../../agent/extensions/utility-tools.ts)
+- [`agent/extensions/video-studio.ts`](../../agent/extensions/video-studio.ts)
 
 ### Libraries
 
@@ -1376,6 +1399,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/token-budget.ts`](../../agent/extensions/lib/token-budget.ts)
 - [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts)
 - [`agent/extensions/lib/utility-client.ts`](../../agent/extensions/lib/utility-client.ts)
+- [`agent/extensions/lib/video-studio.ts`](../../agent/extensions/lib/video-studio.ts)
 - [`agent/extensions/lib/workspace-write-lease.ts`](../../agent/extensions/lib/workspace-write-lease.ts)
 
 ### Local forks
@@ -1483,6 +1507,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/systemd/pi-mini-preprocessor.service`](../../agent/scripts/systemd/pi-mini-preprocessor.service)
 - [`agent/scripts/systemd/pi-smol-preprocessor.service`](../../agent/scripts/systemd/pi-smol-preprocessor.service)
 - [`agent/scripts/transaction.mjs`](../../agent/scripts/transaction.mjs)
+- [`agent/scripts/video-render.mjs`](../../agent/scripts/video-render.mjs)
 - [`agent/scripts/wait-condition.mjs`](../../agent/scripts/wait-condition.mjs)
 - [`agent/scripts/workspace-facts.mjs`](../../agent/scripts/workspace-facts.mjs)
 
@@ -1523,7 +1548,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 157 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 160 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../../agent/skills/ai-engineering/SKILL.md)
@@ -1545,6 +1570,7 @@ The exporter includes 157 public skill directories. This list is a path inventor
 - `cinematic-pixel-scene` — [`agent/skills/cinematic-pixel-scene/SKILL.md`](../../agent/skills/cinematic-pixel-scene/SKILL.md)
 - `classical-ml-modeling` — [`agent/skills/classical-ml-modeling/SKILL.md`](../../agent/skills/classical-ml-modeling/SKILL.md)
 - `cloudflare-platform-engineering` — [`agent/skills/cloudflare-platform-engineering/SKILL.md`](../../agent/skills/cloudflare-platform-engineering/SKILL.md)
+- `code-first-video` — [`agent/skills/code-first-video/SKILL.md`](../../agent/skills/code-first-video/SKILL.md)
 - `coding-practices` — [`agent/skills/coding-practices/SKILL.md`](../../agent/skills/coding-practices/SKILL.md)
 - `color-theory` — [`agent/skills/color-theory/SKILL.md`](../../agent/skills/color-theory/SKILL.md)
 - `colors` — [`agent/skills/colors/SKILL.md`](../../agent/skills/colors/SKILL.md)
@@ -1629,6 +1655,7 @@ The exporter includes 157 public skill directories. This list is a path inventor
 - `ponytail` — [`agent/skills/ponytail/SKILL.md`](../../agent/skills/ponytail/SKILL.md)
 - `presentation-authoring` — [`agent/skills/presentation-authoring/SKILL.md`](../../agent/skills/presentation-authoring/SKILL.md)
 - `procedural-animation-math` — [`agent/skills/procedural-animation-math/SKILL.md`](../../agent/skills/procedural-animation-math/SKILL.md)
+- `procedural-audio` — [`agent/skills/procedural-audio/SKILL.md`](../../agent/skills/procedural-audio/SKILL.md)
 - `product-ui-verification` — [`agent/skills/product-ui-verification/SKILL.md`](../../agent/skills/product-ui-verification/SKILL.md)
 - `property-based-testing` — [`agent/skills/property-based-testing/SKILL.md`](../../agent/skills/property-based-testing/SKILL.md)
 - `proxy-analysis` — [`agent/skills/proxy-analysis/SKILL.md`](../../agent/skills/proxy-analysis/SKILL.md)
@@ -1636,6 +1663,7 @@ The exporter includes 157 public skill directories. This list is a path inventor
 - `python-software-engineering` — [`agent/skills/python-software-engineering/SKILL.md`](../../agent/skills/python-software-engineering/SKILL.md)
 - `rag-engineering` — [`agent/skills/rag-engineering/SKILL.md`](../../agent/skills/rag-engineering/SKILL.md)
 - `reinforcement-learning` — [`agent/skills/reinforcement-learning/SKILL.md`](../../agent/skills/reinforcement-learning/SKILL.md)
+- `remotion-video` — [`agent/skills/remotion-video/SKILL.md`](../../agent/skills/remotion-video/SKILL.md)
 - `research` — [`agent/skills/research/SKILL.md`](../../agent/skills/research/SKILL.md)
 - `resourceful-market-strategy` — [`agent/skills/resourceful-market-strategy/SKILL.md`](../../agent/skills/resourceful-market-strategy/SKILL.md)
 - `rl-decision-systems` — [`agent/skills/rl-decision-systems/SKILL.md`](../../agent/skills/rl-decision-systems/SKILL.md)
@@ -1731,6 +1759,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/STRUCTURE.md`](STRUCTURE.md)
 - [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 - [`docs/UNREAL-INTEGRATION-REVIEW.md`](UNREAL-INTEGRATION-REVIEW.md)
+- [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
 ## Retired source markers
 

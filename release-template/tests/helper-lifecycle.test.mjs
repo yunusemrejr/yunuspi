@@ -337,9 +337,11 @@ test('large user prompts are hashed, bounded for analysis, and not retained in r
 		messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
 		requestMessages: [{ requestId: 'large', turnId: 'turn-large', messageIndex: 0 }],
 	});
-	assert.equal(context.messages[1].details.promptHash, createHash('sha256').update(prompt).digest('hex'));
-	assert.ok(JSON.stringify(context.messages[1]).length < 20_000);
-	assert.doesNotMatch(JSON.stringify(context.messages[1]), /PRIVATE-RAW-PROMPT/);
+	assert.equal(context, undefined, 'a routeless deterministic fallback adds nothing to model context');
+	const shown = f.customMessages.find(({ message }) => message.customType === 'prompt-analysis')?.message;
+	assert.equal(shown.details.promptHash, createHash('sha256').update(prompt).digest('hex'));
+	assert.ok(JSON.stringify(shown).length < 20_000);
+	assert.doesNotMatch(JSON.stringify(shown), /PRIVATE-RAW-PROMPT/);
 	assert.ok(f.completions.length === 0);
 });
 

@@ -2,7 +2,7 @@ import { sessionObservability } from '../../../../lib/session-observability.ts';
 import { readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { getSupportedThinkingLevels, splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
+import { clampSupportedThinkingLevel, splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
 import type { Usage } from "../../shared/types.ts";
 import { getAgentDir } from "../../shared/utils.ts";
 import { filterFallbackCandidates, findModelExclusion, parseModelKey, recordModelFailure } from "./model-exclusions.ts";
@@ -578,14 +578,14 @@ function resolvePreferenceEntries(role: string, availableModels: AvailableModelI
 		}
 		const wanted = suffix.thinkingSuffix ? suffix.thinkingSuffix.slice(1) : entry.thinking;
 		const norm = normalizeThinking(wanted);
-		const thinking = !norm.dynamic && norm.thinking && getSupportedThinkingLevels(info).includes(norm.thinking) ? norm.thinking : undefined;
+		const thinking = !norm.dynamic && norm.thinking ? clampSupportedThinkingLevel(info, norm.thinking) : undefined;
 		seen.add(identity);
 		out.push({
 			route: base,
 			...(thinking ? { thinking } : {}),
 			dynamicThinking: !thinking,
 			...(translated.routing ? { providerRouting: translated.routing } : {}),
-			explanation: [`explicit llm_preferences (${role})`, ...(thinking ? [`thinking ${thinking}`] : ["dynamic thinking"]), ...(translated.routing ? ["openrouter backend routing"] : [])],
+			explanation: [`explicit llm_preferences (${role})`, ...(thinking ? [thinking === norm.thinking ? `thinking ${thinking}` : `thinking ${thinking} (requested ${norm.thinking} is unsupported)`] : ["dynamic thinking"]), ...(translated.routing ? ["openrouter backend routing"] : [])],
 		});
 	}
 	return out;

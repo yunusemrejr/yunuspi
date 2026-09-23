@@ -5,6 +5,8 @@ description: Produce timed motion graphics for video, including title sequences,
 
 # Motion graphics production
 
+For a complete narrated explainer or documentary, use the code-first-video skill; it builds on these principles with a master timeline, narration and a review loop.
+
 Establish message, aspect ratio, duration, frame rate and delivery format. Convert the story into beats with readable holds and deliberate entrances/exits. Use the existing typography and visual direction. For music or narration, map cue seconds before animating; effects should support the focal point.
 
 Make each frame a function of absolute time. Seed randomness, wait for fonts/assets and avoid accumulated frame deltas. For browser graphics, the [timeline starter](assets/timeline-starter.html) exposes `window.renderFrame(seconds)` and an editable beat sequence. Copy it into the project, adapt the design and retain the render function. It is a mechanical starting point, not a finished visual style.

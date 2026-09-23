@@ -847,6 +847,17 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/ASYNC-AND-STUDIO.md",
 	}),
 	capability({
+		id: "video-studio",
+		group: "web_media",
+		summary: "Produce code-first videos: Remotion projects driven by one master video.json timeline, reusable SVG/Canvas primitives, local Piper narration with measured durations, seeded procedural music/sfx, stills contact sheets, scene previews, decode-verified finals and automated picture/loudness/sync QA with mandatory visual review.",
+		entrypoints: ["video_project", "video_render", "video_qa", "narration_tts", "audio_synth"],
+		tools: ["video_project", "video_render", "video_qa", "narration_tts", "audio_synth", "video_frames", "media_info", "audio_analyze"],
+		options: [option("dir", "Video project directory inside the workspace (video.json + src/)."), option("mode", "stills with contact sheet, preview of a scene or seconds range, or final.", ["stills", "preview", "final"]), option("action", "Project init/check/install or narration status/install/synthesize."), option("kind", "Procedural audio music bed or sound effect.", ["music", "sfx"])],
+		related: ["creative-studio", "web-and-media", "background-tasks"],
+		sourceFiles: ["agent/extensions/video-studio.ts", "agent/extensions/lib/video-studio.ts", "agent/scripts/video-render.mjs", "agent/skills/procedural-audio/scripts/synth.py"],
+		doc: "agent/public-template/docs/VIDEO-STUDIO.md",
+	}),
+	capability({
 		id: "rendered-design-review",
 		group: "engineering",
 		summary: "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",

@@ -223,18 +223,19 @@ test('observer reviews chronological chunks without losing earlier tool outcomes
   h.close();
 });
 
-test('completed work invalidates in-flight and queued advice and an accepted note is consumed once', async () => {
+test('overlapping later work keeps paid advice with an explicit may-be-addressed caveat, consumed once', async () => {
   let resolve;
   const h=harness(async()=>new Promise(done=>{resolve=done;}));
   h.input('Fix parser validation.');await h.advance(30000);
   h.emit('tool_result',{toolName:'read',input:{path:'/fixture/parser.ts',offset:1,limit:200},content:[{type:'text',text:'The exact parser source was read successfully.'}]});
   resolve({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Have you read the parser source yet?',evidence:['request'],tools:['read'],skills:[]})}]});await flush();
-  assert.equal(h.sent.filter(([message])=>message.content.includes('returned a note')).length,0);
-  assert.match(h.sent.at(-1)[0].content,/outdated advice discarded/);
-  assert.equal(h.emit('context',{messages:[]}),undefined);h.close();
+  assert.match(h.sent.at(-1)[0].content,/returned a note.*later work continued on "parser" meanwhile/);
+  assert.match(h.emit('context',{messages:[]}).messages.at(-1).content,/later work continued on "parser" after this snapshot, so it may already be addressed/);
+  assert.equal(h.emit('context',{messages:[]}),undefined,'an accepted note is consumed once');h.close();
   const queued=harness();queued.input('Fix parser validation.');await queued.advance(30000);
   queued.emit('tool_result',{toolName:'edit',input:{path:'/fixture/parser.ts'},content:[{type:'text',text:'Validation now implemented.'}]});
-  assert.equal(queued.emit('context',{messages:[]}),undefined,'unconsumed note cannot survive later completed work');queued.close();
+  const late=queued.emit('context',{messages:[]});
+  assert.ok(!late || /may already be addressed/.test(late.messages.at(-1).content),'a queued note re-checks overlap at delivery time');queued.close();
 });
 
 test('review cadence has a 30-second floor and 120-second visible ceiling with timeout recovery and no duplicate advice', async () => {
@@ -360,7 +361,7 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   active.emit('tool_execution_start',{toolCallId:'build',toolName:'bash',args:{command:'npm test',timeout:120}});await active.advance(30000);
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could useful independent work continue while that check runs?',evidence:['running-tools'],tools:[],skills:[]})}]});await flush();
-  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/outdated advice discarded/);active.close();
+  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/State cited by this review changed/);active.close();
 });
 
 

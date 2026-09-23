@@ -61,7 +61,7 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
   // ring, counters, /metrics and the session report. Only an unexpected
   // skip outcome earns a transcript line.
   "model.skip": "error",
-  "local.refresh": "all",
+  "local.refresh": "error",
   "reminder.ack": "error",
   "reminder.follow": "error",
   "review.disposition": "all",
@@ -125,10 +125,16 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   }
   if (kind === "ml.needle.call" && data.count !== 0) {
     const op = typeof data.op === "string" && ["embed", "rank", "classify", "extract"].includes(data.op) ? data.op : "result";
+    const outcome = data.accepted === false
+      ? { classify: "request type unclear · no label applied", rank: "no confident ranking · lexical order kept", embed: "embeddings unused", extract: "no excerpt confident enough", result: "low confidence · result unused" }[op]
+      : { classify: "request type classified", rank: "candidates ranked", embed: "embeddings ready", extract: "excerpts selected", result: "result ready" }[op];
     return { label: "Needle3", status: data.accepted === false ? "skip" : status, ms,
-      detail: `${data.coalesced === true ? "shared in-flight result" : data.cached === true ? "cached embeddings" : "local WASM"} · ${op} ${data.accepted === false ? "abstained" : "ready"}` };
+      detail: `${data.coalesced === true ? "shared in-flight result" : data.cached === true ? "cached embeddings" : "local WASM"} · ${outcome}` };
   }
-  if (kind === "ml.jev.used") return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached judgment" : "remote judgment ready"}${amount("questions") === undefined ? "" : ` · ${amount("questions")} questions`}` };
+  if (kind === "ml.jev.used") {
+    const questions = amount("questions");
+    return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
+  }
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
     label: kind === "ml.smol.inference" ? "Smol" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status
       : kind === "ml.smol.inference" && reason && !["unknown", "model unknown", "insufficient savings", "cancelled"].includes(reason) ? "error" : "skip", ms,
@@ -209,7 +215,9 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
       };
     }
     if (kind === "guidance.delivered") {
-      return { label: clean(decision || "hint", 60), status: "ok" };
+      const label = decision === "skill-or-tool" ? "skill/tool suggestion sent to agent"
+        : decision.startsWith("signal:") ? `${decision.slice(7).replaceAll("-", " ")} guidance sent to agent` : decision || "hint";
+      return { label: clean(label, 60), status: "ok" };
     }
     if (kind === "ml.mini.select" || kind === "ml.smol.take") {
       const ok = decision === "selected" || decision === "cache-hit";
@@ -229,7 +237,7 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     }
     if (kind === "local.refresh") {
       const count = typeof data.count === "number" && Number.isFinite(data.count) ? ` ${Math.round(data.count)} models` : "";
-      return { label: clean(route || "local", 40), status: isError || outcome === "unavailable" ? "error" : "ok", detail: clean(`${outcome}${count}`, 40) || undefined };
+      return { label: clean(route || "local", 40), status: isError || outcome === "unavailable" ? "error" : outcome === "not-running" ? "skip" : "ok", detail: clean(`${outcome.replace("-", " ")}${count}`, 40) || undefined };
     }
     if (kind === "reminder.ack") {
       const ignored = decision === "ignored";

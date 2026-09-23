@@ -309,3 +309,70 @@ test("same-length briefs with different middle requirements cannot share routing
   assert.equal(choose(textTask), textModel.fullId);
   assert.equal(choose(visionTask), visionModel.fullId);
 });
+
+test("automatic helpers finalize before crossing the parent's reported-token budget", () => {
+  const handlers = {}; const steers = []; let active;
+  const pi = { on: (event, handler) => { handlers[event] = handler; }, setActiveTools: (tools) => { active = tools; }, sendUserMessage: (text) => steers.push(text) };
+  const previous = process.env.PI_SUBAGENT_CHILD_AGENT;
+  process.env.PI_SUBAGENT_CHILD_AGENT = "automatic-free-assistant";
+  try {
+    promptRuntime.registerTokenBudget(pi, 96000);
+    const turn = (input, output, tools = true) => handlers.message_end({ message: { role: "assistant", usage: { input, output }, content: tools ? [{ type: "toolCall" }] : [{ type: "text", text: "done" }] } });
+    turn(25000, 1000); turn(25000, 1000);
+    assert.equal(active, undefined, "52k used plus a 25k next turn and answer stays within budget");
+    turn(25000, 1000);
+    assert.deepEqual(active, [], "tools are removed once the next turn would cross the hard budget");
+    assert.match(steers[0], /Token budget nearly used \(78000 of 96000/);
+    turn(30000, 1000); assert.equal(steers.length, 1, "finalization happens once");
+    const quiet = {}; let quietActive;
+    promptRuntime.registerTokenBudget({ on: (event, handler) => { quiet[event] = handler; }, setActiveTools: (tools) => { quietActive = tools; } }, 1000);
+    quiet.message_end({ message: { role: "assistant", usage: { input: 5000, output: 10 }, content: [{ type: "text", text: "final" }] } });
+    assert.equal(quietActive, undefined, "a terminal answer is never interrupted");
+    process.env.PI_SUBAGENT_CHILD_AGENT = "worker";
+    const writer = {}; promptRuntime.registerTokenBudget({ on: (event, handler) => { writer[event] = handler; }, setActiveTools: () => { throw new Error("writers keep tools"); } }, 10);
+    assert.equal(writer.message_end, undefined, "explicit writer budgets stay parent-accounted");
+  } finally {
+    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD_AGENT; else process.env.PI_SUBAGENT_CHILD_AGENT = previous;
+  }
+});
+
+test("a caller abort after a clean final answer is owned drain cleanup, not a process-signal failure", async t => {
+  const fakePiPath = path.join(root, "fake-pi-lingering.mjs");
+  const envLog = path.join(root, "lingering-env.json");
+  fs.writeFileSync(fakePiPath, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.PI_TEST_LINGER_ENV, JSON.stringify({ tokenBudget: process.env.PI_SUBAGENT_TOKEN_BUDGET ?? null }));
+const message = { role: "assistant", provider: "openrouter", model: "org/model-a", stopReason: "stop", content: [{ type: "text", text: "Final advisory answer." }], usage: { input: 10, output: 5 } };
+process.stdout.write(JSON.stringify({ type: "message_end", message }) + "\\n");
+setInterval(() => {}, 1000);
+`, { mode: 0o700 });
+  // Isolate route health: the earlier 429 fixture legitimately cools this route.
+  const prior = Object.fromEntries(["PI_SUBAGENT_PI_BINARY", "PI_PROVIDER_STATE_FILE", "PI_MODEL_EXCLUSIONS_PATH"].map(key => [key, process.env[key]]));
+  process.env.PI_SUBAGENT_PI_BINARY = fakePiPath;
+  process.env.PI_PROVIDER_STATE_FILE = path.join(root, "lingering-health.json");
+  process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(root, "lingering-exclusions.json");
+  process.env.PI_TEST_LINGER_ENV = envLog;
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    delete process.env.PI_TEST_LINGER_ENV;
+  });
+  const agentConfig = {
+    name: "lingering-fixture", description: "Lingering child", source: "runtime",
+    filePath: path.join(root, "lingering-fixture.md"), systemPrompt: "",
+    systemPromptMode: "replace", inheritProjectContext: false, inheritGlobalContext: false,
+    inheritSkills: false, model: route,
+  };
+  const controller = new AbortController();
+  const pending = runSync(process.cwd(), [agentConfig], agentConfig.name, "Advise", {
+    runId: "lingering-abort-test", availableModels: registry, modelOverride: route, timeoutMs: 10_000,
+    signal: controller.signal, usageBudget: { tokens: { hard: 48000 } },
+  });
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(envLog) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+  await new Promise(resolve => setTimeout(resolve, 150));
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.processSignal, undefined, "the completed answer keeps its success classification");
+  assert.equal(JSON.parse(fs.readFileSync(envLog, "utf8")).tokenBudget, "48000", "the parent's hard token budget reaches the child");
+});

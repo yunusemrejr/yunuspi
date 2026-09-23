@@ -6,6 +6,8 @@ export const READ_ONLY_REASONING_TOOLS = ["sqlite_probe", "package_probe", "open
 export const DEFAULT_TOOL_BUDGET_BLOCK = ["read", "grep", "find", "ls", ...READ_ONLY_REASONING_TOOLS] as const;
 export const TOOL_BUDGET_ENV = "PI_SUBAGENT_TOOL_BUDGET";
 export const TOOL_BUDGET_ZERO_AUTH_ENV = "PI_SUBAGENT_TOOL_BUDGET_ZERO_AUTH";
+/** Hard cumulative input+output token budget the parent will account against this child. */
+export const TOKEN_BUDGET_ENV = "PI_SUBAGENT_TOKEN_BUDGET";
 
 export function normalizeToolBudgetBlock(block: ToolBudgetConfig["block"] | undefined): "*" | string[] {
 	if (block === "*") return "*";

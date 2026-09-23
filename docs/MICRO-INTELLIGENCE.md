@@ -39,7 +39,7 @@ Repeated unchanged lexical and unavailable notices are limited to once per minut
 
 Initial and follow-up analyses produce one persistent TUI message. It shows the task interpretation, follow-up relationship, model route or categorized fallback cause, and whether a long input was excerpted. Expand the message to inspect the exact advisory inserted next to the corresponding original user message. No approval step is introduced and no replacement prompt is substituted for the user's text.
 
-The advisory separates concrete work from reusable mindset scaffolding and quoted examples. This extraction is a heuristic, not authority: omitted content may contain additional requirements, and the main agent still receives the original. A bounded model attempt may time out; deterministic analysis remains explicitly labeled and the final configured route gets the remaining preflight budget. Late responses cannot turn an already delivered fallback into a model success.
+The advisory separates concrete work from reusable mindset scaffolding and quoted examples. This extraction is a heuristic, not authority: omitted content may contain additional requirements, and the main agent still receives the original. A bounded model attempt may time out; the final configured route gets the remaining preflight budget. When every route fails, the TUI names each route and its timeout or failure category, and nothing is added to the main agent's context: a zero-confidence restatement of the prompt carries no information. Late responses cannot turn an already delivered fallback into a model success, and an aborted request is reported as late-failed rather than as a late completion.
 
 ## Needle3 — local semantic reflex
 

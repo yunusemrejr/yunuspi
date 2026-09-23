@@ -99,3 +99,13 @@ export function getSupportedThinkingLevels(model: ModelInfo | undefined): Thinki
 	});
 	return levels;
 }
+
+/** Same order as the core clampThinkingLevel: an unsupported explicit level
+ * resolves to the nearest stronger supported level, else the nearest weaker. */
+export function clampSupportedThinkingLevel(model: ModelInfo | undefined, level: ThinkingLevel): ThinkingLevel | undefined {
+	const supported = getSupportedThinkingLevels(model);
+	if (supported.includes(level)) return level;
+	const index = THINKING_LEVELS.indexOf(level);
+	return THINKING_LEVELS.slice(index + 1).find((candidate) => supported.includes(candidate))
+		?? [...THINKING_LEVELS.slice(0, index)].reverse().find((candidate) => supported.includes(candidate));
+}

@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "title": "How attention works",
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "theme": {
+    "background": "#0b0f17",
+    "surface": "#151c29",
+    "ink": "#eef2f8",
+    "muted": "#8b97aa",
+    "accent": "#5eead4",
+    "accent2": "#f5b544",
+    "danger": "#f87171",
+    "display": "Fraunces",
+    "text": "Inter",
+    "mono": "JetBrains Mono"
+  },
+  "audio": {
+    "music": null,
+    "musicVolume": 0.22,
+    "musicDuckedVolume": 0.07,
+    "narrationVolume": 1,
+    "sfx": []
+  },
+  "scenes": [
+    {
+      "id": "ambiguity",
+      "component": "Ambiguity",
+      "seconds": 8,
+      "narration": "In this sentence, what does the word it refer to? You know instantly. A model has to work it out.",
+      "narrationAudio": null,
+      "narrationOffset": 0.4,
+      "props": {
+        "tokens": [
+          "The",
+          "animal",
+          "didn't",
+          "cross",
+          "the",
+          "street",
+          "because",
+          "it",
+          "was",
+          "tired"
+        ],
+        "focus": 7,
+        "question": "What does \u201cit\u201d refer to?"
+      },
+      "cues": {
+        "tokens": 0.3,
+        "focus": 2.1,
+        "question": 2.6,
+        "scan": 4.9
+      }
+    },
+    {
+      "id": "weights",
+      "component": "Weights",
+      "seconds": 10,
+      "narration": "Attention lets it look at every other word, and score how relevant each one is. Here, the strongest link points to animal.",
+      "narrationAudio": null,
+      "narrationOffset": 0.3,
+      "props": {
+        "tokens": [
+          "The",
+          "animal",
+          "didn't",
+          "cross",
+          "the",
+          "street",
+          "because",
+          "it",
+          "was",
+          "tired"
+        ],
+        "focus": 7,
+        "weights": [
+          0.05,
+          0.92,
+          0.08,
+          0.12,
+          0.04,
+          0.35,
+          0.1,
+          0,
+          0.15,
+          0.3
+        ],
+        "winner": 1,
+        "label": "Attention = learned relevance"
+      },
+      "cues": {
+        "arcs": 0.6,
+        "label": 4.4,
+        "winner": 7.1
+      }
+    },
+    {
+      "id": "matrix",
+      "component": "MatrixScene",
+      "seconds": 10,
+      "narration": "Every word does this at the same time. The result is a grid of weights, one row per word, computed in parallel.",
+      "narrationAudio": null,
+      "narrationOffset": 0.3,
+      "props": {
+        "labels": [
+          "animal",
+          "cross",
+          "street",
+          "it",
+          "was",
+          "tired"
+        ],
+        "values": [
+          [
+            0.62,
+            0.18,
+            0.1,
+            0.04,
+            0.02,
+            0.04
+          ],
+          [
+            0.3,
+            0.5,
+            0.12,
+            0.02,
+            0.02,
+            0.04
+          ],
+          [
+            0.2,
+            0.35,
+            0.3,
+            0.05,
+            0.04,
+            0.06
+          ],
+          [
+            0.55,
+            0.05,
+            0.2,
+            0.1,
+            0.04,
+            0.06
+          ],
+          [
+            0.4,
+            0.08,
+            0.06,
+            0.28,
+            0.12,
+            0.06
+          ],
+          [
+            0.46,
+            0.04,
+            0.05,
+            0.2,
+            0.1,
+            0.15
+          ]
+        ],
+        "highlightRow": 3,
+        "label": "Every word attends to every word"
+      },
+      "cues": {
+        "label": 0.4,
+        "matrix": 0.8,
+        "highlight": 5.1,
+        "parallel": 6.4
+      }
+    },
+    {
+      "id": "stack",
+      "component": "Stack",
+      "seconds": 8,
+      "narration": "Stack many of these layers, and you get the transformer: the architecture behind today's language models.",
+      "narrationAudio": null,
+      "narrationOffset": 0.3,
+      "props": {
+        "layers": [
+          6,
+          6,
+          6,
+          6,
+          6
+        ],
+        "labels": [
+          "input",
+          "attention",
+          "attention",
+          "attention",
+          "output"
+        ],
+        "kicker": "The transformer",
+        "title": "Attention is all you need \u00b7 2017"
+      },
+      "cues": {
+        "network": 0.2,
+        "signal": 1.4,
+        "title": 2.5
+      }
+    }
+  ]
+}

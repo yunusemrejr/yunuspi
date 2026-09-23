@@ -48,7 +48,7 @@ test('registered activity renderer produces bounded TUI lines for each flowing l
   assert.match(burst, /Needle3.*6ms total.*3 completions/);
   for(let i=0;i<2;i++){activity.note('ml.needle.call',{op:'rank',count:1,cached:true});await Promise.resolve();}
   assert.equal(sent.length, 3, 'later completions create visible lines rather than vanishing behind an old cooldown');
-  assert.match(plain(new CustomMessageComponent(sent[1],renderer).render(120)),/cached embeddings.*rank ready/);
+  assert.match(plain(new CustomMessageComponent(sent[1],renderer).render(120)),/cached embeddings.*candidates ranked/);
   const fixtures = [
    ['ml.jev.used',{questions:3},'JEV'],
    ['ml.smol.inference',{decision:'selected'},'Smol'],

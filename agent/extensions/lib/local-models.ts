@@ -101,7 +101,17 @@ export function registerLocalModels(pi:any,agentDir:string):string[] {
           cache=next;last=Date.now();
           try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'ok',count:next.length});}catch{}
           return cache;
-        } catch { if(!controller.signal.aborted){cache=[];last=Date.now();try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:'unavailable',isError:true});}catch{}}return cache; }
+        } catch(error:any) {
+          if(!controller.signal.aborted){
+            cache=[];last=Date.now();
+            // A refused connection or the 2s probe timeout means the optional
+            // local server is simply not running; only a responding server
+            // with bad metadata is a fault worth an error line.
+            const absent=error?.status===undefined&&['TypeError','TimeoutError','AbortError'].includes(error?.name);
+            try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('local.refresh',{route:id,outcome:absent?'not-running':'unavailable',...(absent?{}:{isError:true})});}catch{}
+          }
+          return cache;
+        }
       };
       const promise=work();
       pending={promise,controller,waiters:0};

@@ -3922,6 +3922,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			toolTimeoutMs: params.toolTimeoutMs,
 			configToolTimeoutMs: data.configToolTimeoutMs,
 			toolBudget: effectiveToolBudget.toolBudget,
+			usageBudget: data.usageBudget,
 			capabilityCeiling: data.capabilityCeiling,
 			allowZeroToolBudget: data.allowZeroToolBudget && effectiveToolBudget.toolBudget === data.toolBudget,
 		});

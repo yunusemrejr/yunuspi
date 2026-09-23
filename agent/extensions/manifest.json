@@ -38,7 +38,8 @@
     "model-config.ts",
     "model-routing-config.ts",
     "micro-intelligence.ts",
-    "session-observer.ts"
+    "session-observer.ts",
+    "video-studio.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -156,7 +157,8 @@
     "token-budget.ts",
     "tool-discovery.ts",
     "utility-client.ts",
-    "workspace-write-lease.ts"
+    "workspace-write-lease.ts",
+    "video-studio.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
@@ -530,6 +532,7 @@
     "scripts/scene-runtime.mjs",
     "extensions/lib/utility-mcp/local-reference.mjs",
     "extensions/lib/utility-mcp/web-assets.mjs",
-    "extensions/lib/utility-mcp/workflow.mjs"
+    "extensions/lib/utility-mcp/workflow.mjs",
+    "scripts/video-render.mjs"
   ]
 }

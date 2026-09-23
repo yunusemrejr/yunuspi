@@ -177,7 +177,7 @@ test('dedicated discovery bounds answers without starving configured reasoning o
   const start = runtime.indexOf('export function capAutomaticHelperRequest');
   const end = runtime.indexOf('\nconst SUBAGENT_INHERIT_PROJECT_CONTEXT_ENV', start);
   const cap = vm.runInNewContext(stripTypeScriptTypes(runtime.slice(start, end)).replace('export function', 'function') + '\ncapAutomaticHelperRequest', {
-    process, SUBAGENT_CHILD_AGENT_ENV: 'PI_SUBAGENT_CHILD_AGENT', AUTOMATIC_HELPER_LIMITS: { outputTokens: 4096 },
+    process, SUBAGENT_CHILD_AGENT_ENV: 'PI_SUBAGENT_CHILD_AGENT', AUTOMATIC_HELPER_LIMITS: { outputTokens: 4096, reasoningOutputTokens: 8192 },
     loadModelEconomyConfig: economy.loadModelEconomyConfig, isAutonomousMeteredEligible: economy.isAutonomousMeteredEligible,
     operationalEconomyQualification: economy.operationalEconomyQualification, toModelInfo,
     isProvenFreeRoute: free.isProvenFreeRoute, capFreeRequest: free.capFreeRequest,
@@ -192,16 +192,20 @@ test('dedicated discovery bounds answers without starving configured reasoning o
   const reasoningModel = { ...model, reasoning: true, api: 'openai-responses', cost: { input: .01, output: .02, cacheRead: 0, cacheWrite: 0 } };
   const request = { model: model.id, max_output_tokens: 8192, reasoning: { effort: 'high' } };
   const capped = cap(request, reasoningModel);
-  assert.equal(capped.max_output_tokens, 4096, 'reasoning and final JSON share the wire allowance');
+  assert.equal(capped.max_output_tokens, 8192, 'the caller ceiling still wins');
+  assert.equal(cap({ ...request, max_output_tokens: 32000 }, { ...reasoningModel, maxTokens: 64000 }).max_output_tokens, 12288, 'enabled reasoning receives its own allowance beside the final JSON');
   assert.equal(capped.reasoning.effort, 'high', 'configured thinking remains authoritative');
   assert.equal(request.max_output_tokens, 8192, 'source request is not mutated');
-  assert.equal(cap({ model: model.id }, reasoningModel).max_output_tokens, 4096);
+  assert.equal(cap({ model: model.id }, reasoningModel).max_output_tokens, 4096, 'reasoning-capable route without enabled reasoning keeps the answer ceiling');
+  assert.equal(cap({ model: model.id, reasoning: { effort: 'none' } }, reasoningModel).max_output_tokens, 4096);
+  assert.equal(cap({ ...request, reasoning: { effort: 'high' } }, { ...model, reasoning: false }).max_output_tokens, 1024, 'non-reasoning discovery routes never widen');
   assert.equal(cap(request, { ...reasoningModel, maxTokens: 2048 }).max_output_tokens, 2048);
   assert.equal(cap({ ...request, max_output_tokens: 512 }, reasoningModel).max_output_tokens, 512, 'caller may impose a smaller ceiling');
   const anthropic = { model: model.id, max_tokens: 8192, thinking: { type: 'enabled', budget_tokens: 7000 } };
   const thinking = cap(anthropic, { ...reasoningModel, api: 'anthropic-messages' });
-  assert.equal(thinking.max_tokens, 4096);
-  assert.equal(thinking.thinking.budget_tokens, 3072, 'explicit reasoning leaves 1024 answer tokens');
+  assert.equal(thinking.max_tokens, 8192, 'enabled thinking keeps the caller ceiling inside the reasoning allowance');
+  assert.equal(thinking.thinking.budget_tokens, 7000);
+  assert.equal(cap({ ...anthropic, max_tokens: 4096 }, { ...reasoningModel, api: 'anthropic-messages' }).thinking.budget_tokens, 3072, 'explicit reasoning leaves 1024 answer tokens');
   assert.equal(anthropic.thinking.budget_tokens, 7000);
   assert.throws(() => cap({ ...anthropic, max_tokens: 1024 }, reasoningModel), /cannot fit enabled thinking/);
 });

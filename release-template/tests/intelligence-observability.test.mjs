@@ -126,10 +126,10 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
     assert.equal(sent.length, 1);
     assert.equal(sent[0].details.count, 30);
     assert.equal(sent[0].details.ms, 60);
-    assert.match(sent[0].details.detail, /local WASM · rank ready · 30 completions/);
+    assert.match(sent[0].details.detail, /local WASM · candidates ranked · 30 completions/);
     for (let i = 0; i < 30; i++) { activity.note('ml.needle.call', { op: 'rank', count: 1, cached: true }); await Promise.resolve(); }
     assert.equal(sent.length, 31, 'neither the old 60s cooldown nor the generic 24/min cap hides meaningful completions');
-    assert.match(sent.at(-1).details.detail, /cached embeddings · rank ready/);
+    assert.match(sent.at(-1).details.detail, /cached embeddings · candidates ranked/);
     assert.ok(sent.every(message => message.excludeFromContext && message.display));
     activity.note('ml.evidence.delivered', { helper: 'smol', savedChars: 4096, count: 1, raw: 'PRIVATE-TEXT' });
     await Promise.resolve();
@@ -141,7 +141,7 @@ test('ML activity flows on every completion and only simultaneous bursts aggrega
     assert.doesNotMatch(sent.at(-1).details.detail, /model context/);
     activity.note('ml.jev.used', { cached: false, durationMs: 444, questions: 3 });
     await Promise.resolve();
-    assert.match(sent.at(-1).details.detail, /remote judgment ready · 3 questions/);
+    assert.match(sent.at(-1).details.detail, /remote judge answered · 3 questions/);
     activity.note('ml.wasm.completed', { helper: 'source-check', runtime: 'tree-sitter-wasm', durationMs: 3, findings: 2 });
     await Promise.resolve();
     assert.match(sent.at(-1).details.detail, /local parse complete · 2 findings/);

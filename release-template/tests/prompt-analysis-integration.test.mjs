@@ -123,15 +123,14 @@ test('fallback visibly explains route failure and long input while preserving th
   const raw = '<mindset>' + 'Reusable work guidance. '.repeat(1400) + '</mindset>\nImplement menu navigation.';
   await f.session.prompt(raw);
   const shown = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
-  assert.match(shown.content, /Primary: Implement menu navigation/);
-  assert.match(shown.content, /Fallback reason: audit-fixture\/first: failed \(invalid-request\)/);
-  assert.match(shown.content, /Long request: analysis used/);
+  assert.match(shown.content, /Intent analysis · initial · unavailable — audit-fixture\/first failed \(invalid-request\)\./);
+  assert.match(shown.content, /Nothing was added to the main agent's context/);
   assert.doesNotMatch(shown.content, /private diagnostic/);
   const main = f.calls.at(-1).context.messages;
   assert.ok(main.some(message => message.role === 'user' && message.content.some(part => part.text === raw)));
-  assert.ok(main.some(message => message.content.some(part => part.text?.includes(shown.details.advisory))));
+  assert.ok(!main.some(message => message.content?.some?.(part => part.text?.includes(shown.details.advisory))), 'zero-confidence fallback never spends model context');
   const renderer = f.session.extensionRunner.getMessageRenderer('prompt-analysis');
-  assert.ok(renderer(shown, { expanded: true }).render(100).join('\n').includes('Exact advisory sent to the main agent'));
+  assert.ok(!renderer(shown, { expanded: true }).render(100).join('\n').includes('Exact advisory sent to the main agent'));
 });
 
 test('real preflight handled after analysis cancels lineage before the next genuine request', async (t) => {

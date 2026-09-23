@@ -458,6 +458,7 @@ async function runSingleAttempt(
 		modelRouteCandidates: shared.modelRouteCandidates,
 		modelRouteCandidate: shared.modelRouteCandidate,
 		toolBudget: options.toolBudget,
+		tokenBudget: options.usageBudget?.tokens?.hard,
 		allowZeroToolBudget: options.allowZeroToolBudget,
 		permissionRules,
 		permissionAuditPath,
@@ -1520,7 +1521,10 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 		if (options.signal) {
 			const kill = () => {
 				if (processClosed || lifecycleFinished) return;
-				abortedBySignal = true;
+				// After a clean terminal answer this SIGTERM is owned drain cleanup;
+				// the completed work must not be recorded as a process-signal failure.
+				if (cleanTerminalAssistantStopReceived || agentSettledReceived) forcedTerminationSignal = true;
+				else abortedBySignal = true;
 				proc.kill("SIGTERM");
 				setTimeout(() => !proc.killed && proc.kill("SIGKILL"), 3000);
 			};

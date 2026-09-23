@@ -1,0 +1,50 @@
+# Narration and sound
+
+## Writing for the ear
+
+- One idea per sentence, 8–18 words. Put the important word at the end of the sentence, where the voice lands.
+- Say what the picture shows, in the order it appears, but add what the picture cannot: why it matters, what it replaced, what happens next.
+- Avoid parentheses, lists read aloud, and symbols. Spell out numbers the way they should be spoken ("twenty seventeen", "a hundred million").
+- Aim for about 3.3–4.3 syllables per second (roughly 140–170 words per minute for typical prose; short plain words can run faster in wpm while sounding relaxed). Dense technical passages go slower; transitions can go faster. `narration_tts` reports the measured rate per scene.
+- Leave breaths: 0.3–0.6 s before a scene's narration starts (`narrationOffset`) and about 0.8 s after it ends before the cut.
+
+## Local narration with Piper
+
+```js
+tool_search({ names: ["narration_tts"] })
+narration_tts({ action: "install", voice: "en_US-ryan-high" })   // once per machine, checksum-pinned
+narration_tts({ action: "synthesize", dir: "my-video", fitScenes: true })
+narration_tts({ action: "synthesize", dir: "my-video", scenes: ["intro"], speed: 0.95 })
+```
+
+`synthesize` writes `public/audio/narration/<scene>.wav` and records `narrationAudio` and `narrationSeconds` in `video.json`. With `fitScenes: true`, scenes shorter than their narration are lengthened. Cues are scene-relative, so visuals keep their internal timing. Re-time cues to the spoken words afterwards.
+
+Pronunciation: TTS guesses at names and acronyms. Write "G P T" or "transformer" plainly, respell names phonetically ("Vaswani" → "Vas-wah-nee"), and re-synthesize only the affected scenes. Keep the original spelling for on-screen text.
+
+A human recording can replace any scene: put the file in `public/audio/narration/`, set `narrationAudio`, and measure `narrationSeconds` with `media_info`.
+
+## Music bed
+
+`audio_synth kind:"music"` renders a seeded ambient bed sized to the timeline. Direct it:
+
+- `key`/`mode`: minor or dorian for reflective and documentary tones, major for optimistic tones.
+- `progression`: four chords, `barsPerChord` 2 for calm, 1 for momentum.
+- `bpm` 70–90 under narration. Faster tempos compete with speech.
+- `layers`: lower `pulse` and `bell` for dense narration; raise them for visual-only beats.
+- `intensity`: automation points `[seconds, 0..1]` that follow the story arc: low in exposition, rising into the key reveal, resolving at the end.
+
+The template ducks music under narration windows automatically (`musicVolume` to `musicDuckedVolume`). Measure the result with `video_qa`; adjust the two volumes in `video.json`.
+
+## Sound accents
+
+`audio_synth kind:"sfx"` with `type` whoosh (object crossing frame, transition), riser (tension into a reveal), impact (reveal lands), tick (items counting or stepping), chime (conclusion, success). Use one accent per idea, place it at the visual event (`video.json` `audio.sfx: [{src, at, volume}]`), and keep it 6–12 dB under narration. If you can't say which visual event a sound belongs to, delete it.
+
+## Loudness targets
+
+| Target | Integrated | Peak |
+| --- | --- | --- |
+| Web and social default | -16 LUFS | ≤ -1 dBFS |
+| Platforms that normalize (YouTube) | -14 LUFS | ≤ -1 dBFS |
+| Narration-only explainer | narration peaks around -3 to -6 dBFS; music 15–20 LU below the voice | |
+
+Adjust `narrationVolume`, `musicVolume` and `musicDuckedVolume` in `video.json`, re-render, and measure with `video_qa`. For standalone audio deliverables, `media_edit action:"normalize"` does measured two-pass loudness normalization.

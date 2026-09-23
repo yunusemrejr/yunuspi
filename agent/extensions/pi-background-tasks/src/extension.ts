@@ -800,7 +800,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     name: "bg_kill",
     label: "Background Kill",
     description:
-      "Stop a running background task by ID. Fails loudly if the task is unknown or already finished.",
+      "Stop a running background task by ID. Fails loudly if the task is unknown; a task that already finished is reported with its terminal state and nothing is signalled.",
     promptSnippet: "Stop a running background task by ID",
     promptGuidelines: [
       "Use bg_kill for explicit bg_run tasks on user cancellation or when no longer needed; use managed-bash's process for internal helpers.",
@@ -808,6 +808,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     parameters: BgKillParams,
     async execute(_toolCallId, params) {
       const task = registry.resolveTask(params.taskId);
+      if (task.status !== "running") {
+        // The requested end state already holds; reporting it is not a failure.
+        const message = `Background task ${taskDisplayName(task)} (${task.id}) already ${task.status}${typeof task.exitCode === "number" ? ` (exit ${task.exitCode})` : ""}; nothing to stop. Output: ${task.outputPath}`;
+        return { content: textContent(message), details: { task: registry.snapshot(task), message } };
+      }
       await registry.stopTask(task, "user");
       const message = `Killed background task ${taskDisplayName(task)} (${task.id}). Output: ${task.outputPath}`;
       return {
@@ -824,8 +829,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     },
     renderResult(result, _options, theme) {
       const { task } = result.details;
+      const state = task.status === "killed" ? theme.fg("warning", "■ killed") : theme.fg("dim", `● already ${task.status}`);
       return new Text(
-        `${theme.fg("warning", "■ killed")} ${theme.fg("accent", taskDisplayName(task))} ${theme.fg("dim", `(${task.id})`)}\n${theme.fg("dim", `Output: ${task.outputPath}`)}`,
+        `${state} ${theme.fg("accent", taskDisplayName(task))} ${theme.fg("dim", `(${task.id})`)}\n${theme.fg("dim", `Output: ${task.outputPath}`)}`,
         0,
         0,
       );

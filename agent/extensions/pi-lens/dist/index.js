@@ -25393,7 +25393,7 @@ function triggerBackgroundWordIndexBuild(cwd, dbg2, options = {}) {
     return current;
   const status = { state: "building" };
   buildStatuses.set(key3, status);
-  void (async () => {
+  const done = (async () => {
     const startMs = Date.now();
     try {
       const { loadProjectSnapshot: loadProjectSnapshot2, saveProjectSnapshot: saveProjectSnapshot2, PROJECT_SNAPSHOT_VERSION: PROJECT_SNAPSHOT_VERSION2 } = await Promise.resolve().then(() => (init_project_snapshot(), project_snapshot_exports));
@@ -25440,6 +25440,7 @@ function triggerBackgroundWordIndexBuild(cwd, dbg2, options = {}) {
       });
     }
   })();
+  Object.defineProperty(status, "done", { value: done, enumerable: false });
   return status;
 }
 function wordIndexPersistDebounceMs() {
@@ -106219,9 +106220,24 @@ function toSymbolSearchHit(result) {
   };
 }
 async function symbolSearch(query, cwd, limit = 20, options = {}) {
-  const warmLease = acquireWarmWordIndex(cwd);
+  let warmLease = acquireWarmWordIndex(cwd);
   const snapshot = loadProjectSnapshotWithoutWordIndex(cwd);
-  const index = warmLease.index;
+  let index = warmLease.index;
+  if (!index) {
+    const prior = getWordIndexBuildStatus(cwd);
+    const building = !prior || prior.state === "building" ? triggerBackgroundWordIndexBuild(cwd) : void 0;
+    // A cold index usually finishes in seconds. Waiting a bounded interval
+    // answers this call instead of spending the agent's next calls on retries.
+    if (building?.state === "building" && building.done) {
+      warmLease.release();
+      const waitMs = Number.isFinite(options.buildWaitMs) ? Math.max(0, options.buildWaitMs) : 8e3;
+      let timer;
+      await Promise.race([building.done.catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, waitMs); timer.unref?.(); })]);
+      clearTimeout(timer);
+      warmLease = acquireWarmWordIndex(cwd);
+      index = warmLease.index;
+    }
+  }
   if (!index) {
     warmLease.release();
     const priorStatus = getWordIndexBuildStatus(cwd);

@@ -1,6 +1,9 @@
 // Shared by dispatch, child request caps and the checkpoint deadline. Tokens
 // count cumulative input/output: reading source resends context on later turns.
-export const AUTOMATIC_HELPER_LIMITS = { tools: 4, tokens: 48000, outputTokens: 4096 } as const;
+// reasoningOutputTokens is added to the per-response ceiling only when the
+// request enables provider reasoning: thinking shares the output allowance, and
+// a 4096 total truncated high-effort reviewers before their JSON verdict.
+export const AUTOMATIC_HELPER_LIMITS = { tools: 4, tokens: 48000, outputTokens: 4096, reasoningOutputTokens: 8192 } as const;
 // 2026-09-16: all-sessions audit showed 1426 unknown vs 4 changes vs 0 pass
 // aspect outcomes and 0 accepted dispositions ever — 90s / $0.01 per round
 // cannot cover free-tier turn latency (measured ~21s/turn × up to 8 tool

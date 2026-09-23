@@ -118,6 +118,7 @@ export function projectRunEvidence(result: any = {}) {
 		...(route(result.model) ? { model: route(result.model) } : {}),
 		...(failure ? { outcomeReason: failure } : {}),
 		...(cause ? { cause } : {}),
+		...(typeof result.processSignal === "string" && /^SIG[A-Z0-9]{1,12}$/.test(result.processSignal) ? { signal: result.processSignal } : {}),
 		...(count(result.progressSummary?.durationMs) === undefined ? {} : { durationMs: result.progressSummary.durationMs }),
 		output: ["present", "absent"].includes(result.outputState) ? result.outputState : "unknown",
 		...(progress ? { progress } : {}),

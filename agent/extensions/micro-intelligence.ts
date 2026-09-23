@@ -322,7 +322,9 @@ function makeCandidate(
         metrics.llmHelperCall();
         const response = await ctx.modelRegistry.completeSimple(routedModel, context, options);
         if (response?.stopReason === "error") throw new Error(response.errorMessage || "Prompt analysis model request failed");
-        return { text: response?.stopReason === "aborted" ? "" : toText(response), inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
+        // An aborted stream is the timeout/cancel echo, not a late completion.
+        if (response?.stopReason === "aborted") throw Object.assign(new Error("Prompt analysis request aborted"), { name: "AbortError" });
+        return { text: toText(response), inputTokens: tokens(response, "input"), outputTokens: tokens(response, "output") };
       }
       const authRequest = Promise.resolve(ctx.modelRegistry.getApiKeyAndHeaders(entry.model));
       let onAbort: (() => void) | undefined;
@@ -406,7 +408,8 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
   pi.registerMessageRenderer?.("prompt-analysis", (message: any, { expanded }: { expanded: boolean }) => {
     const summary = typeof message.content === "string" ? message.content : "Intent analysis";
-    const advisory = message.details?.advisory;
+    // A fallback sends nothing to the main agent, so there is nothing to expand.
+    const advisory = message.details?.status === "fallback" ? undefined : message.details?.advisory;
     return new Text(summary + (typeof advisory === "string"
       ? expanded ? `\n\nExact advisory sent to the main agent:\n${advisory}` : "\nExpand to see the exact advisory sent to the main agent."
       : ""), 0, 0);
@@ -701,7 +704,9 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       const requestAlreadyPresent = event.messages.some((message: any) =>
         message?.role === "custom" && message.customType === "prompt-analysis-context" && message.details?.requestId === pending.requestId,
       );
-      if (!requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
+      // A deterministic fallback only restates the literal prompt with zero
+      // confidence; injecting it would spend context on no new information.
+      if (pending.status !== "fallback" && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
         const details = analysisDetails(pending, pending.preferenceSource);
         const content = pending.advisory;
         inserts.push({
@@ -733,11 +738,14 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
 
       if (!pending.displayed && !pending.signal.aborted && !ctx.signal?.aborted) {
         pending.displayed = true;
-        const reasons = pending.attempts.map((attempt) => `${attempt.route}: ${attempt.outcome}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
-        const concise = [
+        const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
+        const concise = pending.status === "fallback" ? [
+          `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
+          "Nothing was added to the main agent's context; it works from your prompt as written.",
+        ].join("\n") : [
           renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route),
           ...(pending.analysis.kind === "followup" && !pending.analysis.relation ? ["Relationship: uncertain; earlier user scope remains authoritative."] : []),
-          ...(pending.status === "fallback" ? [`Fallback reason: ${reasons.join("; ") || "no eligible analysis route"}.`] : reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
+          ...(reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
           ...(pending.excerpted ? ["Long request: analysis used the beginning, end and extracted task focus; the omitted middle may contain additional constraints."] : []),
           "Original user prompt preserved. This advisory informs the main agent; it does not replace the request.",
         ].join("\n");

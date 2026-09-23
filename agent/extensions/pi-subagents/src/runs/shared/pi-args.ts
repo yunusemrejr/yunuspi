@@ -38,6 +38,7 @@ import { decodeThinkingCeiling, intersectThinkingCeilings, SUBAGENT_THINKING_CEI
 import { encodeRunFanoutBudgetDescriptor, RUN_FANOUT_BUDGET_ENV } from "./run-fanout-budget.ts";
 import {
 	TOOL_BUDGET_ENV,
+	TOKEN_BUDGET_ENV,
 	TOOL_BUDGET_ZERO_AUTH_ENV,
 	encodeToolBudgetEnv,
 } from "./tool-budget.ts";
@@ -213,6 +214,8 @@ export interface BuildPiArgsInput {
 	/** Exact route metadata for this process attempt; carried to the child hook. */
 	modelRouteCandidate?: ModelRouteCandidate;
 	toolBudget?: ResolvedToolBudget;
+	/** Hard reported-token budget; the child finalizes before crossing it. */
+	tokenBudget?: number;
 	allowZeroToolBudget?: boolean;
 	permissionRules?: PermissionRules;
 	permissionAuditPath?: string;
@@ -1054,6 +1057,7 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 	const encodedToolBudget = encodeToolBudgetEnv(input.toolBudget);
 	if (encodedToolBudget) env[TOOL_BUDGET_ENV] = encodedToolBudget;
 	env[TOOL_BUDGET_ZERO_AUTH_ENV] = input.allowZeroToolBudget ? "1" : undefined;
+	env[TOKEN_BUDGET_ENV] = Number.isSafeInteger(input.tokenBudget) && input.tokenBudget! > 0 ? String(input.tokenBudget) : undefined;
 	const encodedChildWatchdog = encodeChildWatchdogConfig(input.childWatchdog);
 	if (encodedChildWatchdog)
 		env[CHILD_WATCHDOG_CONFIG_ENV] = encodedChildWatchdog;
