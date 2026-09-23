@@ -15,6 +15,8 @@ export declare const bashToolSystemPromptContribution: {
 };
 export type BashToolInput = Static<typeof bashSchema>;
 export interface BashToolDetails {
+    /** Native completion evidence, identifying the actual post-spawn-hook command. */
+    execution?: { exitCode: number; cwd: string; commandSha256: string };
     truncation?: TruncationResult;
     fullOutputPath?: string;
     captureError?: string;

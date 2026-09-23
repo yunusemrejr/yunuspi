@@ -314,8 +314,34 @@ def launch(payload):
     return result
 
 
+def background_exit(result):
+    if result.get('cancelled'):
+        return 130
+    if result.get('timedOut'):
+        return 124
+    if result.get('started') is not True or result.get('error'):
+        return 125
+    code = result.get('exitCode')
+    if type(code) is not int:
+        return 125
+    return min(255, 128 - code) if code < 0 else min(255, code)
+
+
 def main():
-    raw = sys.stdin.buffer.read(3 * 1024 * 1024 + 1)
+    background = len(sys.argv) > 1 and sys.argv[1] == '--background'
+    deadline = None
+    if background:
+        if len(sys.argv) != 6 or len(sys.argv[4]) > 65536:
+            raise ValueError("Invalid bounded background sandbox request")
+        raw = base64.b64decode(sys.argv[4], validate=True)
+        if len(raw) > 48 * 1024:
+            raise ValueError("Background sandbox request exceeds 48 KiB")
+        deadline = int(sys.argv[5])
+        if deadline < time.time() * 1000 or deadline > time.time() * 1000 + 15000:
+            raise ValueError("Background sandbox admission expired; no experiment launched")
+        sys.argv = [sys.argv[0], sys.argv[2], sys.argv[3]]
+    else:
+        raw = sys.stdin.buffer.read(3 * 1024 * 1024 + 1)
     if len(raw) > 3 * 1024 * 1024:
         raise ValueError("Sandbox request exceeds 3 MiB")
     payload = json.loads(raw)
@@ -334,8 +360,11 @@ def main():
         if not stat.S_ISREG(info.st_mode) or not os.access(node, os.X_OK):
             raise ValueError("Harness Node executable is unavailable")
         prepared['nodeBinary'] = node
-    print(json.dumps(launch(prepared)))
-    return 0
+    if deadline is not None and deadline < time.time() * 1000:
+        raise ValueError("Background sandbox source snapshot exceeded admission deadline")
+    result = launch(prepared)
+    print(json.dumps(result))
+    return background_exit(result) if background else 0
 
 
 if __name__ == '__main__':

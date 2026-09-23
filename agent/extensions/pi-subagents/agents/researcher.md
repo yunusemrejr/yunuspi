@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief
-tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, http_request, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session, web_research
+tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, workspace_search, local_mail_search, local_mail_read, ssh_plan, read, write, web_search, fetch_content, get_search_content, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, claim_check, http_request, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session, web_research
 subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../reasoning-aids.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../http-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 thinking: medium
 systemPromptMode: replace

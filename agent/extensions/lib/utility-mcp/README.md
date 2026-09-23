@@ -1,8 +1,7 @@
 # yunuspi-utility-mcp
 
 One local MCP stdio server, automatically owned by `extensions/utility-tools.ts`.
-Starting a harness session prewarms the server and exposes all eight native tool
-names. Calls reuse that process. Unexpected exits trigger up to three automatic
+Starting a harness session prewarms the server and exposes the shared catalog as native tools. Calls reuse that process. Unexpected exits trigger up to three automatic
 restarts per minute; the next call can retry after that circuit breaker. Shutdown
 closes the server. A workspace switch replaces it with a process rooted in the
 new workspace. There are no credentials, config files, network listeners or
@@ -24,13 +23,17 @@ explicitly load the extension and router and permit these read-only tools.
 | `coverage_probe` | Existing artifacts, uncovered evidence and Git line intersections |
 | `contract_diff` | JSON/YAML file or inline payload structural changes; schema mode |
 | `env_audit` | Names referenced in explicit sources versus example/deployment configs |
-| `net_probe` | `dns`, one `tcp` connection, one `tls` handshake |
+| `net_probe` | `dns`, one `tcp` connection, one `tls` handshake, passive `ssh` banner |
+| `workspace_search` | Literal file/folder or UTF-8 content search under an explicit root |
+| `local_mail_search` / `local_mail_read` | Explicit Maildir/mbox search and exact message reading |
+| `ssh_plan` | Safe explicit-target argv plan, without connecting or reading SSH config |
 | `archive_probe` | `list`, `stat`, `find`, one bounded UTF-8 `read` |
 
 ## Bounds and evidence
 
 - Files resolve inside the startup workspace, including symlink and descriptor
-  checks. Directories/globs never initiate recursive traversal. Package lookup
+  checks. Only `workspace_search` traverses directories, under its explicit root;
+  symlinks and dependency directories are skipped. Package lookup
   checks known manifest/lock/node_modules paths up the ancestor chain only as far
   as the workspace boundary. Git inspection is limited to explicit source files.
 - MCP requests: 512 KiB; two concurrent workers; six seconds per call; 128 MiB
@@ -69,6 +72,23 @@ explicitly load the extension and router and permit these read-only tools.
 - Network results are live and never cached. Certificate validation errors stay
   visible even though the inspection handshake permits an untrusted certificate
   so its subject/SAN/issuer/expiry can be returned. No HTTP bytes are sent.
+- Workspace search caps traversal at 5,000 entries, content at 16 MiB per call
+  and 1 MiB per file, and matches at 1,000. Hidden paths require an explicit
+  option. Skipped paths and incomplete scans are reported; no match is not proof
+  of absence outside that scope. Continuation requires the prior `snapshot`;
+  changed directory metadata or scanned bytes reject stale pages.
+- Local mail uses an explicit workspace-contained Maildir (`cur`/`new`) or mbox.
+  It never discovers credentials or accounts. The existing AgentMail tools own
+  hosted inbox access. MIME/charset decoding uses Python's standard library;
+  attachments are omitted, HTML becomes inert text, and malformed/lossy decoding
+  stays visible. Search caps are 1,000 messages, 16 MiB total, 1 MiB per message
+  and 65,536 decoded body characters. `local_mail_read` requires the exact
+  `message_hash`, rejecting stale results, and returns 1,600-character pages.
+- SSH banner checks send no application bytes, cap received data at 4 KiB and
+  close after 3.5 seconds. A banner does not verify the host key or authenticate.
+  `ssh_plan` returns argv only, bypassing SSH configuration, proxies, local
+  commands, forwarding and interactive authentication. Host-key checking remains
+  strict; normal authorized shell execution owns any later connection.
 - File-backed results include `input_hash` derived from exact source bytes and
   arguments; SQLite includes DB/WAL snapshot hashes and coverage includes Git
   diff evidence. No result cache retains user data; hashes support caller caching
@@ -87,7 +107,8 @@ the MCP protocol owner. Temp snapshots are cleaned up by the executor.
 Run `node --test --test-concurrency=1 agent/public-template/tests/utility-mcp.test.mjs`
 in the private tree, or `node --test tests/utility-mcp.test.mjs` in a public export.
 Fixtures are temporary and include real SQLite/WAL, Git, ZIP/TAR and localhost
-TCP/TLS cases. DNS record formatting has a deterministic resolver fixture.
+TCP/TLS cases. `tests/operation-tools.test.mjs` covers actual MCP/native discovery,
+Maildir/mbox, stale pages, MIME encodings, path boundaries, SSH banners and cancellation. DNS record formatting has a deterministic resolver fixture.
 
 Protocol framing follows the [MCP stdio specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
 SQLite enforcement uses its [authorizer and progress APIs](https://docs.python.org/3/library/sqlite3.html).

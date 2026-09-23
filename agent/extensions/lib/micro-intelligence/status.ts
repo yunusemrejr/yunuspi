@@ -125,6 +125,7 @@ export function microStatusSnapshot(request?: {
       calls: stats.calls,
       byOp: { embed: stats.embedCalls, rank: stats.rankCalls, classify: stats.classifyCalls, extract: stats.extractCalls },
       cacheHits: stats.cacheHits,
+      coalescedCalls: stats.coalescedCalls,
       p50: stats.p50,
       p95: stats.p95,
       skipReasons: stats.skipReasons,

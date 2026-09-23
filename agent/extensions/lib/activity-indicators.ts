@@ -121,7 +121,7 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   if (kind === "ml.needle.call" && data.count !== 0) {
     const op = typeof data.op === "string" && ["embed", "rank", "classify", "extract"].includes(data.op) ? data.op : "result";
     return { label: "Needle3", status: data.accepted === false ? "skip" : status, ms,
-      detail: `${data.cached === true ? "cached embeddings" : "local WASM"} · ${op} ${data.accepted === false ? "abstained" : "ready"}` };
+      detail: `${data.coalesced === true ? "shared in-flight result" : data.cached === true ? "cached embeddings" : "local WASM"} · ${op} ${data.accepted === false ? "abstained" : "ready"}` };
   }
   if (kind === "ml.jev.used") return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached judgment" : "remote judgment ready"}${amount("questions") === undefined ? "" : ` · ${amount("questions")} questions`}` };
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {

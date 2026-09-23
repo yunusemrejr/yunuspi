@@ -9,6 +9,7 @@ import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -187,6 +188,69 @@ test("cold callers trigger warmup instead of hanging", async () => {
   assert.equal(result.ok, true);
   assert.equal(handle.health().state, "healthy");
   await handle.shutdown();
+});
+
+test("identical concurrent Needle requests share one worker operation and caller-owned results", async () => {
+  const factory = canned(4), handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const rank = { query: "render screenshot", candidates: [{ id: "one", text: "render scene" }, { id: "two", text: "write prose" }] };
+  const classify = { text: "render screenshot", labels: rank.candidates };
+  const cases = [
+    ["embed", () => handle.embed(["render screenshot"]), result => { result.value.vectors[0][0] = 999; }, result => result.value.vectors[0][0]],
+    ["rank", () => handle.rank(rank), result => { result.value.ranked[0].score = 999; }, result => result.value.ranked[0].score],
+    ["classify", () => handle.classify(classify), result => { result.value.label = "changed"; }, result => result.value.label],
+    ["extract", () => handle.extract({ text: "Invoice number 12", schema: { type: "object" } }), result => { result.value.value.a = 999; }, result => result.value.value.a],
+  ];
+  try {
+    for (const [op, invoke, mutate, inspect] of cases) {
+      const results = await Promise.all(Array.from({ length: 12 }, invoke));
+      assert.ok(results.every(result => result.ok));
+      assert.equal(factory.workers.flatMap(worker => worker.posted).filter(item => item.op === op).length, 1, `${op}: 12 callers require 1 worker operation`);
+      assert.equal(results.filter(result => result.coalesced).length, 11);
+      const before = inspect(results[1]); mutate(results[0]); assert.equal(inspect(results[1]), before);
+      assert.notEqual(results[1], results[2]);
+    }
+    assert.equal(handle.stats().calls, 48, "request counts include successful cached/shared consumers");
+    assert.equal(handle.stats().coalescedCalls, 44);
+    assert.equal(handle.stats().cacheHits, 44);
+  } finally { await handle.shutdown(); }
+});
+
+test("Needle coalescing preserves caller session telemetry and does not merge different decisions", async () => {
+  const key = Symbol.for('yunus-pi.observability-context.v1'), old = globalThis[key];
+  const storage = new AsyncLocalStorage(), events = { first: [], second: [] };
+  globalThis[key] = { storage };
+  const factory = canned(4), handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const input = { text: "render screenshot", labels: [{ id: "a", text: "render scene" }, { id: "b", text: "write prose" }] };
+  const within = (id, params) => storage.run({ values: { [Symbol.for('yunus-pi.health.v1')]: (kind, data) => events[id].push({ kind, data }) } }, () => handle.classify(params));
+  try {
+    const results = await Promise.all([within('first', input), within('second', input)]);
+    assert.ok(results.every(result => result.ok));
+    assert.equal(events.first.filter(event => event.kind === 'ml.needle.call').length, 1);
+    assert.equal(events.second.filter(event => event.kind === 'ml.needle.call').length, 1);
+    assert.equal(events.second.find(event => event.kind === 'ml.needle.call').data.coalesced, true);
+    const distinct = await Promise.all([handle.classify({ ...input, acceptAt: .5 }), handle.classify({ ...input, acceptAt: .99 })]);
+    assert.equal(distinct[0].value.accepted, true); assert.equal(distinct[1].value.accepted, false);
+    assert.equal(factory.workers[0].posted.filter(item => item.op === 'classify').length, 3);
+  } finally { await handle.shutdown(); if (old === undefined) delete globalThis[key]; else globalThis[key] = old; }
+});
+
+test("Needle shared failures are not cached and shutdown resolves every shared waiter", async () => {
+  let respond = true;
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    if (message.op === 'init') return reply({ id: message.id, ok: true, result: { dim: 4 }, ms: 0 });
+    if (respond) return reply({ id: message.id, ok: false, error: 'fixture failure', ms: 0 });
+  } });
+  const handle = runtime.createNeedleRuntime({ workerFactory: factory, assetDir: fixtureAssets() });
+  const input = { query: 'render screenshot', candidates: [{ id: 'a', text: 'render scene' }] };
+  try {
+    const first = await Promise.all([handle.rank(input), handle.rank(input)]);
+    assert.ok(first.every(result => !result.ok)); assert.equal(handle.stats().coalescedCalls, 0);
+    await handle.rank(input); assert.equal(factory.workers[0].posted.filter(item => item.op === 'rank').length, 2, 'a later request retries after a shared failure');
+    respond = false;
+    const pending = Promise.all([handle.rank(input), handle.rank(input), handle.rank(input)]);
+    await handle.shutdown(); assert.ok((await pending).every(result => !result.ok));
+    assert.equal((await handle.rank(input)).reason, 'unavailable');
+  } finally { await handle.shutdown(); }
 });
 
 test("trivial and oversized inputs skip before inference", async () => {

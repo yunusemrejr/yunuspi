@@ -7,7 +7,7 @@ const { root, name, args } = workerData;
 try {
   const files = new Files(root);
   let result;
-  if (name === 'sqlite_probe' || name === 'archive_probe') {
+  if (['sqlite_probe', 'archive_probe', 'workspace_search', 'local_mail_search', 'local_mail_read'].includes(name)) {
     result = await new Promise((resolve, reject) => {
       const process = execFile('python3', ['-I', fileURLToPath(new URL('./probe.py', import.meta.url))], { timeout: 5200, killSignal: 'SIGKILL', maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
         if (error) return reject(Error('Inspection process failed or exceeded limits'));
@@ -18,6 +18,7 @@ try {
     });
     if (result.error) throw Error(result.error);
   } else if (name === 'net_probe') result = await (await import('./net.mjs')).netProbe(args);
+  else if (name === 'ssh_plan') result = (await import('./net.mjs')).sshPlan(args);
   else {
     const [module, method] = { workflow_probe: ['workflow','workflowProbe'], web_asset_check: ['web-assets','webAssetCheck'], package_probe: ['package', 'packageProbe'], openapi_probe: ['openapi', 'openapiProbe'], coverage_probe: ['coverage', 'coverageProbe'], contract_diff: ['contract', 'contractDiff'], env_audit: ['env', 'envAudit'] }[name];
     result = await (await import(`./${module}.mjs`))[method](files, args);

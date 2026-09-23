@@ -42,7 +42,7 @@ function dispatch(request) {
     initialized = true;
     return result(id, { protocolVersion: ['2024-11-05', '2025-03-26', PROTOCOL].includes(params.protocolVersion) ? params.protocolVersion : PROTOCOL,
       capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'yunuspi-utility-mcp', version: '1.0.0' },
-      instructions: 'Use these bounded specialized tools instead of shell inspection snippets. Files are confined to the startup workspace. Supply explicit paths; no recursive discovery. Read output_truncated/truncated before drawing conclusions.' });
+      instructions: 'Use these bounded specialized tools instead of shell inspection snippets. Files are confined to the startup workspace. Supply explicit paths; recursive discovery is available only through bounded workspace_search under its explicit root. Read output_truncated/truncated before drawing conclusions.' });
   }
   if (method === 'ping') return result(id, {});
   if (!ready) return error(id, -32000, 'Initialization required');

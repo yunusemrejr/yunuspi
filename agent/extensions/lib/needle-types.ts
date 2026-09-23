@@ -103,8 +103,10 @@ export interface NeedleStats {
   rankCalls: number;
   classifyCalls: number;
   extractCalls: number;
-  /** Successful operations served entirely by cached embeddings, counted once per call. */
+  /** Successful operations served by cached embeddings or identical live work. */
   cacheHits: number;
+  /** Successful consumers that joined identical live work, with no extra inference. */
+  coalescedCalls: number;
   /** Non-shadow successful operations; classifications must clear thresholds. */
   accepted: number;
   shadow: number;

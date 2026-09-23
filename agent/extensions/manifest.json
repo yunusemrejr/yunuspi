@@ -509,6 +509,7 @@
     "extensions/lib/utility-mcp/openapi.mjs",
     "extensions/lib/utility-mcp/package.mjs",
     "extensions/lib/utility-mcp/probe.py",
+    "extensions/lib/utility-mcp/local_operations.py",
     "extensions/lib/utility-mcp/server.mjs",
     "extensions/lib/utility-mcp/shapes.mjs",
     "extensions/lib/utility-mcp/worker.mjs",

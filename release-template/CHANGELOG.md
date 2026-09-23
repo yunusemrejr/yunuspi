@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-09-23
+
+Agents gain bounded workspace and local-mail search, hash-checked message reading, inert SSH connection planning and explicit SSH banner inspection. `claim_check` verifies exact quotations and current file provenance; interpretations remain subject to review. Tools stay behind existing discovery, utility workers and authority boundaries.
+
+Rendered UI checks add animated status capsules, copy density, primary font proliferation, repeated heavy borders and narrow quantified marketing evidence candidates. Checks use existing captures, expose scope and exclusions, and introduce no model calls or repair loops.
+
+Concurrent identical Needle3 operations share existing queued inference with separate consumer results and honest TUI telemetry. Voluntary coordination receipts observe normal authorized shell execution against explicit input hashes; stale or unverifiable evidence cannot be advertised as a current check. Signal-terminated native shell commands now fail explicitly.
+
+Disposable experiments can opt into the existing background-task registry, retaining OS isolation, bounded output, terminal notifications and cleanup. Foreground use remains compatible. Details and limits: [operations audit](docs/OPERATIONS-EVIDENCE-AUDIT.md), [async, operations and studio](docs/ASYNC-AND-STUDIO.md).
+
 ## 0.3.0 — 2026-09-23
 
 Slow independent reviews now show aspect progress and elapsed/deadline information in the existing tool display. Repair rounds receive prior blockers and changed-source context. Exhausted review rounds ask for an honest assessment of remaining gaps; stopping a session no longer requires manufacturing a review or child run.

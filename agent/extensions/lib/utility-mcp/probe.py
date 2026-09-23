@@ -4,6 +4,7 @@ Input/output are bounded JSON; no shell, extraction, project writes or extension
 The independent alarm survives cancellation of the parent worker thread.
 """
 import fnmatch
+import importlib.util
 import hashlib
 import json
 import os
@@ -261,7 +262,14 @@ def main():
     try:
         request = json.loads(sys.stdin.buffer.read(512 * 1024 + 1))
         root = Path(request['root']).resolve(strict=True)
-        result = {'sqlite_probe': sqlite_probe, 'archive_probe': archive_probe}[request['name']](root, request['args'])
+        if request['name'] in ('workspace_search', 'local_mail_search', 'local_mail_read'):
+            sys.dont_write_bytecode = True
+            spec = importlib.util.spec_from_file_location('yunuspi_local_operations', Path(__file__).with_name('local_operations.py'))
+            operations = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(operations)
+            result = getattr(operations, request['name'])(root, request['args'], regular)
+        else:
+            result = {'sqlite_probe': sqlite_probe, 'archive_probe': archive_probe}[request['name']](root, request['args'])
         encoded = json.dumps(result, ensure_ascii=True, allow_nan=False)
         if len(encoded) > 2 * 1024 * 1024:
             raise ValueError('Result byte limit exceeded; narrow request')

@@ -46,7 +46,7 @@ export function needleAssetDir(): string {
 }
 
 export type NeedleResult<T> =
-  | { ok: true; value: T; cached: boolean; ms: number; shadow: boolean }
+  | { ok: true; value: T; cached: boolean; coalesced?: boolean; ms: number; shadow: boolean }
   | { ok: false; reason: NeedleSkipReason; detail?: string };
 
 const RING_MAX = 128;
@@ -121,9 +121,13 @@ export function createNeedleRuntime(options: {
   const pending = new Map<number, Pending>();
   const queue: Array<{ request: Omit<NeedleWorkerRequest, "id">; op: string; queuedAt: number; resolve: (r: NeedleResult<never>) => void; timer: ReturnType<typeof setTimeout> }> = [];
   const embedCache = new Map<string, number[]>();
+  // This is only the live work owned by the existing queue, never a result
+  // cache. Identical callers share inference while retaining their own result
+  // objects and async session scope when finished() publishes telemetry.
+  const inflight = new Map<string, Promise<NeedleResult<never>>>();
   const stats: NeedleStats = {
     calls: 0, embedCalls: 0, rankCalls: 0, classifyCalls: 0, extractCalls: 0,
-    cacheHits: 0, accepted: 0, shadow: 0, escalatedToJev: 0, escalatedToLlm: 0,
+    cacheHits: 0, coalescedCalls: 0, accepted: 0, shadow: 0, escalatedToJev: 0, escalatedToLlm: 0,
     timeouts: 0, workerRestarts: 0, latencies: [], queueWaits: [], skipReasons: {},
   };
   let shadowAgreed = 0, shadowDisagreed = 0;
@@ -428,17 +432,40 @@ export function createNeedleRuntime(options: {
       // that was never started. Missing assets skip immediately.
       if (!starting) startWorker();
       if (!worker) return Promise.resolve(skip(state === "cooling" ? "cooldown" : "unavailable"));
-      return enqueue(request, op);
     }
-    return enqueue(request, op);
+    // Requests have already been normalized and bounded by their operation.
+    // Snapshot the JSON transport before queueing: caller mutation must not
+    // change queued extraction schemas or the identity that peers join.
+    let snapshot: Omit<NeedleWorkerRequest, "id">;
+    let identity: string;
+    try {
+      const serialized = JSON.stringify(request);
+      snapshot = JSON.parse(serialized);
+      identity = needleHash(serialized);
+    } catch { return Promise.resolve(skip("unsupported-shape")); }
+    const existing = inflight.get(identity);
+    if (existing) return existing.then(result => {
+      if (!result.ok) return { ...result };
+      return { ...structuredClone(result), cached: true, coalesced: true };
+    });
+    const work = enqueue(snapshot, op).finally(() => {
+      if (inflight.get(identity) === work) inflight.delete(identity);
+    });
+    inflight.set(identity, work);
+    return work.then(result => structuredClone(result));
   };
 
   const finished = <T>(result: NeedleResult<never>, counter: "embedCalls" | "rankCalls" | "classifyCalls" | "extractCalls"): NeedleResult<T> => {
     if (result.ok) {
       stats[counter]++;
       if (result.cached) stats.cacheHits++;
+      if (result.coalesced) {
+        stats.coalescedCalls++;
+        stats.calls++;
+        if (result.shadow) stats.shadow++;
+      }
       if (!result.shadow && (counter !== "classifyCalls" || (result.value as NeedleClassifyResult).accepted)) stats.accepted++;
-      noteHealth("ml.needle.call", { op: counter.replace("Calls", ""), cached: result.cached, shadow: result.shadow, durationMs: result.ms, count: 1, ...(counter === "classifyCalls" ? { accepted: (result.value as NeedleClassifyResult).accepted } : {}) });
+      noteHealth("ml.needle.call", { op: counter.replace("Calls", ""), cached: result.cached, coalesced: result.coalesced === true, shadow: result.shadow, durationMs: result.ms, count: 1, ...(counter === "classifyCalls" ? { accepted: (result.value as NeedleClassifyResult).accepted } : {}) });
       return result as NeedleResult<T>;
     }
     return result as NeedleResult<T>;
@@ -500,7 +527,7 @@ export function createNeedleRuntime(options: {
           if (embedCache.size > policy.embedCacheMax) embedCache.delete(embedCache.keys().next().value!);
         }
       });
-      return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: result.cached, ms: result.ms, shadow: result.shadow }, "embedCalls");
+      return finished<NeedleEmbedResult>({ ok: true, value: { dim, vectors }, cached: result.cached, coalesced: result.coalesced, ms: result.ms, shadow: result.shadow }, "embedCalls");
     },
     async rank(input) {
       const query = needleText(input?.query, policy.maxTextChars);
@@ -613,6 +640,7 @@ export function createNeedleRuntime(options: {
       closed = true;
       if (processState[SHARED_RUNTIME] === handle) delete processState[SHARED_RUNTIME];
       embedCache.clear();
+      inflight.clear();
       if (reprobeTimer) clearTimeout(reprobeTimer);
       reprobeTimer = undefined;
       failAll("unavailable", "shutdown");

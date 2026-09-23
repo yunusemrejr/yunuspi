@@ -152,7 +152,7 @@ Send and read email through AgentMail (outreach and inbox triage) with an enviro
 
 #### session-coordination
 
-Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes and a local Markdown board; peers are advisory, not remote messaging or locks.
+Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes, explicit-input native check receipts and a local Markdown board; peers are advisory, not remote messaging or locks.
 
 **Entrypoints:** `session_coordinate`, `sibling-bridge`, `todo-plan-changed`
 
@@ -160,10 +160,11 @@ Coordinate independent Pi sessions sharing one checkout through voluntary object
 
 **Options:**
 
-- `action`: Coordination operation. Values: `status`, `publish`, `clear`.
+- `action`: Coordination operation. Values: `status`, `publish`, `clear`, `prepare_check`.
 - `objective`: Bounded objective text, up to 240 characters.
 - `note`: Bounded handoff note, up to 500 characters.
-- `files`: Up to 32 absolute or cwd-resolved files/directories.
+- `files`: Up to 32 absolute or cwd-resolved scopes; prepare_check requires 1–8 regular input files <=256 KiB each.
+- `checkName|command`: Name and exact next authorized bash command to observe. This tool never executes it; freshness covers declared inputs only.
 - `PI_SIBLING_STALE_WRITES`: Disable stale-read write blocking when set to off.
 - `coordinationRoot`: Canonical same-checkout identity joins nested paths and symlink aliases.
 
@@ -299,7 +300,7 @@ Check SVG references and source cues, image/text metadata, measured frame timing
 
 #### rendered-design-review
 
-Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition evidence. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.
+Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.
 
 **Entrypoints:** `design_audit`
 
@@ -334,6 +335,27 @@ Inspect GitHub Actions workflow dependencies/matrix bounds, static web asset ref
 **Related records:** `source-intelligence`, `safety-bounds`, `rendered-design-review`
 
 **Source:** [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs), [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts)
+
+**Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
+
+#### bounded-operations
+
+Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection. Prepare inert SSH argv or inspect one explicit server banner without authenticating or executing remote commands.
+
+**Entrypoints:** `workspace_search`, `local_mail_search`, `local_mail_read`, `ssh_plan`, `net_probe`
+
+**Catalog tool pointers:** `workspace_search`, `local_mail_search`, `local_mail_read`, `ssh_plan`, `net_probe`
+
+**Options:**
+
+- `root|path`: Explicit workspace-contained root or local mail export; hidden content is opt-in.
+- `query|mode|kind`: Literal content/path or mail-field search; bounded and paginated.
+- `snapshot|message_hash`: Current snapshot identity required for continuation or reading mail.
+- `host|port|user`: One explicit SSH target; no ranges, configuration execution or automatic connection.
+
+**Related records:** `source-intelligence`, `memory-evidence`, `safety-bounds`
+
+**Source:** [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts), [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py), [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
 
 **Documentation:** [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 
@@ -393,9 +415,9 @@ Record future-session notes, project-scoped decisions and checklist state, with 
 
 Keep small verbatim project observations with SHA256 provenance and retrieve unchanged evidence from the active session branch; inferred claims and unattributed URLs are rejected.
 
-**Entrypoints:** `evidence_cache`, `context_score`, `handoff_capsule`
+**Entrypoints:** `evidence_cache`, `claim_check`, `context_score`, `handoff_capsule`
 
-**Catalog tool pointers:** `evidence_cache`, `context_score`, `handoff_capsule`
+**Catalog tool pointers:** `evidence_cache`, `claim_check`, `context_score`, `handoff_capsule`
 
 **Options:**
 
@@ -403,6 +425,7 @@ Keep small verbatim project observations with SHA256 provenance and retrieve unc
 - `source`: Local project source path or attributable source id.
 - `quote`: Verbatim observation to cache.
 - `query`: Evidence relevance query.
+- `claims`: Up to 12 quotations/interpretations with explicit source excerpts and optional expected hashes; matches establish provenance, never real-world truth.
 - `goal`: Goal used to build a handoff capsule.
 - `items`: Bounded context items for scoring or capsule extraction.
 - `maxChars`: Capsule output bound; default 2200.
@@ -835,6 +858,7 @@ Inspect host/session dependencies and device candidates before guarded operation
 - `files[].path`: Relative disposable destination.
 - `files[].content|source`: Exactly one inline fixture or project source.
 - `timeoutMs`: Sandbox execution timeout, 1000–120000.
+- `background`: Opt in to the existing background-task owner for disposable experiments; completion arrives without polling.
 - `maxOutputBytes`: Sandbox output bound, 1024–65536.
 - `PI_WRITE_DEGENERATION`: Disable the repeated-write degeneration heuristic only when set to 0. Values: `0`.
 - `PI_SIBLING_STALE_WRITES`: Restore advisory-only sibling write behavior when off.
@@ -939,7 +963,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `agentmail_search` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 965; literal)
 - `agentmail_send` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 802; literal)
 - `agentmail_status` — [`agent/extensions/agentmail.ts`](../agent/extensions/agentmail.ts) (line 725; literal)
-- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
+- `archive_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 38; catalog)
 - `artifact_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 105; factory)
 - `ast_diff` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 12; definition)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 218; factory)
@@ -953,25 +977,28 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 136; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 205; literal)
+- `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
 - `context_profile` — [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) (line 342; literal)
-- `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
+- `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 14; literal)
 - `context_slice` — [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) (line 10; definition)
-- `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
-- `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
+- `contract_diff` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 32; catalog)
+- `coverage_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 30; catalog)
 - `coverage_select` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 21; factory)
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 127; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
 - `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 218; literal)
-- `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
-- `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 11; literal)
+- `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
+- `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 189; literal)
-- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 10; literal)
+- `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 432; literal)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 217; factory)
+- `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
+- `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 92; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 219; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 215; factory)
@@ -983,27 +1010,28 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2019; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 387; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 222; factory)
-- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
+- `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 847; literal)
-- `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
-- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
+- `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
+- `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 604; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 736; literal)
 - `project_tests` — [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts) (line 531; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 530; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 217; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
-- `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 9; literal)
+- `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 232; factory)
 - `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 233; factory)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2180; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1818; literal)
-- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 584; literal)
+- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 632; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1755; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 360; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 652; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
-- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
+- `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
+- `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
 - `structured_output` — [`agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts`](../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts) (line 865; literal)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) (line 179; definition)
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../agent/extensions/pi-subagents/src/extension/index.ts) (line 759; definition)
@@ -1017,12 +1045,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 235; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 216; factory)
 - `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 59; literal)
-- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
+- `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
 - `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 194; configured-default)
 - `workdir_snapshot` — [`agent/extensions/scoped-snapshots.ts`](../agent/extensions/scoped-snapshots.ts) (line 12; literal)
-- `workflow_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
+- `workflow_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 20; catalog)
+- `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
 
 ### Dynamic tool owners
 
@@ -1037,7 +1066,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1659, 2247, 2401, 2800)
 - [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 70)
-- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `web_asset_check`, `workflow_probe` (lines 23)
+- [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
 
 ### Literal slash commands
 
@@ -1382,6 +1411,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/utility-mcp/coverage.mjs`](../agent/extensions/lib/utility-mcp/coverage.mjs)
 - [`agent/extensions/lib/utility-mcp/env.mjs`](../agent/extensions/lib/utility-mcp/env.mjs)
 - [`agent/extensions/lib/utility-mcp/files.mjs`](../agent/extensions/lib/utility-mcp/files.mjs)
+- [`agent/extensions/lib/utility-mcp/local_operations.py`](../agent/extensions/lib/utility-mcp/local_operations.py)
 - [`agent/extensions/lib/utility-mcp/local-reference.mjs`](../agent/extensions/lib/utility-mcp/local-reference.mjs)
 - [`agent/extensions/lib/utility-mcp/net.mjs`](../agent/extensions/lib/utility-mcp/net.mjs)
 - [`agent/extensions/lib/utility-mcp/openapi.mjs`](../agent/extensions/lib/utility-mcp/openapi.mjs)
@@ -1678,6 +1708,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 - [`docs/NEEDLE-AUDIT.md`](NEEDLE-AUDIT.md)
+- [`docs/OPERATIONS-EVIDENCE-AUDIT.md`](OPERATIONS-EVIDENCE-AUDIT.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
 - [`docs/PATCH-MIGRATION.md`](PATCH-MIGRATION.md)
 - [`docs/PLATFORMS.md`](PLATFORMS.md)

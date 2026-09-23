@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
-tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
+tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, workspace_search, local_mail_search, local_mail_read, ssh_plan, read, grep, find, ls, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, claim_check, git_info, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see
 subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../reasoning-aids.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 thinking: high
 systemPromptMode: replace

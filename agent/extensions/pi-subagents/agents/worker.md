@@ -7,7 +7,7 @@ thinking: high
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
+tools: sqlite_probe, package_probe, openapi_probe, coverage_probe, contract_diff, env_audit, net_probe, archive_probe, skill_review, workspace_search, local_mail_search, local_mail_read, ssh_plan, media_info, video_frames, audio_analyze, media_edit, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, dependency_plan, decision_frontier, coverage_select, math_check, artifact_check, value_convert, data_query, context_score, handoff_capsule, evidence_cache, claim_check, git_info, http_request, bulk_edit, sys_probe, context_slice, symbol_expand, ast_diff, obs_read, project_intel, sandbox_run, render_see, browser_session
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true

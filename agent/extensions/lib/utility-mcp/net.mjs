@@ -20,7 +20,7 @@ export async function netProbe(args) {
     const records = await dns.resolve(target, type);
     return { host: target, record_type: type, records, latency_ms: Math.round((performance.now() - start) * 100) / 100, cacheable: false };
   }
-  if (!args.port) throw Error('tcp/tls requires one explicit port');
+  if (!args.port) throw Error('tcp/tls/ssh requires one explicit port');
   const address = net.isIP(target) ? { address: target, family: net.isIP(target) } : await dns.lookup(target);
   // Connect exactly once, to the resolved address. No host/port enumeration or
   // protocol payloads. Unverified TLS is used only to inspect the certificate;
@@ -30,10 +30,29 @@ export async function netProbe(args) {
     const options = { host: address.address, family: address.family, port: args.port };
     const socket = args.action === 'tls' ? tls.connect({ ...options, servername, rejectUnauthorized: false }) : net.connect(options);
     const base = () => ({ host: target, address: address.address, port: args.port, latency_ms: Math.round((performance.now() - start) * 100) / 100, cacheable: false });
-    const done = result => { socket.destroy(); resolve({ ...base(), ...result }); };
-    socket.setTimeout(3500, () => done({ connected: false, error: 'timeout' }));
-    socket.once('error', error => done({ connected: false, error: error.code ?? 'connection_failed' }));
+    let settled = false, connected = false;
+    socket.once('connect', () => { connected = true; });
+    const failed = error => ({ connected: args.action === 'ssh' ? connected : false, error, ...(args.action === 'ssh' ? { ssh_identified: false, host_key_verified: false, authenticated: false } : {}) });
+    const deadline = setTimeout(() => done(failed('timeout')), 3500);
+    const done = result => { if (settled) return; settled = true; clearTimeout(deadline); socket.destroy(); resolve({ ...base(), ...result }); };
+    if (args.action === 'ssh') {
+      let bytes = Buffer.alloc(0);
+      socket.on('data', chunk => {
+        if (bytes.length + chunk.length > 4096) return done({ connected, ssh_identified: false, error: 'banner_limit', host_key_verified: false, authenticated: false });
+        bytes = Buffer.concat([bytes, chunk]);
+        for (const line of bytes.toString('latin1').split('\n').slice(0, -1)) {
+          if (!line.startsWith('SSH-')) continue;
+          const banner = line.replace(/\r$/, '');
+          if (!/^SSH-(?:2\.0|1\.99)-[\x21-\x7e]+(?: [\x20-\x7e]*)?$/.test(banner) || banner.length > 253) return done({ connected, ssh_identified: false, error: 'invalid_ssh_banner', host_key_verified: false, authenticated: false });
+          return done({ connected, ssh_identified: true, banner, host_key_verified: false, authenticated: false });
+        }
+      });
+      socket.once('end', () => done({ connected, ssh_identified: false, error: 'closed_before_banner', host_key_verified: false, authenticated: false }));
+    }
+    socket.setTimeout(3500, () => done(failed('timeout')));
+    socket.once('error', error => done(failed(error.code ?? 'connection_failed')));
     socket.once(args.action === 'tls' ? 'secureConnect' : 'connect', () => {
+      if (args.action === 'ssh') return;
       if (args.action !== 'tls') return done({ connected: true });
       const chain = [], seen = new Set();
       let cert = socket.getPeerCertificate(true);
@@ -47,4 +66,22 @@ export async function netProbe(args) {
         chain_errors: [...new Set([socket.authorizationError, identityError?.code].filter(Boolean).map(String))] });
     });
   });
+}
+
+
+export function sshPlan(args) {
+  const target = host(args.host);
+  if (!/^[a-z_][a-z0-9_.-]{0,63}$/i.test(args.user)) throw Error('Expected a simple explicit SSH username');
+  // -F /dev/null suppresses both user and system config, including Match exec
+  // and ProxyCommand. This function only constructs argv; it never spawns SSH.
+  const argv = ['-F', '/dev/null', '-p', String(args.port),
+    '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no',
+    '-o', 'IdentitiesOnly=yes', '-o', 'PasswordAuthentication=no', '-o', 'KbdInteractiveAuthentication=no',
+    '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes', '-o', 'PermitLocalCommand=no',
+    '-o', 'ProxyCommand=none', '-o', 'ProxyJump=none', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
+    '-o', 'ConnectTimeout=5', '-o', 'ConnectionAttempts=1', '-o', 'RequestTTY=no', '--', `${args.user}@${target}`];
+  return { executable: 'ssh', argv, target: { host: target, user: args.user, port: args.port }, executed: false,
+    config_read: false, credentials_read: false, network_connected: false,
+    requires: ['Existing trusted known_hosts entry', 'User-authorized execution through the normal shell policy'],
+    limitations: ['Configuration aliases, jump hosts and custom identities are deliberately not resolved', 'A plan does not verify identity, connectivity or authentication'] };
 }

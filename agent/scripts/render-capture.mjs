@@ -511,7 +511,7 @@ export async function renderCapture(p, output, signal) {
       // Reuse this capture and its DOM. No second render or model review is
       // scheduled; clean automatic checks add no model-context payload.
       try {
-        const noiseSample = await page.locator(p.selector ?? ":root").first().evaluate(inspectNoiseState);
+        const noiseSample = await page.locator(p.selector ?? ":root").first().evaluate(inspectNoiseState, {detailed: Boolean(p.designAudit)});
         if (p.designAudit || noiseSample.findings.length) noise = noiseSample;
       } catch {
         // Optional advisory evidence cannot invalidate a usable capture.

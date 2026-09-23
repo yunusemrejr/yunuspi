@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Writable } from 'node:stream';
 import { syncBuiltinESMExports } from 'node:module';
 import childProcess from 'node:child_process';
+import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { OutputAccumulator } from '../core/coding-agent/dist/core/tools/output-accumulator.js';
 import { createBashToolDefinition, createLocalBashOperations } from '../core/coding-agent/dist/core/tools/bash.js';
@@ -72,6 +73,16 @@ test('output controls validate before launching and old default tail semantics r
  let starts=0;const tool=createBashToolDefinition(scratch,{operations:{async exec(_cmd,_cwd,{onData}){starts++;await onData(Buffer.from('first\nlast\n'));return{exitCode:0};}}});
  for(const args of [{maxOutputBytes:0},{maxOutputBytes:1024.5},{maxOutputBytes:Infinity},{outputMode:'unknown'}]) await assert.rejects(tool.execute('bad',{command:'unused',...args}),/maxOutputBytes|outputMode/);
  assert.equal(starts,0);const result=await tool.execute('ok',{command:'unused'});assert.equal(result.content[0].text,'first\nlast\n');assert.equal(starts,1);
+});
+
+test('native completion evidence identifies actual post-hook command and signal exits are errors',async()=>{
+ const actual=command("process.stdout.write('checked')"), tool=createBashToolDefinition(scratch,{spawnHook:context=>({...context,command:actual})});
+ const result=await tool.execute('provenance',{command:'model-facing command'},undefined,undefined,context);
+ assert.deepEqual(result.details.execution,{exitCode:0,cwd:scratch,commandSha256:createHash('sha256').update(actual).digest('hex')});
+ assert.equal(result.content[0].text,'checked');
+ const killed=createBashToolDefinition(scratch,{operations:{async exec(){return {exitCode:null};}}});
+ await assert.rejects(killed.execute('killed',{command:'synthetic killed child'}),/Command terminated by signal/);
+ await assert.rejects(createBashToolDefinition(scratch).execute('nonzero',{command:command('process.exit(7)')}),/Command exited with code 7/);
 });
 
 test('installed-style managed bash uses bounded capture and preserves both real output streams',async()=>{

@@ -1,4 +1,5 @@
 import { constants } from "node:fs";
+import { createHash } from "node:crypto";
 import { access as fsAccess } from "node:fs/promises";
 import { spawn } from "child_process";
 import { Type } from "typebox";
@@ -294,10 +295,16 @@ export function createShellToolDefinition(cwd, config, options) {
                 }
                 const snapshot = await finishOutput();
                 const { text: outputText, details } = formatOutput(snapshot);
-                if (exitCode !== 0 && exitCode !== null) {
+                if (exitCode === null) {
+                    throw new Error(appendStatus(outputText, "Command terminated by signal"));
+                }
+                if (exitCode !== 0) {
                     throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
                 }
-                return { content: [{ type: "text", text: outputText }], details };
+                return { content: [{ type: "text", text: outputText }], details: {
+                    ...details,
+                    execution: { exitCode, cwd: spawnContext.cwd, commandSha256: createHash("sha256").update(spawnContext.command).digest("hex") },
+                } };
             }
             finally {
                 clearUpdateTimer();

@@ -57,6 +57,17 @@ families, evidence relevance, and escalation triage.
   caller-owned vectors, and shutdown is terminal. Idle workers are unreferenced
   so they cannot retain the host process. Grammar decoding uses the execution
   ceiling (8 seconds by default); embedding budgets remain input-scaled.
+- Concurrent identical normalized embedding, ranking, classification and
+  extraction requests share the existing queue's in-flight operation. Each
+  consumer receives its own result object and session-scoped telemetry;
+  different candidates, thresholds, schema or text remain separate. Failed
+  work is never retained as a reusable result, and shutdown settles all
+  waiters. `coalescedCalls` reports successful shared consumers; the TUI
+  identifies a shared in-flight result separately from cached embeddings.
+  A controlled before/after worker fixture with twelve concurrent consumers
+  for each of the four operations dispatched 48 operations before the change
+  and 4 after it, with 44 shared consumers. This measures duplicate local
+  work removed, not paid-provider savings or inference-quality improvement.
 - Latency (measured 2026-09-19, pinned build): ~3.5ms per character warm,
   so ranking call sites truncate to ~160 chars and re-rank a 12-entry
   head slice. Repeat ranks hit the worker cache in milliseconds. Static

@@ -1118,6 +1118,10 @@
           "summary": "Sandbox execution timeout, 1000–120000."
         },
         {
+          "name": "background",
+          "summary": "Opt in to the existing background-task owner for disposable experiments; completion arrives without polling."
+        },
+        {
           "name": "maxOutputBytes",
           "summary": "Sandbox output bound, 1024–65536."
         },
@@ -1470,7 +1474,7 @@
     {
       "id": "session-coordination",
       "group": "coordination",
-      "summary": "Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes and a local Markdown board; peers are advisory, not remote messaging or locks.",
+      "summary": "Coordinate independent Pi sessions sharing one checkout through voluntary objectives, file scopes, recent writes, explicit-input native check receipts and a local Markdown board; peers are advisory, not remote messaging or locks.",
       "entrypoints": [
         "session_coordinate",
         "sibling-bridge",
@@ -1485,7 +1489,8 @@
           "values": [
             "status",
             "publish",
-            "clear"
+            "clear",
+            "prepare_check"
           ],
           "summary": "Coordination operation."
         },
@@ -1499,7 +1504,11 @@
         },
         {
           "name": "files",
-          "summary": "Up to 32 absolute or cwd-resolved files/directories."
+          "summary": "Up to 32 absolute or cwd-resolved scopes; prepare_check requires 1–8 regular input files <=256 KiB each."
+        },
+        {
+          "name": "checkName|command",
+          "summary": "Name and exact next authorized bash command to observe. This tool never executes it; freshness covers declared inputs only."
         },
         {
           "name": "PI_SIBLING_STALE_WRITES",
@@ -1670,11 +1679,13 @@
       "summary": "Keep small verbatim project observations with SHA256 provenance and retrieve unchanged evidence from the active session branch; inferred claims and unattributed URLs are rejected.",
       "entrypoints": [
         "evidence_cache",
+        "claim_check",
         "context_score",
         "handoff_capsule"
       ],
       "tools": [
         "evidence_cache",
+        "claim_check",
         "context_score",
         "handoff_capsule"
       ],
@@ -1698,6 +1709,10 @@
         {
           "name": "query",
           "summary": "Evidence relevance query."
+        },
+        {
+          "name": "claims",
+          "summary": "Up to 12 quotations/interpretations with explicit source excerpts and optional expected hashes; matches establish provenance, never real-world truth."
         },
         {
           "name": "goal",
@@ -2121,7 +2136,7 @@
     {
       "id": "rendered-design-review",
       "group": "engineering",
-      "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition evidence. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
+      "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
       "entrypoints": [
         "design_audit"
       ],
@@ -2204,6 +2219,55 @@
       "sourceFiles": [
         "agent/extensions/lib/utility-mcp/catalog.mjs",
         "agent/extensions/sys-probe.ts"
+      ],
+      "doc": "docs/ASYNC-AND-STUDIO.md",
+      "commands": []
+    },
+    {
+      "id": "bounded-operations",
+      "group": "engineering",
+      "summary": "Search explicit workspace roots and local Maildir/mbox exports with scan limits, source hashes and stale-page rejection. Prepare inert SSH argv or inspect one explicit server banner without authenticating or executing remote commands.",
+      "entrypoints": [
+        "workspace_search",
+        "local_mail_search",
+        "local_mail_read",
+        "ssh_plan",
+        "net_probe"
+      ],
+      "tools": [
+        "workspace_search",
+        "local_mail_search",
+        "local_mail_read",
+        "ssh_plan",
+        "net_probe"
+      ],
+      "options": [
+        {
+          "name": "root|path",
+          "summary": "Explicit workspace-contained root or local mail export; hidden content is opt-in."
+        },
+        {
+          "name": "query|mode|kind",
+          "summary": "Literal content/path or mail-field search; bounded and paginated."
+        },
+        {
+          "name": "snapshot|message_hash",
+          "summary": "Current snapshot identity required for continuation or reading mail."
+        },
+        {
+          "name": "host|port|user",
+          "summary": "One explicit SSH target; no ranges, configuration execution or automatic connection."
+        }
+      ],
+      "related": [
+        "source-intelligence",
+        "memory-evidence",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/utility-tools.ts",
+        "agent/extensions/lib/utility-mcp/local_operations.py",
+        "agent/extensions/lib/utility-mcp/net.mjs"
       ],
       "doc": "docs/ASYNC-AND-STUDIO.md",
       "commands": []
@@ -2779,7 +2843,7 @@
       {
         "name": "archive_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 30,
+        "line": 38,
         "kind": "catalog"
       },
       {
@@ -2862,6 +2926,12 @@
         "kind": "literal"
       },
       {
+        "name": "claim_check",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
         "name": "contact_supervisor",
         "source": "agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts",
         "line": 305,
@@ -2876,7 +2946,7 @@
       {
         "name": "context_score",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 9,
+        "line": 14,
         "kind": "literal"
       },
       {
@@ -2888,13 +2958,13 @@
       {
         "name": "contract_diff",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 24,
+        "line": 32,
         "kind": "catalog"
       },
       {
         "name": "coverage_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 22,
+        "line": 30,
         "kind": "catalog"
       },
       {
@@ -2930,13 +3000,13 @@
       {
         "name": "env_audit",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 26,
+        "line": 34,
         "kind": "catalog"
       },
       {
         "name": "evidence_cache",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 11,
+        "line": 16,
         "kind": "literal"
       },
       {
@@ -2962,7 +3032,7 @@
       {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 10,
+        "line": 15,
         "kind": "literal"
       },
       {
@@ -2976,6 +3046,18 @@
         "source": "agent/extensions/media-tools.ts",
         "line": 217,
         "kind": "factory"
+      },
+      {
+        "name": "local_mail_read",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 16,
+        "kind": "catalog"
+      },
+      {
+        "name": "local_mail_search",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 14,
+        "kind": "catalog"
       },
       {
         "name": "math_check",
@@ -3046,7 +3128,7 @@
       {
         "name": "net_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 28,
+        "line": 36,
         "kind": "catalog"
       },
       {
@@ -3058,13 +3140,13 @@
       {
         "name": "openapi_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 20,
+        "line": 28,
         "kind": "catalog"
       },
       {
         "name": "package_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 18,
+        "line": 26,
         "kind": "catalog"
       },
       {
@@ -3106,7 +3188,7 @@
       {
         "name": "sandbox_run",
         "source": "agent/extensions/sandbox.ts",
-        "line": 9,
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -3136,7 +3218,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 584,
+        "line": 632,
         "kind": "literal"
       },
       {
@@ -3167,7 +3249,13 @@
       {
         "name": "sqlite_probe",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 16,
+        "line": 24,
+        "kind": "catalog"
+      },
+      {
+        "name": "ssh_plan",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 18,
         "kind": "catalog"
       },
       {
@@ -3251,7 +3339,7 @@
       {
         "name": "web_asset_check",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
-        "line": 14,
+        "line": 22,
         "kind": "catalog"
       },
       {
@@ -3281,6 +3369,12 @@
       },
       {
         "name": "workflow_probe",
+        "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
+        "line": 20,
+        "kind": "catalog"
+      },
+      {
+        "name": "workspace_search",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 12,
         "kind": "catalog"
@@ -3360,6 +3454,12 @@
         "kind": "literal"
       },
       {
+        "name": "claim_check",
+        "source": "agent/extensions/pi-memory/context-tools.ts",
+        "line": 9,
+        "kind": "literal"
+      },
+      {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
         "line": 342,
@@ -3368,7 +3468,7 @@
       {
         "name": "context_score",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 9,
+        "line": 14,
         "kind": "literal"
       },
       {
@@ -3380,7 +3480,7 @@
       {
         "name": "evidence_cache",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 11,
+        "line": 16,
         "kind": "literal"
       },
       {
@@ -3392,7 +3492,7 @@
       {
         "name": "handoff_capsule",
         "source": "agent/extensions/pi-memory/context-tools.ts",
-        "line": 10,
+        "line": 15,
         "kind": "literal"
       },
       {
@@ -3488,7 +3588,7 @@
       {
         "name": "sandbox_run",
         "source": "agent/extensions/sandbox.ts",
-        "line": 9,
+        "line": 59,
         "kind": "literal"
       },
       {
@@ -3506,7 +3606,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 584,
+        "line": 632,
         "kind": "literal"
       },
       {
@@ -3747,21 +3847,25 @@
           "contract_diff",
           "coverage_probe",
           "env_audit",
+          "local_mail_read",
+          "local_mail_search",
           "net_probe",
           "openapi_probe",
           "package_probe",
           "sqlite_probe",
+          "ssh_plan",
           "web_asset_check",
-          "workflow_probe"
+          "workflow_probe",
+          "workspace_search"
         ]
       }
     ],
     "coverage": {
       "sourceFiles": 600,
-      "registrationSites": 64,
+      "registrationSites": 65,
       "indirectRegistrationSites": 16,
-      "stableRegistrationRows": 89,
-      "uniqueStableTools": 88,
+      "stableRegistrationRows": 94,
+      "uniqueStableTools": 93,
       "dynamicOwnerCount": 12,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4518,6 +4622,10 @@
       },
       {
         "path": "agent/extensions/lib/utility-mcp/files.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/utility-mcp/local_operations.py",
         "exists": true
       },
       {
@@ -6202,6 +6310,10 @@
       {
         "name": "NEEDLE-AUDIT.md",
         "path": "docs/NEEDLE-AUDIT.md"
+      },
+      {
+        "name": "OPERATIONS-EVIDENCE-AUDIT.md",
+        "path": "docs/OPERATIONS-EVIDENCE-AUDIT.md"
       },
       {
         "name": "ORCHESTRATION-EVIDENCE.md",
