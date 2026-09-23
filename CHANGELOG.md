@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 — 2026-09-23
+
+Model search places configured, available matches first, temporary failure exclusions/cooldowns next, and unconfigured catalog entries last. Results explain availability, retain exact provider identities, and accept pasted regional provider/model IDs. Unlisted session-only candidates appear below registered TUI matches and are labeled unverified.
+
+Unavailable catalog endpoints no longer erase the provenance of previously validated cached models, so reloads retain usable catalog additions. MiMo 2.6 Flash and Pro are registered in the three official Xiaomi Token Plan regions; regional credentials stay separate.
+
 ## 0.5.2 — 2026-09-23
 
 The session observer reviews chronological chunks during active work, with a 30-second minimum review gap and visible checks within 120 seconds. It remains a conversational reviewer with no tools or execution authority. Advice is consumed once, repeated suggestions are suppressed, and stale or incomplete evidence is identified. Its packet includes current work, actual tool availability, source-backed council/swarm/fusion capabilities, configured model preferences and measured usage. Long foreground commands prompt conditional background-work advice, not automatic interruption.

@@ -1,4 +1,6 @@
 import { performance } from "node:perf_hooks";
+import { filterFallbackCandidates } from "../pi-subagents/src/runs/shared/model-exclusions.ts";
+import { evaluateRoute, readHealth } from "../pi-subagents/src/runs/shared/provider-health.ts";
 import { recordModelRoutingLatency } from "./model-routing-metrics.ts";
 import {
 	LLM_PREFERENCES_VERSION,
@@ -20,6 +22,8 @@ export interface ModelRoutingCatalogItem {
 	input?: string[];
 	cost?: { input?: number; output?: number; knownFree?: boolean };
 	enabled: boolean;
+	availability?: "available" | "blocked" | "unavailable" | "unconfigured";
+	availabilityLabel?: string;
 	globalProviderRouting?: Record<string, unknown>;
 }
 
@@ -39,6 +43,7 @@ export interface ModelRoutingSnapshot {
 export interface ModelRoutingRegistry {
 	getAll?: () => unknown[];
 	getAvailable?: () => unknown[];
+	getProviderAuthStatus?: (provider: string) => { configured?: boolean };
 }
 
 function safeString(value: unknown, max = 256): string | undefined {
@@ -98,7 +103,44 @@ function catalog(registry: ModelRoutingRegistry): ModelRoutingCatalogItem[] {
 		const candidate = publicModel(row, enabledKeys.has(`${String((row as any)?.provider ?? "").toLowerCase()}/${String((row as any)?.id ?? "").toLowerCase()}`));
 		if (candidate) out.set(candidate.fullId.toLowerCase(), candidate);
 	}
-	return [...out.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));
+	const models = [...out.values()];
+	const now = Date.now(), health = readHealth(), exclusions = new Map<string, number>();
+	const providerConfigured = new Map<string, boolean | undefined>();
+	filterFallbackCandidates(models.map(model => model.fullId), { now, onExcluded: (route, exclusion) => exclusions.set(route, exclusion.expiresAt) });
+	for (const model of models) {
+		if (!model.enabled) {
+			if (!providerConfigured.has(model.provider)) {
+				try { providerConfigured.set(model.provider, registry.getProviderAuthStatus?.(model.provider)?.configured); }
+				catch { providerConfigured.set(model.provider, undefined); }
+			}
+			const configured = providerConfigured.get(model.provider);
+			model.availability = configured === false ? "unconfigured" : "unavailable";
+			model.availabilityLabel = configured === false ? "Catalog only · provider not configured in this session"
+				: configured === true ? "Configured provider · model not available in this session"
+				: "Catalog only · availability not confirmed in this session";
+			continue;
+		}
+		const excludedUntil = exclusions.get(model.fullId);
+		const decision = evaluateRoute({ provider: model.provider, model: model.id, now }, health);
+		if (excludedUntil || !decision.allowed) {
+			model.availability = "blocked";
+			model.availabilityLabel = `Configured · ${excludedUntil ? "failure exclusion" : "temporary cooldown"} until ${new Date(Math.max(excludedUntil ?? 0, decision.cooldownUntil)).toISOString()}`;
+		} else {
+			model.availability = "available";
+			model.availabilityLabel = "Configured and available in this session";
+		}
+	}
+	return models.sort((a, b) => modelRoutingAvailabilityRank(a) - modelRoutingAvailabilityRank(b) || a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));
+}
+
+/** Readiness outranks textual relevance, but only among matching search rows.
+ * Catalog presence and successful inference are deliberately not equivalent. */
+export function modelRoutingAvailabilityRank(model: Pick<ModelRoutingCatalogItem, "enabled" | "availability">): number {
+	return !model.enabled || model.availability === "unconfigured" ? 2 : model.availability === "blocked" ? 1 : 0;
+}
+
+export function compareModelRoutingSearch(a: { model: ModelRoutingCatalogItem; score: number }, b: { model: ModelRoutingCatalogItem; score: number }): number {
+	return modelRoutingAvailabilityRank(a.model) - modelRoutingAvailabilityRank(b.model) || b.score - a.score || a.model.fullId.localeCompare(b.model.fullId);
 }
 
 export function readModelRoutingSnapshot(configPath: string, registry: ModelRoutingRegistry): ModelRoutingSnapshot {
@@ -136,7 +178,37 @@ export async function saveModelRoutingSnapshot(
 
 /** Search all tokens in arbitrary order. Provider words score in their own
  * field, while model and alias text remain independent evidence. */
-export function scoreModelRoutingSearch(query: string, model: ModelRoutingCatalogItem, aliases: string[] = [], pins: string[] = []): number {
+export function scoreModelRoutingSearch(query: string, model: ModelRoutingCatalogItem, aliases: string[] = [], pins: string[] = [], knownProviders: readonly string[] = []): number {
+	const literal = query.trim().toLowerCase(), provider = model.provider.toLowerCase();
+	// Pasted route identities carry a provider constraint. Tokenizing a
+	// compound provider discarded its region and made exact routes disappear.
+	// A bare brand remains a broad search; an exact compound provider is scoped.
+	const providers = knownProviders.length ? knownProviders : [model.provider];
+	if (literal.includes("/") && !/\s/.test(literal)) {
+		const scope = providers.reduce((best, value) => {
+			const candidate = value.toLowerCase();
+			return candidate.length > best.length && literal.startsWith(candidate + "/") ? candidate : best;
+		}, "");
+		if (scope) {
+			if (scope !== provider) return 0;
+			const id = literal.slice(scope.length + 1);
+			if (!id || id === model.id.toLowerCase()) return 1000;
+			// Partial model search stays inside the explicitly named provider.
+			return scoreModelRoutingSearch(id, model, aliases, pins);
+		}
+		// Vendor-namespaced model IDs are also searchable, but an unknown
+		// provider prefix is never silently stripped by fuzzy matching.
+		return model.id.toLowerCase().startsWith(literal) ? 800 : 0;
+	}
+	const terms = literal.split(/\s+/);
+	const compoundScopes = /[-_.]/.test(literal) ? [...new Set(providers.map(value => value.toLowerCase()).filter(value => /[-_.]/.test(value) && terms.includes(value)))] : [];
+	if (compoundScopes.length) {
+		if (compoundScopes.length !== 1 || compoundScopes[0] !== provider) return 0;
+		// Match complete provider terms only. Model fragments such as
+		// "mimo-v2.6-flash" must keep all of their version/name tokens.
+		const rest = terms.filter(term => term !== provider).join(" ");
+		return rest ? scoreModelRoutingSearch(rest, model, aliases, pins) : 1000;
+	}
 	const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
 	const expand = (text: string) => {
 		const result: string[] = [];
@@ -166,11 +238,11 @@ export function scoreModelRoutingSearch(query: string, model: ModelRoutingCatalo
 	if (!rawTokens.length) return 1;
 	const modifiers = new Set(["official", "direct"]);
 	const searchTokens = rawTokens.filter(token => !modifiers.has(token));
-	const provider = normalize(model.provider);
+	const normalizedProvider = normalize(model.provider);
 	const host = normalize(model.providerHost ?? "");
 	const modelTokens = [...new Set([model.id, model.name ?? "", ...aliases, model.api ?? ""].flatMap(value => expand(value)))];
 	const pinTokens = expand(`${pins.join(" ")} ${JSON.stringify(model.globalProviderRouting ?? {})}`);
-	const allProviderNames = new Set([provider, ...providerAliasNames(provider).map(normalize), host].filter(Boolean));
+	const allProviderNames = new Set([normalizedProvider, ...providerAliasNames(normalizedProvider).map(normalize), host].filter(Boolean));
 	const official = rawTokens.includes("official") || rawTokens.includes("direct");
 	// Every provider named in the query is evidence. Reading only the first one
 	// let "openrouter deepseek official" exclude the real DeepSeek route.
@@ -200,8 +272,8 @@ export function scoreModelRoutingSearch(query: string, model: ModelRoutingCatalo
 	// The official bonus belongs to the provider that actually serves the model;
 	// an aggregator route is never "official" merely because it was named.
 	if (official && exactProvider && !AGGREGATOR_PROVIDERS.has(model.provider.toLowerCase())) score += 18;
-	// Catalog routes this session cannot use stay selectable but rank below the
-	// routes the resolver can actually accept.
+	// The comparator groups matching rows by availability before relevance;
+	// this small score tie-break preserves compatibility for direct score users.
 	return model.enabled ? score + 0.25 : score * 0.6;
 }
 

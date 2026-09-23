@@ -517,3 +517,55 @@ test("HTTP editor callbacks retain their owning session's routing metrics", asyn
   assert.equal(metricsA.routingMetrics.latency.search.count, 1);
   assert.equal(metricsB.routingMetrics.latency.search.count, 0, "another server cannot observe this session's searches");
 });
+
+test('configured routes lead search, failed and unconfigured routes are labelled, and selection preserves exact identity', async t => {
+  const f = fixture();
+  const providers = ['xiaomi', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-cn', 'xiaomi-token-plan-sgp'];
+  const models = providers.map(provider => ({ ...f.models[0], provider, id: 'mimo-v2.6-flash', name: 'MiMo v2.6 Flash', baseUrl: 'https://example.invalid/v1' }));
+  f.ctx.modelRegistry = { getAll: () => models, getAvailable: () => models.filter(model => ['xiaomi-token-plan-cn', 'xiaomi-token-plan-sgp'].includes(model.provider)), getProviderAuthStatus: provider => ({ configured: ['xiaomi-token-plan-cn', 'xiaomi-token-plan-sgp'].includes(provider) }) };
+  const { recordModelFailure, clearExclusions } = await import('../agent/extensions/pi-subagents/src/runs/shared/model-exclusions.ts');
+  recordModelFailure({ provider: 'xiaomi-token-plan-cn', modelId: 'mimo-v2.6-flash', reason: 'model-not-found', ttlMs: 60_000 });
+  const handle = await createModelRoutingEditorServer(f.ctx, { configPath: f.configPath, resolveRole: f.resolver });
+  t.after(async () => { clearExclusions(); await handle.close(); fs.rmSync(f.root, { recursive: true, force: true }); });
+  const token = new URL(handle.url).pathname.slice(1);
+  const response = await post(handle.url, token, 'search', { query: 'mimo flash', role: 'prompt_analysis' });
+  const result = await response.json();
+  assert.equal(result.models[0].provider, 'xiaomi-token-plan-sgp');
+  assert.deepEqual(result.models.map(model => model.availability), ['available', 'blocked', 'unconfigured', 'unconfigured']);
+  assert.match(result.models[1].availabilityLabel, /failure exclusion/);
+  assert.match(result.models[2].availabilityLabel, /provider not configured/);
+  for (const query of ['xiaomi-token-plan-sgp', 'xiaomi-token-plan-sgp/mimo-v2.6-flash', 'XIAOMI-TOKEN-PLAN-SGP/MIMO-V2.6-FLASH', 'xiaomi-token-plan-sgp mimo flash', 'mimo flash XIAOMI-TOKEN-PLAN-SGP']) {
+    const exact = await (await post(handle.url, token, 'search', { query, role: 'prompt_analysis' })).json();
+    assert.deepEqual(exact.models.map(model => model.fullId), ['xiaomi-token-plan-sgp/mimo-v2.6-flash'], `exact provider/route search: ${query}`);
+  }
+  const missing = await (await post(handle.url, token, 'search', { query: 'xiaomi-token-plan-unknown/mimo-v2.6-flash', role: 'prompt_analysis' })).json();
+  assert.deepEqual(missing.models, [], 'unknown provider never loses its identity to a model-only match');
+  const wrongVersion = await (await post(handle.url, token, 'search', { query: 'xiaomi-token-plan-sgp mimo-v2.5-flash', role: 'prompt_analysis' })).json();
+  assert.deepEqual(wrongVersion.models, [], 'provider extraction does not drop an unmatched model/version term');
+  const broad = await (await post(handle.url, token, 'search', { query: 'xiaomi', role: 'prompt_analysis' })).json();
+  assert.equal(broad.models[0].provider, 'xiaomi-token-plan-sgp', 'broad brand searches retain configured regional routes');
+  const { compareModelRoutingSearch } = await import('../agent/extensions/lib/model-routing-store.ts');
+  assert.ok(compareModelRoutingSearch({ model: result.models[0], score: 1 }, { model: result.models[2], score: 1000 }) < 0, 'text match strength cannot put an unconfigured route ahead of a matching ready route');
+  const page = await openPage(t, handle.url);
+  await page.getByRole('searchbox', { name: 'Search models' }).fill('mimo flash');
+  await page.locator('.result').nth(3).waitFor();
+  assert.match(await page.locator('.result').first().innerText(), /xiaomi-token-plan-sgp\/mimo-v2\.6-flash/);
+  assert.match(await page.locator('.result').nth(1).innerText(), /Add \(unavailable\)/);
+  assert.match(await page.locator('.result').nth(2).innerText(), /Add \(not configured\)/);
+  await page.locator('.result').first().getByRole('button', { name: 'Add', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: 'Model routing configuration updated' }).waitFor();
+  const saved = JSON.parse(fs.readFileSync(f.configPath, 'utf8'));
+  assert.deepEqual(saved.preferences.subagents.models.at(-1), { provider: 'xiaomi-token-plan-sgp', model: 'mimo-v2.6-flash' });
+});
+
+test('catalog visibility never mislabels unavailable or unknown authentication as unconfigured', async t => {
+  const f = fixture();
+  t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
+  const { readModelRoutingSnapshot } = await import('../agent/extensions/lib/model-routing-store.ts');
+  const configured = readModelRoutingSnapshot(f.configPath, { getAll: () => [f.models[0]], getAvailable: () => [], getProviderAuthStatus: () => ({ configured: true }) });
+  assert.equal(configured.models[0].availability, 'unavailable');
+  assert.match(configured.models[0].availabilityLabel, /Configured provider · model not available/);
+  const unknown = readModelRoutingSnapshot(f.configPath, { getAll: () => [f.models[0]], getAvailable: () => [] });
+  assert.equal(unknown.models[0].availability, 'unavailable');
+  assert.match(unknown.models[0].availabilityLabel, /availability not confirmed/);
+});

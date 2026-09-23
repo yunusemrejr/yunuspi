@@ -271,7 +271,8 @@ customModelItem(query) {
         // When filtering by a query, move the selector to the top row so the best
         // match is highlighted. When the query is cleared, keep the current position
         // clamped to the (restored) list length.
-const customItem=this.customModelItem(query);if(customItem)this.filteredModels=[customItem,...this.filteredModels];        this.selectedIndex = query ? 0 : Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
+// Registered matches stay ahead of an unlisted, unverified session-only ID.
+const customItem=this.customModelItem(query);if(customItem)this.filteredModels=[...this.filteredModels,customItem];        this.selectedIndex = query ? 0 : Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
         this.updateList();
     }
     updateList() {
@@ -292,7 +293,8 @@ const customItem=this.customModelItem(query);if(customItem)this.filteredModels=[
             const currentMarker = isCurrent ? theme.fg("accent", "✓ ") : "  ";
             const modelText = isSelected ? theme.fg("accent", item.id) : item.id;
             const providerBadge = theme.fg("muted", `[${item.provider}]`);
-            const line = `${cursor}${currentMarker}${modelText} ${providerBadge}${defaultBadge}`;
+            const availabilityBadge = item.model.piUnlistedModel ? theme.fg("warning", " · unlisted, unverified") : "";
+            const line = `${cursor}${currentMarker}${modelText} ${providerBadge}${defaultBadge}${availabilityBadge}`;
             this.listContainer.addChild(new Text(line, 0, 0));
         }
         // Add scroll indicator if needed

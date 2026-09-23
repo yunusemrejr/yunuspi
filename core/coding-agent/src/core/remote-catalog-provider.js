@@ -58,7 +58,10 @@ function remoteModels(entry, localGeneratedAt) {
     if (!entry)
         return [];
     const freshness = entry.lastModified ?? entry.validatedAt;
-    if (localGeneratedAt !== undefined && (freshness === undefined || freshness <= localGeneratedAt)) {
+    // Disk data is untrusted: coercion of strings/NaN must not bypass the
+    // comparison, and checkedAt alone is never proof that the body was valid.
+    if (!Number.isSafeInteger(freshness) || freshness <= 0 ||
+        (localGeneratedAt !== undefined && freshness <= localGeneratedAt)) {
         return [];
     }
     return entry.models;
@@ -111,13 +114,14 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
                 return;
             }
             if (response.status === 404 || response.status === 501) {
+                // An unavailable endpoint does not retire a previously validated
+                // catalog. Preserve the body's freshness and validator so a later
+                // offline session still restores it; checkedAt records only the
+                // failed availability check, never new authority for an old body.
                 await context.publish({
                     persist: {
                         ...(stored ?? { models: [] }),
                         checkedAt,
-                        lastModified: 0,
-                        validatedAt: undefined,
-                        etag: undefined,
                     },
                 });
                 return;
