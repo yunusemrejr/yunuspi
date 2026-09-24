@@ -584,11 +584,10 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       }
 
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
-      const startedAt = Date.now();
       const attempts: PromptAnalysisAttempt[] = [];
-      let progress: { attempt: number; route: string; recovery?: string } | undefined;
+      let progress: { attempt: number; route: string; recovery?: string; startedAt: number; timeoutMs: number } | undefined;
       const showProgress = () => {
-        try { if (owns() && progress) ctx.ui?.setStatus?.("prompt-analysis", `Intent analysis · ${progress.route} · attempt ${progress.attempt}${progress.recovery ? " · compact retry" : ""} · ${Math.floor((Date.now() - startedAt) / 1000)}s`); } catch { /* UI must not stop analysis */ }
+        try { if (owns() && progress) ctx.ui?.setStatus?.("prompt-analysis", `Intent analysis · ${progress.route} · attempt ${progress.attempt}${progress.recovery ? " · compact retry" : ""} · ${Math.floor((Date.now() - progress.startedAt) / 1000)}s / ${Math.ceil(progress.timeoutMs / 1000)}s allowed`); } catch { /* UI must not stop analysis */ }
       };
       const progressTimer = setInterval(showProgress, 1000);
       const clearProgress = () => {
@@ -607,7 +606,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         } : resumedAnalysisContext,
         candidates: selected.routes,
         signal,
-        onStart: detail => { progress = detail; showProgress(); },
+        onStart: detail => { progress = { ...detail, startedAt: Date.now() }; showProgress(); },
         onAttempt: (attempt) => {
           if (!owns()) return;
           // Keep the bounded initial outcome for the visible explanation;
@@ -683,7 +682,7 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         route: result.route ?? "none",
         owner: selected.source,
         decision: result.status,
-        durationMs: Math.max(0, Date.now() - startedAt),
+        durationMs: result.durationMs,
         ...(result.inputTokens !== undefined ? { inputTokens: result.inputTokens } : {}),
         ...(result.outputTokens !== undefined ? { outputTokens: result.outputTokens } : {}),
         usageUnknownAttempts: result.usageUnknownAttempts,

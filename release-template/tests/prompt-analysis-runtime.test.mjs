@@ -25,6 +25,66 @@ function reply(prompt, extra = {}) {
 	});
 }
 
+for (const kind of ['initial', 'followup']) {
+	test(`${kind}: a 90-second preferred response survives the default deadline`, async t => {
+		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+		const prompt = 'Preserve the endpoint behavior.';
+		const starts = [];
+		const pending = runtime.runPromptAnalysis({ prompt, kind,
+			candidates: [
+				{ route: 'xiaomi/primary', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), 90_000)) },
+				{ route: 'meta/fallback', complete: async () => { throw new Error('Fallback should not run'); } },
+			], onStart: value => starts.push(value) });
+		await new Promise(resolve => setImmediate(resolve));
+		t.mock.timers.tick(90_000);
+		const result = await pending;
+		assert.equal(result.status, 'model');
+		assert.equal(result.route, 'xiaomi/primary');
+		assert.equal(result.durationMs, 90_000);
+		assert.deepEqual(starts.map(value => value.timeoutMs), [120_000]);
+	});
+
+	test(`${kind}: Meta still has a full allowance after Xiaomi times out`, async t => {
+		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+		const prompt = 'Preserve the endpoint behavior.';
+		const starts = [], outcomes = [];
+		let firstSignal;
+		const pending = runtime.runPromptAnalysis({ prompt, kind,
+			candidates: [
+				{ route: 'xiaomi/primary', complete: ({ signal }) => { firstSignal = signal; return new Promise(() => {}); } },
+				{ route: 'meta/fallback', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), 90_000)) },
+			], onStart: value => starts.push(value), onAttempt: value => outcomes.push(value) });
+		await new Promise(resolve => setImmediate(resolve));
+		t.mock.timers.tick(120_000);
+		await new Promise(resolve => setImmediate(resolve));
+		assert.equal(firstSignal.aborted, true);
+		assert.deepEqual(starts.map(value => value.timeoutMs), [120_000, 120_000]);
+		t.mock.timers.tick(90_000);
+		const result = await pending;
+		assert.equal(result.status, 'model');
+		assert.equal(result.route, 'meta/fallback');
+		assert.equal(result.durationMs, 210_000);
+		assert.deepEqual(outcomes.map(value => value.outcome), ['timeout', 'complete']);
+	});
+
+	test(`${kind}: stalled providers remain bounded by the four-minute deadline`, async t => {
+		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+		const signals = [];
+		const pending = runtime.runPromptAnalysis({ prompt: 'Preserve the endpoint behavior.', kind,
+			candidates: ['xiaomi/primary', 'meta/fallback', 'unused/third'].map(route => ({ route,
+				complete: ({ signal }) => { signals.push(signal); return new Promise(() => {}); } })) });
+		await new Promise(resolve => setImmediate(resolve));
+		t.mock.timers.tick(120_000);
+		await new Promise(resolve => setImmediate(resolve));
+		t.mock.timers.tick(120_000);
+		const result = await pending;
+		assert.equal(result.status, 'fallback');
+		assert.equal(result.durationMs, 240_000);
+		assert.equal(signals.length, 2);
+		assert.ok(signals.every(signal => signal.aborted));
+	});
+}
+
 test('routes advance after fast failures and malformed attempts keep their measured usage', async () => {
 	const prompt = 'Preserve the existing return shape.';
 	const outcomes = [];
@@ -47,6 +107,19 @@ test('routes advance after fast failures and malformed attempts keep their measu
 	assert.equal(result.outputTokens, 5);
 	assert.deepEqual(outcomes.map(({ outcome }) => outcome), ['malformed', 'failed', 'complete']);
 	assert.equal(result.analysis.explicitConstraints[0].text, prompt);
+});
+
+test('a provider-originated abort advances to fallback instead of cancelling analysis', async () => {
+	const prompt = 'Preserve the endpoint behavior.';
+	const outcomes = [];
+	const result = await runtime.runPromptAnalysis({ prompt, kind: 'initial',
+		candidates: [
+			{ route: 'xiaomi/primary', complete: async () => { throw Object.assign(new Error('Transport aborted'), { name: 'AbortError' }); } },
+			{ route: 'meta/fallback', complete: async () => ({ text: reply(prompt) }) },
+		], onAttempt: value => outcomes.push(value) });
+	assert.equal(result.status, 'model');
+	assert.equal(result.route, 'meta/fallback');
+	assert.deepEqual(outcomes.map(value => value.outcome), ['failed', 'complete']);
 });
 
 test('follow-up uses the compact output budget and emits a gated relation', async () => {

@@ -50,10 +50,13 @@ export interface PromptAnalysisRun {
   attempts: number;
 }
 
-const INITIAL_BUDGET_MS = 30_000;
-const FOLLOWUP_BUDGET_MS = 24_000;
-const INITIAL_ATTEMPT_MS = 15_000;
-const FOLLOWUP_ATTEMPT_MS = 12_000;
+// Account-backed providers can spend tens of seconds queued or reasoning.
+// Follow-ups need the same transport allowance as initial requests, even
+// though their answer budget is smaller. Preserve room for a full fallback.
+const INITIAL_BUDGET_MS = 240_000;
+const FOLLOWUP_BUDGET_MS = 240_000;
+const INITIAL_ATTEMPT_MS = 120_000;
+const FOLLOWUP_ATTEMPT_MS = 120_000;
 const MAX_ROUTE_ATTEMPTS = 4;
 
 function aborted(signal?: AbortSignal): boolean {
@@ -250,7 +253,9 @@ export async function runPromptAnalysis(input: {
       });
       return snapshot({ startedAt, now, analysis, status: "model", route: candidate.route, attempts, inputTokens, outputTokens, knownUsageObserved, usageStates });
     } catch (error) {
-      if (aborted(input.signal) || (error instanceof Error && error.name === "AbortError")) {
+      // Only the caller can cancel the whole pass. A transport's own abort
+      // is a failed route and must leave the configured fallback available.
+      if (aborted(input.signal)) {
         stopped = !settled;
         if (!settled) usageStates.set(attempt, "pending");
         return snapshot({ startedAt, now, status: "cancelled", attempts, inputTokens, outputTokens, knownUsageObserved, usageStates });

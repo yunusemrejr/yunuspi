@@ -222,6 +222,7 @@ test('cancelled registry and legacy streams clear progress without publishing fa
     const pending = task.run();
     await began;
     assert.match(f.status(), /Intent analysis/);
+    assert.match(f.status(), /0s \/ 240s allowed/);
     controller.abort();
     await pending;
     await tick();
