@@ -39,6 +39,7 @@
     "model-routing-config.ts",
     "micro-intelligence.ts",
     "session-observer.ts",
+    "design-studio.ts",
     "video-studio.ts"
   ],
   "lib": [
@@ -161,7 +162,9 @@
     "tool-discovery.ts",
     "utility-client.ts",
     "workspace-write-lease.ts",
-    "video-studio.ts"
+    "video-studio.ts",
+    "design-studio.ts",
+    "image-analysis.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

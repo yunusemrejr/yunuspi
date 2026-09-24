@@ -53,6 +53,29 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
     if (signal?.aborted) abort();
   });
 }
+const captureQueue = createRenderQueue();
+/** One trusted capture for other bounded tools (visual_diff). The PNG is
+ * copied to `destination`, which the caller owns; staging stays outside the
+ * workspace and is removed. Returns the renderer's receipt. */
+export async function captureToFile(params: { source: string; width: number; height: number; fullPage: boolean; clip?: { y: number; height: number }; colorScheme?: string; timeoutMs?: number }, destination: string, cwd: string, signal?: AbortSignal): Promise<any> {
+  const release = await captureQueue(signal);
+  let tempRoot: string | undefined;
+  try {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-render-"));
+    await fs.chmod(tempRoot, 0o700);
+    const staged = path.join(tempRoot, "capture.png");
+    const source = /^https?:\/\//i.test(params.source) ? params.source : path.resolve(cwd, params.source.replace(/^@/, ""));
+    const details = JSON.parse((await runCapture({ ...params, source, output: "image" }, staged, tempRoot, cwd, signal)).trim());
+    if (!details.output) throw new Error("Render produced no image");
+    const stat = await fs.lstat(staged);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) throw new Error("Render returned an invalid capture artifact");
+    await fs.copyFile(staged, destination, fs.constants.COPYFILE_EXCL);
+    return { ...details, output: destination };
+  } finally {
+    if (tempRoot) await fs.rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
+    release();
+  }
+}
 export default function (pi: any) {
   registerBrowserSession(pi);
   const acquireRender = createRenderQueue();

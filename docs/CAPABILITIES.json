@@ -2259,6 +2259,69 @@
       "commands": []
     },
     {
+      "id": "design-studio",
+      "group": "web_media",
+      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
+      "entrypoints": [
+        "image_analyze",
+        "image_crop",
+        "image_trace",
+        "visual_diff"
+      ],
+      "tools": [
+        "image_analyze",
+        "image_crop",
+        "image_trace",
+        "visual_diff",
+        "render_see",
+        "design_audit"
+      ],
+      "options": [
+        {
+          "name": "path|url",
+          "summary": "Local image, or an http(s) image downloaded once through the SSRF-guarded fetcher and kept locally."
+        },
+        {
+          "name": "scale|referenceScale",
+          "summary": "Reference pixel ratio (2 for @2x exports); inferred from common export widths."
+        },
+        {
+          "name": "ocr",
+          "summary": "Attach recognized copy to text blocks with local Tesseract."
+        },
+        {
+          "name": "map|blocks|kinds",
+          "summary": "Target assets by design-map block ids or kinds."
+        },
+        {
+          "name": "key|trim|format",
+          "summary": "Edge-connected background keying with de-fringing, trimming, and PNG/JPEG/WebP selection."
+        },
+        {
+          "name": "source|candidate|region",
+          "summary": "Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region."
+        },
+        {
+          "name": "outputDir",
+          "summary": "Artifacts default to the git-ignored .pi/design folder in the workspace."
+        }
+      ],
+      "related": [
+        "rendered-design-review",
+        "web-and-media",
+        "artifact-numeric-checks"
+      ],
+      "sourceFiles": [
+        "agent/extensions/design-studio.ts",
+        "agent/extensions/lib/design-studio.ts",
+        "agent/extensions/lib/image-analysis.ts",
+        "agent/scripts/render-capture.mjs",
+        "agent/skills/mockup-to-code/SKILL.md"
+      ],
+      "doc": "docs/DESIGN-STUDIO.md",
+      "commands": []
+    },
+    {
       "id": "rendered-design-review",
       "group": "engineering",
       "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
@@ -3124,7 +3187,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 218,
+        "line": 241,
         "kind": "literal"
       },
       {
@@ -3168,7 +3231,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 432,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -3306,7 +3369,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 217,
+        "line": 240,
         "kind": "literal"
       },
       {
@@ -3439,7 +3502,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 220,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -3463,7 +3526,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 59,
+        "line": 82,
         "kind": "literal"
       },
       {
@@ -3604,7 +3667,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 218,
+        "line": 241,
         "kind": "literal"
       },
       {
@@ -3628,7 +3691,7 @@
       {
         "name": "http_request",
         "source": "agent/extensions/http-tools.ts",
-        "line": 432,
+        "line": 495,
         "kind": "literal"
       },
       {
@@ -3706,7 +3769,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 217,
+        "line": 240,
         "kind": "literal"
       },
       {
@@ -3778,13 +3841,13 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 220,
+        "line": 258,
         "kind": "literal"
       },
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 59,
+        "line": 82,
         "kind": "literal"
       },
       {
@@ -3807,6 +3870,15 @@
       }
     ],
     "dynamicOwners": [
+      {
+        "source": "agent/extensions/design-studio.ts",
+        "signals": [
+          "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
+        ],
+        "lines": [
+          18
+        ]
+      },
       {
         "source": "agent/extensions/lib/small-tools.ts",
         "signals": [
@@ -4000,12 +4072,12 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 609,
-      "registrationSites": 66,
-      "indirectRegistrationSites": 17,
+      "sourceFiles": 612,
+      "registrationSites": 67,
+      "indirectRegistrationSites": 18,
       "stableRegistrationRows": 94,
       "uniqueStableTools": 93,
-      "dynamicOwnerCount": 13,
+      "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
         "build",
@@ -4041,6 +4113,10 @@
       },
       {
         "path": "agent/extensions/continuation-notice.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/design-studio.ts",
         "exists": true
       },
       {
@@ -4270,6 +4346,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/design-studio.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/diagnostic-provenance.ts",
         "exists": true
       },
@@ -4335,6 +4415,10 @@
       },
       {
         "path": "agent/extensions/lib/host-operation-safety.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/image-analysis.ts",
         "exists": true
       },
       {
@@ -6107,6 +6191,10 @@
         "path": "agent/skills/ml-engineering/SKILL.md"
       },
       {
+        "name": "mockup-to-code",
+        "path": "agent/skills/mockup-to-code/SKILL.md"
+      },
+      {
         "name": "model-evaluation",
         "path": "agent/skills/model-evaluation/SKILL.md"
       },
@@ -6447,6 +6535,10 @@
       {
         "name": "COST-ACCOUNTING.md",
         "path": "docs/COST-ACCOUNTING.md"
+      },
+      {
+        "name": "DESIGN-STUDIO.md",
+        "path": "docs/DESIGN-STUDIO.md"
       },
       {
         "name": "EFFICIENCY-AUDIT.md",

@@ -971,6 +971,30 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 **Documentation:** [`docs/VIDEO-STUDIO.md`](VIDEO-STUDIO.md)
 
+#### design-studio
+
+Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
+
+**Entrypoints:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`
+
+**Catalog tool pointers:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`, `render_see`, `design_audit`
+
+**Options:**
+
+- `path|url`: Local image, or an http(s) image downloaded once through the SSRF-guarded fetcher and kept locally.
+- `scale|referenceScale`: Reference pixel ratio (2 for @2x exports); inferred from common export widths.
+- `ocr`: Attach recognized copy to text blocks with local Tesseract.
+- `map|blocks|kinds`: Target assets by design-map block ids or kinds.
+- `key|trim|format`: Edge-connected background keying with de-fringing, trimming, and PNG/JPEG/WebP selection.
+- `source|candidate|region`: Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region.
+- `outputDir`: Artifacts default to the git-ignored .pi/design folder in the workspace.
+
+**Related records:** `rendered-design-review`, `web-and-media`, `artifact-numeric-checks`
+
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
+
+**Documentation:** [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
+
 #### research-toolkit
 
 Plan research angles and capture lead/company/contact candidates plus provenance-aware source notes with source URLs, retrieved-at timestamps and hashes. Local-only; compose with web_search/fetch_content/web_research and verify primary sources.
@@ -1033,14 +1057,14 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 127; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
-- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 218; literal)
+- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 241; literal)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 189; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
-- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 432; literal)
+- `http_request` — [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) (line 495; literal)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 217; factory)
 - `local_mail_read` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 16; catalog)
 - `local_mail_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 14; catalog)
@@ -1063,7 +1087,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 728; literal)
 - `project_tests` — [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts) (line 531; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 530; literal)
-- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 217; literal)
+- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 240; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 232; factory)
@@ -1085,11 +1109,11 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 231; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 254; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 220; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 258; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 235; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 216; factory)
-- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 59; literal)
+- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 82; literal)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
@@ -1100,6 +1124,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 18)
 - [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 75)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 579)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 205)
@@ -1273,6 +1298,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts)
 - [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts)
 - [`agent/extensions/continuation-notice.ts`](../agent/extensions/continuation-notice.ts)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
@@ -1332,6 +1358,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/cost-evidence.ts`](../agent/extensions/lib/cost-evidence.ts)
 - [`agent/extensions/lib/cost-states.ts`](../agent/extensions/lib/cost-states.ts)
 - [`agent/extensions/lib/data-query.ts`](../agent/extensions/lib/data-query.ts)
+- [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
 - [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
 - [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
@@ -1349,6 +1376,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/hook-events.ts`](../agent/extensions/lib/hook-events.ts)
 - [`agent/extensions/lib/hook-ledger.ts`](../agent/extensions/lib/hook-ledger.ts)
 - [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts)
+- [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts)
 - [`agent/extensions/lib/image-compaction.ts`](../agent/extensions/lib/image-compaction.ts)
 - [`agent/extensions/lib/intent-context.ts`](../agent/extensions/lib/intent-context.ts)
 - [`agent/extensions/lib/intervention-control.ts`](../agent/extensions/lib/intervention-control.ts)
@@ -1575,7 +1603,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 160 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 161 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
@@ -1660,6 +1688,7 @@ The exporter includes 160 public skill directories. This list is a path inventor
 - `media-in-web` — [`agent/skills/media-in-web/SKILL.md`](../agent/skills/media-in-web/SKILL.md)
 - `memory-resource-ownership` — [`agent/skills/memory-resource-ownership/SKILL.md`](../agent/skills/memory-resource-ownership/SKILL.md)
 - `ml-engineering` — [`agent/skills/ml-engineering/SKILL.md`](../agent/skills/ml-engineering/SKILL.md)
+- `mockup-to-code` — [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
 - `model-evaluation` — [`agent/skills/model-evaluation/SKILL.md`](../agent/skills/model-evaluation/SKILL.md)
 - `modern-frontend-frameworks` — [`agent/skills/modern-frontend-frameworks/SKILL.md`](../agent/skills/modern-frontend-frameworks/SKILL.md)
 - `motion` — [`agent/skills/motion/SKILL.md`](../agent/skills/motion/SKILL.md)
@@ -1754,6 +1783,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/CORE-OWNERSHIP.md`](CORE-OWNERSHIP.md)
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)
 - [`docs/COST-ACCOUNTING.md`](COST-ACCOUNTING.md)
+- [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
 - [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/GUARDIAN-IMPLEMENTATION-AUDIT.md`](GUARDIAN-IMPLEMENTATION-AUDIT.md)

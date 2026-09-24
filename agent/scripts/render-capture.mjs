@@ -98,6 +98,13 @@ export async function renderCapture(p, output, signal) {
     throw Error(
       "Invalid bounds: viewport 64–2048; timeoutMs 100–30000; readiness load/domcontentloaded/networkidle; selector <=256 chars",
     );
+  // A clip captures one horizontal slice of a full page (visual_diff stitches
+  // long pages from slices). It bounds the output, so the full-page size
+  // fallback below does not apply to it.
+  const clip = p.clip;
+  if (clip !== undefined && (outputMode === "text" || !conditions.fullPage || typeof clip !== "object" || clip === null ||
+    !Number.isInteger(clip.y) || !Number.isInteger(clip.height) || clip.y < 0 || clip.y > 200000 || clip.height < 16 || clip.height > 4096))
+    throw Error("Invalid clip: requires fullPage image capture with integer y 0–200000 and height 16–4096");
   let browser,
     browserStarting = false,
     timer,
@@ -469,9 +476,15 @@ export async function renderCapture(p, output, signal) {
         width: document.documentElement.scrollWidth,
         height: document.documentElement.scrollHeight,
       }));
+      if (clip) {
+        if (clip.y >= size.height) throw Error(`Clip starts at ${clip.y}px, below the page end (${size.height}px)`);
+        conditions.clip = { x: 0, y: clip.y, width: Math.min(size.width, conditions.viewport.width), height: Math.min(clip.height, size.height - clip.y) };
+        conditions.documentSize = size;
+      }
       if (
         outputMode !== "text" &&
         conditions.fullPage &&
+        !clip &&
         (size.width > 4096 ||
           size.height > 4096 ||
           size.width * size.height > 8e6)
@@ -522,6 +535,7 @@ export async function renderCapture(p, output, signal) {
         await page.screenshot({
           path: output,
           fullPage: conditions.fullPage,
+          ...(conditions.clip ? { clip: conditions.clip } : {}),
           timeout: Math.max(1, ms - (Date.now() - start)),
         });
     }

@@ -428,6 +428,69 @@ export async function performHttp(
   }
 }
 
+/** Download one bounded binary resource (for example a reference image) with
+ * the same SSRF validation and DNS pinning as http_request. Redirects are
+ * followed at most three times and every hop is validated again. Returns the
+ * bytes only when the content type matches and the size stays within bounds. */
+export async function fetchBinary(
+  input: { url: string; maxBytes?: number; timeoutMs?: number; accept?: RegExp },
+  signal?: AbortSignal,
+  transportOptions: HttpTransportOptions = {},
+): Promise<{ bytes: Buffer; contentType: string; url: string }> {
+  const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 25 * 1024 * 1024, 1024), 64 * 1024 * 1024);
+  const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30000, 1000), 120000);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  let current = input.url;
+  for (let hop = 0; hop < 4; hop++) {
+    let url: URL;
+    try { url = new URL(current); } catch { throw new Error("url is not a valid absolute URL"); }
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https URLs are supported");
+    if (url.username || url.password) throw new Error("Credentials in the URL are not allowed");
+    if (BLOCKED_HOSTS.test(url.hostname)) throw new Error("This host is blocked (cloud metadata endpoint)");
+    const target = await validateHttpTarget(url, combined, transportOptions.lookup ?? defaultLookup);
+    const dispatcher = new Agent({ connect: { lookup: createPinnedLookup(target) } });
+    try {
+      const response = await request(target.url, { method: "GET", dispatcher, signal: combined, headers: { accept: "image/*,*/*;q=0.5", "user-agent": "YunusPi-image-fetch/1" } });
+      if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+        const location = response.headers.location;
+        await response.body.dump().catch(() => {});
+        if (typeof location !== "string" || !location) throw new Error(`Redirect ${response.statusCode} without a location`);
+        current = new URL(location, target.url).toString();
+        continue;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.body.dump().catch(() => {});
+        throw new Error(`Download failed with HTTP ${response.statusCode}`);
+      }
+      const contentType = String(response.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+      if (input.accept && !input.accept.test(contentType)) {
+        await response.body.dump().catch(() => {});
+        throw new Error(`Unexpected content type ${contentType || "(none)"}`);
+      }
+      const declared = Number(response.headers["content-length"]);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        await response.body.dump().catch(() => {});
+        throw new Error(`Download exceeds ${maxBytes} bytes`);
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of response.body) {
+        total += chunk.length;
+        if (total > maxBytes) throw new Error(`Download exceeds ${maxBytes} bytes`);
+        chunks.push(Buffer.from(chunk));
+      }
+      return { bytes: Buffer.concat(chunks), contentType, url: target.url.toString() };
+    } catch (error) {
+      if (!signal?.aborted && timeoutSignal.aborted) throw new Error(`Download timed out after ${timeoutMs}ms`);
+      throw error;
+    } finally {
+      await dispatcher.close().catch(() => {});
+    }
+  }
+  throw new Error("Too many redirects");
+}
+
 export default function httpTools(pi: any) {
   pi.registerTool({
     name: "http_request",

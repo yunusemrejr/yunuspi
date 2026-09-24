@@ -7,6 +7,7 @@ import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './h
 import { askJev, jevMark, tooShort } from './jev-client.ts';
 import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
+import { skillActionSegments, skillRoutes } from './skill-routing.ts';
 
 /** Multi-stage re-rank: lexical order -> Needle semantic ranking -> Jev
  * validation when uncertain. Single candidates, trivial queries and
@@ -86,6 +87,29 @@ export const CORE_TOOLS = new Set([
   // work through bg_run/bg_status/bg_logs/bg_kill; keep the quartet with bg_wait.
   'bg_run','bg_status','bg_logs','bg_kill',
 ]);
+/** Prompts that unmistakably need a specialized studio stage its tools for
+ * the first model turn: one schema bundle instead of a discovery round trip
+ * the agent may not think to make. Intents come from the skill routing table
+ * (one source of truth); attached images count as the reference for an
+ * image-to-code request. Everything else stays lazily discoverable. */
+export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
+  { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
+  { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth'] },
+];
+const WEB_TARGET = /\b(?:websites?|web ?pages?|landing pages?|home ?pages?|sites?|pages?|html|css|tailwind|react|vue|svelte|components?|ui|front-?end|layout|app screens?)\b/i;
+const IMAGE_ASK = /\b(?:this|these|attached|like|match\w*|same|similar|based on|from|recreate|replicate|clone|turn|convert|build|make|implement|copy)\b/i;
+export function intentBundleTools(prompt: unknown, images = 0): string[] {
+  const text = String(prompt ?? '').slice(0, 32768);
+  if (!text.trim()) return [];
+  const segments = skillActionSegments(text), out = new Set<string>();
+  for (const bundle of INTENT_BUNDLES) {
+    const route = skillRoutes.find(candidate => candidate.name === bundle.skill);
+    const routed = !!route && segments.some(part => route.intent.test(route.pathIntent ? part : part.replace(/(?:\S*\/)+\S*/g, ' ')));
+    const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
+    if (routed || pictured) for (const name of bundle.tools) out.add(name);
+  }
+  return [...out];
+}
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));
 const safeOffset = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : 0;
 const pageLimit = (value: unknown, fallback = 3) => Number.isSafeInteger(value)
@@ -215,7 +239,21 @@ export function registerToolDiscovery(pi: any) {
   // turn_end precedes the owned core's next-turn context snapshot. turn_start
   // would be too late; mutating in execute would split a parallel tool batch.
   pi.on('turn_end', flushPending);
-  pi.on('before_agent_start', flushPending);
+  pi.on('before_agent_start', (event: any, ctx: any) => {
+    // Stage strong-intent studio bundles only while discovery owns the wire.
+    try {
+      if (owner && identity(ctx) === owner && same(flushed, new Set(pi.getActiveTools()))) {
+        const images = Array.isArray(event?.images) ? event.images.length : 0;
+        const names = intentBundleTools(event?.prompt, images).filter(name => allowed.has(name) && !expected.has(name));
+        if (names.length) {
+          expected = new Set([...expected, ...names]);
+          wireDirty = true;
+          try { pi.appendEntry?.(RECEIPT, {names, reason: 'intent'}); } catch { /* restoration only */ }
+        }
+      }
+    } catch { /* Staging is an optimization; discovery stays available. */ }
+    flushPending();
+  });
   pi.on('agent_end', flushPending);
   pi.registerTool({
     name:'tool_search',label:'Find tools',

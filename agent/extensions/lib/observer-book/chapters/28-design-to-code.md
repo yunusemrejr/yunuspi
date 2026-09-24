@@ -5,8 +5,8 @@ title: Design to code
 summary: Turning mockups, screenshots and references into working interfaces: decompose before coding, decide CSS versus SVG versus raster per region, extract tokens, cut assets cleanly, build structure first, and compare renders to the reference.
 terms: mockup mockups figma design screenshot reference image picture png jpg recreate replicate clone convert turn into website page implement pixel perfect match look like similar asset assets slice crop export svg icon icons illustration image to code design to code
 files: .png .jpg .jpeg .webp .svg .fig
-tools: render_see browser_session design_audit image_ocr web_asset_check
-skills: frontend-design custom-svg svg-assessment image-analysis visual-composition product-ui-verification
+tools: image_analyze image_crop image_trace visual_diff render_see browser_session design_audit image_ocr web_asset_check
+skills: mockup-to-code frontend-design custom-svg svg-assessment image-analysis visual-composition product-ui-verification
 ---
 
 # Design to code
@@ -22,7 +22,7 @@ Implementing a design from an image is translation, not tracing. A mockup is a s
 
 **Signals.** Implementation started immediately from an image; many unique CSS values; repeated elements implemented separately.
 
-**Ask.** Has the mockup been mapped into sections, grid, components, tokens and assets before coding?
+**Ask.** Has the mockup been mapped into sections, grid, components, tokens and assets before coding (image_analyze drafts that map and an annotated overlay)?
 
 **Traps.** Over-analysis of simple layouts; treating mockup pixel values as law when they are approximations.
 
@@ -61,7 +61,7 @@ Implementing a design from an image is translation, not tracing. A mockup is a s
 
 **Signals.** Assets with visible halos or background fragments; images displayed larger than their pixel size; unoptimized multi-megabyte images.
 
-**Ask.** Is each extracted asset tightly cropped, cleanly separated from its background, sharp at 2x and compressed?
+**Ask.** Is each extracted asset tightly cropped, cleanly separated from its background, sharp at 2x and compressed (image_crop keys, trims and picks formats; image_trace vectorizes flat marks)?
 
 **Traps.** Extracting assets that should have been rebuilt with CSS or SVG.
 
@@ -87,7 +87,7 @@ Implementing a design from an image is translation, not tracing. A mockup is a s
 
 **Signals.** "Looks like the design" claimed without any screenshot comparison; iterations fixing tiny details while large sections differ.
 
-**Ask.** Has the render been compared against the reference at the same width, and which region differs most?
+**Ask.** Has the render been compared against the reference at the same width (visual_diff renders and scores it), and which region differs most?
 
 **Traps.** Chasing sub-pixel anti-aliasing differences; comparing at different widths or zoom levels.
 
