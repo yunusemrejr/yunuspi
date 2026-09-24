@@ -171,6 +171,25 @@ console.log(`Dependencies: ${deps ? `npm ci --ignore-scripts + build:core (${off
 console.log(`Needle3 local-semantic assets: ${needle && !offline ? 'pinned official build (~36MB download)' : 'skipped (offline or --skip-needle)'}`);
 if (preserveState) console.log('Private state and compatible local customizations will carry forward; source conflicts or unsafe links reject the update.');
 if (!apply) process.exit(0);
+// Every update keeps the previous installation for rollback. Without a bound
+// these accumulated (28 copies, about 10 GB). After a successful activation,
+// keep only the newest YUNUSPI_BACKUP_RETAIN (default 2, 1..20) automatic
+// backups, always including the one just made. Manually named backups,
+// symlinks and non-directories are never touched; a failed removal only warns.
+function pruneAutomaticBackups(target, current) {
+  const retain = /^(?:[1-9]|1\d|20)$/.test(process.env.YUNUSPI_BACKUP_RETAIN ?? '') ? Number(process.env.YUNUSPI_BACKUP_RETAIN) : 2;
+  const parent = path.dirname(target), pattern = new RegExp(`^${path.basename(target).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.backup-(\\d+)-(\\d+)$`);
+  const automatic = fs.readdirSync(parent).map(name => ({ name, match: pattern.exec(name) })).filter(({ name, match }) => {
+    if (!match) return false;
+    try { const info = fs.lstatSync(path.join(parent, name)); return info.isDirectory() && !info.isSymbolicLink(); } catch { return false; }
+  }).sort((a, b) => Number(b.match[1]) - Number(a.match[1]));
+  const keep = new Set([...automatic.slice(0, retain).map(entry => entry.name), path.basename(current)]);
+  for (const { name } of automatic) {
+    if (keep.has(name)) continue;
+    try { fs.rmSync(path.join(parent, name), { recursive: true, force: true }); console.log(`Removed old automatic backup ${path.join(parent, name)}`); }
+    catch (error) { console.warn(`Could not remove old backup ${name}: ${error.message}`); }
+  }
+}
 function assertIdleCore() {
   if (!existing || process.platform !== 'linux') return;
   const installedCore = path.join(target, 'runtime/core/coding-agent');
@@ -317,6 +336,7 @@ exec /bin/bash "$AGENT/scripts/pi-launch.sh" ${quote(process.execPath)} "$YUNUSP
     }
     throw error;
   }
+  if (backup) pruneAutomaticBackups(target, backup);
   console.log(`Public files installed. ${backup ? `Previous managed installation preserved at ${backup}. ` : ''}${deps ? `Launch ${target}/bin/yunuspi; add ${target}/bin to PATH.` : 'Source copied only. Install dependencies and build before launching; see docs/INSTALL.md.'}`);
 } finally {
   if (!retainStage) fs.rmSync(stage, { recursive: true, force: true });

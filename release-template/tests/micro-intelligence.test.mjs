@@ -207,7 +207,8 @@ test("evidence router classifies shapes deterministically", () => {
   assert.equal(distilled.smol, false);
   assert.ok(distilled.reasons.includes("deterministic-won"));
   const error = routeEvidence({ tool: "bash", text: `Error: boom\n${"x".repeat(1200)}`, isError: true });
-  assert.equal(error.needle, true);
+  assert.equal(error.needle, false, "error families belong to deterministic rules, not Needle similarity");
+  assert.ok(error.reasons.includes("needle:errors-use-deterministic-rules"));
 });
 
 test("evidence router sends uncovered prose to jev and small text nowhere", () => {
@@ -284,15 +285,11 @@ test("advisory runs asynchronously and never throws", async () => {
   assert.equal(crashed.skipped, "unavailable");
 });
 
-test("needle request pass classifies families and degrades cleanly", async () => {
-  const { needleRequestPass } = advisoryMod;
-  const pass = await needleRequestPass("fix the failing login test now", async () => ({
-    ok: true, cached: false, ms: 3, shadow: false,
-    value: { label: "implementation", score: 0.95, margin: 0.02, accepted: true },
-  }));
-  assert.equal(pass.family, "implementation");
-  assert.equal(await needleRequestPass("fix it", undefined), undefined);
-  assert.equal(await needleRequestPass("hi", async () => { throw new Error("x"); }), undefined);
+test("deterministic request family covers everyday change and analysis verbs", () => {
+  const { deterministicRequestPass } = advisoryMod;
+  for (const prompt of ["make the app GUI a web UI, not desktop", "remove the desktop gui code", "update the harness to the latest version", "turn these scattered images into one sheet"])
+    assert.equal(deterministicRequestPass(prompt).family, "implementation", prompt);
+  assert.equal(deterministicRequestPass("understand everything about the website and its hosting").family, "investigation");
 });
 
 test("review helpers rank perspectives and cluster findings", async () => {
@@ -386,6 +383,17 @@ test("weak Needle agreement cannot reorder the rest of the candidate set", async
   });
   assert.equal(outcome.applied, "lexical");
   assert.deepEqual(outcome.ordered, lexicalTools);
+});
+
+test("a low-margin Needle order is fused with the lexical order instead of discarded", async () => {
+  const lexical = ["a", "b", "c", "d", "e"].map((id) => ({ id, text: `${id}: candidate ${id}` }));
+  const outcome = await retrievalMod.multiStageRetrieve({
+    kind: "skill", site: "rank", query: "find the matching skill", lexical,
+    needle: async () => ({ ok: true, cached: false, ms: 4, shadow: false,
+      value: { ranked: ["d", "a", "b", "c", "e"].map((id, i) => ({ id, score: 0.96 - i * 0.001 })), margin: 0.001 } }),
+  });
+  assert.equal(outcome.applied, "fused");
+  assert.deepEqual(outcome.ordered.map((c) => c.id), ["a", "d", "b", "c", "e"], "Needle lifts its pick; a strong lexical top stays first");
 });
 
 test("retrieval rejects Jev choices outside the submitted candidates", async () => {

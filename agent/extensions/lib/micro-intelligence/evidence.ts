@@ -165,13 +165,13 @@ export function routeEvidence(input: RouteInput): EvidenceRoute {
     }
   }
 
-  // Needle: semantic relevance / error-family cues when meaning matters.
-  // Failures, prose evidence and mixed results benefit; tiny structured
-  // dumps do not pay for an embedding round-trip.
+  // Needle: semantic relevance when meaning matters. Error families are not
+  // routed: zero-shot and exemplar classification of real tool errors
+  // measured 31% top-1 accuracy with margins under 0.013, and no cue ever
+  // cleared acceptance; deterministic failure rules own that verdict.
   if (!processed.has("needle")) {
-    if (isError && text.length >= 800) {
-      route.needle = true;
-      reasons.push("needle:error-family");
+    if (isError) {
+      reasons.push("needle:errors-use-deterministic-rules");
     } else if ((shape === "prose" || shape === "mixed") && text.length >= 1500) {
       route.needle = true;
       reasons.push("needle:prose-relevance");

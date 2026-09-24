@@ -71,8 +71,6 @@ export function microStatusSnapshot(request?: {
   family: string;
   substantive: boolean;
   terms: string[];
-  needle?: { score: number; margin: number; accepted: boolean };
-  needlePending?: boolean;
   advisory?: MicroStatusRequest["advisory"];
   advisoryPending?: boolean;
   advisoryFamily?: string;
@@ -109,7 +107,6 @@ export function microStatusSnapshot(request?: {
           family: request.family,
           substantive: request.substantive,
           terms: request.terms.slice(0, 16),
-          needle: request.needle ?? (request.needlePending ? { pending: true } : undefined),
           advisory: request.advisory ?? (request.advisoryPending ? { pending: true } : undefined),
           ...(request.advisoryFamily ? { advisoryFamily: request.advisoryFamily } : {}),
           ...(request.promptAnalysis ? { promptAnalysis: request.promptAnalysis } : {}),

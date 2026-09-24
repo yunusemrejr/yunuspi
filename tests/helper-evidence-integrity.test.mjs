@@ -81,18 +81,6 @@ test('Jev abstains on missing or malformed judgments and oversized sources witho
   assert.equal(calls, 0);
 });
 
-test('request classification cannot apply shadow or abstained labels', async () => {
-  metrics.resetMicroMetrics();
-  for (const [shadow, accepted] of [[true, true], [false, false]]) {
-    assert.equal(await advisory.needleRequestPass('review the implementation and its behavior', async () => ({ ok: true, shadow, ms: 2, value: { label: 'review', score: 0.99, margin: 0.1, accepted } })), undefined);
-  }
-  const snapshot = metrics.microMetrics().snapshot().helpers.needle;
-  assert.equal(snapshot.runs, 2);
-  assert.equal(snapshot.accepted, 0);
-  assert.equal(snapshot.skipReasons.shadow, 1);
-  assert.equal(snapshot.skipReasons['low-confidence'], 1);
-});
-
 test('a read-only prefix cannot rescue a mutation requested after the embedding limit', async () => {
   const task = `${'Read and explain the implementation. '.repeat(40)}Then modify the implementation to fix the bug.`;
   const classify = async () => ({ ok: true, shadow: false, cached: false, ms: 1, value: { label: 'read-only', score: 0.999, margin: 0.1, accepted: true } });

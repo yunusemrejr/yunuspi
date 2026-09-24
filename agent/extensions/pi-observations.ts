@@ -24,7 +24,6 @@ import {
 } from "./lib/smol-preprocessor.ts";
 import { routeEvidence } from "./lib/micro-intelligence/evidence.ts";
 import { microMetrics } from "./lib/micro-intelligence/metrics.ts";
-import { needleClassify } from "./lib/needle-runtime.ts";
 import { retrieveObservation } from "./lib/observation-retrieval.ts";
 import type {
 	ExtensionAPI,
@@ -70,16 +69,6 @@ const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Needle error-family labels for tool-result triage. A similarity cue only:
 // the deterministic failureCategory verdict and the raw text stay authoritative.
 // Labels mirror failureCategory's taxonomy so cues compose with verdicts.
-const ERROR_FAMILY_LABELS = [
-  { id: "timeout", text: "the operation timed out, hit a deadline, or is still running" },
-  { id: "transport", text: "fetch failure, socket hangup, connection reset, DNS, or proxy failure" },
-  { id: "capacity", text: "rate limit, quota, billing refusal, cooldown, or capacity exhaustion" },
-  { id: "input", text: "invalid arguments, failed validation, bad input, or unknown tool" },
-  { id: "dependency", text: "missing module, package, file, or executable" },
-  { id: "permission", text: "permission denied, not authorized, or outside the allowed scope" },
-  { id: "process", text: "process signal, crash, exit code, or resource failure" },
-  { id: "context", text: "context limit, payload too large, or truncated input" },
-];
 // Best-effort capability telemetry: selection rendered into model context is
 // the honest usefulness signal (stronger than inference accepted, weaker than
 // proven downstream use, which no observer can see).
@@ -183,9 +172,6 @@ export default function piObservationsExtension(
 	let counter = 0;
 	let visionHintSent = false;
 	let taskSignal = "";
-	// Settled Needle error-family cues by observation id (bounded; cleared on
-	// restore). Rendered as similarity cues next to the failure hint.
-	const needleCues = new Map<number, { family: string; score: number; margin: number }>();
 	// Background Jev selections are offered at tool_result time. The next
 	// provider request usually follows within milliseconds, before a ~0.6s Jev
 	// answer, and the first render is sealed for the branch lifetime; without a
@@ -249,7 +235,6 @@ export default function piObservationsExtension(
 		mini.reset();
 		smol.reset();
 		jevDistillPending.clear();
-		needleCues.clear();
 		taskSignal = "";
 		observations = new Map();
 		// A replaced branch (new/forks/compaction) re-renders from scratch.
@@ -430,35 +415,6 @@ export default function piObservationsExtension(
 			jev: route.jev,
 			count: 1,
 		});
-		// Needle error-family cue: async, never delays the result. The settled
-		// cue renders next to the failure hint; the raw text stays authoritative.
-		if (route.needle && event.isError === true && needleCues.size < 512) {
-			const cueId = ref.id;
-			const cueKey = key;
-			void needleClassify({ text: text.slice(0, 2048), labels: ERROR_FAMILY_LABELS }).then(
-				(result) => {
-					const micro = microMetrics();
-					if (result.ok) micro.run("needle", result.ms);
-					if (result.ok && !result.shadow && result.value.accepted) {
-						if (needleCues.size < 512) {
-							needleCues.set(cueId, {
-								family: result.value.label,
-								score: result.value.score,
-								margin: result.value.margin,
-							});
-						}
-						micro.accept("needle");
-					} else if (!result.ok) {
-						micro.skip("needle", result.reason);
-					} else {
-						micro.skip("needle", result.shadow ? "shadow" : "low-confidence");
-					}
-				},
-				() => {
-					microMetrics().skip("needle", "unavailable");
-				},
-			);
-		}
 		// Existing deterministic compression wins. Only bounded successful prose
 		// can spend local inference; the original tool body stays in the transcript.
 		if (
@@ -742,12 +698,6 @@ export default function piObservationsExtension(
 				if (related)
 					failureHint = `[Related historical failure: obs_read({id:${related.id}}); structural similarity ${related.similarity.toFixed(2)}, not a probability or verified resolution. The match does not establish current cause or resolution.]`;
 			}
-			// Settled Needle error-family cue (computed asynchronously at tool_result
-			// time). Similarity only; the deterministic verdict stays authoritative.
-			const cue = message.isError ? needleCues.get(ref.id) : undefined;
-			const needleHint = cue
-				? `[needle error-family cue: ${cue.family} (score ${cue.score.toFixed(2)}, margin ${cue.margin.toFixed(3)}) — semantic similarity only, not a diagnosis; raw: obs_read({id:${ref.id}}).]`
-				: undefined;
 			let baseline = baselines.get(ref.operation);
 			const exactChange = (previous: string) =>
 				outputDelta(previous, raw) ??
@@ -817,12 +767,11 @@ export default function piObservationsExtension(
 					if (baselines.size > MAX_ENTRIES)
 						baselines.delete(baselines.keys().next().value!);
 				}
-				if (failureHint || needleHint) {
+				if (failureHint) {
 					changed = true;
 					const content = [
 						...message.content,
-						...(failureHint ? [{ type: "text" as const, text: failureHint }] : []),
-						...(needleHint ? [{ type: "text" as const, text: needleHint }] : []),
+						{ type: "text" as const, text: failureHint },
 					];
 					sealFirstRender(ref.id, ref.resultHash, content, []);
 					return { ...message, content };
@@ -843,7 +792,7 @@ export default function piObservationsExtension(
 			const projected = [
 				{
 					type: "text" as const,
-					text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}${needleHint ? `\n${needleHint}` : ""}`,
+					text: `[observation #${ref.id}; ${delta ? "exact change against the full baseline above" : "extractive summary; omitted content is not verified"}; raw: obs_read({id:${ref.id}})]\n${status}\n${projection}${failureHint ? `\n${failureHint}` : ""}`,
 				},
 			];
 			if (!sealed) {
@@ -905,7 +854,7 @@ export default function piObservationsExtension(
 					(result.spans.length ? result.spans.map(span => `[${span.start},${span.end})\n${text.slice(span.start, span.end)}`).join("\n\n") : "No lexical candidates in the scanned prefix. This does not establish absence.") +
 					`\n[Full original: obs_read({id:${params.id},offset:0}); ranking=${result.ranking}]`;
 				// Completion is returned as evidence, distinct from a ranker merely running.
-				if (result.spans.length) noteHealth("ml.evidence.returned", { helper: result.ranking === "needle" ? "needle" : "deterministic", savedChars: Math.max(0, text.length - content.length), count: 1 });
+				if (result.spans.length) noteHealth("ml.evidence.returned", { helper: result.ranking === "needle" || result.ranking === "fused" ? "needle" : "deterministic", savedChars: Math.max(0, text.length - content.length), count: 1 });
 				return { content: [{ type: "text" as const, text: content }], details: {
 					observationId: params.id, sourceHash: createHash("sha256").update(text).digest("hex"),
 					originalIsError, originalExitCode: entry.message.details?.exitCode,

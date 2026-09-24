@@ -2698,7 +2698,7 @@
       {
         "name": "memory-prime",
         "source": "agent/extensions/pi-memory/priming.ts",
-        "line": 184
+        "line": 220
       },
       {
         "name": "metrics",
@@ -2713,7 +2713,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 942
+        "line": 891
       },
       {
         "name": "or-provider",
@@ -3192,7 +3192,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 428,
+        "line": 423,
         "kind": "literal"
       },
       {
@@ -3210,7 +3210,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 866,
+        "line": 815,
         "kind": "literal"
       },
       {
@@ -3312,7 +3312,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 652,
+        "line": 663,
         "kind": "literal"
       },
       {
@@ -3616,13 +3616,13 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 428,
+        "line": 423,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 866,
+        "line": 815,
         "kind": "literal"
       },
       {
@@ -3700,7 +3700,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 652,
+        "line": 663,
         "kind": "literal"
       },
       {
@@ -3946,7 +3946,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 607,
+      "sourceFiles": 608,
       "registrationSites": 66,
       "indirectRegistrationSites": 17,
       "stableRegistrationRows": 94,
@@ -4161,6 +4161,10 @@
       },
       {
         "path": "agent/extensions/lib/checkpoint-files.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/ci-awareness.ts",
         "exists": true
       },
       {

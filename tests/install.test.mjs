@@ -76,5 +76,10 @@ const lease=spawn('flock',['--shared',path.join(target,'logs/harness-session.loc
 await new Promise((resolve,reject)=>{lease.stdout.once('data',resolve);lease.once('error',reject);});
 try { const busy=run('--apply','--backup-existing');assert.equal(busy.status,75,busy.stderr);assert(fs.existsSync(path.join(target,'runtime/core/coding-agent/dist/cli.js'))); }
 finally { lease.stdin.end('done\n'); }
+const manual=path.join(root,'target.backup-manual');fs.mkdirSync(manual);
+for(let i=0;i<3;i++){const updated=run('--apply','--backup-existing','--offline');assert.equal(updated.status,0,updated.stderr);}
+const automatic=fs.readdirSync(root).filter(name=>/^target\.backup-\d+-\d+$/.test(name));
+assert.equal(automatic.length,2,'only the newest two automatic backups are retained');
+assert(fs.existsSync(manual),'manually named backups are never pruned');
 console.log('installer checks passed: owned-source preview/build/launcher, offline npm, backups, active-session refusal, and path safety');
 }finally{fs.rmSync(root,{recursive:true,force:true});}

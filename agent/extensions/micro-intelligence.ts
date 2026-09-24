@@ -8,15 +8,13 @@ import { Text } from "@yunuspi/tui";
 import { createHash } from "node:crypto";
 import {
   deterministicRequestPass,
-  needleRequestPass,
   type AdvisoryResult,
   type DeterministicPass,
-  type NeedlePass,
   type RequestFamily,
 } from "./lib/micro-intelligence/advisory.ts";
 import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
-import { needleClassify, needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
+import { needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
 import { runPromptAnalysis } from "./lib/prompt-analysis-runtime.ts";
 import {
   buildPromptAnalysisRequest,
@@ -68,8 +66,6 @@ function noteHealth(kind: string, data: Record<string, unknown>): void {
 export interface MicroRequestState {
   requestHash: string;
   deterministic: DeterministicPass;
-  needle?: NeedlePass;
-  needlePending: boolean;
   advisory?: AdvisoryResult;
   advisoryPending: boolean;
   family: RequestFamily;
@@ -79,7 +75,6 @@ export interface MicroRequestState {
 }
 
 interface MicroDependencies {
-  classify: typeof needleClassify;
   warmup: typeof needleWarmup;
   completePromptAnalysis?: (model: any, context: any, options: any) => Promise<any>;
 }
@@ -395,7 +390,7 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
   };
 }
 
-export default function (pi: any, deps: MicroDependencies = { classify: needleClassify, warmup: needleWarmup }) {
+export default function (pi: any, deps: MicroDependencies = { warmup: needleWarmup }) {
   if (process.env.PI_MICRO_INTELLIGENCE === "off" || process.env.PI_SUBAGENT_CHILD === "1") return;
   let lastRequest: MicroRequestState | undefined;
   let generation = 0;
@@ -435,8 +430,6 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
             family: lastRequest.family,
             substantive: lastRequest.deterministic.substantive,
             terms: lastRequest.deterministic.terms,
-            needle: lastRequest.needle,
-            needlePending: lastRequest.needlePending,
             advisory: lastRequest.advisory,
             advisoryPending: lastRequest.advisoryPending,
             advisoryFamily: lastRequest.advisoryFamily,
@@ -551,7 +544,6 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
       const state: MicroRequestState = {
         requestHash: createHash("sha256").update(prompt).digest("hex"),
         deterministic,
-        needlePending: false,
         advisoryPending: true,
         family: deterministic.family,
         at: Date.now(),
@@ -564,24 +556,11 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
         requestStateRegistry().delete(oldest);
       }
 
-      // Local Needle classification remains a separate local pass. Results
-      // are written to this request object only; a later prompt cannot claim it.
-      if (deterministic.substantive) {
-        state.needlePending = true;
-        const requestMetrics = metrics;
-        void needleRequestPass(prompt, (text, labels) => deps.classify({ text, labels })).then((needle) => {
-          if (!owns()) return;
-          state.needlePending = false;
-          if (needle) {
-            state.needle = needle;
-            state.family = needle.family;
-            noteHealth("ml.request.family", { decision: needle.family, count: 1 });
-          }
-        }, () => {
-          if (owns()) state.needlePending = false;
-          requestMetrics.skip("needle", "unavailable");
-        });
-      }
+      // Request family comes from deterministic cues and prompt analysis.
+      // Needle zero-shot family classification was removed: on 20 recorded
+      // prompts it agreed with the cues once, mislabelled fixes as lookups,
+      // never cleared its 0.02 margin (max 0.009), and occupied the serial
+      // Needle worker at the moment tool and skill ranking needed it.
 
       const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
       const attempts: PromptAnalysisAttempt[] = [];

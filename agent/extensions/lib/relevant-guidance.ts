@@ -18,6 +18,8 @@ import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMeta
 import { evaluateStuckSignal, isTrivialChangeRequest, shouldSuggestReview } from "./review-coordinator.ts";
 import { lastQualityReviewCompletedAt } from "./quality-review-owner.ts";
 import { failureCategory } from "./session-diagnostics.ts";
+import { multiStageRetrieve } from "./micro-intelligence/retrieval.ts";
+import { needleRank } from "./needle-runtime.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
@@ -569,7 +571,7 @@ export function createRelevantGuidance(pi: any) {
   const FILLER = new Set(['use','using','please','find','get','show','list','skill','skills','workflow','workflows','relevant','appropriate','best','good','right','proper','some','any','help','helpful','needed','need','needs','for','with','about','related']);
   const normalizeSkillQuery = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s+#._-]+/g,' ').split(/\s+/).filter(term => term && !FILLER.has(term)).join(' ').slice(0,256);
   const MARKETING_FAMILY = new Set(['resourceful-market-strategy','community-promotion','organic-growth-engineering','copywriting','natural-editorial-writing']);
-  const searchSkills = (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown) => {
+  const searchSkills = async (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown) => {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
     // Explicit family requests such as "use marketing skills" reliably
     // resolve: filler verbs and the generic skills/workflows token carry no
@@ -607,11 +609,20 @@ export function createRelevantGuidance(pi: any) {
       }
     }
     const seen = new Set<string>();
-    const unique = ordered.filter(skill => {
+    let unique = ordered.filter(skill => {
       if (seen.has(skill.file)) return false;
       seen.add(skill.file);
       return true;
     });
+    // Local Needle3 ranking fused with the lexical head (see retrieval.ts):
+    // measured top-5 skill hits 10/18 lexical vs 13/18 fused. Worker caches
+    // keep pagination stable; unavailable Needle keeps the lexical order.
+    if (text && unique.length > 1) {
+      const head = unique.slice(0, 12).map(skill => ({ id: skill.file, text: `${skill.name}: ${skill.description}`, skill }));
+      const outcome = await multiStageRetrieve({ kind: 'skill', site: 'rank', query: text, lexical: head,
+        needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }) }).catch(() => undefined);
+      if (outcome && outcome.applied !== 'lexical') unique = [...outcome.ordered.map(entry => entry.skill), ...unique.slice(12)];
+    }
     const selected = unique.slice(offset, offset + limit);
     return {
       results: selected.map((skill) => ({
@@ -672,7 +683,7 @@ export function createRelevantGuidance(pi: any) {
           return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
         }
         const query = typeof input.query === 'string' ? input.query.trim().slice(0,256) : '';
-        const page = searchSkills(query,input.limit,input.offset,group);
+        const page = await searchSkills(query,input.limit,input.offset,group);
         const result = {query, ...(group ? {group} : {}), ...page,
           nextOffset:page.remaining ? page.offset+page.results.length : null,
           next:'Read a chosen result.path with the read tool when useful. To explore tools or local ML/SLM helpers, use tool_search({}).',

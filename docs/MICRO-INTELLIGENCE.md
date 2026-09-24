@@ -91,6 +91,20 @@ families, evidence relevance, and escalation triage.
   pre-screen uses asymmetric bars). Near-ties escalate to Jev instead of
   misapplying. Shadow mode (`PI_NEEDLE_SHADOW=1`) measures agreement
   without applying Needle results or changing baseline Jev eligibility.
+- Measured 2026-09-24 on real session data: top-vs-second margins stay at
+  0.000–0.013 for ranking and classification alike, so the 0.02 floor almost
+  never passes. Ranking still carries signal: on 18 requests against the
+  242-skill catalog, top-1/top-5 hits were 4/10 for Needle, 7/10 for lexical
+  and 9/13 for their reciprocal-rank fusion. Retrieval (`tool_search`,
+  `skill_review` search, observation queries) therefore fuses a low-margin
+  Needle order with the lexical order (`applied: "fused"`); an adjacent swap
+  ties and keeps lexical order, so Needle cannot flip neighbours on its own.
+  Zero-shot classification did not carry signal: request families agreed
+  with deterministic cues on 1 of 20 real prompts, and tool-error families
+  reached 31% top-1 even with exemplar nearest neighbours. Both per-event
+  classifications were removed; deterministic cues and rules own those
+  verdicts, and the serial worker stays free for ranking. The intent
+  pre-screen keeps its asymmetric bars with Jev fallback.
 
 Assets (`needle.js`, `needle.wasm`, `needle3.cact`, upstream `LICENSE`)
 are never committed. The installer fetches the pinned revision from the
@@ -217,14 +231,14 @@ always-empty ledger were removed; production helper metrics remain authoritative
 ## Request lifecycle
 
 ```text
-before_agent_start → deterministic pass (terms, intent cues)
-                   → Needle family classification (async, local)
-                   → ONE Jev advisory batch (async, after Needle or 500ms)
-tool_search        → deterministic eligibility → lexical order
-                   → Needle head-slice rank → Jev on uncertainty/disagreement
+before_agent_start → deterministic pass (terms, intent cues, request family)
+                   → ONE Jev advisory batch (async)
+tool_search and    → deterministic eligibility → lexical order
+skill_review search → Needle head-slice rank (accepted, else fused with
+                     lexical) → Jev on uncertainty/disagreement
 tool_result        → deterministic distiller first (its win ends routing)
-                   → Smol (structured) / Kompress (prose) / Needle cue / Jev triage
-failure            → deterministic rules → Needle family cue → Jev validation
+                   → Smol (structured) / Kompress (prose) / Jev triage
+failure            → deterministic rules → Jev validation
 spawn guard        → Needle→Jev intent pre-screen → full arbiter only on defer
 ```
 

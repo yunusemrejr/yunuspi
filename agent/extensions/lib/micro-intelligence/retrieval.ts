@@ -39,7 +39,7 @@ export type RetrievalJev = (
 
 export interface RetrievalOutcome<T extends RetrievalCandidate> {
   ordered: T[];
-  applied: "lexical" | "needle" | "jev";
+  applied: "lexical" | "needle" | "fused" | "jev";
   lexicalTop?: string;
   needleTop?: string;
   needleMargin?: number;
@@ -55,6 +55,8 @@ const MAX_STAGE = 25;
 const NEEDLE_STAGE = 12;
 /** Embedding texts truncate here (~160 chars x ~3.5ms/char). */
 const EMBED_CHARS = 160;
+/** Reciprocal-rank fusion constant (the conventional 60). */
+const RRF_K = 60;
 
 export function trivialQuery(query: unknown): boolean {
   return typeof query !== "string" || query.trim().length < 3;
@@ -87,7 +89,7 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   const bit = (id: string | undefined): string | undefined => id;
   const lexicalTop = bit(lexical[0]?.id);
   const done = (ordered: T[], applied: RetrievalOutcome<T>["applied"], extra: Partial<RetrievalOutcome<T>> = {}): RetrievalOutcome<T> => {
-    if(applied !== "lexical")try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.retrieval.used",{count:1});}catch{/* optional visibility */}
+    if(applied !== "lexical")try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.retrieval.used",{count:1,decision:applied});}catch{/* optional visibility */}
     return { ordered, applied, lexicalTop, ...extra };
   };
 
@@ -156,12 +158,26 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
     }
   }
 
+  // Needle cosines are compressed (top-vs-second margins measured 0.000-0.006
+  // over a 242-skill catalog), so the acceptance margin almost never passes
+  // and its order used to be discarded. Reciprocal-rank fusion with the
+  // lexical order keeps that signal without letting a weak Needle top displace
+  // strong lexical evidence. Measured on 18 skill requests: top-1 4 Needle,
+  // 7 lexical, 9 fused; top-5 10, 10, 13.
+  let fusedOrdered: T[] | undefined;
+  if (!needleShadow && needleOrder && !needleAccepted) {
+    const needleRank = new Map(needleOrder.map((id, index) => [id, index]));
+    const fused = slice.map((item, index) => ({ item, index, score: 1 / (RRF_K + index) + (needleRank.has(item.id) ? 1 / (RRF_K + needleRank.get(item.id)!) : 0) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.item);
+    if (fused.some((item, index) => item.id !== slice[index].id)) fusedOrdered = fused.concat(lexical.slice(MAX_STAGE));
+  }
+
   // Jev validation: uncertain Needle, stage disagreement, or no Needle.
   const needsJev = needleShadow || needleTop === undefined || !needleAccepted || !agrees;
   if (options.jev && needsJev) {
     metrics.offer("jev");
     try {
-      const pool = (needleOrdered ?? [...lexical]).slice(0, MAX_STAGE);
+      const pool = (needleOrdered ?? fusedOrdered ?? [...lexical]).slice(0, MAX_STAGE);
       const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
       const judged = await options.jev(site, { query: query.slice(0, 256) }, {
         rank: {
@@ -206,6 +222,10 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   if (needleOrdered && needleTop !== undefined) {
     metrics.accept("needle");
     return done(needleOrdered, "needle", { needleTop, needleMargin });
+  }
+  if (fusedOrdered) {
+    metrics.accept("needle");
+    return done(fusedOrdered, "fused", { needleTop, needleMargin });
   }
   return done([...lexical], "lexical", { needleTop, needleMargin });
 }

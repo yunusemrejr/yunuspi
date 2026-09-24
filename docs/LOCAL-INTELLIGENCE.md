@@ -41,6 +41,19 @@ priority; a directory name alone cannot make old memory relevant. The existing
 once-per-session receipt and 16-file, 128 KiB scan limits prevent repeated
 history injection. `/memory-prime off` remains an explicit user control.
 
+Session continuity does not depend on word overlap. The same once-per-session
+priming carries the Follow-ups list from the newest automatic exit summary in
+this project's daily logs (at most 900 characters, secrets skipped), even for a
+prompt such as "continue"; it is labelled historical and must be verified, not
+treated as new requirements. When the project has CI configuration, priming
+also names its workflows and, for a GitHub origin, the Actions result for the
+current HEAD commit. That single API request starts at session start, uses
+`GITHUB_TOKEN`/`GH_TOKEN` when set, has a 2.5 s timeout, is skipped offline and
+never delays the first request by more than 300 ms; failures are stated as
+"not checked". The agent is told that a failing or missing run for a pushed
+commit is unfinished work. A one-line `Continuity ·` notice in the TUI shows
+what was carried; it is excluded from model context.
+
 `PI_LOCAL_INTELLIGENCE=off` disables the new selection and reranking paths; established context scoring and provider-health protection remain available. `PI_HANDOFF_SELECTION=off` disables child report selection alone. Existing `PI_MINI_PREPROCESSOR`, `PI_CONTEXT_MEMORY` and `PI_OUTPUT_DISTILLER` controls retain their scopes. New controls: `PI_NEEDLE=off` and `PI_NEEDLE_SHADOW=1` (disable / shadow-measure Needle), `PI_MICRO_ADVISORY=off` (request advisory batch), `PI_INTENT_PRESCREEN=off` (intent pre-screen), `PI_MICRO_INTELLIGENCE=off` (lifecycle extension). Install changes through the normal update/reload workflow; running sessions need to load the updated extensions.
 
 The public `tests/local-intelligence.test.mjs` uses synthetic fixtures to test task switches, cache isolation, exact source reconstruction, critical overflow, compaction input reduction, saved-file handoffs, sparse metric changes, error polarity and stale telemetry. Existing context, observation, skill, graph, model-quality and recovery regressions cover integration. Needle, coordination, expansion, session, and calibration coverage lives in `tests/needle-*.test.mjs`, `tests/micro-intelligence.test.mjs`, `tests/smol-kompress-expansion.test.mjs`, `tests/micro-intel-session.test.mjs`, and `tests/micro-intel-bench.test.mjs` with fixtures in `tests/fixtures/micro-intel/`. These tests establish their contracts, not broad model intelligence or measured production token savings. Optional local Kompress/Smol weights and service availability are separate from distribution tests.
@@ -49,7 +62,7 @@ Deferred work needs evidence first: a generative selector must beat deterministi
 
 ## Request lifetime and interactive latency
 
-Request classification and the single JEV advisory batch are canceled or discarded when input, session, or branch changes. Finished advice is reusable only for the exact current request; councils may use its bounded perspective cues without changing mandatory roles or treating agreement as verification. Long request excerpts retain both ends and mark omitted text. A deterministic family prior keeps useful council questions in the batch when Needle is slow. Micro-metrics start afresh at session boundaries.
+Request classification and the single JEV advisory batch are canceled or discarded when input, session, or branch changes. Finished advice is reusable only for the exact current request; councils may use its bounded perspective cues without changing mandatory roles or treating agreement as verification. Long request excerpts retain both ends and mark omitted text. The request family comes from deterministic cues; no local model classifies it. Micro-metrics start afresh at session boundaries.
 
 Exact capability names bypass semantic re-ranking. Searches cache only shortlisted embeddings; they do not queue whole-catalog warmups ahead of interactive work. Short technical skill terms (SQL, PHP, API, CSS, C++, AI, ML) remain searchable, and long metadata typos can use the existing bounded single-edit matcher. JEV validates typed answers before caching, applies one deadline across its alias cascade, and keeps provider-echoed request bodies out of health diagnostics.
 

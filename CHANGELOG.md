@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.6 — 2026-09-24
+
+Sessions now start knowing what the previous one left unfinished. The automatic exit summary's Follow-ups list for the project is carried into the next session's one-time priming even when the new prompt shares no words with it (a plain "continue" used to receive nothing), labelled as historical and bounded, with secrets skipped. Projects with CI configuration also get their workflow names and, for GitHub origins, the Actions result for the current HEAD commit, fetched once in the background at session start (2.5 s timeout, `GITHUB_TOKEN`/`GH_TOKEN` when set, skipped offline, never delaying the first request by more than 300 ms). The agent is told that a failing or missing run for a pushed commit is unfinished work. A one-line `Continuity ·` TUI notice shows what was carried.
+
+Needle3 now contributes where it measurably helps. On real session data its top-vs-second margins never exceeded 0.013, so the 0.02 acceptance bar discarded its ranking every time. Ranking still carries signal (18 skill requests over the 242-skill catalog: top-5 hits 10 Needle, 10 lexical, 13 fused), so `tool_search`, `skill_review` search and observation queries fuse a low-margin Needle order with the lexical order by reciprocal rank. Zero-shot classification did not carry signal (request families agreed with deterministic cues on 1 of 20 real prompts; tool-error families reached 31% even with exemplars), so the per-prompt request pass and the per-error family cue were removed, which keeps the serial Needle worker free for ranking. Deterministic request families now recognise everyday verbs such as make, remove, update and turn … into (9 of 20 recorded prompts were previously "unknown").
+
+Updates keep at most two automatic installation backups (`YUNUSPI_BACKUP_RETAIN`, default 2); 28 had accumulated. Manually named backups are never pruned.
+
 ## 0.6.5 — 2026-09-24
 
 Makes the automatic reviewers and local intelligence produce value instead of discarded or idle work, without new model calls. The session observer no longer throws away finished paid reviews because todo, child or completed-tool state moved on during the review (measured 18 of 20 reviews discarded in one active session), or because older events left its bounded queue. A note is withheld only when its premise is gone: every cited running command finished, the model changed, or routing advice weighed child state that has since changed. Other notes are delivered with a caveat naming the changed state. A finished tool call replaces its unread start event, halving queue pressure and the resulting coverage loss. An unchanged idle state is reported once instead of as a new numbered "review" every 90 seconds.

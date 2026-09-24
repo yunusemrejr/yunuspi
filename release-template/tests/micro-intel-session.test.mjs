@@ -33,10 +33,6 @@ const needleRank = (winner) => async (_query, candidates, topK) => ({
     margin: 0.03,
   },
 });
-const needleClassify = (label) => async () => ({
-  ok: true, cached: false, ms: 3, shadow: false,
-  value: { label, score: 0.96, margin: 0.03, accepted: true },
-});
 const jevRank = (winner) => async () => ({
   ok: true,
   answers: {
@@ -57,12 +53,10 @@ test("coding session: every layer does distinct useful work", async () => {
   const metrics = metricsMod.microMetrics();
   const layers = new Set(["deterministic"]);
 
-  // 1. Request arrives: deterministic + needle classification.
+  // 1. Request arrives: deterministic family and terms.
   const pass = advisoryMod.deterministicRequestPass("Fix the failing authentication test in the login handler and add coverage");
   assert.equal(pass.substantive, true);
-  const family = await advisoryMod.needleRequestPass("Fix the failing authentication test", needleClassify("implementation"));
-  assert.equal(family.family, "implementation");
-  layers.add("needle");
+  assert.equal(pass.family, "implementation");
 
   // 2. Advisory batch runs once, asynchronously.
   const advisory = await new Promise((resolve) => {
@@ -91,6 +85,7 @@ test("coding session: every layer does distinct useful work", async () => {
     needle: needleRank("bash"),
   });
   assert.equal(ranked.applied, "needle");
+  layers.add("needle");
   assert.equal(ranked.ordered[0].id, "bash");
 
   // 4. Real Smol owner, schema validation and sealing; only transport is mocked.

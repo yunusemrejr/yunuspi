@@ -130,6 +130,43 @@ test('default priming selects relevant project history once and abstains on gene
  const empty=make();empty.start();assert.equal(await empty.prompt(''),undefined);assert.equal(empty.entries.length,0);
 });
 
+test('the previous session\'s follow-ups are carried into a generic next prompt with a visible notice',async()=>{
+ const cwd=path.join(root,'carry');fs.mkdirSync(cwd,{recursive:true});
+ const project=path.join(cwd,'project.md'),daily=path.join(cwd,'daily');fs.mkdirSync(daily,{recursive:true});
+ fs.writeFileSync(project,'Unrelated project fact about widgets.\n');
+ fs.writeFileSync(path.join(daily,'2026-09-23.md'),'<!-- 2026-09-23 10:00:00 [aaaa] -->\n## Session Summary (auto, exit: session-end)\n\n### Follow-ups\n- Old follow-up that a newer summary supersedes.\n');
+ fs.writeFileSync(path.join(daily,'2026-09-24.md'),'<!-- 2026-09-24 15:41:29 [bbbb] -->\n## Session Summary (auto, exit: session-end)\n\n### Decisions\n- Shipped the portrait.\n\n### Follow-ups\n- Rerun the syntax check after the dev server restart.\n- robots.txt is missing crawler entries (user decision needed).\n- The staging password is in the vault and must never be carried.\n');
+ const hooks={},entries=[],sent=[];
+ registerPriming({on:(name,fn)=>hooks[name]=fn,registerCommand(){},registerMessageRenderer(){},sendMessage:m=>sent.push(m),appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},()=>({project,daily,global:project}));
+ const ctx={cwd,sessionManager:{getEntries:()=>entries}};hooks.session_start({},ctx);
+ const result=await hooks.before_agent_start({prompt:'continue'},ctx);
+ assert.match(result.message.content,/previous session \(2026-09-24 15:41\)[\s\S]*Rerun the syntax check[\s\S]*robots\.txt/);
+ assert.doesNotMatch(result.message.content,/Old follow-up|staging password/);
+ assert.equal(entries.filter(e=>e.customType==='memory-priming-attempt').length,1);
+ assert.match(sent[0].content,/Continuity · 2 follow-ups carried from the previous session/);
+ assert.equal(sent[0].excludeFromContext,true);
+ assert.equal(await hooks.before_agent_start({prompt:'continue'},ctx),undefined,'carried once per session');
+});
+
+test('CI facts report the current commit, private and offline limits, and nothing without CI config',async()=>{
+ const {ciFacts}=await import(pathToFileURL(path.join(agent,'extensions/lib/ci-awareness.ts')));
+ const repo=path.join(root,'ci-repo'),sha='a'.repeat(40);
+ fs.mkdirSync(path.join(repo,'.git/refs/heads'),{recursive:true});fs.mkdirSync(path.join(repo,'.github/workflows'),{recursive:true});
+ fs.writeFileSync(path.join(repo,'.git/HEAD'),'ref: refs/heads/main\n');fs.writeFileSync(path.join(repo,'.git/refs/heads/main'),sha+'\n');
+ fs.writeFileSync(path.join(repo,'.git/config'),'[remote "origin"]\n\turl = git@github.com:owner/project.git\n');
+ fs.writeFileSync(path.join(repo,'.github/workflows/ci.yml'),'name: Build and test\non: push\n');
+ const urls=[];
+ const reply=(status,body)=>async url=>{urls.push(url);return new Response(JSON.stringify(body),{status});};
+ const ok=await ciFacts(path.join(repo),{env:{},fetchImpl:reply(200,{workflow_runs:[{name:'Build and test',status:'completed',conclusion:'failure'}]})});
+ assert.match(urls[0],new RegExp(`repos/owner/project/actions/runs\\?head_sha=${sha}`));
+ assert.equal(ok.status,'GitHub Actions for HEAD aaaaaaa on main: "Build and test" failure');
+ assert.match(ok.text,/workflows "Build and test"[\s\S]*failing or missing run is unfinished work/);
+ assert.match((await ciFacts(repo,{env:{},fetchImpl:reply(200,{workflow_runs:[]})})).status,/no GitHub Actions run recorded for HEAD aaaaaaa/);
+ assert.match((await ciFacts(repo,{env:{},fetchImpl:reply(404,{})})).status,/private repositories need GITHUB_TOKEN/);
+ const calls=urls.length;assert.match((await ciFacts(repo,{env:{PI_OFFLINE:'1'},fetchImpl:reply(200,{})})).status,/offline/);assert.equal(urls.length,calls);
+ const plain=path.join(root,'no-ci');fs.mkdirSync(plain,{recursive:true});assert.equal(await ciFacts(plain,{env:{}}),undefined);
+});
+
 test('explicit global and project priming opt-outs remain authoritative',async()=>{
  const cwd=path.join(root,'opt-out-project');fs.mkdirSync(cwd,{recursive:true});
  const project=path.join(cwd,'memory.md');fs.writeFileSync(project,'Widget authentication requires the current scoped cache policy.\n');

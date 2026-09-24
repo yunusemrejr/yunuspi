@@ -53,6 +53,7 @@
     "capability-health.ts",
     "catalog-cache-lock.ts",
     "checkpoint-files.ts",
+    "ci-awareness.ts",
     "code-guidance-signals.ts",
     "code-lexical-mask.ts",
     "compact-tool-json.ts",

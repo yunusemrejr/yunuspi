@@ -8,7 +8,6 @@
  */
 import { taskTerms } from "../local-intelligence.mjs";
 import { isPromptPivot, isPromptRefusal, isReferentialFollowup } from "../intent-context.ts";
-import type { NeedleResult, NeedleClassifyResult } from "../needle-types.ts";
 import { microMetrics } from "./metrics.ts";
 import { COUNCIL_PERSPECTIVES } from "./review.ts";
 import { requestExcerpt } from '../prompt-interpretation.ts';
@@ -26,13 +25,6 @@ export interface DeterministicPass {
   substantive: boolean;
 }
 
-export interface NeedlePass {
-  family: RequestFamily;
-  score: number;
-  margin: number;
-  accepted: boolean;
-}
-
 /** Synchronous deterministic pass over the raw prompt. Pure and total. */
 export function deterministicRequestPass(prompt: unknown): DeterministicPass {
   const text = typeof prompt === "string" ? prompt : "";
@@ -44,65 +36,17 @@ export function deterministicRequestPass(prompt: unknown): DeterministicPass {
   // Substantive: enough content to classify/route, not a bare stop/pivot cue.
   const substantive = chars >= 40 && terms.length >= 2 && !refusal;
   // This is a cheap advisory prior, never a mutation/authorization decision.
-  // It keeps council shaping useful when local inference misses its 500ms window.
+  // Everyday change verbs (make, remove, update, turn ... into) count: 9 of 20
+  // recorded prompts were otherwise "unknown".
   const cues = text.slice(0, 8192).replace(/```[\s\S]*?```/g, ' ').replace(/^\s*>.*$/gm, ' ');
-  const family: RequestFamily = /\b(?:implement|build|fix|refactor|add|edit|create|improve|optimi[sz]e)\b/i.test(cues) ? 'implementation'
+  const family: RequestFamily = /\b(?:implement|build|fix|refactor|add|edit|create|improve|optimi[sz]e|make|remove|delete|update|upgrade|change|convert|turn|replace|rewrite|redesign|migrate|port|install|deploy|write|generate|integrate|deslopify)\b/i.test(cues) ? 'implementation'
     : /\b(?:review|audit|critique|assess)\b/i.test(cues) ? 'review'
-    : /\b(?:debug|diagnose|trace|reproduce|investigate)\b/i.test(cues) ? 'investigation'
+    : /\b(?:debug|diagnose|trace|reproduce|investigate|understand|analy[sz]e|inspect|explore)\b/i.test(cues) ? 'investigation'
     : /\b(?:research|compare|search|summarize)\b/i.test(cues) ? 'research'
     : /\b(?:show|list|read|recall|look up)\b/i.test(cues) ? 'lookup' : 'unknown';
   return { terms, pivot, refusal, followup, chars, substantive, family };
 }
 
-export const REQUEST_FAMILIES: Array<{ id: RequestFamily; text: string }> = [
-  { id: "implementation", text: "write, edit, implement, build or fix code, files, configuration or tests" },
-  { id: "investigation", text: "debug, diagnose, trace, reproduce or explain a failure, error or unexpected behavior" },
-  { id: "review", text: "review, audit, critique or assess code, design, security or quality" },
-  { id: "research", text: "research, compare, search the web, gather information or summarize knowledge" },
-  { id: "lookup", text: "look up, show, list, read or recall a small known fact, file or value" },
-];
-
-export type NeedleClassify = (
-  text: string,
-  labels: Array<{ id: string; text: string }>,
-) => Promise<NeedleResult<NeedleClassifyResult>>;
-
-/** Local semantic request-family classification. Never throws. */
-export async function needleRequestPass(
-  prompt: string,
-  classify: NeedleClassify | undefined,
-): Promise<NeedlePass | undefined> {
-  const metrics = microMetrics();
-  if (!classify || typeof prompt !== "string" || prompt.trim().length < 12) {
-    metrics.skip("needle", "trivial");
-    return undefined;
-  }
-  try {
-    // 512 chars keeps the background classification inside ~2.5s worst case.
-    const result = await classify(requestExcerpt(prompt, 512), REQUEST_FAMILIES);
-    if (!result.ok) {
-      metrics.skip("needle", result.reason);
-      return undefined;
-    }
-    metrics.run("needle", result.ms);
-    if (result.shadow || !result.value.accepted) {
-      metrics.skip("needle", result.shadow ? "shadow" : "low-confidence");
-      return undefined;
-    }
-    if (!REQUEST_FAMILIES.some((entry) => entry.id === result.value.label)) {
-      metrics.skip("needle", "unknown-family");
-      return undefined;
-    }
-    metrics.accept("needle");
-    const family = (REQUEST_FAMILIES.some((entry) => entry.id === result.value.label)
-      ? result.value.label
-      : "unknown") as RequestFamily;
-    return { family, score: result.value.score, margin: result.value.margin, accepted: result.value.accepted };
-  } catch {
-    metrics.skip("needle", "unavailable");
-    return undefined;
-  }
-}
 
 export interface AdvisoryContext {
   prompt: string;

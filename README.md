@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.6.5 makes automatic reviews and local intelligence count: observer reviews are delivered with caveats instead of discarded, JEV skill discovery and output distillation fit their budgets and reach context, Smol accepts Unicode terminal output, and `todo` recovers unambiguous batch mistakes without a wasted turn. It includes the generous analysis and observer timeouts, provider repairs, account-backed Codex catalog, verified observer delivery and expanded `/used` dashboard. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Version 0.6.6 gives sessions continuity: the previous session's follow-ups and the project's current CI result are carried into the next session, Needle3 ranking is fused with lexical ranking where it measurably helps, and updates keep at most two backups. Version 0.6.5 made observer reviews, JEV and Smol produce value instead of discarded or idle work. It includes the generous analysis and observer timeouts, provider repairs, account-backed Codex catalog, verified observer delivery and expanded `/used` dashboard. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 

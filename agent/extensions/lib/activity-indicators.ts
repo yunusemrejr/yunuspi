@@ -151,7 +151,7 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   };
   if (kind === "ml.smol.used" || kind === "ml.mini.used") return { label: kind === "ml.smol.used" ? "Smol" : "Kompress", status, detail: "selection applied" };
   if (kind === "ml.fuzzy.used") return { label: "Fuzzy matching", status, detail: `local match applied${amount("count") === undefined ? "" : ` · ${amount("count")} matches`}` };
-  if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: "ranking applied" };
+  if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: { needle: "Needle3 ranking applied", fused: "Needle3 + lexical fused ranking applied", jev: "JEV ranking applied" }[decision] ?? "ranking applied" };
   if (kind === "ml.radar.rank" && decision === "on" && (amount("count") ?? 0) > 0) return { label: "Neural ranker", status, detail: `ranking applied · ${amount("count")} results` };
   if (kind === "ml.intent") return { label: "Intent classifier", status, detail: "local route selected" };
 }
