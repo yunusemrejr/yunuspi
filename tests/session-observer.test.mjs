@@ -13,11 +13,12 @@ process.env.PI_PROVIDER_STATE_FILE = path.join(fixtureRoot, 'health.json');
 process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(fixtureRoot, 'exclusions.json');
 process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(fixtureRoot, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
+process.env.PI_OBSERVER_BOOK_DIR = 'off';
 delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_OBSERVER;
 delete process.env.PI_SUBAGENT_CHILD;
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
-const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage, OBSERVER_DEADLINE_MS } = await import('../agent/extensions/lib/session-observer.ts');
+const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage, observerEvidenceBytes, OBSERVER_DEADLINE_MS, OBSERVER_PACKET_MAX_BYTES } = await import('../agent/extensions/lib/session-observer.ts');
 const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
 
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
@@ -303,7 +304,7 @@ test('observer reviews chronological chunks without losing earlier tool outcomes
   assert.match(h.packets[0].evidence.find(row=>row.id==='todo-state').text,/Verify parser boundary checks/);
   assert.match(h.packets[0].evidence.find(row=>row.id==='child-state').text,/completed/);
   assert.equal(h.packets[0].evidence[0].text,'Fix parser validation.');
-  for(const p of h.packets) assert.ok(Buffer.byteLength(p.text,'utf8')<=8000);
+  for(const p of h.packets) { assert.ok(observerEvidenceBytes(p)<=8000); assert.ok(Buffer.byteLength(p.text,'utf8')<=OBSERVER_PACKET_MAX_BYTES); }
   h.close();
 });
 
@@ -448,7 +449,7 @@ test('bounded plan and child snapshots keep active work and failed follow-up vis
   assert.match(plan.text, /1 open, 16 completed.*Resolve parser boundary case/);
   const children = h.packets[0].evidence.find(row => row.id === 'child-state');
   assert.match(children.text, /Parser edge review: failed; execution=succeeded; acceptance=failed \(Missing empty-input test\)/);
-  assert.ok(Buffer.byteLength(h.packets[0].text, 'utf8') <= 8000);
+  assert.ok(observerEvidenceBytes(h.packets[0]) <= 8000 && Buffer.byteLength(h.packets[0].text, 'utf8') <= OBSERVER_PACKET_MAX_BYTES);
   h.close();
 });
 

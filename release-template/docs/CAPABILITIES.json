@@ -968,6 +968,54 @@
       "commands": []
     },
     {
+      "id": "session-observer",
+      "group": "review",
+      "summary": "Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.",
+      "entrypoints": [
+        "session_observer preference role",
+        "/observer-book"
+      ],
+      "commands": [
+        "observer-book",
+        "models"
+      ],
+      "options": [
+        {
+          "name": "/observer-book [toc|read <id>|margins [clear]|on|off]",
+          "summary": "Read the book and its current selection, manage this project's margin notes, or disable the book for this session."
+        },
+        {
+          "name": "PI_OBSERVER_BOOK",
+          "summary": "Set to off to review without the book."
+        },
+        {
+          "name": "PI_OBSERVER_BOOK_DIR",
+          "summary": "Directory of extra user chapters (default ~/.pi/settings/observer-book); off disables user chapters."
+        },
+        {
+          "name": "PI_OBSERVER_MARGINS|PI_OBSERVER_MARGINS_DIR",
+          "summary": "Disable margin notes or relocate their per-project store (default under the agent memory directory)."
+        },
+        {
+          "name": "PI_SESSION_OBSERVER",
+          "summary": "Set to off to disable periodic observation entirely; the /models Session Observer role chooses the route."
+        }
+      ],
+      "related": [
+        "quality-review",
+        "review-coordination",
+        "micro-intelligence",
+        "session-coordination"
+      ],
+      "sourceFiles": [
+        "agent/extensions/session-observer.ts",
+        "agent/extensions/lib/session-observer.ts",
+        "agent/extensions/lib/observer-book.ts"
+      ],
+      "doc": "docs/SESSION-OBSERVER.md",
+      "tools": []
+    },
+    {
       "id": "quick-commands",
       "group": "commands",
       "summary": "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
@@ -1018,7 +1066,8 @@
         "used",
         "errors",
         "commands",
-        "guardian"
+        "guardian",
+        "observer-book"
       ],
       "options": [
         {
@@ -2716,6 +2765,11 @@
         "line": 891
       },
       {
+        "name": "observer-book",
+        "source": "agent/extensions/session-observer.ts",
+        "line": 306
+      },
+      {
         "name": "or-provider",
         "source": "agent/extensions/provider-cmd.ts",
         "line": 654
@@ -3946,7 +4000,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 608,
+      "sourceFiles": 609,
       "registrationSites": 66,
       "indirectRegistrationSites": 17,
       "stableRegistrationRows": 94,
@@ -4381,6 +4435,10 @@
       },
       {
         "path": "agent/extensions/lib/observation-retrieval.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/observer-book.ts",
         "exists": true
       },
       {
@@ -6445,6 +6503,10 @@
       {
         "name": "NEEDLE-AUDIT.md",
         "path": "docs/NEEDLE-AUDIT.md"
+      },
+      {
+        "name": "OBSERVER-BOOK.md",
+        "path": "docs/OBSERVER-BOOK.md"
       },
       {
         "name": "OPERATIONS-EVIDENCE-AUDIT.md",

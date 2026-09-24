@@ -136,6 +136,7 @@
     "session-metrics.ts",
     "session-observability.ts",
     "session-observer.ts",
+    "observer-book.ts",
     "observer-model-evidence.ts",
     "session-report.ts",
     "session-signals.ts",

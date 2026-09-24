@@ -9,6 +9,12 @@ import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/s
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
 import { isProvenFreeRoute } from './pi-subagents/src/runs/shared/free-route-evidence.ts';
+import { projectMemoryKey } from './pi-memory/project-identity.ts';
+import { needleHealth, needleRank } from './lib/needle-runtime.ts';
+import { needlePolicy } from './lib/needle-policy.ts';
+import { createBookSelectionState, createMarginStore, createSessionProfile, loadObserverBook, marginStoreDir, noteBookCitations, noteBookmarks, noteBookReview, profileRow, renderBookSection,
+  selectBookPassages, selectMargins, type BookSection, type BookSelection, type MarginStore, type ObserverBook } from './lib/observer-book.ts';
+import path from 'node:path';
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
 export default function sessionObserver(pi: any, testing: any = {}) {
@@ -22,6 +28,44 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
   let inputRestrictions: any = {}, inputBlocked = false;
+  // Observer Book state. The profile and selection belong to the current task;
+  // margin notes belong to the project and persist across sessions.
+  const profile = createSessionProfile(now);
+  let bookState = createBookSelectionState(), bookOff = false, salience = 0, childSummary = { total: 0, failed: 0 };
+  let marginStore: MarginStore | undefined, marginKey = '', needleFlight = false;
+  let routingEpoch = -1, routingChildState = '', lastFired = '';
+  let lastBookView: Array<{ id: string; title: string; trigger?: string }> = [];
+  const routeHealth = new Map<string, { failures: number; coolUntil: number }>();
+  let fallbackNotice = '';
+  const bookEnabled = () => !bookOff && (process.env.PI_OBSERVER_BOOK ?? '').toLowerCase() !== 'off';
+  const loadBook = (): ObserverBook | undefined => {
+    if (!bookEnabled()) return undefined;
+    try { const book = (testing.loadBook ?? loadObserverBook)(); return book?.chapters?.length ? book : undefined; } catch { return undefined; }
+  };
+  const margins = (context: any): MarginStore | undefined => {
+    const dir = testing.marginDir !== undefined ? testing.marginDir : marginStoreDir();
+    if (!dir || typeof context?.cwd !== 'string') return undefined;
+    try {
+      const key = projectMemoryKey(context.cwd);
+      if (!marginStore || marginKey !== key) { marginStore?.flush(); marginStore = createMarginStore({ dir, project: key, label: path.basename(context.cwd), now }); marginKey = key; }
+      return marginStore;
+    } catch { return undefined; }
+  };
+  const needleUsable = () => {
+    if (testing.needleRank) return true;
+    try { return needlePolicy().enabled && ['healthy', 'degraded'].includes(needleHealth().state); } catch { return false; }
+  };
+  /** Refine the next selection with Needle when it is already serving other
+   * callers; never starts the worker for the observer and never blocks. */
+  async function refineWithNeedle(selection: BookSelection, query: string) {
+    if (needleFlight || selection.candidates.length < 3 || bookState.needle?.signature === selection.signature || !needleUsable()) return;
+    needleFlight = true;
+    const state = bookState;
+    try {
+      const result = await (testing.needleRank ?? needleRank)({ query: query.slice(0, 160), candidates: selection.candidates, topK: selection.candidates.length });
+      if (result?.ok && state === bookState && Array.isArray(result.value?.ranked)) state.needle = { signature: selection.signature, order: result.value.ranked.map((row: any) => String(row.id)) };
+    } catch { /* Lexical order remains authoritative. */ } finally { needleFlight = false; }
+  }
   const observerOptOutChunk = (text: string) => /\b(?:work|stay|remain|operate)\s+offline\b|\boffline[- ]only\b|\b(?:no|without)\s+(?:network|internet)\b|\b(?:do not|don't|never)\s+(?:use|access)\s+(?:the\s+)?(?:network|internet)\b|\b(?:no|disable|stop|do not use|don't use)\s+(?:(?:background|automatic|periodic)\s+)*(?:observers?|advis[oe]rs?)\b/i.test(text);
   const noObserver = (text: string) => {
     // Constraint scanning is incremental, not a reason to disable long tasks.
@@ -62,6 +106,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     }
     try {
       const ledger = reduceChildEvents(projectTranscriptChildren((ctx?.sessionManager?.getBranch?.() ?? []).slice(-2048)));
+      childSummary = { total: ledger.tasks.length, failed: ledger.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
       if (ledger.tasks.length) {
         const unresolved = ledger.tasks.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
         const finished = ledger.tasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');
@@ -73,8 +118,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
+    profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const runtime = createSessionObserver({
+    salience: () => salience,
     ...testing,
     snapshot() {
       const state = currentState(), evidence = [...state, ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
@@ -99,7 +146,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       let available = ctx.modelRegistry.getAvailable();
       if (ctx.scopedModels?.length) { const scope = new Set(ctx.scopedModels.map((row: any) => `${row.model?.provider}/${row.model?.id}`)); available = available.filter((model: any) => scope.has(`${model.provider}/${model.id}`)); }
       const selection = resolveSessionObserverPreferenceChain(available.map(toModelInfo));
-      const entry = selection.routes[0];
+      // A configured route that failed twice in a row cools down for ten
+      // minutes while the next configured route serves; with one route, or
+      // all cooling, the first route is retried (failures stay visible).
+      const entry = selection.routes.find(route => (routeHealth.get(route.route)?.coolUntil ?? 0) <= now()) ?? selection.routes[0];
+      if (entry && selection.routes[0] && entry.route !== selection.routes[0].route && fallbackNotice !== entry.route) {
+        fallbackNotice = entry.route;
+        pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer route ${selection.routes[0].route} failed repeatedly; using configured fallback ${entry.route} for up to 10 minutes.`, display: true, excludeFromContext: true, details: { status: 'fallback', route: entry.route } }, { triggerTurn: false });
+      } else if (entry?.route === selection.routes[0]?.route) fallbackNotice = '';
       if (!entry) return { packet: currentPacket, reason: selection.status === 'disabled' ? 'Observer disabled in model preferences' : 'Configured observer model unavailable' };
       const model = available.find((candidate: any) => `${candidate.provider}/${candidate.id}` === entry.route);
       if (!model || !Number.isSafeInteger(model.maxTokens) || model.maxTokens < 4096) return { packet: currentPacket, reason: 'Configured observer model lacks output capacity' };
@@ -111,15 +165,50 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         reportedDropped = dropped;
         pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer coverage: ${dropped} earlier events exceeded the queue; reviewing retained chunks with incomplete historical coverage.`, display: true, excludeFromContext: true, details: { status: 'coverage', dropped } }, { triggerTurn: false });
       }
+      const capturedStates = new Map(currentState(false).map(row => [row.id, row.text]));
+      // Deterministic working-pattern measurements for the observer and the book.
+      profile.foreground(Math.max(0, ...[...runningTools.values()].filter(tool => tool.foreground).map(tool => now() - tool.startedAt)));
+      profile.children(childSummary);
+      const measured = profile.snapshot();
+      const profileEvidence: ObserverEvidence = { id: 'session-profile', kind: 'session profile', text: `Harness measurement, not a verdict: ${profileRow(measured)}` };
+      const focusText = `${request} ${[...recent.slice(0, 16), ...streaming].map(row => row.text).join(' ')} ${todos.map(task => task.title ?? '').join(' ')}`;
+      // The book: static rules and contents, sticky passages, relevant margin
+      // notes. Chapters name the tools and skills their doctrine relies on;
+      // those lead the capability shortlist so advice can name them exactly.
+      const book = loadBook();
+      let section: BookSection | undefined, bookSelection: BookSelection | undefined;
+      const preferTools: string[] = [], preferSkills: string[] = [];
+      if (book) {
+        try {
+          const focus = { request, recent: focusText.slice(request.length) };
+          bookSelection = selectBookPassages(book, focus, profile, bookState);
+          const store = margins(ctx);
+          const notes = store ? selectMargins(store.list(), focus, now()) : [];
+          section = renderBookSection(book, bookSelection, notes);
+          lastBookView = (section?.passages ?? []).map(id => ({ id, title: section!.titles[id] ?? id, ...(bookSelection!.passages.find(row => row.passage.id === id)?.trigger ? { trigger: bookSelection!.passages.find(row => row.passage.id === id)!.trigger } : {}) }));
+          for (const row of bookSelection.passages) { const chapter = book.chapterById.get(row.passage.chapter); if (chapter) { preferTools.push(...chapter.tools); preferSkills.push(...chapter.skills); } }
+          const firedKey = bookSelection.fired.join(',');
+          if (firedKey && firedKey !== lastFired && bookSelection.fired.some(name => !lastFired.split(',').includes(name))) salience++;
+          lastFired = firedKey;
+        } catch { section = undefined; bookSelection = undefined; }
+      }
+      // Routing evidence is the largest row and matters for delegation and
+      // model advice. Send it on the first review of a task, when child state
+      // changed, when the work is about models or delegation, or on request.
+      const childState = capturedStates.get('child-state') ?? '';
+      const routingAsked = bookState.bookmarkReview === bookState.review && bookState.bookmarks.includes('routing');
+      const routingTopic = /\b(?:models?|rout(?:e|es|ing)|providers?|costs?|pric(?:e|es|ing)|budgets?|subagents?|councils?|swarms?|fusion|delegat\w*|parallel|cheap\w*|expensive)\b/i.test(focusText.slice(0, 6_000));
+      const includeRouting = routingEpoch !== taskEpoch || childState !== routingChildState || routingTopic || routingAsked;
       let routing: string;
-      try {
+      if (includeRouting) try {
         const focus = `${request} ${recent.slice(0, 12).map(row => row.text).join(' ')}`;
         const preferredRoles = [/\b(?:swarm|parallel|fanout)\b/i.test(focus) ? 'swarm' : '', /\b(?:fusion|reconcile|conflicting)\b/i.test(focus) ? 'fusion' : ''].filter(Boolean);
         routing = observerModelEvidence({ models: available, entries: ctx.sessionManager.getBranch?.() ?? [], currentModel: ctx.model, restrictions: constraints, preferredRoles });
       }
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
-      currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...evidence], tools, skills);
-      const capturedStates = new Map(currentState(false).map(row => [row.id, row.text]));
+      else routing = 'Omitted this review to save tokens: model preferences, usage and child outcomes are unchanged since they were last shown for this task. Ask to read "routing" when model or delegation advice needs them.';
+      const [stateRows, restRows] = [evidence.filter(row => row.kind === 'current state'), evidence.filter(row => row.kind !== 'current state')];
+      currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills });
       const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);
@@ -159,9 +248,33 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       };
       // Reviewer billing and its own prior note must not create new work for
       // itself. Task activity, queue progress and available capabilities do.
-      const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, state: [...capturedStates], streaming, model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name) });
+      // The key excludes everything the observer's own reviews change (billing,
+      // advice history, book rotation, margin notes); newly fired book triggers
+      // are session facts and may start a review.
+      const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, state: [...capturedStates], streaming, model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name), fired: bookSelection?.fired ?? [], book: Boolean(section) });
+      const routeName = entry.route;
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent,
-        reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly } };
+        reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
+        backlog: recent.filter(row => !reviewedIds.has(row.id)).length,
+        bookPassages: section?.passages ?? [],
+        dispatched: () => {
+          noteBookReview(bookState, section?.passages ?? []);
+          if (includeRouting) { routingEpoch = taskEpoch; routingChildState = childState; }
+          if (bookSelection) void refineWithNeedle(bookSelection, `${promptRequestFocus(request).slice(0, 100)} ${focusText.slice(-120)}`);
+        },
+        applied: (advice: any) => {
+          if (!owns(ctx)) return undefined;
+          const parts: string[] = [];
+          const store = advice.book?.length || advice.margin || advice.strike?.length ? margins(ctx) : undefined;
+          if (advice.book?.length) { noteBookCitations(bookState, advice.book); store?.cite(advice.book); parts.push(`book: ${advice.book.join(', ')}`); }
+          if (advice.read?.length) { noteBookmarks(bookState, advice.read); parts.push(`reading ${advice.read.join(', ')}`); }
+          if (advice.strike?.length && store) { try { if (store.strike(advice.strike)) parts.push(`struck margin ${advice.strike.join(', ')}`); } catch { /* A read-only store keeps its notes. */ } }
+          if (advice.margin && store) {
+            try { const kept = store.add(advice.margin, { passage: advice.book?.[0], model: routeName }); parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`); }
+            catch { parts.push('margin note not saved'); }
+          } else if (advice.marginRejected) parts.push(`margin note dropped (${advice.marginRejected})`);
+          return parts.join(' · ') || undefined;
+        } };
     },
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
@@ -172,6 +285,15 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       void Promise.resolve(delivery).catch(() => { /* Native delivery reports display failures independently. */ });
     },
     receipt(data: any, origin: string) {
+      // Route health is a property of the provider, not of the session that
+      // happened to own the request, so it is tracked for late replies too.
+      const route = typeof data?.provider === 'string' && typeof data?.model === 'string' ? `${data.provider}/${data.model}` : '';
+      if (route && ['failed', 'timeout', 'completed'].includes(data.status)) {
+        const health = routeHealth.get(route) ?? { failures: 0, coolUntil: 0 };
+        if (data.status === 'completed') { health.failures = 0; health.coolUntil = 0; }
+        else if (++health.failures >= 2) health.coolUntil = now() + 600_000;
+        routeHealth.set(route, health); if (routeHealth.size > 32) routeHealth.delete(routeHealth.keys().next().value!);
+      }
       // The exposed append owner is the current session only. Retain an honest
       // pending/unknown receipt in the old session if a provider ignores abort;
       // never reopen its file or charge the replacement session for a late reply.
@@ -179,6 +301,50 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     },
   });
   pi.registerMessageRenderer(OBSERVER_MESSAGE, (message: any) => new Text(typeof message.content === 'string' ? message.content : '', 0, 0));
+  // The user can read the observer's book and manage its margin notes. The
+  // command changes no model context and never wakes the agent.
+  pi.registerCommand?.('observer-book', {
+    description: 'Observer Book: status, contents and margin notes — usage: /observer-book [toc | read <id> | margins [clear] | on | off]',
+    argumentHint: '[toc|read <id>|margins [clear]|on|off]',
+    handler: async (args: string, context: any) => {
+      const say = (text: string, level: 'info' | 'warning' = 'info') => {
+        if (context?.hasUI && typeof context.ui?.notify === 'function') context.ui.notify(text, level);
+        else pi.sendMessage({ customType: OBSERVER_MESSAGE, content: text, display: true, excludeFromContext: true, details: { status: 'book' } }, { triggerTurn: false });
+      };
+      const [verb = '', ...rest] = String(args ?? '').trim().split(/\s+/).filter(Boolean);
+      const target = rest.join(' ');
+      if (verb === 'off' || verb === 'on') { bookOff = verb === 'off'; say(`Observer Book ${bookOff ? 'disabled' : 'enabled'} for this session; the observer ${bookOff ? 'reviews without doctrine or margin notes' : 'reads its book again from the next review'}.`); return; }
+      const wasOff = bookOff; bookOff = false;
+      const book = loadBook(); bookOff = wasOff;
+      if (!book) { say('Observer Book unavailable: disabled by PI_OBSERVER_BOOK=off or no readable chapters.', 'warning'); return; }
+      const store = margins(context ?? ctx);
+      if (verb === 'toc') {
+        const parts = [...new Set(book.chapters.map(chapter => chapter.part))];
+        say(parts.map(part => `${part}: ${book.chapters.filter(chapter => chapter.part === part).map(chapter => `${chapter.id} (${chapter.title}, ${chapter.passages.length})`).join('; ')}`).join('\n'));
+        return;
+      }
+      if (verb === 'read') {
+        const chapter = book.chapterById.get(target), passage = book.passages.get(target);
+        if (passage) { const owner = book.chapterById.get(passage.chapter); say(`${owner?.title ?? passage.chapter} › ${passage.title} [${passage.id}]\n${passage.body}`); return; }
+        if (chapter) { say(`${chapter.title} [${chapter.id}] — ${chapter.summary}\n${chapter.passages.map(row => `${row.id}: ${row.title}`).join('\n')}`); return; }
+        say(`Unknown chapter or passage "${target.slice(0, 80)}". Use /observer-book toc for chapter ids.`, 'warning');
+        return;
+      }
+      if (verb === 'margins') {
+        if (!store) { say('Margin notes are disabled (PI_OBSERVER_MARGINS=off) or this project has no readable identity.', 'warning'); return; }
+        if (rest[0] === 'clear') { const count = store.clear(); say(`Struck ${count} margin note${count === 1 ? '' : 's'} for this project; they will not be shown to the observer again.`); return; }
+        const notes = store.list();
+        const age = (at: number) => { const hours = Math.max(0, (now() - at) / 3_600_000); return hours < 48 ? `${Math.round(hours)}h ago` : `${Math.round(hours / 24)}d ago`; };
+        say(notes.length ? notes.map(note => `${note.id}${note.confirmations > 1 ? ` ×${note.confirmations}` : ''} (${age(note.updatedAt)}): ${note.text}`).join('\n') : 'No margin notes for this project yet.');
+        return;
+      }
+      const userChapters = book.chapters.filter(chapter => chapter.source === 'user').length;
+      const reading = lastBookView.length ? lastBookView.map(row => `${row.title}${row.trigger ? ` (⚑ ${row.trigger})` : ''}`).join('; ') : 'nothing selected yet';
+      say([`Observer Book ${book.hash.slice(0, 8)}: ${book.chapters.length} chapters, ${book.passages.size} passages${userChapters ? ` (${userChapters} user chapters)` : ''}${bookOff ? ' · disabled for this session' : ''}.`,
+        `Last review read: ${reading}.`, `Margin notes for this project: ${store ? store.list().length : 'disabled'}.`,
+        ...book.diagnostics.slice(0, 3)].join('\n'));
+    },
+  });
   pi.on('session_start', (_event: any, context: any) => { closed = false; reset(context); });
   for (const event of ['session_switch', 'session_tree', 'session_fork']) pi.on(event, (_: any, context: any) => reset(context));
   pi.on('input', (event: any, context: any) => {
@@ -207,7 +373,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!accepted || accepted.signal?.aborted) return;
     accepted.cleanup(); pending.delete(id); ctx = context;
     request = accepted.request; userRequest = Boolean(request.trim()); inputRestrictions = accepted.restrictions; inputBlocked = accepted.blocked;
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; runtime.begin(owner); if (userRequest) runtime.start();
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++;
+    profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
+    runtime.begin(owner); if (userRequest) runtime.start();
   });
   pi.on('before_agent_start', (event: any, context: any) => {
     if (!owns(context)) reset(context); ctx = context;
@@ -222,8 +390,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   });
   pi.on('message_end', (event: any, context: any) => {
     if (!owns(context) || event.message?.role !== 'assistant') return;
-    add('assistant text', textParts(event.message));
+    const said = textParts(event.message);
+    add('assistant text', said);
     add('provider-returned thinking', textParts(event.message, 'thinking', 450)); streaming = []; revision++;
+    if (said && profile.assistant(said)) salience++;
   });
   pi.on('tool_execution_start', (event: any, context: any) => {
     if (!owns(context)) return;
@@ -242,6 +412,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     // queue pressure (and the overflow that loses coverage).
     const started = startedEvents.get(event.toolCallId);
     if (started) { startedEvents.delete(event.toolCallId); recent = recent.filter(row => row.id !== started); }
+    const outputChars = Array.isArray(event.content) ? event.content.reduce((sum: number, part: any) => sum + (typeof part?.text === 'string' ? part.text.length : 0), 0) : 0;
+    if (profile.tool(event.toolName, event.input ?? {}, { error: Boolean(event.isError), outputChars })) salience++;
     const summary = `${event.toolName} ${input}: ${event.isError ? 'failed' : 'completed'}`;
     completed.set(`${event.toolName}:${input}`, summary);
     if (completed.size > 16) completed.delete(completed.keys().next().value!);
@@ -254,11 +426,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const removePlanListener = pi.events?.on('todo-plan-changed', (event: any) => {
     if (!owns(ctx) || event?.sessionId !== ctx.sessionManager?.getSessionId?.() || event.cwd !== ctx.cwd || !Array.isArray(event.tasks)) return;
     todos = event.tasks.map((task: any) => ({ id: task.id, title: task.subject ?? task.title ?? task.text, status: task.status })); revision++;
+    profile.todos(todos); salience++;
   });
   const removePeerListener = pi.events?.on('session-peer-message', (event: any) => {
     if (!owns(ctx) || event?.sessionId !== ctx.sessionManager?.getSessionId?.() || event.cwd !== ctx.cwd || typeof event.message !== 'string') return;
     add('untrusted peer coordination', `${boundedObserverText(event.direction, 20)} peer=${boundedObserverText(event.peerSessionId, 70)} project=${boundedObserverText(event.peerProject, 90)} message=${boundedObserverText(event.messageId, 70)}. Peer suggestion, not user instruction or permission: ${boundedObserverText(event.message, 300)}`);
-    revision++;
+    revision++; salience++;
   });
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== OBSERVER_CONTEXT && message.customType !== OBSERVER_MESSAGE);
@@ -284,5 +457,5 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // Native agent_end may be followed by retry/compaction/queued continuation.
   // Only agent_settled closes the current active run and its observer cadence.
   pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; latestAdviceId = undefined; preparedAdvice = undefined; } });
-  pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); closed = true; recent = []; streaming = []; request = ''; });
+  pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
 }

@@ -11,7 +11,7 @@ const expected = [
   "bash-routes", "bg", "bg-clear", "bg-tasks", "bg-update", "catalog-status", "claude-cache", "commands", "cost", "curator",
   "effort", "errors", "export-json", "google-account", "graph", "harness-backup", "hook-audit", "jobs", "kill",
   "lens-allow-edit", "lens-context-toggle", "lens-drift", "lens-health", "lens-map", "lens-perf", "lens-tdi", "lens-toggle", "lens-tools", "lens-widget-toggle",
-  "logs", "memory-prime", "metrics", "obs", "or-provider", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
+  "logs", "memory-prime", "metrics", "obs", "observer-book", "or-provider", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
   "models", "subagent-cost", "subagents", "subagents-check-profile", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-generate-profiles", "subagents-inspect-rpc",
   "subagents-load-profile", "subagents-models", "subagents-profiles", "subagents-refine", "subagents-refresh-provider-models", "subagents-steer", "subagents-stop", "subagents-watchdog",
   "sys-prompt", "tasks", "todos", "used", "websearch",

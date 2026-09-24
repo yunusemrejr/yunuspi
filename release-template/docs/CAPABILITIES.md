@@ -103,7 +103,7 @@ Use the installed slash-command surface for session controls, model/provider rou
 
 **Entrypoints:** `pi.getCommands`, `registerCommand`
 
-**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`
+**Commands:** `/cost`, `/self`, `/metrics`, `/obs`, `/effort`, `/reminder`, `/graph`, `/provider`, `/or-provider`, `/models`, `/todos`, `/memory-prime`, `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/bg-update`, `/jobs`, `/logs`, `/kill`, `/subagents`, `/run`, `/subagents-doctor`, `/subagents-inspect-rpc`, `/subagents-refine`, `/subagents-fleet`, `/subagents-detach`, `/subagents-stop`, `/subagents-steer`, `/subagents-models`, `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile`, `/subagents-watchdog`, `/prompt-workflow`, `/google-account`, `/sys-prompt`, `/used`, `/errors`, `/commands`, `/guardian`, `/observer-book`
 
 **Options:**
 
@@ -843,6 +843,28 @@ Coordinate distinct review kinds (quality, project, error) with trivial-work sup
 
 **Documentation:** [`docs/REVIEWS-AND-COUNCILS.md`](REVIEWS-AND-COUNCILS.md)
 
+#### session-observer
+
+Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.
+
+**Entrypoints:** `session_observer preference role`, `/observer-book`
+
+**Commands:** `/observer-book`, `/models`
+
+**Options:**
+
+- `/observer-book [toc|read <id>|margins [clear]|on|off]`: Read the book and its current selection, manage this project's margin notes, or disable the book for this session.
+- `PI_OBSERVER_BOOK`: Set to off to review without the book.
+- `PI_OBSERVER_BOOK_DIR`: Directory of extra user chapters (default ~/.pi/settings/observer-book); off disables user chapters.
+- `PI_OBSERVER_MARGINS|PI_OBSERVER_MARGINS_DIR`: Disable margin notes or relocate their per-project store (default under the agent memory directory).
+- `PI_SESSION_OBSERVER`: Set to off to disable periodic observation entirely; the /models Session Observer role chooses the route.
+
+**Related records:** `quality-review`, `review-coordination`, `micro-intelligence`, `session-coordination`
+
+**Source:** [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts), [`agent/extensions/lib/session-observer.ts`](../../agent/extensions/lib/session-observer.ts), [`agent/extensions/lib/observer-book.ts`](../../agent/extensions/lib/observer-book.ts)
+
+**Documentation:** [`docs/SESSION-OBSERVER.md`](SESSION-OBSERVER.md)
+
 ### safety
 
 #### safety-bounds
@@ -1128,6 +1150,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../../agent/extensions/model-routing-config.ts) (line 419)
 - /obs — [`agent/extensions/pi-observations.ts`](../../agent/extensions/pi-observations.ts) (line 891)
+- /observer-book — [`agent/extensions/session-observer.ts`](../../agent/extensions/session-observer.ts) (line 306)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 654)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../../agent/extensions/provider-cmd.ts) (line 653)
@@ -1351,6 +1374,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/needle-worker.mjs`](../../agent/extensions/lib/needle-worker.mjs)
 - [`agent/extensions/lib/numeric-checks.ts`](../../agent/extensions/lib/numeric-checks.ts)
 - [`agent/extensions/lib/observation-retrieval.ts`](../../agent/extensions/lib/observation-retrieval.ts)
+- [`agent/extensions/lib/observer-book.ts`](../../agent/extensions/lib/observer-book.ts)
 - [`agent/extensions/lib/observer-model-evidence.ts`](../../agent/extensions/lib/observer-model-evidence.ts)
 - [`agent/extensions/lib/output-distiller.ts`](../../agent/extensions/lib/output-distiller.ts)
 - [`agent/extensions/lib/project-tests.ts`](../../agent/extensions/lib/project-tests.ts)
@@ -1744,6 +1768,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 - [`docs/MODEL-ROUTING.md`](MODEL-ROUTING.md)
 - [`docs/NEEDLE-AUDIT.md`](NEEDLE-AUDIT.md)
+- [`docs/OBSERVER-BOOK.md`](OBSERVER-BOOK.md)
 - [`docs/OPERATIONS-EVIDENCE-AUDIT.md`](OPERATIONS-EVIDENCE-AUDIT.md)
 - [`docs/ORCHESTRATION-EVIDENCE.md`](ORCHESTRATION-EVIDENCE.md)
 - [`docs/PATCH-MIGRATION.md`](PATCH-MIGRATION.md)

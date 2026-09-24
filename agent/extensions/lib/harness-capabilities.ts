@@ -477,6 +477,27 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/REVIEWS-AND-COUNCILS.md",
 	}),
 	capability({
+		id: "session-observer",
+		group: "review",
+		summary: "Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.",
+		entrypoints: ["session_observer preference role", "/observer-book"],
+		commands: ["observer-book", "models"],
+		options: [
+			option("/observer-book [toc|read <id>|margins [clear]|on|off]", "Read the book and its current selection, manage this project's margin notes, or disable the book for this session."),
+			option("PI_OBSERVER_BOOK", "Set to off to review without the book."),
+			option("PI_OBSERVER_BOOK_DIR", "Directory of extra user chapters (default ~/.pi/settings/observer-book); off disables user chapters."),
+			option("PI_OBSERVER_MARGINS|PI_OBSERVER_MARGINS_DIR", "Disable margin notes or relocate their per-project store (default under the agent memory directory)."),
+			option("PI_SESSION_OBSERVER", "Set to off to disable periodic observation entirely; the /models Session Observer role chooses the route."),
+		],
+		related: ["quality-review", "review-coordination", "micro-intelligence", "session-coordination"],
+		sourceFiles: [
+			"agent/extensions/session-observer.ts",
+			"agent/extensions/lib/session-observer.ts",
+			"agent/extensions/lib/observer-book.ts",
+		],
+		doc: "agent/public-template/docs/SESSION-OBSERVER.md",
+	}),
+	capability({
 		id: "quick-commands",
 		group: "commands",
 		summary: "Use the installed slash-command surface for session controls, model/provider routing, plans, reminders, project graph, observations and background work.",
@@ -488,7 +509,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			"subagents-detach", "subagents-stop", "subagents-steer", "subagents-models", "subagents-profiles",
 			"subagents-load-profile", "subagents-refresh-provider-models", "subagents-generate-profiles", "subagents-check-profile",
 			"subagents-watchdog", "prompt-workflow", "google-account",
-			"sys-prompt", "used", "errors", "commands", "guardian",
+			"sys-prompt", "used", "errors", "commands", "guardian", "observer-book",
 		],
 		options: [
 			option("pi.getCommands()", "Read the live command registry; command availability can depend on loaded extensions and configuration."),
