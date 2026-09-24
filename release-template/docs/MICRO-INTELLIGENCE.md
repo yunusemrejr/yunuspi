@@ -151,6 +151,30 @@ low-value reductions still abstain. The current observation owner covers bash
 and documentation reads; routing flags alone do not demonstrate execution in
 web, review or council flows. Cold requests can time out and retain raw text.
 
+Eligibility covers ordinary Markdown: headings, lists, tables, quotes, front
+matter, link rows, HTML lines and lead-ins ending in a colon are structural
+paragraphs that are always kept, so only prose paragraphs can be omitted, and
+printable Unicode (curly quotes, dashes, accents) is accepted while control,
+bidi, zero-width and unpaired surrogate characters are not. The client and the
+worker apply one gate (`miniSource` and `paragraph_source`), with a test that
+runs the same fixtures through both; ASCII word boundaries on both sides keep
+their protected sets identical. Sources with more whitespace-separated words
+than the 512-token window can hold are not offered. The worker spends its
+ten-second inference slot only when inference runs: shape, size and
+token-window refusals are answered at once with `X-Kompress-Inference: 0`,
+after which the client needs no cooldown, and the slot is released before the
+response is written so an immediate next request is not refused as busy.
+
+Measured on this repository's 253 Markdown files of 800–4,096 characters: the
+previous gate admitted none (146 failed the prose-shape rule, 79 contained
+non-ASCII text, 28 had code fences); the current gate admits 192. None of them
+passes the savings admission, because the protected-evidence rule keeps nearly
+every prose paragraph that mentions a number, path, negation or status. The
+observation owner therefore routes output to Kompress only when a selection
+could pay for itself (`miniAdmissible`, the same test `select` applies);
+Kompress-shaped output it cannot shorten stays available to Smol and Jev,
+where previously any Kompress-shaped output ended routing.
+
 ## Council and recovery consumers
 
 The automatic scope council starts one local Needle perspective ranking alongside

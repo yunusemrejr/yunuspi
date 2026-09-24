@@ -15,7 +15,7 @@ import {
 } from "./lib/local-intelligence.mjs";
 import {
 	createMiniPreprocessor,
-	miniSource,
+	miniAdmissible,
 	miniProjection,
 } from "./lib/mini-preprocessor.ts";
 import {
@@ -416,8 +416,17 @@ export default function piObservationsExtension(
 			count: 1,
 		});
 		// Existing deterministic compression wins. Only bounded successful prose
-		// can spend local inference; the original tool body stays in the transcript.
-		if (
+		// that a selection could actually shorten claims local inference; other
+		// output stays available to Smol and Jev below. The original tool body
+		// stays in the transcript.
+		const smallStatus = () => {
+			try {
+				return JSON.stringify({ isError: false, details: event.details ?? {} }).length <= 80;
+			} catch {
+				return false;
+			}
+		};
+		const kompressClaims =
 			miniEligibleTool(event.toolName, event.input) &&
 			!event.isError &&
 			!event.details?.truncation &&
@@ -427,29 +436,20 @@ export default function piObservationsExtension(
 			(event.details?.exitCode === undefined || event.details.exitCode === 0) &&
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
-			miniSource(text) &&
 			!preserveRaw &&
-			!distilled
-		) {
-			let statusSize = Infinity;
-			try {
-				statusSize = JSON.stringify({
-					isError: false,
-					details: event.details ?? {},
-				}).length;
-			} catch {}
-			if (statusSize <= 80)
-				return mini
-					.select(text, ctx?.model?.cost?.input, taskSignal)
-					.then(finish, () => finish());
-		}
+			!distilled &&
+			smallStatus() &&
+			miniAdmissible(text, ctx?.model?.cost?.input, taskSignal);
+		if (kompressClaims)
+			return mini
+				.select(text, ctx?.model?.cost?.input, taskSignal)
+				.then(finish, () => finish());
 		// Structured successful line output complements Kompress prose selection.
 		// Speculate without delaying this result; a pending first exposure stays
 		// raw while a validated source/task cache can serve later observations.
 		if (
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
-			!miniSource(text) &&
 			safeSmolOutput(
 				event.toolName,
 				text,
@@ -476,7 +476,6 @@ export default function piObservationsExtension(
 			typeof (smol as { offerWindowed?: unknown }).offerWindowed === "function" &&
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
-			!miniSource(text) &&
 			!safeSmolOutput(event.toolName, text, false, event.details) &&
 			!preserveRaw &&
 			!distilled
@@ -501,7 +500,6 @@ export default function piObservationsExtension(
 			!event.isError &&
 			text.length >= 6000 &&
 			text.length <= MAX_OUTPUT_CHARS &&
-			!miniSource(text) &&
 			!safeSmolOutput(event.toolName, text, false, event.details) &&
 			!preserveRaw &&
 			!distilled

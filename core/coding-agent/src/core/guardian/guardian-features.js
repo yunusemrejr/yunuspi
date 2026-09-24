@@ -110,6 +110,24 @@ export function safeToolShape(toolName, args) {
 	return `${toolName.slice(0, 128)}|${shape}`.slice(0, 512);
 }
 
+// Generated identifiers, clock readings, elapsed times and temporary paths
+// change on every attempt, so a retried failure would never look identical.
+// Plain numbers (line numbers, counts, status codes) stay significant.
+const VOLATILE_FAILURE_TEXT = [
+	[/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>"],
+	[/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, "<time>"],
+	[/(?:\/tmp|\/var\/folders)\/[^\s'"`:,)]+/g, "<tmp>"],
+	[/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}\b/gi, "<hex>"],
+	[/\b1[6-9]\d{8}(?:\d{3})?\b/g, "<epoch>"],
+	[/\b\d+(?:\.\d+)?\s?(?:ms|milliseconds?|s|secs?|seconds?)\b/gi, "<duration>"],
+];
+
+export function normalizeFailureText(text) {
+	let normalized = text;
+	for (const [pattern, token] of VOLATILE_FAILURE_TEXT) normalized = normalized.replace(pattern, token);
+	return normalized;
+}
+
 export function fingerprintFailureResult(result, isError) {
 	if (!isError || !result || typeof result !== "object" || !Array.isArray(result.content)) return undefined;
 	const pieces = [];
@@ -121,7 +139,7 @@ export function fingerprintFailureResult(result, isError) {
 		pieces.push(item.text);
 	}
 	if (!pieces.length) return undefined;
-	return createHash("sha256").update("guardian-error-v1\0").update(pieces.join("\n")).digest("hex");
+	return createHash("sha256").update("guardian-error-v2\0").update(normalizeFailureText(pieces.join("\n"))).digest("hex");
 }
 
 function norm(value) {

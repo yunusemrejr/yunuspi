@@ -36,10 +36,13 @@ class Server(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
  protocol_version='HTTP/1.1'
  def log_message(self,*args):pass
- def send_json(self,status,body):
+ def send_json(self,status,body,inference=None):
   data=json.dumps(body,separators=(',',':')).encode('ascii')
   try:
-   self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.send_header('Connection','close');self.end_headers();self.wfile.write(data)
+   self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.send_header('Connection','close')
+   # Tells clients whether a refusal spent inference, so a gate refusal needs no cooldown.
+   if inference is not None:self.send_header('X-Kompress-Inference','1' if inference else '0')
+   self.end_headers();self.wfile.write(data)
   except OSError:pass
   self.close_connection=True
  def authorized(self):
@@ -56,23 +59,30 @@ class Handler(BaseHTTPRequestHandler):
   if self.headers.get('Transfer-Encoding') or len(lengths)!=1 or not re.fullmatch(r'[0-9]{1,5}',lengths[0]):return self.send_json(400,UNKNOWN)
   size=int(lengths[0])
   if not 1<=size<=8192:return self.send_json(413,UNKNOWN)
-  if not self.server.inference.acquire(blocking=False):return self.send_json(503,UNKNOWN)
+  if not self.server.inference.acquire(blocking=False):return self.send_json(503,UNKNOWN,False)
+  # Release the slot before answering, so a client's immediate next request
+  # after a refusal is not turned away as busy.
+  try:status,body,inference=self.selection(size)
+  finally:release_workspace();self.server.inference.release()
+  return self.send_json(status,body,inference)
+ def selection(self,size):
   try:
    raw=self.rfile.read(size)
-   if len(raw)!=size:return self.send_json(400,UNKNOWN)
+   if len(raw)!=size:return 400,UNKNOWN,False
    body=json.loads(raw.decode('utf8'),object_pairs_hook=strict_object)
-   if not isinstance(body,dict) or set(body)!={'version','raw'} or type(body['version']) is not int or body['version']!=1 or not isinstance(body['raw'],str):return self.send_json(400,UNKNOWN)
-   text=body['raw']
-   if not text.isascii() or not 800<=len(text)<=4096:return self.send_json(200,UNKNOWN)
-   now=time.monotonic()
-   if now-self.server.last_inference<10:return self.send_json(429,UNKNOWN)
-   self.server.last_inference=now
-   result=self.server.selector.select(text)
-   if result.get('applied'):return self.send_json(200,{'version':1,'status':'SELECT','sourceHash':result['sha256'],'keep':result['kept_ids']})
-   return self.send_json(200,UNKNOWN)
-  except (ValueError,UnicodeError,TimeoutError,OSError):return self.send_json(400,UNKNOWN)
-  except Exception:return self.send_json(200,UNKNOWN)
-  finally:release_workspace();self.server.inference.release()
+   if not isinstance(body,dict) or set(body)!={'version','raw'} or type(body['version']) is not int or body['version']!=1 or not isinstance(body['raw'],str):return 400,UNKNOWN,False
+   # The ten-second slot bounds actual inference; shape, size and token-window
+   # refusals are answered without spending it.
+   def admit():
+    now=time.monotonic()
+    if now-self.server.last_inference<10:return False
+    self.server.last_inference=now;return True
+   result=self.server.selector.select(body['raw'],admit)
+   if result.get('applied'):return 200,{'version':1,'status':'SELECT','sourceHash':result['sha256'],'keep':result['kept_ids']},True
+   if result.get('reason')=='rate_limited':return 429,UNKNOWN,False
+   return 200,UNKNOWN,result.get('inference',True)
+  except (ValueError,UnicodeError,TimeoutError,OSError):return 400,UNKNOWN,None
+  except Exception:return 200,UNKNOWN,None
 
 def main():
  parser=argparse.ArgumentParser(description=__doc__)

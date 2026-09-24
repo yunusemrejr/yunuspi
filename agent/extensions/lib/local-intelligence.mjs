@@ -41,6 +41,9 @@ export function candidateRelevance(texts, task) {
   return literal.map((score, i) => score + .25 * related[i]);
 }
 
+/** Control, bidi and zero-width characters can hide or reorder text; printable
+ * Unicode (✓, →, tree glyphs, curly quotes) is ordinary evidence. */
+export const hiddenText = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
 export const protectedEvidence = /\b(?:not|no|never|none|neither|nor|without|except|unless|only|if|until|before|after|must|shall|require\w*|need\w*|should|cannot|can't|don't|fail\w*|error\w*|warning|blocked|pending|unresolved|unverified|unknown|uncertain\w*|may|might|could|reported|observed|said|says|claimed|according|alleged|denied|confirmed|verified|unconfirmed|current|latest|remaining|deprecated|superseded|decid\w*|decision\w*|constraint\w*|verif\w*|test\w*|pass\w*|success\w*|succeed\w*|complet\w*|cancel\w*|abort\w*|status|exit|reject\w*|hypothes\w*|changed|modified|deleted|created|next step|next action)\b|\d|https?:\/\/|[/\\]|\b\w+\.\w+\b/i;
 const dependent = /^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b/i;
 

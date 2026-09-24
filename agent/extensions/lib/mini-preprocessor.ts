@@ -2,7 +2,7 @@ import { sessionObservability } from './session-observability.ts';
 /** Local non-generative paragraph selection. The transcript always owns raw text. */
 import {createHash} from 'node:crypto';
 import {beginHarnessActivity} from './harness-activity.ts';
-import {protectedEvidence, relevanceScores, taskTerms} from './local-intelligence.mjs';
+import {hiddenText, protectedEvidence, relevanceScores, taskTerms} from './local-intelligence.mjs';
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -10,21 +10,44 @@ import {microMetrics} from './micro-intelligence/metrics.ts';
 export type MiniSelection = {version:1;status:'SELECT';sourceHash:string;keep:number[]};
 type Runtime = {version:1;enabled:true;endpoint:'http://127.0.0.1:18736/select';apiKey:string};
 const dependent = /^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b/i;
+// These rules mirror paragraph_source() in agent/scripts/lib/paragraph_selector.py
+// exactly: the worker may omit any paragraph this client does not require.
+const structuredSource = /```|~~~|<\||\|>|^\s*(?:[{}\]]|\[(?![^\]\n]*\](?:\(|:))|diff --git|@@|#!|at\s+[A-Za-z0-9_]+\s*\()/m;
+const heading = /^ {0,3}#{1,6}[ \t]+\S/;
+const row = /^[ \t]*(?:(?:[-*+]|[0-9]{1,3}[.)])[ \t]+\S|\||>|(?:---|\*\*\*|___)[ \t]*$|\[[^\]\n]+\](?:\(|:)|<[A-Za-z/!]|[A-Za-z_][A-Za-z0-9_-]*:[ \t])/;
+const continuation = /^[ \t]{2,}\S/;
+const sentenceEnd = /[.!?][*_]{0,3}["'\u201d\u2019)\]]?[*_]{0,3}\s*$/;
+/** Markdown structure (headings, lists, tables, quotes, front matter, link
+ * rows, HTML and key: value lines, lead-ins ending in a colon). Kept verbatim:
+ * only prose paragraphs can be omitted. */
+export function structuralParagraph(paragraph:string):boolean {
+ const lines=paragraph.split('\n').filter(line=>line.trim());
+ if(!lines.length)return false;
+ if(heading.test(lines[0])||/:\s*$/.test(paragraph))return true;
+ return row.test(lines[0])&&lines.every(line=>row.test(line)||continuation.test(line));
+}
 export function miniSource(raw:string) {
- if(typeof raw!=='string'||raw.length<800||raw.length>4096||/[^\x09\x0a\x0d\x20-\x7e]/.test(raw)||/```|<\||\|>|^\s*(?:[{}\[\]]|diff --git|@@|#!|at\s+\w+\s*\()/m.test(raw))return;
+ // Printable Unicode is eligible; hidden characters and unpaired surrogates are not.
+ if(typeof raw!=='string'||hiddenText.test(raw)||/\p{Cs}/u.test(raw))return;
+ // The worker's limits: 800 code points to 4096 UTF-8 bytes, and a 512-token
+ // window. Every whitespace-separated word costs at least one token, so longer
+ // word counts cannot fit and are not offered.
+ const codePoints=raw.length-(raw.match(/[\ud800-\udbff][\udc00-\udfff]/g)?.length??0);
+ if(codePoints<800||Buffer.byteLength(raw)>4096||raw.trim().split(/\s+/).length+2>512||structuredSource.test(raw))return;
  const spans:Array<[number,number]>=[];let start=0;
  for(const m of raw.matchAll(/\n[ \t]*\n+/g)){if(raw.slice(start,m.index).trim())spans.push([start,m.index]);start=m.index!+m[0].length;}
  if(raw.slice(start).trim())spans.push([start,raw.length]);
  if(spans.length<4||spans.length>24)return;
  const paragraphs=spans.map(([a,b])=>raw.slice(a,b));
- // Soft line wrapping does not change paragraph ownership or its protected
- // facts. Spans keep the exact original bytes, including those newlines.
- if(paragraphs.some(p=>!/[.!?]["')]?\s*$/.test(p)))return;
  const required=new Set<number>();
  for(let i=0;i<paragraphs.length;i++){
+  if(structuralParagraph(paragraphs[i])){required.add(i);continue;}
+  // Soft line wrapping does not change paragraph ownership or its protected
+  // facts. Spans keep the exact original bytes, including those newlines.
+  if(!sentenceEnd.test(paragraphs[i]))return;
   if(protectedEvidence.test(paragraphs[i])||paragraphs[i].trim().split(/\s+/).length<=6)required.add(i);
-  if(dependent.test(paragraphs[i].trimStart())){required.add(i);if(i)required.add(i-1);}
  }
+ for(let i=0;i<paragraphs.length;i++)if(dependent.test(paragraphs[i].trimStart())){required.add(i);if(i)required.add(i-1);}
  return {hash:createHash('sha256').update(raw).digest('hex'),paragraphs,spans,required};
 }
 export function validateMiniSelection(raw:string,value:unknown):MiniSelection|undefined {
@@ -55,6 +78,17 @@ export function miniPotentialSavings(raw:string,task=""):number {
 // .25 (was .35): on cheap/free routes the dollar gate can never pass, so the
 // ratio floor is the only path — and 35% admitted nothing all day (0 hits).
 const usefulContextSaving = (saved:number, total:number) => saved >= 1024 && saved / total >= .25;
+const priceOf = (inputUsdPerMillion:unknown) => typeof inputUsdPerMillion==='number'&&Number.isFinite(inputUsdPerMillion)?Math.max(0,inputUsdPerMillion):0;
+const selectionSignal = (task:string) => process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).sort().join(' ');
+/** Whether a selection could pay for itself: context capacity on any route,
+ * or the local compute budget on priced routes. Routing uses the same test,
+ * so output Kompress cannot shorten stays available to Smol and Jev. */
+export function miniAdmissible(raw:string,inputUsdPerMillion:unknown,task=''):boolean{
+ // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
+ // Newly produced tool bytes have not appeared in the provider prefix yet.
+ const potential=miniPotentialSavings(raw,selectionSignal(task));
+ return potential>0&&(usefulContextSaving(potential,raw.length)||potential/6*priceOf(inputUsdPerMillion)/1e6>=.45*.00002*10);
+}
 async function loadRuntime():Promise<Runtime|undefined>{
  if(process.env.PI_MINI_PREPROCESSOR==='off')return;
  let handle;try{
@@ -86,9 +120,9 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    if(process.env.PI_MINI_PREPROCESSOR==='off'){skip('disabled');return;}
    if(!runtime){skip('no-runtime');return;}
    // Unknown-price providers still benefit from the measured context floor.
-   const inputPrice=typeof inputUsdPerMillion==='number'&&Number.isFinite(inputUsdPerMillion)?Math.max(0,inputUsdPerMillion):0;
+   const inputPrice=priceOf(inputUsdPerMillion);
    const source=miniSource(raw);if(!source){skip('ineligible');return;}
-   const signal=process.env.PI_LOCAL_INTELLIGENCE==='off'?'':taskTerms(task).sort().join(' ');
+   const signal=selectionSignal(task);
    const key=source.hash+':'+createHash('sha256').update(signal).digest('hex');
    const cached=validateMiniSelection(raw,cache.get(key));
    if(cached){
@@ -98,25 +132,26 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     return {...cached,keep:[...cached.keep]};
    }
    if(busy||now()-last<Math.min(60000,10000*2**failures)){skip(busy?'busy':'cooldown');return;}
-   // Conservative local compute budget proxy: $0.00002/CPU-second, 10x margin.
-   // Newly produced tool bytes have not appeared in the provider prefix yet.
-   const potential=miniPotentialSavings(raw,signal);
-   if(!potential || !usefulContextSaving(potential,raw.length) && potential/6*inputPrice/1e6 < .45*.00002*10){skip('insufficient-savings');return;}
-   const epoch=generation,abort=new AbortController();current=abort;busy=true;last=now();const started=performance.now();
-   stats.requests++;let accepted=false,valid=false;
+   if(!miniAdmissible(raw,inputPrice,task)){skip('insufficient-savings');return;}
+   const body=JSON.stringify({version:1,raw});
+   if(Buffer.byteLength(body)>8192){skip('ineligible');return;}
+   const epoch=generation,abort=new AbortController(),previous=last;current=abort;busy=true;last=now();const started=performance.now();
+   stats.requests++;let accepted=false,valid=false,refusedUnrun=false;
    const finishActivity=beginHarnessActivity('kompress');
    const deadline=new Promise<never>((_,reject)=>abort.signal.addEventListener("abort",()=>reject(new Error("mini preprocessing cancelled")),{once:true}));
    let expired=false;
    const timer=setTimeout(()=>{expired=true;abort.abort();},450);timer.unref?.();
    try{
-    const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body:JSON.stringify({version:1,raw})})]);
+    const res=await Promise.race([deadline, request(runtime.endpoint,{method:'POST',redirect:'error',signal:abort.signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${runtime.apiKey}`},body})]);
     if(!res.ok){valid=res.status===429||res.status===503;void res.body?.cancel().catch(()=>{});return;}
     if(!res.body)return;
     const reader=res.body.getReader();const chunks:Uint8Array[]=[];let length=0;
     try{while(true){const part=await Promise.race([deadline,reader.read()]);if(part.done)break;length+=part.value.byteLength;if(length>2048){void reader.cancel().catch(()=>{});return;}chunks.push(part.value);}}finally{reader.releaseLock();}
     if(abort.signal.aborted||generation!==epoch)return;
     const wire=Buffer.concat(chunks).toString('utf8');
-    if(/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"UNKNOWN"\s*\}\s*$/.test(wire)){valid=true;return;}
+    // Services that report a refusal made before inference (shape, size or
+    // token window) leave their slot unspent, so no cooldown follows.
+    if(/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"UNKNOWN"\s*\}\s*$/.test(wire)){valid=true;refusedUnrun=res.headers?.get?.('x-kompress-inference')==='0';return;}
     // Refuse duplicate/escaped/extra keys before JSON parsing.
     if(!/^\s*\{\s*"version"\s*:\s*1\s*,\s*"status"\s*:\s*"SELECT"\s*,\s*"sourceHash"\s*:\s*"[a-f0-9]{64}"\s*,\s*"keep"\s*:\s*\[\s*\d+(?:\s*,\s*\d+)*\s*\]\s*\}\s*$/.test(wire))return;
     let selection=validateMiniSelection(raw,JSON.parse(wire));if(!selection)return;valid=true;
@@ -134,7 +169,8 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
    }catch{return;}finally{
     clearTimeout(timer);
     metrics.run('kompress',performance.now()-started,raw.length);
-    if(!accepted)skip(expired?'timeout':valid?'no-useful-selection':'invalid-selection');
+    if(!accepted)skip(expired?'timeout':refusedUnrun?'service-refused':valid?'no-useful-selection':'invalid-selection');
+    if(refusedUnrun&&epoch===generation)last=previous;
     finishActivity(epoch!==generation?'cancelled':expired||!valid?'error':accepted?'ok':'skipped');
     if(!accepted && epoch===generation){failures=valid?0:Math.min(3,failures+1);stats.fallbacks++;if(expired)stats.timeouts++;}
     try{sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('ml.mini.select',{decision:accepted?'selected':'raw',durationMs:performance.now()-started,count:1});}catch{}

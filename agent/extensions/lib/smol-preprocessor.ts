@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { relevanceScores, taskTerms } from './local-intelligence.mjs';
+import { hiddenText, relevanceScores, taskTerms } from './local-intelligence.mjs';
 import { beginHarnessActivity, type FinishActivity } from './harness-activity.ts';
 import { microMetrics } from './micro-intelligence/metrics.ts';
 
@@ -143,7 +143,7 @@ export function smolOutputSkipReason(tool: string, raw: string, isError: boolean
   // such as ✓, → or tree glyphs is ordinary terminal output. Control, bidi
   // and zero-width characters can hide or reorder text and stay excluded.
   // ASCII-only admission rejected 36 of 92 recorded offers.
-  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(raw)) return 'input-shape-unsupported';
+  if (hiddenText.test(raw)) return 'input-shape-unsupported';
   if (details != null && (typeof details !== 'object' || Array.isArray(details))) return 'input-shape-unsupported';
   try { if (JSON.stringify({isError: false, details: details ?? {}}).length > 500) return 'metadata-budget'; } catch { return 'input-shape-unsupported'; }
   if (/<\||\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/i.test(raw)) return 'protected-content';

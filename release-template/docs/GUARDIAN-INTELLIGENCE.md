@@ -50,6 +50,10 @@ evidence requirement. Guardian additionally retains bounded delivery history bey
 1. **Repeated identical failure.** The same tool call with the same argument fingerprint must fail
    three times with the same typed error text across at least two independent assistant responses,
    remain fresh, belong to the live task, and not be covered by an explicit user retry directive.
+   Generated identifiers (UUIDs, long hex ids), clock times, epoch timestamps, elapsed durations and
+   temporary paths are normalized before the error text is compared, so a retry that fails the same
+   way with a new run id or timing is recognized; plain numbers such as line numbers, counts and
+   status codes stay significant.
 2. **Verified constraint drift.** A literal, non-quoted user path constraint (for example
    "only write files under src/") must be crossed by two independent *successful* file changes
    inside the same task lineage, after the constraint itself was re-verified against the raw

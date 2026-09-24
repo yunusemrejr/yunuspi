@@ -137,6 +137,40 @@ test("a verified repeated identical failure produces exactly one bounded interve
 	supervisor.dispose();
 });
 
+test("retries whose errors differ only in generated ids, clock times or temp paths are one repeated failure", async () => {
+	const { normalizeFailureText } = await import(pathToFileURL(path.join(guardianDir, "guardian-features.js")).href);
+	const attempt = (uuid, ms, tmp, at) => `Subagent run ${uuid} failed after ${ms}ms at ${at}: provider quota exceeded (log /tmp/pi-run-${tmp}/out.log)`;
+	const texts = [
+		attempt("3f2a9c1b-4d5e-4f60-8a7b-9c0d1e2f3a4b", 1843, "k3j2h1", "2026-09-24T10:15:02.114Z"),
+		attempt("7c1d2e3f-5a6b-4c7d-8e9f-0a1b2c3d4e5f", 2210, "q9w8e7", "2026-09-24T10:15:31.920Z"),
+		attempt("9e8d7c6b-1a2b-4c3d-9e8f-7a6b5c4d3e2f", 1977, "z5x4c3", "2026-09-24T10:16:05.003Z"),
+	];
+	assert.equal(new Set(texts.map(normalizeFailureText)).size, 1);
+	assert.notEqual(normalizeFailureText("SyntaxError at line 12"), normalizeFailureText("SyntaxError at line 13"), "plain numbers stay significant");
+	assert.notEqual(normalizeFailureText("HTTP 404 Not Found"), normalizeFailureText("HTTP 500 Internal Server Error"));
+
+	const { supervisor, emitted } = harness("guardian-volatile");
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "req-volatile", "Delegate the review") });
+	for (const [index, text] of texts.entries()) {
+		await toolStart(supervisor, { toolCallId: `v-${index}`, toolName: "subagent", args: { task: "review the parser" } });
+		await toolEnd(supervisor, { toolCallId: `v-${index}`, toolName: "subagent", text });
+		await assistantTurn(supervisor);
+	}
+	assert.equal(emitted.length, 1, "per-attempt noise must not hide a repeated failure");
+	assert.equal(emitted[0].detail.kind, "repeated-identical-failure");
+	supervisor.dispose();
+
+	const distinct = harness("guardian-distinct-lines");
+	await distinct.supervisor.observeAgentEvent({ type: "message_start", message: userMessage(distinct.supervisor, "req-lines", "Fix the parser") });
+	for (let index = 0; index < 3; index++) {
+		await toolStart(distinct.supervisor, { toolCallId: `l-${index}` });
+		await toolEnd(distinct.supervisor, { toolCallId: `l-${index}`, text: `SyntaxError at line ${12 + index}` });
+		await assistantTurn(distinct.supervisor);
+	}
+	assert.equal(distinct.emitted.length, 0, "failures that differ in substance are not merged");
+	distinct.supervisor.dispose();
+});
+
 test("two failures, a different action, or a user retry directive never intervene", async () => {
 	const two = harness("guardian-two");
 	await two.supervisor.observeAgentEvent({ type: "message_start", message: userMessage(two.supervisor, "req-2", "Fix the parser") });
