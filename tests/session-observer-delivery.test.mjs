@@ -23,7 +23,7 @@ function sse(toolIndex){
   return new Response('data: '+JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:model.id,choices:[{index:0,delta,finish_reason:toolIndex===undefined?'stop':'tool_calls'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
 }
 
-for(const mode of ['success','pre-dispatch-failure','http-error','remove-payload','modify-context','cancelled','stale-owner']) test(`native observer delivery evidence: ${mode}`,async t=>{
+for(const mode of ['success','slow-success','pre-dispatch-failure','http-error','remove-payload','modify-context','cancelled','stale-owner']) test(`native observer delivery evidence: ${mode}`,async t=>{
   const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'observer-delivery-'));
   const previous=Object.fromEntries(['PI_CODING_AGENT_DIR','PI_LLM_PREFERENCES_FILE','PI_SUBAGENTS_ECONOMY_CONFIG','PI_PROVIDER_STATE_FILE','PI_MODEL_EXCLUSIONS_PATH','PI_OFFLINE','PI_SESSION_OBSERVER','PI_SUBAGENT_CHILD'].map(key=>[key,process.env[key]]));
   Object.assign(process.env,{PI_CODING_AGENT_DIR:cwd,PI_LLM_PREFERENCES_FILE:path.join(cwd,'prefs.json'),PI_SUBAGENTS_ECONOMY_CONFIG:path.join(cwd,'economy.json'),PI_PROVIDER_STATE_FILE:path.join(cwd,'health.json'),PI_MODEL_EXCLUSIONS_PATH:path.join(cwd,'exclusions.json')});
@@ -33,7 +33,7 @@ for(const mode of ['success','pre-dispatch-failure','http-error','remove-payload
   t.after(()=>{session?.dispose();for(const[key,value]of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;fs.rmSync(cwd,{recursive:true,force:true});});
   const settingsManager=SettingsManager.inMemory({compaction:{enabled:false},retry:{enabled:true,maxRetries:1,baseDelayMs:1},providerRetry:{maxRetries:0}});
   const loader=new DefaultResourceLoader({cwd,agentDir:cwd,settingsManager,noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true,
-    extensionFactories:[pi=>observerExtension(pi,{...time,dispatch:async()=>{observerCalls++;return{stopReason:'stop',content:[{type:'text',text:JSON.stringify({note,evidence:['request'],tools:[],skills:[]})}]};}}),pi=>{
+    extensionFactories:[pi=>observerExtension(pi,{...time,dispatch:async()=>{observerCalls++;if(mode==='slow-success')await new Promise(resolve=>time.setTimeout(resolve,150000));return{stopReason:'stop',content:[{type:'text',text:JSON.stringify({note,evidence:['request'],tools:[],skills:[]})}]};}}),pi=>{
       if(mode==='remove-payload')pi.on('before_provider_request',event=>{
         if(!fault&&JSON.stringify(event.payload).includes('Observer advice receipt=')){fault=true;return{...event.payload,messages:event.payload.messages.filter(message=>!JSON.stringify(message.content).includes('Observer advice receipt='))};}
       });
@@ -58,14 +58,19 @@ for(const mode of ['success','pre-dispatch-failure','http-error','remove-payload
       return sse();
     }});}};
   ({session}=await createAgentSession({cwd,agentDir:cwd,model,modelRuntime,settingsManager,resourceLoader:loader,sessionManager:SessionManager.create(cwd,cwd),thinkingLevel:'off',tools:['fixture_work'],
-    customTools:[{name:'fixture_work',description:'Synthetic bounded work',parameters:{type:'object',properties:{}},execute:async()=>{if(++toolCalls===1){await time.advance(30000);authArmed=true;}return{content:[{type:'text',text:'Synthetic work completed.'}]};}}]}));
+    customTools:[{name:'fixture_work',description:'Synthetic bounded work',parameters:{type:'object',properties:{}},execute:async()=>{if(++toolCalls===1){await time.advance(30000);if(mode==='slow-success')await time.advance(150000);authArmed=true;}return{content:[{type:'text',text:'Synthetic work completed.'}]};}}]}));
   session.subscribe(event=>events.push(event));
   await session.prompt('Complete the synthetic parser fixture.');
   assert.equal(observerCalls,1,JSON.stringify({toolCalls,wire:wire.length,messages:session.messages.map(message=>({role:message.role,type:message.customType,content:message.customType==='session-observer'?message.content:undefined,error:message.errorMessage}))}));
-  if(mode!=='success')assert.equal(fault,true);
+  if(!['success','slow-success'].includes(mode))assert.equal(fault,true);
   const entries=session.sessionManager.getBranch();
   const returned=entries.find(entry=>entry.customType==='session-observer'&&entry.details?.status==='completed');
   assert.ok(returned?.details?.adviceId);
+  if(mode==='slow-success') {
+    assert.match(returned.content,/Returned advice in 150s/);
+    assert.ok(entries.some(entry=>entry.customType==='session-observer'&&entry.details?.status==='checked'&&/90s elapsed \/ 180s allowed/.test(entry.content)));
+    assert.ok(!entries.some(entry=>entry.customType==='session-observer'&&entry.details?.status==='unavailable'));
+  }
   const receipts=entries.filter(entry=>entry.customType==='session-observer-delivery-v1').map(entry=>entry.data);
   if(['cancelled','stale-owner'].includes(mode)){assert.deepEqual(receipts.map(receipt=>receipt.status),['prepared-context']);return;}
   assert.deepEqual(receipts.map(receipt=>receipt.status),['prepared-context','provider-received']);

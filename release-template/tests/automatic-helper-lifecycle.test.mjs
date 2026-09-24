@@ -19,6 +19,8 @@ const {registerAutonomousRecovery,automaticFusionBody}=await load('extensions/pi
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 const {buildModelCandidates}=await load('extensions/pi-subagents/src/runs/shared/model-fallback.ts');
+const {AUTOMATIC_HELPER_LIMITS}=await load('extensions/pi-subagents/src/runs/shared/automatic-budgets.ts');
+const {planAssistance}=await load('extensions/pi-subagents/src/runs/shared/assistance-plan.ts');
 const evidence=await load('extensions/pi-subagents/src/runs/shared/free-route-evidence.ts');
 evidence.publishFreeEvidence([{id:'example/adviser',pricing:{prompt:'0',completion:'0'},capabilities:{toolCalling:true}}],evidence.FREE_CATALOG_URL);
 const model={provider:'openrouter',id:'example/adviser',api:'openai-completions',baseUrl:evidence.FREE_BASE_URL,cost:{input:0,output:0},input:['text'],contextWindow:65536,maxTokens:8192,reasoning:false};
@@ -102,4 +104,57 @@ test('preferred Friendli helper and quality-review routes keep configured admiss
   assert.deepEqual(admissions,[route],kind);
   await fx.emit('session_shutdown');
  }
+});
+
+
+test('automatic investigations receive their full multi-turn deadline inside the outer watchdog',async(t)=>{
+ const deadlines=[];
+ t.mock.method(AbortSignal,'timeout',ms=>{
+  const controller=new AbortController();
+  deadlines.push({ms,controller});
+  return controller.signal;
+ });
+ for(const prompt of [
+  'Investigate the concrete compatibility boundary for this package',
+  'Compare architectural alternatives for the package compatibility boundary',
+  'Investigate cross-file failures in the frontend and backend with tests',
+ ]) {
+  let finish;
+  const fx=fixture({primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>{finish=resolve;})});
+  await fx.input(prompt);
+  await fx.emit('before_agent_start',{prompt});
+  await tick();
+  assert.equal(fx.calls.length,1);
+  const [,params,signal]=fx.calls[0];
+  assert.equal(planAssistance(prompt,true).deadlineMs,180000);
+  assert.equal(params.timeoutMs,180000);
+  assert.equal(params.maxRuntimeMs,180000);
+  assert.equal(params.toolBudget.hard,AUTOMATIC_HELPER_LIMITS.tools);
+  assert.equal(params.usageBudget.tokens.hard,AUTOMATIC_HELPER_LIMITS.tokens);
+  assert.ok(deadlines.some(d=>d.ms===185000),'outer watchdog leaves time for the child receipt');
+  assert.equal(signal.aborted,false);
+  finish(result('Source inspection finished; the parent can verify the finding.'));
+  await tick();await tick();
+  assert.ok(fx.messages.some(m=>m.message.customType==='autonomous-free-fusion'));
+  await fx.emit('session_shutdown');
+ }
+ assert.ok(deadlines.every(d=>d.ms>35000),'no hidden 20/30/35-second watchdog remains');
+});
+
+test('generous helper deadlines still cancel promptly with the owning turn',async(t)=>{
+ const outer=new AbortController();
+ t.mock.method(AbortSignal,'timeout',()=>outer.signal);
+ let finish;
+ const fx=fixture({primary:{...model,provider:'parent'},launch:()=>new Promise(resolve=>{finish=resolve;})});
+ const prompt='Investigate the concrete compatibility boundary for this package';
+ await fx.input(prompt);
+ await fx.emit('before_agent_start',{prompt});
+ await tick();
+ const signal=fx.calls[0][2];
+ fx.abort.abort();
+ assert.equal(signal.aborted,true);
+ finish(result('Late advice must not reach a cancelled turn.'));
+ await tick();await tick();
+ assert.equal(fx.messages.length,0);
+ await fx.emit('session_shutdown');
 });

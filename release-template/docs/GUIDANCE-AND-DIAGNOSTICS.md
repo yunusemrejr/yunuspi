@@ -132,6 +132,8 @@ The offline session audit reports the ten largest raw-text contributors and exac
 
 Automatic exit summaries abort provider work at their deadline, request at most 2,048 output tokens, skip offline mode and do not fall back from an unavailable explicitly configured summary model to the active model. Truncated responses are not saved as completed memory. A session metadata marker prevents another summary of unchanged history after resume; new messages make a later summary eligible. Selective priming can retrieve a bounded task-relevant memory digest once per session; complete memory contents remain available on demand.
 
+Automatic research assistance has a three-minute investigation allowance for source-reading turns and synthesis. The enclosing cancellation watchdog allows five additional seconds for terminal receipts and cleanup. These helpers run asynchronously while the main agent continues; their existing tool, token and cost budgets still apply, and cancelling the owning task cancels its helpers immediately.
+
 | Component | Admission and relationship | What enters model context |
 | --- | --- | --- |
 | Scope council | Qualifying change-scope requests; uses the native child executor and suppresses the separate startup helper | A bounded advisory discussion; never authorization or quality evidence |

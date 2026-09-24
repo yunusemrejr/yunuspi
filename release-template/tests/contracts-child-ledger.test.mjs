@@ -173,3 +173,37 @@ test('empty or cost-only usage never fabricates zero token counts and partial re
   {type:'completion',taskId:'fixture',attempt:1,row:{exitCode:0,usage:{input:8}}});
  assert.deepEqual(reduceChildEvents(events).tasks[0].attempts[0].usage,{input:10,output:5});
 });
+
+test('legacy helper accounting joins its exact observed native session without duplicating the child', () => {
+  const native='11111111-1111-4111-8111-111111111111';
+  const receipt=(kind,data)=>({type:'custom',customType:kind,data});
+  const entries=[
+    receipt('subagent-cost-v1',{runId:'auto-assist-wrapper',mode:'single',results:[{index:0,agent:'automatic-free-assistant',status:'running'}]}),
+    receipt('subagent-lifecycle-v1',{runId:native,mode:'single',state:'running',results:[{index:0,status:'running'}]}),
+    receipt('subagent-lifecycle-v1',{runId:native,mode:'single',state:'failed',results:[{index:0,status:'failed'}]}),
+    receipt('subagent-cost-v1',{runId:'auto-assist-wrapper',mode:'single',results:[{index:0,agent:'automatic-free-assistant',model:'fixture/reviewer',sessionFile:`/fixture/${native}/run-0/session.jsonl`,timedOut:true,error:'child-error',usage:{input:300,output:100,turns:3}}]}),
+  ];
+  entries.push(receipt('subagent-cost-v1',{runId:'auto-assist-wrapper',mode:'single',results:[{index:0,status:'failed',error:'child-error'}]}));
+  const ledger=reduceChildEvents(projectTranscriptChildren(entries));
+  assert.equal(ledger.tasks.length,1);
+  assert.equal(ledger.tasks[0].attempts.length,1);
+  assert.equal(ledger.tasks[0].attempts[0].runId,native);
+  assert.equal(ledger.tasks[0].execution.cause.category,'timeout');
+  assert.equal(ledger.tasks[0].attempts[0].usage.turns,3);
+  assert.equal(ledger.tasks[0].agent,'automatic-free-assistant');
+});
+
+test('legacy helper path linkage requires an unambiguous observed single run', () => {
+  const native='11111111-1111-4111-8111-111111111111';
+  const life={type:'custom',customType:'subagent-lifecycle-v1',data:{runId:native,mode:'single',state:'failed',results:[{index:0,status:'failed'}]}};
+  const helper=(runId,sessionFile,extra={})=>({type:'custom',customType:'subagent-cost-v1',data:{runId,mode:'single',results:[{index:0,error:'child-error',sessionFile,...extra}]}});
+  for(const file of [`/fixture/${native}/run-1/session.jsonl`,`/fixture/../${native}/run-0/session.jsonl`,`${native}/run-0/session.jsonl`,`/fixture/22222222-2222-4222-8222-222222222222/run-0/session.jsonl`]) {
+    assert.equal(reduceChildEvents(projectTranscriptChildren([life,helper('auto-assist-one',file)])).tasks.length,2,file);
+  }
+  const file=`/fixture/${native}/run-0/session.jsonl`;
+  assert.equal(reduceChildEvents(projectTranscriptChildren([life,helper('auto-assist-one',file),helper('auto-assist-two',file)])).tasks.length,3,'ambiguous wrapper ownership stays separate');
+  assert.equal(reduceChildEvents(projectTranscriptChildren([life,helper('auto-assist-one',file,{index:1})])).tasks.length,2,'nonzero child position is not inferred');
+  assert.equal(reduceChildEvents(projectTranscriptChildren([{...life,data:{...life.data,mode:'parallel'}},helper('auto-assist-one',file)])).tasks.length,2,'parallel run is not inferred');
+  const other='33333333-3333-4333-8333-333333333333';
+  assert.equal(reduceChildEvents(projectTranscriptChildren([life,helper('auto-assist-one',file,{runId:other})])).tasks.length,2,'explicit child ID is never replaced by path inference');
+});

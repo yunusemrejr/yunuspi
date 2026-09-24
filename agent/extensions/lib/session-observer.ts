@@ -6,7 +6,7 @@ import { capFreeRequest, isProvenFreeRoute } from '../pi-subagents/src/runs/shar
 export const OBSERVER_MIN_GAP_MS = 30_000;
 export const OBSERVER_MAX_GAP_MS = 120_000;
 export const OBSERVER_INTERVAL_MS = OBSERVER_MIN_GAP_MS;
-export const OBSERVER_DEADLINE_MS = 45_000;
+export const OBSERVER_DEADLINE_MS = 180_000;
 export const OBSERVER_PACKET_BYTES = 8_000;
 export const OBSERVER_MESSAGE = 'session-observer';
 export const OBSERVER_CONTEXT = 'session-observer-context';
@@ -133,7 +133,7 @@ export function observerDispatch(route: ObserverRoute, packet: ObserverPacket, s
   const ceiling = Math.min(4096, model.maxTokens);
 
   return registry.completeSimple(model, { messages: [{ role: 'user', content: [{ type: 'text', text: packet.text }], timestamp: Date.now() }] }, {
-    signal, maxRetries: 0, maxTokens: ceiling, ...(route.thinking ? { reasoning: route.thinking } : {}),
+    signal, timeoutMs: OBSERVER_DEADLINE_MS, maxRetries: 0, maxTokens: ceiling, ...(route.thinking ? { reasoning: route.thinking } : {}),
     onPayload(payload: any, actual: any) {
       const denied = () => Object.assign(Error('Observer dispatch no longer matches its permitted route'), { code: 'PI_AUTONOMOUS_REQUEST_DENIED' });
       if (signal.aborted) throw signal.reason ?? denied();
@@ -190,9 +190,11 @@ interface ObserverPorts {
 export function createSessionObserver(ports: ObserverPorts) {
   const now = ports.now ?? Date.now, schedule = ports.setTimeout ?? setTimeout, unschedule = ports.clearTimeout ?? clearTimeout;
   const deadlineMs = Math.min(OBSERVER_DEADLINE_MS, Math.max(1, ports.deadlineMs ?? OBSERVER_DEADLINE_MS));
-  const interval = Math.max(OBSERVER_MIN_GAP_MS, Math.min(ports.intervalMs ?? OBSERVER_INTERVAL_MS, OBSERVER_MAX_GAP_MS - deadlineMs));
+  // Review opportunities and visible check-ins have their own cadence. A slow
+  // reasoning request can remain in flight across several of these ticks.
+  const interval = Math.max(OBSERVER_MIN_GAP_MS, Math.min(ports.intervalMs ?? OBSERVER_INTERVAL_MS, OBSERVER_MAX_GAP_MS));
   let owner = '', generation = 0, active = false, closed = false, timer: ReturnType<typeof setTimeout> | undefined;
-  let flight: { controller: AbortController; cancel: () => void } | undefined, lastHash = '', lastNotice = '';
+  let flight: { controller: AbortController; cancel: () => void; started: number; route: string } | undefined, lastHash = '', lastNotice = '';
   let lastReviewAt = -Infinity, lastCheckAt = 0, check = 0;
   const delivered = new Set<string>(), recentAdvice: Set<string>[] = [];
   let current: { evidence: string; body: string; at: number; generation: number; freshness: () => boolean | string | undefined } | undefined;
@@ -209,7 +211,11 @@ export function createSessionObserver(ports: ObserverPorts) {
   const arm = () => { stopTimer(); if (!active || closed) return; timer = schedule(() => { timer = undefined; arm(); void tick(); }, interval); timer.unref?.(); };
   async function tick() {
     if (!active || closed) return;
-    if (flight) { if (flight.controller.signal.aborted) checkIn('Provider has not acknowledged cancellation; overlapping observer calls are paused.'); return; }
+    if (flight) {
+      if (flight.controller.signal.aborted) checkIn('Provider has not acknowledged cancellation; overlapping observer calls are paused.');
+      else checkIn(`Still reviewing with ${flight.route} · ${Math.floor((now() - flight.started) / 1000)}s elapsed / ${Math.ceil(deadlineMs / 1000)}s allowed; main agent continues.`);
+      return;
+    }
     if (now() - lastReviewAt < OBSERVER_MIN_GAP_MS) return;
     const epoch = generation, origin = owner;
     let snapshot: ReturnType<ObserverPorts['snapshot']>;
@@ -224,12 +230,12 @@ export function createSessionObserver(ports: ObserverPorts) {
     let timedOut = false, cancelled = false, terminal = false;
     let release!: () => void;
     const cancellation = new Promise<undefined>(resolve => { release = () => resolve(undefined); });
-    const thisFlight = { controller, cancel() { if (cancelled || controller.signal.aborted) { release(); return; } cancelled = true; controller.abort(Error('Observer cancelled')); account('cancelled'); release(); } };
+    const thisFlight = { controller, started, route: route.route, cancel() { if (cancelled || controller.signal.aborted) { release(); return; } cancelled = true; controller.abort(Error('Observer cancelled')); account('cancelled'); release(); } };
     flight = thisFlight;
-    account('pending'); notice('started', `${route.route}${route.thinking ? ` · ${route.thinking} thinking` : ''}`);
+    account('pending'); notice('started', `${route.route}${route.thinking ? ` · ${route.thinking} thinking` : ''} · up to ${Math.ceil(deadlineMs / 1000)}s`);
     const deadline = schedule(() => {
       timedOut = true; controller.abort(Error('Observer deadline exceeded')); account('timeout'); release();
-      if (generation === epoch && active && owner === origin) { current = undefined; notice('unavailable', 'Observer timed out; cancellation requested'); }
+      if (generation === epoch && active && owner === origin) { current = undefined; notice('unavailable', `Observer timed out after ${Math.ceil(deadlineMs / 1000)}s; cancellation requested. Evidence retained for the next review.`); }
     }, deadlineMs);
     deadline.unref?.();
     // Attach both handlers immediately: a rejection after the deadline is still

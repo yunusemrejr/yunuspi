@@ -1,3 +1,4 @@
+import { AUTOMATIC_HELPER_LIMITS } from "./automatic-budgets.ts";
 import type { ModelInfo } from "../../shared/model-info.ts";
 import { catalogRouteCapabilities, isProvenFreeRoute } from "./free-route-evidence.ts";
 import { modelIdentity, taskQuality } from "./model-quality.ts";
@@ -27,9 +28,9 @@ export function planAssistance(prompt: string, project = false): AssistancePlan 
   || /\bcorrectness\b/i.test(text) && /\bconcurrency\b/i.test(text)
   || (text.match(/\b[\w/-]+\.(?:ts|js|py|go|rs|tsx|java)\b/g)?.length ?? 0) >= 2;
  const critical = taskQuality(text).level === "critical";
- if (alternatives) return {mode:"fusion",roles:["Independently propose the best approach with source evidence, tradeoffs and falsifiable checks","Independently challenge the proposed direction: find alternatives, counterexamples and decisive checks"],reason:"competing approaches benefit from independent answers and synthesis",deadlineMs:30000,maxCostUsd:.02};
- if (broad) return {mode:"swarm",roles:["Map the relevant source owners and the first useful implementation slice","Investigate independent failure cases, compatibility and boundary conditions",...(project ? ["Identify affected consumers and the smallest project checks that detect regressions"] : [])],reason:"separable investigations in a broad task",deadlineMs:30000,maxCostUsd:.03};
- return {mode:"subagent",roles:[critical ? "Investigate concrete failure cases and the checks the parent should run" : "Investigate the relevant source and return a useful next step with its verification"],reason:"one bounded independent investigation",deadlineMs:20000,maxCostUsd:.01};
+ if (alternatives) return {mode:"fusion",roles:["Independently propose the best approach with source evidence, tradeoffs and falsifiable checks","Independently challenge the proposed direction: find alternatives, counterexamples and decisive checks"],reason:"competing approaches benefit from independent answers and synthesis",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.02};
+ if (broad) return {mode:"swarm",roles:["Map the relevant source owners and the first useful implementation slice","Investigate independent failure cases, compatibility and boundary conditions",...(project ? ["Identify affected consumers and the smallest project checks that detect regressions"] : [])],reason:"separable investigations in a broad task",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.03};
+ return {mode:"subagent",roles:[critical ? "Investigate concrete failure cases and the checks the parent should run" : "Investigate the relevant source and return a useful next step with its verification"],reason:"one bounded independent investigation",deadlineMs:AUTOMATIC_HELPER_LIMITS.deadlineMs,maxCostUsd:.01};
 }
 
 export interface AssistanceMember {route:string;proof:string;role:string;free:boolean;explanation:string[];providerRouting?:Record<string,unknown>}

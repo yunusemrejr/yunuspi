@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 — 2026-09-24
+
+The session observer now has three minutes to finish a review, with elapsed/allowed-time check-ins while the main agent continues. This allowance is independent of the 30-second review cadence and 120-second visible check-in bound. Timeout recovery retains the evidence chunk; cancellation, stale-state validation, duplicate suppression and verified main-agent delivery remain enforced.
+
+Automatic research assistants also receive three minutes for their investigation and final answer. Their enclosing watchdog includes cleanup time instead of cancelling otherwise healthy work after 35 seconds. Existing tool, token and cost budgets remain active.
+
+The `/used` dashboard joins legacy helper wrappers to their underlying child only when exact run evidence agrees, so one stopped investigation is not counted twice. Task and run rows show specific causes such as timeout, authentication or quota failure, with expandable execution and retry evidence. Configured assistants are labelled without an unsupported claim that their model is free.
+
 ## 0.6.2 — 2026-09-24
 
 Prompt analysis gives preferred providers two minutes per route and both initial and follow-up requests a four-minute overall deadline. A first-route timeout leaves a full two-minute fallback allowance; fast responses return immediately. The TUI shows each attempt's elapsed and allowed time. Provider-originated aborts advance to the fallback instead of silently cancelling the entire analysis, while user cancellation remains immediate. Virtual-time regression tests cover slow preferred responses, slow fallbacks, stalled providers and cancellation.

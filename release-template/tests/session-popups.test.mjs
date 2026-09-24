@@ -427,3 +427,22 @@ test('stop-all fails closed and captures delivery errors', () => {
   assert.equal(result.failed.length, 1);
   assert.equal(result.failed[0].id, 'b2');
 });
+
+test('used popup merges a legacy automatic wrapper and names the recorded timeout at collapsed rows', () => {
+  const native='11111111-1111-4111-8111-111111111111';
+  const branch=[
+    {type:'custom',customType:'subagent-lifecycle-v1',data:{runId:native,mode:'single',results:[{index:0,status:'failed'}]}},
+    {type:'custom',customType:'subagent-cost-v1',data:{runId:'auto-assist-wrapper',mode:'single',results:[{index:0,agent:'automatic-free-assistant',model:'fixture/reviewer',sessionFile:`/fixture/${native}/run-0/session.jsonl`,timedOut:true,error:'child-error',usage:{input:300,output:100,turns:3}}]}},
+  ];
+  branch.push({type:'custom',customType:'subagent-cost-v1',data:{runId:'auto-assist-wrapper',mode:'single',results:[{index:0,status:'failed',error:'child-error'}]}});
+  const summary=signals.buildUsedSummary(branch),html=signals.usedSummaryHtml(summary);
+  assert.equal(summary.agents.total,1);
+  assert.equal(summary.agents.failed,1);
+  assert.equal(summary.logicalTasks.length,1);
+  assert.equal(summary.runs.length,1);
+  assert.match(html,/<summary><span class="item-name">Automatic assistant<\/span><span class="badge failed">Timed out<\/span>/);
+  assert.match(html,/Attempt 1 · fixture\/reviewer<\/span><span class="badge failed">Timed out/);
+  assert.match(html,/automatic-free-assistant/,'raw agent identity remains inspectable');
+  assert.doesNotMatch(html,/failed \(unknown\)/);
+  assert.match(html,/1 child · 0 main-session · 0 recoveries/);
+});

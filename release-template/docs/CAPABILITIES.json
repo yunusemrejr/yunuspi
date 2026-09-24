@@ -2583,12 +2583,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1743
+        "line": 1764
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1345
+        "line": 1366
       },
       {
         "name": "curator",
@@ -2603,7 +2603,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1717
+        "line": 1738
       },
       {
         "name": "export-json",
@@ -2753,7 +2753,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1670
+        "line": 1691
       },
       {
         "name": "subagent-cost",
@@ -2838,7 +2838,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1675
+        "line": 1696
       },
       {
         "name": "tasks",
@@ -2848,7 +2848,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1694
+        "line": 1715
       },
       {
         "name": "websearch",
@@ -3288,7 +3288,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1835,
+        "line": 1856,
         "kind": "literal"
       },
       {
@@ -3300,7 +3300,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1772,
+        "line": 1793,
         "kind": "literal"
       },
       {
@@ -3676,7 +3676,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1835,
+        "line": 1856,
         "kind": "literal"
       },
       {
@@ -3688,7 +3688,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1772,
+        "line": 1793,
         "kind": "literal"
       },
       {

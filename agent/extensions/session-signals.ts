@@ -11,6 +11,7 @@ import { readCostEvidence, hasRecordedTokenUsage } from "./lib/cost-evidence.ts"
 import { collectSessionCost } from "./lib/session-cost.ts";
 import { collectHarnessUsage, harnessUsageHtml, helperUsageView, collectSkillEvidence } from "./lib/helper-usage.ts";
 import {
+  deriveAttemptOutcome,
   reduceChildEvents,
   projectTranscriptChildren,
   normalizeHelperChildEntries,
@@ -334,6 +335,8 @@ export type UsedSummary = {
     turns?: number;
     costUsd?: number;
     usageRecorded: boolean;
+    failureCategory?: string;
+    failureStage?: string;
   }[];
   agents: {
     total: number;
@@ -593,6 +596,10 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
     let status = statusOf(data, result);
     if (previous && terminal.has(previous.status) && !terminal.has(status)) status = previous.status;
     const agent = bounded(result.agent, 80) ?? launchAgent(args, childIndex) ?? previous?.agent;
+    const failure = deriveAttemptOutcome(result).execution.cause;
+    const keepKnownCause = failure?.category === "unknown" && previous?.failureCategory && previous.failureCategory !== "unknown";
+    const failureCategory = keepKnownCause ? previous.failureCategory : failure?.category ?? previous?.failureCategory;
+    const failureStage = keepKnownCause ? previous.failureStage : failure?.stage ?? previous?.failureStage;
     runRows.set(key, {
       runId: parent, attempt,
       ...(bounded(result.runId, 80) ? { childRunId: bounded(result.runId, 80) } : previous?.childRunId ? { childRunId: previous.childRunId } : {}),
@@ -606,6 +613,8 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
       ...(finite(usage?.turns) || previous?.turns ? { turns: Math.max(previous?.turns ?? 0, finite(usage?.turns)) } : {}),
       ...(isNonnegative(rawCost) || previous?.costUsd !== undefined ? { costUsd: Math.max(previous?.costUsd ?? 0, finite(rawCost)) } : {}),
       usageRecorded: previous?.usageRecorded === true || usage !== undefined,
+      ...(failureCategory ? { failureCategory } : {}),
+      ...(failureStage ? { failureStage } : {}),
     });
   };
   for (const launch of launches) {
@@ -735,6 +744,14 @@ const factGrid = (rows: [string, unknown][]) => `<dl class="facts-grid">${rows.f
 const statusTone = (status: string) => status === "completed" || status === "complete" || status === "accepted" || status === "pass" ? "complete" : status === "failed" || status === "rejected" || status === "error" ? "failed" : ["queued", "running", "detached", "paused", "pending"].includes(status) ? "active" : "info";
 const group = (title: string, meta: string, body: string, open = false) => `<details class="group"${open ? " open" : ""}><summary><span class="group-title">${title}</span><span class="group-meta">${escapeHtml(meta)}</span></summary><div class="group-body">${body}</div></details>`;
 
+const childStateLabel = (state: string, category?: string, acceptance?: string) => {
+  if (state !== "failed") return state;
+  if (acceptance === "failed" && (!category || category === "none")) return "Acceptance failed";
+  const labels: Record<string, string> = {timeout:"Timed out", "budget-exhausted":"Budget exhausted", auth:"Authentication failed", quota:"Quota reached", "rate-limit":"Rate limited", overload:"Provider overloaded", transport:"Connection failed", "output-truncated":"Output truncated", internal:"Internal error", permission:"Permission denied", dependency:"Missing dependency", "invalid-request":"Invalid request", "schema-incompatible":"Schema incompatible", "unsupported-field":"Unsupported field", "context-overflow":"Context limit reached", "process-signal":"Process interrupted"};
+  return labels[category ?? ""] ?? (category && category !== "unknown" && category !== "none" ? `Failed · ${category}` : "Failed · cause unknown");
+};
+const agentDisplayName = (agent?: string) => agent === "automatic-free-assistant" ? "Automatic assistant" : agent;
+
 export function usedSummaryHtml(summary: UsedSummary): string {
   const tools = Array.isArray(summary.tools) ? summary.tools : [];
   const reads = Array.isArray(summary.skillsRead) ? summary.skillsRead : [];
@@ -814,8 +831,8 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   ].join("");
   const runBody = runs.length ? runs.map((run, index) => {
     const route = run.provider && run.model ? `${run.provider}/${run.model}` : run.model ?? "model not recorded";
-    const who = run.agent ? run.agent : `Agent ${index + 1}`;
-    return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(run.status)}</span></summary>${factGrid([
+    const who = agentDisplayName(run.agent) ?? `Agent ${index + 1}`;
+    return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(childStateLabel(run.status, run.failureCategory))}</span></summary>${factGrid([
       ["Parent run", run.runId],
       ["Child run", run.childRunId ?? "not recorded"],
       ["Attempt", run.attempt ?? "not recorded"],
@@ -825,7 +842,8 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       ["Provider", run.provider ?? "not recorded"],
       ["Model", run.model ?? "not recorded"],
       ["Thinking", run.thinking ?? "not recorded"],
-      ["Last status", run.status],
+      ["Last status", childStateLabel(run.status, run.failureCategory)],
+      ["Failure stage", run.failureStage],
       ["Token traffic", run.usageRecorded ? formatCount(run.tokens) : "not recorded"],
       ["Turns", run.turns === undefined ? "not recorded" : formatCount(run.turns)],
       ["Cost", run.costUsd === undefined ? "not recorded" : `$${run.costUsd.toFixed(6)}`],
@@ -834,11 +852,15 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const taskBody = logicalTasks.length ? logicalTasks.map((task) => {
     const attemptRows = task.attempts.map((attempt) => {
       const cause = attempt.execution.cause;
-      return `<details class="item"><summary><span class="item-name">Attempt ${attempt.attempt}${attempt.route ? ` · ${escapeHtml(attempt.route)}` : ""}</span><span class="badge ${statusTone(attempt.state)}">${escapeHtml(attempt.state)}</span></summary>${factGrid([
+      return `<details class="item"><summary><span class="item-name">Attempt ${attempt.attempt}${attempt.route ? ` · ${escapeHtml(attempt.route)}` : ""}</span><span class="badge ${statusTone(attempt.state)}">${escapeHtml(childStateLabel(attempt.state, cause?.category, attempt.acceptance.status))}</span></summary>${factGrid([
         ["Run", attempt.runId ?? "not recorded"],
         ["Route", attempt.route ?? "not recorded"],
         ["Backend", attempt.backend ?? "not recorded"],
         ["Failure stage", cause?.stage ?? "none"],
+        ["Provider code", cause?.providerCode],
+        ["Retry unchanged", cause ? cause.retryable ? "allowed by recorded cause" : "change the cause before retrying" : undefined],
+        ["Output before stop", cause ? cause.outputPresent ? "recorded" : "not recorded" : undefined],
+        ["Turns", attempt.usage?.turns],
         ["Diagnostic", cause?.diagnosticRef ?? "not recorded"],
         ["Execution", cause ? `${attempt.execution.status} (${cause.category}${cause.truncation !== "none" ? `, ${cause.truncation}` : ""})` : attempt.execution.status],
         ["Acceptance", attempt.acceptance.status + (attempt.acceptance.reason ? ` · ${attempt.acceptance.reason}` : "")],
@@ -846,7 +868,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
         ["Exit code", attempt.exitCode === undefined ? "not recorded" : String(attempt.exitCode)],
       ])}</details>`;
     }).join("");
-    return `<details class="item"><summary><span class="item-name">${escapeHtml(task.label)}</span><span class="badge ${statusTone(task.state)}">${escapeHtml(task.state)}</span></summary>${factGrid([
+    return `<details class="item"><summary><span class="item-name">${escapeHtml(task.label === "child task" ? agentDisplayName(task.agent) ?? task.label : task.label)}</span><span class="badge ${statusTone(task.state)}">${escapeHtml(childStateLabel(task.state, task.execution.cause?.category, task.acceptance.status))}</span></summary>${factGrid([
       ["Task", task.taskId],
       ["Todo", task.todoId ?? "not linked"],
       ["Scope", task.scopeId ?? "not recorded"],
@@ -885,8 +907,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   sections.push(group("🪝 Hooks", session.hookCalls === null ? "unknown before telemetry" : plural(session.hookCalls, "call"), factGrid([
     ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
   ]) + hookHtml));
-  const failuresTotal = session.parentErrors + toolErrorsTotal;
-  sections.push(group("🚨 Failures/recovery", `${failuresTotal} recorded · ${summary.recoveries} recoveries`, factGrid([
+  sections.push(group("🚨 Failures/recovery", `${agents.failed} child · ${session.parentErrors} main-session · ${summary.recoveries} recoveries`, factGrid([
     ["Parent failures", `${formatCount(session.parentErrors)} total · ${formatCount(session.blockedTools)} blocked tools`],
     ["Tool failures", formatCount(toolErrorsTotal)],
     ["Child failures", formatCount(agents.failed)],

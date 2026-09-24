@@ -17,7 +17,7 @@ delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_OBSERVER;
 delete process.env.PI_SUBAGENT_CHILD;
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
-const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage } = await import('../agent/extensions/lib/session-observer.ts');
+const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage, OBSERVER_DEADLINE_MS } = await import('../agent/extensions/lib/session-observer.ts');
 const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
 
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
@@ -96,10 +96,39 @@ test('deadline aborts without overlap; cancelled old-owner completions never pub
   const time = clock(), notices = [], receipts = []; let finish, signal, calls = 0;
   const observer = createSessionObserver({ ...time, snapshot: () => ({ packet: packet(), route }), notice: (...x) => notices.push(x), receipt: (...x) => receipts.push(x), dispatch: async (_r,_p,s) => { calls++; signal=s; return new Promise(resolve=>{finish=resolve;}); } });
   observer.begin('old-session'); observer.start(); await time.advance(30000); assert.equal(calls,1);
-  await time.advance(45000); assert.equal(signal.aborted,true); assert.equal(observer.context(),undefined);
+  await time.advance(OBSERVER_DEADLINE_MS); assert.equal(signal.aborted,true); assert.equal(observer.context(),undefined);
   observer.begin('new-session'); observer.start(); await time.advance(30000); assert.equal(calls,1,'abort-ignoring transport retains its single-flight slot');
   finish(reply()); await flush(); assert.equal(observer.context(),undefined); assert.equal(notices.filter(x=>x[0]==='completed').length,0);
   assert.equal(receipts.at(-1)[1],'old-session','late actual usage keeps its original owner'); observer.close();
+});
+
+test('a slow observer keeps its three-minute allowance with visible progress and no duplicate dispatch', async () => {
+  const time=clock(),notices=[];let finish,signal,calls=0;
+  const observer=createSessionObserver({...time,snapshot:()=>({packet:packet(),route}),notice:(...args)=>notices.push([time.now(),...args]),receipt(){},dispatch:async(_r,_p,s)=>{signal=s;calls++;return new Promise(resolve=>{finish=resolve;});}});
+  observer.begin('owner');observer.start();await time.advance(30000);
+  assert.match(notices[0][2],/high thinking.*up to 180s/);
+  await time.advance(90000);
+  assert.equal(signal.aborted,false);assert.equal(calls,1);assert.equal(observer.context(),undefined);
+  assert.match(notices.at(-1)[2],/Still reviewing with deepseek\/deepseek-flash.*90s elapsed \/ 180s allowed/);
+  await time.advance(60000);assert.equal(signal.aborted,false);assert.equal(calls,1);
+  finish(reply());await flush();
+  assert.match(notices.at(-1)[2],/Returned advice in 150s/);
+  assert.match(observer.context(),/required field/);assert.equal(observer.context(),undefined);
+  for(let i=1;i<notices.length;i++)assert.ok(notices[i][0]-notices[i-1][0]<=120000);
+  assert.equal(notices.filter(row=>row[1]==='unavailable').length,0);observer.close();assert.equal(time.jobs.size,0);
+});
+
+test('default observer timeout retains evidence and retries only after dispatch settlement', async () => {
+  const time=clock(),notices=[],receipts=[];let finish,calls=0,reviewed=0;
+  const observer=createSessionObserver({...time,snapshot:()=>({packet:packet(),route,reviewed:()=>reviewed++}),notice:(...args)=>notices.push([time.now(),...args]),receipt:data=>receipts.push(data),dispatch:async()=>{calls++;return calls===1?new Promise(resolve=>{finish=resolve;}):reply();}});
+  observer.begin('owner');observer.start();await time.advance(30000+180000);
+  assert.equal(calls,1);assert.equal(reviewed,0);assert.match(notices.at(-1)[2],/timed out after 180s/);
+  await time.advance(120000);assert.equal(calls,1);assert.equal(reviewed,0);assert.match(notices.at(-1)[2],/not acknowledged cancellation/);
+  finish(reply());await flush();assert.equal(observer.context(),undefined,'late timeout result is never injected');
+  await time.advance(30000);assert.equal(calls,2);assert.equal(reviewed,1);assert.match(observer.context(),/required field/);
+  assert.deepEqual(receipts.filter(row=>row.status==='pending').length,2);
+  for(let i=1;i<notices.length;i++)assert.ok(notices[i][0]-notices[i-1][0]<=120000);
+  observer.close();assert.equal(time.jobs.size,0);
 });
 
 test('observer dispatch preserves high thinking, bounds output and rejects endpoint changes before actual SDK transport', async () => {
@@ -109,7 +138,7 @@ test('observer dispatch preserves high thinking, bounds output and rejects endpo
     return completeSimple(selected, context, { ...given, apiKey:'synthetic-key', fetch:async(_url,init)=>{requests.push(JSON.parse(init.body));return new Response('data: '+JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:selected.id,choices:[{index:0,delta:{content:reply().content[0].text},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});} });
   } };
   await observerDispatch(route,packet(),new AbortController().signal,registry);
-  assert.equal(options.reasoning,'high'); assert.equal(options.maxTokens,4096); assert.equal(options.maxRetries,0); assert.equal(requests.length,1); assert.equal(requests[0].tools,undefined);
+  assert.equal(options.reasoning,'high'); assert.equal(options.timeoutMs,180000); assert.equal(options.maxTokens,4096); assert.equal(options.maxRetries,0); assert.equal(requests.length,1); assert.equal(requests[0].tools,undefined);
   const altered={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,baseUrl:'https://elsewhere.invalid/v1'},context,opts)};
   const denied=await observerDispatch(route,packet(),new AbortController().signal,altered);
   assert.equal(denied.stopReason,'error'); assert.equal(requests.length,1);
@@ -254,8 +283,9 @@ test('active observer cancellation resolves the visible start without stale-owne
   const replaced=harness(async()=>new Promise(resolve=>{finish=resolve;}));replaced.input('Fix parser validation.');await replaced.advance(30000);
   replaced.ctx.sessionManager=replaced.newManager();replaced.emit('session_start');replaced.emit('agent_settled');
   assert.equal(replaced.sent.length,1,'old owner cancellation never appears in the replacement session');finish(reply());await flush();replaced.close();
-  const timeout=harness(async()=>new Promise(resolve=>{finish=resolve;}));timeout.input('Fix parser validation.');await timeout.advance(75000);
-  assert.equal(timeout.sent.length,2);assert.match(timeout.sent[1][0].content,/timed out/);timeout.emit('agent_settled');assert.equal(timeout.sent.length,2,'already timed-out observation does not also report stopped');finish(reply());await flush();timeout.close();
+  const timeout=harness(async()=>new Promise(resolve=>{finish=resolve;}));timeout.input('Fix parser validation.');await timeout.advance(30000+OBSERVER_DEADLINE_MS);
+  assert.equal(timeout.sent.filter(([m])=>m.details.status==='unavailable').length,1);assert.match(timeout.sent.at(-1)[0].content,/timed out after 180s.*Evidence retained/);
+  const count=timeout.sent.length;timeout.emit('agent_settled');assert.equal(timeout.sent.length,count,'already timed-out observation does not also report stopped');finish(reply());await flush();timeout.close();
 });
 
 

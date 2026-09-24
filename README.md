@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.6.2 gives prompt-analysis providers a generous two-minute route allowance, preserves fallback time, and shows elapsed and allowed time in the TUI. It includes the provider repairs, account-backed Codex catalog, observer delivery checks and expanded `/used` dashboard from 0.6.1. It retains the code-first video studio, frequent observer reviews and explicitly addressed communication between independent sessions. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Version 0.6.3 gives observers and automatic assistants three minutes for thoughtful reviews, with visible progress and evidence-preserving recovery. It includes the generous prompt-analysis allowances, provider repairs, account-backed Codex catalog, observer delivery checks and expanded `/used` dashboard. It retains the code-first video studio, frequent observer reviews and explicitly addressed communication between independent sessions. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 

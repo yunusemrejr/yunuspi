@@ -423,6 +423,9 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 				if (!attempt) break;
 				if (event.type === "completion") {
 					const outcome = deriveAttemptOutcome(asRecord(event.row));
+					// A later redacted accounting snapshot cannot erase a known cause.
+					if (outcome.execution.cause?.category === "unknown" && attempt.execution.cause && attempt.execution.cause.category !== "unknown")
+						outcome.execution.cause = attempt.execution.cause;
 					// Completion evidence outranks earlier lifecycle guesses, but
 					// an explicit stop already recorded stays stopped.
 					if (attempt.state === "stopped" && outcome.state !== "stopped") {
@@ -536,16 +539,31 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
  */
 export function normalizeHelperChildEntries(entries: readonly unknown[]): readonly unknown[] {
 	// Native lifecycle and helper accounting describe the same attempted child.
-	// Link only explicit single-child run IDs; conflicts remain separate.
+	// Historical helpers omitted runId: accept only an exact run-0 session path
+	// naming an observed single native run. Never merge by model, time or state.
+	const nativeSingles = new Set(entries.flatMap(value => {
+		const entry = asRecord(value), data = asRecord(entry.data);
+		return entry.type === "custom" && entry.customType === "subagent-lifecycle-v1" && data.mode === "single" && typeof data.runId === "string" ? [data.runId] : [];
+	}));
 	const helperLinks = new Map<string, {parent: string; row: Record<string, unknown>} | null>();
+	const parentLinks = new Map<string, string | null>();
+	const parentKey = (parent: string, row: Record<string, unknown>) => `${parent}:${row.attempt ?? 1}`;
 	for (const value of entries) {
 		const entry = asRecord(value), data = asRecord(entry.data);
 		if (entry.type !== "custom" || entry.customType !== "subagent-cost-v1" || typeof data.runId !== "string" || !/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(data.runId) || !Array.isArray(data.results) || data.results.length !== 1) continue;
 		const row = asRecord(data.results[0]);
-		if (typeof row.runId !== "string" || row.runId === data.runId || (row.index ?? 0) !== 0) continue;
-		const prior = helperLinks.get(row.runId);
-		if (prior === null || prior && (prior.parent !== data.runId || (prior.row.attempt ?? 1) !== (row.attempt ?? 1))) helperLinks.set(row.runId, null);
-		else helperLinks.set(row.runId, {parent:data.runId, row});
+		if ((row.index ?? 0) !== 0) continue;
+		let native = typeof row.runId === "string" ? row.runId : undefined;
+		if (!native && typeof row.sessionFile === "string" && row.sessionFile.length <= 4096 && !row.sessionFile.split("/").some(part => part === "." || part === "..")) {
+			const pathId = row.sessionFile.match(/^\/.*\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/run-0\/session\.jsonl$/)?.[1];
+			if (pathId && nativeSingles.has(pathId)) native = pathId;
+		}
+		if (!native || native === data.runId) continue;
+		const key = parentKey(data.runId, row), priorParent = parentLinks.get(key);
+		parentLinks.set(key, priorParent === null || priorParent && priorParent !== native ? null : native);
+		const prior = helperLinks.get(native);
+		if (prior === null || prior && (prior.parent !== data.runId || (prior.row.attempt ?? 1) !== (row.attempt ?? 1))) helperLinks.set(native, null);
+		else helperLinks.set(native, {parent:data.runId, row});
 	}
 	return entries.map(value => {
 		const entry = asRecord(value), message = asRecord(entry.message);
@@ -554,11 +572,19 @@ export function normalizeHelperChildEntries(entries: readonly unknown[]): readon
 		if (!custom && !tool) return value;
 		const data = asRecord(custom ? entry.data : message.details);
 		const native = asString(data.runId ?? data.asyncId, 160), link = native ? helperLinks.get(native) : undefined;
-		if (!link || !Array.isArray(data.results) || data.results.length !== 1) return value;
-		const row = asRecord(data.results[0]);
+		const rows = Array.isArray(data.results) ? data.results : [];
+		if (rows.length > 1) return value;
+		const row = asRecord(rows[0]);
 		if ((row.index ?? 0) !== 0) return value;
-		const normalized = {...data, runId:link.parent, results:[{...row, runId:native, index:0, attempt:link.row.attempt ?? 1,
-			...(link.row.label ? {label:link.row.label} : {}), ...(link.row.scopeId ? {scopeId:link.row.scopeId} : {})}]};
+		let normalized: Record<string, unknown>;
+		if (link && parentLinks.get(parentKey(link.parent, link.row)) === native && (rows.length === 1 || data.mode === "single")) {
+			normalized = {...data, runId:link.parent, results:[{...row, ...(rows.length ? {} : {status:data.state}), runId:native, index:0, attempt:link.row.attempt ?? 1,
+				...(link.row.label ? {label:link.row.label} : {}), ...(link.row.scopeId ? {scopeId:link.row.scopeId} : {})}]};
+		} else {
+			const child = native ? parentLinks.get(parentKey(native, row)) : undefined;
+			if (!child || helperLinks.get(child)?.parent !== native || rows.length !== 1) return value;
+			normalized = {...data, results:[{...row, runId:child}]};
+		}
 		return custom ? {...entry,data:normalized} : {...entry,message:{...message,details:normalized}};
 	});
 }

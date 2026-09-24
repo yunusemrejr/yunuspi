@@ -666,7 +666,10 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 		usedAssist = true;
 		const epoch = generation;
 		const controller = assistance = new AbortController();
-		const signal = ctx.signal ? AbortSignal.any([controller.signal, ctx.signal, AbortSignal.timeout(35000)]) : AbortSignal.any([controller.signal, AbortSignal.timeout(35000)]);
+		// The outer controller must outlive the child investigation deadline so
+		// its terminal receipt can settle before cleanup cancels the group.
+		const assistanceDeadline = AbortSignal.timeout(AUTOMATIC_HELPER_LIMITS.deadlineMs + AUTOMATIC_HELPER_LIMITS.cleanupGraceMs);
+		const signal = AbortSignal.any([controller.signal, assistanceDeadline, ...(ctx.signal ? [ctx.signal] : [])]);
 		// Read-only helpers never hold up the parent's first request or own its
 		// recovery lock. Native next-turn delivery does not wake an idle parent.
 		void group(ctx, signal).then(content => {
