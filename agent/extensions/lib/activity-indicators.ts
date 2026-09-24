@@ -68,9 +68,14 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
 };
 
 const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, error: 10_000 };
-/** Infrastructure states flap slowly; a 10s window would re-log every check. */
+/** Infrastructure states flap slowly; a 10s window would re-log every check.
+ * Guardian lines are keyed by WASM state, so a state change still shows at
+ * once; an unchanged heartbeat (measured 71 lines in one session) does not.
+ * File-based routing re-matches the same skill on every edit of that file
+ * type (27 identical lines measured); a repeat match is not news. */
 const DEDUPE_OVERRIDE: Array<[string, number]> = [
-  ["guardian.", 60_000],
+  ["guardian.", 300_000],
+  ["skill.route", 600_000],
   ["local.refresh", 600_000],
   ["reminder.", 300_000],
 ];
@@ -197,7 +202,8 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
     if (kind === "skill.route" || kind === "ml.intent") {
       const sim = typeof data.similarity === "number" && Number.isFinite(data.similarity)
         ? `sim ${data.similarity.toFixed(2)}` : undefined;
-      return { label: clean(route || "?", 60), status: "ok", detail: sim };
+      // A router match is a suggestion, not a read or use of the skill.
+      return { label: clean(route || "?", 60), status: "ok", detail: kind === "skill.route" ? ["router match, not a read", sim].filter(Boolean).join(" · ") : sim };
     }
     if (kind === "skill.resolve") {
       return { label: clean(skill || "?", 60), status: decision === "missing" || isError ? "error" : "ok", detail: clean(decision || "", 24) || undefined };
@@ -393,7 +399,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       // Child sessions have no TUI: lines would only bloat child context.
       if (process.env.PI_SUBAGENT_CHILD === "1") return;
       const lineStatus = d.status;
-      const key = `${lineKind}\0${lineLabel}\0${lineStatus}`;
+      const guardianState = lineKind.startsWith("guardian.") ? ["lazy", "initializing", "quarantined"].includes(String(data.decision)) ? String(data.decision) : "evaluating" : "";
+      const key = `${lineKind}\0${lineLabel}\0${lineStatus}\0${guardianState}`;
       const last = lastLine.get(key);
       if (last !== undefined && now - last < dedupeMs(lineKind, lineStatus)) return;
       while (lineAt.length && now - lineAt[0]! > 60_000) lineAt.shift();

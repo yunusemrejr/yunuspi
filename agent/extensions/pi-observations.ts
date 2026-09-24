@@ -63,6 +63,8 @@ const MAX_ENTRIES = 64;
 // Sealed renderings hold only a receipt or a reference to one, never a copy of
 // the raw output, so the bound can be far larger than the observation index.
 const MAX_SEALED = 2048;
+/** Bounded context-time wait for an in-flight Jev distillation (typically ~0.6s). */
+const JEV_DISTILL_WAIT_MS = 1500;
 const PAGE_CHARS = 20000;
 const TOOLS = new Set(["bash", "read", "grep", "ls", "find"]);
 // Needle error-family labels for tool-result triage. A similarity cue only:
@@ -184,15 +186,18 @@ export default function piObservationsExtension(
 	// Settled Needle error-family cues by observation id (bounded; cleared on
 	// restore). Rendered as similarity cues next to the failure hint.
 	const needleCues = new Map<number, { family: string; score: number; margin: number }>();
-	// Background Jev selections are consumed only when already ready. Remote
-	// latency cannot hold the next provider request or rewrite a prior seal.
-	const jevDistillPending = new Map<string, {value?:string}>();
+	// Background Jev selections are offered at tool_result time. The next
+	// provider request usually follows within milliseconds, before a ~0.6s Jev
+	// answer, and the first render is sealed for the branch lifetime; without a
+	// wait, paid selections never reached context. The context pass therefore
+	// waits a bounded JEV_DISTILL_WAIT_MS, only for not-yet-sealed results.
+	const jevDistillPending = new Map<string, {value?:string; settled?:Promise<void>}>();
 	const offerJevDistill = (key: string, tool: string, text: string): void => {
 		if (jevDistillPending.has(key)) return;
 		if (jevDistillPending.size >= 200) jevDistillPending.delete(jevDistillPending.keys().next().value!);
-		const slot: {value?:string} = {};
+		const slot: {value?:string; settled?:Promise<void>} = {};
 		jevDistillPending.set(key,slot);
-		void selectDistillChunks(tool,text,(site,state,questions)=>askJev(site,state,questions,{pi}))
+		slot.settled = selectDistillChunks(tool,text,(site,state,questions)=>askJev(site,state,questions,{pi}),undefined,taskSignal)
 			.then(value=>{if(jevDistillPending.get(key)===slot)slot.value=value;})
 			.catch(()=>{});
 	};
@@ -646,10 +651,24 @@ export default function piObservationsExtension(
 		}
 		const jevReady = new Map<number, string | undefined>();
 		if (jevEnabled()) {
-			event.messages.forEach((message,index)=>{
+			const eligible = (message: any) => {
 				const ref=message.details?.piObservation as Reference|undefined;
-				if(message.role==='toolResult'&&ref?.version===1&&ref.operation&&TOOLS.has(message.toolName))
-					jevReady.set(index,jevDistillPending.get(`${ref.id}:${ref.signature}`)?.value);
+				return message.role==='toolResult'&&ref?.version===1&&ref.operation&&TOOLS.has(message.toolName) ? ref : undefined;
+			};
+			const waits: Array<Promise<void>> = [];
+			for (const message of event.messages) {
+				const ref = eligible(message), slot = ref && jevDistillPending.get(`${ref.id}:${ref.signature}`);
+				const sealed = ref && sealedRenders.get(ref.id);
+				if (slot?.settled && slot.value === undefined && !(sealed && sealed.resultHash === ref.resultHash)) waits.push(slot.settled);
+			}
+			if (waits.length) {
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				await Promise.race([Promise.all(waits), new Promise<void>(resolve => { timer = setTimeout(resolve, JEV_DISTILL_WAIT_MS); })]);
+				clearTimeout(timer);
+			}
+			event.messages.forEach((message,index)=>{
+				const ref=eligible(message);
+				if(ref) jevReady.set(index,jevDistillPending.get(`${ref.id}:${ref.signature}`)?.value);
 			});
 		}
 		const messages = event.messages.map((message, index) => {

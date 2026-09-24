@@ -206,7 +206,9 @@ export function createSessionObserver(ports: ObserverPorts) {
   };
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, ' ').trim();
   const notice = (status: string, detail: string, advice?: ObserverAdvice) => { const key = `${status}:${detail}:${advice?.note ?? ''}`; if (lastNotice === key) return; lastNotice = key; lastCheckAt = now(); try { ports.notice(status, detail, advice); } catch {} };
-  const checkIn = (detail: string) => { if (now() - lastCheckAt >= OBSERVER_MAX_GAP_MS - interval) notice('checked', `Review ${++check}: ${detail}`); };
+  // A check-in is not a review: no counter, so an unchanged idle state is
+  // deduplicated by notice() instead of producing a new line every 90 seconds.
+  const checkIn = (detail: string) => { if (now() - lastCheckAt >= OBSERVER_MAX_GAP_MS - interval) notice('checked', detail); };
   const stopTimer = () => { if (timer !== undefined) unschedule(timer); timer = undefined; };
   const arm = () => { stopTimer(); if (!active || closed) return; timer = schedule(() => { timer = undefined; arm(); void tick(); }, interval); timer.unref?.(); };
   async function tick() {
@@ -253,10 +255,11 @@ export function createSessionObserver(ports: ObserverPorts) {
       const text = response.content?.filter((p: any) => p.type === 'text' && typeof p.text === 'string').map((p: any) => p.text).join('\n') ?? '';
       const validation = validateObserverAdvice(text, snapshot.packet), advice = validation.advice;
       if (!advice) { current = undefined; notice('unavailable', `Observer response rejected: ${validation.reason}; evidence retained for the next review.`); return; }
-      // false: the cited state changed or coverage was lost, so the premise is
-      // gone. A string names overlapping later work; the review keeps its value.
+      // false: the premise is gone (cited running work finished or the model
+      // changed). A string names changed state or overlapping later work; the
+      // paid review keeps its value and is delivered with that caveat.
       const freshness = snapshot.current?.(advice);
-      if (freshness === false) { current = undefined; notice('reviewed', 'State cited by this review changed before it finished; advice no longer applies.'); return; }
+      if (freshness === false) { current = undefined; notice('reviewed', 'Cited running work finished or the model changed before this review returned; advice not delivered.'); return; }
       // A stale review has not consumed its evidence. Advance the queue only
       // after the cited state is reconciled, so the next review sees that chunk.
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;

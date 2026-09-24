@@ -64,6 +64,25 @@ test('typed skill selection avoids a full child and cannot invent catalog identi
   assert.equal(none.calls.length,0);
 });
 
+test('a large skill catalog is shortlisted to fit the Jev input budget instead of always paying for a child', async () => {
+  const { buildSkillDiscoveryRequest } = await import(pathToFileURL(path.join(agent, 'extensions/lib/skill-discovery.ts')));
+  const { JEV_MAX_INPUT_CHARS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/jev-client.ts')));
+  const catalog = Array.from({ length: 240 }, (_, i) => ({ name: `domain-skill-${i}`, file: `/skills/domain-skill-${i}/SKILL.md`, description: `Guidance for specialised area number ${i} covering frameworks, tooling and review workflow details`.padEnd(150, '.') }));
+  catalog.push({ name: 'sql-query-engineering', file: '/skills/sql/SKILL.md', description: 'Database query execution plans, indexes and slow postgres statements' });
+  const built = buildSkillDiscoveryRequest(catalog, { prompt: 'Speed up slow postgres query execution plans', files: ['db/queries.sql'], tools: ['read'] });
+  const request = { brief: built.brief, task: 'Speed up slow postgres query execution plans', candidates: built.catalog.map(skill => ({ name: skill.name, description: skill.description.slice(0, 160) })) };
+  const payloads = [];
+  const answer = exists => async (_site, state, questions) => { payloads.push(JSON.stringify([state, questions])); return { ok: true, answers: { skill: { type: 'choice', choice: 'sql-query-engineering', probabilities: { 'sql-query-engineering': .9 } }, exists: { type: 'noul', noul: exists } }, usage: { model: 'mock', inputTokens: 20, costUsd: 0, ms: 1, cached: false } }; };
+  const f = fixture({ judge: answer(.95) });
+  assert.equal(JSON.parse(await f.runner(request, f.ctx)).suggestions[0].name, 'sql-query-engineering');
+  assert.equal(f.calls.length, 0, 'a confident pick avoids the paid child');
+  assert.ok(payloads[0].length <= JEV_MAX_INPUT_CHARS, `payload ${payloads[0].length} fits the Jev budget`);
+  assert.ok(!payloads[0].includes('Catalog [name, description]'), 'the LLM brief catalog is not duplicated');
+  const none = fixture({ judge: answer(.05) });
+  await none.runner(request, none.ctx);
+  assert.equal(none.calls.length, 1, 'over a shortlist, "nothing fits" is inconclusive and keeps the existing fallback');
+});
+
 test('skill judge respects delegation policy and rejects stale results', async () => {
   let calls=0,resolve;
   const request={brief:'Select useful skills.',candidates:[{name:'sql-query-engineering',description:'Database query plans'}]};

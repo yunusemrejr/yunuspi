@@ -465,27 +465,54 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   active.emit('tool_execution_start',{toolCallId:'build',toolName:'bash',args:{command:'npm test',timeout:120}});await active.advance(30000);
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could useful independent work continue while that check runs?',evidence:['running-tools'],tools:[],skills:[]})}]});await flush();
-  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/State cited by this review changed/);active.close();
+  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/Cited running work finished/);active.close();
 });
 
-test('a stale cited state retains its chronological event for the next review', async () => {
+test('changed cited plan state is delivered with a named caveat instead of discarding the paid review', async () => {
+  let finish;
+  const h = harness(async () => new Promise(resolve => { finish = resolve; }));
+  h.input('Fix parser validation.');
+  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'in_progress' }] });
+  h.emit('tool_result', { toolName: 'read', input: { path: 'src/parser.ts' }, content: [{ type: 'text', text: 'Missing validation.' }] });
+  await h.advance(30000);
+  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'completed' }] });
+  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could the parser input still need validation?', evidence: ['todo-state', 'event-1'], tools: [], skills: [] }) }] });
+  await flush();
+  assert.match(h.sent.at(-1)[0].content, /returned a note.*cited todo-state changed meanwhile/);
+  assert.match(h.emit('context', { messages: [] }).messages.at(-1).content, /cited todo-state changed after this snapshot, so it may already be addressed/);
+  h.close();
+});
+
+test('a review whose cited running work finished retains its chronological event for the next review', async () => {
   let finish, calls = 0;
   const h = harness(async () => {
     if (++calls === 1) return new Promise(resolve => { finish = resolve; });
     return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] };
   });
   h.input('Fix parser validation.');
-  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'in_progress' }] });
   h.emit('tool_result', { toolName: 'read', input: { path: 'src/parser.ts' }, content: [{ type: 'text', text: 'Missing validation.' }] });
+  h.emit('tool_execution_start', { toolCallId: 'build', toolName: 'bash', args: { command: 'npm test' } });
   await h.advance(30000);
   assert.ok(h.packets[0].evidence.some(row => row.id === 'event-1'));
-  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'completed' }] });
-  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could the parser input still need validation?', evidence: ['todo-state', 'event-1'], tools: [], skills: [] }) }] });
+  h.emit('tool_result', { toolCallId: 'build', toolName: 'bash', input: { command: 'npm test' }, content: [{ type: 'text', text: 'Tests passed.' }] });
+  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could independent work continue while the test run finishes?', evidence: ['running-tools', 'event-1'], tools: [], skills: [] }) }] });
   await flush();
-  assert.match(h.sent.at(-1)[0].content, /State cited by this review changed/);
+  assert.match(h.sent.at(-1)[0].content, /Cited running work finished/);
   await h.advance(30000);
   assert.equal(calls, 2);
   assert.ok(h.packets[1].evidence.some(row => row.id === 'event-1'), 'stale advice must not consume the unread tool outcome');
+  h.close();
+});
+
+test('a completed tool replaces its unread start event so the queue carries one row per call', async () => {
+  const h = harness();
+  h.input('Fix parser validation.');
+  h.emit('tool_execution_start', { toolCallId: 'r1', toolName: 'read', args: { path: 'src/parser.ts' } });
+  h.emit('tool_result', { toolCallId: 'r1', toolName: 'read', input: { path: 'src/parser.ts' }, content: [{ type: 'text', text: 'Missing validation.' }] });
+  h.emit('tool_execution_start', { toolCallId: 'r2', toolName: 'bash', args: { command: 'npm test' } });
+  await h.advance(30000);
+  const events = h.packets[0].evidence.filter(row => /^event-/.test(row.id));
+  assert.deepEqual(events.map(row => row.kind), ['tool result', 'tool started'], 'finished call keeps only its result; running call keeps its start');
   h.close();
 });
 
@@ -497,4 +524,14 @@ test('observer billing and earlier advice do not trigger an inference feedback l
  assert.equal(h.packets.length,2,'after cursor drains, unchanged task activity stops inference despite observer receipts');
  assert.notEqual(h.packets[0].evidence.find(row=>row.id==='model-routing').text,h.packets[1].evidence.find(row=>row.id==='model-routing').text,'test includes evolving native observer billing evidence');
  assert.ok(h.sent.some(([message])=>/No new evidence to review/.test(message.content)));h.close();
+});
+
+test('an unchanged idle observer state is reported once, not as a new numbered review every check-in', async () => {
+  const h=harness();h.input('Fix parser validation.');
+  h.emit('tool_result',{toolName:'read',input:{path:'src/parser.ts'},content:[{type:'text',text:'Parser lacks validation.'}]});
+  await h.advance(900000);
+  const idle=h.sent.filter(([message])=>/No new evidence to review/.test(message.content));
+  assert.equal(idle.length,1,'identical idle check-ins are deduplicated');
+  assert.ok(!h.sent.some(([message])=>/Review \d+:/.test(message.content)),'no review counter without a review');
+  h.close();
 });

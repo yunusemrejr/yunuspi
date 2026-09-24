@@ -65,6 +65,32 @@ export const DEFAULT_PROMPT_SNIPPET =
 	"Maintain an actionable hierarchical plan";
 export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_GUIDANCE];
 
+/** Recover only unambiguous batch shapes before schema validation. Measured:
+ * 7 of 9 recorded todo validation failures were batches whose operations
+ * omitted `action`, each costing a full model turn to repeat the call. A
+ * positive id can only be an update (creates use negative aliases); otherwise a
+ * subject is a create. Delete is never inferred; anything else still fails
+ * validation with the declared-schema message. */
+export function prepareTodoArguments(args: unknown): any {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+	let input = args as Record<string, any>;
+	if (input.action === undefined && typeof input.batch === "string") {
+		try {
+			const parsed = JSON.parse(input.batch);
+			if (Array.isArray(parsed?.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, operations: parsed.operations }; }
+		} catch { return args; }
+	}
+	if (input.action === undefined && Array.isArray(input.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, action: "batch" }; }
+	if (input.action !== "batch" || !Array.isArray(input.operations)) return input === args ? args : input;
+	const operations = input.operations.map((op: any) => {
+		if (!op || typeof op !== "object" || Array.isArray(op) || op.action !== undefined) return op;
+		if (Number.isSafeInteger(op.id) && op.id > 0) return { ...op, action: "update" };
+		if (typeof op.subject === "string" && op.subject.trim()) return { ...op, action: "create" };
+		return op;
+	});
+	return operations.some((op: any, index: number) => op !== input.operations[index]) ? { ...input, operations } : input === args ? args : input;
+}
+
 export function registerTodoTool(pi: ExtensionAPI): void {
 	const guidance = validateGuidanceFields(loadConfig().guidance);
 	pi.registerTool({
@@ -75,6 +101,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		promptSnippet: guidance.promptSnippet ?? DEFAULT_PROMPT_SNIPPET,
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
+		prepareArguments: prepareTodoArguments,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const result = applyTaskMutation(

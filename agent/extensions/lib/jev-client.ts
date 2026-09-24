@@ -596,10 +596,16 @@ export function splitTextChunks(text: string, maxChunks = 8, chunkChars = 2000):
   return chunks;
 }
 
+/** Terminal output keeps chunks that carry outcome signals. The general
+ * protection (any digit, path or hedge word) marks every chunk of a real log
+ * as required, so Jev was never consulted on terminal output. */
+const terminalSignal = /\b(?:error\w*|fail\w*|warn\w*|exception|traceback|panic|fatal|denied|refused|reject\w*|blocked|abort\w*|cancel\w*|timeout|timed out|assert\w*|exit(?:ed)? (?:code|status)|must|required|deprecated|conflict\w*|not found|missing|unresolved|summary|total|passed|skipped)\b/i;
+
 /** Score text chunks for distillation. First and last chunks are always
  * kept; middle chunks need `keepAt` (0-1). Returns the rendered selection
  * with its TUI mark, or undefined when nothing should change. The `ask`
- * dependency lets tests drive the orchestration without transport. */
+ * dependency lets tests drive the orchestration without transport. `task`
+ * grounds the relevance question; without it Jev judged relevance blind. */
 export async function selectDistillChunks(
   tool: string,
   text: string,
@@ -609,22 +615,24 @@ export async function selectDistillChunks(
     questions: Record<string, unknown>,
   ) => Promise<JevAskResult>,
   keepAt = 0.6,
+  task = "",
 ): Promise<string | undefined> {
   const chunks = splitTextChunks(text, 8, 2000);
   if (chunks.length < 2) return undefined;
-  const required = chunks.map((chunk, index) => index === 0 || index === chunks.length - 1 || protectedEvidence.test(chunk));
+  const signal = tool === "bash" ? terminalSignal : protectedEvidence;
+  const required = chunks.map((chunk, index) => index === 0 || index === chunks.length - 1 || signal.test(chunk));
   if (required.every(Boolean)) return undefined;
   const metrics=microMetrics();metrics.offer('jev');
   const questions: Record<string, unknown> = {};
   chunks.forEach((_, index) => {
     questions[`chunk_${index}`] = {
       type: "noul",
-      instructions: `Does chunk ${index} carry task-relevant information (errors, results, decisions, data)?`,
+      instructions: `Does chunk ${index} carry information relevant to the task (errors, results, decisions, data)?`,
     };
   });
   const judged = await ask(
     "distill",
-    { tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
+    { ...(task ? { task: task.slice(0, 600) } : {}), tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
     questions,
   );
   if (!judged.ok) {metrics.skip('jev',judged.skipped);return undefined;}

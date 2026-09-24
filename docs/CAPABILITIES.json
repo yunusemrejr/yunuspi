@@ -2713,7 +2713,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 923
+        "line": 942
       },
       {
         "name": "or-provider",
@@ -2872,7 +2872,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          118
+          145
         ]
       }
     ],
@@ -3210,7 +3210,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 847,
+        "line": 866,
         "kind": "literal"
       },
       {
@@ -3622,7 +3622,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 847,
+        "line": 866,
         "kind": "literal"
       },
       {
@@ -3904,7 +3904,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          70
+          96
         ],
         "knownNames": [
           "todo"

@@ -109,3 +109,25 @@ test('single-mutation actions carrying operations apply as an atomic batch',()=>
  assert.equal(applyTaskMutation(empty,'create',{}).op.kind,'error');
  assert.equal(applyTaskMutation(empty,'update',{id:1,operations:[{action:'create',subject:'late'}]}).op.kind,'batch');
 });
+
+test('todo recovers only unambiguous batch operations that omit their action before validation', async () => {
+ const {prepareTodoArguments}=await load('todo.ts');
+ const {TodoParamsSchema}=await load('tool/types.ts');
+ const {validateToolArguments}=await import(pathToFileURL(path.join(release,'core/ai/src/utils/validation.js')).href);
+ const tool={name:'todo',parameters:TodoParamsSchema};
+ const valid=args=>{try{validateToolArguments(tool,{name:'todo',id:'call',arguments:args});return true;}catch{return false;}};
+ // Shapes recorded in real sessions: updates by id, creates by subject, and a JSON-string batch.
+ const recorded={action:'batch',operations:[{id:3,status:'completed',evidence:'Verified with PIL.'},{subject:'Map site structure',acceptance:'List of pages'}]};
+ assert.equal(valid(recorded),false,'the recorded shape fails the declared schema');
+ const prepared=prepareTodoArguments(recorded);
+ assert.deepEqual(prepared.operations.map(op=>op.action),['update','create']);
+ assert.equal(valid(prepared),true);
+ const stringBatch=prepareTodoArguments({batch:JSON.stringify({operations:[{action:'create',id:-1,subject:'Outcome'}]})});
+ assert.equal(stringBatch.action,'batch');assert.equal(valid(stringBatch),true);
+ const implicit=prepareTodoArguments({batch:true,operations:[{action:'create',subject:'Outcome'}]});
+ assert.equal(implicit.action,'batch');assert.equal('batch' in implicit,false);assert.equal(valid(implicit),true);
+ const ambiguous={action:'batch',operations:[{status:'completed'}]};
+ assert.equal(prepareTodoArguments(ambiguous),ambiguous,'no id and no subject is left for validation to reject');
+ assert.equal(valid(prepareTodoArguments(ambiguous)),false);
+ const correct={action:'list'};assert.equal(prepareTodoArguments(correct),correct,'valid calls pass through untouched');
+});

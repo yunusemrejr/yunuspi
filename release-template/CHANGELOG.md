@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.5 — 2026-09-24
+
+Makes the automatic reviewers and local intelligence produce value instead of discarded or idle work, without new model calls. The session observer no longer throws away finished paid reviews because todo, child or completed-tool state moved on during the review (measured 18 of 20 reviews discarded in one active session), or because older events left its bounded queue. A note is withheld only when its premise is gone: every cited running command finished, the model changed, or routing advice weighed child state that has since changed. Other notes are delivered with a caveat naming the changed state. A finished tool call replaces its unread start event, halving queue pressure and the resulting coverage loss. An unchanged idle state is reported once instead of as a new numbered "review" every 90 seconds.
+
+JEV skill discovery fits its 32 KiB input budget: it sends the evidence, not a second copy of the catalog, and shortlists large catalogs lexically. Previously every discovery over a large skill catalog skipped JEV and launched a paid general-model child. A confident JEV pick now avoids that child; a no-fit verdict over a shortlist keeps the fallback. JEV output distillation now receives the task, protects terminal output by outcome signals instead of any digit or path, and gets one bounded wait (at most 1.5 s, only before a result's first render), so a paid selection can reach context instead of arriving after the render was sealed. Smol accepts printable Unicode terminal output (✓, →, tree glyphs); control, ANSI, bidi and zero-width characters stay excluded.
+
+The `todo` tool recovers batch operations that omit `action` when the intent is unambiguous (positive id: update; subject: create), the cause of most recorded todo validation failures and their repeated turns. The TUI labels a skill router match as a match rather than a read, shows a repeated match of the same skill at most every ten minutes, and reports an unchanged Guardian state at most every five minutes while state changes still appear at once.
+
 ## 0.6.4 — 2026-09-24
 
 Improves coordination within the existing inference budgets. Identical JEV judgments now share cache entries and in-flight work across caller sites; a cancelled caller cannot retain the paid usage record for an answer delivered to another caller. Regression fixtures verify one request instead of two for duplicate questions. Prompt analysis accepts a complete, validated JSON advisory even when the provider reports reaching its output limit; partial JSON still uses bounded recovery. Failed preview sends remain eligible for display retry, and a session change during a display send discards the old advisory before model-context insertion.

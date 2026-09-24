@@ -109,7 +109,8 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 		const longRequest = `${"Synthetic background context. ".repeat(700)}\nRead the fixture.`;
 		assert.ok(longRequest.length > 16_384);
 		await Promise.all([a.session.prompt(longRequest, { source: "rpc" }), b.session.prompt("Read the fixture.", { source: "rpc" })]);
-		now += 61_000;
+		// An unchanged Guardian state repeats at most every five minutes.
+		now += 301_000;
 		await a.session.prompt("Read the fixture again.", { source: "rpc" });
 		const activity = session => session.messages.filter(message => message.customType === "harness-activity");
 		const guardian = activity(a.session).filter(message => message.details.kind === "guardian.observing");

@@ -18,7 +18,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let todos: any[] = [], adviceHistory: string[] = [];
   let latestAdviceId: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
-  const completed = new Map<string, string>(), toolInputs = new Map<string, string>();
+  const completed = new Map<string, string>(), toolInputs = new Map<string, string>(), startedEvents = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
   let inputRestrictions: any = {}, inputBlocked = false;
@@ -38,8 +38,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     ? message.content.slice(-8).filter((x: any) => x?.type === type && typeof x[type] === 'string').map((x: any) => boundedObserverText(x[type], limit)).join('\n').slice(-limit) : '';
   const add = (kind: string, text: string, tool?: string) => {
     if (!text || !request) return;
-    recent.push({ id: `event-${++sequence}`, kind, text: boundedObserverText(text, 700), ...(tool ? { tool } : {}) });
+    const id = `event-${++sequence}`;
+    recent.push({ id, kind, text: boundedObserverText(text, 700), ...(tool ? { tool } : {}) });
     if (recent.length > 256) { dropped += recent.length - 256; recent = recent.slice(-256); }
+    return id;
   };
   const compactInput = (input: any) => {
     if (!input || typeof input !== 'object') return '';
@@ -71,7 +73,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; runtime.begin(owner); };
   const runtime = createSessionObserver({
     ...testing,
     snapshot() {
@@ -118,36 +120,42 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
       currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...evidence], tools, skills);
       const capturedStates = new Map(currentState(false).map(row => [row.id, row.text]));
-      const capturedSequence = sequence, capturedDropped = dropped, capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
+      const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);
       const relevantWords = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9_]{4,}/g) ?? []).filter(word => !commonWords.has(word)));
       const resources = (text: string) => new Set(text.toLowerCase().match(/(?:[a-z0-9_.-]+\/)*[a-z0-9_.-]+\.[a-z0-9]{1,8}\b/g) ?? []);
       const stillCurrent = (advice?: any) => {
-        if (capturedDropped !== dropped || capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
+        if (capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
         const currentStates = new Map(currentState(false).map(row => [row.id, row.text]));
         const cited = currentPacket.evidence.filter(row => advice?.evidence?.includes(row.id));
-        if (cited.some(row => row.kind === 'current state' && capturedStates.get(row.id) !== currentStates.get(row.id))) return false;
+        const changed = cited.filter(row => row.kind === 'current state' && capturedStates.get(row.id) !== currentStates.get(row.id)).map(row => row.id);
+        // Discard only when the premise is gone: advice about running work
+        // whose every cited command has finished, or routing advice after the
+        // child state it weighed changed. Todo/child/completed-tool rows change
+        // on almost every step of an active session (measured 18 of 20 paid
+        // reviews discarded); such changes are named in the delivery caveat.
+        if (changed.includes('running-tools') && ![...capturedRunning].some(id => runningTools.has(id))) return false;
         if (advice?.evidence?.includes('model-routing') && capturedStates.get('child-state') !== currentStates.get('child-state')) return false;
         const citedText = cited.filter(row => row.kind !== 'user request').map(row => row.text).join(' ');
         const targets = resources(`${citedText} ${advice?.note ?? ''}`), focus = relevantWords(advice?.note ?? '');
         const suggestedTools = new Set<string>(advice?.tools ?? []);
-        // Overlapping later work does not falsify a review: the note is still
-        // delivered, labelled so the agent checks whether it was already
-        // addressed. Only changed cited state or lost coverage discards it.
+        // Overlapping later work does not falsify a review either: the note is
+        // delivered, labelled so the agent checks whether it was already addressed.
+        let overlap = '';
         for (const row of recent) {
           const index = Number(row.id.replace('event-', ''));
           if (index <= capturedSequence || !['tool started', 'tool result', 'tool error', 'assistant text'].includes(row.kind)) continue;
           const changedTargets = resources(row.text), changedFocus = relevantWords(row.text);
           const target = [...targets].find(item => changedTargets.has(item));
-          if (target) return `later work touched ${target}`;
-          const word = [...focus].find(item => changedFocus.has(item));
-          if (word) return `later work continued on "${word}"`;
+          const word = target ? undefined : [...focus].find(item => changedFocus.has(item));
           // A suggested tool without a named resource may already be doing the
           // requested work. Distinct named resources permit unrelated progress.
-          if (row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size)) return `a later ${row.tool} call may have covered this`;
+          overlap = target ? `later work touched ${target}` : word ? `later work continued on "${word}"`
+            : row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size) ? `a later ${row.tool} call may have covered this` : '';
+          if (overlap) break;
         }
-        return true;
+        return [changed.length ? `cited ${changed.join(', ')} changed` : '', overlap].filter(Boolean).join('; ') || true;
       };
       // Reviewer billing and its own prior note must not create new work for
       // itself. Task activity, queue progress and available capabilities do.
@@ -223,12 +231,17 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (event.toolCallId) { runningTools.set(event.toolCallId, { name: event.toolName, input, startedAt: now(), foreground: ['bash', 'powershell'].includes(event.toolName) && event.args?.background !== true && event.args?.async !== true });
       if (runningTools.size > 128) runningTools.delete(runningTools.keys().next().value!);
       toolInputs.set(event.toolCallId, input); if (toolInputs.size > 128) toolInputs.delete(toolInputs.keys().next().value!); }
-    add('tool started', `${event.toolName} started. ${input}`, event.toolName); revision++;
+    const started = add('tool started', `${event.toolName} started. ${input}`, event.toolName); revision++;
+    if (event.toolCallId && started) { startedEvents.set(event.toolCallId, started); if (startedEvents.size > 128) startedEvents.delete(startedEvents.keys().next().value!); }
   });
   pi.on('tool_result', (event: any, context: any) => {
     if (!owns(context)) return;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);
+    // The result row repeats the input, so an unread start row only doubles
+    // queue pressure (and the overflow that loses coverage).
+    const started = startedEvents.get(event.toolCallId);
+    if (started) { startedEvents.delete(event.toolCallId); recent = recent.filter(row => row.id !== started); }
     const summary = `${event.toolName} ${input}: ${event.isError ? 'failed' : 'completed'}`;
     completed.set(`${event.toolName}:${input}`, summary);
     if (completed.size > 16) completed.delete(completed.keys().next().value!);

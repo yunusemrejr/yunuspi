@@ -119,6 +119,9 @@ background. Protected facts are collected across the complete source before
 4–32 KiB windowing; unsafe or overly dense evidence falls back to raw. Windowed
 results identify both the original source hash and the selected window hash.
 Errors, instructions, secrets, cancellation and truncation are excluded.
+Printable Unicode (for example ✓, → or tree glyphs) is eligible because line
+extraction is UTF-8 exact; control, ANSI escape, bidi and zero-width characters
+are not.
 The background model receives at most 1,024 bytes of task-aware framing and whole
 source lines, with exact repeated rows deduplicated. Its IDs must belong to that
 candidate view; the host adds protected evidence from the complete source and
@@ -167,8 +170,11 @@ identical requests share one paid call. Caller mutation cannot alter cached
 answers. The circuit breaker preserves heuristic fallback. New sites: `rank` (validation),
 `request-advisory`, `intent`, `finding-duplicate`, `classify`, and
 `skill-discovery`. Skill discovery asks one typed choice/existence batch before
-launching a general-model advisor. Valid catalog choices or clear no-fit
-judgments avoid that launch; uncertainty keeps the bounded original fallback.
+launching a general-model advisor. It sends the evidence section of the brief,
+not its embedded catalog copy; a catalog over the 32 KiB budget is shortlisted
+by lexical overlap. Valid catalog choices or clear no-fit judgments over the
+complete catalog avoid that launch; a no-fit over a shortlist, and uncertainty,
+keep the bounded original fallback.
 
 Preferred working routes and exact-input cache hits avoid model-catalog discovery.
 Only model rejections trigger catalog fallback. Cancelled, malformed and over-budget
@@ -176,9 +182,15 @@ inputs stop before another judgment; the serialized state/question budget is 32 
 
 Jev evidence selection preserves protected chunks independently of scores,
 rejects sources exceeding the complete-input budget, and cannot truncate kept
-facts to meet an output cap. Ready results may apply at the context boundary;
-a pending remote request adds no context wait. A raw first exposure remains
-sealed. A clipped Needle prefix cannot rescue a mutation request as read-only;
+facts to meet an output cap. The relevance question carries the current task
+terms. Terminal (`bash`) output protects chunks with outcome signals (errors,
+failures, warnings, exit status, summaries, totals); other tools keep the broad
+protection, under which any digit or path marks a chunk as required. The next
+provider request normally follows a tool result within milliseconds, before a
+~0.6 s answer, so the context boundary waits at most 1.5 s, once, for a pending
+selection whose result has not been rendered yet. Sealed renders never wait (an
+earlier version waited up to 2 s on every pass; its removal left paid
+selections unused). A raw first exposure remains sealed. A clipped Needle prefix cannot rescue a mutation request as read-only;
 Jev receives the complete bounded task before that judgment.
 
 ## Coordination, metrics, health

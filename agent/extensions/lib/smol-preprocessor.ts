@@ -139,7 +139,11 @@ export function smolOutputSkipReason(tool: string, raw: string, isError: boolean
   if (isError) return 'protected-content';
   if (raw.length < 3000) return 'too-small-to-benefit';
   if (raw.length > maxChars) return 'input-budget';
-  if (/[^\x09\x0a\x0d\x20-\x7e]/.test(raw)) return 'input-shape-unsupported';
+  // Line extraction is UTF-8 exact (smol-extraction.ts), so printable Unicode
+  // such as ✓, → or tree glyphs is ordinary terminal output. Control, bidi
+  // and zero-width characters can hide or reorder text and stay excluded.
+  // ASCII-only admission rejected 36 of 92 recorded offers.
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/.test(raw)) return 'input-shape-unsupported';
   if (details != null && (typeof details !== 'object' || Array.isArray(details))) return 'input-shape-unsupported';
   try { if (JSON.stringify({isError: false, details: details ?? {}}).length > 500) return 'metadata-budget'; } catch { return 'input-shape-unsupported'; }
   if (/<\||\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/i.test(raw)) return 'protected-content';
