@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.6.6 gives sessions continuity: the previous session's follow-ups and the project's current CI result are carried into the next session, Needle3 ranking is fused with lexical ranking where it measurably helps, and updates keep at most two backups. Version 0.6.5 made observer reviews, JEV and Smol produce value instead of discarded or idle work. It includes the generous analysis and observer timeouts, provider repairs, account-backed Codex catalog, verified observer delivery and expanded `/used` dashboard. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Version 0.7.0 gives the session observer a book of working doctrine it reads, cites and annotates. It adds a design-to-code studio (analyze a mockup, cut and trace its assets, compare the build), code-quality and pre-commit review tools, desktop app control in a private virtual display, synced video captions and working transitions, and memory search that works without qmd. Matching tools are staged for the first model turn, so the agent uses them without reminders. Version 0.6.6 gave sessions continuity: the previous session's follow-ups and the project's current CI result are carried into the next session. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 
@@ -62,12 +62,15 @@ The capability index explains entry points, supported options, related abilities
 | Area | Available capabilities |
 | --- | --- |
 | Understand and change code | Symbol, AST and language-server inspection; scoped context; batch edits; syntax diagnostics; review evidence; snapshots. [Source checks](docs/SKILLS-AND-CHECKS.md) |
+| Keep code clean | Clone and DRY detection, code-slop and prose checks, complexity, pre-commit review and blame, and a commit guard for secrets and conflict markers. [Code quality](docs/CODE-QUALITY.md) |
+| Build from a design | Mockup and screenshot analysis into bands, blocks, palette, type scale and tokens; asset cutting and SVG tracing; rendered visual comparison against the reference. [Design studio](docs/DESIGN-STUDIO.md) |
 | Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
 | Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) |
 | Manage longer tasks | Background jobs, dependency-aware action plans and verification records. [Action plans](docs/ACTION-PLANS.md) |
-| Work with the web | Search, rendered-page reading, isolated browser tabs, DOM references, screenshots, console JavaScript, condition waits, forms and human verification help. Both browser tools support localhost previews. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
+| Work with the web | Search, source-ranked research, rendered-page reading, isolated browser tabs, DOM references, screenshots, console JavaScript, condition waits, forms and human verification help. Both browser tools support localhost previews. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
+| Drive desktop apps | Launch Electron, GTK, Qt or X11 apps in a private virtual display; screenshots, window geometry, pointer and keyboard input, logs. Linux with Xvfb and xdotool. [Desktop sessions](docs/DESKTOP-SESSIONS.md) |
 | Reach people by email | Send and read mail through AgentMail with an environment-provided key, bounded recipients, compact inbox previews and opt-in message bodies. [Email and outreach](docs/EMAIL.md) |
-| Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) |
+| Create and analyze artifacts | Skills for documents, spreadsheets, research, ML, Blender, CAD, 3D/voxel work, video and audio; code-first video with narration, synced captions and effects; media tools for frames, measurements and bounded edits. [Skills](agent/skills/) · [Video studio](docs/VIDEO-STUDIO.md) |
 | Inspect and experiment | Structured-data and API tools, local utility MCP tools, and disposable sandboxes with resource limits. [Utility tools](agent/extensions/lib/utility-mcp/README.md) · [Sandboxes](docs/SANDBOXES.md) |
 
 Some capabilities need additional software or provider access. Browser rendering requires its browser runtime; media processing needs tools such as FFmpeg, and text extraction needs Tesseract. Optional local preprocessing requires a separately installed model environment. Model weights, paid subscriptions and credentials are not bundled.
