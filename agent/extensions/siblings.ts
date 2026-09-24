@@ -366,6 +366,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 	const readVersions = new Map<string,{version:string;whole:boolean}>(), pendingReads = new Map<string,{target:string;version:string;whole:boolean}>();
 	let scanTruncated = false;
 	let bridgeEpoch: string | undefined, bridgeStartedAt = 0, inbox: string | undefined, inboxWatcher: fs.FSWatcher | undefined;
+	let peerSequence = 0;
 	const delivering = new Set<string>();
 	const received = new Set<string>();
 	// /reload re-registers this extension without restarting the process.
@@ -595,7 +596,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 	const stopInbox = () => {
 		inboxWatcher?.close(); inboxWatcher = undefined;
 		try { if(currentContext && bridgeEpoch)retirePresence({kind:'root',sid:currentContext.sessionManager.getSessionId(),root:coordinationRoot(currentContext.cwd),bridgeEpoch,bridgeStartedAt}); } catch { /* A removed workspace cannot block teardown. */ }
-		const old = inbox; inbox = undefined; bridgeEpoch = undefined; delivering.clear(); received.clear();
+		const old = inbox; inbox = undefined; bridgeEpoch = undefined; peerSequence = 0; delivering.clear(); received.clear();
 		if (old) try { fs.rmSync(old, {recursive:true,force:true}); } catch { /* Epoch fencing still rejects stale deliveries. */ }
 	};
 	const drainInbox = () => {
@@ -605,9 +606,18 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 			privateDirectory(DIR); privateDirectory(INBOX_DIR);
 			const info=fs.lstatSync(directory); if(!info.isDirectory() || info.isSymbolicLink()) return;
 			const own = ctx.sessionManager.getSessionId(), root = coordinationRoot(ctx.cwd), now = Date.now();
-			for (const name of inboxNames(directory)) {
-				if (!/^[0-9a-f]{64}\.json$/.test(name) || delivering.has(name)) continue;
-				const file = path.join(directory,name), row = readPeerRecord(file,8192);
+			// Filenames are idempotency digests, not chronology. Replaying them
+			// lexically could put an old "started" note after its completion.
+			// Read the existing bounded inbox once, retaining all validation below.
+			const queued = inboxNames(directory)
+				.filter(name => /^[0-9a-f]{64}\.json$/.test(name) && !delivering.has(name))
+				.map(name => ({name, row:readPeerRecord(path.join(directory,name),8192)}));
+			const sender = (row:any) => JSON.stringify([row?.fromRoot,row?.from,row?.fromEpoch]);
+			const sequence = (row:any) => Number.isSafeInteger(row?.sequence) && row.sequence > 0 ? row.sequence : 0;
+			queued.sort((a,b) => (Number.isFinite(a.row?.at) ? a.row.at : 0) - (Number.isFinite(b.row?.at) ? b.row.at : 0)
+				|| sender(a.row).localeCompare(sender(b.row)) || sequence(a.row) - sequence(b.row) || a.name.localeCompare(b.name));
+			for (const {name,row} of queued) {
+				const file = path.join(directory,name);
 				const sourceShape = row && typeof row.from==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(row.from) && typeof row.fromRoot==='string' && path.isAbsolute(row.fromRoot) && row.fromRoot.length<=4096 && peerEpoch(row.fromEpoch);
 				const sourceFiles = sourceShape ? [path.join(ACTIVE_DIR,`${createHash('sha1').update(row.fromRoot).digest('hex').slice(0,16)}--${row.from}.json`),retiredPath(row.fromRoot,row.from,row.fromEpoch)] : [];
 				const source = sourceFiles.map(file=>readPeerRecord(file)).find(data=>data?.kind==='root' && data.sid===row.from && data.root===row.fromRoot && data.bridgeEpoch===row.fromEpoch
@@ -778,7 +788,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 					if (inboxNames(directory).length >= 128) return reject('Recipient inbox is full (128 queued messages). Continue independent work; no message was queued.');
 					publish(ctx);
 					const messageId = createHash('sha256').update(`${bridgeEpoch}\0${_id}\0${target.sid}\0${target.bridgeEpoch}`).digest('hex');
-					const envelope = {version:1,id:messageId,from:ctx.sessionManager.getSessionId(),fromRoot:coordinationRoot(ctx.cwd),fromEpoch:bridgeEpoch,to:target.sid,toRoot:target.root,toEpoch:target.bridgeEpoch,at:Date.now(),message:input.message};
+					const envelope = {version:1,id:messageId,from:ctx.sessionManager.getSessionId(),fromRoot:coordinationRoot(ctx.cwd),fromEpoch:bridgeEpoch,to:target.sid,toRoot:target.root,toEpoch:target.bridgeEpoch,at:Date.now(),sequence:++peerSequence,message:input.message};
 					const file = path.join(directory,`${messageId}.json`), temporary = path.join(directory,`${randomUUID()}.tmp`);
 					try {
 						fs.writeFileSync(temporary,JSON.stringify(envelope),{flag:'wx',mode:0o600});

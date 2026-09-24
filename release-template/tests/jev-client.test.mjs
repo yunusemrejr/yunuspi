@@ -134,6 +134,47 @@ test("identical calls pay once via the session cache", async () => {
   assert.equal(ledger[1].data.costUsd, 0);
 });
 
+test("identical judgments at different sites reuse the paid answer", async () => {
+  let fetches = 0;
+  const { ledger, pi } = harness(async () => { fetches++; return decisionsOk(); });
+  const questions = { ping: { type: "noul", instructions: "Affirmative?" } };
+  const first = await jev.askJev("screen", "shared state", questions, { pi });
+  const second = await jev.askJev("rank", "shared state", questions, { pi });
+  assert.equal(fetches, 1);
+  assert.equal(first.usage.cached, false);
+  assert.equal(second.usage.cached, true);
+  assert.deepEqual(ledger.map(row => [row.data.site, row.data.cached]), [["screen", false], ["rank", true]]);
+});
+
+test("a cancelled leader does not own a surviving caller's paid judgment", async () => {
+  let respond, started, fetches = 0;
+  const begun = new Promise(resolve => { started = resolve; });
+  harness(async () => {
+    fetches++;
+    started();
+    return new Promise(resolve => { respond = resolve; });
+  });
+  const leaderLedger = [], followerLedger = [];
+  const leaderPi = { appendEntry: (type, data) => leaderLedger.push({ type, data }) };
+  const followerPi = { appendEntry: (type, data) => followerLedger.push({ type, data }) };
+  const abort = new AbortController();
+  const questions = { ping: { type: "noul", instructions: "Affirmative?" } };
+  const leader = jev.askJev("screen", "shared state", questions, { pi: leaderPi, signal: abort.signal });
+  await begun;
+  const follower = jev.askJev("rank", "shared state", questions, { pi: followerPi });
+  abort.abort();
+  assert.equal((await leader).skipped, "aborted");
+  respond(decisionsOk());
+  const result = await follower;
+  assert.equal(result.ok, true);
+  assert.equal(result.usage.cached, false);
+  assert.equal(fetches, 1);
+  assert.equal(leaderLedger.length, 0);
+  assert.equal(followerLedger.length, 1);
+  assert.equal(followerLedger[0].data.site, "rank");
+  assert.ok(followerLedger[0].data.costUsd > 0);
+});
+
 test("preferred and cached judgments do not fetch the model catalog", async () => {
   let catalogs = 0, judgments = 0;
   harness(async url => {

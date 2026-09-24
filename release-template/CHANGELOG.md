@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.4 — 2026-09-24
+
+Improves coordination within the existing inference budgets. Identical JEV judgments now share cache entries and in-flight work across caller sites; a cancelled caller cannot retain the paid usage record for an answer delivered to another caller. Regression fixtures verify one request instead of two for duplicate questions. Prompt analysis accepts a complete, validated JSON advisory even when the provider reports reaching its output limit; partial JSON still uses bounded recovery. Failed preview sends remain eligible for display retry, and a session change during a display send discards the old advisory before model-context insertion.
+
+The observer retains chronological evidence when changed state invalidates a review. Its bounded summaries prioritize active todos and unresolved child outcomes, including recorded failure reasons, so completed history cannot hide work needing attention. Review cadence, deadlines, packet sizes and output caps are unchanged.
+
+Automatic teams preserve preference order while counting provider aliases of the same model as one reviewer. Explicit instructions not to spawn agents or helpers suppress automatic delegation. Cross-session messages preserve recorded timestamp order, and the activity footer clears completed helper labels when work ends.
+
 ## 0.6.3 — 2026-09-24
 
 The session observer now has three minutes to finish a review, with elapsed/allowed-time check-ins while the main agent continues. This allowance is independent of the 30-second review cadence and 120-second visible check-in bound. Timeout recovery retains the evidence chunk; cancellation, stale-state validation, duplicate suppression and verified main-agent delivery remain enforced.

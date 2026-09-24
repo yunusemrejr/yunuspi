@@ -3,7 +3,7 @@ import type { ModelInfo } from "../../shared/model-info.ts";
 import { catalogRouteCapabilities, isProvenFreeRoute } from "./free-route-evidence.ts";
 import { modelIdentity, taskQuality } from "./model-quality.ts";
 import { selectAffordableModel } from "./model-selection.ts";
-import { distributeLlmPreferredModels, withLlmThinkingSuffix } from "./model-fallback.ts";
+import { resolveLlmPreferenceChain, withLlmThinkingSuffix } from "./model-fallback.ts";
 import type { ModelEconomyConfig } from "./model-economy.ts";
 import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 
@@ -19,7 +19,7 @@ export interface AssistancePlan {
 export function planAssistance(prompt: string, project = false): AssistancePlan {
  const text = prompt.slice(0,32768).replace(/```[\s\S]*?```/g," ").replace(/^\s*>.*$/gm," ");
  const none = (reason:string): AssistancePlan => ({mode:"none",roles:[],reason,deadlineMs:0,maxCostUsd:0});
- if (/\b(?:do not|don't|never)\s+(?:delegate|use\s+(?:subagents?|swarms?|fusion))\b|\bno\s+(?:subagents?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i.test(text)) return none("explicit delegation constraint");
+ if (/\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|use\s+(?:sub[- ]?agents?|swarms?|fusion|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|delegation|swarms?|fusion|tools)\b|\bwithout tools\b/i.test(text)) return none("explicit delegation constraint");
  if (/\b(?:only use|use only|stick to|stay on)\b(?!\s+(?:the\s+)?free\b)/i.test(text)) return none("explicit route/tool restriction");
  if (text.length < 35 || /\b(?:typo|spelling|rename|one.line)\b/i.test(text) && !/\b(?:debug|investigate|audit)\b/i.test(text)) return none("coordination exceeds useful work");
  if (!/\b(?:review|debug|research|compare|implement|investigate|audit|refactor|refine|optimize|design|build|fix|analy[sz]e|improve|verify|test|deploy|release|publish|migrat(?:e|ion))\b/i.test(text)) return none("no independent work identified");
@@ -60,16 +60,14 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
  // routes, matching the single-subagent path. Automatic council/review
  // rounds opt out via honorPaidPreferences: their freeOnly bounds only the
  // autonomous fill while configured routes stay honored.
- const distributed = distributeLlmPreferredModels(options.role ?? plan.mode, slots.length, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
- const distinct = distributed.filter((item,index,self)=>self.findIndex(other=>modelIdentity(other.route)===modelIdentity(item.route))===index);
- slots.forEach((role,index)=>{
-  const pick = distinct[index];
-  if (!pick) return;
+ const preferred = resolveLlmPreferenceChain(options.role ?? plan.mode, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
+ for (const pick of preferred) {
+  if (team.length >= slots.length) break;
   const model = pool.find(m=>m.fullId===pick.route);
-  if (!model) return;
+  if (!model || used.has(modelIdentity(model.id))) continue;
   used.add(modelIdentity(model.id));
-  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role,proof:"explicit llm_preferences",explanation:pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
- });
+  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role:slots[team.length]!,proof:"explicit llm_preferences",explanation:pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
+ }
  for (const role of slots.slice(team.length)) {
   const candidates = pool.filter(m=>!used.has(modelIdentity(m.id)));
   const available = (freeOnly:boolean, diverse:boolean) => selectAffordableModel(diverse ? candidates.filter(m=>!team.some(member=>member.route.startsWith(m.provider+"/"))) : candidates,cheap,

@@ -3294,7 +3294,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 758,
+        "line": 768,
         "kind": "literal"
       },
       {
@@ -3682,7 +3682,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 758,
+        "line": 768,
         "kind": "literal"
       },
       {

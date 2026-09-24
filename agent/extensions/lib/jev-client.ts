@@ -146,6 +146,7 @@ type InflightEntry = {
   controller: AbortController;
   waiters: number;
   settled: boolean;
+  charged: boolean;
 };
 const inflight = new Map<string, InflightEntry>();
 
@@ -179,9 +180,9 @@ export function jevHealth(): {
   };
 }
 
-function cacheKey(site: string, slug: string, state: unknown, questions: unknown): string {
+function cacheKey(slug: string, state: unknown, questions: unknown): string {
   return createHash("sha256")
-    .update(JSON.stringify([site, slug, state, questions]))
+    .update(JSON.stringify([slug, state, questions]))
     .digest("hex");
 }
 
@@ -423,16 +424,14 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
   if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
   let identity: string;
-  try { identity=cacheKey(site,'inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
+  try { identity=cacheKey('inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
   let entry=inflight.get(identity);
-  let leader=false;
   if (!entry) {
     if(inflight.size>=64)return {ok:false,skipped:'busy'};
-    leader=true;
     const controller=new AbortController();
-    entry={controller,waiters:0,settled:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
+    entry={controller,waiters:0,settled:false,charged:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
     entry.promise=(async()=>{
-      try { return await boundedAsk(site,state,questions,{...opts,signal:controller.signal}); }
+      try { return await boundedAsk(state,questions,{...opts,signal:controller.signal}); }
       catch { return {ok:false,skipped:'unavailable'}; }
       finally {
         entry!.settled=true;
@@ -458,7 +457,12 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     aborted=waited.aborted;
     if (aborted) return {ok:false,skipped:'aborted'};
     const result=waited.result!;
-    if(leader || !result.ok)return result;
+    if (!result.ok) return result;
+    if (!result.usage.cached && !entry.charged) {
+      entry.charged = true;
+      ledger(opts.pi, { site, ...result.usage });
+      return { ...result, answers: structuredClone(result.answers) };
+    }
     const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
     ledger(opts.pi,{site,...usage});
     return {ok:true,answers:structuredClone(result.answers),usage};
@@ -478,18 +482,17 @@ async function waitForInflight(entry: InflightEntry, signal?: AbortSignal, onAbo
 
 /** One deadline covers the entire alias cascade and discovery, not each
  * alias independently. Cancellation never poisons provider health. */
-async function boundedAsk(site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
+async function boundedAsk(state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
   const controller = new AbortController();
   const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
   const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), deps.requestTimeoutMs);
   try {
-    const result = await askJevOnce(site, state, questions, { ...opts, signal });
+    const result = await askJevOnce(state, questions, { ...opts, signal });
     return controller.signal.aborted && !opts.signal?.aborted ? { ok: false, skipped: 'timeout' } : result;
   } finally { clearTimeout(timer); }
 }
 
 async function askJevOnce(
-  site: string,
   state: unknown,
   questions: Record<string, unknown>,
   opts: JevAskOpts = {},
@@ -517,10 +520,9 @@ async function askJevOnce(
   // aliases only after all known ones explicitly reject the requested model.
   const ordered = knownSlugs();
   for (const slug of ordered) {
-    const hit = cacheGet(cacheKey(site, slug, state, questions));
+    const hit = cacheGet(cacheKey(slug, state, questions));
     if (hit) {
       beginHarnessActivity('jev')('cached');
-      ledger(opts.pi, { site, model: slug, inputTokens: 0, costUsd: 0, ms: deps.now() - started, cached: true });
       return {
         ok: true,
         answers: structuredClone(hit.answers),
@@ -544,10 +546,9 @@ async function askJevOnce(
     try {
       const { answers } = await postDecisions(slug, state, questions, key, opts.signal);
       stickySlug = slug;
-      cacheSet(cacheKey(site, slug, state, questions), { answers, inputTokens, model: slug });
+      cacheSet(cacheKey(slug, state, questions), { answers, inputTokens, model: slug });
       const ms = deps.now() - started;
       const costUsd = jevCostUsd(inputTokens);
-      ledger(opts.pi, { site, model: slug, inputTokens, costUsd, ms, cached: false });
       return { ok: true, answers, usage: { model: slug, inputTokens, costUsd, ms, cached: false } };
     } catch (error) {
       if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };

@@ -86,6 +86,45 @@ test('queue receipt waits for native persistence and a session switch invalidate
   }finally{await a.fire('session_shutdown');await b.fire('session_shutdown');}
 });
 
+test('queued peer updates reach the agent in timestamp order rather than digest order',async()=>{
+  const directory=workspace('ordered-bridge'),cwd=workspace('ordered-project');
+  const a=fixture(directory,cwd,'sender'),b=fixture(directory,cwd,'recipient');
+  await a.fire('session_start');await b.fire('session_start');
+  try{
+    const target=await address(a,b),self=await a.status();
+    const {createHash}=await import('node:crypto');
+    const recipientDir=path.join(directory,'inbox',createHash('sha256').update(`${cwd}\0recipient\0${target.recipientEpoch}`).digest('hex'));
+    const at=Date.now();
+    for(const [index,id,message] of [[0,'f','Check started.'],[1,'a','Check finished; use the result.']]){
+      const row={version:1,id:id.repeat(64),from:'sender',fromRoot:cwd,fromEpoch:self.bridgeEpoch,to:'recipient',toRoot:cwd,toEpoch:target.recipientEpoch,at:at+index,message};
+      fs.writeFileSync(path.join(recipientDir,`${row.id}.json`),JSON.stringify(row),{mode:0o600});
+    }
+    await b.fire('turn_end');
+    assert.deepEqual(b.messages.map(row=>row.message.content.split('\n').at(-1)),['Check started.','Check finished; use the result.']);
+    assert.ok(b.messages.every(row=>!row.options.triggerTurn),'ordering adds no model turns');
+    await b.fire('turn_end');assert.equal(b.messages.length,2,'delivered updates are not repeated');
+  }finally{await a.fire('session_shutdown');await b.fire('session_shutdown');}
+});
+
+test('same-clock peer sends retain sender order without changing their wall clock',async()=>{
+  const directory=workspace('same-clock-bridge'),cwd=workspace('same-clock-project');
+  const a=fixture(directory,cwd,'sender'),b=fixture(directory,cwd,'recipient');
+  await a.fire('session_start');await b.fire('session_start');
+  const originalNow=Date.now;
+  try{
+    const target=await address(a,b),at=Date.now();Date.now=()=>at;
+    const expected=Array.from({length:8},(_,i)=>`Progress update ${i}.`);
+    for(const message of expected)assert.equal((await a.invoke({action:'send',...target,message})).details.queued,true);
+    const {createHash}=await import('node:crypto');
+    const recipientDir=path.join(directory,'inbox',createHash('sha256').update(`${cwd}\0recipient\0${target.recipientEpoch}`).digest('hex'));
+    const rows=fs.readdirSync(recipientDir).filter(name=>name.endsWith('.json')).map(name=>JSON.parse(fs.readFileSync(path.join(recipientDir,name),'utf8')));
+    assert.equal(rows.length,8);assert.ok(rows.every(row=>row.at===at));
+    assert.deepEqual(rows.map(row=>row.sequence).sort((a,b)=>a-b),[1,2,3,4,5,6,7,8]);
+    await b.fire('turn_end');
+    assert.deepEqual(b.messages.map(row=>row.message.content.split('\n').at(-1)),expected);
+  }finally{Date.now=originalNow;await a.fire('session_shutdown');await b.fire('session_shutdown');}
+});
+
 test('a queued message survives sender exit but retirement cannot authorize new messages',async()=>{
   const directory=workspace('departure-bridge'),cwd=workspace('departure-project');
   const a=fixture(directory,cwd,'sender'),b=fixture(directory,cwd,'recipient');await a.fire('session_start');await b.fire('session_start');

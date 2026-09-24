@@ -253,11 +253,13 @@ export function createSessionObserver(ports: ObserverPorts) {
       const text = response.content?.filter((p: any) => p.type === 'text' && typeof p.text === 'string').map((p: any) => p.text).join('\n') ?? '';
       const validation = validateObserverAdvice(text, snapshot.packet), advice = validation.advice;
       if (!advice) { current = undefined; notice('unavailable', `Observer response rejected: ${validation.reason}; evidence retained for the next review.`); return; }
-      snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
       // false: the cited state changed or coverage was lost, so the premise is
       // gone. A string names overlapping later work; the review keeps its value.
       const freshness = snapshot.current?.(advice);
       if (freshness === false) { current = undefined; notice('reviewed', 'State cited by this review changed before it finished; advice no longer applies.'); return; }
+      // A stale review has not consumed its evidence. Advance the queue only
+      // after the cited state is reconciled, so the next review sees that chunk.
+      snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
       const overlap = typeof freshness === 'string' ? freshness : undefined;
       if (!advice.note) { current = undefined; notice('reviewed', `Chunk ${++check}: no useful new reminder.`); return; }
       const body = observerAdviceText(advice), key = normalize(body), tokens = new Set(normalize(advice.note).split(' '));

@@ -107,3 +107,14 @@ test('named helpers show start, success, error and cancellation with theme color
   assert.match(f.writes.at(-1).text,/<error>✗ Shell failed/);
  } finally {f.close();}
 });
+
+test('agent end clears a completed helper alongside active work', () => {
+ const f = fixture();
+ try {
+  f.emit('tool_execution_start', {toolCallId:'shell',toolName:'bash'});
+  f.service({action:'start',id:'jev',label:'jev'})('ok');
+  assert.match(f.writes.at(-1).text,/Shell.*JEV returned/);
+  f.emit('agent_end');
+  assert.equal(f.writes.at(-1).text,undefined);
+ } finally {f.close();}
+});

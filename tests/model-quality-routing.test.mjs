@@ -526,6 +526,44 @@ try {
    1,
   );
  });
+ check("configured router aliases do not consume independent team slots", () => {
+  const alias = model(fresh.id, "orcarouter");
+  const prefsFile = path.join(root, "llm-prefs-aliases.json");
+  fs.writeFileSync(prefsFile, JSON.stringify({
+   preferences: { fusion: [
+    { provider: fresh.provider, model: fresh.id },
+    { provider: alias.provider, model: alias.id },
+   ] },
+  }));
+  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
+  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
+  clearLlmPreferencesCache();
+  try {
+   const plan = planAssistance("Compare two implementation approaches in this repository");
+   const team = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
+   assert.equal(team.length, 2);
+   assert.equal(team[0].route, fresh.fullId);
+   assert.equal(team[0].role, plan.roles[0]);
+   assert.equal(team[1].role, plan.roles[1]);
+   assert.notEqual(team[1].route, alias.fullId, "a router alias cannot serve as independent critique");
+   assert.notEqual(team[1].route, fresh.fullId);
+   fs.writeFileSync(prefsFile, JSON.stringify({
+    preferences: { fusion: [
+     { provider: fresh.provider, model: fresh.id },
+     { provider: alias.provider, model: alias.id },
+     { provider: other.provider, model: other.id },
+    ] },
+   }));
+   clearLlmPreferencesCache();
+   const configured = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
+   assert.deepEqual(configured.map(member => member.route), [fresh.fullId, other.fullId]);
+   assert.equal(configured[1].proof, "explicit llm_preferences");
+  } finally {
+   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
+   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
+   clearLlmPreferencesCache();
+  }
+ });
  check("team freeOnly filters paid preferences unless explicitly honored", () => {
   const prefsFile = path.join(root, "llm-prefs-team-freeonly.json");
   fs.writeFileSync(

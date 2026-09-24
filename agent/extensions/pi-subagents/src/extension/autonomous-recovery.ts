@@ -145,7 +145,7 @@ function restrictionEvidence(parts: Iterable<string>) {
    else if (final || !["free", "the free"].some(word => word.startsWith(target.toLowerCase()))) flags.fixedRoute = true;
   }
   if (saw(/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:delegation|subagents|swarm)\b/i)) flags.allowDelegation = true;
-  if (saw(/\b(?:do not|don't|never)\s+(?:delegate|(?:allow|enable|use)\s+(?:automatic\s+)?(?:subagents|swarm|delegation))\b|\bno\s+(?:subagents|swarm|delegation)\b/i)) flags.noDelegation = true;
+  if (saw(/\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|(?:allow|enable|use)\s+(?:automatic\s+)?(?:sub[- ]?agents?|swarm|delegation|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|swarm|delegation)\b/i)) flags.noDelegation = true;
  };
  for (const part of parts) for (let at = 0; at < part.length; at += 16_384) {
   const normalized = (carry + part.slice(at, at + 16_384))

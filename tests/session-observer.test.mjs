@@ -434,6 +434,24 @@ test('observer child state uses canonical execution and acceptance outcomes desp
   const child=h.packets[0].evidence.find(row=>row.id==='child-state');assert.match(child.text,/Review parser: failed/);assert.match(child.text,/execution=succeeded; acceptance=failed/);h.close();
 });
 
+test('bounded plan and child snapshots keep active work and failed follow-up visible', async () => {
+  const h = harness(); h.input('Complete parser checks.');
+  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot,
+    tasks: [...Array.from({ length: 16 }, (_, i) => ({ id: i + 1, subject: `Finished check ${i}`, status: 'completed' })),
+      { id: 17, subject: 'Resolve parser boundary case', status: 'in_progress' }] });
+  h.setBranch([
+    { type: 'custom', customType: 'subagent-cost-v1', data: { runId: 'failed-child', results: [{ index: 0, status: 'completed', exitCode: 0, label: 'Parser edge review', acceptance: { status: 'rejected', reason: 'Missing empty-input test' } }] } },
+    ...Array.from({ length: 8 }, (_, i) => ({ type: 'custom', customType: 'subagent-cost-v1', data: { runId: `finished-child-${i}`, results: [{ index: 0, status: 'completed', exitCode: 0, label: `Finished review ${i}`, acceptance: { status: 'passed' } }] } })),
+  ]);
+  await h.advance(30000);
+  const plan = h.packets[0].evidence.find(row => row.id === 'todo-state');
+  assert.match(plan.text, /1 open, 16 completed.*Resolve parser boundary case/);
+  const children = h.packets[0].evidence.find(row => row.id === 'child-state');
+  assert.match(children.text, /Parser edge review: failed; execution=succeeded; acceptance=failed \(Missing empty-input test\)/);
+  assert.ok(Buffer.byteLength(h.packets[0].text, 'utf8') <= 8000);
+  h.close();
+});
+
 test('unrelated tool progress permits snapshot advice while cited running work completion invalidates it', async () => {
   let finish;
   const h=harness(async()=>new Promise(resolve=>{finish=resolve;}));h.input('Fix parser validation.');
@@ -448,6 +466,27 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could useful independent work continue while that check runs?',evidence:['running-tools'],tools:[],skills:[]})}]});await flush();
   assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/State cited by this review changed/);active.close();
+});
+
+test('a stale cited state retains its chronological event for the next review', async () => {
+  let finish, calls = 0;
+  const h = harness(async () => {
+    if (++calls === 1) return new Promise(resolve => { finish = resolve; });
+    return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] };
+  });
+  h.input('Fix parser validation.');
+  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'in_progress' }] });
+  h.emit('tool_result', { toolName: 'read', input: { path: 'src/parser.ts' }, content: [{ type: 'text', text: 'Missing validation.' }] });
+  await h.advance(30000);
+  assert.ok(h.packets[0].evidence.some(row => row.id === 'event-1'));
+  h.publish('todo-plan-changed', { sessionId: 'synthetic-session', cwd: fixtureRoot, tasks: [{ id: 1, subject: 'Inspect parser', status: 'completed' }] });
+  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could the parser input still need validation?', evidence: ['todo-state', 'event-1'], tools: [], skills: [] }) }] });
+  await flush();
+  assert.match(h.sent.at(-1)[0].content, /State cited by this review changed/);
+  await h.advance(30000);
+  assert.equal(calls, 2);
+  assert.ok(h.packets[1].evidence.some(row => row.id === 'event-1'), 'stale advice must not consume the unread tool outcome');
+  h.close();
 });
 
 

@@ -230,7 +230,11 @@ export async function runPromptAnalysis(input: {
         return snapshot({ startedAt, now, status: "cancelled", attempts, inputTokens, outputTokens, knownUsageObserved, usageStates });
       }
       const result = response;
-      const analysis = result.stopReason === "length" ? undefined : parsePromptAnalysis(result.text, input.prompt, input.kind);
+      // A provider can exhaust its allowance exactly after the closing JSON
+      // delimiter. Validate the full answer first; retrying an already usable
+      // advisory spends another call without adding evidence. Partial JSON
+      // still fails the same strict parser and follows truncation recovery.
+      const analysis = parsePromptAnalysis(result.text, input.prompt, input.kind);
       if (!analysis) {
         const outcome = result.stopReason === "length" ? "truncated" : !result.text?.trim() ? "empty" : "malformed";
         const retry = !repaired && attempts < maxAttempts && outcome === "truncated" && totalBudget - (now() - startedAt) >= Math.min(3000, totalBudget / 4);

@@ -1048,7 +1048,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 233; factory)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2180; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1856; literal)
-- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 758; literal)
+- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 768; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1793; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 360; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 652; literal)

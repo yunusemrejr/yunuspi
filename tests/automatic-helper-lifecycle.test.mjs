@@ -15,7 +15,7 @@ Object.assign(process.env,{
 });
 delete process.env.PI_SUBAGENT_CHILD;
 const load=p=>import(pathToFileURL(path.join(agent,p)));
-const {registerAutonomousRecovery,automaticFusionBody}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
+const {registerAutonomousRecovery,automaticFusionBody,explicitRecoveryConstraints}=await load('extensions/pi-subagents/src/extension/autonomous-recovery.ts');
 const {resetSharedControl}=await load('extensions/lib/intervention-shared.ts');
 const {clearLlmPreferencesCache}=await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 const {buildModelCandidates}=await load('extensions/pi-subagents/src/runs/shared/model-fallback.ts');
@@ -68,6 +68,21 @@ test('unclear follow-ups do not launch a second interpretation sidecar',async()=
  assert.equal(fx.calls.length,0);
  assert.equal(fx.messages.length,0);
  await fx.emit('session_shutdown');
+});
+
+test('explicit no-spawn instruction blocks automatic helpers and council routes',async()=>{
+ for (const spelling of ['agents', 'subagents', 'sub-agents', 'sub agents', 'helpers']) {
+ const prompt=`Investigate cross-file compatibility failures in the frontend and backend. Do not spawn ${spelling}.`;
+ assert.equal(planAssistance(prompt,true).mode,'none');
+ const fx=fixture();
+ await fx.input(prompt);
+ assert.equal(explicitRecoveryConstraints(fx.ctx,prompt,model).noDelegation,true);
+ await fx.emit('before_agent_start',{prompt});
+ await tick();
+ assert.equal(fx.calls.length,0);
+ assert.equal(fx.messages.length,0);
+ await fx.emit('session_shutdown');
+ }
 });
 
 test('automatic fusion retains attribution, conflicts and omitted-source gaps',()=>{

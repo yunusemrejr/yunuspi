@@ -786,9 +786,17 @@ export default function (pi: any, deps: MicroDependencies = { classify: needleCl
             details: { ...details, promptHash: pending.promptHash },
             excludeFromContext: true,
           }, { triggerTurn: false });
-        } catch { /* TUI visibility must not gate inference. */ }
+        } catch {
+          // The send did not display this advisory. Allow a later context pass
+          // to retry it, while retaining the in-flight guard above.
+          if (pendingFor(request) === pending) pending.displayed = false;
+        }
       }
     }
+    // A session switch or request abort can occur during the display await.
+    // The native context runner accepts this return value after the await, so
+    // recheck ownership before returning any prepared advisory messages.
+    if (eligible.some(({ request, pending }) => pendingFor(request) !== pending)) return undefined;
     for (const insert of inserts.reverse()) next.splice(insert.index + 1, 0, insert.message);
     return inserts.length ? { messages: next } : undefined;
   });

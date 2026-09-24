@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -412,4 +413,67 @@ test('small advisers retain final constraints and abstain on invalid confidence'
  assert.equal(result.multiPerspective,false);
  assert.deepEqual(result.perspectives,[]);
  assert.equal(advisoryMod.deterministicRequestPass('Implement typed API contracts and database transaction tests.').family,'implementation');
+});
+
+async function promptContextFixture(t, sendMessage) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'micro-context-'));
+  const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_PROVIDER_STATE_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_MICRO_INTELLIGENCE', 'PI_SUBAGENT_CHILD'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.PI_CODING_AGENT_DIR = directory;
+  process.env.PI_LLM_PREFERENCES_FILE = path.join(directory, 'preferences.json');
+  process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
+  process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
+  process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(directory, 'economy.json');
+  delete process.env.PI_MICRO_INTELLIGENCE;
+  delete process.env.PI_SUBAGENT_CHILD;
+  fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
+  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ version: 1,
+    models: { advisor: { provider: 'micro-fixture', model: 'advisor' } },
+    preferences: { prompt_analysis: { models: ['advisor'] } } }));
+  const { clearLlmPreferencesCache } = await load('extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
+  const { default: register } = await load('extensions/micro-intelligence.ts');
+  clearLlmPreferencesCache();
+  const model = { provider: 'micro-fixture', id: 'advisor', api: 'openai-completions', baseUrl: 'https://synthetic.invalid/v1',
+    contextWindow: 65536, maxTokens: 4096, reasoning: false, input: ['text'], cost: { input: .1, output: .1, cacheRead: 0, cacheWrite: 0 } };
+  let sessionId = 'micro-session-1';
+  const handlers = new Map();
+  const ctx = { cwd: directory, sessionManager: { getSessionId: () => sessionId, getBranch: () => [] },
+    modelRegistry: { getAvailable: () => [model], find: () => model, getApiKeyAndHeaders: async () => ({ ok: true, apiKey: 'synthetic-key' }) },
+    ui: { setStatus() {} } };
+  register({ on: (name, handler) => handlers.set(name, handler), registerTool() {}, registerMessageRenderer() {},
+    events: { emit() {} }, sendMessage }, { classify: () => undefined, warmup() {}, completePromptAnalysis: async () => ({
+      stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ intent: 'Inspect the parser', taskLabel: 'Parser review', confidence: .9, subtasks: ['Verify the parser'] }) }],
+    }) });
+  const emit = (name, event = {}) => handlers.get(name)?.(event, ctx);
+  const request = { source: 'interactive', originalText: 'Inspect the parser and verify its behavior.', requestId: 'micro-request-1', turnId: 'micro-turn-1',
+    processId: 'micro-process', sessionId, guardianOwnerId: 'micro-owner-1', signal: new AbortController().signal };
+  await emit('session_start', { reason: 'new' });
+  await emit('input', request);
+  t.after(() => { emit('session_shutdown'); for (const key of keys) if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; fs.rmSync(directory, { recursive: true, force: true }); });
+  const messages = [{ role: 'user', content: [{ type: 'text', text: request.originalText }] }];
+  return { context: (input = messages) => emit('context', { messages: input, requestMessages: [{ requestId: request.requestId, turnId: request.turnId, messageIndex: 0 }] }),
+    switchSession: () => { sessionId = 'micro-session-2'; emit('session_tree'); } };
+}
+
+test('failed prompt-analysis display can retry without duplicating the context capsule', async t => {
+  let sends = 0;
+  const f = await promptContextFixture(t, async () => { if (++sends === 1) throw new Error('Synthetic display failure'); });
+  const first = await f.context();
+  assert.equal(first.messages.filter(message => message.customType === 'prompt-analysis-context').length, 1);
+  const second = await f.context(first.messages);
+  assert.equal(sends, 2, 'a rejected display send remains eligible on the next context pass');
+  assert.equal(second, undefined, 'the already inserted context capsule is not duplicated');
+  await f.context(first.messages);
+  assert.equal(sends, 2, 'a successful display send is delivered once');
+});
+
+test('session switch during prompt-analysis display cannot return stale context advice', async t => {
+  let release;
+  const f = await promptContextFixture(t, () => new Promise(resolve => { release = resolve; }));
+  const pending = f.context();
+  while (!release) await Promise.resolve();
+  f.switchSession();
+  release();
+  assert.equal(await pending, undefined, 'the old session must not receive a capsule after the display await');
+  assert.equal(await f.context(), undefined, 'the replacement session cannot inherit old request advice');
 });

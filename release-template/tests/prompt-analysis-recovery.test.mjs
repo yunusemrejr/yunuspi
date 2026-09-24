@@ -191,14 +191,28 @@ test('the preferred route keeps its own allowance when more fallbacks are config
   assert.equal(result.route, 'preferred');
 });
 
+test('complete validated JSON at the output boundary avoids a redundant paid retry', async () => {
+  const calls = [], outcomes = [];
+  const result = await runPromptAnalysis({ prompt, kind: 'initial',
+    candidates: ['preferred', 'fallback'].map(route => ({ route, complete: async () => {
+      calls.push(route);
+      return { text: answer, stopReason: 'length', inputTokens: 10, outputTokens: 768 };
+    } })), onAttempt: value => outcomes.push(value) });
+  assert.equal(result.status, 'model');
+  assert.equal(result.route, 'preferred');
+  assert.deepEqual(calls, ['preferred']);
+  assert.deepEqual(outcomes.map(row => row.outcome), ['complete']);
+  assert.equal(result.outputTokens, 768);
+});
+
 test('repeated truncation retries only once and respects the total attempt ceiling', async () => {
   const calls = [], outcomes = [];
   const result = await runPromptAnalysis({ prompt, kind: 'initial', budget: { totalMs: 500, perAttemptMs: 100, maxAttempts: 4 },
     candidates: ['first', 'second', 'third', 'fourth'].map(route => ({ route, complete: async request => {
       calls.push({ route, request });
-      return { text: answer, stopReason: 'length', reasoningTokens: 768, inputTokens: 10, outputTokens: 768 };
+      return { text: answer.slice(0, -1), stopReason: 'length', reasoningTokens: 768, inputTokens: 10, outputTokens: 768 };
     } })), onAttempt: value => outcomes.push(value) });
-  assert.equal(result.status, 'fallback', 'even syntactically complete output marked length is not silently accepted');
+  assert.equal(result.status, 'fallback', 'an incomplete JSON object must never be accepted');
   assert.deepEqual(calls.map(row => row.route), ['first', 'first', 'second', 'third']);
   assert.equal(calls.filter(row => row.request.prompt.includes('\nRecovery:')).length, 1);
   assert.equal(outcomes.filter(row => row.recovery === 'compact-retry').length, 1);

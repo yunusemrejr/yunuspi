@@ -50,10 +50,22 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const rows: ObserverEvidence[] = [];
     if (runningTools.size) rows.push({ id: 'running-tools', kind: 'current state', text: [...runningTools.values()].slice(-3).map(tool => `${tool.name} ${tool.foreground ? 'foreground' : 'running'}${withElapsed ? ` elapsed=${Math.floor((now() - tool.startedAt) / 1000)}s` : ''} ${tool.input}`).join('; ') });
     if (completed.size) rows.push({ id: 'completed-tools', kind: 'current state', text: 'Recently completed tools (do not suggest repeating without a new reason): ' + [...completed.values()].join('; ').slice(-370) });
-    if (todos.length) rows.push({ id: 'todo-state', kind: 'current state', text: todos.filter(task => task.status !== 'deleted').slice(0, 12).map(task => `${String(task.id).slice(0, 30)} ${String(task.status).slice(0, 30)} ${String(task.subject ?? task.title ?? task.text ?? '').slice(0, 70)}`).join('; ').slice(0, 450) });
+    const visibleTodos = todos.filter(task => task.status !== 'deleted');
+    if (visibleTodos.length) {
+      const inProgress = visibleTodos.filter(task => task.status === 'in_progress');
+      const pending = visibleTodos.filter(task => task.status === 'pending');
+      const completedTodos = visibleTodos.filter(task => task.status === 'completed');
+      const selected = [...inProgress, ...pending, ...completedTodos.slice(-2)].slice(0, 12);
+      rows.push({ id: 'todo-state', kind: 'current state', text: `${inProgress.length + pending.length} open, ${completedTodos.length} completed: ${selected.map(task => `${String(task.id).slice(0, 30)} ${String(task.status).slice(0, 30)} ${String(task.subject ?? task.title ?? task.text ?? '').slice(0, 70)}`).join('; ')}`.slice(0, 450) });
+    }
     try {
       const ledger = reduceChildEvents(projectTranscriptChildren((ctx?.sessionManager?.getBranch?.() ?? []).slice(-2048)));
-      if (ledger.tasks.length) rows.push({ id: 'child-state', kind: 'current state', text: ledger.tasks.slice(-6).map(task => `${task.label.slice(0, 55)}: ${task.state}; execution=${task.execution.status}; acceptance=${task.acceptance.status}; attempts=${task.attempts.length}${task.unresolvedLinkage ? '; identity unresolved' : ''}`).join(' | ') });
+      if (ledger.tasks.length) {
+        const unresolved = ledger.tasks.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
+        const finished = ledger.tasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');
+        const selected = [...unresolved.slice(-6), ...finished.slice(-2)].slice(0, 6);
+        rows.push({ id: 'child-state', kind: 'current state', text: selected.map(task => `${task.label.slice(0, 55)}: ${task.state}; execution=${task.execution.status}${task.execution.cause ? ` (${task.execution.cause.category})` : ''}; acceptance=${task.acceptance.status}${task.acceptance.status === 'failed' && task.acceptance.reason ? ` (${boundedObserverText(task.acceptance.reason, 70)})` : ''}; attempts=${task.attempts.length}${task.todoId ? `; todo=${task.todoId.slice(0, 30)}` : ''}${task.unresolvedLinkage ? '; identity unresolved' : ''}`).join(' | ').slice(0, 450) });
+      }
       if (ledger.unresolved.length) rows.push({ id: 'child-uncertainty', kind: 'current state', text: `${ledger.unresolved.length} child identity/accounting links are unresolved; task coverage and attribution may be incomplete.` });
     } catch { rows.push({ id: 'children-unavailable', kind: 'current state', text: 'Child-agent lifecycle evidence is unavailable; do not infer that there are no children.' }); }
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });

@@ -131,7 +131,7 @@ export function registerHarnessActivity(pi: { on: (name: any, handler: any) => v
   for (const event of ['before_agent_start', 'agent_start']) pi.on(event, (_event: unknown, ctx: Context) => {
     if (sessionOf(ctx) === session || !session) { context = ctx; session = sessionOf(ctx); blocked = false; }
   });
-  pi.on('agent_end', () => { active.clear(); blocked = true; render(); });
+  pi.on('agent_end', () => { clear(); blocked = true; });
   pi.on('message_end', (event: any) => { if (event.message?.role === 'assistant' && event.message.stopReason === 'aborted') cancel(); });
   pi.on('session_shutdown', () => {
     clear(); closed = true; generation++;
