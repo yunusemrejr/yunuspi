@@ -24,6 +24,7 @@
  */
 
 import { registerPriming } from './priming.ts';
+import { formatHits, memorySearchFiles, searchMemory, type Reranker } from './local-search.ts';
 import { registerContextTools } from './context-tools.ts';
 import { addCompactionSalience } from './context-salience.ts';
 import { projectMemoryKey } from './project-identity.ts';
@@ -2750,11 +2751,12 @@ export default function (pi: ExtensionAPI) {
 		name: "memory_search",
 		label: "Memory Search",
 		description:
-			"Search across all memory files (MEMORY.md, SCRATCHPAD.md, daily logs).\n" +
+			"Search memory across sessions (MEMORY.md, SCRATCHPAD.md, this project's memory and daily logs; scope:'all' adds other projects' logs).\n" +
 			"Modes:\n" +
-			"- 'keyword' (default, ~30ms): Fast BM25 search. Best for specific terms, dates, names, #tags, [[links]].\n" +
+			"- 'keyword' (default, ~30ms): Fast BM25 search. Best for specific terms, dates, names, #tags, [[links]]; tolerates typos.\n" +
 			"- 'semantic' (~2s): Meaning-based search. Finds related concepts even with different wording.\n" +
 			"- 'deep' (~10s): Hybrid search with reranking. Use when other modes don't find what you need.\n" +
+			"Works without qmd: a built-in BM25 index with local Needle3 reranking serves every mode when qmd is missing.\n" +
 			"If semantic/deep warns about missing embeddings, embedding starts automatically in the background — retry shortly.\n" +
 			"If the first search doesn't find what you need, try rephrasing or switching modes. " +
 			"Keyword mode is best for specific terms; semantic mode finds related concepts even with different wording.",
@@ -2768,6 +2770,11 @@ export default function (pi: ExtensionAPI) {
 			limit: Type.Optional(
 				Type.Number({ description: "Max results (default: 5)" }),
 			),
+			scope: Type.Optional(
+				StringEnum(["project", "all"] as const, {
+					description: "project (default): global memory, this project's memory and daily logs. all: every project's daily logs too (built-in search).",
+				}),
+			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			if (!qmdAvailable) {
@@ -2775,17 +2782,10 @@ export default function (pi: ExtensionAPI) {
 				qmdAvailable = await detectQmd();
 			}
 
-			if (!qmdAvailable) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: qmdInstallInstructions(),
-						},
-					],
-					isError: true,
-					details: {},
-				};
+			// Built-in search needs no binary: used when qmd is missing, when
+			// PI_MEMORY_SEARCH=builtin, and for cross-project scope.
+			if (!qmdAvailable || process.env.PI_MEMORY_SEARCH === "builtin" || params.scope === "all") {
+				return builtinMemorySearch(params, qmdAvailable ? undefined : "Built-in search (qmd is not installed; it adds embedding search).");
 			}
 
 			let hasCollection = await checkCollection("pi-memory");
@@ -2796,17 +2796,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 			if (!hasCollection) {
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								"Could not set up qmd pi-memory collection. Check that qmd is working and the memory directory exists.",
-						},
-					],
-					isError: true,
-					details: {},
-				};
+				return builtinMemorySearch(params, "The qmd pi-memory collection could not be set up; built-in search used.");
 			}
 
 			const mode = params.mode ?? "keyword";
@@ -2875,19 +2865,41 @@ export default function (pi: ExtensionAPI) {
 					details: { mode, query: params.query, count: results.length, needsEmbed },
 				};
 			} catch (err) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `memory_search error: ${err instanceof Error ? err.message : String(err)}`,
-						},
-					],
-					isError: true,
-					details: {},
-				};
+				// A broken qmd install must not make memory unsearchable.
+				return builtinMemorySearch(params, `qmd failed (${err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120)}); built-in search used.`);
 			}
 		},
 	});
+
+	/** Built-in BM25 memory search with optional local Needle3 reranking. */
+	async function builtinMemorySearch(params: { query: string; mode?: string; limit?: number; scope?: string }, note?: string) {
+		const mode = params.mode ?? "keyword";
+		const files = await memorySearchFiles({ memory: MEMORY_FILE, scratchpad: SCRATCHPAD_FILE, project: projectMemoryFile(), projectDaily: projectDailyDir(), dailyRoot: DAILY_DIR }, params.scope === "all" ? "all" : "project");
+		let semanticNote = "";
+		// Semantic modes were asked for explicitly, so the local model may be
+		// started; results never wait more than a few seconds for it.
+		const rerank: Reranker = async (query, candidates) => {
+			const needle = await import("../lib/needle-runtime.ts");
+			const { needlePolicy } = await import("../lib/needle-policy.ts");
+			if (!needlePolicy().enabled) { semanticNote = "Semantic reranking is disabled (PI_NEEDLE); keyword order shown."; return undefined; }
+			if (!["healthy", "degraded"].includes(needle.needleHealth().state)) {
+				needle.needleWarmup();
+				const until = Date.now() + 2500;
+				while (Date.now() < until && !["healthy", "degraded"].includes(needle.needleHealth().state)) await new Promise(r => setTimeout(r, 100));
+			}
+			if (!["healthy", "degraded"].includes(needle.needleHealth().state)) { semanticNote = "The local semantic model is still warming; keyword order shown. Retry for semantic order."; return undefined; }
+			const ranked = await needle.needleRank({ query, candidates, topK: candidates.length });
+			return ranked.ok ? ranked.value.ranked.map(r => r.id) : undefined;
+		};
+		const found = await searchMemory(files, params.query, { limit: clampSearchLimit(params.limit), mode, rerank });
+		const header = [note, found.reranked ? "Reranked with the local Needle3 model." : semanticNote].filter(Boolean).join(" ");
+		if (!found.results.length) {
+			return { content: [{ type: "text" as const, text: `No results found for "${params.query}" (built-in ${mode} search over ${found.files} memory files).${header ? " " + header : ""} Try other words, or scope:"all" for other projects.` }],
+				details: { engine: "builtin", mode, query: params.query, count: 0, files: found.files, scope: params.scope ?? "project" } };
+		}
+		return { content: [{ type: "text" as const, text: `${header ? header + "\n\n" : ""}${formatHits(found.results)}` }],
+			details: { engine: "builtin", mode, query: params.query, count: found.results.length, files: found.files, blocks: found.blocks, reranked: found.reranked, truncated: found.truncated, scope: params.scope ?? "project" } };
+	}
 
 	// --- memory_status tool (doctor) ---
 	pi.registerTool({

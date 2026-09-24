@@ -270,13 +270,35 @@ Inspect bounded syntax, advisory code-noise patterns, AST context, symbols, call
 - `maxHops|maxNodes|maxChars`: AST and response bounds.
 - `path`: Source path for syntax or Git inspection.
 - `base|before|after`: Git base or supplied source pair for ast_diff.
-- `action`: Git inspection operation. Values: `scope`, `status`, `diff`, `log`, `show`, `branch`.
+- `action`: Git inspection operation; review is pre-commit risk evidence and blame summarizes line history. Values: `scope`, `status`, `diff`, `log`, `show`, `branch`, `review`, `blame`.
+- `range`: blame line range such as 40,80 or 40,+20.
 
-**Related records:** `quality-review`, `project-intelligence`, `safety-bounds`
+**Related records:** `quality-review`, `project-intelligence`, `safety-bounds`, `code-quality`
 
 **Source:** [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts), [`agent/extensions/lib/code-noise.mjs`](../../agent/extensions/lib/code-noise.mjs), [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts), [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
 
 **Documentation:** [`docs/GUIDANCE-AND-DIAGNOSTICS.md`](GUIDANCE-AND-DIAGNOSTICS.md)
+
+#### code-quality
+
+Measure duplication, code slop, prose quality and complexity without installing anything or running project code. Token clone detection (renamed clones included) across a tree or only the files changed against a revision, placeholder and debug-leftover patterns, swallowed errors, dead and unused code, stock AI-sounding prose with replacements and readability, per-function complexity; edits automatically get high-precision hints when a new block repeats nearby code. Advisory evidence with file:line, not a quality score.
+
+**Entrypoints:** `code_quality`
+
+**Catalog tool pointers:** `code_quality`, `syntax_check`, `git_info`, `lsp_diagnostics`, `lens_diagnostics`
+
+**Options:**
+
+- `operation`: Measurement to run. Values: `duplicates`, `slop`, `prose`, `complexity`.
+- `paths`: Files or directories inside the workspace; default is the workspace root.
+- `changed|base`: Focus on files changed against a revision plus untracked files.
+- `mode|minTokens|minLines`: Clone matching: renamed (identifiers and literals ignored) or exact, and size thresholds.
+
+**Related records:** `source-intelligence`, `quality-review`, `artifact-numeric-checks`
+
+**Source:** [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts), [`agent/extensions/lib/code-quality.ts`](../../agent/extensions/lib/code-quality.ts), [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts), [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts)
+
+**Documentation:** [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 
 #### artifact-numeric-checks
 
@@ -1047,6 +1069,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts) (line 217; literal)
 - `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts) (line 205; literal)
 - `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
+- `code_quality` — [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts) (line 9; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
 - `context_profile` — [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts) (line 342; literal)
 - `context_score` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 14; literal)
@@ -1062,7 +1085,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
-- `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 189; literal)
+- `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 338; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 495; literal)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 217; factory)
@@ -1071,12 +1094,12 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `math_check` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 92; factory)
 - `media_edit` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 219; factory)
 - `media_info` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 215; factory)
-- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2507; literal)
-- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2367; literal)
-- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2650; literal)
-- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2749; literal)
-- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2893; literal)
-- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2019; literal)
+- `memory_forget` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2508; literal)
+- `memory_read` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2368; literal)
+- `memory_restore` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2651; literal)
+- `memory_search` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2750; literal)
+- `memory_status` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2905; literal)
+- `memory_write` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2020; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../../agent/extensions/micro-intelligence.ts) (line 423; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 222; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
@@ -1092,7 +1115,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 232; factory)
 - `scene_render` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 233; factory)
-- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2180; literal)
+- `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../../agent/extensions/pi-memory/index.ts) (line 2181; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1856; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../../agent/extensions/siblings.ts) (line 768; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1793; literal)
@@ -1106,10 +1129,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `subagent` — [`agent/extensions/pi-subagents/src/extension/index.ts`](../../agent/extensions/pi-subagents/src/extension/index.ts) (line 759; definition)
 - `subagent_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 22; constant)
 - `symbol_expand` — [`agent/extensions/pi-lens/context-tools.ts`](../../agent/extensions/pi-lens/context-tools.ts) (line 11; definition)
-- `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 231; literal)
+- `syntax_check` — [`agent/extensions/lib/source-check.ts`](../../agent/extensions/lib/source-check.ts) (line 255; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../../agent/extensions/sys-probe.ts) (line 254; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 258; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../../agent/extensions/lib/tool-discovery.ts) (line 266; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 235; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 216; factory)
@@ -1141,12 +1164,12 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Literal slash commands
 
-- /bash-routes — [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts) (line 97)
+- /bash-routes — [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts) (line 99)
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 473)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 515)
 - /bg-tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 507)
 - /bg-update — [`agent/extensions/pi-background-tasks/src/extension.ts`](../../agent/extensions/pi-background-tasks/src/extension.ts) (line 523)
-- /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1639)
+- /catalog-status — [`agent/extensions/live-models.ts`](../../agent/extensions/live-models.ts) (line 1638)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1764)
 - /cost — [`agent/extensions/session-signals.ts`](../../agent/extensions/session-signals.ts) (line 1366)
@@ -1296,6 +1319,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/bash-router.ts`](../../agent/extensions/bash-router.ts)
 - [`agent/extensions/bulk-edit.ts`](../../agent/extensions/bulk-edit.ts)
 - [`agent/extensions/checkpoints.ts`](../../agent/extensions/checkpoints.ts)
+- [`agent/extensions/code-quality.ts`](../../agent/extensions/code-quality.ts)
 - [`agent/extensions/context-profile.ts`](../../agent/extensions/context-profile.ts)
 - [`agent/extensions/continuation-notice.ts`](../../agent/extensions/continuation-notice.ts)
 - [`agent/extensions/design-studio.ts`](../../agent/extensions/design-studio.ts)
@@ -1348,6 +1372,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/ci-awareness.ts`](../../agent/extensions/lib/ci-awareness.ts)
 - [`agent/extensions/lib/code-guidance-signals.ts`](../../agent/extensions/lib/code-guidance-signals.ts)
 - [`agent/extensions/lib/code-lexical-mask.ts`](../../agent/extensions/lib/code-lexical-mask.ts)
+- [`agent/extensions/lib/code-quality.ts`](../../agent/extensions/lib/code-quality.ts)
 - [`agent/extensions/lib/compact-tool-json.ts`](../../agent/extensions/lib/compact-tool-json.ts)
 - [`agent/extensions/lib/compaction-policy.ts`](../../agent/extensions/lib/compaction-policy.ts)
 - [`agent/extensions/lib/context-anchor.ts`](../../agent/extensions/lib/context-anchor.ts)
@@ -1779,6 +1804,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/ASYNC-AND-STUDIO.md`](ASYNC-AND-STUDIO.md)
 - [`docs/AUDIT-CHANGED-FILES.md`](AUDIT-CHANGED-FILES.md)
 - [`docs/CHANGE-SCOPE.md`](CHANGE-SCOPE.md)
+- [`docs/CODE-QUALITY.md`](CODE-QUALITY.md)
 - [`docs/CONTEXT-AUDIT.md`](CONTEXT-AUDIT.md)
 - [`docs/CORE-OWNERSHIP.md`](CORE-OWNERSHIP.md)
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)

@@ -4,7 +4,7 @@ part: operations
 title: Git and code review
 summary: Version control as communication: atomic commits with meaningful messages, branch hygiene, safe history rewriting, conflict resolution, reviewable pull requests and constructive review.
 terms: git commit commits branch branches merge rebase squash cherry-pick conflict conflicts pull request pr review reviewer diff history log blame bisect stash reset revert force push main master remote origin github gitlab
-tools: git_info ast_diff
+tools: git_info ast_diff code_quality
 skills: git-github github-repo-presentation multi-developer-pipelines
 ---
 
@@ -21,7 +21,7 @@ Version control is a communication medium across time: commits explain changes t
 
 **Signals.** Commits mixing unrelated changes; messages like "fix" or "updates"; commits that leave the build broken.
 
-**Ask.** Could this commit be reverted on its own, and does its message explain why the change was needed?
+**Ask.** Could this commit be reverted on its own, and does its message explain why the change was needed (git_info review flags risky additions before committing)?
 
 **Traps.** Hundreds of micro-commits that should be squashed; perfectionism delaying commits.
 
@@ -86,6 +86,6 @@ Version control is a communication medium across time: commits explain changes t
 
 **Signals.** Reverting or "cleaning up" unusual code without checking why it exists; regressions investigated without history.
 
-**Ask.** What does the history say about why this code looks the way it does?
+**Ask.** What does the history say about why this code looks the way it does (git_info blame summarizes a line range)?
 
 **Traps.** Blaming people instead of understanding changes.

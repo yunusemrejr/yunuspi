@@ -48,7 +48,6 @@ import type { FreeRouteCapabilities } from "./pi-subagents/src/runs/shared/free-
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import {
 	publishFreeEvidence,
 	publishProviderFreeEvidence,

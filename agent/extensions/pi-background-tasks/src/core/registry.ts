@@ -4,7 +4,7 @@ import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Api, Model } from "@yunuspi/ai";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
@@ -44,7 +44,6 @@ import {
 // on 2026-08-31 together with their durable-fs.ts dependency.
 import { closeAndFsyncOutputStream, writeJsonAtomic } from "./attested-pi-run.js";
 import { resolvePiLaunch, type PiLaunchSpec } from "./pi-launch.js";
-import { resolveAnthropicAttributionExtensionPath } from "./anthropic-attribution-path.js";
 import {
   runWindowsTaskkill,
   type TaskkillOutcome,

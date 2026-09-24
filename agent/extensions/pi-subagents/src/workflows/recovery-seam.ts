@@ -17,7 +17,6 @@ import {
 	DEFAULT_CONFIG,
 	planSwarmRecovery,
 	type SwarmRecoveryConfig,
-	type SwarmRecoveryResult,
 	type SwarmRunRecord,
 } from "../runs/shared/swarm-recovery.ts";
 

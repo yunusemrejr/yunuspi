@@ -3,7 +3,6 @@ import { guardedCommand, SELF_MUTATION_ALLOWED } from "../../../../lib/self-muta
 import { spawn } from "node:child_process";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
 	AcceptanceConfig,

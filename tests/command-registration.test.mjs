@@ -49,7 +49,7 @@ test("the installed extension graph registers every shipped command without load
     const result = JSON.parse(child.stdout.trim().split("\n").at(-1));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
-    assert.equal(result.extensions, 49);
+    assert.equal(result.extensions, 50);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

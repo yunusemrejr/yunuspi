@@ -19,7 +19,6 @@ import {
 	loadModelEconomyConfig,
 } from "./model-economy.ts";
 import { isProvenFreeRoute, catalogRouteCapabilities, readFreeEvidence } from "./free-route-evidence.ts";
-import { taskQuality } from "./model-quality.ts";
 import { isAutonomousMeteredEligible } from "./model-economy.ts";
 import { formatAffordableSelectionDiagnostics, selectAffordableModel } from "./model-selection.ts";
 import { evaluateQuotaHealth, type QuotaEvent } from "./quota-health.ts";
@@ -27,7 +26,7 @@ import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
 import { modelIdentity } from "./model-quality.ts";
 import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting, normalizePreferenceRole, readLlmPreferencesDocument, validateLlmPreferencesDocumentForWrite, SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_ROLE, type LlmModelEntry } from "./llm-preferences.ts";
-import { modelRouteCandidateKey, normalizeModelRouteCandidate, routeOf, stableProviderRouting, type ModelRouteCandidate } from "../../shared/model-route.ts";
+import { modelRouteCandidateKey, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { childRequirementsFromTask, type ChildRouteRequirements } from "./child-route-requirements.ts";
 import { extractTaskIntent } from "./task-intent-model.ts";
 

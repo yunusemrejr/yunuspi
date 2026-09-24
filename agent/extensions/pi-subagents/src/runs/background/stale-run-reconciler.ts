@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { writeGuardedStatus } from "../shared/status-revision.ts";
 import { resultFilePath, resultPayloadPathForSessionRun, writeAsyncResultFile } from "./result-files.ts";
 import { updateActiveRunIndex } from "./active-run-index.ts";

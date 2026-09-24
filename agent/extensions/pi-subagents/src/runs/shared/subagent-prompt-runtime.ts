@@ -27,7 +27,7 @@ import { getAgentDir, resolveWatchPath } from "../../shared/utils.ts";
 import { registerChildWatchdog } from "../../watchdog/register-child.ts";
 import { CHILD_WATCHDOG_CONFIG_ENV, decodeChildWatchdogConfig } from "../../watchdog/child-status.ts";
 import { requestWatchdogPermission, type WatchdogPermissionRequest, type WatchdogPermissionResult } from "../../watchdog/permission-arbiter.ts";
-import { formatGitAuthorityReason, gitAuthorityFromEnv, gitAuthorityToolDecision, scanGitAuthorityViolation } from "../../../../lib/git-authority.ts";
+import { gitAuthorityFromEnv, gitAuthorityToolDecision } from "../../../../lib/git-authority.ts";
 import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
 import { resolveWaitToolConfig } from "../background/wait-config.ts";
 import { registerWaitTool } from "../background/wait-tool.ts";

@@ -96,6 +96,13 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
   { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth'] },
 ];
+// Intents without a skill route: quality work stages the measurement tools,
+// commits stage the pre-commit review, copy and docs stage the prose check.
+const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
+  { pattern: /\b(?:refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality', 'git_info'] },
+  { pattern: /\b(?:commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit)\b/i, tools: ['git_info'] },
+  { pattern: /\b(?:copywriting|(?:landing|marketing|sales|product) (?:page )?copy|blog post|newsletter|press release|release notes|proofread|rewrite (?:the |this )?(?:text|copy|prose|docs?)|readme|documentation)\b/i, tools: ['code_quality'] },
+];
 const WEB_TARGET = /\b(?:websites?|web ?pages?|landing pages?|home ?pages?|sites?|pages?|html|css|tailwind|react|vue|svelte|components?|ui|front-?end|layout|app screens?)\b/i;
 const IMAGE_ASK = /\b(?:this|these|attached|like|match\w*|same|similar|based on|from|recreate|replicate|clone|turn|convert|build|make|implement|copy)\b/i;
 export function intentBundleTools(prompt: unknown, images = 0): string[] {
@@ -108,6 +115,7 @@ export function intentBundleTools(prompt: unknown, images = 0): string[] {
     const pictured = bundle.skill === 'mockup-to-code' && images > 0 && WEB_TARGET.test(text) && IMAGE_ASK.test(text);
     if (routed || pictured) for (const name of bundle.tools) out.add(name);
   }
+  for (const bundle of DIRECT_BUNDLES) if (segments.some(part => bundle.pattern.test(part))) for (const name of bundle.tools) out.add(name);
   return [...out];
 }
 const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(name => b.has(name));

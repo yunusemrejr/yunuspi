@@ -4,7 +4,7 @@ part: engineering
 title: Code quality and static analysis
 summary: Using linters, type checkers, language servers and analyzers as evidence: duplication and the DRY principle, dead code, complexity, formatting, and recognizing generated-looking code slop.
 terms: quality lint linter linting eslint ruff pylint flake8 clippy golangci prettier black format formatter static analysis analyzer lsp language server diagnostics typecheck tsc mypy duplicate duplication duplicated dry copy paste redundant complexity cyclomatic dead unused slop smell smells
-tools: syntax_check source_check quality_review ast_diff symbol_expand
+tools: code_quality syntax_check lsp_diagnostics lens_diagnostics quality_review git_info ast_diff symbol_expand
 skills: coding-practices anti-ai-slop software-engineering-wisdom
 ---
 
@@ -47,7 +47,7 @@ Quality tools are cheap reviewers that never get tired. They are only useful whe
 
 **Signals.** New functions similar to existing ones; the same constant or regex in several files; blocks pasted with small edits.
 
-**Ask.** Does this change re-implement something the codebase already has, or copy a rule that must stay identical elsewhere?
+**Ask.** Does this change re-implement something the codebase already has, or copy a rule that must stay identical elsewhere (code_quality duplicates with changed:true lists copies touching the change)?
 
 **Traps.** Merging coincidental similarity into a flag-driven abstraction; DRYing test code into unreadability.
 
@@ -60,7 +60,7 @@ Quality tools are cheap reviewers that never get tired. They are only useful whe
 
 **Signals.** Functions gaining new branches with each change; switch statements over types in many places; boolean parameters multiplying.
 
-**Ask.** Did this change push a function past a size or branching level where it should be split?
+**Ask.** Did this change push a function past a size or branching level where it should be split (code_quality complexity measures it)?
 
 **Traps.** Splitting to satisfy a metric while making logic harder to follow.
 
@@ -73,7 +73,7 @@ Quality tools are cheap reviewers that never get tired. They are only useful whe
 
 **Signals.** Comment density far above the surrounding code; unused parameters or options; stubbed functions; repeated try/catch-log-rethrow blocks.
 
-**Ask.** Which lines in this diff would a careful human author delete as noise?
+**Ask.** Which lines in this diff would a careful human author delete as noise (code_quality slop finds placeholders, leftovers and dead code)?
 
 **Traps.** Stripping comments that explain genuinely non-obvious decisions.
 

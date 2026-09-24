@@ -7,9 +7,12 @@ import { spawn } from 'node:child_process';
 import { Type } from 'typebox';
 import { readSourceFiles } from '../pi-lens/context-code.mjs';
 import {codeNoiseSupported, inspectCodeNoise} from './code-noise.mjs';
+import {codeSlop, familyOf, findDuplicates, neighborSources} from './code-quality.ts';
 import {sessionObservability} from './session-observability.ts';
 
 type Outcome = {status:'passed'|'failed'|'unavailable'|'incomplete'; checker:string; diagnostics:string[]};
+// Patterns precise enough to mention after an edit without being asked.
+const AUTOMATIC_SLOP = new Set(['placeholder-elision','placeholder-implementation','debug-leftover','swallowed-error','bare-except','commented-out-code','redundant-boolean']);
 const PYTHON = `import sys,json
 source=sys.stdin.buffer.read()
 try:
@@ -188,17 +191,20 @@ export default function registerSourceCheck(pi: any) {
   // extension/session and is fenced across session changes and async reads.
   let generation = 0, checks = 0;
   const seen = new Set<string>();
-  const reset = () => {generation++; checks = 0; seen.clear();};
+  // Files written this session: a new block is compared with them and with
+  // its directory neighbours, which is where copy-paste usually comes from.
+  const edited: string[] = [];
+  const reset = () => {generation++; checks = 0; seen.clear(); edited.length = 0;};
   for (const event of ['session_start','session_switch','session_tree','session_shutdown']) pi.on(event,reset);
   pi.on('before_agent_start',() => {checks = 0;});
   pi.on('tool_result',async (event: any,ctx: any) => {
-    if (process.env.PI_REASONING_AIDS === 'off' || event.isError || !['write','edit'].includes(event.toolName) || checks >= 4 || seen.size >= 512) return;
+    if (process.env.PI_REASONING_AIDS === 'off' || event.isError || !['write','edit'].includes(event.toolName) || checks >= 6 || seen.size >= 512) return;
     const filename = event.input?.path;
-    if (typeof filename !== 'string' || !codeNoiseSupported(filename)) return;
+    if (typeof filename !== 'string' || (!codeNoiseSupported(filename) && !familyOf(filename))) return;
     const owner = generation;
     checks++;
     try {
-      const data = await readSourceFiles(ctx.cwd,[filename],undefined,codeNoiseSupported);
+      const data = await readSourceFiles(ctx.cwd,[filename],undefined,(file: string) => codeNoiseSupported(file) || !!familyOf(file));
       const file = data.files[0];
       if (owner !== generation || !file || Buffer.byteLength(file.source) > 65536) return;
       let changedLines: [number,number] | undefined;
@@ -215,17 +221,35 @@ export default function registerSourceCheck(pi: any) {
       const key = `${ctx.sessionManager?.getSessionId?.() ?? 'current'}:${ctx.cwd}:${file.path}:${file.digest}`;
       if (seen.has(key)) return;
       seen.add(key);
-      const noise = await inspectCodeNoise(file.path,file.source);
+      const noise: any = codeNoiseSupported(file.path) ? await inspectCodeNoise(file.path,file.source) : {status:'unsupported',findings:[],scope:''};
       if (owner !== generation) return;
       if (changedLines) {
-        noise.findings = noise.findings.filter(f => f.line >= changedLines[0] && f.line <= changedLines[1]);
+        noise.findings = noise.findings.filter((f: any) => f.line >= changedLines[0] && f.line <= changedLines[1]);
         noise.scope += ' Automatic edit findings are restricted to the unambiguous replacement span.';
       }
       noiseActivity(noise);
-      if (!noise.findings.length) return;
-      const locations = noise.findings.map(f => `L${f.line} ${f.kind}`).join('; ');
-      return {content:[...event.content,{type:'text',text:`Code noise review (advisory): ${locations}. Inspect the edited file; keep intentional behavior. No automatic retry is required.`}],
-        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise}}};
+      const span: [number,number] = changedLines ?? [1,file.source.split('\n').length];
+      // High-precision patterns only; the code_quality tool reports the rest.
+      const noisy = new Set(noise.findings.map((f: any) => f.line));
+      const slop = codeSlop(file.path,file.source,span).filter(f => AUTOMATIC_SLOP.has(f.rule) && !(f.rule === 'swallowed-error' && noisy.has(f.line))).slice(0,3);
+      let clones: any[] = [];
+      try {
+        const others = await neighborSources(ctx.cwd,file.path,edited.slice(-20));
+        if (owner !== generation) return;
+        const report = findDuplicates([{path:file.path,source:file.source},...others],{minTokens:45,minLines:5,focus:new Set([file.path]),focusLines:new Map([[file.path,span]]),limit:2});
+        clones = report.clones.slice(0,2);
+      } catch { /* Duplicate hints are optional evidence. */ }
+      if (!edited.includes(file.path)) edited.push(file.path);
+      if (edited.length > 40) edited.shift();
+      if (!noise.findings.length && !slop.length && !clones.length) return;
+      const parts = [
+        ...noise.findings.map((f: any) => `L${f.line} ${f.kind}`),
+        ...slop.map(f => `L${f.line} ${f.rule}: ${f.message}`),
+        ...clones.map(c => { const mine = c.a.path === file.path && c.a.start >= span[0] - 2 && c.a.start <= span[1] ? c.a : c.b, other = mine === c.a ? c.b : c.a;
+          return `L${mine.start}-${mine.end} repeats ${other.path === file.path ? '' : other.path + ':'}${other.start}-${other.end} (${c.lines} lines, ${c.kind}${c.renamed.length ? `; differs in ${c.renamed.slice(0,3).join(', ')}` : ''}): reuse or extract it if the copies must change together`; }),
+      ];
+      return {content:[...event.content,{type:'text',text:`Code review (advisory): ${parts.join('; ')}. Keep intentional behavior; no automatic retry is required.`}],
+        details:{...event.details,codeNoise:{path:file.path,digest:file.digest,...noise},...(slop.length||clones.length?{codeQuality:{slop,clones}}:{})}};
     } catch { /* Advisory inspection must not turn a successful edit into a failed tool. */ }
   });
   pi.registerTool({name:'syntax_check',label:'Syntax check',

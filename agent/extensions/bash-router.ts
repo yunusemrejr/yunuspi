@@ -53,6 +53,8 @@ export default function bashRouter(pi: any) {
      let candidateResults = new Map<string, { tool: string; ruleId: string }>();
      let nativePending = new Map<string, string>();
      let nativeUsed = new Set<string>();
+     // Tools pointed at once while installed but off the wire this session.
+     let activationHinted = new Set<string>();
      const nativeRouteTargets = new Map([
           ["read", "read"],
           ["grep", "grep"],
@@ -133,6 +135,7 @@ export default function bashRouter(pi: any) {
 
      const reset = () => {
           counts = new Map();
+          activationHinted = new Set();
           hintCounts = new Map();
           pending = new Map();
           nativePending = new Map();
@@ -226,7 +229,18 @@ export default function bashRouter(pi: any) {
                       ? "available-candidate"
                       : "unavailable-candidate";
           recordActivity(availability, route.tool, route.ruleId);
-          if (!targetAvailable) return;
+          if (!targetAvailable) {
+               // An installed but inactive specialist: say once how to turn it
+               // on, after the Bash call succeeds. Never blocks or escalates.
+               let installed = false;
+               try { installed = pi.getAllTools?.()?.some?.((tool: any) => tool?.name === route.tool) === true; } catch { installed = false; }
+               if (installed && Array.isArray(active) && !activationHinted.has(route.tool) && typeof event.toolCallId === "string" && event.toolCallId) {
+                    activationHinted.add(route.tool);
+                    pending.set(event.toolCallId, { tool: route.tool, ruleId: `activate:${route.tool}`, seen: 1,
+                         hint: `${route.tool} is installed but not active; tool_search({names:["${route.tool}"]}) enables it for the rest of the session. ${route.hint}` });
+               }
+               return;
+          }
           if (active !== undefined && typeof id === "string" && id) {
                candidateResults.set(id, {
                     tool: route.tool,

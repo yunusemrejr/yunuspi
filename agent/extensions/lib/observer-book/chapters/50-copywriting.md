@@ -4,7 +4,7 @@ part: business
 title: Copywriting
 summary: Words that sell honestly: clarity over cleverness, specific benefits, headline formulas, persuasion frameworks (AIDA, PAS, BAB), calls to action, microcopy, editing, and avoiding generic AI-sounding prose.
 terms: copy copywriting copywriter headline headlines tagline slogan subheadline cta call-to-action microcopy ux-writing benefit benefits persuasion persuasive aida pas wording rewrite landing copy sales
-tools: claim_check
+tools: claim_check code_quality
 skills: copywriting natural-editorial-writing anti-ai-slop storytelling search-discoverability
 ---
 

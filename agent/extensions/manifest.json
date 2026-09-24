@@ -26,6 +26,7 @@
     "continuation-notice.ts",
     "bash-router.ts",
     "git-tools.ts",
+    "code-quality.ts",
     "http-tools.ts",
     "bulk-edit.ts",
     "sys-probe.ts",
@@ -164,7 +165,8 @@
     "workspace-write-lease.ts",
     "video-studio.ts",
     "design-studio.ts",
-    "image-analysis.ts"
+    "image-analysis.ts",
+    "code-quality.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

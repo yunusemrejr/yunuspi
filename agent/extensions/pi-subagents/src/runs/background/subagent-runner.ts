@@ -150,7 +150,7 @@ import { asyncStatusChildIdentity } from "../shared/child-identity.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { effectiveToolTimeoutMs, formatToolTimeoutMessage, toolTimeoutCallKey } from "../shared/tool-timeout.ts";
 import { usageBudgetExceededMessage, usageBudgetState } from "../shared/usage-budget.ts";
-import { childTerminalCause, classifyChildTerminal, groupCounters, groupLifecycleState, groupTelemetry, isProviderFailureText, isToolFailureText, type ChildTerminalFacts, type ChildTelemetrySource } from "../shared/group-reliability.ts";
+import { childTerminalCause, classifyChildTerminal, groupCounters, groupTelemetry, isProviderFailureText, isToolFailureText, type ChildTerminalFacts, type ChildTelemetrySource } from "../shared/group-reliability.ts";
 import { CHILD_BREAKER_EVAL_INTERVAL_MS } from "../shared/child-circuit-breakers.ts";
 import { assembleRunnerSpawnPreflight, buildChildRouteProvenance, formatSpawnPreflightBlocked } from "../shared/child-spawn-preflight.ts";
 import { evaluateRoute, readHealth } from "../shared/provider-health.ts";

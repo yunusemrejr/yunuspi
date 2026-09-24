@@ -16,7 +16,6 @@ import { promisify } from 'node:util';
 import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
 import { nodeId } from './store.mjs';
 import {
-  isActualEnvPath,
   isConfigPath,
   isDeploymentPath,
   isDiscoverablePath,
@@ -26,7 +25,6 @@ import {
   isProtectedPath,
   isSourcePath,
   isTemplateEnvPath,
-  isTextPath,
   parseCode,
   parseApiSpec,
   parseDeployment,

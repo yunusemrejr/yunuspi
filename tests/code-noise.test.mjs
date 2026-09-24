@@ -74,10 +74,10 @@ test('successful edit hook emits one bounded advisory per source revision and re
     hooks.get('session_switch')();
     assert.ok(await hooks.get('tool_result')(event,{...ctx,sessionManager:{getSessionId:()=> 'second'}}));
     hooks.get('session_start')();
-    for(let index=0;index<5;index++) {
+    for(let index=0;index<7;index++) {
       fs.writeFileSync(path.join(directory,'module.js'),`try { call(${index}); } catch {}`);
       const note=await hooks.get('tool_result')(event,ctx);
-      assert.equal(Boolean(note),index<4);
+      assert.equal(Boolean(note),index<6);
     }
     hooks.get('before_agent_start')();
     assert.ok(await hooks.get('tool_result')(event,ctx));

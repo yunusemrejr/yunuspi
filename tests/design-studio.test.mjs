@@ -305,7 +305,7 @@ test("image-to-code prompts route to the skill and stage the studio tools; verif
   }
   for (const prompt of ["take a screenshot of the page", "compare the screenshot with the page", "Create a website for my bakery", "update the screenshot in the README", "fix the css bug on the page"]) {
     assert.equal(routing.routeSkills(prompt).some(route => route.name === "mockup-to-code"), false, prompt);
-    assert.deepEqual(discovery.intentBundleTools(prompt), [], prompt);
+    assert.equal(discovery.intentBundleTools(prompt).some(name => ["image_analyze", "image_crop", "image_trace", "visual_diff"].includes(name)), false, prompt);
   }
   assert.ok(discovery.intentBundleTools("make the site look like this", 1).includes("visual_diff"), "an attached image is the reference");
   assert.deepEqual(discovery.intentBundleTools("what is in this picture?", 1), []);
