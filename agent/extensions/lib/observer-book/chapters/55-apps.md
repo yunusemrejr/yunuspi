@@ -5,7 +5,7 @@ title: Mobile and desktop apps
 summary: Native and cross-platform application craft: platform conventions, offline-first data, lifecycle and background limits, battery and performance, permissions, packaging, updates and store review.
 terms: mobile app apps ios android swift kotlin react native flutter electron tauri desktop native cross-platform offline sync push notification permission background battery app store play store packaging installer update window menu tray gtk qt
 files: .swift .kt .dart .xaml .plist androidmanifest.xml electron-builder.json tauri.conf.json
-tools: sandbox_run render_see
+tools: sandbox_run render_see desktop_session
 skills: desktop-app-dev desktop-ui linux-desktop-ui-ux java-cross-platform dotnet-linux-engineering windows-on-linux-engineering
 ---
 

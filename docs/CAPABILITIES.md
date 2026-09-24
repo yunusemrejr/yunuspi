@@ -322,6 +322,28 @@ Check SVG references and source cues, image/text metadata, measured frame timing
 
 **Documentation:** [`docs/SKILLS-AND-CHECKS.md`](SKILLS-AND-CHECKS.md)
 
+#### desktop-computer-use
+
+Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.
+
+**Entrypoints:** `desktop_session`
+
+**Catalog tool pointers:** `desktop_session`, `image_ocr`, `visual_diff`
+
+**Options:**
+
+- `action`: Session operation. Values: `start`, `launch`, `screenshot`, `click`, `move`, `drag`, `scroll`, `type`, `key`, `focus`, `windows`, `wait`, `logs`, `stop`, `list`.
+- `command|cwd`: launch: shell command run with DISPLAY set, from a workspace directory.
+- `x|y|toX|toY|button|double|direction|amount`: Pointer input in display pixels.
+- `text|keys`: Keyboard input: literal text, or xdotool key names such as ctrl+s.
+- `title|timeoutMs`: wait for a window whose title contains the text.
+
+**Related records:** `web-and-media`, `rendered-design-review`, `safety-bounds`
+
+**Source:** [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts), [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts), [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
+
+**Documentation:** [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
+
 #### rendered-design-review
 
 Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.
@@ -1081,6 +1103,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
 - `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 241; literal)
+- `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
@@ -1132,7 +1155,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 255; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 254; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 266; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 267; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 235; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 216; factory)
@@ -1323,6 +1346,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts)
 - [`agent/extensions/continuation-notice.ts`](../agent/extensions/continuation-notice.ts)
 - [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts)
+- [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
@@ -1384,6 +1408,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/cost-states.ts`](../agent/extensions/lib/cost-states.ts)
 - [`agent/extensions/lib/data-query.ts`](../agent/extensions/lib/data-query.ts)
 - [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
+- [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts)
 - [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
 - [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
@@ -1810,6 +1835,7 @@ The historical core transforms were deleted after the owned-core migration (see 
 - [`docs/CORE-UPDATES.md`](CORE-UPDATES.md)
 - [`docs/COST-ACCOUNTING.md`](COST-ACCOUNTING.md)
 - [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
+- [`docs/DESKTOP-SESSIONS.md`](DESKTOP-SESSIONS.md)
 - [`docs/EFFICIENCY-AUDIT.md`](EFFICIENCY-AUDIT.md)
 - [`docs/EMAIL.md`](EMAIL.md)
 - [`docs/GUARDIAN-IMPLEMENTATION-AUDIT.md`](GUARDIAN-IMPLEMENTATION-AUDIT.md)

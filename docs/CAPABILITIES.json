@@ -2381,6 +2381,70 @@
       "commands": []
     },
     {
+      "id": "desktop-computer-use",
+      "group": "engineering",
+      "summary": "Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.",
+      "entrypoints": [
+        "desktop_session"
+      ],
+      "tools": [
+        "desktop_session",
+        "image_ocr",
+        "visual_diff"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "start",
+            "launch",
+            "screenshot",
+            "click",
+            "move",
+            "drag",
+            "scroll",
+            "type",
+            "key",
+            "focus",
+            "windows",
+            "wait",
+            "logs",
+            "stop",
+            "list"
+          ],
+          "summary": "Session operation."
+        },
+        {
+          "name": "command|cwd",
+          "summary": "launch: shell command run with DISPLAY set, from a workspace directory."
+        },
+        {
+          "name": "x|y|toX|toY|button|double|direction|amount",
+          "summary": "Pointer input in display pixels."
+        },
+        {
+          "name": "text|keys",
+          "summary": "Keyboard input: literal text, or xdotool key names such as ctrl+s."
+        },
+        {
+          "name": "title|timeoutMs",
+          "summary": "wait for a window whose title contains the text."
+        }
+      ],
+      "related": [
+        "web-and-media",
+        "rendered-design-review",
+        "safety-bounds"
+      ],
+      "sourceFiles": [
+        "agent/extensions/desktop-session.ts",
+        "agent/extensions/lib/desktop-session.ts",
+        "agent/extensions/filesystem-safety.ts"
+      ],
+      "doc": "docs/DESKTOP-SESSIONS.md",
+      "commands": []
+    },
+    {
       "id": "rendered-design-review",
       "group": "engineering",
       "summary": "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",
@@ -3256,6 +3320,12 @@
         "kind": "literal"
       },
       {
+        "name": "desktop_session",
+        "source": "agent/extensions/desktop-session.ts",
+        "line": 15,
+        "kind": "literal"
+      },
+      {
         "name": "env_audit",
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 34,
@@ -3567,7 +3637,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 266,
+        "line": 267,
         "kind": "literal"
       },
       {
@@ -3742,6 +3812,12 @@
         "kind": "literal"
       },
       {
+        "name": "desktop_session",
+        "source": "agent/extensions/desktop-session.ts",
+        "line": 15,
+        "kind": "literal"
+      },
+      {
         "name": "evidence_cache",
         "source": "agent/extensions/pi-memory/context-tools.ts",
         "line": 16,
@@ -3912,7 +3988,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 266,
+        "line": 267,
         "kind": "literal"
       },
       {
@@ -4143,11 +4219,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 615,
-      "registrationSites": 68,
+      "sourceFiles": 617,
+      "registrationSites": 69,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 95,
-      "uniqueStableTools": 94,
+      "stableRegistrationRows": 96,
+      "uniqueStableTools": 95,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4192,6 +4268,10 @@
       },
       {
         "path": "agent/extensions/design-studio.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/desktop-session.ts",
         "exists": true
       },
       {
@@ -4426,6 +4506,10 @@
       },
       {
         "path": "agent/extensions/lib/design-studio.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/desktop-session.ts",
         "exists": true
       },
       {
@@ -6622,6 +6706,10 @@
       {
         "name": "DESIGN-STUDIO.md",
         "path": "docs/DESIGN-STUDIO.md"
+      },
+      {
+        "name": "DESKTOP-SESSIONS.md",
+        "path": "docs/DESKTOP-SESSIONS.md"
       },
       {
         "name": "EFFICIENCY-AUDIT.md",

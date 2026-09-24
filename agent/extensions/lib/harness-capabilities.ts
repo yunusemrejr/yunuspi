@@ -915,6 +915,23 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/DESIGN-STUDIO.md",
 	}),
 	capability({
+		id: "desktop-computer-use",
+		group: "engineering",
+		summary: "Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.",
+		entrypoints: ["desktop_session"],
+		tools: ["desktop_session", "image_ocr", "visual_diff"],
+		options: [
+			option("action", "Session operation.", ["start", "launch", "screenshot", "click", "move", "drag", "scroll", "type", "key", "focus", "windows", "wait", "logs", "stop", "list"]),
+			option("command|cwd", "launch: shell command run with DISPLAY set, from a workspace directory."),
+			option("x|y|toX|toY|button|double|direction|amount", "Pointer input in display pixels."),
+			option("text|keys", "Keyboard input: literal text, or xdotool key names such as ctrl+s."),
+			option("title|timeoutMs", "wait for a window whose title contains the text."),
+		],
+		related: ["web-and-media", "rendered-design-review", "safety-bounds"],
+		sourceFiles: ["agent/extensions/desktop-session.ts", "agent/extensions/lib/desktop-session.ts", "agent/extensions/filesystem-safety.ts"],
+		doc: "agent/public-template/docs/DESKTOP-SESSIONS.md",
+	}),
+	capability({
 		id: "rendered-design-review",
 		group: "engineering",
 		summary: "Collect rendered typography, spacing, surface effects, solid-color text contrast, overflow, motion and bounded placeholder/adjacent-label repetition, animated status pills, copy density, font proliferation, heavy border panels and quantified-claim evidence candidates. Compare viewport/state screenshots using design skills; intentional repetition is allowed, with no aesthetic score or compliance claim.",

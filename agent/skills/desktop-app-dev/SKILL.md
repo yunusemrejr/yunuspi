@@ -6,6 +6,8 @@ description: Build cross-platform desktop apps with Electron, Tauri or native to
 
 # Desktop App Development
 
+Verify desktop behavior by running it: `desktop_session` launches the app into a private virtual display, then clicks, types, presses keys and takes screenshots, without touching the user's screen. Check the window appears (`wait` with its title), the main flows respond to input, and `logs` shows no startup errors.
+
 ## Choose the stack (decide first, it's the 90% decision)
 
 | Need | Pick |

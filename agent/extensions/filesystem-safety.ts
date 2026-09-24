@@ -1590,8 +1590,9 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		denied.clear();
 	});
 	pi.on("tool_call", async (event, ctx) => {
-		// Only intercept bash tool calls
-		if (event.toolName !== "bash" && event.toolName !== "bg_run") {
+		// Only intercept shell commands: bash, background runs and commands
+		// launched into a desktop_session virtual display.
+		if (event.toolName !== "bash" && event.toolName !== "bg_run" && !(event.toolName === "desktop_session" && event.input?.action === "launch")) {
 			return undefined;
 		}
 

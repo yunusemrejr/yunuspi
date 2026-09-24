@@ -41,6 +41,7 @@
     "micro-intelligence.ts",
     "session-observer.ts",
     "design-studio.ts",
+    "desktop-session.ts",
     "video-studio.ts"
   ],
   "lib": [
@@ -166,7 +167,8 @@
     "video-studio.ts",
     "design-studio.ts",
     "image-analysis.ts",
-    "code-quality.ts"
+    "code-quality.ts",
+    "desktop-session.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",
