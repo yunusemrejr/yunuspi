@@ -647,3 +647,31 @@ test("configured search routes continue on empty results and preserve structured
     fs.rmSync(pacing, { recursive: true, force: true });
   }
 });
+
+test("research reads corroborated, primary and diverse sources first within the page budget", async () => {
+  const { rankReadCandidates, siteOf } = await import("../agent/extensions/pi-web-access/research-work.ts");
+  assert.equal(siteOf("https://www.docs.example.co.uk/a"), "example.co.uk");
+  assert.equal(siteOf("https://api.github.com/x"), "github.com");
+  const results = [
+    { query: "rust async runtime comparison", results: [
+      { url: "https://blog.a.com/rust-async", title: "Rust async runtimes compared", snippet: "" },
+      { url: "https://blog.a.com/other", title: "Rust tips", snippet: "" },
+      { url: "https://tokio.rs/docs#intro", title: "Tokio docs", snippet: "async runtime" },
+      { url: "https://www.pinterest.com/pin/1", title: "rust async", snippet: "" },
+    ] },
+    { query: "tokio vs async-std performance", results: [
+      { url: "https://tokio.rs/docs", title: "Tokio docs", snippet: "" },
+      { url: "https://github.com/async-rs/async-std", title: "async-std", snippet: "" },
+    ] },
+  ];
+  const candidates = ["https://example.org/supplied", "https://blog.a.com/rust-async", "https://blog.a.com/other", "https://tokio.rs/docs", "https://www.pinterest.com/pin/1", "https://github.com/async-rs/async-std"]
+    .map((url, i) => ({ url, origin: i === 0 ? "supplied" : "query" }));
+  const order = rankReadCandidates(candidates, results);
+  assert.deepEqual(order.slice(0, 3).map(row => row.url), ["https://example.org/supplied", "https://tokio.rs/docs", "https://github.com/async-rs/async-std"]);
+  assert.ok(order[1].why.includes("found by 2 queries"));
+  assert.equal(order.at(-1).url, "https://blog.a.com/other", "a second page from one site waits for other sites");
+  assert.ok(order.findIndex(row => row.url.includes("pinterest")) > order.findIndex(row => row.url === "https://blog.a.com/rust-async"));
+  const afterRead = rankReadCandidates(candidates.slice(1), results, ["https://tokio.rs/other-page"]);
+  const before = order.find(row => row.url === "https://tokio.rs/docs").score, after = afterRead.find(row => row.url === "https://tokio.rs/docs").score;
+  assert.ok(Math.abs(before - after - 0.9) < 0.01, "an already-read site costs the same as a page chosen in this round");
+});

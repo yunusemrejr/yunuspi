@@ -1,6 +1,72 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { matchesDomainFilters, normalizeDomainFilters } from "./duckduckgo.ts";
 
+/** Registrable-ish domain: the last two labels, three for common two-part
+ * public suffixes (example.co.uk). Good enough for diversity accounting. */
+export function siteOf(url: string): string {
+  try {
+    const labels = new URL(url).hostname.toLowerCase().replace(/^www\./, "").split(".");
+    const two = labels.slice(-2).join(".");
+    return /^(?:co|com|org|net|ac|gov|edu)\.[a-z]{2}$/.test(two) && labels.length > 2 ? labels.slice(-3).join(".") : two;
+  } catch { return ""; }
+}
+// Mild, transparent priors: primary and reference sources first, social and
+// Q&A aggregators last. Relevance and corroboration still dominate.
+const PRIMARY = /(?:^|\.)(?:gov|edu|mil|int)$|(?:^|\.)(?:w3\.org|ietf\.org|rfc-editor\.org|iso\.org|whatwg\.org|ecma-international\.org|arxiv\.org|acm\.org|ieee\.org|nature\.com|science\.org|nih\.gov|who\.int|europa\.eu|python\.org|nodejs\.org|mozilla\.org|kernel\.org|postgresql\.org|rust-lang\.org|go\.dev|github\.com)$/;
+const REFERENCE = /(?:^|\.)(?:wikipedia\.org|stackoverflow\.com|stackexchange\.com)$/;
+const LOW_SIGNAL = /(?:^|\.)(?:pinterest\.[a-z.]+|quora\.com|facebook\.com|instagram\.com|tiktok\.com|x\.com|twitter\.com)$/;
+
+/** Order candidate pages for reading: supplied sources first, then pages
+ * that more queries found (and found higher), from more reputable hosts,
+ * whose titles match the queries, spread across different sites. Returns
+ * rows with the reasons that ranked them. */
+export function rankReadCandidates(candidates: Array<{ url: string; origin: string }>, results: any[], alreadyRead: string[] = []): Array<{ url: string; origin: string; score: number; why: string[] }> {
+  const hits = new Map<string, { reciprocal: number; queries: Set<string>; text: string }>();
+  const sites = new Map<string, Set<string>>();
+  for (const result of results ?? []) (result?.results ?? []).forEach((row: any, rank: number) => {
+    let key: string;
+    try { const url = new URL(row.url); url.hash = ""; key = url.href; } catch { return; }
+    const hit = hits.get(key) ?? { reciprocal: 0, queries: new Set<string>(), text: "" };
+    hit.reciprocal += 1 / (1 + rank); hit.queries.add(result.query); hit.text += ` ${row.title ?? ""} ${row.snippet ?? ""}`;
+    hits.set(key, hit);
+    const site = siteOf(key);
+    sites.set(site, (sites.get(site) ?? new Set<string>()).add(result.query));
+  });
+  const queryTerms = new Set((results ?? []).flatMap((r: any) => String(r?.query ?? "").toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []));
+  const scored = candidates.map((row) => {
+    const why: string[] = [];
+    let score = 0;
+    if (row.origin === "supplied") { score += 100; why.push("supplied source"); }
+    const hit = hits.get(row.url);
+    if (hit) {
+      score += hit.reciprocal;
+      if (hit.queries.size > 1) { score += 0.8 * (hit.queries.size - 1); why.push(`found by ${hit.queries.size} queries`); }
+      const words = new Set(hit.text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+      const overlap = [...queryTerms].filter((t) => words.has(t)).length / Math.max(1, queryTerms.size);
+      score += 0.6 * overlap;
+    }
+    const site = siteOf(row.url);
+    if ((sites.get(site)?.size ?? 0) > 1) { score += 0.3; why.push("site found by several queries"); }
+    if (PRIMARY.test(site)) { score += 0.6; why.push("primary or official source"); }
+    else if (REFERENCE.test(site)) { score += 0.3; why.push("reference source"); }
+    else if (LOW_SIGNAL.test(site)) { score -= 0.6; why.push("social or aggregator source"); }
+    return { ...row, score, why, site };
+  });
+  // Greedy selection with a per-site penalty keeps reads diverse.
+  const counts = new Map<string, number>();
+  for (const url of alreadyRead) counts.set(siteOf(url), (counts.get(siteOf(url)) ?? 0) + 1);
+  const order: Array<{ url: string; origin: string; score: number; why: string[] }> = [];
+  const pool = [...scored];
+  while (pool.length) {
+    let best = 0, bestScore = -Infinity;
+    pool.forEach((row, i) => { const adjusted = row.score - 0.9 * (counts.get(row.site) ?? 0); if (adjusted > bestScore) { bestScore = adjusted; best = i; } });
+    const [row] = pool.splice(best, 1);
+    counts.set(row.site, (counts.get(row.site) ?? 0) + 1);
+    order.push({ url: row.url, origin: row.origin, score: Math.round(bestScore * 100) / 100, why: row.why });
+  }
+  return order;
+}
+
 // Runs inside the existing job owner. Two workers, no extra model or browser.
 export async function runResearchWork(
   job: any,
@@ -147,14 +213,14 @@ export async function runResearchWork(
   const readPages = async () => {
     for (const result of job.results)
       for (const row of result?.results ?? []) add(row.url, result.query);
-    const selected = [...candidates.values()]
-      .filter(
-        (row) => !job.sources.some((source: any) => source.url === row.url),
-      )
+    const unread = [...candidates.values()].filter(
+      (row) => !job.sources.some((source: any) => source.url === row.url),
+    );
+    const selected = rankReadCandidates(unread, job.results, job.sources.map((source: any) => source.url))
       .slice(0, Math.max(0, maxPages - job.sources.length));
     await parallel(selected, async (row) => {
       // Reserve before awaiting so completion order cannot exceed the source budget.
-      const receipt: any = { ...row, state: "reading" };
+      const receipt: any = { url: row.url, origin: row.origin, ...(row.why.length ? { selectedBecause: row.why } : {}), state: "reading" };
       job.sources.push(receipt);
       try {
         const result = await readSource(row.url, signal);
