@@ -2953,7 +2953,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 306
+        "line": 311
       },
       {
         "name": "or-provider",

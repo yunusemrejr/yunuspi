@@ -720,9 +720,43 @@ const similar = (a: string, b: string) => {
   return shared / new Set([...left, ...right]).size >= 0.6;
 };
 
-/** Per-project margin notes: read-merge-write with an atomic rename so
- * concurrent sessions in one checkout do not erase each other's notes. Struck
- * notes stay as tombstones for the TTL so a stale writer cannot revive them. */
+const lockPause = new Int32Array(new SharedArrayBuffer(4));
+/** Serializes a margin read-change-write across processes sharing the store.
+ * The lock file holds its owner's pid and a token. A lock whose owner has
+ * exited, or that is older than 30 seconds, is set aside, and an inode check
+ * guarantees a fresh lock is never removed. Callers wait up to 500 ms, then
+ * report the store as busy; only the holder of the token releases the lock. */
+function withMarginLock<T>(file: string, body: () => T): T {
+  const lock = `${file}.lock`, token = `${process.pid} ${randomUUID()}`, until = Date.now() + 500;
+  for (;;) {
+    try { fs.writeFileSync(lock, token, { flag: 'wx', mode: 0o600 }); break; }
+    catch (error: any) { if (error?.code !== 'EEXIST') throw error; }
+    reclaimStaleMarginLock(lock);
+    if (Date.now() > until) throw Error('margin store is busy');
+    Atomics.wait(lockPause, 0, 0, 5);
+  }
+  try { return body(); }
+  finally { try { if (fs.readFileSync(lock, 'utf8') === token) fs.unlinkSync(lock); } catch { /* reclaimed as stale */ } }
+}
+function reclaimStaleMarginLock(lock: string) {
+  try {
+    const seen = fs.lstatSync(lock), pid = Number(fs.readFileSync(lock, 'utf8').split(' ')[0]);
+    let exited = false;
+    if (Number.isSafeInteger(pid) && pid > 0) try { process.kill(pid, 0); } catch (error: any) { exited = error?.code === 'ESRCH'; }
+    if (!exited && Date.now() - seen.mtimeMs < 30_000) return;
+    const aside = `${lock}.${process.pid}.${randomUUID()}.stale`;
+    fs.renameSync(lock, aside);
+    const moved = fs.lstatSync(aside);
+    // Another process replaced the stale lock first: put its fresh one back.
+    if (moved.ino !== seen.ino || moved.dev !== seen.dev) try { fs.linkSync(aside, lock); } catch { /* a newer lock exists */ }
+    fs.unlinkSync(aside);
+  } catch { /* the lock changed hands meanwhile */ }
+}
+
+/** Per-project margin notes: read-change-write under a cross-process lock,
+ * with an atomic rename, so concurrent sessions in one checkout neither erase
+ * each other's notes nor assign one id twice. Struck notes stay as tombstones
+ * for the TTL so a stale writer cannot revive them. */
 export function createMarginStore(options: { dir: string; project: string; label?: string; now?: () => number }) {
   const now = options.now ?? Date.now;
   if (!/^[A-Za-z0-9._-]{1,120}$/.test(options.project)) throw Error('Invalid margin project key');
@@ -753,12 +787,15 @@ export function createMarginStore(options: { dir: string; project: string; label
     fs.renameSync(temp, file);
   }
   const mutate = (change: (value: MarginFile) => void) => {
-    const value = read();
-    for (const [id, count] of Object.entries(pendingCited)) value.cited[id] = (value.cited[id] ?? 0) + count;
-    pendingCited = {};
-    change(value);
-    write(value);
-    return value;
+    fs.mkdirSync(options.dir, { recursive: true, mode: 0o700 });
+    return withMarginLock(file, () => {
+      const value = read();
+      for (const [id, count] of Object.entries(pendingCited)) value.cited[id] = (value.cited[id] ?? 0) + count;
+      change(value);
+      write(value);
+      pendingCited = {};
+      return value;
+    });
   };
   return {
     file,

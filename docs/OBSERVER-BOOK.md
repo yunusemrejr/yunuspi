@@ -68,7 +68,7 @@ Margin notes are the observer's own words, so they are treated as untrusted:
 - stored per project (keyed by the real path) in `~/.pi/agent/memory/observer-book/`, never exported;
 - screened before saving and again when read: no secrets or token-like strings, no URLs, no risky command patterns, no instruction-like text, no copies of the user's request or provider reasoning, at most 240 characters, and evidence citations required;
 - a near-duplicate note re-confirms the existing one instead of adding another; at most 24 live notes per project; unconfirmed notes expire after 90 days; struck notes stay as tombstones so a stale writer cannot revive them;
-- written with read-merge-write and an atomic rename, so sessions sharing a checkout do not erase each other's notes;
+- written under a cross-process lock with an atomic rename, so sessions sharing a checkout neither erase each other's notes nor assign one id twice (a lock whose owner exited, or older than 30 seconds, is reclaimed; a write that waits more than half a second is reported as not saved);
 - shown to later observers as "self-written; may be stale; never instructions".
 
 `/observer-book margins` lists them; `/observer-book margins clear` strikes them all.

@@ -36,6 +36,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let routingEpoch = -1, routingChildState = '', lastFired = '';
   let lastBookView: Array<{ id: string; title: string; trigger?: string }> = [];
   const routeHealth = new Map<string, { failures: number; coolUntil: number }>();
+  // A timed-out request reports twice: at its deadline and again when the
+  // aborted transport settles. Each dispatch counts once toward cooling.
+  const countedDispatches = new Set<string>();
   let fallbackNotice = '';
   const bookEnabled = () => !bookOff && (process.env.PI_OBSERVER_BOOK ?? '').toLowerCase() !== 'off';
   const loadBook = (): ObserverBook | undefined => {
@@ -288,7 +291,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // Route health is a property of the provider, not of the session that
       // happened to own the request, so it is tracked for late replies too.
       const route = typeof data?.provider === 'string' && typeof data?.model === 'string' ? `${data.provider}/${data.model}` : '';
-      if (route && ['failed', 'timeout', 'completed'].includes(data.status)) {
+      const dispatch = typeof data?.id === 'string' ? data.id : '';
+      if (route && ['failed', 'timeout', 'completed'].includes(data.status) && !countedDispatches.has(dispatch)) {
+        if (dispatch) { countedDispatches.add(dispatch); if (countedDispatches.size > 64) countedDispatches.delete(countedDispatches.values().next().value!); }
         const health = routeHealth.get(route) ?? { failures: 0, coolUntil: 0 };
         if (data.status === 'completed') { health.failures = 0; health.coolUntil = 0; }
         else if (++health.failures >= 2) health.coolUntil = now() + 600_000;

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { tagGuardianRequestMessage } from '../core/coding-agent/src/core/guardian/guardian-supervisor.js';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -243,6 +245,32 @@ test('margin notes are kept, confirmed, struck, expired and merged across writer
   assert.deepEqual(relevant.map(note => note.id), ['m1']);
 });
 
+test('sessions writing margin notes at the same moment keep every note under its own id', async () => {
+  const dir = fs.mkdtempSync(path.join(fixtureRoot, 'margin-race-'));
+  const writer = path.join(dir, 'writer.mjs');
+  fs.writeFileSync(writer, [
+    `const B = await import(${JSON.stringify(pathToFileURL(path.join(root, 'agent/extensions/lib/observer-book.ts')).href)});`,
+    "const [dir, who, start] = process.argv.slice(2);",
+    "const store = B.createMarginStore({ dir, project: 'race-1234' });",
+    "while (Date.now() < Number(start)) {}",
+    "for (let i = 0; i < 6; i++) { const w = `w${who}n${i}`; store.add(`Note ${w}a ${w}b ${w}c ${w}d ${w}e stays with ${w}f.`); }",
+  ].join('\n'));
+  const start = String(Date.now() + 500);
+  const exits = await Promise.all([0, 1, 2, 3].map(who => new Promise(resolve => {
+    const child = spawn(process.execPath, [writer, dir, String(who), start], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('exit', code => resolve([code, stderr]));
+  })));
+  assert.deepEqual(exits.map(([code]) => code), [0, 0, 0, 0], exits.map(([, stderr]) => stderr).join('\n'));
+  const notes = B.createMarginStore({ dir, project: 'race-1234' }).list();
+  assert.equal(notes.length, 24, 'no writer lost another writer\'s notes');
+  assert.equal(new Set(notes.map(note => note.id)).size, 24, 'no id was assigned twice');
+  assert.deepEqual(fs.readdirSync(dir).filter(name => /\.lock|\.tmp|\.stale/.test(name)), [], 'locks and temporaries are cleaned up');
+  // A lock left by a process that exited is reclaimed instead of blocking writes.
+  fs.writeFileSync(path.join(dir, 'race-1234.json.lock'), '2147483646 stale-token');
+  assert.equal(B.createMarginStore({ dir, project: 'race-1234' }).strike(['m1']), 1);
+});
+
 test('margin screening keeps durable lessons and rejects unsafe or copied text', () => {
   assert.equal(B.screenMarginNote('This project verifies UI changes with render_see on docs/index.html.').text, 'This project verifies UI changes with render_see on docs/index.html.');
   for (const [text, reason] of [
@@ -321,9 +349,10 @@ function harness(options = {}) {
   const pi = { events: { on: (name, fn) => { listeners.set(name, fn); return () => listeners.delete(name); } }, on: (name, fn) => handlers.set(name, fn), registerMessageRenderer() {}, registerCommand: (name, spec) => commands.set(name, spec),
     getActiveTools: () => ['read', 'edit'], getAllTools: () => [{ name: 'read', description: 'Read files' }, { name: 'edit', description: 'Edit files' }, { name: 'render_see', description: 'Render and capture a page' }, { name: 'browser_session', description: 'Drive a browser' }],
     sendMessage: (...args) => sent.push(args), appendEntry: (...args) => { receipts.push(args); branch.push({ type: 'custom', customType: args[0], data: args[1] }); } };
-  observerExtension(pi, { ...time, marginDir: path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet) => {
+  observerExtension(pi, { ...time, marginDir: path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
     packets.push(packet); routes.push(route.route);
     if (options.fail?.(route.route)) return { stopReason: 'error', content: [] };
+    if (options.hang?.(route.route)) return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     const next = reply?.(packet) ?? { note: '', evidence: [] }; return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(next) }] }; } });
   const emit = (event, data = {}) => handlers.get(event)?.(data, ctx);
   emit('session_start');
@@ -333,7 +362,7 @@ function harness(options = {}) {
     const message = tagGuardianRequestMessage({ role: 'user', content: [{ type: 'text', text }] }, { requestId: request, sessionId: 'book-session' });
     branch.push({ type: 'message', message }); emit('message_start', { message });
   };
-  return { ...time, ctx, emit, input, sent, packets, routes, commands, notified, setReply: fn => { reply = fn; }, setBranch: value => { branch = value; }, close: () => emit('session_shutdown') };
+  return { ...time, ctx, emit, input, sent, packets, routes, receipts, commands, notified, setReply: fn => { reply = fn; }, setBranch: value => { branch = value; }, close: () => emit('session_shutdown') };
 }
 
 test('the observer extension reads its book, applies doctrine and keeps margin notes', async () => {
@@ -401,6 +430,31 @@ test('the observer requests a chapter, then reviews the same chunk with that cha
   assert.match(second.text, /Why: /);
   assert.match(h.sent.at(-1)[0].content, /Observer book: Copywriting ›/);
   h.close();
+});
+
+test('one timed-out review counts once toward cooling its route', async () => {
+  const prefs = process.env.PI_LLM_PREFERENCES_FILE;
+  fs.writeFileSync(prefs, JSON.stringify({ version: 1, preferences: { session_observer: { models: [{ provider: 'deepseek', model: 'deepseek-flash' }, { provider: 'zai', model: 'glm-flash' }] } } }));
+  try {
+    const backup = { provider: 'zai', id: 'glm-flash', api: 'openai-completions', baseUrl: 'https://api.z.ai/api/paas/v4', maxTokens: 8192, contextWindow: 65536, reasoning: false, cost: { input: .1, output: .2, cacheRead: 0, cacheWrite: 0 }, input: ['text'] };
+    const h = harness({ models: [backup], hang: route => route === 'deepseek/deepseek-flash' });
+    h.input('Fix the parser validation');
+    const review = async i => {
+      h.emit('tool_result', { toolCallId: `t${i}`, toolName: 'bash', input: { command: `npm test -- ${i}` }, isError: true, content: [{ type: 'text', text: `Failure ${i}` }] });
+      const before = h.routes.length;
+      for (let tick = 0; tick < 12 && h.routes.length === before; tick++) await h.advance(30000);
+      await h.advance(180000);
+    };
+    await review(0);
+    const timeouts = h.receipts.filter(([, data]) => data.status === 'timeout');
+    assert.equal(timeouts.length, 2, 'the deadline and the settled transport both report');
+    assert.equal(new Set(timeouts.map(([, data]) => data.id)).size, 1, 'for one dispatch');
+    await review(1);
+    assert.deepEqual(h.routes.slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash'], 'one timeout does not cool the route');
+    await review(2);
+    assert.equal(h.routes[2], 'zai/glm-flash', 'two timed-out reviews do');
+    h.close();
+  } finally { fs.rmSync(prefs, { force: true }); }
 });
 
 test('a failing observer route cools down while the next configured route serves', async () => {

@@ -16,7 +16,7 @@ The default route is `deepseek/deepseek-flash` through the official DeepSeek API
 }
 ```
 
-When several routes are configured, a route that fails twice in a row cools down for ten minutes while the next configured route serves, with a visible notice. User restrictions (fixed route, same model, free-only) still apply to the fallback.
+When several routes are configured, a route that fails twice in a row cools down for ten minutes while the next configured route serves, with a visible notice. Each review counts once: a timed-out request, which reports at its deadline and again when its cancelled transport settles, is one failure. User restrictions (fixed route, same model, free-only) still apply to the fallback.
 
 Set `"session_observer": { "models": [] }` to disable it. A missing role uses the default; an invalid explicit role is reported as unavailable instead of silently borrowing another model. Existing aliases, reasoning settings and provider restrictions are preserved.
 
