@@ -293,3 +293,44 @@ test("video studio registers five lazily discovered tools", async () => {
     assert.match(file.sha256, /^[0-9a-f]{64}$/);
   }
 });
+
+test("captions are timed by syllables and punctuation, chunked for reading and exported as SRT/VTT", async () => {
+  const captions = await import(pathToFileURL(path.join(template, "src/captions.ts")).href);
+  const text = "Attention lets every token look at every other token, and decide what matters. Then it mixes them.";
+  const words = captions.timeWords(text, 6);
+  assert.equal(words.length, 17);
+  assert.equal(words[0].start, 0); assert.ok(Math.abs(words.at(-1).end - 6) < 0.01, "the last word ends with the narration");
+  assert.ok(words.every((w, i) => i === 0 || w.start >= words[i - 1].end - 1e-9), "words never overlap");
+  const comma = words.findIndex(w => w.word === "token,"), period = words.findIndex(w => w.word === "matters.");
+  assert.ok(words[comma + 1].start - words[comma].end > 0.05 && words[period + 1].start - words[period].end > words[comma + 1].start - words[comma].end, "a sentence end pauses longer than a comma");
+  const chunks = captions.captionChunks(text, 6, 6);
+  assert.ok(chunks.every(c => c.words.length <= 6 && c.text.length <= 42 + 12));
+  assert.ok(chunks.some(c => c.text.endsWith("matters.")), "chunks break at sentence ends");
+  assert.deepEqual(captions.captionChunks(text, 6, 6), chunks, "deterministic");
+  const srt = captions.toSrt([{ text: "Hello world.", start: 1.5, end: 3.25 }, { text: "Bye.", start: 3661.001, end: 3662 }]);
+  assert.equal(srt, "1\n00:00:01,500 --> 00:00:03,250\nHello world.\n\n2\n01:01:01,001 --> 01:01:02,000\nBye.\n");
+  assert.match(captions.toVtt([{ text: "Hi.", start: 0, end: 1 }]), /^WEBVTT\n\n00:00:00\.000 --> 00:00:01\.000\nHi\.\n$/);
+  assert.equal(captions.estimateSeconds("one two three four five six seven eight nine ten eleven twelve thirteen"), 5);
+  const track = studio.captionTrack({ captions: { enabled: true, maxWords: 5 } }, [
+    { id: "a", start: 0, end: 3, seconds: 3, narration: "A short opening line that runs long past its scene end.", narrationOffset: 0.5, narrationSeconds: 4, cues: {} },
+    { id: "b", start: 3, end: 6, seconds: 3, narration: null, cues: {} },
+  ]);
+  assert.ok(track.length >= 2 && track[0].start === 0.5 && track.every(c => c.end <= 3), "cues start at the narration offset and stay inside their scene");
+});
+
+test("timeline validation covers transitions and captions; the template wires both", () => {
+  const spec = baseSpec();
+  spec.scenes[0].transition = { type: "wipe", seconds: 0.5 };
+  spec.captions = { enabled: true, style: "karaoke", maxWords: 6, position: "top" };
+  assert.deepEqual(studio.validateVideoSpec(spec, new Set(["A"]), () => true).issues, []);
+  spec.scenes[1].transition = { type: "spin" };
+  spec.scenes[0].transition = { type: "fade", seconds: 4 };
+  spec.captions = { enabled: "yes", style: "big" };
+  const messages = studio.validateVideoSpec(spec, new Set(["A"]), () => true).issues.map(i => i.message).join("\n");
+  assert.match(messages, /transition\.type must be/); assert.match(messages, /transition\.seconds must be 0\.05\.\.3/); assert.match(messages, /captions must be an object with enabled/);
+  const main = fs.readFileSync(path.join(template, "src/Main.tsx"), "utf8");
+  assert.match(main, /<Entry transition=\{scene\.transition\}>/, "scene transitions are rendered, not only declared");
+  assert.match(main, /spec\.captions\?\.enabled/);
+  const pkg = JSON.parse(fs.readFileSync(path.join(template, "package.json"), "utf8"));
+  assert.equal(pkg.dependencies["@remotion/media-utils"], pkg.dependencies.remotion, "audio-reactive primitives use the pinned Remotion version");
+});

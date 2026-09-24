@@ -10,6 +10,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
 import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
+// The template's caption timing is the single source for burned-in captions
+// and sidecar subtitles; it is plain TypeScript with no Remotion imports.
+import { captionChunks, estimateSeconds, toSrt, toVtt } from "../../skills/remotion-video/assets/template/src/captions.ts";
 
 const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 export const VIDEO_PATHS = {
@@ -80,6 +83,11 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     for (const [name, value] of Object.entries(raw.cues ?? {})) {
       if (typeof value !== "number" || value < 0 || value >= seconds) err(`cue "${name}" must be inside the scene (0..${seconds})`, id);
     }
+    if (raw.transition !== undefined) {
+      const kind = raw.transition?.type, length = raw.transition?.seconds ?? 0.5;
+      if (!["fade", "slide", "wipe", "zoom", "blur", "none"].includes(kind)) err('transition.type must be fade, slide, wipe, zoom, blur or none', id);
+      else if (typeof length !== "number" || length < 0.05 || length > Math.min(3, seconds / 2)) err(`transition.seconds must be 0.05..${Math.min(3, seconds / 2)}`, id);
+    }
     const offset = raw.narrationOffset ?? 0;
     if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) { err("narrationOffset must be a non-negative number", id); continue; }
     if (raw.narrationAudio) {
@@ -103,6 +111,15 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     at += duration;
   }
   if (at > 1800) err(`total duration ${at.toFixed(1)}s exceeds 30 minutes`);
+  if (spec.captions !== undefined) {
+    const c = spec.captions;
+    if (!c || typeof c !== "object" || typeof c.enabled !== "boolean") err("captions must be an object with enabled: true|false");
+    else {
+      if (c.style !== undefined && !["chunks", "karaoke"].includes(c.style)) err('captions.style must be "chunks" or "karaoke"');
+      if (c.maxWords !== undefined && (!Number.isInteger(c.maxWords) || c.maxWords < 2 || c.maxWords > 14)) err("captions.maxWords must be an integer 2..14");
+      if (c.position !== undefined && !["bottom", "top"].includes(c.position)) err('captions.position must be "bottom" or "top"');
+    }
+  }
   const audio = spec.audio ?? {};
   if (audio.music && !exists(audio.music)) err(`music public/${audio.music} is missing`);
   for (const sfx of audio.sfx ?? []) {
@@ -110,6 +127,19 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     if (typeof sfx?.at !== "number" || sfx.at < 0 || sfx.at >= at) err(`sfx ${sfx?.src} at ${sfx?.at}s is outside the timeline`);
   }
   return { issues, scenes, seconds: at };
+}
+
+/** Absolute-time caption chunks for every narrated scene, clipped to its
+ * scene. Uses the template's caption timing so sidecars match the video. */
+export function captionTrack(spec: any, scenes: TimedScene[]): Array<{ text: string; start: number; end: number }> {
+  const maxWords = spec?.captions?.maxWords ?? 7;
+  return scenes.flatMap((scene) => {
+    const text = typeof scene.narration === "string" ? scene.narration.trim() : "";
+    if (!text) return [];
+    const spoken = Number(scene.narrationSeconds) > 0 ? Number(scene.narrationSeconds) : estimateSeconds(text);
+    const origin = scene.start + (scene.narrationOffset ?? 0);
+    return captionChunks(text, spoken, maxWords).map((chunk) => ({ text: chunk.text, start: origin + chunk.start, end: Math.min(scene.end, origin + chunk.end) })).filter((c) => c.end > c.start);
+  });
 }
 
 /** Scene-relative seconds of a representative, fully built frame: after the
@@ -342,7 +372,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     if (params.install !== false) await npmInstall(dir, signal, progress);
     return {
       project: dir, installed: params.install !== false,
-      files: ["video.json (master timeline: scenes, narration, cues, audio)", "src/scenes/*.tsx + index.ts (scene registry)", "src/primitives/* (Stage, Heading, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop)", "src/motion.ts, src/theme.tsx, src/timeline.ts", "public/audio/ (narration, music, sfx)"],
+      files: ["video.json (master timeline: scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry)", "src/primitives/* (Stage, Heading, KineticText, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch)", "src/motion.ts, src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx)"],
       next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding", "Replace video.json scenes; build scene components from primitives", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", "narration_tts synthesize → audio_synth music/sfx → video_render preview → video_render final → video_qa"],
       note: "The two template scenes are mechanical examples; replace them with components designed for this video.",
     };
@@ -414,7 +444,18 @@ export async function videoRender(params: any, cwd: string, signal?: AbortSignal
       const result = await runRenderer(dir, request, signal, report, timeoutMs);
       const info = await probe(result.output, signal);
       await run("ffmpeg", [...FFMPEG_FLAGS, "-v", "error", "-xerror", ...inputArgs(result.output, 0), "-f", "null", "-"], signal, timeoutMs);
-      return { mode, output: result.output, frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
+      // Sidecar subtitles use the same timing as the burned-in captions.
+      let captions: any;
+      if (mode === "final") {
+        const from = (request.range?.[0] ?? 0) / fps, to = ((request.range?.[1] ?? total - 1) + 1) / fps;
+        const track = captionTrack(spec, scenes).filter((c) => c.end > from && c.start < to).map((c) => ({ ...c, start: Math.max(0, c.start - from), end: Math.min(to, c.end) - from }));
+        if (track.length) {
+          await fs.writeFile(path.join(out, "captions.srt"), toSrt(track), { flag: "wx" });
+          await fs.writeFile(path.join(out, "captions.vtt"), toVtt(track), { flag: "wx" });
+          captions = { srt: path.join(out, "captions.srt"), vtt: path.join(out, "captions.vtt"), cues: track.length, timing: "estimated from narration length and syllables, not speech-aligned" };
+        }
+      }
+      return { mode, output: result.output, ...(captions ? { captions } : {}), frameRange: request.range ?? [0, total - 1], seconds: Number(info.format?.duration), size: `${info.streams?.find((s: any) => s.codec_type === "video")?.width}x${info.streams?.find((s: any) => s.codec_type === "video")?.height}`, hasAudio: info.streams?.some((s: any) => s.codec_type === "audio") ?? false, renderMs: result.renderMs, decodeVerified: true,
         review: mode === "final" ? "Run video_qa on this file, then inspect its contact sheet and listen-check narration timing before delivery." : "Watch the motion: extract frames around transitions with video_frames, or check timing against cues in video.json. Stills cannot show pacing, easing or transitions." };
     }
     throw new Error("mode must be stills, preview or final");

@@ -39,6 +39,12 @@ The template ducks music under narration windows automatically (`musicVolume` to
 
 `audio_synth kind:"sfx"` with `type` whoosh (object crossing frame, transition), riser (tension into a reveal), impact (reveal lands), tick (items counting or stepping), chime (conclusion, success). Use one accent per idea, place it at the visual event (`video.json` `audio.sfx: [{src, at, volume}]`), and keep it 6–12 dB under narration. If you can't say which visual event a sound belongs to, delete it.
 
+## Captions and sound-driven visuals
+
+Most viewers meet a video muted first. Keep `captions.enabled` on for explainers and social cuts: captions come from the narration text and its measured length, so re-run `narration_tts` after editing a line and the captions follow. Use `karaoke` style for short social pieces where the active word helps pacing, `chunks` for calmer documentary work. The final render writes `captions.srt` and `captions.vtt`; upload them as platform subtitles instead of relying only on burned-in text. Caption timing is estimated from syllables and punctuation, so check two or three chunks against the audio in the preview.
+
+When music carries a section without narration, let the visuals listen: `AudioSpectrum` reads the actual audio file each frame (align it with `offsetSeconds` to where that audio starts). Tie accents to visible events: a `Glitch` or a `KineticText` word landing on the same frame as its sound accent reads as one gesture.
+
 ## Loudness targets
 
 | Target | Integrated | Peak |

@@ -6,11 +6,13 @@ The workflow lives in skills. `code-first-video` covers direction: research, nar
 
 | Tool | Does |
 | --- | --- |
-| `video_project` | `init` scaffolds a project with reusable primitives (network, matrix, graph, chart, history timeline, code, particles, typography) and installs pinned dependencies; `check` validates timing, cues, narration fit, component registry and assets; `install` repairs dependencies |
-| `video_render` | `stills` renders representative frames and a labelled contact sheet; `preview` renders a low-resolution scene or range; `final` renders full-quality H.264/AAC with decode verification. Bundles are content-hash cached and renders are queued |
+| `video_project` | `init` scaffolds a project with reusable primitives (network, matrix, graph, chart, history timeline, code, particles, typography, kinetic text) and finishing layers (narration captions, audio-reactive spectrum, film grain, light leaks, camera moves, glitch) and installs pinned dependencies; `check` validates timing, cues, narration fit, transitions, captions, component registry and assets; `install` repairs dependencies |
+| `video_render` | `stills` renders representative frames and a labelled contact sheet; `preview` renders a low-resolution scene or range; `final` renders full-quality H.264/AAC with decode verification and writes `captions.srt` and `captions.vtt` when scenes have narration. Bundles are content-hash cached and renders are queued |
 | `video_qa` | Black and frozen stretches, audio/video drift, silence gaps, EBU R128 loudness, peak and range, per-scene narration audibility and a scene contact sheet for visual review |
 | `narration_tts` | Local Piper neural narration: explicit one-time install of a pinned engine and checksum-verified voice; per-scene synthesis writing measured durations back to the timeline |
 | `audio_synth` | Seeded numpy music beds (chord progression, intensity automation) and sound effects (whoosh, riser, impact, tick, chime) |
+
+`video.json` also sets burned-in captions (`captions: {enabled, style: "chunks" | "karaoke", maxWords, position}`), timed from each scene's narration text and measured length with syllable weights and punctuation pauses (an estimate, not speech alignment), and per-scene entry transitions (`transition: {type: "fade" | "slide" | "wipe" | "zoom" | "blur", seconds}`). Prompts that ask for an explainer, documentary or narrated video put the five tools on the wire for the first model turn.
 
 ```js
 tool_search({ names: ["video_project", "video_render", "video_qa", "narration_tts", "audio_synth"] })

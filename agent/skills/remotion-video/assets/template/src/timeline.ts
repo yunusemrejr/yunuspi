@@ -17,13 +17,17 @@ export type SceneSpec = {
   narrationSeconds?: number | null;
   props?: Record<string, unknown>;
   cues?: Record<string, number>;
-  transition?: { type: "fade" | "none"; seconds?: number };
+  /** Entry transition from the previous scene's end. */
+  transition?: { type: "fade" | "slide" | "wipe" | "zoom" | "blur" | "none"; seconds?: number };
 };
 export type SfxSpec = { src: string; at: number; volume?: number };
+export type CaptionSpec = { enabled: boolean; style?: "chunks" | "karaoke"; maxWords?: number; position?: "bottom" | "top" };
 export type VideoSpec = {
   version: 1; title: string; fps: number; width: number; height: number;
   theme: Theme;
   audio: { music: string | null; musicVolume: number; musicDuckedVolume: number; narrationVolume: number; sfx: SfxSpec[] };
+  /** Burned-in narration captions; the final render also writes SRT/VTT. */
+  captions?: CaptionSpec;
   scenes: SceneSpec[];
 };
 export type TimedScene = SceneSpec & { index: number; from: number; durationInFrames: number; startSeconds: number };

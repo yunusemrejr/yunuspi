@@ -23,6 +23,12 @@
     "narrationVolume": 1,
     "sfx": []
   },
+  "captions": {
+    "enabled": true,
+    "style": "chunks",
+    "maxWords": 7,
+    "position": "bottom"
+  },
   "scenes": [
     {
       "id": "opening",
@@ -31,8 +37,15 @@
       "narration": "Replace this line with the opening narration.",
       "narrationAudio": null,
       "narrationOffset": 0.4,
-      "props": { "kicker": "Chapter one", "title": "A title that states the idea", "subtitle": "One short supporting line" },
-      "cues": { "title": 0.3, "subtitle": 1.4 }
+      "props": {
+        "kicker": "Chapter one",
+        "title": "A title that states the idea",
+        "subtitle": "One short supporting line"
+      },
+      "cues": {
+        "title": 0.3,
+        "subtitle": 1.4
+      }
     },
     {
       "id": "idea",
@@ -41,8 +54,24 @@
       "narration": "Describe what the diagram shows, in the order it appears.",
       "narrationAudio": null,
       "narrationOffset": 0.3,
-      "props": { "label": "Signals flow through the network", "layers": [3, 5, 5, 2] },
-      "cues": { "network": 0.2, "signal": 2.0, "label": 3.2 }
+      "props": {
+        "label": "Signals flow through the network",
+        "layers": [
+          3,
+          5,
+          5,
+          2
+        ]
+      },
+      "cues": {
+        "network": 0.2,
+        "signal": 2.0,
+        "label": 3.2
+      },
+      "transition": {
+        "type": "fade",
+        "seconds": 0.5
+      }
     }
   ]
 }

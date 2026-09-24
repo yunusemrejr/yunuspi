@@ -9,3 +9,7 @@ export { BarChart } from "./BarChart";
 export { TimelineAxis } from "./TimelineAxis";
 export { CodeBlock } from "./CodeBlock";
 export { TokenRow } from "./TokenRow";
+export { Captions } from "./Captions";
+export { FilmGrain, LightLeak, CameraMove, Glitch } from "./Effects";
+export { KineticText } from "./KineticText";
+export { AudioSpectrum } from "./AudioSpectrum";

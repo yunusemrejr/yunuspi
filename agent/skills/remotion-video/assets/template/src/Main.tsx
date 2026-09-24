@@ -1,8 +1,27 @@
 import React from "react";
-import { AbsoluteFill, Audio, interpolate, Sequence, staticFile } from "remotion";
+import { AbsoluteFill, Audio, interpolate, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { estimateSeconds } from "./captions";
+import { ease } from "./motion";
+import { Captions } from "./primitives/Captions";
 import { scenes as registry } from "./scenes";
 import { ThemeProvider } from "./theme";
-import { narrationWindows, spec, timeline, toFrames, type TimedScene } from "./timeline";
+import { narrationWindows, spec, timeline, toFrames, type SceneSpec, type TimedScene } from "./timeline";
+
+/** Entry transition over the first `seconds` of a scene (default 0.5 s). */
+const Entry: React.FC<{ transition?: SceneSpec["transition"]; children: React.ReactNode }> = ({ transition, children }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  if (!transition || transition.type === "none") return <>{children}</>;
+  const frames = Math.max(1, Math.round((transition.seconds ?? 0.5) * fps));
+  const p = interpolate(frame, [0, frames], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ease.out });
+  const style: React.CSSProperties =
+    transition.type === "fade" ? { opacity: p }
+    : transition.type === "slide" ? { opacity: p, transform: `translateX(${(1 - p) * 8}%)` }
+    : transition.type === "wipe" ? { clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` }
+    : transition.type === "zoom" ? { opacity: p, transform: `scale(${1.08 - 0.08 * p})` }
+    : { opacity: Math.min(1, p * 1.5), filter: `blur(${(1 - p) * 16}px)` };
+  return <AbsoluteFill style={style}>{children}</AbsoluteFill>;
+};
 
 export const SceneView: React.FC<{ scene: TimedScene }> = ({ scene }) => {
   const Component = registry[scene.component];
@@ -26,7 +45,14 @@ export const Main: React.FC = () => {
       <AbsoluteFill style={{ background: spec.theme.background }}>
         {scenes.map((scene) => (
           <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationInFrames} name={scene.id}>
-            <SceneView scene={scene} />
+            <Entry transition={scene.transition}>
+              <SceneView scene={scene} />
+            </Entry>
+            {spec.captions?.enabled && scene.narration ? (
+              <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`captions:${scene.id}`}>
+                <Captions text={scene.narration} seconds={scene.narrationSeconds ?? estimateSeconds(scene.narration)} style={spec.captions.style} maxWords={spec.captions.maxWords} position={spec.captions.position} />
+              </Sequence>
+            ) : null}
             {scene.narrationAudio ? (
               <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`narration:${scene.id}`}>
                 <Audio src={staticFile(scene.narrationAudio)} volume={spec.audio.narrationVolume} />

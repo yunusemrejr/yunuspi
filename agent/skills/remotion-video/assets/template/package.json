@@ -12,6 +12,7 @@
     "@fontsource/jetbrains-mono": "5.3.0",
     "@remotion/bundler": "4.0.527",
     "@remotion/cli": "4.0.527",
+    "@remotion/media-utils": "4.0.527",
     "@remotion/renderer": "4.0.527",
     "react": "19.3.0",
     "react-dom": "19.3.0",
