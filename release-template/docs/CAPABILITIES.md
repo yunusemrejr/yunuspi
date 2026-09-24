@@ -1108,7 +1108,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
-- `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 338; literal)
+- `git_info` — [`agent/extensions/git-tools.ts`](../../agent/extensions/git-tools.ts) (line 367; literal)
 - `handoff_capsule` — [`agent/extensions/pi-memory/context-tools.ts`](../../agent/extensions/pi-memory/context-tools.ts) (line 15; literal)
 - `http_request` — [`agent/extensions/http-tools.ts`](../../agent/extensions/http-tools.ts) (line 495; literal)
 - `image_ocr` — [`agent/extensions/media-tools.ts`](../../agent/extensions/media-tools.ts) (line 217; factory)

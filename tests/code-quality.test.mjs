@@ -218,3 +218,33 @@ test("bash router points once at an installed specialist that is off the wire", 
   uninstalled.get("tool_call")({ toolName: "bash", toolCallId: "c", input: { command: "git status" } });
   assert.equal(uninstalled.get("tool_result")({ toolName: "bash", toolCallId: "c", content: [], isError: false }), undefined, "no hint for tools that are not installed");
 });
+
+test("a bash commit with a staged secret or conflict marker is stopped, asked about, or allowed when clean", async () => {
+  const gitTools = (await import(pathToFileURL(path.join(agentRoot, "extensions/git-tools.ts")))).default;
+  const hooks = [];
+  gitTools({ registerTool() {}, on: (name, handler) => { if (name === "tool_call") hooks.push(handler); } });
+  const guard = hooks[0];
+  const dir = workspace();
+  const git = (...args) => execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { cwd: dir });
+  const call = (command, ctx = {}) => guard({ toolName: "bash", input: { command } }, { cwd: dir, hasUI: false, ...ctx });
+  try {
+    git("init", "-q");
+    write(dir, "a.js", "export const a = 1;\n");
+    git("add", "-A"); git("commit", "-qm", "init");
+    write(dir, "a.js", "export const a = 2;\n"); git("add", "a.js");
+    assert.equal(await call('git commit -m "clean change"'), undefined, "clean staged changes commit normally");
+    write(dir, "config.js", `export const token = "${["gh", "p_"].join("")}${"B".repeat(36)}";\n`); git("add", "config.js");
+    const blocked = await call('git add -A && git commit -m "add config"');
+    assert.equal(blocked.block, true); assert.match(blocked.reason, /possible GitHub token/);
+    assert.equal((await call('git commit -m "x"', { hasUI: true, ui: { confirm: async () => true } })), undefined, "a person can allow it");
+    assert.equal((await call('git commit -m "x"', { hasUI: true, ui: { confirm: async () => false } })).block, true);
+    assert.equal(await call("git status"), undefined);
+    assert.equal(await guard({ toolName: "read", input: { path: "a.js" } }, { cwd: dir }), undefined);
+    process.env.PI_COMMIT_SECRET_GUARD = "off";
+    try { assert.equal(await call('git commit -m "x"'), undefined); } finally { delete process.env.PI_COMMIT_SECRET_GUARD; }
+    git("reset", "-q", "config.js"); fs.rmSync(path.join(dir, "config.js"));
+    write(dir, "a.js", "<<<<<<< HEAD\nexport const a = 2;\n=======\nexport const a = 3;\n>>>>>>> other\n");
+    const marker = await call("git commit -am wip");
+    assert.equal(marker.block, true); assert.match(marker.reason, /merge conflict marker/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

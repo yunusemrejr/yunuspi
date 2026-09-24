@@ -24,6 +24,10 @@ After a successful `write` or `edit`, the existing syntax hook adds one short ad
 - `review` summarizes the working tree (or `staged`, or a `revision`): files by kind, the largest changes, risk flags from added lines (possible secrets, conflict markers, focused tests such as `it.only`, debug statements, `.env` files, edits to generated or vendored paths, dependency manifests changed without their lockfile, binaries, source changed without tests), `git diff --check` whitespace errors and a draft conventional-commit header to rewrite from the real intent.
 - `blame` summarizes which commits last touched a line range (`range:"40,80"`), with dates, authors and subjects.
 
+## Commit guard
+
+When an agent runs `git commit` through bash, the staged changes (or tracked changes for `commit -a`) are reviewed first. A secret-like string (private keys, cloud and platform tokens, JSON web tokens, credential assignments) or a conflict marker stops the commit with the flagged files; in an interactive session you are asked instead and can allow it. Other review flags never block. `PI_COMMIT_SECRET_GUARD=off` disables the guard. Patterns can be false positives, and a passing guard does not prove a commit is free of secrets.
+
 ## Language servers and linters
 
 The pi-lens tools remain the source for type-aware diagnostics (`lsp_diagnostics`, `lens_diagnostics`), symbol navigation and project-configured linters and formatters. Prefer the project's own checkers when they exist; `code_quality` covers what they usually do not: duplication across files, generated-looking patterns and prose.

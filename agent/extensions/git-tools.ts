@@ -73,12 +73,12 @@ async function git(args: string[], cwd: string, allowCodes: number[] = [0]): Pro
 
 /** Pre-commit review evidence: what changed, by kind, with risk flags from
  * the added lines and a draft conventional-commit header. Read-only. */
-export async function reviewChanges(params: GitInfoParams, cwd: string): Promise<any> {
+export async function reviewChanges(params: GitInfoParams & { untracked?: boolean }, cwd: string): Promise<any> {
   const revision = validateRevision(params.revision), filePath = validatePath(params.path);
   const target = params.staged ? ["--cached"] : revision ? [revision] : ["HEAD"];
   const scope = filePath ? ["--", filePath] : [];
   const numstat = await git(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--numstat", "-M", ...target, ...scope], cwd);
-  const untracked = params.staged || revision ? [] : (await git(["ls-files", "--others", "--exclude-standard", ...scope], cwd)).split("\n").filter(Boolean);
+  const untracked = params.staged || revision || params.untracked === false ? [] : (await git(["ls-files", "--others", "--exclude-standard", ...scope], cwd)).split("\n").filter(Boolean);
   const files = numstat.split("\n").filter(Boolean).map(line => {
     const [added, deleted, ...rest] = line.split("\t");
     const file = rest.join("\t").replace(/^.*=> /, "").replace(/[{}]/g, "");
@@ -334,7 +334,36 @@ export async function runGitInfo(
   return boundText(stdout.trim() || "(no output)");
 }
 
+/** A bash `git commit` (not an amend-only or dry run) and whether it stages
+ * tracked changes itself (-a / --all). */
+export function commitCommand(command: string): { all: boolean } | undefined {
+  const match = /(?:^|[;&|(]\s*|&&\s*)git\s+(?:-C\s+\S+\s+|-c\s+\S+\s+)*commit\b([^;&|]*)/.exec(command);
+  if (!match || /--dry-run\b/.test(match[1])) return undefined;
+  return { all: /(?:^|\s)(?:--all\b|-[a-zA-Z]*a[a-zA-Z]*\b)/.test(match[1]) };
+}
+const BLOCKING_RISK = /possible (?:private key|AWS access key|GitHub token|Slack token|API secret key|Google API key|JSON web token|credential assignment)|merge conflict marker/;
+
 export default function gitTools(pi: any) {
+  // Commits the agent makes through bash get a last look at what they will
+  // record: secret-like strings and conflict markers stop the commit (or ask,
+  // when a person is present). PI_COMMIT_SECRET_GUARD=off disables it.
+  pi.on?.("tool_call", async (event: any, ctx: any) => {
+    if (event?.toolName !== "bash" || process.env.PI_COMMIT_SECRET_GUARD === "off") return undefined;
+    const commit = commitCommand(String(event.input?.command ?? ""));
+    if (!commit) return undefined;
+    let risks: string[] = [];
+    try {
+      const review = await reviewChanges({ action: "review", ...(commit.all ? { untracked: false } : { staged: true }) }, ctx?.cwd || process.cwd());
+      risks = review.risks.filter((risk: string) => BLOCKING_RISK.test(risk));
+    } catch { return undefined; }
+    if (!risks.length) return undefined;
+    const reason = `Commit stopped before recording: ${risks.slice(0, 5).join("; ")}. Remove the secret (rotate it if it was ever pushed) or resolve the marker, then commit again; git_info review lists the flagged files. Deliberate test fixtures can build such values at runtime.`;
+    if (ctx?.hasUI && !ctx.signal?.aborted) {
+      const allowed = await ctx.ui.confirm("Commit may contain a secret or conflict marker", `${reason}\n\nCommit anyway?`, { signal: ctx.signal }).catch(() => false);
+      if (allowed) return undefined;
+    }
+    return { block: true, reason };
+  });
   pi.registerTool({
     name: "git_info",
     label: "Git Info",
