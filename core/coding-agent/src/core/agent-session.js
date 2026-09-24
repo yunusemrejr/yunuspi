@@ -174,7 +174,7 @@ export class AgentSession {
             sessionId: this.sessionManager.getSessionId(),
             cwd: this._cwd,
             observe: (data) => withSessionObservability({ sessionManager: this.sessionManager }, () => {
-                sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(data.outcome === "evaluated" ? "guardian.evaluated" : "guardian.observing", data);
+                sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(data.outcome === "decision" ? "guardian.decision" : data.outcome === "evaluated" ? "guardian.evaluated" : "guardian.observing", data);
             }),
             emit: async ({ type, content, detail, child }) => {
                 if (child && !this.isStreaming) return;

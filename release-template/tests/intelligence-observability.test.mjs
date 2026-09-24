@@ -241,7 +241,7 @@ test('loaded child health events relay bounded stages promptly only for their li
     });
     await Promise.resolve();
     assert.equal(records().length, 4);
-    assert.match(records().find(record => /Smol/.test(record.message)).message, /added to model context · 3 completions · 3000 characters saved/);
+    assert.match(records().find(record => /Local LM/.test(record.message)).message, /added to model context · 3 completions · 3000 characters saved/);
     guardian.dispose();
     await f.emit('tool_call', { toolCallId: 'after-owner-disposal', toolName: 'probe' });
     assert.equal(records().length, 4, 'a late child cannot relay after its owner was disposed');

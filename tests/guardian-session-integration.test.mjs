@@ -113,10 +113,11 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 		now += 301_000;
 		await a.session.prompt("Read the fixture again.", { source: "rpc" });
 		const activity = session => session.messages.filter(message => message.customType === "harness-activity");
-		const guardian = activity(a.session).filter(message => message.details.kind === "guardian.observing");
-		assert.equal(guardian.length, 2);
-		assert.match(guardian[0].details.detail, /1 tool results.*failure detector on standby/);
-		assert.match(guardian[1].details.detail, /2 tool results.*failure detector on standby/);
+		// Contract change 0.8.0: Guardian heartbeats are summarized by the live
+		// footer pulse and /guardian status, never repeated transcript lines
+		// (measured 245 identical lines a day). Verdicts remain lines below.
+		assert.equal(activity(a.session).filter(message => message.details.kind === "guardian.observing").length, 0);
+		assert.equal(a.session._guardian.handleCommand("/guardian stats").stats.toolResults, 2, "Guardian still observed both reads");
 		assert.equal(activity(b.session).filter(message => message.details.kind.startsWith("guardian.")).length, 0);
 		assert.equal(activity(a.session).filter(message => message.details.label === "Fuzzy matching").length, 2);
 		assert.equal(activity(b.session).filter(message => message.details.label === "Fuzzy matching").length, 1);
@@ -127,13 +128,13 @@ test("real SDK Guardian and consumed intelligence receipts remain visible across
 		assert.equal(a.session._guardian.handleCommand("/guardian status").kernel, "lazy");
 		const failing = await makeSession(true);
 		await failing.session.prompt("Locate the missing file.", { source: "rpc" });
-		const evaluations = activity(failing.session).filter(message => message.details.kind === "guardian.evaluated");
-		assert.equal(evaluations.length, 1);
-		assert.match(evaluations[0].details.detail, /3 tool results.*1 WASM evaluations/);
+		const verdicts = activity(failing.session).filter(message => message.details.kind === "guardian.decision");
+		assert.equal(verdicts.length, 1, "each WASM verdict is one visible line");
+		assert.match(verdicts[0].details.detail, /WASM score \d\.\d\d [<≥] \d\.\d\d · (?:no intervention|guidance sent to agent)/);
 		assert.equal(failing.session._guardian.handleCommand("/guardian stats").stats.classifierEvaluations, 1);
 		assert.equal(failing.session._guardian.handleCommand("/guardian stats").stats.similarityEvaluations, 1);
 		assert.equal(failing.calls(), 4);
-		assert.doesNotMatch(JSON.stringify(failing.contexts), /guardian\.evaluated|WASM evaluations/);
+		assert.doesNotMatch(JSON.stringify(failing.contexts), /guardian\.(?:evaluated|decision)|WASM score/);
 	} finally {
 		for (const session of sessions) { await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); }
 		Date.now = originalNow;

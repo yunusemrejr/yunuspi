@@ -30,10 +30,32 @@ export function validateFileContract(value: unknown, label = "acceptance.files")
 	return errors;
 }
 
+/** Blank PHP code while keeping template text. A PHP block ends at `?>` or at
+ * end of file (the closing tag is conventionally omitted); heredoc/nowdoc
+ * bodies inside it are HTML templates and stay visible. Without the EOF case
+ * the tokenizer read `<?php … <<<'HTML' <div …>` as one processing
+ * instruction, swallowed the first container and rejected balanced files. */
+export function maskPhpCode(source: string): string {
+	const blank = (value: string) => value.replace(/[^\n]/g, " ");
+	return source.replace(/<\?(?:php\b|=)?[\s\S]*?(?:\?>|$(?![\s\S]))/g, (block) => {
+		let out = "", at = 0;
+		for (const match of block.matchAll(/<<<[ \t]*(['"]?)([A-Za-z_]\w*)\1[ \t]*\r?\n/g)) {
+			if (match.index! < at) continue;
+			const bodyStart = match.index! + match[0].length;
+			const end = new RegExp(`^[ \\t]*${match[2]}\\b`, "m").exec(block.slice(bodyStart));
+			if (!end) break;
+			const bodyEnd = bodyStart + end.index;
+			out += blank(block.slice(at, bodyStart)) + block.slice(bodyStart, bodyEnd);
+			at = bodyEnd;
+		}
+		return out + blank(block.slice(at));
+	});
+}
+
 // Tokenizer preserves explicit closing tags (a DOM parser silently repairs them).
 // Compare only definite container balances; optional HTML end tags are excluded.
 export function inspectStaticHtml(source: string): HtmlShape {
-	const text = source.replace(/<\?[\s\S]*?\?>/g, (match) => " ".repeat(match.length));
+	const text = maskPhpCode(source);
 	const result: HtmlShape = { h1: 0, orphan: {}, unclosed: {}, scripts: [], incompleteScripts: 0 };
 	let tag = "", openStart = 0, scriptStart: number | undefined;
 	const noop = () => {};

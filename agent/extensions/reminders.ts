@@ -1,3 +1,4 @@
+import { messageText, renderHarnessNotice } from "./lib/harness-notice.ts";
 import { sessionObservability } from './lib/session-observability.ts';
 /**
  * Soft Reminders — todo-list upkeep, context-drift check-in, and reliable
@@ -331,7 +332,9 @@ function manualLine(r: ManualReminder): string {
 	// The user's accepted text is the instruction. Repeat it exactly on every
 	// occurrence so an important suffix cannot disappear between re-anchors.
 	// Selection is bounded by MANUAL_TEXT_MAX before this line is rendered.
-	return `[custom-reminder] ${r.text}`;
+	// One line per reminder: a multi-line /reminder text must not split the
+	// marker from its continuation (renderer, observer and ack parse per line).
+	return `[custom-reminder] ${r.text.replace(/\s*\r?\n\s*/g, " / ")}`;
 }
 
 /** Rotating harness trajectory probes, appended AFTER the user's exact text on
@@ -509,6 +512,15 @@ function logReminderErr(where: string, err: unknown): void {
 export default function remindersExtension(pi: ExtensionAPI) {
 	registerToolDiscovery(pi);
 	if (process.env.PI_SUBAGENT_CHILD !== "1") registerHarnessActivity(pi);
+	// The user's own reminders read as reminders; the harness check-in that
+	// carries them (orientation, hints, trajectory question) stays expandable.
+	if (process.env.PI_SUBAGENT_CHILD !== "1") pi.registerMessageRenderer?.("reminders", (message: any, options: any, theme: any) => {
+		const text = messageText(message);
+		const own = text.split("\n").filter((line) => line.startsWith("[custom-reminder] ")).map((line) => line.slice(18));
+		if (!own.length) return undefined;
+		return renderHarnessNotice({ icon: "⏰", tone: "warning", title: own.length === 1 ? "Reminder sent to the agent" : `${own.length} reminders sent to the agent`,
+			summary: "repeats about every 5 min · /reminder list", body: own.map((line) => `• ${line}`).join("\n"), detail: text }, options, theme);
+	});
 	// Children share skill routing/read receipts without inheriting the parent's
 	// manual reminder timers, todo nudges or continuation messages.
 	if (process.env.PI_SUBAGENT_CHILD === "1") {

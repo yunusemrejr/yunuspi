@@ -51,7 +51,7 @@ test('registered activity renderer produces bounded TUI lines for each flowing l
   assert.match(plain(new CustomMessageComponent(sent[1],renderer).render(120)),/cached embeddings.*candidates ranked/);
   const fixtures = [
    ['ml.jev.used',{questions:3},'JEV'],
-   ['ml.smol.inference',{decision:'selected'},'Smol'],
+   ['ml.smol.inference',{decision:'selected'},'Local LM'],
    ['ml.mini.select',{decision:'cache-hit'},'Kompress'],
    ['ml.fuzzy.used',{count:2},'Fuzzy matching'],
    ['ml.radar.rank',{decision:'on',count:3},'Neural ranker'],
@@ -60,7 +60,7 @@ test('registered activity renderer produces bounded TUI lines for each flowing l
    ['ml.retrieval.used',{},'Retrieval intelligence'],
    ['ml.evidence.delivered',{helper:'deterministic',savedChars:2048},'Deterministic selection'],
    ['ml.evidence.returned',{helper:'needle',savedChars:1234},'Needle3'],
-   ['ml.smol.offer',{decision:'ineligible-source',reason:'protected-content'},'Smol'],
+   ['ml.smol.offer',{decision:'ineligible-source',reason:'protected-content'},'Local LM'],
   ];
   for(const [kind,data,label] of fixtures){
    activity.note(kind,{...data,raw:'\x1b[2JPRIVATE-PAYLOAD',route:'PRIVATE-ROUTE',text:'PRIVATE-CONTENT'});

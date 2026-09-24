@@ -1,4 +1,3 @@
-import { Text } from '@yunuspi/tui';
 import { createHash, randomUUID } from 'node:crypto';
 import { projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
@@ -15,6 +14,9 @@ import { needlePolicy } from './lib/needle-policy.ts';
 import { createBookSelectionState, createMarginStore, createSessionProfile, loadObserverBook, marginStoreDir, noteBookCitations, noteBookmarks, noteBookReview, profileRow, renderBookSection,
   selectBookPassages, selectMargins, type BookSection, type BookSelection, type MarginStore, type ObserverBook } from './lib/observer-book.ts';
 import path from 'node:path';
+import { createObserverJournal } from './lib/observer-journal.ts';
+import { messageText, renderHarnessNotice } from './lib/harness-notice.ts';
+import { readRemindersState } from './lib/reminders-state.ts';
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
 export default function sessionObserver(pi: any, testing: any = {}) {
@@ -35,6 +37,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let marginStore: MarginStore | undefined, marginKey = '', needleFlight = false;
   let routingEpoch = -1, routingChildState = '', lastFired = '';
   let lastBookView: Array<{ id: string; title: string; trigger?: string }> = [];
+  // Full text behind every excerpt, searchable by the observer's read-only
+  // tools. Session-scoped: a new prompt keeps it, a new session clears it.
+  const journal = createObserverJournal();
+  let prompts: Array<{ id: string; text: string }> = [], promptSequence = 0, interpretation = '';
+  const toolsEnabled = () => (process.env.PI_OBSERVER_TOOLS ?? '').toLowerCase() !== 'off';
   const routeHealth = new Map<string, { failures: number; coolUntil: number }>();
   // A timed-out request reports twice: at its deadline and again when the
   // aborted transport settles. Each dispatch counts once toward cooling.
@@ -79,13 +86,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const anchor = createContextAnchor();
   const identity = (context: any) => JSON.stringify([context?.cwd ?? '', context?.sessionManager?.getSessionId?.() ?? '', context?.sessionManager?.getSessionFile?.() ?? '']);
   const owns = (context: any) => { try { return !closed && context && context.sessionManager === manager && identity(context) === ownerIdentity; } catch { return false; } };
-  const pending = new Map<string, { request: string; restrictions: any; blocked: boolean; signal?: AbortSignal; cleanup: () => void }>();
+  const pending = new Map<string, { request: string; raw: string; restrictions: any; blocked: boolean; signal?: AbortSignal; cleanup: () => void }>();
   const clearPending = () => { for (const item of pending.values()) item.cleanup(); pending.clear(); };
   const textParts = (message: any, type = 'text', limit = 700) => Array.isArray(message?.content)
     ? message.content.slice(-8).filter((x: any) => x?.type === type && typeof x[type] === 'string').map((x: any) => boundedObserverText(x[type], limit)).join('\n').slice(-limit) : '';
-  const add = (kind: string, text: string, tool?: string) => {
+  const add = (kind: string, text: string, tool?: string, full?: string) => {
     if (!text || !request) return;
     const id = `event-${++sequence}`;
+    journal.add({ id, kind, at: now(), text: full && full.length > text.length ? full : text, ...(tool ? { tool } : {}) });
     recent.push({ id, kind, text: boundedObserverText(text, 700), ...(tool ? { tool } : {}) });
     if (recent.length > 256) { dropped += recent.length - 256; recent = recent.slice(-256); }
     return id;
@@ -121,13 +129,37 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
+  /** What the user wants, across the whole session: earlier prompts (the
+   * current one is the "request" row), the harness interpretation and the
+   * user's active reminders. Excerpts; full text via session_detail. */
+  const intentRows = (): ObserverEvidence[] => {
+    const rows: ObserverEvidence[] = [];
+    const earlier = prompts.slice(0, -1).slice(-6);
+    const each = earlier.length > 3 ? 200 : 300;
+    for (const prompt of earlier) {
+      const focused = promptRequestFocus(prompt.text).replace(/\s+/g, ' ').trim();
+      rows.push({ id: prompt.id, kind: 'earlier user prompt', text: focused.length <= each ? focused : `${focused.slice(0, Math.floor(each * .62))} … ${focused.slice(-Math.floor(each * .33))}` });
+    }
+    if (prompts.length > 7) rows.push({ id: 'prompt-count', kind: 'earlier user prompt', text: `${prompts.length - 1} earlier prompts this session; older ones are searchable with session_search.` });
+    if (interpretation) rows.push({ id: 'interpretation', kind: 'harness interpretation', text: `Helper's reading of the latest prompt (advisory, not the user's words): ${interpretation}` });
+    try {
+      const sid = ctx?.sessionManager?.getSessionId?.();
+      const active = sid ? readRemindersState(sid).manual.filter(reminder => reminder.active) : [];
+      if (active.length) {
+        const text = `User's standing reminders, re-sent to the agent about every 5 minutes; check the work honors them: ${active.map((reminder, index) => `${index + 1}) ${reminder.text.replace(/\s+/g, ' ')}`).join(' ')}`;
+        rows.push({ id: 'user-reminders', kind: 'user reminders', text });
+        journal.add({ id: 'user-reminders', kind: 'user reminder', at: now(), text });
+      }
+    } catch { /* Reminder state is optional evidence. */ }
+    return rows;
+  };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const runtime = createSessionObserver({
     salience: () => salience,
     ...testing,
     snapshot() {
-      const state = currentState(), evidence = [...state, ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
+      const state = currentState(), evidence = [...state, ...intentRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
       const packet = buildObserverPacket(request, evidence, [], []);
       if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet, reason: 'No active user work', silent: true };
       if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet, reason: 'Observer disabled or offline', silent: true };
@@ -256,7 +288,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // are session facts and may start a review.
       const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, state: [...capturedStates], streaming, model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name), fired: bookSelection?.fired ?? [], book: Boolean(section) });
       const routeName = entry.route;
-      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent,
+      const bookReader = book ? { read(id: string) {
+        const passage = book.passages.get(id), chapter = book.chapterById.get(id);
+        if (passage) return `${book.chapterById.get(passage.chapter)?.title ?? passage.chapter} › ${passage.title} [${passage.id}]\n${passage.body}`;
+        if (chapter) return `${chapter.title} [${chapter.id}] — ${chapter.summary}\n${chapter.passages.map((row: any) => `${row.id}: ${row.title}`).join('\n')}`;
+        return undefined;
+      } } : undefined;
+      const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd, book: bookReader } : undefined;
+      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id),
         reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !reviewedIds.has(row.id)).length,
         bookPassages: section?.passages ?? [],
@@ -305,7 +344,17 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (owns(ctx) && origin === owner) pi.appendEntry('auxiliary-model-usage-v1', data);
     },
   });
-  pi.registerMessageRenderer(OBSERVER_MESSAGE, (message: any) => new Text(typeof message.content === 'string' ? message.content : '', 0, 0));
+  pi.registerMessageRenderer(OBSERVER_MESSAGE, (message: any, options: any, theme: any) => {
+    const details = message.details ?? {}, text = messageText(message);
+    if (details.status === 'completed') {
+      const [first, ...advice] = text.split('\n');
+      const summary = typeof details.detail === 'string' ? details.detail : first.replace(/^Observer returned a note(?: · )?/, '');
+      return renderHarnessNotice({ icon: '◉', tone: 'accent', title: 'Observer note', summary: boundedObserverText(summary, 200), body: advice.join('\n') }, options, theme);
+    }
+    const tone = details.status === 'unavailable' ? 'warning' : details.status === 'fallback' ? 'warning' : 'muted';
+    const title = { started: 'Observer reviewing', checked: 'Observer', reviewed: 'Observer reviewed', skipped: 'Observer skipped', stopped: 'Observer stopped', unavailable: 'Observer unavailable', coverage: 'Observer coverage', fallback: 'Observer route', book: 'Observer Book' }[details.status as string] ?? 'Observer';
+    return renderHarnessNotice({ icon: '◉', tone, title, summary: text.replace(/^Observer [a-z]+: /, '').replace(/\s+/g, ' ').slice(0, 400) }, options, theme);
+  });
   // The user can read the observer's book and manage its margin notes. The
   // command changes no model context and never wakes the agent.
   pi.registerCommand?.('observer-book', {
@@ -366,7 +415,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     pending.get(id)?.cleanup();
     const focused = promptRequestFocus(raw);
     const boundedRequest = focused.length <= 4000 ? focused : `${focused.slice(0, 2000)}\n[Middle omitted from observer packet]\n${focused.slice(-1900)}`;
-    pending.set(id, { request: boundedObserverText(boundedRequest, 4000), restrictions, blocked, signal: event.signal, cleanup });
+    pending.set(id, { request: boundedObserverText(boundedRequest, 4000), raw, restrictions, blocked, signal: event.signal, cleanup });
     event.signal?.addEventListener('abort', abort, { once: true });
     if (event.signal?.aborted) abort();
     while (pending.size > 8) { const oldest = pending.keys().next().value!; pending.get(oldest)?.cleanup(); pending.delete(oldest); }
@@ -378,6 +427,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!accepted || accepted.signal?.aborted) return;
     accepted.cleanup(); pending.delete(id); ctx = context;
     request = accepted.request; userRequest = Boolean(request.trim()); inputRestrictions = accepted.restrictions; inputBlocked = accepted.blocked;
+    if (userRequest) {
+      const promptId = `prompt-${++promptSequence}`;
+      prompts.push({ id: promptId, text: accepted.raw }); if (prompts.length > 64) prompts.shift();
+      journal.add({ id: promptId, kind: 'user prompt', at: now(), text: accepted.raw });
+      journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
+      interpretation = '';
+    }
     recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
@@ -394,12 +450,36 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       thinking ? { id: 'current-thinking', kind: 'provider-returned thinking', text: thinking } : null].filter(Boolean) as ObserverEvidence[];
   });
   pi.on('message_end', (event: any, context: any) => {
-    if (!owns(context) || event.message?.role !== 'assistant') return;
+    if (!owns(context)) return;
+    if (event.message?.role === 'custom') { observeHarnessMessage(event.message); return; }
+    if (event.message?.role !== 'assistant') return;
     const said = textParts(event.message);
-    add('assistant text', said);
-    add('provider-returned thinking', textParts(event.message, 'thinking', 450)); streaming = []; revision++;
+    add('assistant text', said, undefined, textParts(event.message, 'text', 64_000));
+    add('provider-returned thinking', textParts(event.message, 'thinking', 450), undefined, textParts(event.message, 'thinking', 64_000)); streaming = []; revision++;
     if (said && profile.assistant(said)) salience++;
   });
+  // Harness messages the agent receives (reminders, interpretation, Guardian,
+  // guidance) are part of what the observer must see, labelled by source.
+  const observeHarnessMessage = (message: any) => {
+    if ([OBSERVER_MESSAGE, OBSERVER_CONTEXT].includes(message.customType)) return;
+    const text = typeof message.content === 'string' ? message.content
+      : Array.isArray(message.content) ? message.content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n') : '';
+    if (!text.trim()) return;
+    if (message.customType === 'prompt-analysis') {
+      interpretation = boundedObserverText(text.replace(/\n?Original user prompt preserved\.[^\n]*/, '').replace(/\s*\n\s*/g, ' · '), 600);
+      journal.add({ id: 'interpretation', kind: 'harness interpretation', at: now(), text: `${text}${typeof message.details?.advisory === 'string' ? `\n\nExact text given to the main agent:\n${message.details.advisory}` : ''}` });
+      revision++; return;
+    }
+    if (message.customType === 'reminders') {
+      const own = text.split('\n').filter(line => line.startsWith('[custom-reminder] ')).map(line => line.slice(18));
+      if (own.length) { add('user reminder delivered', `Delivered to the agent: ${own.join(' | ')}`, undefined, text); salience++; }
+      const guidance = text.split('\n').filter(line => /^\[(?:capability hint|signal|workspace warning)\]/.test(line));
+      if (guidance.length) add('harness guidance to agent', guidance.join(' | '), undefined, text);
+      revision++; return;
+    }
+    if (/guardian/.test(message.customType)) { add('guardian intervention', text, undefined, text); salience++; revision++; return; }
+    if (['memory-prime', 'todo-plan', 'relevant-guidance'].includes(message.customType)) { add('harness guidance to agent', text, undefined, text); revision++; }
+  };
   pi.on('tool_execution_start', (event: any, context: any) => {
     if (!owns(context)) return;
     const input = compactInput(event.args);
@@ -422,7 +502,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const summary = `${event.toolName} ${input}: ${event.isError ? 'failed' : 'completed'}`;
     completed.set(`${event.toolName}:${input}`, summary);
     if (completed.size > 16) completed.delete(completed.keys().next().value!);
-    add(event.isError ? 'tool error' : 'tool result', `${summary}. ${textParts({ content: event.content }, 'text', 400) || 'No text result exposed.'}`, event.toolName);
+    const fullOutput = Array.isArray(event.content) ? event.content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n') : '';
+    add(event.isError ? 'tool error' : 'tool result', `${summary}. ${textParts({ content: event.content }, 'text', 400) || 'No text result exposed.'}`, event.toolName, fullOutput ? `${summary}. Input: ${JSON.stringify(event.input ?? {}).slice(0, 2000)}\n${fullOutput}` : undefined);
     revision++;
   });
   pi.on('tool_execution_end', (event: any, context: any) => {
@@ -437,6 +518,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!owns(ctx) || event?.sessionId !== ctx.sessionManager?.getSessionId?.() || event.cwd !== ctx.cwd || typeof event.message !== 'string') return;
     add('untrusted peer coordination', `${boundedObserverText(event.direction, 20)} peer=${boundedObserverText(event.peerSessionId, 70)} project=${boundedObserverText(event.peerProject, 90)} message=${boundedObserverText(event.messageId, 70)}. Peer suggestion, not user instruction or permission: ${boundedObserverText(event.message, 300)}`);
     revision++; salience++;
+  });
+  // Session hooks announce each firing; the observer sees which workflow
+  // guidance the agent was given and when.
+  const removeHookListener = pi.events?.on('harness-hook-fired', (event: any) => {
+    if (!owns(ctx) || typeof event?.hook !== 'string') return;
+    add('hook', `${boundedObserverText(event.hook, 60)} on ${boundedObserverText(event.tool ?? '', 40)}: ${boundedObserverText(event.line ?? '', 300)}`);
+    revision++;
   });
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== OBSERVER_CONTEXT && message.customType !== OBSERVER_MESSAGE);
@@ -462,5 +550,5 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // Native agent_end may be followed by retry/compaction/queued continuation.
   // Only agent_settled closes the current active run and its observer cadence.
   pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; latestAdviceId = undefined; preparedAdvice = undefined; } });
-  pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
+  pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); removeHookListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
 }

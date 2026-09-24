@@ -17,7 +17,8 @@ External office/CAD/media applications and optional model weights are not bundle
 ## Local-inference runtimes (downloaded at install time, never committed)
 
 - Needle3 (Cactus Compute) — Apache-2.0. The `needle.js`/`needle.wasm` engine and `needle3.cact` weights are fetched during setup from the official `Cactus-Compute/needle3` Hugging Face repository at a pinned revision with SHA-256 verification; upstream source is https://github.com/cactus-compute/needle. Telemetry is disabled (`NEEDLE_TELEMETRY=0`, `DO_NOT_TRACK=1`). A copy of the upstream LICENSE is installed beside the weights.
-- Kompress-small (`chopratejas/kompress-small`) and SmolLM2-135M-Instruct loopback runtimes, when configured, are operator-installed local services; check their model cards and licenses before distribution or use.
+- Kompress-small (`chopratejas/kompress-small`), when configured, is an operator-installed local service; check its model card and license before distribution or use.
+- Qwen3.5-0.8B (`Qwen/Qwen3.5-0.8B`, Apache-2.0; GGUF from `ggml-org/Qwen3.5-0.8B-GGUF` at a pinned revision) and the llama.cpp `b10878` server binary (MIT, `ggml-org/llama.cpp`) are downloaded at install time by `agent/extensions/lib/local-lm-assets.mjs`, checksum-verified and never committed.
 
 ## Pi-derived core
 

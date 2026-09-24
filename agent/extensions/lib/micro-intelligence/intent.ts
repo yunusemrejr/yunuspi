@@ -5,6 +5,7 @@
  */
 import { needleClassify } from "../needle-runtime.ts";
 import { askJev } from "../jev-client.ts";
+import { localLm } from "../local-lm.ts";
 import { microMetrics } from "./metrics.ts";
 
 export type MutationScreenVerdict = "read-only" | "implementation" | "unavailable" | "defer";
@@ -44,7 +45,22 @@ export async function resolveWithScreen<T>(
   return { verdict: await fallback(), screened: false };
 }
 
-export async function cheapMutationScreen(task: string, deps: { classify?: typeof needleClassify; ask?: typeof askJev } = {}): Promise<MutationScreenVerdict> {
+/** Local-model stage (Qwen3.5-0.8B, free): measured on 12 real prompts, every
+ * file-changing task scored P>=0.51 but one (0.38) and every read-only task
+ * P<=0.42. It may only decide the fail-safe "implementation" direction; the
+ * dangerous read-only rescue stays with Needle's strict bar, Jev and the arbiter. */
+export const LOCAL_IMPLEMENTATION_AT = 0.5;
+const MUTATION_EXAMPLES = `Decide if a task instructs an AI agent to create, edit or delete files, code or configuration.
+Task: Explain how the caching layer works.
+Changes files: no
+Task: Add input validation to the signup form.
+Changes files: yes
+Task: Review the auth module and list any bugs you find.
+Changes files: no
+Task: Rename the config key and update all callers.
+Changes files: yes
+`;
+export async function cheapMutationScreen(task: string, deps: { classify?: typeof needleClassify; ask?: typeof askJev; judge?: (prompt: string) => Promise<{ ok: boolean; p?: number }> } = {}): Promise<MutationScreenVerdict> {
   if (process.env.PI_INTENT_PRESCREEN === "off") return "defer";
   if (typeof task !== "string" || task.length < 12 || task.length > 8000) return "defer";
   const metrics = microMetrics();
@@ -64,7 +80,17 @@ export async function cheapMutationScreen(task: string, deps: { classify?: typeo
       }
     }
   } catch {
-    /* Fall through to Jev, then to the full arbiter. */
+    /* Fall through to the local model, Jev, then the full arbiter. */
+  }
+  try {
+    const judge = deps.judge ?? ((prompt: string) => localLm().judge(prompt, "mutation-intent"));
+    const local = await judge(`${MUTATION_EXAMPLES}Task: ${task.replace(/\s+/g, " ").slice(0, 600)}\nChanges files:`);
+    if (local.ok && typeof local.p === "number" && local.p >= LOCAL_IMPLEMENTATION_AT) {
+      metrics.llmAvoided(800);
+      return "implementation";
+    }
+  } catch {
+    /* The local stage only ever shortcuts the fail-safe direction. */
   }
   try {
     const judged = await (deps.ask ?? askJev)("intent", { task }, {

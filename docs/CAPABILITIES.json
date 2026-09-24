@@ -115,7 +115,7 @@
     {
       "id": "hook-guidance",
       "group": "commands",
-      "summary": "Attach one deterministic workflow reminder to the first matching tool result; hooks annotate and recover without blocking or changing authority.",
+      "summary": "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.",
       "entrypoints": [
         "tool_call",
         "tool_result",
@@ -2948,12 +2948,12 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 889
+        "line": 893
       },
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 311
+        "line": 360
       },
       {
         "name": "or-provider",
@@ -2978,7 +2978,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1187
+        "line": 1199
       },
       {
         "name": "run",
@@ -3444,7 +3444,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 423,
+        "line": 427,
         "kind": "literal"
       },
       {
@@ -3462,7 +3462,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 813,
+        "line": 817,
         "kind": "literal"
       },
       {
@@ -3564,7 +3564,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 663,
+        "line": 702,
         "kind": "literal"
       },
       {
@@ -3880,13 +3880,13 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 423,
+        "line": 427,
         "kind": "literal"
       },
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 813,
+        "line": 817,
         "kind": "literal"
       },
       {
@@ -3964,7 +3964,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 663,
+        "line": 702,
         "kind": "literal"
       },
       {
@@ -4219,7 +4219,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 617,
+      "sourceFiles": 622,
       "registrationSites": 69,
       "indirectRegistrationSites": 18,
       "stableRegistrationRows": 96,
@@ -4505,6 +4505,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/design-direction.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/design-studio.ts",
         "exists": true
       },
@@ -4554,6 +4558,10 @@
       },
       {
         "path": "agent/extensions/lib/harness-invariants.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/harness-notice.ts",
         "exists": true
       },
       {
@@ -4618,6 +4626,14 @@
       },
       {
         "path": "agent/extensions/lib/local-intelligence.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/local-lm-assets.mjs",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/local-lm.ts",
         "exists": true
       },
       {
@@ -4686,6 +4702,10 @@
       },
       {
         "path": "agent/extensions/lib/observer-book.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/observer-journal.ts",
         "exists": true
       },
       {
@@ -5303,10 +5323,6 @@
         "exists": true
       },
       {
-        "path": "agent/scripts/systemd/pi-smol-preprocessor.service",
-        "exists": true
-      },
-      {
         "path": "agent/scripts/transaction.mjs",
         "exists": true
       },
@@ -5520,6 +5536,11 @@
         "name": "pi-orchestrator.ts",
         "retired": "2026-08-12",
         "why": "2026-08-12 refactor — do not recreate"
+      },
+      {
+        "name": "pi-smol-preprocessor.service",
+        "retired": "2026-09-25",
+        "why": "SmolLM2-135M-Instruct (Q2_K) chose lines at chance level on harness data (skill-relevance AUC 0.53) and almost never ran (eligibility gates rejected nearly every offer; its 250ms take-wait missed ~1s inference). Replaced by the shared local language model Qwen3.5-0.8B (pi-local-lm.service, lib/local-lm.ts, lib/local-lm-assets.mjs): AUC 0.88. local-lm-assets.mjs install retires the old unit and weights. Do not recreate"
       },
       {
         "name": "pi-subagents.ts",

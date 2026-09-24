@@ -102,6 +102,18 @@ A limited skill read satisfies the read requirement when its returned text match
 
 Startup animation stops when its content no longer fits the terminal viewport, preventing repeated full-screen startup redraws after a pane shrinks. MCP lifecycle handling isolates replacement workers from stale callbacks, discards failed handshakes, and avoids launching processes for already-cancelled calls. Restart an existing Pi process to load updated extensions and startup code.
 
+## Visible hooks, live pulse and self-recovery
+
+Each session hook firing is one transcript line (`Hook · deploy verify live · on bash · workflow guidance added to the result`), and the observer receives the same guidance the agent was given. Two hooks were added from live sessions: after a production deploy (a push to a production-like remote, `rsync`/`scp` to a host, or a hosted deploy command) the agent is asked to open the live URL and compare it with the local build before reporting done; the first interface file written in a session asks for a rendered look at narrow and wide widths, judged against the chosen design direction.
+
+Background harness work is summarized in one live footer line, `harness · Guardian 14 checks · 2 WASM · Needle3 6 · local LM 3 · fuzzy 23 · hooks 2 · hints 3`, instead of a transcript line per heartbeat, router match or ranking. Router matches, Guardian heartbeats and local-server "not running" states no longer print lines (live sessions produced 245 identical Guardian lines and hundreds of router matches a day). Guardian verdicts, hooks, skill-hint gating, JEV answers and evidence added to context remain individual lines.
+
+Harness notices (reminders, Guardian interventions, observer notes) render as a coloured icon and title with the detail available on expand. Warnings, errors, status lines and fallback custom messages pass through one sanitizer that removes terminal escape sequences, carriage-return overwrites, control characters and bidirectional overrides, so provider or tool text cannot move the cursor or reorder the display.
+
+Common tool-call mistakes now recover without a wasted turn. When the only schema failure is an over-long explanation field (`reason`, `description`, `summary`, `note` and similar), the text is shortened to the limit with a `[shortened from N characters]` marker and the call proceeds; any other error, and identifiers, paths or content, still reject. `project_tests` assessments split a chain of individually valid checks (`php -l a.php && php -l b.php`, optionally behind one `cd dir &&`) into separate planned checks and say so.
+
+A request such as "only use HTML, CSS, JavaScript and PHP" is a technology constraint. Previously any "only use X" was read as a model/provider pin, which disabled the observer, automatic independent reviews and fallback for a whole session; a pin now needs a route-shaped target (model, provider, route, a `provider/model` id or a known model family).
+
 ## Asynchronous skill discovery and visible activity
 
 Skill suggestions combine task language with successful native file/tool evidence. File extensions and known tool operations contribute bounded domain signals; new files can refine suggestions even when their extension has already appeared. Catalog ranking is independent of catalog order.

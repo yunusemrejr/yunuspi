@@ -74,7 +74,11 @@ export default function (pi: any) {
 				tool: event.toolName,
 				count: 1,
 			}); } catch { /* Telemetry must never turn a successful tool into an error. */ }
+			// Visible receipt: the user sees which workflow hook fired and where.
+			try { sink("hook.fired", { hook: rule.key, tool: event.toolName, decision: event.isError ? "recovery" : "guidance" }); } catch { /* display only */ }
 		}
+		// The observer sees the same guidance the agent was given.
+		try { pi.events?.emit?.("harness-hook-fired", { hook: rule.key, tool: event.toolName, line: rule.line }); } catch { /* optional bridge */ }
 
 		const content = Array.isArray(event.content) ? event.content : [];
 		return {

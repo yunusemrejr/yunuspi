@@ -18,8 +18,8 @@ const mini = await load("extensions/lib/mini-preprocessor.ts");
 const intent = await load("extensions/lib/micro-intelligence/intent.ts");
 
 const smolRuntime = {
-  version: 2, enabled: true, model: "SmolLM2-135M-Instruct",
-  endpoint: "http://127.0.0.1:18735/completion",
+  version: 2, enabled: true, model: "Qwen3.5-0.8B",
+  endpoint: "http://127.0.0.1:18736/completion",
   apiKey: "TEST_SMOL_KEY_1234567890abcdef", execution: "background", timeoutMs: 2000,
 };
 
@@ -58,7 +58,10 @@ test("retention deduplicates exact boilerplate and abstains on distinct protecte
 
 test("safety exclusions survive the expansion", () => {
   const base = listing();
-  assert.equal(smol.safeSmolOutput("bash", `${base}\nerror: boom`, false, undefined), false);
+  assert.equal(smol.safeSmolOutput("bash", `${base}\nTraceback (most recent call last):`, false, undefined), false);
+  assert.equal(smol.safeSmolOutput("bash", `${base}\n    at parse (src/parser.ts:41:10)`, false, undefined), false);
+  // Status words in a successful result are retained by the host, not a reason to abstain.
+  assert.equal(smol.safeSmolOutput("bash", `${base}\nwarning: 2 deprecated packages`, false, undefined), true);
   assert.equal(smol.safeSmolOutput("bash", `${base}\npassword: hunter2`, false, undefined), false);
   assert.equal(smol.safeSmolOutput("bash", base.slice(0, 2000), false, undefined), false);
 });
@@ -108,14 +111,14 @@ test("tiny-model input is bounded, task-aware and deduplicates exact rows", () =
   const raw = ["inventory begins", ...Array(35).fill("Background activity handles ordinary application housekeeping and general administration."), "Deployment remains pending verification."].join("\n");
   const source = ext.prepareSmolExtraction(raw, [1, 37]);
   const input = smol.smolModelInput(source, "investigate connection setup");
-  assert.ok(Buffer.byteLength(input.prompt) <= 1024);
+  assert.ok(Buffer.byteLength(input.prompt) <= 2048);
   assert.match(input.prompt, /Task: investigate connection setup/);
   assert.equal(input.prompt.match(/Background activity/g).length, 1);
   assert.ok(input.lineIds.has(2), "repeated rows use their first source ID");
   assert.ok(input.lineIds.has(37));
   for (const id of input.lineIds) assert.ok(input.prompt.includes(`${id}: ${source.lines[id - 1].text}`));
   const dense = smol.smolModelInput(ext.prepareSmolExtraction(listing()), "entry ".repeat(800));
-  assert.ok(Buffer.byteLength(dense.prompt) <= 1024, "prompt budget includes task and framing");
+  assert.ok(Buffer.byteLength(dense.prompt) <= 2048, "prompt budget includes task and framing");
   assert.ok(dense.lineIds.size < 82);
 });
 

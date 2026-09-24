@@ -13,6 +13,8 @@ export declare const cjkBreakRegex: RegExp;
 export declare function visibleWidth(str: string): number;
 /** Remove ANSI, OSC, and APC control sequences while preserving visible text. */
 export declare function stripTerminalSequences(str: string): string;
+/** Remove terminal sequences, carriage-return overwrites and control characters from untrusted display text. */
+export declare function sanitizeDisplayText(value: unknown): string;
 interface GraphemeCellRange {
     start: number;
     end: number;

@@ -43,3 +43,21 @@ test('a PHP check observed before its coverage assessment does not cause a redun
  await assess();assert.equal(api.snapshot().need,'missing');
  assert.match(api.notice(),/without pipes, trailing echo/,'missing receipt guidance explains how to expose the actual test exit status');
 });
+
+test('a chain of individually valid checks is split into planned checks instead of rejected',async t=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'php-chain-'));
+ const tools={};
+ const ctx={cwd,isIdle:()=>true,hasPendingMessages:()=>false};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){},sendMessage(){}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the tools'});
+ fs.mkdirSync(path.join(cwd,'tools'));
+ const assess=commands=>tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'Syntax checks cover both changed tool pages.',commands},undefined,undefined,ctx);
+ const result=await assess(['php -l tools/a.php && php -l tools/b.php']);
+ assert.match(result.content[0].text,/split into 2 planned checks/);
+ assert.match(result.content[0].text,/php -l tools\/a\.php.*php -l tools\/b\.php/);
+ const scoped=await assess(['cd tools && php -l a.php && php -l b.php']);
+ assert.match(scoped.content[0].text,/"cd tools && php -l a\.php","cd tools && php -l b\.php"/);
+ await assert.rejects(assess(['php -l tools/a.php && echo done']),/rejected/,'a chain with an invalid part is still rejected');
+ await assert.rejects(assess(['php -l tools/a.php | tee log']),/rejected/);
+});

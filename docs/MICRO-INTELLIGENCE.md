@@ -8,7 +8,7 @@ DETERMINISTIC HARNESS LOGIC        cheap, auditable, authoritative
         ↓
 NEEDLE3                            local semantic reflex (this machine)
         ↓
-SMOL                               speculative structured line selection
+LOCAL LM (Qwen3.5-0.8B)            calibrated yes/no judgements, line selection
         ↓
 KOMPRESS                           extractive prose paragraph selection
         ↓
@@ -33,7 +33,7 @@ Actual completed intelligence work produces small, flowing session notes. They d
 
 JEV is invoked for eligible semantic judgments, not on every prompt or tool call. Admission failures now leave a visible reason as well as diagnostics. Needle unavailable states likewise retain a reason and the caller's fallback. Fuzzy skill matching is local lexical JavaScript; its match count includes only fuzzy matches, not every skill selected by another route. It is not a WASM inference claim.
 
-Repeated unchanged lexical and unavailable notices are limited to once per minute, and routine Smol eligibility reasons to once per five minutes. Counters remain recorded; actual inference and context-delivery results remain individually visible. Smol distinguishes short inputs, unsupported shapes, budget boundaries and protected content. An `UNKNOWN` response means no safe useful selection was returned, so the full original remains available.
+Routine background work (Guardian checks, Needle rankings, fuzzy matches, router matches, local-model calls, hooks and hints) is counted in one live footer line, `harness · Guardian 14 checks · 2 WASM · Needle3 6 · local LM 3 · hooks 2 …`, instead of a transcript line each. Actions that change what the agent sees stay individual lines: Guardian verdicts and interventions, hooks, local-model gating, JEV answers, evidence added to context. Without a footer the previous lines remain. The line selector distinguishes short inputs, unsupported shapes, budget boundaries and protected content. An `UNKNOWN` response means no safe useful selection was returned, so the full original remains available.
 
 ## Inspectable prompt analysis
 
@@ -123,23 +123,52 @@ node <agent>/extensions/lib/needle-assets.mjs <verify|install|repair|smoke|statu
 Telemetry is disabled (`NEEDLE_TELEMETRY=0`, `DO_NOT_TRACK=1`). No
 prompt, file, or tool content leaves the machine for Needle.
 
-## Smol — speculative structured selection
+## Local language model — judgements and line selection
 
-SmolLM2 proposes source-linked line selections for successful line-oriented
-output. The host reconstructs exact source text and keeps the original behind
-`obs_read`. It retains every distinct protected fact, boundary and task match;
-only identical repeated status/task facts can collapse. Plain inventory rows may be
-background. Protected facts are collected across the complete source before
-4–32 KiB windowing; unsafe or overly dense evidence falls back to raw. Windowed
-results identify both the original source hash and the selected window hash.
-Errors, instructions, secrets, cancellation and truncation are excluded.
-Printable Unicode (for example ✓, → or tree glyphs) is eligible because line
-extraction is UTF-8 exact; control, ANSI escape, bidi and zero-width characters
-are not.
-The background model receives at most 1,024 bytes of task-aware framing and whole
-source lines, with exact repeated rows deduplicated. Its IDs must belong to that
-candidate view; the host adds protected evidence from the complete source and
-orders the final extract. Malformed, duplicate or unoffered IDs fall back to raw.
+Qwen3.5-0.8B (Apache-2.0, 4-bit GGUF, about 580 MB with the pinned llama.cpp
+`b10878` server) runs as a loopback-only user service (`pi-local-lm.service`,
+port 18736, API key, four threads, 2 GB memory ceiling). It replaced the
+SmolLM2-135M selector, which chose at chance level on harness data and almost
+never ran. `agent/extensions/lib/local-lm-assets.mjs
+<status|verify|install|repair|smoke|uninstall>` installs it with pinned
+checksums, an atomic swap and the service unit, and retires the old SmolLM
+service and weights; `scripts/install.mjs` runs it on Linux x86-64 unless
+`--skip-local-lm`.
+
+Measured on real harness decisions (2026-09-25, four threads): skill-hint
+relevance AUC 0.88 and 0.88 accuracy at P(relevant) 0.66, against 0.53 for
+SmolLM2-135M, 0.47 for LFM2.5-350M and 0.85 for the slower LFM2.5-1.2B; p50
+about 0.9 s per judgement. On a test log it selected exactly the failing
+test's lines. These are small fixtures, not production accuracy.
+
+The model never writes prose that reaches the main agent. It answers bounded
+yes/no questions with a calibrated probability (P(yes) from the first token of
+a few-shot prompt) and proposes source line ids. One request runs at a time;
+bursts beyond a small queue are refused as busy and three failures pause use
+for a minute. `PI_LOCAL_LM=off` disables it; the tests run with it off.
+
+- **Skill-hint gate.** "Session context" skill hints come from lexical overlap
+  with the whole session. They must now contain a non-generic term and, when
+  the model is ready, pass a relevance judgement for the current request. In a
+  live music-blog session the lexical path had offered an ERP reference, a
+  proxy-research pack and another company's brand kit. Judgements run in the
+  background and the hint is delivered at the next boundary; without the model
+  the lexical hint keeps its previous behavior. Each verdict is a visible
+  `skill gate` line.
+- **Mutation pre-screen.** Between Needle and Jev, the model may decide only
+  the fail-safe "implementation" direction (P ≥ 0.5; on 12 real prompts every
+  file-changing task scored ≥ 0.51 but one, every read-only one ≤ 0.42). The
+  dangerous read-only rescue keeps Needle's strict bar, Jev and the arbiter.
+- **Line selection.** Successful line-oriented output of 3–32 KiB can become a
+  source-linked selection. The host reconstructs exact source text, keeps the
+  original behind `obs_read`, and always retains boundary lines, task matches
+  and every distinct status line (errors, warnings, totals), so status words no
+  longer block eligibility. Stack traces, patches, credentials and
+  instruction-like text stay excluded, as do failed commands, truncation and
+  cancellation. The model sees up to 2 KiB of task-aware framing and whole
+  lines; its ids must belong to that view. A first exposure waits about one
+  inference (0.9 s, 1.8 s for 4–32 KiB windows) and is then sealed; the
+  cooldown is eight seconds and ten-second leases bound the model fleet-wide.
 
 ## Kompress — extractive prose selection
 
@@ -172,7 +201,7 @@ passes the savings admission, because the protected-evidence rule keeps nearly
 every prose paragraph that mentions a number, path, negation or status. The
 observation owner therefore routes output to Kompress only when a selection
 could pay for itself (`miniAdmissible`, the same test `select` applies);
-Kompress-shaped output it cannot shorten stays available to Smol and Jev,
+Kompress-shaped output it cannot shorten stays available to the local LM and Jev,
 where previously any Kompress-shaped output ended routing.
 
 ## Council and recovery consumers
@@ -234,7 +263,7 @@ Jev receives the complete bounded task before that judgment.
 ## Coordination, metrics, health
 
 `agent/extensions/lib/micro-intelligence/` holds routing, evidence preparation
-and unified metrics. Needle, Smol, Kompress and Jev retain their own bounded
+and unified metrics. Needle, the local LM, Kompress and Jev retain their own bounded
 caches and lifecycle controls. The unused duplicate coordinator and its
 always-empty ledger were removed; production helper metrics remain authoritative.
 
@@ -244,8 +273,8 @@ always-empty ledger were removed; production helper metrics remain authoritative
   breaker-open / no-key`.
 - Metrics count actual offers, runs, accepts, cache hits, skip reasons, and
   latencies per layer, plus Jev questions/tokens/spend by site and
-  full-LLM micro-calls avoided (estimates are labeled as estimates). Smol and
-  Kompress owners report execution separately from candidate routing. Projected
+  full-LLM micro-calls avoided (estimates are labeled as estimates). The line
+  selector and Kompress owners report execution separately from candidate routing. Projected
   savings remain distinct from newly sealed provider reductions; replaying a
   seal does not manufacture another reduction. A typed skill selection counts
   one avoided dispatch, with no invented token estimate.
@@ -261,15 +290,24 @@ tool_search and    → deterministic eligibility → lexical order
 skill_review search → Needle head-slice rank (accepted, else fused with
                      lexical) → Jev on uncertainty/disagreement
 tool_result        → deterministic distiller first (its win ends routing)
-                   → Smol (structured) / Kompress (prose) / Jev triage
+                   → local LM (structured lines) / Kompress (prose) / Jev triage
 failure            → deterministic rules → Jev validation
-spawn guard        → Needle→Jev intent pre-screen → full arbiter only on defer
+spawn guard        → Needle → local LM (fail-safe side only) → Jev pre-screen
+                     → full arbiter only on defer
+skill hints        → lexical rank → generic-term filter → local LM relevance
 ```
 
 Controls: `PI_NEEDLE=off`, `PI_NEEDLE_SHADOW=1`,
 `PI_MICRO_ADVISORY=off`, `PI_INTENT_PRESCREEN=off`,
 `PI_MICRO_INTELLIGENCE=off`, plus the existing `PI_MINI_PREPROCESSOR`,
-`PI_SMOL_PREPROCESSOR`, `PI_JEV`, and `PI_OUTPUT_DISTILLER` scopes.
+`PI_SMOL_PREPROCESSOR` (line selection), `PI_LOCAL_LM` (the whole local
+model), `PI_SKILL_GATE`, `PI_JEV`, and `PI_OUTPUT_DISTILLER` scopes.
+
+Jev trims oversized evidence instead of refusing it: the longest text fields
+lose their middle, with an explicit omission marker, until the request fits
+its 32 KiB input budget (health logs showed every Jev refusal was an input
+budget refusal). Oversized questions still refuse before any request, and the
+caller site is now recorded with each skip.
 
 ## Calibration evidence (2026-09-19)
 
@@ -304,7 +342,7 @@ held-out, deployment-specific set before changing acceptance floors.
 
 ## Independent context probe (2026-09-19)
 
-The synthetic coding-session test now executes the real Smol and Kompress
+The synthetic coding-session test now executes the real line-selector and Kompress
 clients, source validators and projections with mocked transport, instead of
 counting routing flags as inference. Adversarial fixtures cover distinct
 status facts, middle-of-source constraints, malformed judgments, source hashes,
@@ -314,13 +352,13 @@ A separate authorized live probe used synthetic evidence only. Warm Kompress
 selected 1,792 characters into a 361-character projection in 301 ms, retaining
 the blocked verification status. Its first cold call timed out at 455 ms.
 Jev answered a synthetic false-verification question with `noul=0.02` in
-618–1,085 ms; the client estimated 44 input tokens per call. Smol's first call
+618–1,085 ms; the client estimated 44 input tokens per call. SmolLM2's first call
 hit its five-second deadline. An 82-line listing exposed prompt overhead: JSON
 line objects exceeded the service budget; tuples used 2,036 prompt/cache tokens
 and truncated the reply. Numbered verbatim lines reduced that to 1,792 tokens;
 the warm service returned a complete `UNKNOWN` in 1,553 ms. The host safely
 retained the original, and now reports that specific abstention reason. These are small operational probes, not
-production utilization, accepted Smol evidence reduction, or measured paid
+production utilization, accepted SmolLM2 evidence reduction, or measured paid
 main-model savings. Conservative abstentions remain visible rather than being
 counted as successes.
 

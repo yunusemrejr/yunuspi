@@ -268,6 +268,22 @@ export function stripTerminalSequences(str) {
     }
     return result;
 }
+/**
+ * Make untrusted text (provider errors, tool output, extension notices) safe
+ * for a single component: terminal sequences are removed, CRLF becomes LF, a
+ * carriage-return overwrite keeps only its final segment (progress bars), and
+ * remaining control characters other than LF and TAB are dropped. Without this
+ * a stray CR or escape moved the cursor and corrupted the surrounding layout.
+ */
+export function sanitizeDisplayText(value) {
+    if (typeof value !== "string")
+        return value === undefined || value === null ? "" : String(value);
+    let text = stripTerminalSequences(value).replace(/\r\n/g, "\n");
+    if (text.includes("\r"))
+        text = text.split("\n").map((line) => line.slice(line.lastIndexOf("\r") + 1)).join("\n");
+    // Bidirectional overrides and isolates can visually reorder text (spoofing).
+    return text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "");
+}
 /** Return the terminal-cell range occupied by the grapheme at a visible column. */
 export function getGraphemeCellRange(line, column) {
     let currentCol = 0;

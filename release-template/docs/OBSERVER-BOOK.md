@@ -2,11 +2,11 @@
 
 The [session observer](SESSION-OBSERVER.md) reviews the main agent's live work and talks to it about what it sees. The Observer Book is the doctrine it respects while doing so: a library of principles with their reasoning, the session signals that make each one apply, a question to ask, and the traps of applying it badly. The observer also keeps its own margin notes for each project.
 
-The book changes what the observer can say, not what it may do. It has no tools, cannot run anything, and cannot override the user's request or the evidence in front of it. A passage applies only when its signals are visible in the session.
+The book changes what the observer can say, not what it may do. Its only tools are read-only (session detail and search, project file reads and search, and `book_read` for a full chapter or passage); it cannot run anything, and cannot override the user's request or the evidence in front of it. A passage applies only when its signals are visible in the session.
 
 ## What is in it
 
-58 chapters and about 400 passages, grouped into parts:
+58 chapters and about 400 passages, grouped into parts. Design doctrine includes "a mentioned site is context, not a template" and "diverge before you converge on an open brief"; the observer's own craft includes "open requests deserve a thought experiment".
 
 | Part | Chapters |
 | --- | --- |
@@ -75,7 +75,7 @@ Margin notes are the observer's own words, so they are treated as untrusted:
 
 ## Cost and caching
 
-The packet places static text first: instructions, then the book rules and contents (identical every review), then the sticky passages, then the evidence that changes every review. Providers with prefix caching (DeepSeek's is automatic; cached input is billed at a small fraction of the normal price) reuse that prefix. The book has its own 3,400-byte budget and never evicts evidence, which keeps its 8,000-byte bound. Under pressure it drops extra margin notes, the third passage, deep reading, reasoning lines, then the long contents list.
+The packet places static text first: instructions, then the book rules and contents (identical every review), then the sticky passages, then the evidence that changes every review. Providers with prefix caching (DeepSeek's is automatic; cached input is billed at a small fraction of the normal price) reuse that prefix. The book has its own 3,400-byte budget and never evicts evidence, which keeps its 10,000-byte bound. Under pressure it drops extra margin notes, the third passage, deep reading, reasoning lines, then the long contents list.
 
 ## Your own chapters
 

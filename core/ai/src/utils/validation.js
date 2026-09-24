@@ -299,6 +299,10 @@ export function validateToolArguments(tool, toolCall) {
     if (validator.Check(args)) {
         return args;
     }
+    const repaired = __piTrimOverlongProse(args, [...validator.Errors(args)]);
+    if (repaired && validator.Check(repaired)) {
+        return repaired;
+    }
     const errors = __piValidationDetails(validator.Errors(args),tool.parameters);
     const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${__piArgumentEcho(toolCall.arguments)}`;
     throw new Error(errorMessage);
@@ -326,4 +330,30 @@ function __piValidationDetails(errors, schema) { /* PI_VALIDATION_REPAIR_DETAILS
   if (fields.length) lines.push("Top-level fields: " + fields.slice(0, 16).map(key => JSON.stringify(short(key, 40))).join(", ") + (fields.length > 16 ? ", … (see tool schema)" : ""));
   lines.push("Use the declared tool schema to correct the arguments before retrying. No tool execution occurred.");
   return lines.join("\n");
+}
+
+/** Free-text explanation fields whose length limit is a courtesy, not a contract. */
+const __PI_PROSE_FIELD = /^(?:reason|retryReason|description|summary|detail|note|notes|explanation|rationale|message|why|justification|context|comment|evidence)$/i;
+/** When the only failures are over-long prose fields, shorten them with an
+ * explicit marker instead of rejecting the call: a rejected call costs a whole
+ * model turn to retry (measured in live sessions for quality_review,
+ * project_tests and project_intel). Any other error keeps the normal
+ * rejection, and identifiers, paths, code and content are never touched. */
+function __piTrimOverlongProse(args, errors) { /* PI_PROSE_LENGTH_REPAIR_V1 */
+  if (!errors.length || !args || typeof args !== "object") return undefined;
+  const copy = structuredClone(args);
+  for (const error of errors) {
+    if (error.keyword !== "maxLength") return undefined;
+    const limit = Number(error.params?.limit);
+    const segments = String(error.instancePath ?? "").split("/").slice(1).map(part => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+    const key = segments.at(-1);
+    if (!Number.isSafeInteger(limit) || limit < 40 || !key || !__PI_PROSE_FIELD.test(key)) return undefined;
+    let parent = copy;
+    for (const part of segments.slice(0, -1)) { parent = parent?.[part]; if (parent === undefined || parent === null) return undefined; }
+    const value = parent[key];
+    if (typeof value !== "string" || value.length <= limit) continue;
+    const marker = ` … [shortened from ${value.length} characters]`;
+    parent[key] = value.slice(0, Math.max(0, limit - marker.length)).trimEnd() + marker;
+  }
+  return copy;
 }

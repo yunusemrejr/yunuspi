@@ -294,7 +294,9 @@ test('observer responses may cite the book, ask to read, and keep or strike marg
   assert.deepEqual(ok.strike, ['m4']);
   assert.match(ok.margin, /report layer/);
   assert.match(O.observerAdviceText(ok), /Observer book: /);
-  assert.match(O.validateObserverAdvice(JSON.stringify({ note: 'Check it.', evidence: ['event-1'], book: ['craft.invented'] }), packet).reason, /book contains a passage absent/);
+  const invented = O.validateObserverAdvice(JSON.stringify({ note: 'Check it.', evidence: ['event-1'], book: ['craft.invented'] }), packet).advice;
+  assert.equal(invented.book, undefined, 'an invented passage citation is dropped, never displayed');
+  assert.equal(invented.note, 'Check it.', 'the rest of a paid review survives');
   const dropped = O.validateObserverAdvice(JSON.stringify({ note: 'Check the run.', evidence: ['event-1'], margin: 'See https://example.com for the fix' }), packet).advice;
   assert.equal(dropped.margin, undefined); assert.match(dropped.marginRejected, /URLs/);
   const reading = O.validateObserverAdvice(JSON.stringify({ note: '', evidence: [], read: ['debugging'] }), packet).advice;

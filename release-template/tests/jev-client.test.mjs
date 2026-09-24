@@ -220,8 +220,17 @@ test("malformed and oversized inputs fail open before paying, including cancella
   const questions = { ping: { type: 'noul', instructions: 'Affirmative?' } };
   const opts = { signal: new AbortController().signal };
   assert.equal((await jev.askJev('bounded', circular, questions, opts)).skipped, 'invalid-input');
-  assert.equal((await jev.askJev('bounded', 'x'.repeat(32769), questions, opts)).skipped, 'input-budget');
+  // Oversized questions cannot be trimmed safely: refused before paying.
+  const hugeQuestions = { ping: { type: 'noul', instructions: 'x'.repeat(33000) } };
+  assert.equal((await jev.askJev('bounded', 'short evidence', hugeQuestions, opts)).skipped, 'input-budget');
   assert.equal(fetches, 0);
+  // Oversized evidence is trimmed with a visible marker instead of dropped.
+  const fitted = jev.fitJevState({ task: 'Fix it', output: 'y'.repeat(40000) }, questions);
+  assert.ok(JSON.stringify([fitted, questions]).length <= 32768);
+  assert.match(fitted.output, /characters omitted to fit/);
+  assert.equal(fitted.task, 'Fix it');
+  assert.equal((await jev.askJev('bounded', 'x'.repeat(32769), questions, opts)).ok, true);
+  assert.equal(fetches, 1);
 });
 
 test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {

@@ -15,7 +15,7 @@ const jev = await load('lib/jev-client.ts');
 const intent = await load('lib/micro-intelligence/intent.ts');
 const advisory = await load('lib/micro-intelligence/advisory.ts');
 const metrics = await load('lib/micro-intelligence/metrics.ts');
-const runtime = { version: 2, enabled: true, model: 'SmolLM2-135M-Instruct', endpoint: 'http://127.0.0.1:18735/completion', apiKey: 'TEST_SYNTHETIC_LOCAL_KEY', execution: 'background', timeoutMs: 1000 };
+const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18736/completion', apiKey: 'TEST_SYNTHETIC_LOCAL_KEY', execution: 'background', timeoutMs: 1000 };
 const listing = count => Array.from({ length: count }, (_, i) => `entry-${String(i).padStart(3, '0')}.log bytes=${10000 + i}`.padEnd(42, '.'));
 const client = () => smol.createSmolPreprocessor({ runtime, acquireLease: async () => true, fetch: async () => new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })) });
 

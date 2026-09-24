@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createInterventionSession } from "../intervention-session.js";
-import { fingerprintFailureResult, fingerprintToolCall, hasExplicitRetryDirective, makeRepeatedFailureFeatures, safeToolShape } from "./guardian-features.js";
+import { claimsCompletion, fingerprintFailureResult, fingerprintToolCall, hasExplicitRetryDirective, isMutationCall, isVerificationCall, makeRepeatedFailureFeatures, safeToolShape } from "./guardian-features.js";
 import { getGuardianKernelRuntime } from "./guardian-kernels.js";
 
 export const GUARDIAN_REQUEST_META = Symbol.for("yunuspi.guardian.request-meta.v1");
@@ -24,6 +24,10 @@ const MAX_SKILLS = 8;
  * candidate is evaluated. */
 const SUPERVISORY_WINDOW_MS = 120_000;
 const MAX_WINDOW_EVALUATIONS = 16;
+/** Deterministic loop detectors: evidence counts that justify one reminder. */
+const EDIT_MISMATCH_THRESHOLD = 3;
+const READ_CHURN_THRESHOLD = 4;
+const MAX_TRACKED_PATHS = 64;
 // A resumed session ID identifies a transcript, not an in-process owner. More
 // than one SDK runtime can open that transcript simultaneously.
 const liveGuardianSessions = new Map();
@@ -191,7 +195,7 @@ async function waitForRelayVisibility(relay, { timeoutMs = CHILD_ACK_TIMEOUT_MS,
 	return false;
 }
 
-const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "Smol", "retrieval", "Neural ranker", "Intent classifier", "WASM source check", "Deterministic selection"]);
+const ALLOWED_INTELLIGENCE = new Set(["JEV", "Needle3", "FuzzyML", "Kompress", "Local LM", "retrieval", "Neural ranker", "Intent classifier", "WASM source check", "Deterministic selection"]);
 export function relayIntelligenceUsageFromChild(input) {
 	if (!input || !ALLOWED_INTELLIGENCE.has(input.name) || typeof input.sessionId !== "string" || !liveGuardianSessions.get(input.sessionId)?.has(input.ownerId)) return false;
 	const stages = { result: "result ready", cached: "cached result ready", applied: "result applied", delivered: "added to model context", returned: "returned exact excerpts", skipped: "selection unused" };
@@ -239,7 +243,7 @@ export class GuardianSupervisor {
 		this._latestAcceptedTaskId = undefined;
 		this._inFlight = new Map();
 		this._peerReceipts = new Set();
-		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0, peerMessagesSent: 0, peerMessagesReceived: 0 };
+		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0, peerMessagesSent: 0, peerMessagesReceived: 0, editLoopCandidates: 0, readChurnCandidates: 0, completionCandidates: 0, verifications: 0, mutations: 0 };
 		this._admittedAtByKind = new Map();
 		this._window = { startedAt: this._clock(), evaluations: 0 };
 		this._kernelPromise = undefined;
@@ -346,7 +350,7 @@ export class GuardianSupervisor {
 		if (!task) {
 			const parentTaskId = this._latestAcceptedTaskId ?? this._activeTaskId;
 			const rawPrompt = originalText.length <= MAX_RAW_PROMPT ? originalText : undefined;
-			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set() };
+			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), lastMutationAt: 0, lastVerificationAt: 0, completionChecked: false };
 			task.retryDirective = hasExplicitRetryDirective(originalText);
 			this._tasks.set(requestId, task);
 			while (this._tasks.size > MAX_TASKS) {
@@ -457,6 +461,7 @@ export class GuardianSupervisor {
 		if (event.type === "message_end" && event.message?.role === "assistant") {
 			task.responseEpoch++;
 			for (const attempt of task.attempts) if (!attempt.responseSeen && attempt.responseEpoch < task.responseEpoch) attempt.responseSeen = true;
+			await this._considerUnverifiedCompletion(task, event.message);
 			return;
 		}
 		if (event.type === "tool_execution_start") {
@@ -465,7 +470,7 @@ export class GuardianSupervisor {
 			const fingerprint = fingerprintToolCall(toolName, event.args);
 			const shape = safeToolShape(toolName, event.args);
 			const key = fingerprint ? `${toolName}:${fingerprint}` : undefined;
-			if (toolName === "bash" || !key || !shape) {
+			if (!key || !shape) {
 				task.episodeKey = undefined;
 				task.attempts = [];
 			} else if (task.episodeKey && task.episodeKey !== key) {
@@ -478,7 +483,9 @@ export class GuardianSupervisor {
 			const rawPath = typeof event.args?.path === "string" && event.args.path.length <= 1024 ? event.args.path : undefined;
 			if (rawPath) this._noteTouchedPath(task, toolName, rawPath);
 			const candidatePath = (toolName === "write" || toolName === "edit") && rawPath ? rawPath : undefined;
-			this._inFlight.set(event.toolCallId ?? "active", { toolName, fingerprint, shape, taskId: task.requestId, responseEpoch: task.responseEpoch, at: this._clock(), candidatePath });
+			const readKey = toolName === "read" && rawPath ? `${rawPath}|${Number(event.args?.offset) || 0}|${Number(event.args?.limit) || 0}` : undefined;
+			this._inFlight.set(event.toolCallId ?? "active", { toolName, fingerprint, shape, taskId: task.requestId, responseEpoch: task.responseEpoch, at: this._clock(), candidatePath, rawPath, readKey,
+				mutation: isMutationCall(toolName, event.args), verification: isVerificationCall(toolName, event.args) });
 			while (this._inFlight.size > 64) this._inFlight.delete(this._inFlight.keys().next().value);
 			return;
 		}
@@ -491,7 +498,8 @@ export class GuardianSupervisor {
 			this._stats.toolResults++;
 			try {
 				const errorHash = fingerprintFailureResult(event.result, event.isError);
-				if (!event.isError || !errorHash || call.toolName === "bash" || !call.fingerprint || !call.shape) {
+				await this._trackWorkingPattern(task, call, event);
+				if (!event.isError || !errorHash || !call.fingerprint || !call.shape) {
 					task.evidenceVersion++;
 					task.attempts = [];
 					task.episodeKey = undefined;
@@ -532,7 +540,7 @@ export class GuardianSupervisor {
 		const scored = runtime.evaluate(makeRepeatedFailureFeatures({ priorAttempts: attempts.slice(-3), shapeSimilarity: similarity, activeTaskId: task.requestId, now: this._clock(), userRetryDirective: task.retryDirective }));
 		if (!scored) { this._stats.abstained++; return; }
 		this._stats.classifierEvaluations++;
-		if (scored.probability < scored.threshold) { this._stats.abstained++; return; }
+		if (scored.probability < scored.threshold) { this._stats.abstained++; this._notifyDecision("repeated-identical-failure", "abstained", { score: scored.probability / 10000, threshold: scored.threshold / 10000, tool: attempts.at(-1).toolName }); return; }
 		const evidence = attempts.slice(-3).map((attempt, index) => ({ kind: "tool-failure", id: `${task.requestId}:${task.toolCount - 2 + index}`, hash: attempt.errorHash }));
 		const content = "The same tool operation failed repeatedly with the same result. Verify the cause before retrying it.";
 		const arbiterRequestId = this._arbiterRequestId();
@@ -560,7 +568,109 @@ export class GuardianSupervisor {
 		while (task.emittedFailureKeys.size > MAX_INTERVENTION_HISTORY) task.emittedFailureKeys.delete(task.emittedFailureKeys.values().next().value);
 		this._stats.admitted++;
 		this._admitWindow("repeated-identical-failure");
+		this._notifyDecision("repeated-identical-failure", "intervened", { score: scored.probability / 10000, threshold: scored.threshold / 10000, tool: attempts.at(-1).toolName });
 		try { await this._emit({ type: "guardian_intervention", detail, content, child }); } catch { /* observability must not affect agent execution */ }
+	}
+
+	/** One visible verdict per real Guardian decision (display-only). */
+	_notifyDecision(kind, outcome, extra = {}) {
+		try {
+			const result = this._observe({ guardianInstanceId: this.ownerId, outcome: "decision", decision: outcome, check: kind, stats: { ...this._stats }, count: this._stats.toolResults, evaluations: this._stats.classifierEvaluations, ...extra });
+			if (result?.then) void Promise.resolve(result).catch(() => {});
+		} catch { /* display-only */ }
+	}
+
+	/** Shared admission and delivery for deterministic detectors. The same
+	 * window, arbitration plane, child relay and history rules apply as for the
+	 * WASM-scored detector; a stale task or generation abstains. */
+	async _intervene(task, { kind, content, reason, priority, dedupeKey, evidence, extraDetail = {} }) {
+		if (task.emittedFailureKeys.has(dedupeKey)) { this._stats.suppressedHistory++; return false; }
+		const generation = this._stateGeneration, evidenceVersion = task.evidenceVersion;
+		if (!this._windowAllows(kind)) { this._stats.suppressedWindow++; this._notifyDecision(kind, "deferred", { reason: "window" }); return false; }
+		const arbiterRequestId = this._arbiterRequestId();
+		if (!arbiterRequestId) { this._stats.abstained++; return false; }
+		const decision = this._arbiter.enforce({ source: "guardian-intelligence", requestId: arbiterRequestId, category: "guidance", priority, reason, stabilityKey: dedupeKey,
+			contentHash: sha256(content), ttlMs: 30_000, estimatedChars: content.length, estimatedCost: 0, blocking: false, slot: `guardian:${sha256(dedupeKey).slice(0, 32)}`, evidence });
+		if (decision.outcome !== "admitted") { this._stats.abstained++; this._notifyDecision(kind, "abstained", { reason: "arbitration" }); return false; }
+		const childMetadata = readChildMetadata();
+		const child = Boolean(childMetadata);
+		const current = () => this._handle(this.sessionId) && this._enabled && !this._disposed && generation === this._stateGeneration && this._activeTaskId === task.requestId;
+		if (child) {
+			const relay = this._childRelay("guardian_intervention", content);
+			if (!relay || !(await this._awaitParentVisibility(relay, { stillCurrent: current }))) { this._stats.abstained++; return false; }
+		}
+		if (!current() || task.evidenceVersion !== evidenceVersion && kind !== "unverified-completion") { this._stats.abstained++; return false; }
+		task.emittedFailureKeys.add(dedupeKey);
+		while (task.emittedFailureKeys.size > MAX_INTERVENTION_HISTORY) task.emittedFailureKeys.delete(task.emittedFailureKeys.values().next().value);
+		this._stats.admitted++;
+		this._admitWindow(kind);
+		this._notifyDecision(kind, "intervened");
+		try { await this._emit({ type: "guardian_intervention", content, child, detail: { version: 1, kind, category: kind, requestId: task.requestId, taskId: task.requestId, turnId: task.turnId, sessionId: this.sessionId, processId: this.processId, guardianInstanceId: this.ownerId, agentId: childMetadata?.agent ?? "main", createdAt: this._clock(), dedupeKey,
+			target: childMetadata ? { kind: "subagent", runId: childMetadata.runId, agentId: childMetadata.agent, childIndex: childMetadata.childIndex } : { kind: "session", sessionId: this.sessionId }, evidence, ...extraDetail,
+			...(this._observedSignals(task) ? { observedSignals: this._observedSignals(task) } : {}) } }); } catch { /* observability must not affect agent execution */ }
+		return true;
+	}
+
+	/** Working-pattern evidence per task: mutations, verification runs, edit
+	 * mismatches per file and repeated identical reads. Paths are hashed in
+	 * evidence; nothing here stores file contents. */
+	async _trackWorkingPattern(task, call, event) {
+		if (!this._enabled) return;
+		const now = this._clock();
+		if (call.verification) { task.lastVerificationAt = now; this._stats.verifications++; }
+		if (!event.isError && call.mutation) {
+			task.lastMutationAt = now; task.completionChecked = false; this._stats.mutations++;
+			// File contents may have changed: earlier reads are no longer repeats.
+			task.reads.clear();
+			if (call.rawPath) task.editFailures.delete(call.rawPath);
+		}
+		if (call.toolName === "read" && !event.isError && call.rawPath) {
+			task.editFailures.delete(call.rawPath);
+			if (call.readKey) {
+				const seen = (task.reads.get(call.readKey) ?? 0) + 1;
+				task.reads.set(call.readKey, seen);
+				while (task.reads.size > MAX_TRACKED_PATHS) task.reads.delete(task.reads.keys().next().value);
+				if (seen >= READ_CHURN_THRESHOLD) {
+					this._stats.readChurnCandidates++;
+					const pathHash = sha256(call.rawPath).slice(0, 16);
+					await this._intervene(task, { kind: "repeated-identical-read", priority: 45, dedupeKey: `read-churn:${sha256(`${task.requestId}:${call.readKey}`)}`,
+						content: `The same file range has now been read ${seen} times with no change to it in between. Reuse the earlier read, or read a narrower range that answers the open question.`,
+						reason: "Identical read repeated without an intervening mutation.", evidence: [{ kind: "repeated-read", id: `${task.requestId}:read:${pathHash}`, hash: pathHash }] });
+				}
+			}
+		}
+		if ((call.toolName === "edit" || call.toolName === "bulk_edit") && event.isError && call.rawPath) {
+			const record = task.editFailures.get(call.rawPath) ?? { count: 0, prints: new Set() };
+			record.count++; if (call.fingerprint && record.prints.size < 16) record.prints.add(call.fingerprint);
+			task.editFailures.set(call.rawPath, record);
+			while (task.editFailures.size > MAX_TRACKED_PATHS) task.editFailures.delete(task.editFailures.keys().next().value);
+			const failures = record.count;
+			// Identical retries belong to the WASM repeated-failure detector; this
+			// one covers varied attempts that keep missing the current content.
+			if (failures >= EDIT_MISMATCH_THRESHOLD && record.prints.size >= 2) {
+				this._stats.editLoopCandidates++;
+				const pathHash = sha256(call.rawPath).slice(0, 16);
+				if (await this._intervene(task, { kind: "edit-mismatch-loop", priority: 60, dedupeKey: `edit-loop:${sha256(`${task.requestId}:${call.rawPath}:${Math.floor(failures / EDIT_MISMATCH_THRESHOLD)}`)}`,
+					content: `Edits to the same file have failed ${failures} times without a fresh read in between. Re-read the current content of that file (the exact region) before the next edit instead of adjusting the old text from memory.`,
+					reason: "Consecutive failed edits on one file with no intervening read.", evidence: [{ kind: "failed-edit", id: `${task.requestId}:edit:${pathHash}`, hash: pathHash }] })) task.editFailures.delete(call.rawPath);
+			}
+		}
+	}
+
+	/** A final reply that presents changed work as finished while no
+	 * verification ran after the last change. At most once per change set. */
+	async _considerUnverifiedCompletion(task, message) {
+		if (!this._enabled || !task.lastMutationAt || task.completionChecked || message?.stopReason !== "stop") return;
+		const parts = Array.isArray(message.content) ? message.content : [];
+		if (parts.some((part) => part?.type === "toolCall")) return;
+		if (task.lastVerificationAt >= task.lastMutationAt) return;
+		const text = parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
+		if (!claimsCompletion(text)) return;
+		task.completionChecked = true;
+		this._stats.completionCandidates++;
+		await this._intervene(task, { kind: "unverified-completion", priority: 55, dedupeKey: `unverified-completion:${sha256(`${task.requestId}:${task.lastMutationAt}`)}`,
+			content: "Files changed after the last verification run, and this reply presents the work as finished. Run the check that proves the change (tests, build, syntax check or a rendered view) or state plainly which parts remain unverified before finishing.",
+			reason: "Completion claim with mutations newer than any verification run.", evidence: [{ kind: "completion-claim", id: `${task.requestId}:${task.responseEpoch}`, hash: sha256(text.slice(-400)) }] });
 	}
 
 	async analyzeToolActivity(activity) {

@@ -39,4 +39,4 @@ export { Container, CURSOR_MARKER, compositeTuiLine, isFocusable, isViewportTUI,
 export { TuiAltScreen } from "./tui-alt-screen.js";
 export { TuiMainScreen } from "./tui-main-screen.js";
 // Utilities
-export { getOsc8LinkAtColumn, sliceByColumn, stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi, } from "./utils.js";
+export { getOsc8LinkAtColumn, sanitizeDisplayText, sliceByColumn, stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi, } from "./utils.js";

@@ -1,3 +1,4 @@
+import { localLm, skillRelevancePrompt, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * Deterministic routes remain authoritative; optional asynchronous discovery
@@ -58,12 +59,23 @@ const envFile = /(?:^|\/)(?:migrations?|\.github\/workflows|terraform)(?:\/|$)|(
 type Skill = { name: string; file: string; description: string };
 type Hint = { key: string; text: string; tool?: string; requiredTool?: string; skill?: string; reason?: string; priority?: number; sourceFile?: string; expiresAt?: number; discovery?: 'capability' | 'workflow' };
 
+/** Words too broad to make a skill relevant on their own (observed as the
+ * whole match behind off-topic hints: "deployment, history, self, json"). */
+const GENERIC_CONTEXT_TERMS = new Set(["self", "json", "public", "content", "context", "analysis", "history", "based", "adding", "writing", "data", "file", "files", "page", "pages", "site", "system", "simple", "tool", "tools", "app", "code", "text", "help", "make", "list", "update", "check", "work", "project", "general", "using", "user", "users", "new", "build", "create", "support", "time", "info", "type", "types", "service", "services", "local"]);
 export function createRelevantGuidance(pi: any) {
   let anchorContext = createContextAnchor();
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
   let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
   let skillOffers = new Map<string, { n: number; at: number }>();
+  // Semantic gate for catalog-wide "session context" skill hints: the local
+  // model judges each candidate against the current request once; verdicts
+  // are cached per request focus. Measured on live sessions, lexical overlap
+  // alone offered an ERP reference and a proxy-research pack for a music blog.
+  let taskFocus = "", focusEpoch = 0;
+  const skillVerdicts = new Map<string, "yes" | "no" | "pending">();
+  // Load the local model descriptor now so the first prompt is already gated.
+  try { localLm().ready(); } catch { /* optional */ }
   // Delivery counts for re-offerable utility/topic hints, mirroring skill
   // fatigue: an ignored advisory hint demotes after 2 deliveries and stops
   // after 4, so an off-target nudge cannot refill its slot forever. Using
@@ -358,6 +370,33 @@ export function createRelevantGuidance(pi: any) {
       return entry.links.length ? ` Follow-on detail: ${entry.links.map(link => JSON.stringify(link)).join(", ")} — read the ones matching this task.` : "";
     } catch { return ""; }
   };
+  const gateNote = (skill: string, decision: string, score?: number) => { try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.gate", { skill, decision, ...(score !== undefined ? { score } : {}) }); } catch { /* telemetry */ } };
+  /** Deliver a session-context skill hint only when its match is substantive:
+   * at least one non-generic term, and (when the local model is installed) a
+   * calibrated relevance judgement for the current request. */
+  const gatedContextHint = (skill: Skill, matched: string[], hint: Hint) => {
+    const meaningful = matched.map(term => term.split("~").at(-1)!).filter(term => !GENERIC_CONTEXT_TERMS.has(term));
+    if (!meaningful.length) { gateNote(skill.name, "generic-terms"); return; }
+    // Until the local model is known to be ready the lexical hint keeps its
+    // previous immediate behavior; readiness is loaded in the background.
+    if (!taskFocus || process.env.PI_SKILL_GATE === "off" || !localLm().ready()) { add(hint); return; }
+    const key = `${skill.file}\0${focusEpoch}`;
+    const verdict = skillVerdicts.get(key);
+    if (verdict === "yes") { add(hint); return; }
+    if (verdict) return;
+    skillVerdicts.set(key, "pending");
+    if (skillVerdicts.size > 256) skillVerdicts.delete(skillVerdicts.keys().next().value!);
+    const epoch = focusEpoch;
+    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance").then(result => {
+      if (epoch !== focusEpoch) return;
+      // Without a usable model the lexical hint keeps its previous behavior.
+      if (!result.ok) { skillVerdicts.delete(key); add(hint); return; }
+      const keep = result.p >= SKILL_RELEVANCE_THRESHOLD;
+      skillVerdicts.set(key, keep ? "yes" : "no");
+      gateNote(skill.name, keep ? "kept" : "filtered", Math.round(result.p * 100) / 100);
+      if (keep) add(hint);
+    }, () => { if (epoch === focusEpoch) { skillVerdicts.delete(key); add(hint); } });
+  };
   /** Catalog-wide relevance against the ongoing session profile. Weak or generic
    * overlap yields nothing; explicit routes and signals keep their priority. */
   const contextSkill = (priority = 55) => {
@@ -399,7 +438,7 @@ export function createRelevantGuidance(pi: any) {
       // and file routes keep their full priority and their review obligation.
       // Calibration telemetry: score joins read receipts in ranking audits.
       try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("skill.rank", {skill: ranked.skill.name, score: ranked.score, matched: ranked.matched.length}); } catch {}
-      add({ key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file,
+      gatedContextHint(ranked.skill, ranked.matched, { key: `skillctx:${ranked.skill.file}`, skill: ranked.skill.file,
         priority: Math.max(1, priority - fatigue(ranked.skill.file)),
         text: `Session context (${ranked.matched.slice(0,4).join(', ')}): if useful and not already covered, read skill ${JSON.stringify(ranked.skill.name)} at ${JSON.stringify(ranked.skill.file)}.${sectionPointer(ranked.skill.file, ranked.matched)} Advisory; user instructions and project conventions take precedence.` });
       // Up to three distinct relevant workflows can enter the pending queue;
@@ -898,7 +937,7 @@ export function createRelevantGuidance(pi: any) {
       // Substantive new requests replace the old lexical topic profile. Short
       // continuation requests retain it; old domains cannot crowd out a pivot.
       const continuation = currentIntent.length < 100 && /\b(?:continue|resume|same task|next step|keep going)\b/i.test(currentIntent) && !promptRoutes.some(route => route.priority >= 60);
-      if (!continuation) { context = []; reviewTargets.clear(); }
+      if (!continuation) { context = []; reviewTargets.clear(); taskFocus = taskPrompt.replace(/\s+/g, " ").trim().slice(0, 700); focusEpoch++; }
       for (const [file] of reviewTargets) if (!availableSkillFiles.has(file)) reviewTargets.delete(file);
       // Precision order (action intent + file/domain evidence) picks the
       // surfaced three; .sort() by raw priority would undo it. Advisory:

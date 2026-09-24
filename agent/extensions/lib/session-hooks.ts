@@ -44,6 +44,11 @@ const GIT_WRITE =
 const CI = /\bgh (?:run|workflow)\b/;
 const INSTALL =
 	/\b(?:npm (?:i|install|add)\b|pnpm (?:add|install)\b|yarn add\b|pip3? install\b|cargo add\b|go get\b|apt-get install\b)/;
+/** Pushes to production-like remotes and hosted deploy commands. */
+const DEPLOY =
+	/\bgit\s+push\s+(?:-\S+\s+)*(?:prod\w*|live|deploy\w*|namecheap|heroku|dokku|server|origin\s+(?:prod\w*|live|deploy\w*))\b|\brsync\b[^\n]*\s[\w.-]+@?[\w.-]+:[^\s]|\bscp\b[^\n]*\s[\w.-]+@?[\w.-]+:|\b(?:vercel(?:\s+--prod)?|netlify\s+deploy|fly\s+deploy|wrangler\s+(?:deploy|publish)|firebase\s+deploy|gcloud\s+app\s+deploy|kubectl\s+apply|helm\s+upgrade|docker\s+push)\b/;
+/** Interface source files whose first write deserves a rendered look. */
+const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|php|twig|erb|hbs)$/i;
 /** Swarm/fusion surfaces inside a subagent workflow script. */
 const FUSION = /\b(?:fuse|fusion|swarm|runs\.(?:all|lanes|fuseFragments))\b/;
 
@@ -82,6 +87,14 @@ export const HOOK_RULES: readonly HookRule[] = [
     when: args => args.operation === 'ui',
     line: 'Inspect flagged components against project rules and real status data. Verify rendered typography, contrast and interaction states. Source cues cannot certify design; fix demonstrated defects first.',
   },
+	{
+		// First interface file of the session: judge the design as rendered,
+		// not as source. Open briefs also deserve a deliberate direction.
+		key: "ui-first-render",
+		tools: ["write"],
+		line: "Render this interface (render_see) at a narrow and a wide width before building further, and judge it against the chosen design direction: hierarchy, type rhythm, color, spacing, states. A new UI deserves its own identity, not a copy of a site mentioned for links or credit.",
+		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
+	},
 	{
 		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
@@ -177,6 +190,14 @@ export const HOOK_RULES: readonly HookRule[] = [
 		tools: ["bash"],
 		line: "Fix the first reported diagnostic and re-run the same linter; do not suppress a rule to silence it.",
 		when: contains(LINTER),
+	},
+	{
+		// Production deploys (live session 2026-09-24 pushed to a production
+		// remote) are where "done" must be checked against the real site.
+		key: "deploy-verify-live",
+		tools: ["bash"],
+		line: "After this deploy, open the live URL (http_request status/headers, render_see for pages) and compare it with the local build before reporting done; keep the previous revision reachable for rollback.",
+		when: contains(DEPLOY),
 	},
 	{
 		key: "git-write-verify",

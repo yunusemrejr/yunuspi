@@ -177,7 +177,7 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "hook-guidance",
 		group: "commands",
-		summary: "Attach one deterministic workflow reminder to the first matching tool result; hooks annotate and recover without blocking or changing authority.",
+		summary: "Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.",
 		entrypoints: ["tool_call", "tool_result", "session_start", "session_switch"],
 		options: [
 			option("PI_SESSION_HOOKS", "Disable this annotation surface when set to off.", ["on", "off"]),

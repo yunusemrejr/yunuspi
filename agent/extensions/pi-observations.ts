@@ -20,6 +20,7 @@ import {
 } from "./lib/mini-preprocessor.ts";
 import {
 	createSmolPreprocessor,
+	SMOL_TAKE_WAIT_MS,
 	safeSmolOutput,
 } from "./lib/smol-preprocessor.ts";
 import { routeEvidence } from "./lib/micro-intelligence/evidence.ts";
@@ -48,6 +49,9 @@ import {
 /** Providers whose encoded request body has a hard size cap (independent of the
  *  token window). Inlined from the retired request-body-gate transform — owned
  *  source no longer depends on any transform catalogue. */
+/** A 4–32 KiB window takes about two local inferences' prompt time; its
+ * first exposure waits that long once, then every later turn reuses it. */
+const SMOL_WINDOW_WAIT_MS = SMOL_TAKE_WAIT_MS * 2;
 const BODY_LIMIT_PROVIDERS = new Set(["openrouter", "runinfra", "friendli"]);
 function hasRequestBodyLimit(provider: string | undefined): boolean {
 	return !provider || BODY_LIMIT_PROVIDERS.has(provider);
@@ -595,7 +599,7 @@ export default function piObservationsExtension(
 							smolReady.set(
 								index,
 								value ?? (typeof takeWindowed === "function"
-										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, 150, raw)
+										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, SMOL_WINDOW_WAIT_MS, raw)
 									: undefined),
 							);
 						}),

@@ -541,7 +541,20 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if (ticket !== epoch || !active) throw Error('Project test checkpoint cancelled by session change or shutdown.');
       if (params.action === 'assess') {
         if (!['required', 'not_needed', 'blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 12) throw Error('Assessment needs a disposition and concrete coverage/exception reason (at least 12 characters).');
-        const commands = params.commands ?? [];
+        // `a && b` of individually valid checks (optionally behind one `cd dir &&`)
+        // becomes separate planned checks instead of a rejected round trip;
+        // live sessions retried `node --check a && node --check b` by hand.
+        const expandChain = (command: unknown): unknown[] => {
+          if (typeof command !== 'string' || !command.includes('&&') || projectCheckCommand(command, ctx.cwd, true)) return [command];
+          const parts = command.split('&&').map(part => part.trim()).filter(Boolean);
+          const cd = tokenizeSimple(parts[0] ?? '');
+          const prefix = cd?.length === 2 && cd[0] === 'cd' ? `${parts.shift()} && ` : '';
+          const expanded = parts.map(part => prefix + part);
+          return expanded.length > 1 && expanded.every(part => projectCheckCommand(part, ctx.cwd, true)) ? expanded : [command];
+        };
+        const requested = params.commands ?? [];
+        const split = requested.flatMap(expandChain);
+        const commands = split.length <= 8 ? split : requested;
         const checks = commands.map((command: unknown, index: number) => {
           const check = projectCheckCommand(command, ctx.cwd, true);
           if (!check) throw Error(`Command ${index + 1}/${commands.length} rejected (${projectCheckCommandReason(command, ctx.cwd) ?? 'invalid'}): ${JSON.stringify(String(command)).slice(0, 200)}. Declare a simple test command without shell composition, expansion, watch/list/help modes or status masking. Use the project working directory. No command was executed.`);
@@ -554,7 +567,9 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         state.assessment = { revision: state.revision, disposition: params.disposition, reason: params.reason.trim().slice(0, 1200), checks };
         save();
       }
-      return { content: [{ type: 'text', text: JSON.stringify(summary()) }], details: { revision: state.revision, need: projectTestNeed(state) } };
+      const splitNote = params.action === 'assess' && (params.commands ?? []).length && (params.commands ?? []).length !== (state.assessment?.checks?.length ?? 0)
+        ? `Chained commands were split into ${state.assessment?.checks?.length} planned checks; run each exactly as planned: ${JSON.stringify(state.assessment?.checks?.map((check: any) => check.label))}.\n` : '';
+      return { content: [{ type: 'text', text: splitNote + JSON.stringify(summary()) }], details: { revision: state.revision, need: projectTestNeed(state) } };
     },
   });
   return api;

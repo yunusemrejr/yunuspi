@@ -41,27 +41,40 @@ Tool argument values and typed error text are hashed; only bounded type shapes a
 are retained. Sensitive argument keys are excluded from shapes. Guardian itself writes no prompt
 or tool-content log. Skill names and file extensions are diagnostic signals, not activation rules.
 
-## The two interventions
+## The interventions
 
-Both are produced by the intervention control plane, which enforces bounded guidance slots per
+All are produced by the intervention control plane, which enforces bounded guidance slots per
 semantic intervention identity, per-request context budgets, a TTL-based duplicate cache and an
-evidence requirement. Guardian additionally retains bounded delivery history beyond the TTL.
+evidence requirement. Guardian additionally retains bounded delivery history beyond the TTL, and
+each detector admits at most one intervention per two-minute window.
 
-1. **Repeated identical failure.** The same tool call with the same argument fingerprint must fail
-   three times with the same typed error text across at least two independent assistant responses,
-   remain fresh, belong to the live task, and not be covered by an explicit user retry directive.
-   Generated identifiers (UUIDs, long hex ids), clock times, epoch timestamps, elapsed durations and
-   temporary paths are normalized before the error text is compared, so a retry that fails the same
-   way with a new run id or timing is recognized; plain numbers such as line numbers, counts and
-   status codes stay significant.
+1. **Repeated identical failure** (WASM-scored). The same tool call with the same argument
+   fingerprint must fail three times with the same typed error text across at least two independent
+   assistant responses, remain fresh, belong to the live task, and not be covered by an explicit user
+   retry directive. Shell commands are included (an exact command string failing the same way is the
+   most common loop in live sessions); long output is fingerprinted by its head and tail, where
+   commands print the error. Generated identifiers (UUIDs, long hex ids), clock times, epoch
+   timestamps, elapsed durations and temporary paths are normalized before the error text is
+   compared, so a retry that fails the same way with a new run id or timing is recognized; plain
+   numbers such as line numbers, counts and status codes stay significant.
 2. **Verified constraint drift.** A literal, non-quoted user path constraint (for example
    "only write files under src/") must be crossed by two independent *successful* file changes
    inside the same task lineage, after the constraint itself was re-verified against the raw
    prompt text by exact offset.
+3. **Edit-mismatch loop.** Three failed edits to one file, with at least two different argument
+   fingerprints and no successful read of that file in between, produce one reminder to re-read the
+   exact region before editing again. Identical retries stay with detector 1.
+4. **Repeated identical read.** The same file range read four times with no write, edit or other
+   mutation in between produces one reminder to reuse the earlier read or narrow it.
+5. **Unverified completion.** A final reply that presents the work as finished, while files changed
+   after the last verification run (tests, builds, linters, syntax checks, renders, reviews), is
+   steered once per change set to run the proving check or state what remains unverified. A reply
+   that already says the work is unverified or blocked does not trigger it.
 
 Anything else abstains. There is no keyword or topic classifier, so a CSS file in a backend task,
 the word "architecture" in documentation, or a discussion of an unrelated earlier task cannot
-produce guidance.
+produce guidance. Detectors 3–5 are deterministic evidence counts; paths are hashed in evidence and
+no file content is stored.
 
 ## Kernels
 
@@ -89,11 +102,12 @@ constraint.
 
 ## Observability
 
-- Guidance appears in the transcript as a `guardian_intervention` custom message.
+- Guidance appears in the transcript as a `guardian_intervention` notice (⛨ Guardian · kind · guidance sent to the agent, with the WASM score where one was computed).
+- Every WASM verdict, including an abstention, is one `Guardian` activity line with its score and threshold (for example `WASM score 0.62 < 0.95 · no intervention`). Routine monitoring is summarized in the live footer pulse (`Guardian 14 checks · 2 WASM · 1 sent`) instead of repeated transcript lines.
 - Routine monitoring and actual WASM evaluations have separate visible receipts, so standby
   is not confused with successful inference. Reduced prompt coverage is explicit.
 - Child-subagent guidance is relayed to the parent session through the subagent supervisor channel.
-- Internal intelligence components (JEV, Needle3, Smol, Kompress, fuzzy/neural helpers, the intent
+- Internal intelligence components (JEV, Needle3, the local LM, Kompress, fuzzy/neural helpers, the intent
   classifier) report a single bounded `activity` line per real use, deduplicated per component.
 - `/guardian stats` and the `micro_status` tool expose counters; neither runs inference.
 
@@ -104,7 +118,7 @@ measurements, exercised paths and remaining implementation gaps.
 
 ## Boundaries and measured overhead
 
-This is a narrow supervisor, not a general semantic task or architecture classifier. The two
+This is a narrow supervisor, not a general semantic task or architecture classifier. The five
 detectors above are its complete intervention set. Architecture/tool-choice constraints may be
 retained as verified metadata but are not enforced. JEV/Needle3/fuzzy usage is observable through
 the intelligence event system; those scores do not feed Guardian decisions. Path constraints

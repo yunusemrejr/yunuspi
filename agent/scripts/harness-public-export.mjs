@@ -272,7 +272,7 @@ try {
   put("agent/npm/" + name, readRegularSource(path.join(source, "npm", name), "Agent npm manifest"));
  // Ship only the portable local-inference unit templates. Authentication,
  // weights, runtime descriptors and unrelated personal units remain private.
- const modelUnits = ["pi-mini-preprocessor.service", "pi-smol-preprocessor.service"];
+ const modelUnits = ["pi-mini-preprocessor.service"];
  const shippedUnits = new Set();
  for (const name of modelUnits) {
   const file = path.join(source, "scripts/systemd", name);

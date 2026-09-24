@@ -30,7 +30,7 @@ test('helper ledger separates execution, cache, abstention, application and deli
   assert.deepEqual(Object.fromEntries(['executions','cached','skipped','delivered','timingSamples','durationMs'].map(key=>[key,component(summary,'Needle3')[key]])),{executions:2,cached:2,skipped:1,delivered:1,timingSamples:3,durationMs:31});
   assert.equal(component(summary,'Fuzzy matching').applied,2);assert.equal(component(summary,'Fuzzy matching').matches,12);
   assert.equal(component(summary,'JEV').failed,1);assert.equal(component(summary,'JEV').executions,0);
-  assert.equal(component(summary,'Smol').measured,false);
+  assert.equal(component(summary,'Local LM').measured,false);
   let attempts=0;assert.throws(()=>ledger.flush(()=>{attempts++;throw new Error('disk');}));
   ledger.flush(()=>attempts++);ledger.flush(()=>attempts++);assert.equal(attempts,2,'failed persistence keeps dirty state, successful retry clears it');
 });

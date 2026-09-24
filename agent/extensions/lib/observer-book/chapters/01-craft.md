@@ -115,3 +115,17 @@ An observer sees a bounded, delayed slice of someone else's work and cannot act 
 **Ask.** Which run after the final edit demonstrates the claim, and what remains unverified that the summary should state?
 
 **Traps.** Demanding a full suite for a typo fix; ignoring that some checks are impossible here (then the honest move is to say so).
+
+## Open requests deserve a thought experiment {#thought-experiment}
+<!-- terms: vague open-ended open brief decide choose approach options alternatives tradeoffs easiest obvious first idea assumption direction strategy plan -->
+
+**Principle.** When the user leaves major decisions to the agent, the right reminder is to weigh two or three materially different approaches against the stated constraints before committing.
+
+**Why.** An agent under momentum takes the first workable path, which is often the easiest rather than the best. A brief comparison surfaces a better architecture, design or plan while changing course is still cheap, and it gives the user a decision they can inspect. The observer should prompt this early, not after the work is built.
+
+**Signals.** A substantial new artifact is started immediately after an open-ended prompt; no alternatives or criteria appear in the plan or thinking; the first idea is being polished rather than examined.
+
+**Ask.** What were the alternatives, and what made this one the best fit for what the user asked?
+
+**Traps.** Demanding exploration for small, well-specified tasks; reopening a decision the user already made.
+

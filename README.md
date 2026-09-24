@@ -85,7 +85,7 @@ Less context does not guarantee a particular bill. Providers differ in tokenizat
 
 ## See what is happening
 
-Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context. JEV, Needle, Smol and Kompress show calls and timed returns; green marks success or cache reuse, red marks failure, and yellow marks cancellation or a skipped selection. Powers include a short name beside each emoji. Model-list warnings use readable ages such as `1d 14h ago`; `/catalog-status` explains them and `/catalog-status refresh` refreshes the selected provider.
+Short terminal activity labels show tool and automatic-helper actions without adding their details to the model context. JEV, Needle, the local language model and Kompress show calls and timed returns, and routine background work (Guardian checks, rankings, hooks, hints) is summarized in one live footer line; green marks success or cache reuse, red marks failure, and yellow marks cancellation or a skipped selection. Powers include a short name beside each emoji. Model-list warnings use readable ages such as `1d 14h ago`; `/catalog-status` explains them and `/catalog-status refresh` refreshes the selected provider.
 
 `/metrics` shows grouped failures, recovery clues, repeated output, large context contributors and review evidence gaps. Agents can inspect efficiency through `session_self({view:"efficiency"})`.
 

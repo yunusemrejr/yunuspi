@@ -18,7 +18,7 @@ delete process.env.PI_OFFLINE;
 delete process.env.PI_SESSION_OBSERVER;
 delete process.env.PI_SUBAGENT_CHILD;
 after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
-const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, createSessionObserver, observerDispatch, observerUsage, observerEvidenceBytes, OBSERVER_DEADLINE_MS, OBSERVER_PACKET_MAX_BYTES } = await import('../agent/extensions/lib/session-observer.ts');
+const { buildObserverPacket, parseObserverAdvice, validateObserverAdvice, observerAdviceText, createSessionObserver, observerDispatch, observerUsage, observerEvidenceBytes, OBSERVER_DEADLINE_MS, OBSERVER_PACKET_MAX_BYTES } = await import('../agent/extensions/lib/session-observer.ts');
 const { default: observerExtension } = await import('../agent/extensions/session-observer.ts');
 
 const flush = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
@@ -33,11 +33,19 @@ const model = { provider: 'deepseek', id: 'deepseek-flash', api: 'openai-complet
 const route = { route: 'deepseek/deepseek-flash', model, thinking: 'high', officialDefault: true };
 
 test('observer packet and validated advice are bounded, cited, catalog-specific and do not copy thinking', () => {
-  const p = packet(); assert.ok(p.text.length <= 8000); assert.ok(parseObserverAdvice(reply().content[0].text, p));
-  for (const delta of [{ tools: ['imaginary'] }, { skills: ['missing'] }, { evidence: ['unknown'] }, { evidence: [] }, { note: 'word '.repeat(151) }]) assert.equal(parseObserverAdvice(JSON.stringify({ note: 'Inspect the gap.', evidence: ['read-1'], tools: [], skills: [], ...delta }), p), undefined);
+  const p = packet(); assert.ok(p.text.length <= 10000); assert.ok(parseObserverAdvice(reply().content[0].text, p));
+  // Unknown identifiers never reach the agent, but they no longer void a paid review.
+  const base = { note: 'Inspect the gap.', evidence: ['read-1'], tools: [], skills: [] };
+  const withTool = parseObserverAdvice(JSON.stringify({ ...base, tools: ['imaginary', 'read'] }), p);
+  assert.deepEqual(withTool.tools, ['read']); assert.deepEqual(withTool.dropped, ['tools']);
+  assert.deepEqual(parseObserverAdvice(JSON.stringify({ ...base, skills: ['missing'] }), p).skills, []);
+  for (const evidence of [['unknown'], []]) { const uncited = parseObserverAdvice(JSON.stringify({ ...base, evidence }), p); assert.equal(uncited.uncited, true); assert.deepEqual(uncited.evidence, []); }
+  const long = parseObserverAdvice(JSON.stringify({ ...base, note: 'This sentence has several words in it. '.repeat(30) }), p);
+  assert.ok(long.note.split(/\s+/).length <= 150 && long.note.endsWith('…'), 'an over-long note is trimmed at a sentence boundary');
+  assert.equal(parseObserverAdvice(JSON.stringify({ ...base, note: 'word '.repeat(400) }), p).note.split(/\s+/).length <= 121, true);
   const thinking = 'A private exposed reasoning fragment '.repeat(20);
   const bounded = buildObserverPacket('task '.repeat(5000), [{ id: 't', kind: 'provider-returned thinking', text: thinking }], Array.from({length:1000},(_,i)=>({name:`tool${i}`,description:'task '.repeat(100)})), []);
-  assert.ok(bounded.text.length <= 8000); assert.ok(bounded.evidence[1].text.length <= 450);
+  assert.ok(bounded.text.length <= 10000); assert.ok(bounded.evidence[1].text.length <= 450);
   assert.equal(parseObserverAdvice(JSON.stringify({note:thinking.slice(-80),evidence:['t'],tools:[],skills:[]}),bounded),undefined);
 });
 
@@ -52,16 +60,15 @@ test('observer recovers presentation differences but requires actual packet evid
   assert.deepEqual(parsed.advice.skills, []);
   assert.deepEqual(parsed.advice.discoverableTools, ['todo'], 'registered catalog tools shown in the harness map are valid suggestions');
   assert.equal(parsed.advice.status, undefined, 'extra provider metadata never enters advice');
-  for (const [patch, reason] of [
-    [{ evidence: ['invented'] }, /evidence contains an identifier/],
-    [{ evidence: [] }, /no evidence citations/],
-    [{ tools: ['quality_review'] }, /tools contains an identifier/],
-    [{ skills: ['imaginary'] }, /skills contains an identifier/],
-    [{ note: 'Bad\u0000control' }, /control characters/],
-  ]) {
-    const result = validateObserverAdvice(JSON.stringify({ ...answer, ...patch }), p);
-    assert.equal(result.advice, undefined); assert.match(result.reason, reason);
-  }
+  for (const [patch, check] of [
+    [{ evidence: ['invented'] }, advice => advice.uncited === true],
+    [{ evidence: [] }, advice => advice.uncited === true && /^Uncited observation/.test(observerAdviceText(advice))],
+    [{ tools: ['quality_review'] }, advice => advice.tools.length === 0 && advice.dropped.includes('tools')],
+    [{ skills: ['imaginary'] }, advice => advice.skills.length === 0 && advice.dropped.includes('skills')],
+  ]) assert.ok(check(validateObserverAdvice(JSON.stringify({ ...answer, ...patch }), p).advice), JSON.stringify(patch));
+  assert.ok(validateObserverAdvice(JSON.stringify({ ...answer, evidence: ['journal-7'] }), p, new Set(['journal-7'])).advice.evidence.includes('journal-7'), 'journal ids fetched during review are valid citations');
+  const control = validateObserverAdvice(JSON.stringify({ ...answer, note: 'Bad\u0000control' }), p);
+  assert.equal(control.advice, undefined); assert.match(control.reason, /control characters/);
   const broken = validateObserverAdvice('{"note":"Sensitive fixture without closing JSON', p);
   assert.match(broken.reason, /complete JSON object/);
   assert.doesNotMatch(broken.reason, /Sensitive fixture/);
@@ -71,11 +78,11 @@ test('observer contract failures explain the safe category and retry retained ev
   const time = clock(), notices = []; let calls = 0, reviewed = 0;
   const observer = createSessionObserver({ ...time, snapshot: () => ({ packet: packet(), route, reviewed: () => reviewed++ }),
     notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => ++calls === 1
-      ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: 'Inspect a fixture.', evidence: ['invented'], tools: [], skills: [] }) }] }
+      ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: 'Inspect a\u0007 fixture.', evidence: ['read-1'], tools: [], skills: [] }) }] }
       : { ...reply(), content: [{ type: 'text', text: '```json\n' + reply().content[0].text + '\n```' }] } });
   observer.begin('owner'); observer.start(); await time.advance(30000);
   assert.equal(reviewed, 0); assert.equal(observer.context(), undefined);
-  assert.match(notices.at(-1)[1], /evidence contains an identifier absent from this packet; evidence retained/);
+  assert.match(notices.at(-1)[1], /control characters; evidence retained/);
   await time.advance(29999); assert.equal(calls, 1, 'no hidden format-repair request');
   await time.advance(1); assert.equal(calls, 2); assert.equal(reviewed, 1);
   assert.match(observer.context(), /required field/); assert.equal(observer.context(), undefined); observer.close();
@@ -139,7 +146,7 @@ test('observer dispatch preserves high thinking, bounds output and rejects endpo
     return completeSimple(selected, context, { ...given, apiKey:'synthetic-key', fetch:async(_url,init)=>{requests.push(JSON.parse(init.body));return new Response('data: '+JSON.stringify({id:'fixture',object:'chat.completion.chunk',model:selected.id,choices:[{index:0,delta:{content:reply().content[0].text},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});} });
   } };
   await observerDispatch(route,packet(),new AbortController().signal,registry);
-  assert.equal(options.reasoning,'high'); assert.equal(options.timeoutMs,180000); assert.equal(options.maxTokens,4096); assert.equal(options.maxRetries,0); assert.equal(requests.length,1); assert.equal(requests[0].tools,undefined);
+  assert.equal(options.reasoning,'high'); assert.equal(options.timeoutMs,180000); assert.equal(options.maxTokens,8192); assert.equal(options.maxRetries,0); assert.equal(requests.length,1); assert.equal(requests[0].tools,undefined);
   const altered={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,baseUrl:'https://elsewhere.invalid/v1'},context,opts)};
   const denied=await observerDispatch(route,packet(),new AbortController().signal,altered);
   assert.equal(denied.stopReason,'error'); assert.equal(requests.length,1);
@@ -153,7 +160,7 @@ test('child sessions cannot register observer hooks, tools or timers', () => {
 
 test('non-Latin evidence respects the UTF-8 byte ceiling and truncated replies never become advice', async () => {
   const p=buildObserverPacket('東京'.repeat(3000),Array.from({length:12},(_,i)=>({id:`e${i}`,kind:'tool result',text:'🧪漢字'.repeat(300)})),[],[]);
-  assert.ok(Buffer.byteLength(p.text,'utf8')<=8000);
+  assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
   const time=clock(),notices=[];
   const observer=createSessionObserver({...time,snapshot:()=>({packet:packet(),route}),notice:(...x)=>notices.push(x),receipt:()=>{},dispatch:async()=>({...reply(),stopReason:'length'})});
   observer.begin('owner');observer.start();await time.advance(30000);assert.equal(observer.context(),undefined);assert.equal(notices.at(-1)[0],'unavailable');
@@ -169,7 +176,7 @@ test('native transport ignores malicious model defaults and enforces pins, free 
   const pins={order:['configured-backend'],only:['configured-backend'],allow_fallbacks:false};
   const result=await observerDispatch({route:'openrouter/fixture/model',model:router,thinking:'high',providerRouting:pins},packet(),new AbortController().signal,registry);
   assert.equal(result.stopReason,'stop');assert.equal(sent.length,1);
-  assert.equal(sent[0].max_tokens??sent[0].max_completion_tokens,4096);assert.equal(sent[0].reasoning.effort,'high');assert.deepEqual(sent[0].provider,pins);assert.equal(sent[0].tools,undefined);assert.equal(sent[0].model,router.id);assert.match(JSON.stringify(sent[0].messages),/Evidence packet/);
+  assert.equal(sent[0].max_tokens??sent[0].max_completion_tokens,8192);assert.equal(sent[0].reasoning.effort,'high');assert.deepEqual(sent[0].provider,pins);assert.equal(sent[0].tools,undefined);assert.equal(sent[0].model,router.id);assert.match(JSON.stringify(sent[0].messages),/Evidence packet/);
   const overridden={completeSimple:(selected,context,opts)=>registry.completeSimple({...selected,baseUrl:'https://proxy.invalid/v1'},context,opts)};
   const denied=await observerDispatch({...route,officialDefault:false},packet(),new AbortController().signal,overridden);
   assert.equal(denied.stopReason,'error');assert.equal(sent.length,1);
@@ -185,7 +192,7 @@ test('native provider output shapes remain bounded and receipts exclude unrelate
   for(const payload of [{model:model.id,maxTokens:12000},{model:model.id,options:{maxTokens:12000}},{model:model.id,config:{maxOutputTokens:12000}},{model:model.id,inferenceConfig:{maxTokens:12000}}]) {
     let applied;
     await observerDispatch(route,packet(),new AbortController().signal,{completeSimple:async(actual,_context,opts)=>{applied=opts.onPayload(payload,actual);return reply();}});
-    assert.ok(JSON.stringify(applied).includes('4096'));assert.ok(!JSON.stringify(applied).includes('12000'));
+    assert.ok(JSON.stringify(applied).includes('8192'));assert.ok(!JSON.stringify(applied).includes('12000'));
   }
   await assert.rejects(observerDispatch(route,packet(),new AbortController().signal,{completeSimple:async(actual,_context,opts)=>opts.onPayload({model:actual.id},actual)}),/permitted route/);
   assert.deepEqual(observerUsage({input:12,output:5,reasoning:3,rawPrompt:'private',cost:{total:.01,source:'provider-reported',complete:true,rawResponse:'private'}}),{input:12,output:5,reasoning:3,cost:{total:.01,source:'provider-reported',complete:true}});
@@ -304,7 +311,7 @@ test('observer reviews chronological chunks without losing earlier tool outcomes
   assert.match(h.packets[0].evidence.find(row=>row.id==='todo-state').text,/Verify parser boundary checks/);
   assert.match(h.packets[0].evidence.find(row=>row.id==='child-state').text,/completed/);
   assert.equal(h.packets[0].evidence[0].text,'Fix parser validation.');
-  for(const p of h.packets) { assert.ok(observerEvidenceBytes(p)<=8000); assert.ok(Buffer.byteLength(p.text,'utf8')<=OBSERVER_PACKET_MAX_BYTES); }
+  for(const p of h.packets) { assert.ok(observerEvidenceBytes(p)<=10000); assert.ok(Buffer.byteLength(p.text,'utf8')<=OBSERVER_PACKET_MAX_BYTES); }
   h.close();
 });
 
@@ -363,7 +370,7 @@ test('observer source-backed harness map explains orchestration and preserves ac
   const advice=parseObserverAdvice(JSON.stringify({note:'Could discovering parser_check help validate the remaining parser case?',evidence:['request'],tools:['parser_check'],skills:[]}),p);
   assert.deepEqual(advice.discoverableTools,['parser_check']);
   const {discoverableTools,...rest}=advice;assert.equal(rest.tools[0],'parser_check');
-  assert.ok(Buffer.byteLength(p.text,'utf8')<=8000);
+  assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
 });
 
 
@@ -391,7 +398,7 @@ test('observer peer coordination evidence is owner-scoped and cannot change user
 
 test('large multilingual packets keep the next unread event while adapting catalog breadth', () => {
   const p=buildObserverPacket('漢字の確認'.repeat(800),[{id:'event-1',kind:'tool result',text:'First unread result must survive.'},...Array.from({length:20},(_,i)=>({id:`event-${i+2}`,kind:'tool result',text:'漢字'.repeat(200)}))],Array.from({length:20},(_,i)=>({name:`tool_${i}`,description:'漢字の確認 '.repeat(40)})),Array.from({length:20},(_,i)=>({name:`skill_${i}`,description:'漢字の確認 '.repeat(40)})));
-  assert.ok(p.evidence.some(row=>row.id==='event-1'));assert.ok(Buffer.byteLength(p.text,'utf8')<=8000);
+  assert.ok(p.evidence.some(row=>row.id==='event-1'));assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
 });
 
 
@@ -422,7 +429,7 @@ test('packet budget preserves current work and latest advice before static harne
   assert.match(p.evidence.find(row=>row.id==='completed-tools').text,/src\/parser.ts/);
   assert.match(p.evidence.find(row=>row.id==='child-state').text,/acceptance=failed/);
   const reduced=JSON.parse(p.evidence.find(row=>row.id==='model-routing').text);assert.equal(reduced.cost.unknown,true);assert.equal(reduced.restrictions.sameModel,true);
-  assert.ok(Buffer.byteLength(p.text,'utf8')<=8000);
+  assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
 });
 
 test('observer child state uses canonical execution and acceptance outcomes despite late lifecycle rows', async () => {
@@ -449,7 +456,7 @@ test('bounded plan and child snapshots keep active work and failed follow-up vis
   assert.match(plan.text, /1 open, 16 completed.*Resolve parser boundary case/);
   const children = h.packets[0].evidence.find(row => row.id === 'child-state');
   assert.match(children.text, /Parser edge review: failed; execution=succeeded; acceptance=failed \(Missing empty-input test\)/);
-  assert.ok(observerEvidenceBytes(h.packets[0]) <= 8000 && Buffer.byteLength(h.packets[0].text, 'utf8') <= OBSERVER_PACKET_MAX_BYTES);
+  assert.ok(observerEvidenceBytes(h.packets[0]) <= 10000 && Buffer.byteLength(h.packets[0].text, 'utf8') <= OBSERVER_PACKET_MAX_BYTES);
   h.close();
 });
 
@@ -534,5 +541,25 @@ test('an unchanged idle observer state is reported once, not as a new numbered r
   const idle=h.sent.filter(([message])=>/No new evidence to review/.test(message.content));
   assert.equal(idle.length,1,'identical idle check-ins are deduplicated');
   assert.ok(!h.sent.some(([message])=>/Review \d+:/.test(message.content)),'no review counter without a review');
+  h.close();
+});
+
+test('the observer sees every user prompt, the interpretation, delivered reminders and full tool output', async () => {
+  const hosts=[];
+  const h=harness(async(_r,p)=>({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'',evidence:[]})}]}));
+  h.input('Build the music site with PHP and perfect SEO.');
+  h.input('Also add llms.txt and a public JSON API.');
+  h.emit('message_end',{message:{role:'custom',customType:'prompt-analysis',content:'Intent analysis · followup · model\nPrimary: Music site\nRelation: expand\nOriginal user prompt preserved. This advisory informs the main agent; it does not replace the request.',details:{advisory:'Auxiliary interpretation ...'}}});
+  h.emit('message_end',{message:{role:'custom',customType:'reminders',content:'[reminders] sid abc — 1 user-registered reminder(s) due.\n[custom-reminder] Keep the TUI output clear / and never break it\n[harness trajectory check] ...'}});
+  h.emit('tool_result',{toolName:'bash',input:{command:'npm test'},content:[{type:'text',text:`${'passing line\n'.repeat(300)}FAILED required field`}]});
+  await h.advance(30000);
+  const evidence=h.packets.at(-1).evidence;
+  const earlier=evidence.find(row=>row.kind==='earlier user prompt');
+  assert.ok(earlier && /music site/i.test(earlier.text),'the first prompt stays visible after a follow-up');
+  assert.match(evidence.find(row=>row.id==='request').text,/llms\.txt/);
+  assert.match(evidence.find(row=>row.id==='interpretation').text,/Helper's reading.*Primary: Music site/);
+  assert.ok(evidence.some(row=>row.kind==='user reminder delivered'&&/Keep the TUI output clear/.test(row.text)));
+  const result=evidence.find(row=>row.kind==='tool result');
+  assert.ok(result.text.length<600,'the packet carries an excerpt');
   h.close();
 });

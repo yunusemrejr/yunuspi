@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { safeText } from './project-intelligence/privacy.mjs';
 import { isReferentialFollowup, priorUserEvidence } from './intent-context.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
+import { heuristicDesignBrief } from './design-direction.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
 export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200 });
@@ -35,12 +36,26 @@ export function shouldRunScopeCouncil(prompt: string): boolean {
   const text = source.replace(/\b(?:do not|don't|never)\s+(?:change|edit|modify|redesign|rework)\b/gi,'preserve');
   if (/^(?:what|why|how|explain|describe|compare|summarize|review|audit)\b/i.test(text) ||
     /\b(?:read[- ]only|just explain|only explain)\b/i.test(text)) return false;
+  // A brand-new open visual brief deserves explored directions before
+  // building; the same council runs in design-direction mode.
+  if (councilMode(source) === 'direction') return true;
   const action = /\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor|improve|polish|refine|fix|change|adjust|update|replace|remove)\b/i.test(text);
   if (!action) return false;
   if (/\b(?:redesign|rework|rethink|overhaul|revamp|reimagine|refactor)\b/i.test(text)) return true;
   const dissatisfaction = /\b(?:distracting|annoying|low[- ]quality|unprofessional|clunky|confusing|awkward|not happy|unhappy|too (?:busy|much|noisy|slow|complex)|doesn['’]?t (?:look|feel|work)|not (?:good|working|right)|looks? (?:bad|wrong|cheap))\b/i.test(text);
   const openImprovement = /\b(?:improve|polish|refine)\b/i.test(text) && /\b(?:design|UI|interface|animation|motion|character|experience|layout|architecture|workflow|logic|behavior|harness|system)\b/i.test(text);
   return dissatisfaction || openImprovement;
+}
+
+/** "direction" for a new open visual brief (no style spec, nothing to
+ * preserve yet); "scope" for changes to existing work. */
+export function councilMode(prompt: string): 'scope' | 'direction' {
+  const source = prose(prompt).slice(0, 16_000);
+  if (globalNoChange.test(source)) return 'scope';
+  // Negated work ("do not redesign", "never build") is a constraint, not a brief.
+  const affirmative = source.replace(/\b(?:do not|don't|never|without)\s+(?:\w+\s+){0,2}?(?:create|build|make|design|redesign|restyle|develop|craft|produce|generate|launch|revamp|change|edit|modify|rework)\b[^.!?\n]*/gi, ' ');
+  const brief = heuristicDesignBrief(affirmative);
+  return brief?.visualDesign && brief.openEnded ? 'direction' : 'scope';
 }
 
 export function scopeRequest(prompt: string, branch: unknown): string | undefined {

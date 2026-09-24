@@ -16,6 +16,7 @@ import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metric
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
 import { needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
 import { runPromptAnalysis } from "./lib/prompt-analysis-runtime.ts";
+import { detectDesignBrief, designDirectionGuidance, designDirectionSummary } from "./lib/design-direction.ts";
 import {
   buildPromptAnalysisRequest,
   promptAnalysisEvent,
@@ -93,6 +94,9 @@ interface PendingPromptAnalysis {
   status: "model" | "fallback";
   attempts: PromptAnalysisAttempt[];
   advisory: string;
+  /** Design-direction guidance also injected when the analysis fell back. */
+  designGuidance: string;
+  designSummary: string;
   inputChars: number;
   excerpted: boolean;
   generation: number;
@@ -368,7 +372,7 @@ function analysisDetails(pending: PendingPromptAnalysis, source: string) {
     source,
     status: pending.status,
     attempts: pending.attempts,
-    advisory: pending.advisory,
+    ...(pending.advisory ? { advisory: pending.advisory } : {}),
     inputChars: pending.inputChars,
     excerpted: pending.excerpted,
     confidence: pending.analysis.confidence,
@@ -413,9 +417,9 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
 
   pi.registerMessageRenderer?.("prompt-analysis", (message: any, { expanded }: { expanded: boolean }) => {
     const summary = typeof message.content === "string" ? message.content : "Intent analysis";
-    // A fallback sends nothing to the main agent, so there is nothing to expand.
-    const advisory = message.details?.status === "fallback" ? undefined : message.details?.advisory;
-    return new Text(summary + (typeof advisory === "string"
+    // A fallback sends at most local design-direction guidance; nothing else to expand.
+    const advisory = message.details?.advisory;
+    return new Text(summary + (typeof advisory === "string" && advisory
       ? expanded ? `\n\nExact advisory sent to the main agent:\n${advisory}` : "\nExpand to see the exact advisory sent to the main agent."
       : ""), 0, 0);
   });
@@ -624,6 +628,12 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       state.advisoryFamily = state.family;
       if (result.status === "model") metrics.accept("llm");
 
+      // Open-ended or visual briefs get the divergence protocol; incidental
+      // references are marked context-only so they cannot become templates.
+      // Follow-ups inherit the scope, so only the first request qualifies
+      // unless the follow-up itself starts new visual work.
+      const designBrief = detectDesignBrief(prompt, kind === "initial" || analysis.visualDesign ? analysis : { ...analysis, source: "model", visualDesign: false, openEnded: false });
+      const designGuidance = designDirectionGuidance(designBrief);
       const pending: PendingPromptAnalysis = {
         ownerId: guardianOwnerId,
         requestId: event.requestId,
@@ -637,7 +647,11 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         ...(result.route ? { route: result.route } : {}),
         status: result.status,
         attempts,
-        advisory: renderPromptAnalysisContext(analysis, selected.source, result.route),
+        advisory: result.status === "fallback"
+          ? designGuidance
+          : [renderPromptAnalysisContext(analysis, selected.source, result.route), designGuidance].filter(Boolean).join("\n"),
+        designGuidance,
+        designSummary: designDirectionSummary(designBrief),
         inputChars: prompt.length,
         excerpted: prompt.length > (kind === "initial" ? 24_000 : 8_000),
         generation: currentGeneration,
@@ -713,7 +727,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       );
       // A deterministic fallback only restates the literal prompt with zero
       // confidence; injecting it would spend context on no new information.
-      if (pending.status !== "fallback" && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
+      if ((pending.status !== "fallback" || pending.designGuidance) && pending.advisory && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
         const details = analysisDetails(pending, pending.preferenceSource);
         const content = pending.advisory;
         inserts.push({
@@ -748,12 +762,16 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome === "truncated" ? `output limit reached${attempt.reasoningTokens ? ` (${attempt.reasoningTokens} reasoning tokens)` : ""}` : attempt.outcome === "empty" ? "returned no answer" : attempt.outcome}${attempt.recovery ? "; retrying with compact response" : ""}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
         const concise = pending.status === "fallback" ? [
           `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
-          "Nothing was added to the main agent's context; it works from your prompt as written.",
+          pending.designGuidance
+            ? "Only design-direction guidance (from local rules) was added to the main agent's context; it works from your prompt as written."
+            : "Nothing was added to the main agent's context; it works from your prompt as written.",
+          ...(pending.designSummary ? [pending.designSummary] : []),
         ].join("\n") : [
           renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route),
           ...(pending.analysis.kind === "followup" && !pending.analysis.relation ? ["Relationship: uncertain; earlier user scope remains authoritative."] : []),
           ...(reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
           ...(pending.excerpted ? ["Long request: analysis used the beginning, end and extracted task focus; the omitted middle may contain additional constraints."] : []),
+          ...(pending.designSummary ? [pending.designSummary] : []),
           "Original user prompt preserved. This advisory informs the main agent; it does not replace the request.",
         ].join("\n");
         const details = analysisDetails(pending, pending.preferenceSource);

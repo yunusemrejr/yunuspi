@@ -135,11 +135,15 @@ export function fingerprintFailureResult(result, isError) {
 	for (const item of result.content.slice(0, 64)) {
 		if (!item || item.type !== "text" || typeof item.text !== "string") continue;
 		total += item.text.length;
-		if (total > 4096) return undefined;
+		if (total > 262_144) return undefined;
 		pieces.push(item.text);
 	}
 	if (!pieces.length) return undefined;
-	return createHash("sha256").update("guardian-error-v2\0").update(normalizeFailureText(pieces.join("\n"))).digest("hex");
+	// Long failures (shell output) keep their identity through the head and
+	// the tail, where commands print the error; the volatile middle is dropped.
+	const joined = pieces.join("\n");
+	const bounded = joined.length <= 4096 ? joined : `${joined.slice(0, 2048)}\n…\n${joined.slice(-2048)}`;
+	return createHash("sha256").update("guardian-error-v2\0").update(normalizeFailureText(bounded)).digest("hex");
 }
 
 function norm(value) {
@@ -198,4 +202,25 @@ export function hasExplicitRetryDirective(text) {
 	// Quoted examples are not user constraints. This is a conservative veto only.
 	content = content.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, (match) => " ".repeat(match.length));
 	return /\b(?:retr(?:y(?:ing)?|ies)|repeat(?:ing|ed)?|try\s+again)\b/i.test(content);
+}
+
+/** Commands and tools that verify behaviour rather than change it. A match is
+ * evidence that a check ran, not that it passed or covered the change. */
+const VERIFY_COMMAND = /\b(?:test|tests|spec|vitest|jest|pytest|mocha|ava|tap|cargo (?:test|check|build|clippy)|go (?:test|vet|build)|npm (?:run )?(?:test|build|lint|check|typecheck)|pnpm (?:test|build|lint)|yarn (?:test|build|lint)|tsc|eslint|ruff|mypy|flake8|pylint|php -l|node --check|bash -n|shellcheck|make(?: (?:test|check|build))?|gradle|mvn|dotnet (?:test|build)|playwright|lighthouse|curl -[a-zA-Z]*[fsSI]|validate|verify|lint|typecheck|build)\b/i;
+const VERIFY_TOOLS = new Set(["project_tests", "render_see", "browser_session", "web_probe", "syntax_check", "code_quality", "quality_review", "design_audit", "artifact_check", "source_check", "sandbox_run"]);
+export function isVerificationCall(toolName, args) {
+	if (VERIFY_TOOLS.has(toolName)) return true;
+	return (toolName === "bash" || toolName === "bg_run") && typeof args?.command === "string" && VERIFY_COMMAND.test(args.command);
+}
+const MUTATING_TOOLS = new Set(["write", "edit", "bulk_edit", "multi_edit", "apply_patch"]);
+export function isMutationCall(toolName, args) {
+	if (MUTATING_TOOLS.has(toolName)) return true;
+	return toolName === "bash" && typeof args?.command === "string" && /(?:^|[;&|]\s*)(?:sed\s+-i|perl\s+-pi|tee\b|cp\b|mv\b|rm\b|git\s+(?:apply|checkout|restore|reset|merge|rebase|cherry-pick)|npm\s+(?:i|install|uninstall)\b|patch\b)|>>?\s*[\w./-]+\.\w+/.test(args.command);
+}
+/** Final replies that present the work as finished. */
+export function claimsCompletion(text) {
+	if (typeof text !== "string" || !text.trim()) return false;
+	const tail = text.slice(-1600);
+	return /(?:^|\n|\.\s)\s*(?:#+\s*)?(?:✅|done\b|all (?:set|done|tasks? (?:are )?complete)|(?:the )?(?:work|task|implementation|feature|fix|site|app|page|change)s? (?:is|are) (?:now )?(?:complete|done|finished|ready|live|deployed)|(?:i(?:'ve| have)|everything (?:is|has been)) (?:now )?(?:implemented|completed|finished|fixed|deployed|shipped)|summary of (?:changes|what (?:i|was) (?:did|done)))/i.test(tail)
+		&& !/\b(?:not (?:yet )?(?:verified|tested|run)|unverified|untested|could not (?:run|verify|test)|did not (?:run|verify|test)|blocked|remaining|next step|todo|still need)\b/i.test(tail);
 }

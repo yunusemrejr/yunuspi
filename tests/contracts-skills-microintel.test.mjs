@@ -75,12 +75,9 @@ test('smol offers carry structured skip reasons on the live gates', async () => 
     smol.createSmolPreprocessor({}).offer('k1', clean, 1);
     // Unsafe content: protected.
     smol.createSmolPreprocessor({}).offer('k2', `${clean} the password is hunter2`.slice(0, 4100), 1);
-    // Valid v1 runtime but below its floor: too small to benefit.
-    const v1 = {
-      version: 1, enabled: true, model: 'SmolLM2-135M-Instruct', endpoint: 'http://127.0.0.1:18735/completion',
-      calibrated: { eligible: true, p95LatencyMs: 100, outputReductionRatio: 8, minInputChars: 8000, localCostUsdPerSecondCeiling: 0.0001, minSavedChars: 1500 },
-    };
-    smol.createSmolPreprocessor({ runtime: v1 }).offer('k3', clean, 1);
+    // Valid runtime but a short result: too small to benefit.
+    const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18736/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
+    smol.createSmolPreprocessor({ runtime }).offer('k3', clean.slice(0, 2000), 1);
   } finally {
     if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior;
   }
@@ -104,7 +101,9 @@ test('Smol reports size and shape eligibility separately without weakening prote
     ['bash', clean + '\u202e', false, undefined, 'input-shape-unsupported'],
     ['bash', clean + '\x1b[31m', false, undefined, 'input-shape-unsupported'],
     ['bash', clean, false, { truncated: true }, 'protected-content'],
-    ['bash', clean + ' warning: inspect this evidence', false, undefined, 'protected-content'],
+    ['bash', clean + ' warning: inspect this evidence', false, undefined, undefined],
+    ['bash', clean + '\nTraceback (most recent call last):', false, undefined, 'protected-content'],
+    ['bash', clean + ' Authorization: Bearer abc', false, undefined, 'protected-content'],
     ['bash', clean, true, undefined, 'protected-content'],
     ['custom', clean, false, undefined, 'unsupported-tool'],
     ['bash', clean, false, undefined, undefined],

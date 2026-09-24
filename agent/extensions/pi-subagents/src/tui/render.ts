@@ -1723,6 +1723,8 @@ function buildMultiProgressLabel(details: Pick<Details, "mode" | "results" | "pr
 		const currentStepIndex = details.currentStepIndex!;
 		const span = stepSpans[currentStepIndex];
 		const groupSize = span?.count ?? 1;
+		const groupStart = span?.start ?? 0;
+		const groupEnd = groupStart + groupSize;
 		const counts = groupProgressCounts(details, groupStart, groupSize);
 		const running = counts.running;
 		const stateLabel = `${counts.terminal}/${groupSize} terminal (${counts.succeeded} succeeded · ${counts.failed} failed${counts.stopped ? ` · ${counts.stopped} stopped` : ""}${counts.timed_out ? ` · ${counts.timed_out} timed out` : ""})${counts.degraded ? ` · ${counts.state}` : ""}`;

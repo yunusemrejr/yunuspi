@@ -210,11 +210,11 @@ test("portable inference service templates ship without private units or model s
   try {
     const units = path.join(f.source, "scripts/systemd");
     fs.mkdirSync(units);
-    const names = [
-      "pi-mini-preprocessor.service",
-      "pi-smol-preprocessor.service",
-    ];
-    for (const name of [...names, "personal-task.service"])
+    // The retired SmolLM unit is no longer a portable template: like a
+    // personal unit it stays private (the local LM unit is generated at install).
+    const names = ["pi-mini-preprocessor.service"];
+    const privateUnits = ["personal-task.service", "pi-smol-preprocessor.service"];
+    for (const name of [...names, ...privateUnits])
       fs.writeFileSync(
         path.join(units, name),
         "[Service]\nExecStart=%h/.pi/agent/scripts/worker\n",
@@ -222,7 +222,7 @@ test("portable inference service templates ship without private units or model s
     fs.writeFileSync(
       path.join(f.source, "extensions/manifest.json"),
       JSON.stringify({
-        supportFiles: [...names, "personal-task.service"].map(
+        supportFiles: [...names, ...privateUnits].map(
           (name) => "scripts/systemd/" + name,
         ),
       }),

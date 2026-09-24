@@ -118,6 +118,10 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
  * fallback modifier runs are normalized so a fixed carry also handles clauses
  * split across arbitrary chunk boundaries. Evidence stays per-message: the
  * existing conservative deny-over-allow precedence within one message holds. */
+/** Words that make an exclusive "only use X" clause about the model route:
+ * generic route vocabulary, a provider/model id, or a well-known model family. */
+const ROUTE_TARGET = /\b(?:models?|providers?|routes?|llms?|endpoints?|api keys?|(?:this|that|the same|the current|current|same|one)\s+(?:one|route|model|provider))\b|\b[a-z][\w.-]*\/[a-z][\w.:]*[-\d][\w.:-]*|\b(?:openrouter|orcarouter|deepseek|anthropic|claude|opus|sonnet|haiku|fable|openai|gpt[\w.-]*|o\d(?:-mini)?|gemini|gemma|qwen\w*|mistral|mixtral|codestral|grok|xai|kimi|moonshot|glm[\w.-]*|zai|minimax|llama|ollama|lm ?studio|groq|togetherai|fireworks|deepinfra|cerebras|friendli|xiaomi|mimo[\w.-]*|stepfun|nvidia|nemotron|cohere|command-r\w*|perplexity|sonar)\b/i;
+
 function restrictionEvidence(parts: Iterable<string>) {
  const flags = { allowFallback: false, fixedRoute: false, sameModel: false, freeOnly: false, allowDelegation: false, noDelegation: false };
  let carry = "", includesStart = true;
@@ -138,11 +142,22 @@ function restrictionEvidence(parts: Iterable<string>) {
   if (saw(/\bfree[- ]only\b|\bonly\s+(?:use\s+)?free\b|\b(?:no|never use|do not use|don't use)\s+paid\b/i)) flags.freeOnly = true;
   // Only the leading target decides whether an exclusive request is a cost
   // constraint or a route pin; don't retain an unbounded rest-of-line match.
+  // A route pin needs a route-shaped target in the same clause: "only use
+  // HTML, CSS and PHP" is a technology constraint, and treating it as a pin
+  // disabled the observer, independent reviews and fallback for a whole
+  // session (musics.name, 2026-09-24).
   for (const match of text.matchAll(/\b(?:only use|use only|stick to|stay on)\s+/gi)) {
-   const target = text.slice(match.index! + match[0].length, match.index! + match[0].length + 16);
+   const start = match.index! + match[0].length;
+   const target = text.slice(start, start + 16);
    if (!target || /^[\n.!?]/.test(target)) continue;
    if (/^(?:the\s+)?free(?=\W)/i.test(target) || final && /^(?:the\s+)?free$/i.test(target)) flags.freeOnly = true;
-   else if (final || !["free", "the free"].some(word => word.startsWith(target.toLowerCase()))) flags.fixedRoute = true;
+   else if (!final && ["free", "the free"].some(word => word.startsWith(target.toLowerCase()))) continue;
+   else {
+    const clause = /^[^\n.!?;]*/.exec(text.slice(start, start + 120))![0];
+    // A clause cut by the chunk boundary waits for the carried remainder.
+    if (!final && start + clause.length >= text.length) continue;
+    if (ROUTE_TARGET.test(clause)) flags.fixedRoute = true;
+   }
   }
   if (saw(/(?:^|[.!?\n])\s*(?:please\s+)?(?:now\s+)?(?:allow|enable)\s+(?:automatic\s+)?(?:delegation|subagents|swarm)\b/i)) flags.allowDelegation = true;
   if (saw(/\b(?:do not|don't|never)\s+(?:delegate|spawn\s+(?:sub[- ]?agents?|agents?|helpers?)|(?:allow|enable|use)\s+(?:automatic\s+)?(?:sub[- ]?agents?|swarm|delegation|helpers?))\b|\bno\s+(?:sub[- ]?agents?|agents?|helpers?|swarm|delegation)\b/i)) flags.noDelegation = true;

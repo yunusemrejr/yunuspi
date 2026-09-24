@@ -7,13 +7,22 @@ import {createHealthLog,HEALTH_SINK} from './lib/health-log.ts';
 import {sharedCapabilityHealth} from './lib/capability-health.ts';
 import {createActivityIndicators,describeIntelligenceActivity,skillNameFromPath} from './lib/activity-indicators.ts';
 import {createHelperUsageLedger,HELPER_USAGE_ENTRY,HELPER_USAGE_VIEW} from './lib/helper-usage.ts';
-const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Smol'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
- 'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress','Smol':'Smol',
+import {messageText,renderHarnessNotice} from './lib/harness-notice.ts';
+const childRelayNames:Record<string,'JEV'|'Needle3'|'FuzzyML'|'Kompress'|'Local LM'|'retrieval'|'Neural ranker'|'Intent classifier'|'WASM source check'|'Deterministic selection'>={
+ 'JEV':'JEV','Needle3':'Needle3','Fuzzy matching':'FuzzyML','Kompress':'Kompress','Local LM':'Local LM',
  'Retrieval intelligence':'retrieval','Neural ranker':'Neural ranker','Intent classifier':'Intent classifier','WASM source check':'WASM source check','Deterministic selection':'Deterministic selection',
 };
 export default function healthLog(pi:any) {
  registerSessionTelemetry(pi);
- const activity=createActivityIndicators((message,options)=>pi.sendMessage(message,options));
+ // Guardian speaks rarely; when it does the user sees what it told the agent and why.
+ if(process.env.PI_SUBAGENT_CHILD!=='1')pi.registerMessageRenderer?.('guardian_intervention',(message:any,options:any,theme:any)=>{
+  const detail=message.details??{},kind=String(detail.kind??'guardian check').replaceAll('-',' ');
+  const score=typeof detail.confidenceScore==='number'&&Number.isFinite(detail.confidenceScore)?` · WASM score ${(detail.confidenceScore>1?detail.confidenceScore/10000:detail.confidenceScore).toFixed(2)}`:'';
+  const evidence=Array.isArray(detail.evidence)?`${detail.evidence.length} evidence item${detail.evidence.length===1?'':'s'}`:'';
+  return renderHarnessNotice({icon:'⛨',tone:'warning',title:`Guardian · ${kind}`,summary:`guidance sent to the agent${score}${evidence?` · ${evidence}`:''}`,body:messageText(message),detail:detail.target?.kind==='subagent'?`From subagent ${detail.target.agentId ?? ''} (run ${detail.target.runId ?? '?'})`:undefined},options,theme);
+ });
+ let pulseUi:any;
+ const activity=createActivityIndicators((message,options)=>pi.sendMessage(message,options),{set:text=>{try{pulseUi?.setStatus?.('02-harness-pulse',text);}catch{/* the UI can close before a late helper event */}},available:()=>typeof pulseUi?.setStatus==='function'});
  let log:ReturnType<typeof createHealthLog>|undefined;
  let timer:ReturnType<typeof setInterval>|undefined;
  const calls=new Map<string,number>();
@@ -68,6 +77,7 @@ export default function healthLog(pi:any) {
   helperUsage=createHelperUsageLedger();
   sessionObservability()[HELPER_USAGE_VIEW]=helperView=(sessionId:string)=>sessionId===activeSessionId?helperUsage?.snapshot():undefined;
   warn=message=>ctx.ui?.notify?.(message,'warning');writeWarning=false;
+  pulseUi=process.env.PI_SUBAGENT_CHILD==='1'||ctx.hasUI===false?undefined:ctx.ui;
   log=createHealthLog(path.join(getAgentDir(),'logs/health'),activeSessionId??'unknown');
   sink=(kind,data={})=>{if(generation===epoch)emit(kind,data);};
   sessionObservability()[HEALTH_SINK]=sink;

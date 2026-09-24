@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as TuiLayouts from "@yunuspi/tui";
-import { CombinedAutocompleteProvider, Container, fuzzyFilter, getCapabilities, hyperlink, Markdown, matchesKey, Spacer, setCapabilityOverrides, setKeybindings, Text, TruncatedText, TuiAltScreen, TuiMainScreen, visibleWidth, } from "@yunuspi/tui";
+import { CombinedAutocompleteProvider, Container, fuzzyFilter, getCapabilities, hyperlink, Markdown, matchesKey, sanitizeDisplayText, Spacer, setCapabilityOverrides, setKeybindings, Text, TruncatedText, TuiAltScreen, TuiMainScreen, visibleWidth, } from "@yunuspi/tui";
 import chalk from "chalk";
 import { spawn } from "child_process";
 import { APP_NAME, APP_TITLE, CONFIG_DIR_NAME, getAgentDir, getAuthPath, getDebugLogPath, getDocsPath, VERSION, } from "../../config.js";
@@ -2938,12 +2938,12 @@ export class InteractiveMode {
         const last = children.length > 0 ? children[children.length - 1] : undefined;
         const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
         if (last && secondLast && last === this.lastStatusText && secondLast === this.lastStatusSpacer) {
-            this.lastStatusText.setText(theme.fg("dim", message));
+            this.lastStatusText.setText(theme.fg("dim", sanitizeDisplayText(message)));
             this.ui.requestRender();
             return;
         }
         const spacer = new Spacer(1);
-        const text = new Text(theme.fg("dim", message), 1, 0);
+        const text = new Text(theme.fg("dim", sanitizeDisplayText(message)), 1, 0);
         this.chatContainer.addChild(spacer);
         this.chatContainer.addChild(text);
         this.lastStatusSpacer = spacer;
@@ -3609,12 +3609,12 @@ export class InteractiveMode {
     }
     showError(errorMessage) {
         this.chatContainer.addChild(new Spacer(1));
-        this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), this.outputPad, 0));
+        this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${sanitizeDisplayText(errorMessage)}`), this.outputPad, 0));
         this.ui.requestRender();
     }
     showWarning(warningMessage) {
         this.chatContainer.addChild(new Spacer(1));
-        this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
+        this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${sanitizeDisplayText(warningMessage)}`), 1, 0));
         this.ui.requestRender();
     }
     showNewVersionNotification(release) {

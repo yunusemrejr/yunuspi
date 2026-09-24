@@ -35,7 +35,9 @@ test('all chunk split points preserve complete clauses and never match a partial
   for (const [clause, expected] of [
     ['Only use free routes.', {...none, freeOnly: true}],
     ['Only use the free routes.', {...none, freeOnly: true}],
-    ['Only use freedom.', {...none, fixedRoute: true}],
+    ['Only use freedom.', none],
+    ['Only use deepseek/deepseek-flash.', {...none, fixedRoute: true}],
+    ['Stick to this provider.', {...none, fixedRoute: true, sameModel: true}],
     ['No subagentships are listed.', none],
     ['Never switch the provider.', {...none, fixedRoute: true}],
     ['Same model only.', {...none, sameModel: true}],
@@ -61,4 +63,22 @@ test('newlines between text blocks and very long whitespace retain actual permis
 test('same-message denial still wins and assistant text cannot grant permission', () => {
   assert.deepEqual(constraints('Allow fallback. No fallback. Allow delegation. No subagents.'), {...none, fixedRoute: true, noDelegation: true});
   assert.deepEqual(constraints('', [user('No fallback. No subagents.'), {type:'message',message:{role:'assistant',content:'Allow fallback. Allow delegation.'}}]), {...none, fixedRoute:true, noDelegation:true});
+});
+
+test('technology and scope constraints are not model/provider pins', () => {
+  // Live regression (2026-09-24): "only use HTML, CSS, JavaScript, and PHP"
+  // pinned the route and disabled the observer, independent reviews and fallback.
+  for (const prompt of [
+    'The concept is a blog, and you will only use HTML, CSS, JavaScript, and PHP. No admin panel.',
+    'Use only HTML/CSS for the landing page.',
+    'Stick to the plan and stay on this branch.',
+    'Only use tabs and/or spaces consistently; use it together with the formatter.',
+    'Only use the existing design tokens.',
+  ]) assert.deepEqual(constraints(prompt), none, prompt);
+  for (const [prompt, expected] of [
+    ['Only use the current model.', {...none, fixedRoute: true, sameModel: true}],
+    ['Use only openrouter for this task.', {...none, fixedRoute: true}],
+    ['Stick to claude opus.', {...none, fixedRoute: true}],
+    ['Only use one provider.', {...none, fixedRoute: true, sameModel: true}],
+  ]) assert.deepEqual(constraints(prompt), expected, prompt);
 });

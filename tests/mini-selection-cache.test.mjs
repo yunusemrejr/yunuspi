@@ -133,8 +133,8 @@ const { createSmolPreprocessor, validSmolRuntime } = await import(
 const smolRuntime = {
  version: 2,
  enabled: true,
- model: "SmolLM2-135M-Instruct",
- endpoint: "http://127.0.0.1:18735/completion",
+ model: "Qwen3.5-0.8B",
+ endpoint: "http://127.0.0.1:18736/completion",
  apiKey: "TEST_SYNTHETIC_LOCAL_KEY",
  execution: "background",
  timeoutMs: 1000,
@@ -177,7 +177,8 @@ test("background SLM freezes first exposure and reuses validated source/task cac
   },
  });
  assert.equal(validSmolRuntime(smolRuntime), true);
- assert.equal(validSmolRuntime({ ...smolRuntime, timeoutMs: 5001 }), false);
+ assert.equal(validSmolRuntime({ ...smolRuntime, timeoutMs: 8001 }), false);
+ assert.equal(validSmolRuntime({ ...smolRuntime, model: "SmolLM2-135M-Instruct" }), false, "the retired model is never loaded");
  client.offer("first", lineRaw, 0);
  await flush();
  assert.equal(

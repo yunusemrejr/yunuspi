@@ -8,8 +8,8 @@ export type FinishActivity = (outcome?: ActivityOutcome) => void;
 type ActivityRequest = { action: 'start' | 'end'; id: string; label?: ActivityLabel; outcome?: ActivityOutcome };
 type Context = { hasUI?: boolean; signal?: AbortSignal; cwd?: string; sessionManager?: { getSessionId?: () => string }; ui?: { theme?: { fg: (color: any, text: string) => string }; setStatus?: (key: string, text: string | undefined) => void } };
 export type HarnessActivityService = (request: ActivityRequest, ctx?: Context) => FinishActivity | undefined;
-const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', model: 'SLM processing', tool: 'Tool', jev: 'JEV', needle: 'Needle', smol: 'Smol', kompress: 'Kompress', council: 'Council', swarm: 'Swarm', fusion: 'Fusion', agents: 'Agents', interpretation: 'Interpretation' };
-const helpers = new Set(['JEV', 'Needle', 'Smol', 'Kompress']);
+const labels: Record<ActivityLabel, string> = { skills: 'Skill discovery', browser: 'Browser', project: 'Project', review: 'Review', search: 'Search', model: 'SLM processing', tool: 'Tool', jev: 'JEV', needle: 'Needle', smol: 'Local LM', kompress: 'Kompress', council: 'Council', swarm: 'Swarm', fusion: 'Fusion', agents: 'Agents', interpretation: 'Interpretation' };
+const helpers = new Set(['JEV', 'Needle', 'Local LM', 'Kompress']);
 let sequence = 0;
 /** No payloads, global status handles or model messages escape this boundary. */
 export function beginHarnessActivity(label: ActivityLabel): FinishActivity {

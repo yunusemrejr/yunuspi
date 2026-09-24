@@ -73,15 +73,18 @@ On Linux, Playwright may also require system packages; install them using its do
 
 ## Optional local micro-models
 
-Model weights are not bundled. A normal `--apply` attempts to install pinned, checksummed Needle3 WASM assets; `--skip-needle` and `--offline` skip this optional download. A failed download warns and leaves local semantics unavailable until repair. Smol and Kompress require separately configured local servers. Inspect availability with `micro_status`:
+Model weights are not bundled. A normal `--apply` attempts to install pinned, checksummed Needle3 WASM assets; `--skip-needle` and `--offline` skip this optional download. A failed download warns and leaves local semantics unavailable until repair. On Linux x86-64 `--apply` also installs the local language model (Qwen3.5-0.8B with a pinned llama.cpp server, about 580 MB) as the loopback user service `pi-local-lm.service`; `--skip-local-lm` and `--offline` skip it, and a failure warns without failing the install. Staging targets receive the verified assets without a service. Kompress requires a separately configured local server. Inspect availability with `micro_status`:
 
 - Needle3: pinned WASM assets are fetched by
   `node agent/extensions/lib/needle-assets.mjs install [--revision …]`;
   `verify`, `repair`, and `smoke` keep the cache healthy.
-- Smol / Kompress: point at local llama.cpp-style servers serving the
-  SmolLM2 and Qwen3-1.7B-GGUF weights described in
-  `docs/MICRO-INTELLIGENCE.md`, or the stock-Ollama convenience names
-  when using Ollama.
+- Local language model: `node agent/extensions/lib/local-lm-assets.mjs
+  <status|verify|install|repair|smoke|uninstall>` manages the pinned weights,
+  runtime and service; `smoke` runs one real inference. Installing it retires
+  the earlier SmolLM2 selector service and weights.
+- Kompress: point at a local server serving the Qwen3-1.7B-GGUF weights
+  described in `docs/MICRO-INTELLIGENCE.md`, or the stock-Ollama convenience
+  name when using Ollama.
 - Jev: no install step; it activates inside sandbox-guarded processes
   using pinned dependencies.
 

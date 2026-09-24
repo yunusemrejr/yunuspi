@@ -9,15 +9,16 @@ import {fileURLToPath} from 'node:url';
 
 export { activePiProcesses } from './lib/active-core-processes.mjs';
 export function updateInvocation(args, agent = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi/agent')) {
-  let source, offline = false, skipNeedle = false;
+  let source, offline = false, skipNeedle = false, skipLocalLm = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--source' && args[i + 1] && !args[i + 1].startsWith('--')) source = path.resolve(args[++i]);
     else if (args[i] === '--offline') offline = true;
     else if (args[i] === '--skip-needle') skipNeedle = true;
-    else throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]');
+    else if (args[i] === '--skip-local-lm') skipLocalLm = true;
+    else throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle] [--skip-local-lm]');
   }
   if (!source) {
-    if (args.length) throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]');
+    if (args.length) throw Error('Usage: yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle] [--skip-local-lm]');
     return null;
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(source, 'core/coding-agent/package.json'), 'utf8'));
@@ -25,12 +26,12 @@ export function updateInvocation(args, agent = process.env.PI_CODING_AGENT_DIR |
   const installer = path.join(source, 'scripts/install.mjs');
   const stat = fs.lstatSync(installer);
   if (!stat.isFile() || stat.isSymbolicLink()) throw Error('Update source needs a regular reviewed installer');
-  return [installer, '--apply', '--backup-existing', '--preserve-state', '--target', path.resolve(agent), offline ? '--offline' : '--install-deps', ...(skipNeedle ? ['--skip-needle'] : [])];
+  return [installer, '--apply', '--backup-existing', '--preserve-state', '--target', path.resolve(agent), offline ? '--offline' : '--install-deps', ...(skipNeedle ? ['--skip-needle'] : []), ...(skipLocalLm ? ['--skip-local-lm'] : [])];
 }
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes('--help')) {
-    console.log('YunusPi owns its core. No automatic core updates or upstream version checks are performed.\nReview a YunusPi release checkout, stop active sessions, then run:\n  yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle]\nPrivate state and compatible customizations carry forward. Source conflicts reject the update; the previous managed installation and configuration are preserved as a private backup.');
+    console.log('YunusPi owns its core. No automatic core updates or upstream version checks are performed.\nReview a YunusPi release checkout, stop active sessions, then run:\n  yunuspi update --source /path/to/reviewed/yunuspi [--offline] [--skip-needle] [--skip-local-lm]\nPrivate state and compatible customizations carry forward. Source conflicts reject the update; the previous managed installation and configuration are preserved as a private backup.');
     return;
   }
   const invocation = updateInvocation(args);

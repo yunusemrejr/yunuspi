@@ -6,7 +6,7 @@ and the main agent remains responsible for the session in every case.
 
 | Kind | Purpose | Owner | How to invoke deliberately |
 | --- | --- | --- | --- |
-| Quality review | Implementation quality and regressions in observed changes | Quality-review lifecycle with the native runner | `quality_review({action:"review"})`, then `assess` |
+| Quality review | Implementation quality and regressions in observed changes; for interfaces also identity (look-alike reuse of an incidentally mentioned site or category-default output is flagged) | Quality-review lifecycle with the native runner | `quality_review({action:"review"})`, then `assess` |
 | Project review | Architecture, goals, consistency, debt, direction | One bounded advisory helper via the native subagent executor | `subagent` worker with a project-review brief |
 | Error review | Likely faults, root causes, failed assumptions, debugging leads | One bounded advisory helper via the native subagent executor | `subagent` worker with an error-review brief |
 | Council | Multi-perspective reasoning for genuinely hard questions | Automatic scope council, or the supervisor-mediated council prompt | `prompt-workflow` council, or `prompts/council.md` protocol |
@@ -36,7 +36,11 @@ it:
 
 - Quality reviews run at completion checkpoints with changed-source evidence
   (two rounds, bounded aspects, strict evidence parsing).
-- The scope council runs only for qualifying change-scope requests.
+- The scope council runs only for qualifying change-scope requests, and in
+  design-direction mode for a new open visual brief: the same three members,
+  budgets and read-only limits read the brief (classifying mentioned sites as
+  style or context-only), propose three distinct directions, and critique
+  them to recommend one. Its progress rows are labelled "Design council".
 - A strong stuck pattern — the same fix attempted four or more times, four
   or more consecutive errors with multi-cause or loop evidence — earns at
   most a single bounded *suggestion* naming an error review. Suggestions

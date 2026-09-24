@@ -5,7 +5,7 @@ import { collectAuxiliaryModelUsage } from './cost-evidence.ts';
 
 export const HELPER_USAGE_VIEW = Symbol.for('yunuspi.helper-usage-view.v1');
 export const HELPER_USAGE_ENTRY = 'helper-usage-v1';
-const names = ['JEV', 'Needle3', 'Smol', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection'];
+const names = ['JEV', 'Needle3', 'Local LM', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection'];
 const fields = ['events','executions','cached','results','applied','delivered','returned','skipped','failed','timingSamples','durationMs','matches'];
 const numeric = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const clean = (value: unknown, max=200) => typeof value === 'string' ? value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,'').slice(0,max) : '';

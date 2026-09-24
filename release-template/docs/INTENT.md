@@ -37,3 +37,30 @@ separate scope council has its own inference costs and limits.
 
 Portable regression coverage is in `tests/intent-context.test.mjs`. It uses
 synthetic data and local fixtures; it makes no model calls.
+
+## Original and processed prompts
+
+The main agent receives the user's message unchanged. When the helper analysis
+succeeds, a separate block follows it, headed "Auxiliary interpretation
+(advisory only; the literal user prompt is authoritative)", which states that
+it is the harness's reading of the user message directly above, is not a user
+message, adds no requirements, and that the user's words win where they
+differ. The TUI shows the same interpretation as one expandable row, and the
+session observer receives it labelled as a helper's reading next to the
+literal prompts.
+
+## Open briefs and incidental references
+
+The analysis also reports whether the request leaves major decisions open,
+whether it creates or redesigns a visual artifact, which sites or files the user
+offered as style references, and which were mentioned only for a link, credit,
+deployment or conventions. A local heuristic covers the same fields when the
+analysis is unavailable. For a new open visual brief the agent receives
+design-direction guidance: state audience, purpose and character; study a few
+strong peers; sketch three distinct directions; choose with explicit criteria
+(a council where directions are close); record the choice; then build and
+check the rendered result. Context-only references are named as such and must
+not supply fonts, palettes, layout or copy. Other open requests get a shorter
+thought-experiment prompt. Refinement of an existing interface keeps its design
+language and receives no redesign push. The guidance is advisory; the TUI row
+shows a one-line summary of what was sent.

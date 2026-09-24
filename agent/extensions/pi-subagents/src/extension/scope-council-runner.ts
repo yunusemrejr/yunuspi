@@ -10,7 +10,7 @@ import { toModelInfo } from "../shared/model-info.ts";
 import { formatModelThinking } from "../shared/formatters.ts";
 import { persistSubagentCost } from "./session-cost.ts";
 import { stripAcceptanceReport } from "../runs/shared/acceptance.ts";
-import { scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
+import { councilMode, scopeCouncilEnabled } from "../../../lib/scope-deliberation.ts";
 import { needleRank } from "../../../lib/needle-runtime.ts";
 import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
 import { COUNCIL_PERSPECTIVES, selectPerspectives, type RankFn } from "../../../lib/micro-intelligence/review.ts";
@@ -379,8 +379,16 @@ function mergeGaps(gaps: string[]): string {
 	return [...new Set(gaps.map((gap) => gap.trim()).filter(Boolean))].join(" ");
 }
 
-function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase: "preservation" | "meaningful-change" | "peer-critique", packet: string, evidence: string | undefined, timeoutMs: number): SubagentParamsLike {
-	const role = phase === "preservation"
+/** Design-direction roles for a new open visual brief: the same three peers,
+ * budgets and read-only limits, asked to explore instead of to preserve. */
+const DIRECTION_ROLES = {
+	preservation: "Brief peer: state the audience, purpose and the brand's own character in one line each; list the user's explicit requirements and constraints; classify every site, product or file the user mentioned as a style reference or as context only (link, credit, deployment, conventions). Context-only references must not shape the look.",
+	"meaningful-change": "Direction peer: propose three materially different design directions for this brief. For each give the concept, layout rhythm, type pairing, palette, motion and one signature element, and name the kinds of strong peers in this domain it learns from (from knowledge; do not browse). Avoid category defaults and never borrow the look of a context-only reference.",
+	"peer-critique": "Direction critic: judge the proposed directions against the brief, the stated constraints, distinctiveness, accessibility and buildability. Recommend one (or a stated hybrid) with the criteria that decided it and the first things to verify once it renders.",
+} as const;
+
+function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase: "preservation" | "meaningful-change" | "peer-critique", packet: string, evidence: string | undefined, timeoutMs: number, mode: "scope" | "direction" = "scope"): SubagentParamsLike {
+	const role = mode === "direction" ? DIRECTION_ROLES[phase] : phase === "preservation"
 		? "Preservation peer: identify the user's explicit references, constraints and behavior that must remain intact. Separate those from assistant or inferred choices."
 		: phase === "meaningful-change"
 			? "Meaningful-change peer: determine the smallest substantive scope that addresses the current request. Challenge assistant-introduced choices and compare local adjustment, substantive revision and replacement/removal where relevant."
@@ -524,11 +532,15 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			statusOwner = statusToken;
 			try { ctx.ui?.setStatus?.("scope-council", `Scope council: ${team.slice(0, 3).map(member => formatModelThinking(member.route)).join(" + ")}`); } catch { /* UI is optional. */ }
 		}
+		// New open visual briefs explore directions; changes to existing work
+		// deliberate scope. Same members, budgets and read-only limits.
+		const mode = councilMode(request.task);
+		const councilName = mode === "direction" ? "Design council" : "Scope council";
 		const progress = (phase: string, status: string, member?: AssistanceMember, elapsedMs?: number, advice?: string) => {
 			if (!ownsContext() || statusOwner !== statusToken || (signal.aborted && status !== "stopped")) return;
 			const detail = [phase, status, member ? formatModelThinking(member.route) : "", elapsedMs === undefined ? "" : `${Math.round(elapsedMs / 1000)}s`].filter(Boolean).join(" · ");
 			try {
-				const delivery = pi.sendMessage?.({ customType: SCOPE_COUNCIL_PROGRESS, content: `Scope council: ${visibleText(detail, 420)}`,
+				const delivery = pi.sendMessage?.({ customType: SCOPE_COUNCIL_PROGRESS, content: `${councilName}: ${visibleText(detail, 420)}`,
 					display: true, excludeFromContext: true, details: { phase, status, ...(advice ? { advice: visibleText(advice, 2500) } : {}) } }, { triggerTurn: false });
 				void Promise.resolve(delivery).catch(() => { /* Display persistence cannot change advisory execution. */ });
 			} catch { /* Visible diagnostics cannot change a council's result. */ }
@@ -545,7 +557,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			}
 			const runId = `scope-council-${phase}-${randomUUID()}`;
 			const startedAt = now();
-			const phaseLabel = phase === "preservation" ? "Preserve requirements" : phase === "meaningful-change" ? "Assess changes" : "Critique perspectives";
+			const phaseLabel = mode === "direction"
+				? phase === "preservation" ? "Read the brief" : phase === "meaningful-change" ? "Explore directions" : "Choose a direction"
+				: phase === "preservation" ? "Preserve requirements" : phase === "meaningful-change" ? "Assess changes" : "Critique perspectives";
 			progress(phaseLabel, "started", member);
 			const identity = { index: 0, agent: "automatic-free-assistant", attempt: 1,
 				label: phase === "preservation" ? "Scope council: preserve requirements" : phase === "meaningful-change" ? "Scope council: assess changes" : "Scope council: critique advice",
@@ -560,7 +574,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				const timeoutMs = phase === "peer-critique"
 					? remaining
 					: Math.min(120_000, Math.max(1, remaining - 30_000));
-				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs), signal, undefined, ctx);
+				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs, mode), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				const returnedRow = rawResultRow(result);
 				const rawRow = { ...identity, ...returnedRow,

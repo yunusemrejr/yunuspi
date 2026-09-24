@@ -741,8 +741,8 @@ test("long user requests retain Guardian ownership, WASM evaluation and honest b
 		["beyond-bound", `${"x".repeat(131073)} Keep retrying the same operation.`, 0, "bounded-out"],
 		["beyond-bound-no-retry", `${"x".repeat(131073)} Fix the missing file.`, 1, "bounded-out"],
 	]) {
-		const observations = [];
-		const { supervisor, emitted, stats } = harness(name, process.cwd(), { observe: data => observations.push(data) });
+		const observations = [], decisions = [];
+		const { supervisor, emitted, stats } = harness(name, process.cwd(), { observe: data => (data.outcome === "decision" ? decisions : observations).push(data) });
 		t.after(() => supervisor.dispose());
 		const message = userMessage(supervisor, "request", prompt);
 		await supervisor.observeAgentEvent({ type: "message_start", message });
@@ -759,6 +759,10 @@ test("long user requests retain Guardian ownership, WASM evaluation and honest b
 		assert.equal(observations[0].stats.toolResults, 1, 'earlier cumulative snapshots are immutable');
 		assert.ok(Object.values(observations.at(-1).stats).every(value => Number.isFinite(value) && value >= 0));
 		assert.equal(emitted.length, expectedInterventions, name);
+		// Every WASM verdict is reported once for the TUI, with its score.
+		assert.equal(decisions.length, 1, name);
+		assert.equal(decisions[0].decision, expectedInterventions ? "intervened" : "abstained", name);
+		assert.ok(decisions[0].score >= 0 && decisions[0].score <= 1 && decisions[0].threshold > 0, name);
 		if (coverage === "bounded-out") {
 			assert.equal(stats().classifierEvaluations, 1);
 			assert.equal(supervisor._tasks.get("request").rawPrompt, undefined);
@@ -778,4 +782,81 @@ test('peer communication remains owner-scoped diagnostic evidence without constr
  supervisor.handleCommand('/guardian off');
  assert.equal(supervisor.observePeerMessage({...event,messageId:'message-3'}),false);
  assert.equal(stats().peerMessagesReceived,1);
+});
+
+test("repeated identical shell failures are scored like other tools; long output keeps its identity", async (t) => {
+	const { supervisor, emitted } = harness("bash-repeat");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Make the build pass.") });
+	const noisy = `${"compiling module\n".repeat(400)}error TS2304: Cannot find name 'groupStart'. (took 1.2s)`;
+	for (let index = 0; index < 3; index++) {
+		await toolStart(supervisor, { toolCallId: `bash-${index}`, toolName: "bash", args: { command: "npm run build" } });
+		await toolEnd(supervisor, { toolCallId: `bash-${index}`, toolName: "bash", text: noisy.replace("1.2s", `${index + 1}.4s`) });
+		await assistantTurn(supervisor);
+	}
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, "repeated-identical-failure");
+});
+
+test("varied failing edits on one file ask for a fresh read; a read in between resets the count", async (t) => {
+	const { supervisor, emitted } = harness("edit-loop");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Update the header.") });
+	const edit = async (index, old) => {
+		await toolStart(supervisor, { toolCallId: `edit-${index}`, args: { path: "src/header.ts", oldText: old, newText: "x" } });
+		await toolEnd(supervisor, { toolCallId: `edit-${index}`, text: `Could not find the exact text ${old}` });
+	};
+	await edit(0, "a"); await edit(1, "b");
+	await toolStart(supervisor, { toolCallId: "read-0", toolName: "read", args: { path: "src/header.ts" } });
+	await toolEnd(supervisor, { toolCallId: "read-0", toolName: "read", isError: false, text: "content" });
+	await edit(2, "c"); await edit(3, "d");
+	assert.equal(emitted.length, 0, "the read reset the mismatch count");
+	await edit(4, "e");
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, "edit-mismatch-loop");
+	assert.match(emitted[0].content, /Re-read the current content/);
+});
+
+test("the same file range read four times without a change is flagged once; a mutation resets it", async (t) => {
+	const { supervisor, emitted } = harness("read-churn");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Explain the parser.") });
+	const read = async (index) => {
+		await toolStart(supervisor, { toolCallId: `read-${index}`, toolName: "read", args: { path: "src/parser.ts" } });
+		await toolEnd(supervisor, { toolCallId: `read-${index}`, toolName: "read", isError: false, text: "source" });
+	};
+	for (let index = 0; index < 3; index++) await read(index);
+	await toolStart(supervisor, { toolCallId: "write-0", toolName: "write", args: { path: "src/parser.ts", content: "new" } });
+	await toolEnd(supervisor, { toolCallId: "write-0", toolName: "write", isError: false, text: "ok" });
+	for (let index = 3; index < 6; index++) await read(index);
+	assert.equal(emitted.length, 0, "the write made later reads legitimate");
+	await read(6);
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, "repeated-identical-read");
+});
+
+test("a finished-sounding reply after unverified edits is steered once; verification or honesty prevents it", async (t) => {
+	const final = (text) => ({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] } });
+	const run = async (name, steps) => {
+		const { supervisor, emitted } = harness(name);
+		t.after(() => supervisor.dispose());
+		await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Fix the date bug.") });
+		await toolStart(supervisor, { toolCallId: "edit-1", args: { path: "src/date.ts", oldText: "a", newText: "b" } });
+		await toolEnd(supervisor, { toolCallId: "edit-1", isError: false, text: "Edited" });
+		for (const step of steps) await step(supervisor);
+		return emitted;
+	};
+	const unverified = await run("claims-done", [async (s) => s.observeAgentEvent(final("All done. The fix is complete."))]);
+	assert.equal(unverified.length, 1);
+	assert.equal(unverified[0].detail.kind, "unverified-completion");
+	const verified = await run("verified", [async (s) => {
+		await toolStart(s, { toolCallId: "test-1", toolName: "bash", args: { command: "npm test" } });
+		await toolEnd(s, { toolCallId: "test-1", toolName: "bash", isError: false, text: "12 passing" });
+		await s.observeAgentEvent(final("All done. The fix is complete."));
+	}]);
+	assert.equal(verified.length, 0);
+	const honest = await run("honest", [async (s) => s.observeAgentEvent(final("The fix is complete, but I could not run the tests here; it is unverified."))]);
+	assert.equal(honest.length, 0);
+	const twice = await run("once", [async (s) => { await s.observeAgentEvent(final("Done.")); await s.observeAgentEvent(final("Done.")); }]);
+	assert.equal(twice.length, 1, "one reminder per change set");
 });

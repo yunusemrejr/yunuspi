@@ -116,3 +116,29 @@ Patterns are solutions that users already understand. Used well, they reduce cog
 **Ask.** Do these pages draw their visual values from shared tokens, or from local choices?
 
 **Traps.** Over-abstracting components before patterns stabilize.
+
+## A mentioned site is context, not a template {#reference-not-template}
+<!-- terms: reference personal website link credit author portfolio existing site sibling copy mimic clone borrow template same fonts same palette inspiration identity original unique -->
+
+**Principle.** A site, product or file named in the brief for a link, credit, deployment or shared conventions informs those things only; the new work gets its own visual identity unless the user explicitly asks to match something.
+
+**Why.** Whatever is already in context is the path of least resistance, so agents quietly lift fonts, palettes and layouts from the nearest example. The result reads as a sibling of an unrelated site and ignores the new brand's own character. Deployment conventions or code structure can be reused legitimately; appearance is a design decision that deserves its own reasoning.
+
+**Signals.** The agent read a referenced site's styles, fonts or templates before any design direction was chosen; design notes cite "matches the other site"; the brief asked only for a link or credit.
+
+**Ask.** Was this site referenced for its look, or only for a link or convention, and what does the new brand itself call for?
+
+**Traps.** Refusing legitimate reuse the user asked for (shared components, house style, a family of sites); treating code conventions as design sources.
+
+## Diverge before you converge on an open brief {#diverge}
+<!-- terms: new website landing page redesign open brief vague surprise concept direction directions explore options alternatives moodboard peers competitors inspiration unique distinctive elegant beautiful ai slop generic -->
+
+**Principle.** When the user leaves the look to you, study a handful of strong peers in the domain, sketch several genuinely different directions, and choose one with explicit criteria before building.
+
+**Why.** The first idea is usually the category average: the same hero, gradient and sans serif as everything else. A short divergence pass (audience and purpose in a line, three to five peers for patterns and gaps, three distinct concepts, a stated choice) costs minutes and is the difference between a distinctive product and generic output. Writing the choice down keeps later pages consistent and lets reviewers judge against intent.
+
+**Signals.** A new site or interface is being built with no stated direction, no peer research and no alternatives considered; the brief says "elegant", "unique", "no AI slop" or "surprise me".
+
+**Ask.** Which directions were considered, what peers informed them, and why does the chosen one fit this brand better than the others?
+
+**Traps.** Endless exploration that delays shipping; copying one peer instead of learning from several; ignoring constraints the user did state.

@@ -81,7 +81,7 @@ Coordinate a child with its supervisor through explicit decision, interview or p
 
 #### hook-guidance
 
-Attach one deterministic workflow reminder to the first matching tool result; hooks annotate and recover without blocking or changing authority.
+Attach one deterministic workflow reminder to the first matching tool result (including deploy-then-verify-live and render-the-first-interface hooks); each firing shows a visible Hook line and reaches the observer. Hooks annotate and recover without blocking or changing authority.
 
 **Entrypoints:** `tool_call`, `tool_result`, `session_start`, `session_switch`
 
@@ -1123,10 +1123,10 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2750; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2905; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2020; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 423; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 427; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 222; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
-- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 813; literal)
+- `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 817; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 604; literal)
@@ -1143,7 +1143,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 768; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1793; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 360; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 663; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 702; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
@@ -1220,13 +1220,13 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /memory-prime — [`agent/extensions/pi-memory/priming.ts`](../agent/extensions/pi-memory/priming.ts) (line 220)
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 419)
-- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 889)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 311)
+- /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 893)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 360)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 467)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1187)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1199)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 876)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3485)
 - /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1691)
@@ -1407,6 +1407,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/cost-evidence.ts`](../agent/extensions/lib/cost-evidence.ts)
 - [`agent/extensions/lib/cost-states.ts`](../agent/extensions/lib/cost-states.ts)
 - [`agent/extensions/lib/data-query.ts`](../agent/extensions/lib/data-query.ts)
+- [`agent/extensions/lib/design-direction.ts`](../agent/extensions/lib/design-direction.ts)
 - [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
 - [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts)
 - [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
@@ -1420,6 +1421,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/harness-activity.ts`](../agent/extensions/lib/harness-activity.ts)
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts)
 - [`agent/extensions/lib/harness-invariants.ts`](../agent/extensions/lib/harness-invariants.ts)
+- [`agent/extensions/lib/harness-notice.ts`](../agent/extensions/lib/harness-notice.ts)
 - [`agent/extensions/lib/harness-orientation.ts`](../agent/extensions/lib/harness-orientation.ts)
 - [`agent/extensions/lib/health-log.ts`](../agent/extensions/lib/health-log.ts)
 - [`agent/extensions/lib/helper-usage.ts`](../agent/extensions/lib/helper-usage.ts)
@@ -1436,6 +1438,8 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/intervention-shared.ts`](../agent/extensions/lib/intervention-shared.ts)
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts)
 - [`agent/extensions/lib/local-intelligence.mjs`](../agent/extensions/lib/local-intelligence.mjs)
+- [`agent/extensions/lib/local-lm-assets.mjs`](../agent/extensions/lib/local-lm-assets.mjs)
+- [`agent/extensions/lib/local-lm.ts`](../agent/extensions/lib/local-lm.ts)
 - [`agent/extensions/lib/local-models.ts`](../agent/extensions/lib/local-models.ts)
 - [`agent/extensions/lib/media-process.ts`](../agent/extensions/lib/media-process.ts)
 - [`agent/extensions/lib/media-timeline.ts`](../agent/extensions/lib/media-timeline.ts)
@@ -1453,6 +1457,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/numeric-checks.ts`](../agent/extensions/lib/numeric-checks.ts)
 - [`agent/extensions/lib/observation-retrieval.ts`](../agent/extensions/lib/observation-retrieval.ts)
 - [`agent/extensions/lib/observer-book.ts`](../agent/extensions/lib/observer-book.ts)
+- [`agent/extensions/lib/observer-journal.ts`](../agent/extensions/lib/observer-journal.ts)
 - [`agent/extensions/lib/observer-model-evidence.ts`](../agent/extensions/lib/observer-model-evidence.ts)
 - [`agent/extensions/lib/output-distiller.ts`](../agent/extensions/lib/output-distiller.ts)
 - [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts)
@@ -1610,7 +1615,6 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/scripts/scene-model.mjs`](../agent/scripts/scene-model.mjs)
 - [`agent/scripts/scene-runtime.mjs`](../agent/scripts/scene-runtime.mjs)
 - [`agent/scripts/systemd/pi-mini-preprocessor.service`](../agent/scripts/systemd/pi-mini-preprocessor.service)
-- [`agent/scripts/systemd/pi-smol-preprocessor.service`](../agent/scripts/systemd/pi-smol-preprocessor.service)
 - [`agent/scripts/transaction.mjs`](../agent/scripts/transaction.mjs)
 - [`agent/scripts/video-render.mjs`](../agent/scripts/video-render.mjs)
 - [`agent/scripts/wait-condition.mjs`](../agent/scripts/wait-condition.mjs)
@@ -1905,6 +1909,7 @@ The manifest tombstones retired names so the inventory can explain historical re
 - `pi-hermes-memory.ts` — retired 2026-08-12: superseded by the pi-memory fork
 - `pi-mcp-adapter.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
 - `pi-orchestrator.ts` — retired 2026-08-12: 2026-08-12 refactor — do not recreate
+- `pi-smol-preprocessor.service` — retired 2026-09-25: SmolLM2-135M-Instruct (Q2_K) chose lines at chance level on harness data (skill-relevance AUC 0.53) and almost never ran (eligibility gates rejected nearly every offer; its 250ms take-wait missed ~1s inference). Replaced by the shared local language model Qwen3.5-0.8B (pi-local-lm.service, lib/local-lm.ts, lib/local-lm-assets.mjs): AUC 0.88. local-lm-assets.mjs install retires the old unit and weights. Do not recreate
 - `pi-subagents.ts` — retired 2026-08-12: extension file superseded by npm:pi-subagents (the package name stays live)
 - `pi-tinyfish.ts` — retired 2026-08-31: web_search/web_fetch overlap with npm:pi-web-access; moved to backups/retired-extensions/
 - `pi-ux.ts` — retired 2026-09-01: user direction: UX-discipline extension removed — ux_audit tool, UX banner injection, nearestPassingFg folded marker, ux group in tool-loader all deleted; shared detectUiIntent heuristic removed from tool-loader.ts; moved to backups/retired-extensions/pi-ux.ts. Do not recreate

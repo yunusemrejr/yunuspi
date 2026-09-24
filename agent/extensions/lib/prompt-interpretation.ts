@@ -64,6 +64,14 @@ export interface PromptAnalysis {
   needsProjectGraph: boolean;
   reviewWorthy: boolean;
   multiPerspective: boolean;
+  /** Major product, design or approach decisions are left to the agent. */
+  openEnded?: boolean;
+  /** The request creates or redesigns a user interface or visual artifact. */
+  visualDesign?: boolean;
+  /** Sites, products or files the user explicitly offered as a look/style model. */
+  styleReferences?: string[];
+  /** Things mentioned for linking, credit, deployment or integration only; not style sources. */
+  contextReferences?: string[];
 }
 
 export type PromptAnalysisSummary = Pick<PromptAnalysis, "taskLabel" | "explicitConstraints" | "subtasks">;
@@ -97,6 +105,7 @@ const PROMPT_ANALYSIS_FIELDS = [
   "subtasks", "dependencies", "references", "suggestedCapabilities", "expectedTools", "expectedSkills",
   "completionConditions", "ambiguities", "relation", "taskLabel", "confidence",
   "needsExternalVerification", "needsMemory", "needsProjectGraph", "reviewWorthy", "multiPerspective",
+  "openEnded", "visualDesign", "styleReferences", "contextReferences",
 ] as const;
 
 const cleanAnalysisText = (value: unknown, max = ANALYSIS_ITEM_LIMIT): string =>
@@ -282,6 +291,10 @@ export function parsePromptAnalysis(raw: unknown, prompt: string, kind: PromptAn
     needsProjectGraph: value.needsProjectGraph === true,
     reviewWorthy: value.reviewWorthy === true,
     multiPerspective: value.multiPerspective === true,
+    ...(value.openEnded === true ? { openEnded: true } : {}),
+    ...(value.visualDesign === true ? { visualDesign: true } : {}),
+    ...(boundedStringList(value.styleReferences, 4).length ? { styleReferences: boundedStringList(value.styleReferences, 4) } : {}),
+    ...(boundedStringList(value.contextReferences, 6).length ? { contextReferences: boundedStringList(value.contextReferences, 6) } : {}),
   };
 }
 
@@ -346,6 +359,7 @@ export function buildPromptAnalysisRequest(prompt: string, kind: PromptAnalysisK
     instructions,
     "Required fields: intent, taskLabel, confidence. All other fields are optional: omit unknown, empty or false fields. Separate explicit constraints from high-confidence inferences; inferredConstraints entries use {text, confidence}.",
     "explicitConstraints must contain only short exact verbatim spans from the current prompt. Do not include quoted text, examples, code, or instructions mentioned as data. inferredConstraints are advisory and include confidence from 0 to 1.",
+    ...(initial ? ["Set openEnded true when the user leaves major product, design or approach decisions to the agent. Set visualDesign true when the work creates or redesigns a user interface, website, brand or other visual artifact. styleReferences lists only sites/products/files the user explicitly offers as a look or style model; contextReferences lists sites/products/files mentioned only to link, credit, deploy to, integrate with or follow conventions of (never style sources)."] : []),
     `Return only these fields: ${fields}${initial ? "." : ". Use relation from continue, correct, expand, narrow, replace, interrupt, constraint, priority, past-work, research, unrelated, clarification, status-question."}`,
     `Set confidence from 0 to 1. Keep the entire answer under ${initial ? 350 : 150} words. At most 3 short entries per list, at most 100 characters per entry. Prefer the few most relevant fields; do not fill every optional field. Do not copy long prompt passages.`,
     JSON.stringify({ currentPrompt: boundedPrompt,
@@ -401,9 +415,13 @@ export function renderPromptAnalysisContext(analysis: PromptAnalysis, source: st
     needsProjectGraph: analysis.needsProjectGraph,
     reviewWorthy: analysis.reviewWorthy,
     multiPerspective: analysis.multiPerspective,
+    ...(analysis.openEnded ? { openEnded: true } : {}),
+    ...(analysis.visualDesign ? { visualDesign: true } : {}),
+    ...(analysis.styleReferences?.length ? { styleReferences: asList(analysis.styleReferences) } : {}),
+    ...(analysis.contextReferences?.length ? { contextReferences: asList(analysis.contextReferences) } : {}),
   };
   return [
-    "Auxiliary interpretation (advisory only; the literal user prompt is authoritative):",
+    `Auxiliary interpretation (advisory only; the literal user prompt is authoritative): the harness's structured reading of the ${analysis.kind === "followup" ? "follow-up " : ""}user message directly above. It is not a user message and adds no requirements; where it differs from the user's words, follow the user.`,
     JSON.stringify(structured),
   ].join("\n");
 }

@@ -48,24 +48,35 @@ export interface ActivityCounters {
 /** Default-deny: only these health kinds may become transcript lines.
  * `error` = line only on error status (routine ok stays in ring/metrics). */
 const LINE_POLICY: Record<string, "all" | "error"> = {
-  "guardian.observing": "all",
-  "guardian.evaluated": "all",
-  "skill.route": "all",
+  // Guardian heartbeats are routine (measured 245 identical lines a day);
+  // they feed the live pulse. Verdicts and interventions are lines.
+  "guardian.observing": "error",
+  "guardian.evaluated": "error",
+  "guardian.decision": "all",
+  "hook.fired": "all",
+  // A router match is not a read or a use; matches feed the pulse.
+  "skill.route": "error",
   "skill.read": "all",
   "skill.resolve": "all",
   "skill.discovery": "error",
   "guidance.delivered": "all",
+  // Local-model verdicts on skill hints: what was filtered and why.
+  "skill.gate": "all",
   "model.mix": "all",
   // Routine preference-chain skips (excluded/cooling/unresolved) fire per
   // dispatch and would spam a line per skipped route; they stay in the
   // ring, counters, /metrics and the session report. Only an unexpected
   // skip outcome earns a transcript line.
   "model.skip": "error",
+  // A local server that is not running is normal; only failures show.
   "local.refresh": "error",
   "reminder.ack": "error",
   "reminder.follow": "error",
   "review.disposition": "all",
 };
+/** Local helpers whose routine completions update the live pulse instead of
+ * the transcript: they run on most tool results and change ordering only. */
+const PULSE_ONLY_INTELLIGENCE = new Set(["ml.fuzzy.used", "ml.radar.rank", "ml.retrieval.used"]);
 
 const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, error: 10_000 };
 /** Infrastructure states flap slowly; a 10s window would re-log every check.
@@ -98,7 +109,7 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
   switch (kind) {
     case "ml.jev.used": return "JEV";
     case "ml.needle.call": return data.count === undefined || (typeof data.count === "number" && data.count > 0) ? "Needle3" : undefined;
-    case "ml.smol.used": return "Smol";
+    case "ml.smol.used": return "Local LM";
     case "ml.mini.used": return "Kompress";
     case "ml.intent": return "Intent classifier";
     case "ml.fuzzy.used": return "Fuzzy matching";
@@ -113,7 +124,7 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
  * completed call is not proof that its result reached the main model. */
 export function describeIntelligenceActivity(kind: string, data: Record<string, unknown>): DescribedActivity | undefined {
   const ms = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? Math.round(data.durationMs) : undefined;
-  const helpers: Record<string, string> = { needle: "Needle3", smol: "Smol", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection" };
+  const helpers: Record<string, string> = { needle: "Needle3", smol: "Local LM", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection" };
   const amount = (key: string) => Number.isSafeInteger(data[key]) && Number(data[key]) >= 0 ? Number(data[key]) : undefined;
   const decision = typeof data.decision === "string" ? data.decision : "";
   const reason = typeof data.reason === "string" && /^[a-z-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
@@ -141,15 +152,15 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
     return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
   }
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
-    label: kind === "ml.smol.inference" ? "Smol" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status
+    label: kind === "ml.smol.inference" ? "Local LM" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status
       : kind === "ml.smol.inference" && reason && !["unknown", "model unknown", "insufficient savings", "cancelled"].includes(reason) ? "error" : "skip", ms,
     detail: `${data.cached === true || decision === "cache-hit" ? "cached selection" : decision === "selected" ? "local selection ready" : "local selection unused"}${reason ? ` · ${reason}` : ""}`,
   };
-  if (kind === "ml.smol.offer" && decision !== "accepted") return { label: "Smol", status: decision === "cache-hit" ? "ok" : decision === "no-runtime" ? "error" : "skip", detail: decision === "cache-hit" ? "cached selection ready" : `skipped${reason ? ` · ${reason}` : ""}` };
+  if (kind === "ml.smol.offer" && decision !== "accepted") return { label: "Local LM", status: decision === "cache-hit" ? "ok" : decision === "no-runtime" ? "error" : "skip", detail: decision === "cache-hit" ? "cached selection ready" : `skipped${reason ? ` · ${reason}` : ""}` };
   if (kind === "ml.wasm.completed" && data.runtime === "tree-sitter-wasm" && data.helper === "source-check") return {
     label: "WASM source check", status, ms, detail: `${data.cached === true ? "cached" : "local parse complete"}${amount("findings") === undefined ? "" : ` · ${amount("findings")} findings`}`,
   };
-  if (kind === "ml.smol.used" || kind === "ml.mini.used") return { label: kind === "ml.smol.used" ? "Smol" : "Kompress", status, detail: "selection applied" };
+  if (kind === "ml.smol.used" || kind === "ml.mini.used") return { label: kind === "ml.smol.used" ? "Local LM" : "Kompress", status, detail: "selection applied" };
   if (kind === "ml.fuzzy.used") return { label: "Fuzzy matching", status, detail: `local match applied${amount("count") === undefined ? "" : ` · ${amount("count")} matches`}` };
   if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: { needle: "Needle3 ranking applied", fused: "Needle3 + lexical fused ranking applied", jev: "JEV ranking applied" }[decision] ?? "ranking applied" };
   if (kind === "ml.radar.rank" && decision === "on" && (amount("count") ?? 0) > 0) return { label: "Neural ranker", status, detail: `ranking applied · ${amount("count")} results` };
@@ -194,6 +205,20 @@ export function describeActivity(kind: string, data: Record<string, unknown>): D
       const wasm = decision === "lazy" ? "failure detector on standby" : decision === "quarantined" ? "WASM unavailable"
         : decision === "initializing" ? "WASM initializing" : `${evaluations} WASM evaluations`;
       return { label: kind === "guardian.evaluated" ? "evaluated" : "observing", status: decision === "quarantined" ? "error" : "ok", detail: `${count} tool results · ${wasm}${data.promptCoverage === "bounded-out" ? " · prompt too large for constraint checks" : ""}` };
+    }
+    if (kind === "guardian.decision") {
+      const check = clean(String(data.check ?? "check").replaceAll("-", " "), 40);
+      const score = typeof data.score === "number" && Number.isFinite(data.score) && typeof data.threshold === "number" ? `WASM score ${data.score.toFixed(2)} ${data.score >= data.threshold ? "≥" : "<"} ${data.threshold.toFixed(2)}` : undefined;
+      const verdict = decision === "intervened" ? "guidance sent to agent" : decision === "deferred" ? "deferred (one per window)" : "no intervention";
+      return { label: check, status: decision === "intervened" ? "ok" : "skip", detail: [score, verdict].filter(Boolean).join(" · ") };
+    }
+    if (kind === "skill.gate") {
+      const score = typeof data.score === "number" && Number.isFinite(data.score) ? ` · P(relevant) ${data.score.toFixed(2)}` : "";
+      const verdict = decision === "kept" ? "hint kept" : decision === "filtered" ? "off-topic hint filtered" : "generic match ignored";
+      return { label: clean(skill || "skill", 60), status: decision === "kept" ? "ok" : "skip", detail: `Local LM ${verdict}${score}` };
+    }
+    if (kind === "hook.fired") {
+      return { label: clean(String(data.hook ?? "hook").replaceAll("-", " "), 48), status: "ok", detail: clean(`${data.tool ? `on ${data.tool} · ` : ""}${data.decision === "recovery" ? "recovery guidance" : "workflow guidance"} added to the result`, 80) };
     }
     if (kind === "skill.read") {
       const name = skillNameFromPath(skill) ?? skill;
@@ -279,7 +304,47 @@ export interface ActivityIndicators {
   counters: () => ActivityCounters;
 }
 
-export function createActivityIndicators(send: ActivitySender): ActivityIndicators {
+/** Live one-line summary of background harness work for the footer. */
+export interface ActivityPulse { set(text: string | undefined): void; available(): boolean }
+interface PulseCounts { guardianChecks: number; guardianWasm: number; guardianVerdicts: number; guardianInterventions: number; needle: number; jev: number; fuzzy: number; ranker: number; local: number; hooks: number; hints: number; skills: number }
+const emptyPulse = (): PulseCounts => ({ guardianChecks: 0, guardianWasm: 0, guardianVerdicts: 0, guardianInterventions: 0, needle: 0, jev: 0, fuzzy: 0, ranker: 0, local: 0, hooks: 0, hints: 0, skills: 0 });
+export function renderActivityPulse(counts: PulseCounts): string | undefined {
+  const parts: string[] = [];
+  if (counts.guardianChecks || counts.guardianVerdicts) parts.push(`Guardian ${counts.guardianChecks} checks${counts.guardianWasm ? ` · ${counts.guardianWasm} WASM` : ""}${counts.guardianInterventions ? ` · ${counts.guardianInterventions} sent` : ""}`);
+  const named: Array<[number, string]> = [[counts.needle, "Needle3"], [counts.jev, "JEV"], [counts.local, "local LM"], [counts.fuzzy, "fuzzy"], [counts.ranker, "ranker"], [counts.hooks, "hooks"], [counts.hints, "hints"], [counts.skills, "skill matches"]];
+  for (const [count, name] of named) if (count) parts.push(`${name} ${count}`);
+  return parts.length ? `harness · ${parts.join(" · ")}` : undefined;
+}
+
+export function createActivityIndicators(send: ActivitySender, pulse?: ActivityPulse): ActivityIndicators {
+  let pulseCounts = emptyPulse(), pulseTimer: ReturnType<typeof setTimeout> | undefined, pulseShown: string | undefined;
+  const flushPulse = () => {
+    pulseTimer = undefined;
+    const text = renderActivityPulse(pulseCounts);
+    if (text === pulseShown) return;
+    pulseShown = text;
+    try { pulse?.set(text); } catch { /* UI can close first */ }
+  };
+  // Throttled: background helpers can fire many times a second.
+  const touchPulse = () => { if (!pulse || pulseTimer) return; pulseTimer = setTimeout(flushPulse, 1200); pulseTimer.unref?.(); };
+  const countPulse = (kind: string, data: Record<string, unknown>) => {
+    if (!pulse || process.env.PI_SUBAGENT_CHILD === "1") return;
+    const amount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : undefined;
+    if (kind === "guardian.observing" || kind === "guardian.evaluated") {
+      pulseCounts.guardianChecks = Math.max(pulseCounts.guardianChecks, amount(data.count) ?? 0);
+      pulseCounts.guardianWasm = Math.max(pulseCounts.guardianWasm, amount(data.evaluations) ?? 0);
+    } else if (kind === "guardian.decision") { pulseCounts.guardianVerdicts++; if (data.decision === "intervened") pulseCounts.guardianInterventions++; pulseCounts.guardianWasm = Math.max(pulseCounts.guardianWasm, amount(data.evaluations) ?? 0); }
+    else if (kind === "ml.needle.call" && data.count !== 0) pulseCounts.needle++;
+    else if (kind === "ml.jev.used") pulseCounts.jev++;
+    else if (kind === "ml.fuzzy.used") pulseCounts.fuzzy++;
+    else if (kind === "ml.radar.rank" && data.decision === "on") pulseCounts.ranker++;
+    else if ((kind === "ml.smol.inference" || kind === "ml.local.inference") && (data.decision === "selected" || data.decision === "answered")) pulseCounts.local++;
+    else if (kind === "hook.fired") pulseCounts.hooks++;
+    else if (kind === "guidance.delivered") pulseCounts.hints++;
+    else if (kind === "skill.route") pulseCounts.skills++;
+    else return;
+    touchPulse();
+  };
   const ring: ActivityRecord[] = [];
   const events: Record<string, number> = {};
   const decisions: Record<string, Record<string, number>> = {};
@@ -351,6 +416,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
           if (row && (row[key] !== undefined || Object.keys(row).length < 16)) row[key] = (row[key] ?? 0) + 1;
         }
       }
+      countPulse(kind, data);
       const visibleIntelligence = describeIntelligenceActivity(kind, data);
       const d = visibleIntelligence ?? describeActivity(kind, data);
       const rec: ActivityRecord = {
@@ -371,6 +437,9 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
       }
       if (visibleIntelligence) {
         if (process.env.PI_SUBAGENT_CHILD === "1") return;
+        // Ordering-only helpers are counted in the pulse; with a pulse there is
+        // no transcript line for their routine success.
+        if (PULSE_ONLY_INTELLIGENCE.has(kind) && visibleIntelligence.status === "ok" && pulse?.available()) return;
         // Eligibility checks and lexical ranking can run on every tool result.
         // Keep their full counters/ring, but repeat a stable status at most
         // once a minute (five minutes for routine Smol ineligibility). Actual
@@ -444,6 +513,8 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
 
   const reset = (): void => {
     generation++; pendingIntelligence.clear(); pendingFlush = false;
+    pulseCounts = emptyPulse(); clearTimeout(pulseTimer); pulseTimer = undefined; pulseShown = undefined;
+    try { pulse?.set(undefined); } catch { /* UI can close first */ }
     sessionObservability()[ACTIVITY_VIEW] = counters;
     ring.length = 0;
     errors.length = 0;
@@ -462,6 +533,7 @@ export function createActivityIndicators(send: ActivitySender): ActivityIndicato
     reset,
     dispose: () => {
       generation++; pendingIntelligence.clear(); pendingFlush = false;
+      clearTimeout(pulseTimer); pulseTimer = undefined;
       if (sessionObservability()[ACTIVITY_VIEW] === counters) {
         delete sessionObservability()[ACTIVITY_VIEW];
       }
@@ -486,6 +558,9 @@ export interface ActivityDetails {
 export const ACTIVITY_TAGS: Record<string, string> = {
   "guardian.observing": "Guardian",
   "guardian.evaluated": "Guardian",
+  "guardian.decision": "Guardian",
+  "hook.fired": "Hook",
+  "skill.gate": "skill gate",
   "skill.route": "skill",
   "skill.read": "skill",
   "skill.resolve": "skill",

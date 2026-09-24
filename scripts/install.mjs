@@ -10,7 +10,7 @@ import { activePiProcesses } from '../agent/scripts/lib/active-core-processes.mj
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
-let apply = false, backupExisting = false, preserveState = false, deps = false, needle = true, offline = false, target = path.join(os.homedir(), '.pi', 'agent');
+let apply = false, backupExisting = false, preserveState = false, deps = false, needle = true, localLm = process.platform === 'linux' && process.arch === 'x64', offline = false, target = path.join(os.homedir(), '.pi', 'agent');
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === '--apply') apply = true;
@@ -20,9 +20,10 @@ for (let i = 0; i < args.length; i++) {
   else if (arg === '--offline') { offline = true; deps = true; }
   else if (arg === '--with-needle') needle = true;
   else if (arg === '--skip-needle') needle = false;
+  else if (arg === '--skip-local-lm') localLm = false;
   else if (arg === '--target' && args[i + 1] && !args[i + 1].startsWith('--')) target = path.resolve(args[++i]);
   else if (arg === '--help') {
-    console.log('node scripts/install.mjs [--apply] [--install-deps|--offline] [--backup-existing] [--preserve-state] [--with-needle|--skip-needle] [--target PATH]\nDefault is a read-only dry run. --install-deps builds the repository-owned YunusPi core. --offline uses cached npm dependencies and skips optional asset downloads. --target is for staging; full harness runtime expects ~/.pi/agent.\nNeedle3 local-semantic assets (~36MB, pinned official build) download during --apply unless --skip-needle; a failed download warns and never fails the install (repair later with: node <agent>/extensions/lib/needle-assets.mjs repair).');
+    console.log('node scripts/install.mjs [--apply] [--install-deps|--offline] [--backup-existing] [--preserve-state] [--with-needle|--skip-needle] [--skip-local-lm] [--target PATH]\nDefault is a read-only dry run. --install-deps builds the repository-owned YunusPi core. --offline uses cached npm dependencies and skips optional asset downloads. --target is for staging; full harness runtime expects ~/.pi/agent.\nNeedle3 local-semantic assets (~36MB, pinned official build) download during --apply unless --skip-needle; a failed download warns and never fails the install (repair later with: node <agent>/extensions/lib/needle-assets.mjs repair).\nOn Linux x86-64 the local language model (Qwen3.5-0.8B, ~580MB, pinned llama.cpp runtime) installs as a loopback user service unless --skip-local-lm; failures warn and never fail the install (repair later with: node <agent>/extensions/lib/local-lm-assets.mjs repair).');
     process.exit(0);
   } else throw Error(`Unknown or incomplete argument: ${arg}`);
 }
@@ -356,5 +357,23 @@ if (needle && !offline) {
     }
   } catch (error) {
     console.log(`Needle3 assets: download unavailable (${String(error?.message ?? error).slice(0, 160)}). Install continues without local semantics; repair later with: node ${target}/extensions/lib/needle-assets.mjs repair`);
+  }
+}
+// Local language model: pinned, checksummed, atomic; a loopback-only user
+// service. Like Needle3 it is optional: any failure warns and the harness
+// keeps its deterministic and lexical paths.
+if (apply && localLm && !offline && process.env.PI_LOCAL_LM !== 'off') {
+  try {
+    const manager = await import(pathToFileURL(path.join(target, 'extensions/lib/local-lm-assets.mjs')).href).catch(() => null);
+    if (!manager?.installLocalLm) console.log('Local language model: manager unavailable in this distribution; skipping.');
+    else {
+      // A user service is only registered for the real installation; staging
+      // targets get the verified assets without touching systemd.
+      const service = path.resolve(target) === path.join(os.homedir(), '.pi', 'agent');
+      const receipt = await manager.installLocalLm({ agentDir: target, service });
+      console.log(`Local language model: ${receipt.notes.join('; ')}.`);
+    }
+  } catch (error) {
+    console.log(`Local language model: install unavailable (${String(error?.message ?? error).slice(0, 160)}). Install continues without it; repair later with: node ${target}/extensions/lib/local-lm-assets.mjs repair`);
   }
 }

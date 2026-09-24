@@ -396,6 +396,32 @@ async function discoverForCaller(signal?: AbortSignal): Promise<string[]> {
  * One batched judgment call. Returns answers or a fallback directive —
  * callers treat every non-ok result as "use the heuristic path".
  */
+/** Oversized evidence is trimmed instead of refused: the longest string
+ * fields of an object state lose their middle (with an explicit marker) until
+ * the request fits. Health logs showed every Jev refusal was input-budget,
+ * which silently dropped the judgement. Question text is never altered. */
+export function fitJevState(state: unknown, questions: Record<string, unknown>): unknown {
+  let size: number;
+  try { size = JSON.stringify([state, questions]).length; } catch { return state; }
+  if (size <= JEV_MAX_INPUT_CHARS) return state;
+  if (typeof state === "string") return trimMiddle(state, Math.max(1000, state.length - (size - JEV_MAX_INPUT_CHARS) - 200));
+  if (!state || typeof state !== "object" || Array.isArray(state)) return state;
+  const next: Record<string, unknown> = { ...(state as Record<string, unknown>) };
+  for (let guard = 0; guard < 8; guard++) {
+    const over = JSON.stringify([next, questions]).length - JEV_MAX_INPUT_CHARS;
+    if (over <= 0) break;
+    const [key, value] = Object.entries(next).filter(([, v]) => typeof v === "string").sort((a, b) => (b[1] as string).length - (a[1] as string).length)[0] ?? [];
+    if (!key || (value as string).length < 2000) break;
+    next[key] = trimMiddle(value as string, Math.max(1000, (value as string).length - over - 200));
+  }
+  return next;
+}
+function trimMiddle(text: string, keep: number): string {
+  if (text.length <= keep) return text;
+  const head = Math.ceil(keep * 0.6), tail = keep - head;
+  return `${text.slice(0, head)}\n[... ${text.length - keep} characters omitted to fit the judge's input budget ...]\n${text.slice(-tail)}`;
+}
+
 export async function askJev(
   site: string,
   state: unknown,
@@ -403,14 +429,14 @@ export async function askJev(
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
   const started = deps.now();
-  const result = await askJevShared(site, state, questions, opts);
+  const result = await askJevShared(site, fitJevState(state, questions), questions, opts);
   // Report every caller's result in its session scope, including admission
   // failures which never reached the transient transport/footer indicator.
   // Only the controlled reason is emitted: state and provider errors stay out.
   try {
     sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(result.ok ? "ml.jev.used" : "ml.jev.skipped", result.ok
       ? { count: 1, cached: result.usage.cached, durationMs: result.usage.ms, questions: Object.keys(questions).length }
-      : { count: 1, reason: result.skipped, durationMs: Math.max(0, deps.now() - started) });
+      : { count: 1, reason: result.skipped, site: site.slice(0, 40), durationMs: Math.max(0, deps.now() - started) });
   } catch { /* optional visibility */ }
   return result;
 }
