@@ -95,6 +95,7 @@ export const CORE_TOOLS = new Set([
 export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly string[] }> = [
   { skill: 'mockup-to-code', tools: ['image_analyze', 'image_crop', 'image_trace', 'visual_diff', 'render_see'] },
   { skill: 'code-first-video', tools: ['video_project', 'video_render', 'video_qa', 'narration_tts', 'audio_synth'] },
+  { skill: 'key-visual-art-direction', tools: ['scene_create', 'scene_render', 'video_compose'] },
 ];
 // Intents without a skill route: quality work stages the measurement tools,
 // commits stage the pre-commit review, copy and docs stage the prose check.

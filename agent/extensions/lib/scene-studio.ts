@@ -12,7 +12,7 @@ export function sceneCapabilities() {
   try {
     const three = require('three');
     require.resolve('playwright');
-    return { available: true, threeRevision: three.REVISION, rendering: 'WebGL2 via sandboxed Chromium; availability of an actual browser/GPU backend is verified only by scene_render', formats: ['scene.json', 'standalone HTML', 'PNG', 'H.264 MP4'], styles: ['studio', 'clay', 'toon', 'wireframe'] };
+    return { available: true, threeRevision: three.REVISION, rendering: 'WebGL2 via sandboxed Chromium; availability of an actual browser/GPU backend is verified only by scene_render', formats: ['scene.json', 'standalone HTML', 'PNG', 'H.264 MP4'], styles: ['studio', 'clay', 'toon', 'wireframe', 'luminous'] };
   } catch {
     return { available: false, reason: 'Bundled Three.js/Playwright dependency unavailable; repair the harness dependency installation before rendering.' };
   }
@@ -36,8 +36,8 @@ export async function sceneHtml(scene: any, capture = false) {
 <!-- Bundled Three.js license (retained when this standalone HTML is shared):
 ${license.replaceAll('--', '- -')}
 -->
-<style>*{box-sizing:border-box}body{margin:0;background:#0d131c;color:#e2eaf2;font:14px system-ui,sans-serif}main{max-width:${scene.width}px;margin:auto}canvas{display:block;width:100%;height:auto;aspect-ratio:${scene.width}/${scene.height}}header,footer{padding:18px 20px;display:flex;align-items:center;gap:16px}header{justify-content:space-between;font-size:12px;letter-spacing:.08em}h1{font-size:13px;font-weight:500;margin:0}button{background:#e2eaf2;border:0;border-radius:4px;padding:8px 18px;color:#152437;cursor:pointer}input{flex:1;accent-color:#e4b26c}small{color:#91a2b8}body.capture header,body.capture footer{display:none}</style>
-<body class="${capture ? 'capture' : ''}"><main><header><h1 id="title"></h1><small>LOCAL 3D / EDIT SCENE JSON IN THIS FILE</small></header><canvas aria-label="Animated 3D scene"></canvas><footer><button id="play">Play</button><input id="seek" aria-label="Animation time" type="range" min="0" step="0.01" value="0"><span id="time"></span></footer></main>
+<style>*{box-sizing:border-box}body{margin:0;background:#0d131c;color:#e2eaf2;font:14px system-ui,sans-serif}main{max-width:${scene.width}px;margin:auto}canvas{display:block;width:100%;height:auto;aspect-ratio:${scene.width}/${scene.height}}.stage{position:relative;overflow:hidden}.post{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}header,footer{padding:18px 20px;display:flex;align-items:center;gap:16px}header{justify-content:space-between;font-size:12px;letter-spacing:.08em}h1{font-size:13px;font-weight:500;margin:0}button{background:#e2eaf2;border:0;border-radius:4px;padding:8px 18px;color:#152437;cursor:pointer}input{flex:1;accent-color:#e4b26c}small{color:#91a2b8}body.capture header,body.capture footer{display:none}</style>
+<body class="${capture ? 'capture' : ''}"><main><header><h1 id="title"></h1><small>LOCAL 3D / EDIT SCENE JSON IN THIS FILE</small></header><div class="stage"><canvas aria-label="Animated 3D scene"></canvas></div><footer><button id="play">Play</button><input id="seek" aria-label="Animation time" type="range" min="0" step="0.01" value="0"><span id="time"></span></footer></main>
 <script id="scene" type="application/json">${jsonForHtml(scene)}</script>
 <script type="importmap">${JSON.stringify({ imports: { three } })}</script>
 <script type="module">import * as THREE from 'three';import {RoomEnvironment} from '${room}';try{(${sceneRuntime.toString()})(THREE,RoomEnvironment,JSON.parse(document.querySelector('#scene').textContent),${sampleKeys.toString()});}catch(error){window.sceneStudioError=String(error);document.querySelector('#title').textContent='Renderer failed: '+String(error);}</script></body></html>`;
@@ -116,7 +116,7 @@ export async function sceneRender(params: any, cwd: string, signal?: AbortSignal
     for (let i = 0; i < frames; i++) {
       bounded.throwIfAborted();
       metrics = await page.evaluate((t: number) => (window as any).sceneStudio.renderAt(t), mode === 'frame' ? time : i / scene.fps);
-      const image = await page.locator('canvas').screenshot({ type: 'png', animations: 'disabled', timeout: 15_000 });
+      const image = await page.locator('.stage').screenshot({ type: 'png', animations: 'disabled', timeout: 15_000 });
       bytes += image.length;
       if (bytes > 512 * 1024 * 1024) throw Error('Rendered frames exceed the 512 MiB disk budget');
       await fs.writeFile(path.join(frameDir, `${String(i).padStart(6, '0')}.png`), image, { flag: 'wx' });
