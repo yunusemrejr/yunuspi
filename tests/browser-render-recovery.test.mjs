@@ -230,3 +230,42 @@ test("unreachable remote renders fail before browser launch with the navigation 
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("missing local sources name the caller-supplied path in text output", { timeout: 60000 }, async () => {
+  const { renderCapture, enoentSourceHint } = await load("scripts/render-capture.mjs");
+  const enoent = missingPath => Object.assign(Error("missing"), { code: "ENOENT", path: missingPath });
+  assert.equal(enoentSourceHint("/work/site/index.html", "source", enoent("/work/site/index.html")), " (/work/site/index.html)");
+  assert.equal(enoentSourceHint("http://127.0.0.1:8899/page?token=secret", "source", enoent("/work/site/index.html")), " (http://127.0.0.1:8899/page)");
+  assert.equal(enoentSourceHint("/work/doc.pdf", "source", enoent("pdfinfo")), "");
+  assert.equal(enoentSourceHint("/work/site/index.html", "launch", enoent("/work/site/index.html")), "");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "render-enoent-"));
+  const missing = path.join(scratch, "no-such-dir", "fixture.html");
+  const oldChannel = process.env.PI_RENDER_BROWSER_CHANNEL;
+  try {
+    await assert.rejects(
+      renderCapture({ source: missing, output: "text", width: 800, height: 600 },
+        path.join(scratch, "capture.png")),
+      error => {
+        assert.match(String(error.message), /ENOENT: source not found/);
+        assert.ok(String(error.message).includes(missing), "names the missing source");
+        return true;
+      });
+    // A later-stage ENOENT (here: no browser behind a bogus channel) keeps
+    // its own classification instead of blaming the existing source.
+    const present = path.join(scratch, "present.html");
+    fs.writeFileSync(present, "<!doctype html><title>Present</title><h1>Here</h1>");
+    process.env.PI_RENDER_BROWSER_CHANNEL = "definitely-not-a-browser";
+    await assert.rejects(
+      renderCapture({ source: present, output: "text", width: 800, height: 600 },
+        path.join(scratch, "launch.png")),
+      error => {
+        assert.match(String(error.message), /browser startup failure/);
+        assert.doesNotMatch(String(error.message), /source not found/);
+        return true;
+      });
+  } finally {
+    if (oldChannel === undefined) delete process.env.PI_RENDER_BROWSER_CHANNEL;
+    else process.env.PI_RENDER_BROWSER_CHANNEL = oldChannel;
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
