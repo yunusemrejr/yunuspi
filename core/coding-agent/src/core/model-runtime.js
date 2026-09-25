@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { createModels, lazyStream, ModelsError, } from "@yunuspi/ai";
+import { createModels, lazyStream, ModelsError, piWithStreamIdle, } from "@yunuspi/ai";
 import * as builtinProviderCatalog from "@yunuspi/ai/providers/all";
 import { getAgentDir } from "../config.js";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.js";
@@ -452,20 +452,26 @@ export class ModelRuntime {
             },
         };
     }
-    stream(model, context, options) {
-        return lazyStream(model, async () => {
-            const prepared = await this.prepareRequest(model, options);
+    stream(model, context, options) { /* PI_STREAM_IDLE_CALL */
+        // The main agent reaches providers through this runtime, not through
+        // ModelsImpl: without this wrapper a stalled provider stream hangs the
+        // turn silently (measured: 14 minutes, 218 chars of thinking, no error,
+        // user abort required). The idle budget surfaces it as a stream error
+        // so retry/recovery runs instead.
+        return piWithStreamIdle(model, options, (idleOptions) => lazyStream(model, async () => {
+            const prepared = await this.prepareRequest(model, idleOptions);
             return prepared.provider.stream(prepared.model, context, prepared.options);
-        });
+        }));
     }
     complete(model, context, options) {
         return this.stream(model, context, options).result();
     }
-    streamSimple(model, context, options) {
-        return lazyStream(model, async () => {
-            const prepared = await this.prepareRequest(model, options);
+    streamSimple(model, context, options) { /* PI_STREAM_IDLE_CALL */
+        // Same idle protection as stream(): the main inference path.
+        return piWithStreamIdle(model, options, (idleOptions) => lazyStream(model, async () => {
+            const prepared = await this.prepareRequest(model, idleOptions);
             return prepared.provider.streamSimple(prepared.model, context, prepared.options);
-        });
+        }));
     }
     completeSimple(model, context, options) {
         return this.streamSimple(model, context, options).result();

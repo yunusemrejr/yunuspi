@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.5 — 2026-09-26
+
+Ports the local runtime's stream-idle hotfix into the reviewed tree. The main agent reaches providers through `ModelRuntime.stream`/`streamSimple`, and without the idle wrapper a stalled provider stream hangs the turn silently (measured: 14 minutes with no error until the user aborts). Both paths now run inside the shared `piWithStreamIdle` budget, so a stalled stream surfaces as a stream error and retry/recovery runs instead. The port is byte-identical to the production-proven live hotfix; this also unblocks local installation parity for the 0.10.4 edge-case hardening.
+
 ## 0.10.4 — 2026-09-26
 
 Edge-case hardening across the harness: silent failures now leave traces, corrupt state degrades instead of lying, and session switches start clean windows.
