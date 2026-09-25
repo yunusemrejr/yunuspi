@@ -248,6 +248,30 @@ test('repeatedly ignored catalog offers yield the scarce slot instead of re-fill
   assert.ok(tracked?.[1]?.n>=2,'the persisted offer count is what drives the demotion');
 });
 
+test('context skill offers must share a term with the request and stop after two unread offers',()=>{
+  const names=['html-slideshow','orbital-mechanics','asteroseismology','ephemeris-tables'];
+  const descriptions={
+    'html-slideshow':'Browser html slide decks with javascript transitions',
+    'orbital-mechanics':'Orbital ephemeris nbody integrator residuals propagation',
+    'asteroseismology':'Stellar oscillation asteroseismic overtones',
+    'ephemeris-tables':'Ephemeris table interpolation residuals',
+  };
+  const catalog='<available_skills>'+names.map(name=>`<skill><name>${name}</name><description>${descriptions[name]}</description><location>/fixture/skills/${name}/SKILL.md</location></skill>`).join('')+'</available_skills>';
+  const entries=[];
+  const g=createRelevantGuidance({on(){},getActiveTools:()=>['read','edit','write','skill_review'],registerTool(){},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
+  const ctx={cwd:'/fixture/grounding',sessionManager:{getBranch:()=>entries}};
+  g.restore(ctx);
+  g.start({prompt:'Fix the orbital ephemeris nbody integrator residuals and asteroseismic overtones',systemPrompt:catalog},ctx);
+  // File vocabulary alone must not ground an offer.
+  g.record({toolName:'read',input:{path:'viewer.html'}});
+  const offered=g.candidates().filter(h=>h.key?.startsWith('skillctx:')).map(h=>h.skill);
+  assert.ok(!offered.includes('/fixture/skills/html-slideshow/SKILL.md'),'browser/html file terms are not the request');
+  g.commit(g.candidates().filter(h=>h.key?.startsWith('skillctx:')));
+  const before=entries.length;
+  g.commit([]);
+  assert.equal(entries.length,before,'identical guidance state is not re-persisted');
+});
+
 test('changed config files suggest a single batched source checker using fresh paths',()=>{
   const f=fixture([]);
   for(const file of ['first.toml','second.yaml']) f.g.record({toolName:'write',input:{path:file,content:'key = 1'}});

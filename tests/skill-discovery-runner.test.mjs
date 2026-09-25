@@ -107,7 +107,8 @@ test('one tool-free fresh helper shares the existing assistance budget and leave
   assert.deepEqual(params.capabilityCeiling.allowedTools, []); assert.equal(params.capabilityCeiling.denyExtensions, true);
   assert.equal(params.skill, false); assert.equal(params.reads, false);
   assert.equal(params.usageBudget.costUsd.hard, .001); assert.equal(params.usageBudget.tokens.hard, 16000);
-  assert.equal(params.timeoutMs, 25000); assert.equal(params.maxRuntimeMs, 25000);
+  // The first attempt gets its slice of the 40s deadline so a slow route still leaves time for one alternate.
+  assert.ok(params.timeoutMs > 20000 && params.timeoutMs <= 22000, String(params.timeoutMs)); assert.equal(params.maxRuntimeMs, params.timeoutMs);
   assert.match(params.task, /no model fallback/); assert.equal(params.suppressRoutineResultIntercom, true);
   assert.ok(f.entries.some(e => e.type === 'subagent-cost-v1'));
   assert.ok(f.entries.some(e => e.type === 'subagent-lifecycle-v1' && e.data.state === 'completed'));
@@ -275,6 +276,23 @@ test('instant failure retries once on a different member; genuine attempts and l
     assert.equal(await h.runner({ brief: 'Select a supplied skill from the observed evidence.' }, h.ctx), undefined);
     assert.equal(h.calls.length, 1, 'no retry without a backup member');
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
+test('a first route that runs out its time slice retries once on an alternate route', async () => {
+  const modelB = { ...model, id: 'free/text-only' };
+  let n = 0;
+  const f = fixture({ models: [model, modelB], launch: async (_id, params, signal) => {
+    if (++n === 1) return await new Promise(resolve => signal.addEventListener('abort', () => resolve({ details: { results: [{ exitCode: 1, stopped: true, usage: { output: 40 } }] } }), { once: true }));
+    return result('{"skills":["x"]}');
+  } });
+  const clock = Date.now; let offset = 0; Date.now = () => clock() + offset;
+  const realTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...rest) => realTimeout(fn, ms > 15000 && ms < 30000 ? 5 : ms, ...rest);
+  try {
+    assert.equal(await f.runner({ brief: 'Select a supplied skill from the observed evidence.' }, f.ctx), '{"skills":["x"]}');
+  } finally { globalThis.setTimeout = realTimeout; Date.now = clock; }
+  assert.equal(f.calls.length, 2);
+  assert.notEqual(f.calls[0][1].model, f.calls[1][1].model);
 });
 
 test('consecutive instant failures walk distinct routes up to the attempt bound', async () => {

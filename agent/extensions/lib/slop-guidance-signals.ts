@@ -45,6 +45,8 @@ const mutedWarmAccent = (hex: string) => {
 };
 
 /** Explicit tool check shares the edit-hook policy; absence of cues is not a pass. */
+// Condensed pre-build form of these UI signals: UI_PREFLIGHT_TELLS in
+// design-direction.ts. Keep both in step.
 export function inspectUiSource(file: string, text: string) {
   const normalized = file.replaceAll('\\','/');
   if (typeof text !== 'string' || text.length > 24000) throw Error('UI source check requires at most 24000 characters; inspect a complete smaller component');

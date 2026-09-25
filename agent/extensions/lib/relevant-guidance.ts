@@ -312,7 +312,7 @@ export function createRelevantGuidance(pi: any) {
     // document prose, management prompts and negated requests stay silent.
     if (prompt && !routes.length && skillActionSegments(prompt).length && VAGUE_TASK_MARKERS.test(prompt)) engineering(70);
     if (!matchingPrompt && previous !== JSON.stringify([...reviewTargets.values()]))
-      try { pi.appendEntry?.(ENTRY,snapshot()); } catch { /* retain file workflows across compaction */ }
+      try { persist(); } catch { /* retain file workflows across compaction */ }
   };
   const skillKey = (key: string) => key.startsWith("skillctx:") ? key.slice(9) : key.startsWith("skill:") ? key.slice(6) : "";
   const skillCovered = (file: string) => read.has(file) || [...pending.values()].some(h => h.skill === file) || shown.has(`skill:${file}`) || shown.has(`skillctx:${file}`);
@@ -328,6 +328,9 @@ export function createRelevantGuidance(pi: any) {
   // delivery). Fatigue demotes at two, but demotion alone re-filled the slot
   // forever — one workflow was recommended ten times in a single session.
   const suppressed = (file: string) => offeredBefore(file) >= 4;
+  const MAX_UNREAD_CONTEXT_OFFERS = 2;
+  let contextOffersThisRequest: string[] = [];
+  const unreadContextOffers = () => contextOffersThisRequest.filter(file => !read.has(file)).length;
   // Derived context terms only: bounded, newest-kept, never raw prompt text persisted.
   const remember = (text: string) => {
     const current = skillTerms(text);
@@ -377,9 +380,18 @@ export function createRelevantGuidance(pi: any) {
   const gatedContextHint = (skill: Skill, matched: string[], hint: Hint) => {
     const meaningful = matched.map(term => term.split("~").at(-1)!).filter(term => !GENERIC_CONTEXT_TERMS.has(term));
     if (!meaningful.length) { gateNote(skill.name, "generic-terms"); return; }
-    // Until the local model is known to be ready the lexical hint keeps its
-    // previous immediate behavior; readiness is loaded in the background.
-    if (!taskFocus || process.env.PI_SKILL_GATE === "off" || !localLm().ready()) { add(hint); return; }
+    // Offers the agent did not read are a dismissal: after two unread
+    // context offers in one request, stop proposing more for that request.
+    if (unreadContextOffers() >= MAX_UNREAD_CONTEXT_OFFERS) { gateNote(skill.name, "unread-budget"); return; }
+    // Without the local judge, a context offer must share a term with the
+    // user's request itself; file vocabulary alone (browser, html, js)
+    // pushed slideshow and ML-in-browser skills at a Java mail app.
+    const judgeReady = Boolean(taskFocus) && process.env.PI_SKILL_GATE !== "off" && localLm().ready();
+    if (!judgeReady) {
+      const focus = new Set(skillTerms(taskFocus, 64));
+      if (taskFocus && !meaningful.some(term => focus.has(term))) { gateNote(skill.name, "ungrounded"); return; }
+      add(hint); return;
+    }
     const key = `${skill.file}\0${focusEpoch}`;
     const verdict = skillVerdicts.get(key);
     if (verdict === "yes") { add(hint); return; }
@@ -598,6 +610,15 @@ export function createRelevantGuidance(pi: any) {
     add({ key: "render", tool: "render_see", priority: 80, text: 'UI verification: call the available render_see directly for browser DOM/layout evidence and captures (output:"text" or "both"); its renderer is already installed, so supported captures need no Playwright discovery or installation. It is isolated and unauthenticated, with no interaction or GPU rendering. Use pixels when judging appearance; DOM bounds alone do not prove visual quality. Respect model vision capability and report unsupported verification.' });
     utilityHint('artifact_check','UI source review: artifact_check({operation:"ui",path:...}) locates status-pill, typography, color and interaction cues in a complete component. Reuse project tokens and components; inspect rendered states before accepting a design. The check is advisory and does not replace browser verification.');
   };
+  // Identical state is not re-appended: 19 byte-identical snapshots per
+  // session read as repeated deliveries and bloated the transcript.
+  let lastPersisted = "";
+  const persist = () => {
+    const data = snapshot(), json = JSON.stringify(data);
+    if (json === lastPersisted) return;
+    lastPersisted = json;
+    pi.appendEntry?.(ENTRY, data);
+  };
   const snapshot = () => ({ version: 1, cwd, unavailableTools:[...unavailable], shown: [...shown].slice(-LIMIT), read: [...read].slice(-48), requestNumber, topicSeen: [...topicSeen].slice(-64), topicOffers: [...topicOffers].slice(-64), context: context.slice(-48), extensions: [...extensions].slice(0,12), offers: [...skillOffers].slice(-48), reviews:[...reviewTargets.values()], deferrals:[...deferredSkills], diag:[diagnosticCount,diagSuggestedAt] });
   // A workflow checkpoint, not a correctness verdict or a security boundary.
   // Deterministic task/file routes qualify; weak lexical suggestions never gate.
@@ -740,7 +761,7 @@ export function createRelevantGuidance(pi: any) {
           return {isError:true, content:[{type:'text',text:'Choose a current skill from inspect and provide a task-specific reason (12–240 characters).'}]};
         deferredSkills.set(target.skill.file, input.reason.trim());
         try { pi.appendEntry?.('skill-review-decision', {requestNumber, skill:target.skill.name, disposition:'deferred', reason:input.reason.trim()}); } catch {}
-        try { pi.appendEntry?.(ENTRY,snapshot()); } catch {}
+        try { persist(); } catch {}
       }
       const result = {enabled:reviewEnabled(), available:reviewAvailable(), mode:reviewMode(), ...reviewPage(input.limit,input.offset), scope:'Deterministic task and file routes; at most two reads requested per operation. Discovery and skill reads remain available. Reads do not prove application.'};
       return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
@@ -777,6 +798,7 @@ export function createRelevantGuidance(pi: any) {
       deferredSkills.clear();
       const hadTopics = topicSeen.size > 0;
       requestNumber++;
+      contextOffersThisRequest = [];
       try { shadowPlane.beginRequest(`request-${requestNumber}`); } catch { /* shadow only */ }
       advisoryDiscoveryDelivered.clear();
       for (const [key, at] of topicSeen) if (requestNumber - at >= 3) topicSeen.delete(key);
@@ -794,7 +816,7 @@ export function createRelevantGuidance(pi: any) {
         }
         shown.delete(key);
       }
-      if (hadTopics || hadDeferrals) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory metadata */ }
+      if (hadTopics || hadDeferrals) try { persist(); } catch { /* advisory metadata */ }
     },
     shadowAudit() {
       try { return shadowPlane.audit(); } catch { return null; }
@@ -811,7 +833,7 @@ export function createRelevantGuidance(pi: any) {
       matchingPrompt = requestDisabled = false;
       readOnlyPrompt = false;
       advisoryDiscoveryDelivered.clear();
-      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear();
+      cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear(); lastPersisted = ""; contextOffersThisRequest = [];
       context = []; extensions = new Set(); skillIndex = null; skillFingerprint = ''; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
@@ -1012,14 +1034,14 @@ export function createRelevantGuidance(pi: any) {
         add({ key: "intent", tool: "checkpoint_read", text: 'Earlier requirements: checkpoint_read can recover original instructions. Apply later user corrections within their scope; do not reconstruct missing requirements from guesses.' });
       matchingPrompt = false;
       if (previousReviews !== JSON.stringify([...reviewTargets.values()]))
-        try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* receipts are advisory metadata */ }
+        try { persist(); } catch { /* receipts are advisory metadata */ }
     },
     record(event: any) {
       if (!enabled()) return;
       toolStep++;
       const name = event.toolName, input = event.input ?? {};
       recentTools.push(name); if (recentTools.length > 8) recentTools.shift();
-      if (observeAvailability(event)) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory only */ }
+      if (observeAvailability(event)) try { persist(); } catch { /* advisory only */ }
       if (event.isError) {
         if (name === 'edit') {
           const message = (event.content ?? []).filter((item: any) => item.type === 'text').map((item: any) => String(item.text ?? '').slice(0,8000)).slice(0,4).join('\n');
@@ -1119,14 +1141,17 @@ export function createRelevantGuidance(pi: any) {
       const completeRead = (input.offset === undefined || input.offset === 1)
         && event.details?.truncation?.truncated !== true && event.details?.deduplicated !== true
         && (input.limit === undefined || knownSkillRead && returnedWholeSkill(file, event.content));
-      if (knownSkillRead && completeRead && !read.has(file)) {
+      // The harness points agents at one section ("Start at ... line N"), so a
+      // successful ranged read of a skill is consumption too, not a miss.
+      const sectionRead = knownSkillRead && !completeRead && event.isError !== true && typeof input.offset === "number";
+      if (knownSkillRead && (completeRead || sectionRead) && !read.has(file)) {
         add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' + referencePointer(file) });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
         contextSkill(52);
         // Selected ledger: the snapshot below records the read list plus the
         // reviewTargets reasons, so selected/reason needs no extra entry and
         // repeated reads keep the existing no-duplicate-metadata contract.
-        try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* advisory state only */ }
+        try { persist(); } catch { /* advisory state only */ }
       }
       if (["edit", "write"].includes(name) && /\.(?:[cm]?[jt]sx?|php|py|rs|go|java|rb|c|cpp|h|vue|svelte)$/i.test(file)) {
         engineering();
@@ -1208,11 +1233,12 @@ export function createRelevantGuidance(pi: any) {
           if (topicOffers.size > 64) topicOffers.delete(topicOffers.keys().next().value!);
         }
         else { shown.add(h.key); if (shown.size > LIMIT) shown.delete(shown.values().next().value!); }
+        if (h.key.startsWith("skillctx:") && h.skill) contextOffersThisRequest.push(h.skill);
         pending.delete(h.key); try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("guidance.delivered",{decision:h.key.startsWith("signal:")?h.key:"skill-or-tool"}); } catch {}
         if (h.discovery) advisoryDiscoveryDelivered.add(h.discovery);
         if (h.key.startsWith("signal:") && runCount - urgentCount >= runAllowance()) urgentCount++;
         runCount++; }
-      if (hints.length) try { pi.appendEntry?.(ENTRY, snapshot()); } catch { /* avoid blocking work */ }
+      if (hints.length) try { persist(); } catch { /* avoid blocking work */ }
     },
   };
 }

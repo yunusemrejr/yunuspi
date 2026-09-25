@@ -93,7 +93,8 @@ export function createSkillDiscoveryController(options: {
       if (seen.size > 16) seen.delete(seen.values().next().value!);
       const epoch = generation, current = ctx;
       const abort = controller = new AbortController();
-      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(25_000), ...(current.signal ? [current.signal] : [])]);
+      // Outer guard just past the runner's own 40s deadline (skill-discovery-runner.ts).
+      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(45_000), ...(current.signal ? [current.signal] : [])]);
       void Promise.resolve().then(() => {
         if (epoch !== generation || signal.aborted || !permitted()) return;
         return runner({brief:request.brief, task:prompt, candidates:request.catalog.map(skill => ({name:skill.name,description:skill.description.slice(0,160)}))}, current, signal);

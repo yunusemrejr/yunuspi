@@ -35,7 +35,9 @@ test('refinement, explicit style references and non-visual work do not trigger a
   const polish = design.heuristicDesignBrief('Polish the UI and fix the chat answer layout in the app.');
   assert.equal(polish.visualDesign, true);
   assert.equal(polish.openEnded, false, 'refining existing work keeps its design language');
-  assert.equal(design.designDirectionGuidance(polish), '');
+  const polishGuidance = design.designDirectionGuidance(polish);
+  assert.doesNotMatch(polishGuidance, /divergence pass|distinct directions/, 'no redesign pass for refinement');
+  assert.match(polishGuidance, /generated-UI tells while choosing the direction/, 'UI tells arrive before building, not after');
   const styled = design.heuristicDesignBrief('Build a dashboard that looks like linear.app with our palette: #112233');
   assert.equal(styled.openEnded, false);
   assert.deepEqual(styled.styleReferences, ['linear.app']);

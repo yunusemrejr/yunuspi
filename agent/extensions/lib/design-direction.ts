@@ -61,8 +61,25 @@ export function detectDesignBrief(prompt: string, analysis?: Pick<PromptAnalysis
 }
 
 /** Bounded guidance for the main agent. Returns "" when nothing applies. */
+/** The post-edit UI signals in slop-guidance-signals.ts, condensed for delivery before a visual
+ * direction is chosen: checking them after the redesign is locked in costs a
+ * second pass over finished work. Keep in step with the signal checks and
+ * UI_DESIGN_POLICY (the review-time form of the same constraints). */
+export const UI_PREFLIGHT_TELLS: readonly string[] = [
+  "glowing dot markers before labels or chips",
+  "colored left rails on cards",
+  "icons inside tinted tiles",
+  "the indigo-to-purple gradient palette or muddy orange/brass/brown default accents",
+  "generic lightbulb branding",
+  "ad hoc hard-coded hues instead of a small token set",
+  "suppressed focus outlines without a visible replacement",
+  "content pinned with absolute coordinates",
+  "centered body copy",
+  "continuous decorative motion without reduced-motion handling",
+];
+
 export function designDirectionGuidance(brief: DesignBrief | undefined): string {
-	if (!brief || (!brief.openEnded && !brief.contextReferences.length)) return "";
+	if (!brief || (!brief.openEnded && !brief.contextReferences.length && !brief.visualDesign)) return "";
 	const lines = ["Harness design-direction guidance (advisory; the user's words and project conventions win):"];
 	if (brief.openEnded) {
 		lines.push(brief.visualDesign
@@ -70,14 +87,15 @@ export function designDirectionGuidance(brief: DesignBrief | undefined): string 
 			: "- This request leaves major decisions to you. Before committing, run a brief thought experiment: list 2–3 materially different approaches, weigh them against the stated constraints and likely user intent, and record why the chosen one wins. Prefer the approach a demanding expert would pick, not merely the easiest.");
 	}
 	if (brief.contextReferences.length) lines.push(`- Context-only references: ${brief.contextReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Use them for what the user named (links, credit, deployment, conventions); they are not design sources — do not borrow their fonts, palette, layout or copy${brief.visualDesign ? "; the new work needs its own identity" : ""}.`);
+	if (brief.visualDesign) lines.push(`- Decide against these generated-UI tells while choosing the direction, not after building it: ${UI_PREFLIGHT_TELLS.join("; ")}.`);
 	if (brief.styleReferences.length) lines.push(`- Explicit style references: ${brief.styleReferences.map((ref) => JSON.stringify(ref)).join(", ")}. Learn their principles; do not copy them wholesale.`);
-	return lines.join("\n").slice(0, 1600);
+	return lines.join("\n").slice(0, 2000);
 }
 
 /** One TUI line describing what the guidance told the agent. */
 export function designDirectionSummary(brief: DesignBrief | undefined): string {
 	if (!designDirectionGuidance(brief)) return "";
-	const parts = [brief!.openEnded ? (brief!.visualDesign ? "open visual brief → explore distinct directions before building" : "open brief → weigh alternative approaches first") : "references classified"];
+	const parts = [brief!.openEnded ? (brief!.visualDesign ? "open visual brief → explore distinct directions before building" : "open brief → weigh alternative approaches first") : brief!.visualDesign ? "visual work → UI tells checked before building" : "references classified"];
 	if (brief!.contextReferences.length) parts.push(`context-only: ${brief!.contextReferences.slice(0, 3).join(", ")}`);
 	if (brief!.styleReferences.length) parts.push(`style refs: ${brief!.styleReferences.slice(0, 2).join(", ")}`);
 	return `Design direction: ${parts.join(" · ")}.`;
