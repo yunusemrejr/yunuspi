@@ -29,6 +29,15 @@ async function request(driver,m,options={},simple=false){
  }}).result();
  assert.equal(result.stopReason,'stop',result.errorMessage);assert.equal(calls,1);return body;
 }
+test('binary thinking uses only the documented enabled/disabled object, including LongCat',async()=>{
+ const binary={...model,provider:'longcat',thinkingLevelMap:{off:'none',minimal:null,low:null,medium:'enabled',high:null,xhigh:null,max:null},compat:{thinkingFormat:'enabled',supportsReasoningEffort:false,supportsStore:false,maxTokensField:'max_tokens',supportsDeveloperRole:false}};
+ const on=await request(chat,binary,{reasoning:'medium'},true);
+ assert.deepEqual(on.thinking,{type:'enabled'});assert.equal(on.reasoning_effort,undefined);
+ assert.equal(on.max_tokens,8192);assert.equal(on.store,undefined);assert.equal(on.messages[0].role,'system');
+ const off=await request(chat,binary,{reasoning:'off'},true);
+ assert.deepEqual(off.thinking,{type:'disabled'});assert.equal(off.reasoning_effort,undefined);
+});
+
 test('direct calls and simple calls obey the same reasoning enum across request families',async()=>{
  for(const [driver,api] of [[chat,'openai-completions'],[responses,'openai-responses'],[codex,'openai-codex-responses']]){
   const m={...model,api};

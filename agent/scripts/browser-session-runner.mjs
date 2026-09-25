@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import { inspectPageState } from "./render-page-state.mjs";
+import { inspectNoiseState } from './render-noise-state.mjs';
 import { createBrowserLease } from "./browser-session-lease.mjs";
 import {
   browserFailure,
@@ -601,6 +602,14 @@ export async function runBrowserSession(input, output) {
             pageState: state,
             frames: frameList(),
           };
+        }
+        if (['observe','screenshot'].includes(action)) {
+          // Reuse the current capture page and the same bounded visual checks
+          // as render_see; interactive/GPU review must not bypass UI policy cues.
+          try {
+            const noise = await (action === 'screenshot' && hasLocatorTarget() ? await locate() : surface.locator(':root')).evaluate(inspectNoiseState, {}, {timeout});
+            if (noise.findings.length || noise.truncated) result.noise = noise;
+          } catch { result.noise = {status:'unavailable',findings:[],scope:'DOM noise inspection did not complete; no clean-page claim.'}; }
         }
         if (result.pageState) {
           stage = "observation";

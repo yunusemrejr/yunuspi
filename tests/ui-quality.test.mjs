@@ -47,7 +47,7 @@ test('batch edits share cues between reminders and review checkpoints without jo
   const snippets=authoredReviewSnippets('edit',input);
   for(const key of expected) assert.ok(authoredReviewSignals(input.path,snippets).some(s=>s.key===key));
   assert.equal(authoredReviewSignals('x.ts',authoredReviewSnippets('edit',{edits:[{newText:'node.innerHTML'},{newText:'= untrusted'}]})).length,0);
-  for(const edits of [Array.from({length:65},()=>({newText:pill})),[{newText:'x'.repeat(24001)}]]) assert.deepEqual(authoredReviewSnippets('edit',{edits}),[]);
+  for(const edits of [Array.from({length:65},()=>({newText:pill})),[{newText:'x'.repeat(256001)}]]) assert.deepEqual(authoredReviewSnippets('edit',{edits}),[]);
   const ctx={cwd:'/quality-case',sessionManager:{getBranch:()=>[]}},pi={registerTool(){},getActiveTools:()=>['read','write','edit','artifact_check'],appendEntry(){}};
   const g=createRelevantGuidance(pi);g.restore(ctx);g.start({prompt:'Review the UI components',systemPrompt:''},ctx);
   const lifecycle=createQualityReviewLifecycle(pi,{refresh:async()=>{},tests:()=>({need:null})});lifecycle.restore(ctx);lifecycle.input({source:'interactive',text:'Review UI'});
@@ -60,6 +60,21 @@ test('batch edits share cues between reminders and review checkpoints without jo
     assert.deepEqual(lifecycle.snapshot().patterns,[],'complete repair clears cue');
     lifecycle.result({...event,isError:true},ctx);assert.deepEqual(lifecycle.snapshot().patterns,[],'failed write adds no source evidence');
   } finally {lifecycle.shutdown();}
+});
+
+test('large authored files retain policy cues ahead of advisory noise without exposing commented examples',()=>{
+  const dot='.answer::before {width:8px;height:8px;border-radius:50%;background:blue}';
+  const large='.a{outline:none}.b{font-size:10px;text-transform:uppercase}.c{position:absolute}'.repeat(400)+dot;
+  const snippets=authoredReviewSnippets('write',{content:large});
+  assert.ok(snippets.length>1);assert.ok(snippets.every(s=>s.length<=24000));
+  assert.equal(authoredReviewSignals('ui.css',snippets)[0].key,'ui-dot-marker');
+  const comments=authoredReviewSnippets('write',{content:'/*'+'x'.repeat(25000)+dot+'*/'});
+  assert.deepEqual(authoredReviewSignals('ui.css',comments),[]);
+  assert.ok(keys('page.js',`style.textContent = \`${dot}\`;`).includes('ui-dot-marker'));
+  assert.ok(keys('page.js','brand.innerHTML = icon("lightbulb");').includes('ui-bulb-brand'));
+  assert.ok(!keys('lesson.js','const diagram = "lightbulb circuit";').includes('ui-bulb-brand'));
+  assert.ok(keys('theme.css',':root{--accent:#c9a24a}').includes('ui-stock-warm-palette'));
+  assert.ok(!keys('theme.css',':root{--warning:#c9a24a;--accent:#125bbc}').includes('ui-stock-warm-palette'));
 });
 
 test('UI artifact operation uses safe workspace reads in parent and child profiles',async t=>{

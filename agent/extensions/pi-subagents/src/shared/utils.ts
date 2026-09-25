@@ -404,12 +404,17 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
 	// Keep successful source-read evidence after transcript compaction. Tool
 	// starts and model-authored claims alone never establish completed reads.
 	const sourceCalls = new Map<string,string>(), seenIds = new Set<string>(), duplicateIds = new Set<string>();
+	const sourcePaths = new Map<string,string>();
 	const completed = new Set<string>();
 	for (const message of result.messages ?? []) {
 		if (message.role === 'assistant') for (const part of message.content) if (part.type === 'toolCall') {
 			if (seenIds.has(part.id)) duplicateIds.add(part.id);
 			seenIds.add(part.id);
-			if (['read','context_slice','symbol_expand'].includes(part.name)) sourceCalls.set(part.id,part.name);
+			if (['read','context_slice','symbol_expand'].includes(part.name)) {
+				sourceCalls.set(part.id,part.name);
+				const file = part.arguments?.path ?? part.arguments?.file;
+				if (typeof file === 'string' && file.length <= 4096) sourcePaths.set(part.id,file);
+			}
 		}
 		// Image attachments and their metadata notes are visual evidence, not
 		// source-code reads. Empty payloads and mismatched/reordered receipts
@@ -420,11 +425,12 @@ export function compactForegroundResult(result: SingleResult): SingleResult {
 	}
 	for (const id of duplicateIds) completed.delete(id);
 	const sourceReads = result.messages ? completed.size : result.reviewEvidence?.sourceReads ?? 0;
+	const paths = result.messages ? [...new Set([...completed].flatMap(id => sourcePaths.has(id) ? [sourcePaths.get(id)!] : []))].slice(0,64) : result.reviewEvidence?.sourcePaths ?? [];
 	const stopReason = result.stopReason ?? lastAssistantStopReason(result.messages);
 	return {
 		...result,
 		...(stopReason === undefined ? {} : { stopReason }),
-		reviewEvidence: { sourceReads },
+		reviewEvidence: { sourceReads, sourcePaths: paths },
 		task: "[prompt redacted]",
 		messages: undefined,
 		progress: undefined,

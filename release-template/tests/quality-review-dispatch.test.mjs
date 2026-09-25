@@ -116,6 +116,15 @@ try {
  const pixel=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params)});
  const pixelReports=await pixel.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']});
  assert.equal(JSON.parse(pixelReports[0].text).outcome,'pass');
+ assert.match(pixel.calls[0].params.task,/FIRST read current implementing source/);
+ assert.match(pixel.calls[0].params.task,/at most three representative captures/);
+ const logsOnly=fixture({models:[{...free('free/a'),input:['text','image']}],result:async params=>{
+  const result=await pixelResult(params);
+  result.details.results[0].reviewEvidence.sourcePaths=['build/checks.txt'];
+  return result;
+ }});
+ const logsReport=JSON.parse((await logsOnly.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']}))[0].text);
+ assert.equal(logsReport.outcome,'unknown');assert.match(logsReport.gap,/No current interface implementation/);
  const imageOnly=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params,{source:false})});
  assert.ok((await imageOnly.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']})).every(r=>!r.ok&&/source-read/.test(r.gap)),'image inspection cannot substitute for current-source review');
  const wrongTool=fixture({models:[{...free('free/a'),input:['text','image']}],result:params=>pixelResult(params,{toolName:'bash'})});

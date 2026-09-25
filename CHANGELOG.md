@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.1 — 2026-09-26
+
+UI review now enforces standing anti-slop constraints through the existing checkpoint. Large edits and command-generated source retain bounded checks; interactive browser captures and `render_see` share findings. Visible `aria-hidden` SVG branding, full-width heading dots and decorative markers inside large live regions no longer escape inspection. Interface reviewers must read changed implementation source, budget representative screenshots, and compare baseline/final evidence for visual, 3D and motion upgrades. Unaddressed policy cues block acceptance unless repaired or dismissed with specific evidence; they remain separate from independent reviewer reports.
+
+Project memory keeps new history in a compatible Needle3 space when remote indexing fails and incrementally backfills OpenRouter during later ingestion. Explicit migrations retain their selected backend. Automatic recall reserves time for lexical results when semantic work is slow, and activity reports distinguish skipped remote work from completed local fallback.
+
+LongCat joins authenticated live model discovery using `LONGCAT_API_KEY`, current catalog limits and the documented binary thinking switch. Unknown prices/capabilities stay unknown. Streaming native tool calls and tool-result continuation are verified against both `LongCat-2.5-Preview` and `LongCat-2.0`.
+
+This release also includes the concurrent startup, checkpoint, advisor and fleet fixes: prompt analysis leaves the input critical path, tests and reviews share one workspace revision, repeated or stale advisor notes are suppressed, stalled routes receive bounded cooldowns, persistent services avoid completion wakeups, and private worktree checkpoints retain interrupted work.
+
 ## 0.10.0 — 2026-09-25
 
 Project memory supports OpenRouter embeddings with `qwen/qwen3-embedding-8b` as its default remote model. Local-first auto selection, explicit model/space metadata, dimension checks, secret redaction, batched incremental migration and compatible-vector fallback preserve the existing SQLite/FTS5 index. Exact technical lookups avoid remote calls. Main/subagent priming and Observer/Watchmaker history share retrieval work, and status plus auxiliary cost receipts make degradation and spend visible. Consolidation reuses stored vectors instead of re-embedding history. The reproducible comparison is in `docs/PROJECT-MEMORY-EVALUATION.md`.

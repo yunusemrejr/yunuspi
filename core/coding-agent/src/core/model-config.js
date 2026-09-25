@@ -81,6 +81,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
         Type.Literal("chat-template"),
         Type.Literal("qwen-chat-template"),
         Type.Literal("string-thinking"),
+        Type.Literal("enabled"),
         Type.Literal("ant-ling"),
     ])),
     chatTemplateKwargs: Type.Optional(Type.Record(Type.String(), ChatTemplateKwargSchema)),

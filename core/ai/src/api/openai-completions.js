@@ -695,7 +695,7 @@ if (cacheRetention !== 'none' && model.provider === 'cerebras' && options?.sessi
             }
         }
     }
-    else if (compat.thinkingFormat === "deepseek" && model.reasoning) {
+    else if (["deepseek", "enabled"].includes(compat.thinkingFormat) && model.reasoning) {
         if (options?.reasoningEffort) {
             params.thinking = { type: "enabled" };
         }

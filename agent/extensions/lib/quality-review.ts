@@ -6,6 +6,7 @@ import { Type } from 'typebox';
 import { isProjectReviewSource } from '../../scripts/workspace-facts.mjs';
 import { registerContinuationSource } from './continuation-notice.ts';
 import { authoredReviewSnippets, authoredReviewSignals } from './authored-review.ts';
+import { UI_DESIGN_POLICY, UI_POLICY_KEYS } from './slop-guidance-signals.ts';
 import { REVIEW_LIMITS } from '../pi-subagents/src/runs/shared/automatic-budgets.ts';
 import { normalizeReviewPath, parseReviewReport, type ReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 export { parseReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
@@ -55,7 +56,7 @@ export function reviewAspects(files: string[], task = '', history: any[] = [], p
   const recent = history.slice(-20);
   const priority = (id: string) => (id === 'security' ? 100 : 0) + (id === 'correctness' ? 20 : id === 'interface' ? 15 : 0) +
     recent.filter(s => s.aspect === id && (s.outcome === 'changes' || s.hadChanges === true)).length * 3;
-  return [...selected].sort((a,b) => priority(b)-priority(a)).map(id => ({ id, rubric: RUBRICS[id] }));
+  return [...selected].sort((a,b) => priority(b)-priority(a)).map(id => ({ id, rubric: RUBRICS[id] + (id === 'interface' ? ` ${UI_DESIGN_POLICY} Address each supplied UI policy key explicitly in evidence or findings, citing its rendered/source context and any justified exception.` : '') }));
 }
 
 /** Best-effort review telemetry. Failures here never affect the lifecycle. */
@@ -177,6 +178,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let scanning: Promise<void> | undefined, activity = 0, reviewUnavailable = false;
   let testsWaitSettled = 0, testsWaitNeed = '';
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
+  let policyFindings: Array<{id:string; key:string; detail:string; file?:string}> = [];
   // File -> last confirmed content hash. Shared by the discovery pass and the
   // native receipt path so one real edit is charged exactly one revision.
   let hashes: Record<string, string> = {};
@@ -196,11 +198,13 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const shadowPlane = createInterventionSession();
   try { registerShadowSource("review", () => shadowPlane.audit()); } catch { /* diagnostics only */ }
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
-  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow, dispatchGap, reviewedEvidence, reviewedEvidencePaths, evidenceRejected, reviewUnavailable,
+  const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow, dispatchGap, reviewedEvidence, reviewedEvidencePaths, evidenceRejected, reviewUnavailable, policyFindings,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
   const invalidate = (files: string[], token = `quality:${++changeSequence}`): boolean => {
     if (!files.length) return false;
+    policyFindings = [];
     for (const file of files) patterns.delete(file);
+    for (const file of patterns.keys()) if (file.startsWith('render:')) patterns.delete(file);
     const all = [...new Set([...changed,...files])]; scopeOverflow ||= all.length > 128;
     // The workspace revision is shared with project tests: one tree, one number.
     revision = options.revision ? options.revision.advance(token) : revision + 1; changed = all.slice(-128); disposition = ''; reason = ''; delivered = ''; save();
@@ -208,13 +212,14 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   };
   const unavailableReason = () => dispatchGap || reason || (reviewUnavailable ? 'Independent review unavailable: ' + [...new Set(reports.map(r => r.gap))].join(' ').slice(0, 1000) : '');
   const status = () => !changed.length ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
-  const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file}))).slice(0,12);
+  const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
+    .sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,12);
   const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
     ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
     reason: unavailableReason() || (evidenceRejected.length ? `Outcome evidence rejected: ${evidenceRejected.join(' ').slice(0, 1000)}` : '') || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''),
     ...(evidenceRejected.length ? { evidenceRejected } : {}), truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history).map(({id}) => ({id})), historicalSamples: history.length,
-    patterns: patternReport(),
+    patterns: patternReport(), policyFindings: reviewed === revision ? policyFindings : [],
     ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted when current reports and required checks support it (an aspect whose reviewer did not return is a disclosed verification limit, not a blocker, once another aspect passed and no blocking finding remains), otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. An aspect whose reviewer did not return does not prevent accepted once another aspect passed and required checks are green; it is disclosed automatically. Record blocked only for an actual blocker. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess the retained findings. If necessary outcome evidence was missing, attach new or updated evidence paths to an explicit review call while a round remains.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. For UI/behavior work attach outcome evidence (renders, test output) via evidence paths so reviewers judge the outcome, not the diff shape.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
@@ -323,6 +328,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
 		graph = typeof info?.graph === 'string' ? info.graph.slice(0,5000) : graph;
 		history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
 	  } catch {}
+      // Inspect the current bounded source, including bash-generated edits.
+      // Snippet reminders alone miss large writes and are not current evidence.
+      let sourceBudget = 2_000_000;
+      for (const file of changed) try {
+        const target = path.join(root, file), stat = fs.lstatSync(target), size = stat.size;
+        const relative = path.relative(fs.realpathSync(root), fs.realpathSync(target));
+        if (!stat.isFile() || relative.startsWith('../') || path.isAbsolute(relative) || size > 256000 || size > sourceBudget) continue;
+        sourceBudget -= size;
+        patterns.set(file, authoredReviewSignals(file, authoredReviewSnippets('write', {content:fs.readFileSync(target,'utf8')})));
+      } catch { /* Deleted/unreadable source is handled by the reviewer. */ }
       const aspects = reviewAspects(changed,task,history,patternReport());
       const pendingAspects = aspects.filter(aspect => !carried.has(aspect.id));
       roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, carried.has(aspect.id) ? 'carried' : 'pending'])); emitProgress();
@@ -375,6 +390,19 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (rev !== revision) {
         reports = received.map(report => ({...report,outcome:'unknown',gap:`Source changed during this review; evidence may span revisions and cannot approve current source. ${report.gap}`.slice(0,900)}));
         reviewed = rev; save(); return summary();
+      }
+      // Policy obligations cannot disappear behind a generic visual pass. The
+      // existing assessment/dismissal contract handles contextual exceptions;
+      // this adds no reviewer, retry loop, or parallel acceptance system.
+      const ui = received.find(report => report.aspect === 'interface');
+      policyFindings = [];
+      if (ui) {
+        const addressed = ui.outcome === 'unknown' ? '' : JSON.stringify([ui.evidence, ui.findings]);
+        for (const cue of patternReport().filter(cue => UI_POLICY_KEYS.has(cue.key))) {
+          if (addressed.includes(cue.key)) continue;
+          const id = `policy-${createHash('sha256').update(`${cue.file}:${cue.key}`).digest('hex').slice(0,12)}`;
+          policyFindings.push({id, key:cue.key, ...(cue.file.startsWith('render:') ? {} : {file:cue.file}), detail:`Unresolved ${cue.key}: ${cue.check} Inspect this policy cue and repair it or supply a concrete evidence-based exception.`});
+        }
       }
       reports = received; reviewed = rev; reviewedHashes = reviewScopeHashes; reviewUnavailable = completed.size === 0 && carried.size === 0;
       // A decisive round suppresses near-term stuck-signal review suggestions;
@@ -431,6 +459,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
       cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; refunded = 0; followups = 0; task = ''; delivered = ''; noted = ''; testsWaitSettled = 0; testsWaitNeed = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
+      policyFindings = [];
       scopeOverflow = false; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = [];
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
       if (data?.root === root && Number.isSafeInteger(data.revision) && Array.isArray(data.changed)) {
@@ -445,6 +474,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         options.revision?.seed(revision);
         changed = restoredChanged;
         if (verified) { hashes = verified; if (data.reviewed === data.revision) reviewedHashes = {...verified}; }
+        if (verified && data.reviewed === data.revision && Array.isArray(data.policyFindings)) policyFindings = data.policyFindings.slice(0,12).filter((item:any) => /^policy-[a-f0-9]{12}$/.test(item?.id) && UI_POLICY_KEYS.has(item?.key) && typeof item.detail === 'string' && item.detail.length <= 1200);
         rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); refunded = Math.max(0,Math.min(99,Number(data.refunded)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
         scopeOverflow = data.scopeOverflow === true;
         reviewUnavailable = data.reviewUnavailable === true;
@@ -486,10 +516,24 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       // Explicit input grants a fresh bounded attempt, including recovery from
       // missing capacity. Automatic extension turns must never do this.
       reviewed = -1; reports = []; disposition = ''; reason = '';
+      policyFindings = [];
       task = brief(changed.length && task ? `${task}\nUser follow-up: ${String(event.text??'')}` : String(event.text??'')); save();
     },
     result(event: any, ctx: any) {
-      if (!enabled() || !active || !['write','edit'].includes(event.toolName) || event.isError && !event.details?.fileMutation) return;
+      if (!enabled() || !active) return;
+      if (['render_see','design_audit','browser_session'].includes(event.toolName) && !event.isError && Array.isArray(event.details?.noise?.findings)) {
+        const keys: Record<string,string> = {'decorative-dot-marker':'ui-dot-marker','icon-tile':'ui-icon-tile','repeated-heavy-left-border':'ui-accent-rail'};
+        const source = `render:${createHash('sha256').update(String(event.input?.source ?? event.details?.url ?? '') + ':' + String(event.input?.selector ?? '')).digest('hex').slice(0,16)}`;
+        const cues = event.details.noise.findings.slice(0,12).filter((f:any)=>Object.hasOwn(keys,f?.kind)).map((f:any)=>({key:keys[f.kind],skill:'anti-ai-slop',check:`Rendered ${f.kind} at ${JSON.stringify(String(f.selector ?? '').slice(0,220))}. Inspect the actual role and remove decorative use; explicit branding or necessary state needs a specific evidence-based exception.`}));
+        if (patterns.size >= 128 && !patterns.has(source)) patterns.delete(patterns.keys().next().value!);
+        const previous = patterns.get(source);
+        patterns.set(source, cues);
+        if (cues.length && reviewed === revision && JSON.stringify(previous) !== JSON.stringify(cues)) {
+          reviewed = -1; disposition = ''; reason = ''; delivered = ''; policyFindings = []; save();
+        }
+        return;
+      }
+      if (!['write','edit'].includes(event.toolName) || event.isError && !event.details?.fileMutation) return;
       const raw = event.details?.fileMutation?.resolved ?? event.input?.path;
       if (typeof raw !== 'string') return;
       const file = path.relative(root || ctx.cwd,path.resolve(ctx.cwd,raw));
@@ -619,7 +663,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           if (truncated || scopeOverflow) throw Error('Change discovery is incomplete; narrow the workspace or record the uncovered scope as blocked.');
           const test = options.tests();
           if (!test?.disabled && (test?.need || test?.assessment?.disposition === 'blocked')) throw Error('Current project test evidence is unresolved.');
-          const blockers = reports.flatMap(r=>r.findings).filter(f=>f.severity === 'blocking');
+          const blockers = [...reports.flatMap(r=>r.findings).filter(f=>f.severity === 'blocking'), ...policyFindings];
           for (const finding of blockers) if (!(params.dismissals??[]).some((d:any)=>d.id===finding.id && typeof d.reason==='string' && d.reason.trim().length>=20)) throw Error(`Resolve ${finding.id} through a repair/review or supply an evidence-based dismissal.`);
           if (limited.length) acceptedLimit = `Verification limit: no independent verdict for ${limited.map(r => r.aspect).join(', ')} (reviewer did not return).`;
         } else {

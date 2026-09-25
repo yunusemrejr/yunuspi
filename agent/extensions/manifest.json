@@ -184,7 +184,8 @@
     "tool-discovery.ts",
     "utility-client.ts",
     "video-studio.ts",
-    "workspace-write-lease.ts"
+    "workspace-write-lease.ts",
+    "worktree-checkpoint.ts"
   ],
   "forks": {
     "extensions/pi-background-tasks": "pi-background-tasks",

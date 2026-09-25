@@ -73,6 +73,7 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 	friendli: "https://api.friendli.ai/serverless/v1",
 	cerebras: "https://api.cerebras.ai/v1",
 	deepseek: "https://api.deepseek.com/v1",
+	longcat: "https://api.longcat.chat/openai/v1",
 	runinfra: "https://api.runinfra.ai/v1",
 };
 
@@ -1390,6 +1391,24 @@ async function refreshIdOnlyCatalog(
 	};
 }
 
+/** LongCat's authenticated catalog supplies live context/output limits. Keep
+ * unknown prices unknown; availability is not evidence of a free route. */
+async function refreshLongCat(context: RefreshModelContext): Promise<{ models: PiModel[] }> {
+  const key = resolvedCatalogApiKey('longcat', context);
+  if (!key) throw new Error('LongCat catalog credential unavailable');
+  const raw = await fetchJson(`${DEFAULT_BASE_URLS.longcat}/models`, context.signal, {headers:{Authorization:`Bearer ${key}`}}) as any;
+  return {models:modelRows<any>(raw?.data).map(row => {
+    const base = minimalModel(row.id, 'longcat', tokenLimit(row.max_output_tokens) ? row.max_output_tokens : undefined);
+    return {...base, name:typeof row.display_name === 'string' ? row.display_name : row.id,
+      ...(tokenLimit(row.context_window) ? {contextWindow:row.context_window} : {}),
+      // Both documented models expose an on/off switch, not six effort tiers.
+      ...(/^LongCat-2\.(?:0|5-Preview)$/.test(row.id) ? {reasoning:true,
+        thinkingLevelMap:{off:'none',minimal:null,low:null,medium:'enabled',high:null,xhigh:null,max:null},
+        compat:{thinkingFormat:'enabled' as const,supportsReasoningEffort:false}} : {}),
+    };
+  })};
+}
+
 async function refreshCerebras(context: RefreshModelContext): Promise<{ models: PiModel[]; unavailable?: UnavailableMap }> {
     // Default public format has actual prices; /v1/models can be ID-only.
     try {
@@ -1438,6 +1457,7 @@ const REFRESHER_IDS = [
 	"friendli",
 	"cerebras",
 	"deepseek",
+	"longcat",
 	"runinfra",
 ] as const;
 
@@ -1454,6 +1474,7 @@ const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 	openrouter: { sendSessionAffinityHeaders: true },
 	// Legacy fallback; live supported_parameters and explicit config take precedence.
 	cerebras: { maxTokensField: "max_tokens" },
+	longcat: { maxTokensField: 'max_tokens', supportsStore: false, supportsDeveloperRole: false },
 };
 function publishModels(
 	provider: string,
@@ -1537,6 +1558,7 @@ const REFRESHERS: Record<string, Fetcher> = {
 	cerebras: refreshCerebras,
 	deepseek: (ctx, _cached) =>
 		refreshIdOnlyCatalog("deepseek", "https://api.deepseek.com/v1/models", ctx, idOnlyFacts("deepseek")),
+	longcat: refreshLongCat,
 	runinfra: refreshRunInfra,
 };
 
@@ -1656,11 +1678,13 @@ export default async function registerLiveModels(
 		["friendli", "Friendli"],
 		["cerebras", "Cerebras"],
 		["deepseek", "DeepSeek"],
+		["longcat", "LongCat"],
 		["runinfra", "RunInfra"],
 	] as const) {
 		const wire = wireFor(providerId);
 		pi.registerProvider(providerId, {
 			name: meta,
+			...(providerId === 'longcat' ? {apiKey:'${LONGCAT_API_KEY}'} : {}),
 			baseUrl: wire.baseUrl,
 			api: wire.api,
 			refreshModels: refreshFor(providerId),

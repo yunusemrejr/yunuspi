@@ -9,7 +9,7 @@ const inspect = text => scanContent('fixture.txt', Buffer.from(text));
 const canary = ['canary', 'credential', 'never', 'real'].join('-');
 
 test('credential literals, provider tokens, and URL credentials are rejected without disclosure', () => {
-  const cases = [JSON.stringify({ apiKey: canary }), `PASSWORD=${canary}`, 'sk-' + 'a'.repeat(40), 'https://' + 'user:' + canary + '@example.com', JSON.stringify({ namecheap_username: canary }), JSON.stringify({ godaddy_user: canary })];
+  const cases = [JSON.stringify({ apiKey: canary }), `PASSWORD=${canary}`, 'sk-' + 'a'.repeat(40), 'ak_' + 'a'.repeat(28), 'https://' + 'user:' + canary + '@example.com', JSON.stringify({ namecheap_username: canary }), JSON.stringify({ godaddy_user: canary })];
   for (const value of cases) {
     const result = inspect(value);
     assert.ok(result.length > 0);

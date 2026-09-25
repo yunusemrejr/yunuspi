@@ -40,7 +40,7 @@ test('popup diagnostics arrive before tab registration without loss, duplication
 test('browser workflows keep tab/ref ownership, recover asynchronous UI and request human answers', { timeout: 90000 }, async t => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-workflows-'));
   const fixture = `<!doctype html><title>Browser workflow fixture</title><style>body{font:18px sans-serif;padding:20px}button,input{font:inherit;margin:8px}</style>
-    <h1>Workflow fixture</h1><label>Search<input id="search"></label><input type="password" value="SECRET_FIXTURE_PASSWORD">
+    <h1>Workflow fixture</h1><style>.policy-heading::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:blue}</style><h2 class="policy-heading">Answer</h2><label>Search<input id="search"></label><input type="password" value="SECRET_FIXTURE_PASSWORD">
     <textarea hidden>SECRET_HIDDEN_TEXT</textarea><label>Draft<textarea>SECRET_DRAFT_VALUE</textarea></label><div id="article">Rendered research alpha beta gamma</div>
     <button id="replace" onclick="this.outerHTML='<button id=replace onclick=window.wrong=true>Replacement</button>'">Replace me</button>
     <button id="popup" onclick="window.open('/popup')">Open detail</button>
@@ -74,6 +74,10 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     assert.doesNotMatch(JSON.stringify(opened), /SECRET_FIXTURE_PASSWORD|SECRET_HIDDEN_TEXT|SECRET_DRAFT_VALUE/);
     await call({ action: 'fill', ref: search.ref, text: 'typed through DOM reference' });
     assert.equal((await call({ action: 'verify', selector: '#search', text: 'typed through DOM reference' })).verification.matches, true);
+    for (const action of ['screenshot','observe']) {
+      const capture=await call({action});
+      assert.ok(capture.noise.findings.some(f=>f.kind==='decorative-dot-marker'),'interactive captures share the UI policy scanner');
+    }
     await call({ action: 'press', key: 'Control+A' });
     const fresh = await call({ action: 'snapshot' });
     const scoped = await call({ action: 'snapshot', ref: fresh.targets.find(row => row.name === 'Search').ref });

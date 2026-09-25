@@ -1,5 +1,5 @@
 /** Shared local-index and remote-embedding boundary. Never log the originals. */
-const KEYS = /(?:sk-(?:ant-|proj-)?|ghp_|gho_|github_pat_|glpat-|xox[abprs]-|AKIA)[A-Za-z0-9_-]{12,}|-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?(?:-----END[^-]*PRIVATE KEY-----|$)|\b[A-Za-z0-9+/_-]{48,}={0,2}/g;
+const KEYS = /\bak_[A-Za-z0-9_-]{24,}|(?:sk-(?:ant-|proj-)?|ghp_|gho_|github_pat_|glpat-|xox[abprs]-|AKIA)[A-Za-z0-9_-]{12,}|-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?(?:-----END[^-]*PRIVATE KEY-----|$)|\b[A-Za-z0-9+/_-]{48,}={0,2}/g;
 const SECRET_NAME = /(?:^|[_-])(?:api[_-]?key|password|passwd|secret|token|credential|authorization|auth)(?:$|[_-])/i;
 export function redactSecrets(text: string, env: Record<string, string | undefined> = process.env, extra: string[] = []): string {
   let safe = text.replace(KEYS, '[redacted]')

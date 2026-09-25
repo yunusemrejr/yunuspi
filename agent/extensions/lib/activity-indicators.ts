@@ -127,7 +127,7 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   const helpers: Record<string, string> = { needle: "Needle3", smol: "Local LM", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection" };
   const amount = (key: string) => Number.isSafeInteger(data[key]) && Number(data[key]) >= 0 ? Number(data[key]) : undefined;
   const decision = typeof data.decision === "string" ? data.decision : "";
-  const reason = typeof data.reason === "string" && /^[a-z-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
+  const reason = typeof data.reason === "string" && /^[a-z0-9-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
   const status: ActivityStatus = data.isError === true ? "error" : "ok";
   if (data.disabled === true || data.shadow === true || data.isError === true) return;
   if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped") {
@@ -147,8 +147,10 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
     return { label: "Needle3", status: data.accepted === false ? "skip" : status, ms,
       detail: `${data.coalesced === true ? "shared in-flight result" : data.cached === true ? "cached embeddings" : "local WASM"} · ${outcome}` };
   }
-  if (kind === "ml.project-memory.embedding") return { label: "Project memory", status: decision === 'embedded' ? 'ok' : 'error', ms,
-    detail: decision === 'embedded' ? `OpenRouter embeddings ready · ${amount('count') ?? 0} texts` : 'Embedding unavailable · compatible local or lexical fallback' };
+  if (kind === "ml.project-memory.embedding") return { label: "Project memory", status: decision === 'embedded' ? 'ok' : 'skip', ms,
+    detail: decision === 'embedded' ? `OpenRouter embeddings ready · ${amount('count') ?? 0} texts`
+      : decision === 'local-fallback' ? `Saved with Needle3 · ${amount('count') ?? 0} texts · remote backfill pending`
+      : `OpenRouter embedding skipped${reason ? ` · ${reason}` : ''} · lexical retrieval remains available` };
   if (kind === "ml.project-memory.recalled") return { label: "Project memory", status: 'ok', detail: `Historical evidence retrieved · ${amount('count') ?? 0} memories` };
   if (kind === "ml.jev.used") {
     const questions = amount("questions");

@@ -2788,27 +2788,27 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 473
+        "line": 484
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 515
+        "line": 526
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 507
+        "line": 518
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 523
+        "line": 534
       },
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1638
+        "line": 1660
       },
       {
         "name": "claude-cache",
@@ -2853,7 +2853,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 870
+        "line": 874
       },
       {
         "name": "harness-backup",
@@ -2868,67 +2868,67 @@
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 553
+        "line": 564
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 600
+        "line": 611
       },
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113729
+        "line": 113808
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113433
+        "line": 113512
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113490
+        "line": 113569
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113525
+        "line": 113604
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113502
+        "line": 113581
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113644
+        "line": 113723
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113458
+        "line": 113537
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113426
+        "line": 113505
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113663
+        "line": 113742
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113440
+        "line": 113519
       },
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 568
+        "line": 579
       },
       {
         "name": "memory-prime",
@@ -2953,7 +2953,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 422
+        "line": 462
       },
       {
         "name": "or-provider",
@@ -2963,7 +2963,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 606
+        "line": 616
       },
       {
         "name": "prompt-workflow",
@@ -3088,7 +3088,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 499
+        "line": 510
       },
       {
         "name": "used",
@@ -3098,7 +3098,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 248
+        "line": 254
       },
       {
         "name": "websearch",
@@ -3206,25 +3206,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 799,
+        "line": 811,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 753,
+        "line": 765,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 636,
+        "line": 647,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 722,
+        "line": 734,
         "kind": "literal"
       },
       {
@@ -3248,7 +3248,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 205,
+        "line": 206,
         "kind": "literal"
       },
       {
@@ -3418,43 +3418,43 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2508,
+        "line": 2538,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2368,
+        "line": 2398,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2651,
+        "line": 2681,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2750,
+        "line": 2780,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2905,
+        "line": 2935,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2020,
+        "line": 2050,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 427,
+        "line": 438,
         "kind": "literal"
       },
       {
@@ -3496,67 +3496,61 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 746,
+        "line": 750,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 586,
+        "line": 596,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 554,
+        "line": 564,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 516,
+        "line": 526,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 436,
+        "line": 446,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 466,
+        "line": 476,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 570,
+        "line": 580,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 287,
+        "line": 294,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 389,
-        "kind": "literal"
-      },
-      {
-        "name": "project_tests",
-        "source": "agent/extensions/lib/project-tests.ts",
-        "line": 538,
+        "line": 396,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 568,
+        "line": 618,
         "kind": "literal"
       },
       {
@@ -3592,7 +3586,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2181,
+        "line": 2211,
         "kind": "literal"
       },
       {
@@ -3616,7 +3610,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 360,
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -3677,7 +3671,7 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 255,
+        "line": 262,
         "kind": "literal"
       },
       {
@@ -3695,7 +3689,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 276,
+        "line": 279,
         "kind": "literal"
       },
       {
@@ -3800,25 +3794,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 799,
+        "line": 811,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 753,
+        "line": 765,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 636,
+        "line": 647,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 722,
+        "line": 734,
         "kind": "literal"
       },
       {
@@ -3836,7 +3830,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 205,
+        "line": 206,
         "kind": "literal"
       },
       {
@@ -3902,43 +3896,43 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2508,
+        "line": 2538,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2368,
+        "line": 2398,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2651,
+        "line": 2681,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2750,
+        "line": 2780,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2905,
+        "line": 2935,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2020,
+        "line": 2050,
         "kind": "literal"
       },
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 427,
+        "line": 438,
         "kind": "literal"
       },
       {
@@ -3956,67 +3950,61 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 746,
+        "line": 750,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 586,
+        "line": 596,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 554,
+        "line": 564,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 516,
+        "line": 526,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 436,
+        "line": 446,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 466,
+        "line": 476,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 570,
+        "line": 580,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 287,
+        "line": 294,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 389,
-        "kind": "literal"
-      },
-      {
-        "name": "project_tests",
-        "source": "agent/extensions/lib/project-tests.ts",
-        "line": 538,
+        "line": 396,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 568,
+        "line": 618,
         "kind": "literal"
       },
       {
@@ -4040,7 +4028,7 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2181,
+        "line": 2211,
         "kind": "literal"
       },
       {
@@ -4064,7 +4052,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 360,
+        "line": 361,
         "kind": "literal"
       },
       {
@@ -4082,7 +4070,7 @@
       {
         "name": "syntax_check",
         "source": "agent/extensions/lib/source-check.ts",
-        "line": 255,
+        "line": 262,
         "kind": "literal"
       },
       {
@@ -4094,7 +4082,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 276,
+        "line": 279,
         "kind": "literal"
       },
       {
@@ -4240,7 +4228,7 @@
         ],
         "lines": [
           313,
-          642
+          658
         ],
         "knownNames": [
           "contact_supervisor",
@@ -4325,11 +4313,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 633,
-      "registrationSites": 77,
+      "sourceFiles": 634,
+      "registrationSites": 76,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 104,
-      "uniqueStableTools": 103,
+      "stableRegistrationRows": 103,
+      "uniqueStableTools": 102,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -5068,6 +5056,10 @@
       },
       {
         "path": "agent/extensions/lib/workspace-write-lease.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/worktree-checkpoint.ts",
         "exists": true
       }
     ],

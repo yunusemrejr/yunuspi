@@ -16,6 +16,8 @@ and the main agent remains responsible for the session in every case.
 Findings come back concise: bounded reports with evidence and explicit gaps,
 never raw reasoning dumps. The parent verifies, decides and owns changes.
 
+Interface review reads current implementation before inspecting at most three representative captures. A test log does not qualify as an implementation read. Large native edits and current files changed through commands receive bounded source checks; rendered label dots, icon tiles and accent rails feed the same checkpoint. Unaddressed standing UI policy cues appear as `policyFindings` separately from independent reports and prevent acceptance until repaired/reviewed or explicitly dismissed with evidence. These obligations survive session resume and do not create additional review rounds. New rendered findings invalidate earlier acceptance; source edits invalidate stale rendered cues.
+
 ## Session-start disclosure
 
 The first prompt of a session carries one short orientation line naming

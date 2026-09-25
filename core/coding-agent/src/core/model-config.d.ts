@@ -44,7 +44,7 @@ declare const ModelDefinitionSchema: Type.TObject<{
         requiresAssistantAfterToolResult: Type.TOptional<Type.TBoolean>;
         requiresThinkingAsText: Type.TOptional<Type.TBoolean>;
         requiresReasoningContentOnAssistantMessages: Type.TOptional<Type.TBoolean>;
-        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"ant-ling">]>>;
+        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"enabled">, Type.TLiteral<"ant-ling">]>>;
         chatTemplateKwargs: Type.TOptional<Type.TRecord<"^.*$", Type.TUnion<[Type.TUnion<[Type.TString, Type.TNumber, Type.TBoolean, Type.TNull]>, Type.TObject<{
             $var: Type.TUnion<[Type.TLiteral<"thinking.enabled">, Type.TLiteral<"thinking.effort">]>;
             omitWhenOff: Type.TOptional<Type.TBoolean>;
@@ -162,7 +162,7 @@ declare const ModelOverrideSchema: Type.TObject<{
         requiresAssistantAfterToolResult: Type.TOptional<Type.TBoolean>;
         requiresThinkingAsText: Type.TOptional<Type.TBoolean>;
         requiresReasoningContentOnAssistantMessages: Type.TOptional<Type.TBoolean>;
-        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"ant-ling">]>>;
+        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"enabled">, Type.TLiteral<"ant-ling">]>>;
         chatTemplateKwargs: Type.TOptional<Type.TRecord<"^.*$", Type.TUnion<[Type.TUnion<[Type.TString, Type.TNumber, Type.TBoolean, Type.TNull]>, Type.TObject<{
             $var: Type.TUnion<[Type.TLiteral<"thinking.enabled">, Type.TLiteral<"thinking.effort">]>;
             omitWhenOff: Type.TOptional<Type.TBoolean>;
@@ -257,7 +257,7 @@ declare const ProviderConfigSchema: Type.TObject<{
         requiresAssistantAfterToolResult: Type.TOptional<Type.TBoolean>;
         requiresThinkingAsText: Type.TOptional<Type.TBoolean>;
         requiresReasoningContentOnAssistantMessages: Type.TOptional<Type.TBoolean>;
-        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"ant-ling">]>>;
+        thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"enabled">, Type.TLiteral<"ant-ling">]>>;
         chatTemplateKwargs: Type.TOptional<Type.TRecord<"^.*$", Type.TUnion<[Type.TUnion<[Type.TString, Type.TNumber, Type.TBoolean, Type.TNull]>, Type.TObject<{
             $var: Type.TUnion<[Type.TLiteral<"thinking.enabled">, Type.TLiteral<"thinking.effort">]>;
             omitWhenOff: Type.TOptional<Type.TBoolean>;
@@ -378,7 +378,7 @@ declare const ProviderConfigSchema: Type.TObject<{
             requiresAssistantAfterToolResult: Type.TOptional<Type.TBoolean>;
             requiresThinkingAsText: Type.TOptional<Type.TBoolean>;
             requiresReasoningContentOnAssistantMessages: Type.TOptional<Type.TBoolean>;
-            thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"ant-ling">]>>;
+            thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"enabled">, Type.TLiteral<"ant-ling">]>>;
             chatTemplateKwargs: Type.TOptional<Type.TRecord<"^.*$", Type.TUnion<[Type.TUnion<[Type.TString, Type.TNumber, Type.TBoolean, Type.TNull]>, Type.TObject<{
                 $var: Type.TUnion<[Type.TLiteral<"thinking.enabled">, Type.TLiteral<"thinking.effort">]>;
                 omitWhenOff: Type.TOptional<Type.TBoolean>;
@@ -496,7 +496,7 @@ declare const ProviderConfigSchema: Type.TObject<{
             requiresAssistantAfterToolResult: Type.TOptional<Type.TBoolean>;
             requiresThinkingAsText: Type.TOptional<Type.TBoolean>;
             requiresReasoningContentOnAssistantMessages: Type.TOptional<Type.TBoolean>;
-            thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"ant-ling">]>>;
+            thinkingFormat: Type.TOptional<Type.TUnion<[Type.TLiteral<"openai">, Type.TLiteral<"openrouter">, Type.TLiteral<"together">, Type.TLiteral<"baseten">, Type.TLiteral<"deepseek">, Type.TLiteral<"zai">, Type.TLiteral<"qwen">, Type.TLiteral<"chat-template">, Type.TLiteral<"qwen-chat-template">, Type.TLiteral<"string-thinking">, Type.TLiteral<"enabled">, Type.TLiteral<"ant-ling">]>>;
             chatTemplateKwargs: Type.TOptional<Type.TRecord<"^.*$", Type.TUnion<[Type.TUnion<[Type.TString, Type.TNumber, Type.TBoolean, Type.TNull]>, Type.TObject<{
                 $var: Type.TUnion<[Type.TLiteral<"thinking.enabled">, Type.TLiteral<"thinking.effort">]>;
                 omitWhenOff: Type.TOptional<Type.TBoolean>;

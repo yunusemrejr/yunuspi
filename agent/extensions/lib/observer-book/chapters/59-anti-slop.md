@@ -10,6 +10,8 @@ skills: anti-ai-slop frontend-design ui-ux-principles ui-antipattern-review copy
 
 # The anti-slop checklist
 
+Standing constraints include no decorative label dots, boxed icon badges, generic lightbulb logos or muddy orange/brass/brown default palettes. A source comment calling a newly generated style "brand identity" does not authorize it. Require a specific user-brand or necessary-state basis for an exception. For requested visual, 3D or motion improvements, compare baseline and final evidence at matched viewports and relevant states; an attractive-sounding review or one static capture cannot establish improvement. Surface unaddressed policy cues through the existing quality checkpoint rather than launching another review system.
+
 AI website work fails one underlying way: it optimizes for visible completeness and apparent sophistication instead of contextual necessity. The full 200-rule checklist lives in `docs/ANTI-SLOP-CHECKLIST.md`; these passages are the doctrine a reviewer applies. Prefer specific over generic, structural over decorative, quiet over attention-seeking, semantic over ornamental, real over simulated, contextual over fashionable, and subtraction over unnecessary addition.
 
 ## Every element must earn its place {#necessity-test}

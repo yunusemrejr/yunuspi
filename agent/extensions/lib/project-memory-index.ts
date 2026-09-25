@@ -17,6 +17,7 @@ export { redactSecrets } from "./memory-redaction.ts";
 import { embedMemory, MEMORY_EMBED_BATCH, MEMORY_EMBED_CHARS, type MemoryEmbedder, type MemoryEmbedding } from "./project-memory-embedder.ts";
 export { needleMemoryEmbedder, openRouterMemoryEmbedder, configuredMemoryEmbedder, type MemoryEmbedder } from "./project-memory-embedder.ts";
 import { type ChunkType, type ProjectVectorStore, isChunkType } from "./project-vector-store.ts";
+import { sessionObservability } from './session-observability.ts';
 
 /** Retrieval weight per source type. Curated knowledge outranks raw exhaust. */
 export const TYPE_WEIGHTS: Record<ChunkType, number> = {
@@ -341,7 +342,10 @@ export async function indexEvent(
     if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
   }
-  if (backfillIds.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit') result.embedded += (await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, signal: opts.signal, now: opts.now })).embedded;
+  if (backfillIds.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit') {
+    const report = await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, fallback: true, signal: opts.signal, now: opts.now });
+    result.embedded += report.embedded + report.fallbackEmbedded;
+  }
   return result;
 }
 
@@ -416,7 +420,10 @@ export async function indexFile(
     if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
   }
-  if (backfillIds.length && opts.embedder) result.embedded += (await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, signal: opts.signal, now: opts.now })).embedded;
+  if (backfillIds.length && opts.embedder) {
+    const report = await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, fallback: true, signal: opts.signal, now: opts.now });
+    result.embedded += report.embedded + report.fallbackEmbedded;
+  }
   return result;
 }
 
@@ -424,11 +431,11 @@ export async function indexFile(
 export async function reindexEmbeddings(
   store: ProjectVectorStore,
   embedder: MemoryEmbedder,
-  opts: { limit?: number; ids?: string[]; now?: () => string; signal?: AbortSignal } = {},
-): Promise<{ embedded: number; failed: number; remaining: number; cancelled: boolean }> {
+  opts: { limit?: number; ids?: string[]; now?: () => string; signal?: AbortSignal; fallback?: boolean } = {},
+): Promise<{ embedded: number; fallbackEmbedded: number; failed: number; remaining: number; cancelled: boolean }> {
   const limit = Math.max(1, Math.min(256, opts.limit ?? 32));
   const ids = (opts.ids ?? store.unembeddedIds(limit, embedder.id)).slice(0, opts.ids ? 64 : limit);
-  let embedded = 0, failed = 0;
+  let embedded = 0, fallbackEmbedded = 0, failed = 0;
   const now = opts.now ?? (() => new Date().toISOString());
   for (let i = 0; i < ids.length && !opts.signal?.aborted; i += MEMORY_EMBED_BATCH) {
     const chunks = store.getChunks(ids.slice(i, i + MEMORY_EMBED_BATCH)).filter(c => c.valid_until === null && c.source_type !== 'tool_result'
@@ -436,7 +443,21 @@ export async function reindexEmbeddings(
       && !sensitiveMemoryPath(c.source_path) && (!c.has_embedding || c.embedder !== embedder.id));
     if (!chunks.length) continue;
     const batch = await embedMemory(embedder, chunks.map(c => memoryEmbeddingText(c.title, c.text)), { signal: opts.signal });
-    if (!batch || opts.signal?.aborted) { failed += chunks.length; break; }
+    if (!batch || opts.signal?.aborted) {
+      failed += chunks.length;
+      // Automatic ingestion may retain new history in the local space while
+      // the selected remote space is unavailable. Explicit migrations remain
+      // exact-backend operations. Never overwrite a compatible existing vector
+      // or count a local fallback as successful remote backfill.
+      const fallback = opts.fallback ? embedder.fallback : undefined;
+      if (!fallback || fallback.id === embedder.id || opts.signal?.aborted) break;
+      const pending = chunks.filter(c => !c.has_embedding || c.embedder !== fallback.id);
+      const local = pending.length ? await embedMemory(fallback, pending.map(c => memoryEmbeddingText(c.title, c.text)), { signal: opts.signal }) : null;
+      if (local && !opts.signal?.aborted) for (let j = 0; j < pending.length; j++) {
+        if (store.setEmbedding(pending[j].id, local.space, local.vectors[j], now(), pending[j].content_hash)) fallbackEmbedded++;
+      }
+      continue;
+    }
     for (let j = 0; j < chunks.length; j++) {
       // An edit in another session during the request invalidates this vector.
       if (store.setEmbedding(chunks[j].id, batch.space, batch.vectors[j], now(), chunks[j].content_hash)) embedded++;
@@ -444,7 +465,10 @@ export async function reindexEmbeddings(
     }
   }
   const remaining = store.unembeddedIds(5000, embedder.id).length;
-  const report = { embedded, failed, remaining, cancelled: opts.signal?.aborted === true };
+  const report = { embedded, fallbackEmbedded, failed, remaining, cancelled: opts.signal?.aborted === true };
   store.setMeta(`backfill:${embedder.id}`, JSON.stringify({ ...report, at: now() }));
+  if (fallbackEmbedded) try {
+    sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('ml.project-memory.embedding', { decision: 'local-fallback', helper: 'needle', count: fallbackEmbedded });
+  } catch { /* Optional telemetry cannot interrupt indexing. */ }
   return report;
 }

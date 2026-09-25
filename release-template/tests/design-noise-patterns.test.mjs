@@ -16,6 +16,17 @@ async function capture(body,options={}) {
 }
 const kinds=result=>(result.noise?.findings??[]).map(f=>f.kind);
 
+test('visible aria-hidden branding and dots on full-width headings cannot escape the same-capture checks',async()=>{
+ const {rendered}=await capture('<style>h2{width:750px;font:16px Arial}.mark{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:#ddd}h2::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:blue;margin-right:8px}</style><header><span class="mark" aria-hidden="true"><svg width="20" height="20"><circle cx="10" cy="10" r="8"/></svg></span></header><h2>Answer</h2>');
+ assert.ok(kinds(rendered).includes('icon-tile'));
+ assert.ok(kinds(rendered).includes('decorative-dot-marker'));
+ const inline=await capture('<style>.brand{width:38px;height:38px;border-radius:10px;border:1px solid #777;background:#eee}.heading{width:750px;height:24px}</style><header><svg class="brand" aria-hidden="true"><circle cx="19" cy="19" r="8"/></svg></header><main aria-live="polite" style="height:400px"><h2 class="heading pseudo">Answer</h2></main>');
+ assert.ok(kinds(inline.rendered).includes('icon-tile'),'self-styled inline SVG counts as a tile');
+ assert.ok(kinds(inline.rendered).includes('decorative-dot-marker'),'a large live conversation region is not a blanket state exemption');
+ const hidden=await capture('<span hidden class="mark"><svg></svg></span><h2 style="display:none" class="pseudo">Answer</h2>');
+ assert.deepEqual(kinds(hidden.rendered),[]);
+});
+
 test('actual repeated dot motion in a status capsule produces measured automatic advice',async()=>{
  const {rendered}=await capture('<span class="pill"><i aria-hidden="true" class="dot"></i>Live</span><span class="pill pseudo">Connected</span>');
  assert.deepEqual(kinds(rendered),['animated-status-pill','animated-status-pill']);

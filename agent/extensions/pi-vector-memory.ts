@@ -262,7 +262,14 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
         }
       }
       if (ids.length && embedder && current === owner && !owner.controller.signal.aborted) {
-        try { await reindexEmbeddings(owner.store, embedder, { ids, signal: owner.controller.signal, now: isoNow }); }
+        try {
+          // Small resumable recovery of earlier remote failures, shared with
+          // the current batch. No timers or per-chunk remote requests.
+          const backlog = owner.store.unembeddedIds(ids.length + 4, embedder.id).filter(id => !ids.includes(id)).slice(0,4);
+          const pending = [...new Set([...ids, ...backlog])];
+          const report = await reindexEmbeddings(owner.store, embedder, { ids: pending, fallback: true, signal: owner.controller.signal, now: isoNow });
+          if (current === owner && !owner.controller.signal.aborted && (report.embedded || report.fallbackEmbedded)) recallCache.clear();
+        }
         catch { noteHealth('ml.project-memory.index-error', { count: 1, kind: 'embedding-batch' }); }
       }
       if (dropped) {
@@ -405,8 +412,11 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
     if (!cached || now() - cached.at > 60_000) {
       if (recallCache.size >= 8) recallCache.delete(recallCache.keys().next().value!);
       const combined = AbortSignal.any([signal, owner.controller.signal]);
+      // The consumer allows 1200ms for recall. Stop optional semantic work
+      // earlier so FTS5/RRF can still return history before that outer deadline.
+      const retrievalSignal = AbortSignal.any([combined, AbortSignal.timeout(900)]);
       cached = { at: now(), result: retrieveFamilyViews([{ store, relation: 'self' }, ...owner.family], query, {
-        embedder: embedder ?? undefined, signal: combined, now,
+        embedder: embedder ?? undefined, signal: retrievalSignal, now,
         types: ['decision','architecture','concept','convention','observation','bug','error','todo','session_summary','commit','user_request'],
       }) };
       recallCache.set(key, cached);

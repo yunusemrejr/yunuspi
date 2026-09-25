@@ -1273,7 +1273,7 @@ export interface SingleResult {
 	progressSummary?: ProgressSummary;
 	toolCalls?: ToolCallSummary[];
 	/** Native source-read receipts retained when the transcript is compacted. */
-	reviewEvidence?: { sourceReads: number };
+	reviewEvidence?: { sourceReads: number; sourcePaths?: string[] };
 	artifactPaths?: ArtifactPaths;
 	truncation?: TruncationResult;
 	finalOutput?: string;

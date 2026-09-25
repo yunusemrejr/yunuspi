@@ -97,6 +97,8 @@ bounded backfill. Queries never implicitly upload the existing corpus. If Qwen
 is unavailable, retrieval can use existing compatible Needle3 chunks; otherwise
 FTS5 still serves. It never compares a Qwen query against Needle3 document vectors.
 
+Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later ingestion flush adds at most four earlier eligible chunks to its existing batch. Compatible local vectors are reused during cooldown. Explicit `project_memory_reembed` remains an exact-backend operation. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Optional semantic work in automatic context recall stops at 900ms so lexical history can return within the existing 1200ms consumer budget.
+
 Raw tool-result exhaust and automatic file-edit markers stay lexical. Explicitly
 indexed code and durable decisions, corrections, architecture, observations,
 regressions, errors, summaries, commits and todos remain eligible. Credential

@@ -21,7 +21,7 @@ process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(configDir, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_SUBAGENT_CHILD;
 
-const { default: register, lastMicroRequest, microRequestAdvice } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
+const { default: register, lastMicroRequest, microRequestAdvice, settleMicroAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
 const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { searchCapabilityMetadata } = await import(pathToFileURL(path.join(agent, 'extensions/lib/capability-groups.ts')));
 const { collectSessionMetrics } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-metrics.ts')));
@@ -151,7 +151,9 @@ test('only core-provenanced interactive and RPC inputs receive one structured ad
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'request-a' }));
+	await settleMicroAnalyses();
 	await f.emit('input', input({ prompt: promptB, requestId: 'request-b', source: 'rpc' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 2);
 	assert.deepEqual(f.completions.map((call) => call.maxTokens), [768, 320]);
 	assert.deepEqual(f.completions.map((call) => call.model), ['openrouter/test/inside', 'openrouter/test/inside']);
@@ -203,6 +205,7 @@ test('unusable explicit analysis routes inherit configured subagent order', asyn
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'inherited' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions[0].model, 'openrouter/test/inside');
 	await f.emit('context', {
 		messages: [{ role: 'user', content: [{ type: 'text', text: promptA }] }],
@@ -220,6 +223,7 @@ test('autonomous route selection enforces the request spend bound and does not i
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'economy' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions[0].model, 'openrouter/test/cheap');
 });
 
@@ -229,7 +233,9 @@ test('extension-generated API messages and missing provenance are excluded even 
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'synthetic', source: 'extension' }));
+	await settleMicroAnalyses();
 	await f.emit('input', { ...input({ prompt: promptA, requestId: 'missing' }), guardianOwnerId: undefined });
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 0);
 	assert.equal(lastMicroRequest('owner-1'), undefined);
 });
@@ -240,6 +246,7 @@ test('an unusable route degrades to labelled deterministic analysis without fabr
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'fallback' , source: 'rpc' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 0);
 	assert.equal(lastMicroRequest('owner-1').promptAnalysis.source, 'fallback');
 	assert.equal(lastMicroRequest('owner-1').advisoryPending, false);
@@ -266,8 +273,10 @@ test('explicit abort prevents stale analysis from reaching context or Guardian',
 	const controller = new AbortController();
 	const pending = f.emit('input', input({ prompt: promptA, requestId: 'aborted', signal: controller.signal }));
 	await started;
-	controller.abort();
 	await pending;
+	assert.equal(lastMicroRequest('owner-1').advisoryPending, true, 'input returns while its analysis is still running');
+	controller.abort();
+	await settleMicroAnalyses();
 	assert.equal(lastMicroRequest('owner-1').advisoryPending, false);
 	assert.equal(f.typedEvents.length, 0);
 	assert.equal(f.uiNotices.length, 0);
@@ -304,6 +313,7 @@ test('queued prompt from a replaced session cannot reset or contaminate the new 
 	assert.deepEqual(f.completions.map((call) => call.requestPrompt.includes('Classify this new user prompt')), [false]);
 	assert.equal(lastMicroRequest('owner-1'), undefined);
 	await f.emit('input', input({ prompt: 'Start a new task. Keep the original response body.', requestId: 'new-c', ownerId: 'owner-2', sessionId: 'session-2' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 2);
 	assert.equal(f.completions[1].maxTokens, 768, 'the replacement session starts with an initial analysis');
 	assert.equal(lastMicroRequest('owner-2').promptAnalysis.taskLabel, 'New session');
@@ -319,6 +329,7 @@ test('two live extension instances with identical prompt text keep request state
 		a.emit('input', input({ prompt: promptA, requestId: 'same-text-a', ownerId: 'owner-a' })),
 		b.emit('input', input({ prompt: promptA, requestId: 'same-text-b', ownerId: 'owner-b' })),
 	]);
+	await settleMicroAnalyses();
 	assert.equal(lastMicroRequest('owner-a').promptAnalysis.taskLabel, 'First session request');
 	assert.equal(lastMicroRequest('owner-b').promptAnalysis.taskLabel, 'Second session request');
 	assert.equal(microRequestAdvice(promptA), undefined, 'ambiguous unscoped lookup abstains with multiple live owners');
@@ -332,6 +343,7 @@ test('large user prompts are hashed, bounded for analysis, and not retained in r
 	const marker = 'PRIVATE-RAW-PROMPT-';
 	const prompt = `Analyze this request. ${marker}${'x'.repeat(1_100_000)}`;
 	await f.emit('input', input({ prompt, requestId: 'large' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 0);
 	const context = await f.emit('context', {
 		messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
@@ -389,6 +401,7 @@ test('a resumed session classifies the first prompt as a follow-up with restored
 	await f.emit('session_start', { reason: 'resume' });
 	const followUp = 'Continue and also handle the timeout case.';
 	await f.emit('input', input({ prompt: followUp, requestId: 'resume-1', sessionId: 'session-resume' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 1);
 	assert.equal(f.completions[0].maxTokens, 320, 'a resumed session must use the lighter follow-up budget');
 	assert.equal(lastMicroRequest('owner-1').promptAnalysis.kind, 'followup');
@@ -401,6 +414,7 @@ test('a resumed session classifies the first prompt as a follow-up with restored
 	t.after(() => fresh.emit('session_shutdown'));
 	await fresh.emit('session_start', { reason: 'new' });
 	await fresh.emit('input', input({ prompt: followUp, requestId: 'fresh-1', sessionId: 'session-fresh' }));
+	await settleMicroAnalyses();
 	assert.equal(fresh.completions[0].maxTokens, 768, 'a new session still receives the full initial analysis');
 });
 
@@ -410,6 +424,7 @@ test('only the newest user request keeps its advisory in later provider payloads
 	t.after(() => f.emit('session_shutdown'));
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'turn-a' }));
+	await settleMicroAnalyses();
 	// Turn A's own provider payload annotates its request.
 	const turnA = await f.emit('context', {
 		messages: [{ role: 'user', content: [{ type: 'text', text: promptA }] }],
@@ -420,6 +435,7 @@ test('only the newest user request keeps its advisory in later provider payloads
 		['turn-a'],
 	);
 	await f.emit('input', input({ prompt: promptB, requestId: 'turn-b' }));
+	await settleMicroAnalyses();
 	const messages = [
 		{ role: 'user', content: [{ type: 'text', text: promptA }] },
 		{ role: 'user', content: [{ type: 'text', text: promptB }] },
@@ -460,6 +476,7 @@ test('startup and reload restore only the active branch, never an abandoned task
 		await f.emit('session_start', { reason: reason === 'tree' ? 'new' : reason });
 		if (reason === 'tree') await f.emit('session_tree');
 		await f.emit('input', input({ prompt: promptB, requestId: `restored-${reason}` }));
+		await settleMicroAnalyses();
 		assert.equal(f.completions[0].maxTokens, 320);
 		assert.match(f.completions[0].requestPrompt, /Active task/);
 		assert.doesNotMatch(f.completions[0].requestPrompt, /Abandoned task/);
@@ -473,11 +490,14 @@ test('vetoed navigation and rejected analysed requests do not replace the accept
 	await f.emit('session_start', { reason: 'new' });
 	const rejected = new AbortController();
 	await f.emit('input', input({ prompt: 'Rejected task.', requestId: 'rejected', signal: rejected.signal }));
+	await settleMicroAnalyses();
 	rejected.abort();
 	await f.emit('input', input({ prompt: promptA, requestId: 'accepted' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions[1].maxTokens, 768, 'rejected preflight is not an initial task');
 	for (const event of ['session_before_switch', 'session_before_fork', 'session_before_tree']) await f.emit(event);
 	await f.emit('input', input({ prompt: promptB, requestId: 'followup' }));
+	await settleMicroAnalyses();
 	assert.equal(f.completions[2].maxTokens, 320);
 	assert.match(f.completions[2].requestPrompt, /Preserve the existing error shape/);
 });
@@ -493,5 +513,6 @@ test('legacy completion observes auth URL overrides', async (t) => {
 	f.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: true, apiKey: 'synthetic', baseUrl: 'http://localhost:43210/v1' });
 	await f.emit('session_start', { reason: 'new' });
 	await f.emit('input', input({ prompt: promptA, requestId: 'url' }));
+	await settleMicroAnalyses();
 	assert.equal(observedUrl, 'http://localhost:43210/v1');
 });

@@ -144,6 +144,50 @@ async function fixture(t, { runner, context, beforeRefresh } = {}) {
  };
 }
 
+test('current source and rendered policy cues require repair or a specific assessment dismissal', async t => {
+ const f=await fixture(t);
+ await f.mutate('ui.css','.answer::before{width:8px;height:8px;border-radius:50%;background:blue}');
+ await f.tool({action:'review'});
+ assert.ok(f.calls[0][0].patterns.some(p=>p.key==='ui-dot-marker'), 'current source is scanned even without authored tool text');
+ const report=f.state().reports.find(r=>r.aspect==='interface');
+ assert.equal(report.outcome,'pass','independent reports remain separate from checkpoint policy obligations');
+ assert.ok(f.state().policyFindings.some(item=>item.detail.includes('ui-dot-marker')));
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'All reviewers reported success and tests passed.'}),/Resolve policy-/);
+ await f.mutate('ui.css','.answer{color:blue}');
+ f.api.result({toolName:'render_see',input:{source:'http://localhost:8000'},details:{noise:{findings:[{kind:'icon-tile',selector:'header > span'}]}}},f.ctx);
+ await f.tool({action:'review'});
+ const blocker=f.state().policyFindings.find(item=>item.detail.includes('ui-icon-tile'));
+ assert.ok(blocker);
+ f.api.restore(f.ctx);
+ assert.ok(f.state().policyFindings.some(item=>item.id===blocker.id),'policy obligations survive resume on the unchanged source');
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'The remaining brand mark looks fine to the reviewer.'}),/Resolve policy-/);
+ await f.tool({action:'assess',disposition:'accepted',reason:'Inspected the supplied user brand and the header at the recorded viewport.',dismissals:[{id:blocker.id,reason:'The supplied brand specification explicitly requires the boxed mark, verified against that source.'}]});
+ assert.equal(f.state().status,'accepted');
+ const lateCapture={toolName:'browser_session',input:{action:'screenshot'},details:{url:'http://localhost:8000',noise:{findings:[{kind:'decorative-dot-marker',selector:'.answer'}]}}};
+ f.api.result(lateCapture,f.ctx);
+ assert.notEqual(f.state().status,'accepted','new rendered policy evidence invalidates the earlier acceptance');
+ const revision=f.state().revision;
+ f.api.result(lateCapture,f.ctx);
+ assert.equal(f.state().revision,revision,'repeated capture findings do not invent source revisions');
+});
+
+test('interface policy is a standing constraint, with baseline and motion evidence for upgrades',()=>{
+ const rubric=reviewAspects(['ui.css'],'Improve the interface')[0].rubric;
+ assert.match(rubric,/generic lightbulb branding/);assert.match(rubric,/muddy orange/);
+ assert.match(rubric,/baseline and final captures/);assert.match(rubric,/constraints as blocking/);
+});
+
+test('an unavailable UI reviewer cannot erase observed policy cues behind a passing peer', async t => {
+ const f=await fixture(t,{runner:async req=>req.aspects.filter(a=>a.id!=='interface').map(a=>pass(a.id))});
+ await f.mutate('src/value.js','export const value=1;');
+ await f.mutate('ui.css','.answer::before{width:8px;height:8px;border-radius:50%;background:blue}');
+ f.tests({need:null,assessment:{disposition:'required',checks:[{key:'test',label:'npm test'}]}});
+ await f.tool({action:'review'});
+ assert.equal(f.state().reports.find(r=>r.aspect==='interface').unavailable,true);
+ assert.ok(f.state().policyFindings.some(c=>c.key==='ui-dot-marker'));
+ await assert.rejects(f.tool({action:'assess',disposition:'accepted',reason:'Tests and a peer passed; the visual reviewer did not return.'}),/Resolve policy-/);
+});
+
 test("routing includes text, CSS/HTML, technical stack, security and delivery without turning every project into a web audit", () => {
  assert.deepEqual(
   reviewAspects(["README.md"]).map((a) => a.id),

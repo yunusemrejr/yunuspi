@@ -6,7 +6,9 @@ export function inspectNoiseState(root, options = {}) {
     scope: 'Visible main-document DOM sample. Patterns can be intentional; inspect these locations before changing them. No aesthetic score, input values or copied page text. New density and font counts use wholly visible text elements in the current viewport; accent checks use intersecting panels; articles, quotations, code and marked user content are excluded. CSS family declarations do not prove which font rendered. Shadow roots, frames and canvas require separate review.',
     limits: {nodes: maxNodes, findings: maxFindings, scanMs: maxMs, animations: 100, textCharsPerElement: 4096}};
   if (!root || !['text/html', 'application/xhtml+xml'].includes(document.contentType)) return result;
-  const excluded = 'script,style,template,input,textarea,select,pre,code,blockquote,q,article,[role="article"],[contenteditable],[data-user-content],[data-yunuspi-noise="ignore"],[hidden],[inert],[aria-hidden="true"]';
+  // aria-hidden only hides from assistive technology. Decorative branding and
+  // dots often use it and still paint pixels, so visual checks must inspect them.
+  const excluded = 'script,style,template,input,textarea,select,pre,code,blockquote,q,article,[role="article"],[contenteditable],[data-user-content],[data-yunuspi-noise="ignore"],[hidden],[inert]';
   const semanticState = '[role="status"],[role="alert"],[role="progressbar"],[role="timer"],[role="log"],[aria-live]:not([aria-live="off"]),[aria-busy],[aria-invalid],[aria-current]';
   const styles = new Map(), rectangles = new Map(), visibility = new Map();
   const styleOf = node => {if (!styles.has(node)) styles.set(node, getComputedStyle(node)); return styles.get(node);};
@@ -58,6 +60,12 @@ export function inspectNoiseState(root, options = {}) {
     const radius = parseFloat(style[key]);
     return Number.isFinite(radius) && (style[key].includes('%') ? radius >= 40 : radius >= size / 3);
   });
+  const hasStateMeaning = node => {
+    const state = node.closest(semanticState);
+    // A live chat/log region announces arbitrary content; it does not make
+    // every decorative marker in that content a necessary state indicator.
+    return state && (state === node || state.childElementCount <= 3 && rectOf(state).height <= 64);
+  };
   const painted = color => !['transparent','rgba(0, 0, 0, 0)'].includes(color) && !/rgba\([^)]*,\s*0\)$/.test(color);
   const animations = document.getAnimations();
   if (animations.length > 100) result.truncated = true;
@@ -130,7 +138,7 @@ export function inspectNoiseState(root, options = {}) {
           const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '').toLowerCase();
           const data = fonts.get(family) ?? {count: 0, node}; data.count++; fonts.set(family, data);
         }
-        if (node.matches('div,section,aside,li,a') && rect.width >= 120 && rect.height >= 32 && !node.closest(semanticState) && !node.querySelector(semanticState)) {
+        if (node.matches('div,section,aside,li,a') && rect.width >= 120 && rect.height >= 32 && !hasStateMeaning(node) && !node.querySelector(semanticState)) {
           // Accent rail: a colored edge (2px+) as the panel's only strong
           // border, or an absolutely positioned pseudo-element bar doing the same.
           if (parseFloat(style.borderLeftWidth) >= 2 && ['borderTopWidth','borderRightWidth','borderBottomWidth'].every(key => parseFloat(style[key]) <= 1) && painted(style.borderLeftColor))
@@ -144,7 +152,7 @@ export function inspectNoiseState(root, options = {}) {
         }
         // Decorative dot: a small painted round mark with no text, prefixing a
         // short label (static or glowing). Live/status semantics are exempt.
-        if (!node.closest(semanticState) && !node.matches('[aria-pressed],[aria-checked],[aria-selected],[role="switch"],[role="checkbox"]') && rect.width <= 320 && rect.height <= 64) {
+        if (!hasStateMeaning(node) && !node.matches('[aria-pressed],[aria-checked],[aria-selected],[role="switch"],[role="checkbox"]') && rect.height <= 64) {
           const label = directText(node);
           if (label && label.length <= 40) {
             const candidates = [...[...node.children].slice(0, 3).map(child => ({element: child, style: styleOf(child), rect: rectOf(child), pseudo: null})),
@@ -160,12 +168,12 @@ export function inspectNoiseState(root, options = {}) {
           }
         }
         // Icon tile: a square (or round) tinted/bordered box wrapping one icon.
-        if (rect.width >= 24 && rect.width <= 72 && Math.abs(rect.width - rect.height) <= 2 && node.childElementCount === 1 && !directText(node) &&
-            (node.firstElementChild.matches('svg,img') || node.firstElementChild.matches('i,span') && !node.firstElementChild.childElementCount && directText(node.firstElementChild).length <= 32) &&
+        if (rect.width >= 24 && rect.width <= 72 && Math.abs(rect.width - rect.height) <= 2 && !directText(node) &&
+            (node.matches('svg') || node.childElementCount === 1 && (node.firstElementChild.matches('svg,img') || node.firstElementChild.matches('i,span') && !node.firstElementChild.childElementCount && directText(node.firstElementChild).length <= 32)) &&
             (painted(style.backgroundColor) || parseFloat(style.borderTopWidth) >= 1 && painted(style.borderTopColor)) && parseFloat(style.borderTopLeftRadius) >= 4 &&
-            !node.matches('button,a[href],input,[role="button"]') && !node.closest(semanticState))
+            !node.matches('button,a[href],input,[role="button"]') && !hasStateMeaning(node))
           tiles.push({node, sizePx: Math.round(rect.width)});
-        if (rect.width <= 300 && rect.height <= 64 && isRounded(style, rect.height) && !node.closest(semanticState) && !node.matches('button,a,input,[role="button"],[role="switch"],[role="checkbox"]')) {
+        if (rect.width <= 300 && rect.height <= 64 && isRounded(style, rect.height) && !hasStateMeaning(node) && !node.matches('button,a,input,[role="button"],[role="switch"],[role="checkbox"]')) {
           // A short status label, actual capsule geometry and repeated dot motion
           // must all agree. Meaningful live regions and state controls are exempt.
           let badgeText = copy, safeLabel = node.childElementCount <= 3;

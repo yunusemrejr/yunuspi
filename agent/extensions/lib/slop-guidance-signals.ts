@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { proseReport } from './code-quality.ts';
 
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|php)$/i;
+export const UI_POLICY_KEYS = new Set(['ui-dot-marker', 'ui-icon-tile', 'ui-accent-rail', 'ui-bulb-brand', 'ui-stock-warm-palette']);
+export const UI_DESIGN_POLICY = 'Existing UI constraints apply even when the prompt does not repeat them: no decorative colored dots before labels, boxed icon badges, ornamental accent rails, generic lightbulb branding, or muddy orange/brass/brown default palettes. Necessary state indicators, real subject matter and explicitly requested branding are contextual exceptions requiring evidence, not blanket exemptions. Preserve or improve existing visual identity, illustration/3D craft and motion; a replacement or a successful screenshot alone is not evidence of improvement. For visual upgrades compare baseline and final captures at the same viewport and relevant animation states. Treat violations of these constraints as blocking, not optional taste polish.';
 const EXCLUDED = /(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|__fixtures__|skills|references)\/|\.(?:min|generated|test|spec)\.|(?:^|\/)SKILL\.md$/i;
 /** Docs-shaped paths document internals legitimately; leakage cues skip them. */
 const DOCS_PATH = /(?:^|\/)(?:docs?|documentation|api-reference|reference|changelog|architecture|adr|design-docs|specs?|guides?)\//i;
@@ -32,6 +34,15 @@ const luminance = (hex: string) => {
   const rgb = [0,2,4].map(i=>parseInt(full.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
   return rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
 };
+const mutedWarmAccent = (hex: string) => {
+  const full = hex.length === 3 ? [...hex].map(c=>c+c).join('') : hex;
+  const [r,g,b] = [0,2,4].map(i=>parseInt(full.slice(i,i+2),16)/255);
+  const hi=Math.max(r,g,b), lo=Math.min(r,g,b), delta=hi-lo, light=(hi+lo)/2;
+  if (!delta || light === 0 || light === 1) return false;
+  const hue=((hi===r ? (g-b)/delta : hi===g ? (b-r)/delta+2 : (r-g)/delta+4)*60+360)%360;
+  const saturation=delta/(1-Math.abs(2*light-1));
+  return hue>=20 && hue<=50 && saturation>=.25 && saturation<=.7 && light>=.25 && light<=.75;
+};
 
 /** Explicit tool check shares the edit-hook policy; absence of cues is not a pass. */
 export function inspectUiSource(file: string, text: string) {
@@ -49,7 +60,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
   if (typeof value !== 'string' || value.length > 24000) return [];
   file = file.replaceAll('\\', '/');
   if (EXCLUDED.test(file)) return [];
-  const ui = UI_FILE.test(file);
+  const ui = UI_FILE.test(file) || /\.[cm]?[jt]s$/i.test(file) && /<style\b|(?:css|styled\.[\w]+)\s*`|(?:textContent|innerHTML)\s*=\s*`[^`]*\{[^`]*[\w-]+\s*:/i.test(value);
   // DOM-generating scripts (vanilla JS/TS builders, template literals) carry
   // markup structure but not authorial stylesheets: markup-shape cues apply,
   // CSS-property cues do not.
@@ -97,7 +108,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       out.push({key:'ui-ai-widget',skill:'product-ui-verification',check:'An AI chat or assistant surface is present. Verify it answers a demonstrated user need rather than riding on availability; a chatbot on a page whose questions a paragraph could answer is insertion, not a feature. If it stays, verify empty, error, rate-limit and keyboard states like any other feature.'});
     // Stylesheet cues need an authorial stylesheet; a script embedding a few
     // declarations (inline styles, CSSOM) cannot establish these patterns.
-    if (!ui) return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
+    if (!ui && !/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text)) return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
     if (/\boutline\s*:\s*(?:none|0)\s*[;}]/i.test(text) || /\b(?:outline-none|focus:outline-none)\b/.test(text))
       add('ui-focus-suppression', 'Focus outline suppression was observed. Verify a visible replacement on the rendered control for keyboard users, including forced colors; another stylesheet or utility may supply it.');
     const families = new Set([...text.matchAll(/\bfont-family\s*:\s*([^;}\n]+)/gi)]
@@ -126,7 +137,14 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if ((text.match(/animation(?:-iteration-count)?\s*:[^;}\n]{0,240}\binfinite\b/gi)||[]).length >= 2)
       out.push({key:'ui-continuous-motion',skill:'ui-antipattern-review',check:'Multiple continuous animations were observed. Check attention, interruption and reduced-motion behavior in the complete component; this partial change cannot establish whether safeguards are missing.'});
   }
+  if (ui || script) {
+    if (/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text))
+      out.push({key:'ui-bulb-brand',skill:'anti-ai-slop',check:'A lightbulb motif occurs in branding. Generic bulb logos are forbidden by the UI policy; use product-specific identity. A lighting control, teaching diagram or explicit user-supplied brand is a different context: verify it rather than removing useful subject matter.'});
+  }
   if (ui) {
+    // Accent tokens, not arbitrary photograph/material colors or warning states.
+    if ([...text.matchAll(/--(?:[\w-]*-)?(?:accent|brand|primary)(?:-[\w-]+)?\s*:\s*#([\da-f]{6}|[\da-f]{3})\b/gi)].some(m=>mutedWarmAccent(m[1])))
+      out.push({key:'ui-stock-warm-palette',skill:'colors',check:'A muted orange/brass/brown accent token matches the rejected default palette. Derive the palette from the actual product and user preferences; do not call a stock brass treatment bespoke. Real subject colors and explicitly requested branding remain valid.'});
     // Color: stock palette and unsystematic hue sprawl (explicit hex outside
     // custom-property definitions; a token system reuses a few values).
     if (STOCK_PALETTE.test(text))
@@ -221,5 +239,5 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if (navLabels.size >= 2)
       push('prose-vague-nav','copywriting','Two or more navigation labels are vague (Insights, Discover, Explore, Solutions, Resources). Name each destination specifically; generic labels force every visitor to click to learn what lives there.');
   }
-  return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
+  return out.sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
 }

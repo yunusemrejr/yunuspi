@@ -25,6 +25,43 @@ function storeFor(t, name = 'project') {
 const remember = (store, text, embedder, extra = {}) => indexEvent(store, store.projectId, { kind: 'decision', text, ...extra }, { embedder });
 const put = (store, id, embedder = 'needle3', embedding = [1, 0], text = `Historical architectural evidence for ${id}`) => store.upsertChunk({ id, project_id: store.projectId, source_type: 'decision', text, content_hash: id, embedder, embedding });
 
+test('automatic indexing retains local semantics during a remote outage and backfills the selected space incrementally', async t => {
+ const {store}=storeFor(t);let calls=0,localCalls=0,now=0,healthy=false;
+ const remoteBackend=remote(async(_url,opts)=>{calls++;return healthy?response(JSON.parse(opts.body).input.map(()=>[0,1,0])):new Response('',{status:503});},{now:()=>now});
+ const e=configuredMemoryEmbedder({}, {openrouter:remoteBackend,needle:local('needle3',async texts=>{localCalls++;return texts.map(()=>[1,0]);})});
+ await remember(store,'Reuse existing orchestration owners instead of adding parallel services.');
+ await remember(store,'Keep the established subsystem boundary for independent review.');
+ const first=await reindexEmbeddings(store,e,{fallback:true});
+ assert.equal(first.embedded,0);assert.equal(first.fallbackEmbedded,2);assert.equal(first.remaining,2);
+ assert.equal(store.embeddingSpaces().find(s=>s.id==='needle3').count,2);
+ const recalled=await retrieveProjectMemory(store,'Existing design contracts',{embedder:e,rerank:false});
+ assert.ok(recalled.stats.degraded.includes('compatible-local-fallback'));
+ assert.equal(calls,1,'cooldown prevents another remote request');
+ const before=localCalls;const retry=await reindexEmbeddings(store,e,{fallback:true});
+ assert.equal(retry.fallbackEmbedded,0);assert.equal(localCalls,before,'unchanged local fallback vectors are reused');
+ healthy=true;now=61000;
+ const resumed=await reindexEmbeddings(store,e,{limit:1});
+ assert.equal(resumed.embedded,1);assert.equal(resumed.remaining,1);
+ assert.equal(store.embeddingSpaces().find(s=>s.id==='needle3').count,1);
+ assert.equal(store.embeddingSpaces().find(s=>s.id===e.id).dim,3);
+ assert.equal((await reindexEmbeddings(store,e)).remaining,0);
+ assert.equal(store.embeddingSpaces().find(s=>s.id==='needle3').count,0);
+});
+
+test('explicit remote migrations and cancelled indexing never substitute another vector space', async t=>{
+ const {store}=storeFor(t);let localCalls=0;
+ await remember(store,'A durable historical constraint remains lexically available.');
+ const e=configuredMemoryEmbedder({}, {openrouter:remote(async()=>new Response('',{status:503})),needle:local('needle3',async()=>{localCalls++;return [[1,0]];})});
+ const result=await reindexEmbeddings(store,e);
+ assert.equal(result.fallbackEmbedded,0);assert.equal(localCalls,0);assert.equal(store.counts().embedded,0);
+ assert.equal((await reindexEmbeddings(store,e,{fallback:true,signal:AbortSignal.abort()})).cancelled,true);
+ assert.equal(localCalls,0);assert.equal(store.lexicalSearch('durable',5).length,1);
+ const {describeIntelligenceActivity}=await import('../agent/extensions/lib/activity-indicators.ts');
+ const activity=describeIntelligenceActivity('ml.project-memory.embedding',{decision:'unavailable',reason:'timeout',durationMs:8000});
+ assert.equal(activity.status,'skip');assert.match(activity.detail,/timeout/);assert.match(activity.detail,/lexical retrieval remains available/);
+ assert.doesNotMatch(activity.detail,/local.*fallback/);
+});
+
 test('OpenRouter uses embeddings endpoint, default model, ordered batches, dedupe and actual usage', async () => {
   const bodies = [];
   const e = remote(async (url, opts) => {
@@ -53,11 +90,12 @@ test('configurable embedding model has its own full vector-space identity', asyn
 
 test('remote boundary redacts credentials, environment secrets, headers and private keys before truncation', async () => {
   const env = { APP_TOKEN: 'short-secret-value', MY_API_KEY: 'synthetic-env-key-value' };
-  const input = 'Authorization: Bearer supersecret\npassword="synthetic small secret" token=abc123 credentials: xyz987\nhttps://u:' + 'pw@example.test/\neyJhbGciOiJIUzI1NiJ9.eyJzZWNyZXQiOiJtZSJ9.signature\nshort-secret-value synthetic-env-key-value synthetic-key\n-----BEGIN ' + 'PRIVATE KEY-----\nPRIVATE MATERIAL\n-----END PRIVATE KEY-----';
+  const token = 'ak_' + 'x'.repeat(28);
+  const input = token + '\nAuthorization: Bearer supersecret\npassword="synthetic small secret" token=abc123 credentials: xyz987\nhttps://u:' + 'pw@example.test/\neyJhbGciOiJIUzI1NiJ9.eyJzZWNyZXQiOiJtZSJ9.signature\nshort-secret-value synthetic-env-key-value synthetic-key\n-----BEGIN ' + 'PRIVATE KEY-----\nPRIVATE MATERIAL\n-----END PRIVATE KEY-----';
   let sent;
   const e = remote(async (_url, opts) => { sent = JSON.parse(opts.body).input[0]; return response([[1, 1]]); }, { env });
   assert.ok(await e.embed([input]));
-  for (const secret of ['supersecret', 'small secret', 'abc123', 'xyz987', 'u:pw', 'signature', 'short-secret-value', 'synthetic-env-key-value', 'synthetic-key', 'PRIVATE MATERIAL']) assert.ok(!sent.includes(secret), secret);
+  for (const secret of [token, 'supersecret', 'small secret', 'abc123', 'xyz987', 'u:pw', 'signature', 'short-secret-value', 'synthetic-env-key-value', 'synthetic-key', 'PRIVATE MATERIAL']) assert.ok(!sent.includes(secret), secret);
   assert.match(sent, /redacted/);
   assert.match(redactSecrets('API_KEY: "synthetic-small"'), /redacted/);
 });
@@ -282,6 +320,25 @@ test('extension exposes status, controlled backfill, and session-scoped recall w
   const migrated = await call('project_memory_reembed', { limit: 2 }); assert.equal(migrated.details.embedded, 0);
   assert.ok(globalThis[PROJECT_MEMORY_RECALL]);
   hooks.get('session_shutdown')({}, ctx); await new Promise(r => setImmediate(r)); assert.equal(globalThis[PROJECT_MEMORY_RECALL], undefined);
+});
+
+test('automatic recall preserves lexical history when semantic work consumes its soft deadline',async t=>{
+ const keepAlive=setInterval(()=>{},1000);t.after(()=>clearInterval(keepAlive));
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();let queries=0;
+ const e=local('fixture',async(texts,opts={})=>{
+  if(opts.inputType!=='query')return texts.map(()=>[1,0]);
+  queries++;
+  return new Promise(resolve=>opts.signal.addEventListener('abort',()=>resolve(null),{once:true}));
+ });
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'deadline'}};
+ hooks.get('session_start')({},ctx);
+ t.after(()=>hooks.get('session_shutdown')({},ctx));
+ await tools.get('project_memory_remember').execute('r',{text:'Reuse architecture decisions and existing routing boundaries.',type:'decision'},undefined,undefined,ctx);
+ const result=await recallProjectContext(dir,'Find architecture decisions about routing boundaries','observer');
+ assert.match(result,/Reuse architecture decisions/);assert.equal(queries,1);
+ assert.match(await recallProjectContext(dir,'Find architecture decisions about routing boundaries','subagent'),/Reuse architecture decisions/);
+ assert.equal(queries,1,'role consumers share the degraded result, too');
 });
 
 test('embedding charges use the existing auxiliary ledger, including paid malformed responses', async () => {
