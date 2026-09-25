@@ -37,12 +37,16 @@ const RUBRICS: Record<string, string> = {
   runtime: 'Check language/runtime contracts (JavaScript, PHP, Python or other touched stack), browser compatibility, resource lifetimes and WebAssembly memory/ABI/fallback behavior where relevant. Require measurements for performance claims.',
   delivery: 'Check the actual target and release configuration, backwards compatibility, environment boundaries and rollback. Distinguish local, staged and observed production behavior; never deploy or access production just to review.',
 };
-export function reviewAspects(files: string[], task = '', history: any[] = []) {
+export function reviewAspects(files: string[], task = '', history: any[] = [], patterns: Array<{key?: string}> = []) {
   const names = files.join('\n'), prose = task.slice(0, 6000);
   const selected = new Set<string>();
   if (files.some(f => /\.(?:[cm]?[jt]sx?|py|php|go|rs|java|c|cc|cpp|cs|sh|sql|ya?ml|toml|json|vue|svelte)$/i.test(f))) selected.add('correctness');
   if (/auth|permission|security|migration|schema|\.sql\b/i.test(names) || /\b(?:security|authentication|authorization)\b/i.test(prose)) selected.add('security');
   if (/\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names) || /\b(?:UI|GUI|interface|accessibility|responsive|desktop app|game|gameplay|windowed|pixel art)\b/i.test(prose)) selected.add('interface');
+  // DOM-generating scripts (vanilla JS/TS builders) touch no UI-file
+  // extension yet render interface. Their markup-shape cues promote the
+  // interface aspect so rendered verification is demanded there too.
+  if (patterns.some(p => typeof p?.key === 'string' && p.key.startsWith('ui-'))) selected.add('interface');
   if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
   if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose)) selected.add('runtime');
   if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
@@ -305,7 +309,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
 		graph = typeof info?.graph === 'string' ? info.graph.slice(0,5000) : graph;
 		history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
 	  } catch {}
-      const aspects = reviewAspects(changed,task,history);
+      const aspects = reviewAspects(changed,task,history,patternReport());
       roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, 'pending'])); emitProgress();
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
       // Admit each completed aspect before the shared deadline. A slow peer

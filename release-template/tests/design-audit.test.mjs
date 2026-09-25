@@ -118,3 +118,29 @@ test('noise review abstains on hidden clones, separate regions, different action
  assert.equal(many.noise.findings.length,6);assert.equal(many.noise.truncated,true);assert.ok(many.noise.visited<=600);
  assert.ok(JSON.stringify(many).length<=14000);
 });
+
+test('design audit counts rendered slop signatures with locations, not verdicts',async()=>{
+ const source=path.join(root,'slop.html');
+ const pills=Array.from({length:7},(_,i)=>`<span class="pill">Tag ${i}</span>`).join('');
+ fs.writeFileSync(source,`<!doctype html><style>
+html,body{background:#111;color:#eee;font:16px Arial;margin:0}main{padding:24px}
+.pill{display:inline-block;padding:4px 16px;border-radius:999px;background:#222}
+.glow{width:120px;height:40px;margin:8px 0;box-shadow:0 0 24px rgba(255,150,50,.55)}
+.drop{width:120px;height:40px;box-shadow:4px 6px 8px rgba(0,0,0,.3)}
+.panel{width:600px;height:300px;border-radius:24px;background:#1a1a1a}
+.gtext{background:linear-gradient(red,blue);-webkit-background-clip:text;background-clip:text;color:transparent}
+.glass{width:200px;height:80px;margin:8px 0;backdrop-filter:blur(12px);background:rgba(255,255,255,.2)}
+.tglow{text-shadow:0 0 12px orange}
+</style><main><div class="panel">Panel</div>${pills}
+<div class="glow"></div><div class="glow"></div><div class="glow"></div><div class="glow"></div><div class="drop"></div>
+<p class="gtext">Gradient headline</p>
+<div class="glass"></div><div class="glass"></div><div class="glass"></div>
+<p class="tglow">Glow one</p><p class="tglow">Glow two</p><p class="tglow">Glow three</p><p class="tglow">Glow four</p></main>`);
+ const rendered=await renderCapture({source,output:'text',width:800,height:600,designAudit:true},path.join(root,'unused-slop.png'));
+ const d=rendered.pageState.design;assert.ok(d);assert.equal(d.version,2);
+ assert.deepEqual(d.slopSignals,{pills:7,glowShadows:4,gradientText:1,glass:3,textGlow:4});
+ const kinds=d.findings.filter(f=>f.kind.startsWith('slop-')).map(f=>f.kind).sort();
+ assert.deepEqual(kinds,['slop-glass','slop-glow-shadows','slop-gradient-text','slop-pills','slop-text-glow']);
+ for(const f of d.findings.filter(f=>f.kind.startsWith('slop-'))){assert.match(f.selector,/:nth-of-type\(/);assert.ok(f.count>=f.threshold);}
+ assert.match(d.limitations,/not verdicts/);
+});
