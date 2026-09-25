@@ -46,6 +46,7 @@ import {
 import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
+import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { enforceShared, getSharedSession, noteUserInput, sharedSourceAudit } from "./lib/intervention-shared.ts";
 import {
@@ -664,6 +665,9 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		pending.delete("unverified-edits");
 		pending.delete("verify-failed");
 		starts.clear();
+		// Pre-run safety snapshot of uncommitted work (private ref, off the
+		// prompt's critical path): a killed long run can always be recovered.
+		void snapshotWorktree(ctx, "pre-run");
 		await projectTests.start(ctx);
 	});
 	pi.on("message_end", async (event, ctx) => {
@@ -818,9 +822,23 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 
 	// Effective context telemetry is owned by session-signals.ts.
 
+	async function snapshotWorktree(ctx: ExtensionContext, reason: string): Promise<void> {
+		try {
+			const sid = sidOf(ctx);
+			if (!sid) return;
+			const snap = await checkpointWorktree(ctx.cwd, sid, reason);
+			if (!snap || snap.reused) return;
+			pi.appendEntry("worktree-checkpoint-v1", { reason, ref: snap.ref, commit: snap.commit, changedCount: snap.changedCount });
+			if (ctx.hasUI) ctx.ui.setStatus("worktree-checkpoint", `💾 checkpoint ${snap.changedCount} file${snap.changedCount === 1 ? "" : "s"}`);
+		} catch {
+			/* a snapshot is a safety net; it must never break the run or shutdown */
+		}
+	}
+
 	pi.on("session_shutdown", async (_event, ctx) => {
 		projectTests.shutdown();
 		quality.shutdown();
+		await snapshotWorktree(ctx, "shutdown");
 		try {
 			writeState(load(sidOf(ctx)));
 		} catch {
