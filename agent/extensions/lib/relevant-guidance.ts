@@ -493,7 +493,7 @@ export function createRelevantGuidance(pi: any) {
     if (sourceReads.size < 2) return;
     const contextSupported = /\.(?:[cm]?[jt]sx?|py)$/i.test(file);
     const owners = contextSupported
-      ? ['module_report', 'context_slice', 'context_code', 'symbol_search']
+      ? ['module_report', 'context_slice', 'symbol_search']
       : ['module_report', 'symbol_search'];
     const owner = owners.find(name => tools().has(name));
     if (!owner) return;
@@ -501,9 +501,7 @@ export function createRelevantGuidance(pi: any) {
       ? `Repeated source reads: use module_report on an explicit path such as ${JSON.stringify(file)} for a compact outline; ${tools().has('read_symbol') ? 'then use read_symbol for one exact body.' : 'then read only the needed region.'} Prefer targeted reads over another whole-file dump.`
       : owner === 'context_slice'
         ? `Repeated source reads: context_slice can rank relevant functions and imports for the current task when given explicit paths including ${JSON.stringify(file)}. Inspect hashes and omissions, then read only the needed regions.`
-        : owner === 'context_code'
-          ? `Repeated source reads: context_code can find relevant code in an explicit path such as ${JSON.stringify(file)}. Use a short identifier and inspect the returned ranges before reading or editing.`
-          : `Repeated source reads: use symbol_search with a short identifier to rank candidate files before another broad text search. Inspect the returned path and line evidence, then read the exact region.`;
+        : `Repeated source reads: use symbol_search with a short identifier to rank candidate files before another broad text search. Inspect the returned path and line evidence, then read the exact region.`;
     add({key:'source-context-navigation',tool:owner,priority:67,sourceFile:file,text});
   };
   const utilityHints = (prompt: string) => {

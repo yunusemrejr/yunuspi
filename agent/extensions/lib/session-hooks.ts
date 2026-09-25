@@ -233,7 +233,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 	{
 		key: "search-fuzzy",
 		tools: ["grep", "find"],
-		line: "No literal match here. If code intelligence is available, try identifier-ranked symbol_search or context_code findText with a shorter identifier; first confirm the search path and pattern.",
+		line: "No literal match here. If code intelligence is available, try identifier-ranked symbol_search with a shorter identifier; first confirm the search path and pattern.",
 		needsEmptyResult: true,
 	},
 ];

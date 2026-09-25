@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3 — 2026-09-26
+
+Tool and hook integrity fixes. Session-hook guidance no longer names the retired `context_code` tool: the empty-search hook points at identifier-ranked `symbol_search` with a shorter identifier, and repeated-read guidance offers only registered structural tools. A new regression test pins every hook rule binding and every guidance tool reference to the registered tool universe.
+
+The installed-verifier manifest now registers the live `completion-gate.ts` and `requirement-ledger.ts` libraries, closing the integrity blind spot for deploy/completion gating and the requirement ledger. The capability inventory is regenerated for the current tool registrations.
+
 ## 0.10.1 — 2026-09-26
 
 UI review now enforces standing anti-slop constraints through the existing checkpoint. Large edits and command-generated source retain bounded checks; interactive browser captures and `render_see` share findings. Visible `aria-hidden` SVG branding, full-width heading dots and decorative markers inside large live regions no longer escape inspection. Interface reviewers must read changed implementation source, budget representative screenshots, and compare baseline/final evidence for visual, 3D and motion upgrades. Unaddressed policy cues block acceptance unless repaired or dismissed with specific evidence; they remain separate from independent reviewer reports.

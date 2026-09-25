@@ -3248,7 +3248,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 206,
+        "line": 216,
         "kind": "literal"
       },
       {
@@ -3610,13 +3610,13 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 361,
+        "line": 371,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 703,
+        "line": 722,
         "kind": "literal"
       },
       {
@@ -3830,7 +3830,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 206,
+        "line": 216,
         "kind": "literal"
       },
       {
@@ -4052,13 +4052,13 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 361,
+        "line": 371,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 703,
+        "line": 722,
         "kind": "literal"
       },
       {
@@ -4313,7 +4313,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 634,
+      "sourceFiles": 636,
       "registrationSites": 76,
       "indirectRegistrationSites": 18,
       "stableRegistrationRows": 103,
@@ -4572,6 +4572,10 @@
       },
       {
         "path": "agent/extensions/lib/compaction-policy.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/completion-gate.ts",
         "exists": true
       },
       {
@@ -4892,6 +4896,10 @@
       },
       {
         "path": "agent/extensions/lib/request-compat.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/requirement-ledger.ts",
         "exists": true
       },
       {
