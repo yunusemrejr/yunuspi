@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { inspectPageState } from "./render-page-state.mjs";
 import { inspectDesignState } from "./render-design-state.mjs";
 import { inspectNoiseState } from "./render-noise-state.mjs";
-import { renderNavigationFailure } from "./browser-diagnostics.mjs";
+import { renderNavigationFailure, safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
@@ -43,6 +43,17 @@ function preflightUnreachable(error) {
     if (Array.isArray(item.errors)) pending.push(...item.errors.slice(0, 8));
   }
   return false;
+}
+/** Caller-supplied source echo for ENOENT failures. The caller provided this
+ * value, so repeating it exposes no page-discovered data; HTTP queries are
+ * still stripped. Empty unless the missing path is the source itself rather
+ * than a helper executable or a later-stage artifact. */
+export function enoentSourceHint(source, stage, error) {
+  if (stage !== "source") return "";
+  const missing = error?.path;
+  if (typeof missing === "string" && !/[/\\]/.test(missing) && /[/\\]/.test(String(source))) return "";
+  const text = /^https?:\/\//i.test(String(source)) ? safeBrowserUrl(source) : String(source);
+  return ` (${text.slice(0, 256)})`;
 }
 /** Bounded readiness probe for remote renders. Resolves when any HTTP
  * response (any status) proves a listener; throws the structured navigation
@@ -631,7 +642,7 @@ export async function renderCapture(p, output, signal) {
           : /strict mode violation/.test(String(e.message))
             ? "ambiguous selector; inspect current DOM and choose one target"
         : e.code === "ENOENT"
-          ? "ENOENT: source not found"
+          ? `ENOENT: source not found${enoentSourceHint(p.source, stage, e)}`
           : browserStarting
             ? "browser startup failure"
             : e.name === "TimeoutError" || Date.now() - start >= ms
