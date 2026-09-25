@@ -659,6 +659,7 @@ export function createRelevantGuidance(pi: any) {
     if (text && unique.length > 1) {
       const head = unique.slice(0, 12).map(skill => ({ id: skill.file, text: `${skill.name}: ${skill.description}`, skill }));
       const outcome = await multiStageRetrieve({ kind: 'skill', site: 'rank', query: text, lexical: head,
+        local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options),
         needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }) }).catch(() => undefined);
       if (outcome && outcome.applied !== 'lexical') unique = [...outcome.ordered.map(entry => entry.skill), ...unique.slice(12)];
     }

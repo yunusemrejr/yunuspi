@@ -2,7 +2,7 @@
 
 The workdir-level semantic memory spine. Each project owns one SQLite index
 (`<projectsDir>/<project-id>/memory.sqlite`) holding chunk text + metadata,
-an FTS5 lexical index, and Needle3 embedding vectors. JSONL transcripts and
+an FTS5 lexical index, and compatible Needle3 or OpenRouter embedding vectors. JSONL transcripts and
 Markdown stay the auditable source of truth; this store is a lossy,
 rebuildable **index over project history**, never the authority.
 
@@ -19,7 +19,10 @@ agent/extensions/lib/project-vector-store.ts    SQLite schema, FTS5, vector simi
 agent/extensions/lib/project-memory-index.ts    chunking, enrichment, events, embeddings
 agent/extensions/lib/project-memory-retrieve.ts hybrid retrieval, role policies, families
 agent/extensions/lib/project-memory-consolidate.ts clustering + canonical facts
-tests/project-vector-memory.test.mjs            33 tests (mirrored to release-template/tests)
+agent/extensions/lib/project-memory-embedder.ts local/remote transports, space contracts
+agent/extensions/lib/project-memory-context.ts  session-scoped access for existing consumers
+tests/project-vector-memory.test.mjs            storage, retrieval, family and extension tests
+tests/project-memory-openrouter.test.mjs        transport, migration and failure contracts
 ```
 
 ## Storage layout
@@ -48,6 +51,65 @@ over normalized BLOBs — no sqlite-vec dependency; project-scale corpora
 Concurrent sessions share one DB file: WAL + `busy_timeout=10s` lets writers
 queue instead of failing, and registry updates serialize on an atomic-mkdir
 lock (stale locks expire; a stuck lock never blocks resolution).
+
+## Embedding configuration and migration
+
+`PI_MEMORY_EMBEDDER=openrouter` is the enabled default, using
+`qwen/qwen3-embedding-8b`. Remote service failure never prevents lexical recall;
+compatible stored Needle3 vectors can serve as a local fallback.
+`PI_MEMORY_EMBEDDER=auto` prefers healthy Needle3, then OpenRouter, and pins the
+first successful space for that session owner.
+`PI_MEMORY_EMBEDDER=needle` selects local embeddings explicitly.
+`PI_MEMORY_EMBEDDING_MODEL` overrides the default OpenRouter model.
+OpenRouter credentials reuse the existing provider key resolver (configured
+OpenRouter key, then `OPENROUTER_API_KEY`). `PI_OFFLINE=1` prevents remote calls.
+
+OpenRouter uses `/api/v1/embeddings`, not completions. Requests batch up to 16
+texts, each at most 2,000 characters after redaction. Qwen query inputs use its
+[documented retrieval instruction](https://huggingface.co/Qwen/Qwen3-Embedding-8B);
+document inputs remain plain. A bounded cache reuses identical sanitized inputs.
+Each operation has an eight-second deadline; transport, authentication, rate
+limit, malformed/partial response, non-finite vectors, zero vectors, model and
+dimension mismatches fail without breaking lexical memory. Failed transports
+cool down; cancellation does not poison provider health. Usage includes actual
+provider token and cost fields, including paid responses rejected by validation.
+
+Schema v2 migrates existing SQLite databases additively. `embedding_spaces`
+persists backend, full model, representation version, observed dimension and
+creation time. Each chunk records its space and embedding timestamp. Dimensions
+are learned from real responses and pinned; equal dimensions alone never imply
+compatible vectors. Existing Needle3 data remains readable. Each chunk has one
+vector: explicitly migrating it replaces that vector while retaining its text,
+FTS entry, content hash, provenance and temporal history. Different chunks can
+coexist in different spaces, and retrieval only compares compatible ones.
+
+For a Qwen migration, select OpenRouter in the session configuration and call:
+
+```text
+project_memory_reembed backend=openrouter model=qwen/qwen3-embedding-8b limit=32
+```
+
+Repeat to resume until `remaining=0`. The limit is 1–256 chunks; successful
+batches are durable, interrupted batches remain eligible, and unchanged compatible
+content is not embedded again. This tool does not change the session's configured
+backend. Unchanged content re-indexed after a model change is also eligible for
+bounded backfill. Queries never implicitly upload the existing corpus. If Qwen
+is unavailable, retrieval can use existing compatible Needle3 chunks; otherwise
+FTS5 still serves. It never compares a Qwen query against Needle3 document vectors.
+
+Raw tool-result exhaust and automatic file-edit markers stay lexical. Explicitly
+indexed code and durable decisions, corrections, architecture, observations,
+regressions, errors, summaries, commits and todos remain eligible. Credential
+files and symlink paths are refused. Shared redaction removes known key formats,
+private keys, authorization headers, credential assignments, credential URLs,
+JWTs and secret environment values before remote transmission. Only bounded
+retrieval text is sent; repositories are not uploaded automatically.
+
+`project_memory_status` and `/project-memory` show the selected backend/model,
+observed dimension, vector spaces and counts, Qwen3/Needle3/unembedded counts,
+backfill progress, lexical/vector/reranker state and the last embedding error.
+Embedding and recall events also enter the existing health/activity surfaces.
+Status never makes a provider request.
 
 ## Project identity
 
@@ -98,13 +160,17 @@ as health notes, never session errors. `PI_PROJECT_MEMORY=off` disables all.
 ## Retrieval
 
 Hybrid pipeline: FTS5/BM25 lexical candidates (exact identifiers, commit
-shas) plus Needle cosine candidates, fused by reciprocal rank, scored by
+shas) plus compatible semantic candidates, fused by reciprocal rank, scored by
 role policy (type weights × recency × authority × importance), then one
 shared Needle re-rank over the merged head. Without embeddings the lexical
 baseline still serves; degradation is reported in `stats.degraded`, never
-silent. The re-ranker is local Needle, not remote JEV: retrieval stays
-offline and free, and JEV remains available as an opt-in escalation for
-judgment calls, mirroring its role elsewhere in the harness. Tombstoned/superseded chunks stay retrievable for provenance at
+silent. The optional re-ranker remains local Needle. Short exact technical
+lookups with strong lexical evidence skip embeddings and reranking. Longer natural
+questions omit common stop words without removing terms from literal queries.
+For Qwen3, a conservative cosine floor (0.42), a band within 0.08 of the best
+candidate and at most eight candidates keep weak semantic tails out of fusion.
+Those admitted candidates receive a 1.5 RRF weight; existing role/importance/type
+weights still apply. Needle's compressed cosine scale does not use Qwen's gates. Tombstoned/superseded chunks stay retrievable for provenance at
 ×0.25 score unless `include_superseded`.
 
 Role policies (`role` param) — same store, different ranking:
@@ -136,6 +202,7 @@ Siblings are excluded by design.
 | `project_memory_index_path` | index a repo file (regular files ≤ 500 KiB, no symlinks) |
 | `project_memory_forget` | tombstone by id (provenance kept, restorable) |
 | `project_memory_restore` | clear a tombstone |
+| `project_memory_reembed` | controlled compatible-vector backfill (`backend`, `model`, `limit`) |
 | `project_memory_consolidate` | cluster + ratify canonical facts (dry-run default) |
 
 `/project-memory` prints status plus recent entries. Subagent children get
@@ -146,56 +213,32 @@ writer, mirroring the harness child-mutation policy).
 
 `project_memory_consolidate` (or `findClusters` + `consolidate`) groups
 near-duplicate same-concept chunks (Jaccard ≥ 0.5, or cosine ≥ 0.92 with
-vectors), picks the canonical survivor (highest authority, then newest),
+compatible stored vectors and Jaccard ≥ 0.25), picks the canonical survivor (highest authority, then newest),
 boosts it to authority 1.0, and tombstones members with backlinks. History
 is never deleted. Dry-run by default; agent-authored canonicals via
 `project_memory_remember` with `supersedes=[…]` always outrank engine output
-(the engine ratifies, never invents).
+(the engine ratifies, never invents). It reuses persisted vectors and makes no
+embedding requests; proposed clusters remain reviewable in dry-run output.
 
 ## Consumer integration
 
-**Main agent.** Tools are registered in-session; search before implementing
-in unfamiliar subsystems, remember durable decisions after. No code changes
-needed.
+**Main agent and subagents.** The existing once-per-session memory priming
+flow includes cited project-vector history using the `main` or `subagent` policy.
+`/memory-prime` still controls that flow. Search/status tools remain available for
+explicit recall; children cannot mutate memory.
 
-**Subagents.** `project_memory_search` (role `subagent`) and
-`project_memory_status` are available in children. Child prompts that need
-project context should name the subsystem; retrieval handles the rest.
+**Observer and Watchmaker.** Each accepted task starts one bounded background
+recall using its role policy. Repeated periodic reviews reuse the result. The
+observer receives previous mistakes, corrections, constraints and rejected
+approaches; Watchmaker receives historical progress evidence. Results pass through
+the existing evidence packets and byte budgets and cannot create requirements.
+Session-owner and task-generation guards reject stale replies.
 
-**Session observer** (`agent/extensions/session-observer.ts`,
-`lib/session-observer.ts`, `lib/observer-book.ts`). Programmatic access
-from any lib/extension module — no tool round-trip:
-
-```ts
-import { openProjectStore } from "./project-vector-store.ts";
-import { needleMemoryEmbedder } from "./project-memory-index.ts";
-import { retrieveProjectMemory } from "./project-memory-retrieve.ts";
-import { projectDbPath, resolveProjectIdentity } from "./project-identity.ts";
-
-const identity = resolveProjectIdentity(ctx.cwd);
-const store = openProjectStore(projectDbPath(identity), { projectId: identity.id });
-try {
-  const { hits } = await retrieveProjectMemory(store, focusText, {
-    role: "observer", limit: 5, embedder: needleMemoryEmbedder(),
-  });
-  // hits[].chunk: { id, source_type, source_path, text, authority, … }
-} finally {
-  store.close();
-}
-```
-
-Suggested observer query shape: "previous mistakes, regressions, unresolved
-issues, or architectural constraints relevant to <current focus>". Keep the
-observer's existing lexical/Needle selection as the primary signal; project
-memory is corroborating cross-session evidence. Recording durable observer
-insights: `indexEvent(store, id, { kind: "observation", … })`.
-
-**Watchmaker** (`agent/extensions/session-watchmaker.ts`,
-`lib/session-watchmaker.ts`). Same import surface with `role: "watchmaker"`
-and progress-oriented queries ("recent outcomes, commits, stalls, open work
-for <task>"); family scope shows sub-project progress too. Watchmaker's
-time-only packet stays authoritative — memory adds cross-session progress
-context, never timestamps.
+All consumers call the session-scoped vector-memory owner. Identical task queries
+share one embedding across all four policy views and the project family, without
+extra remote reranking calls. Automatic priming waits at most 1.2 seconds; slow
+or unavailable helpers leave the session running normally. Structural code questions
+still belong to AST/LSP/project-intelligence tools.
 
 **Other extensions.** Import from `lib/project-*.ts` (same directory, no
 new dependencies beyond `node:sqlite` + `typebox`). Reuse
@@ -207,7 +250,8 @@ hashes; never write `chunks` rows by hand.
 
 | Condition | Behavior |
 |---|---|
-| Needle missing/unhealthy | lexical-only retrieval; chunks stored unembedded; `reindexEmbeddings` backfills later |
+| Needle missing/unhealthy | auto can select OpenRouter; otherwise lexical recall and controlled backfill |
+| OpenRouter unavailable or incompatible | compatible local vectors or lexical retrieval, with explicit health state |
 | `node:sqlite` unavailable | tools report "unavailable"; session unaffected |
 | corrupt `registry.json` | quarantined to `registry.corrupt-*.json`; explicit/git keys re-resolve |
 | schema mismatch | open throws with versions; extension reports outage via status |
@@ -221,3 +265,12 @@ durable source. `~/.pi/agent/projects/` (registry + per-project SQLite) is
 runtime state: never commit it, never export it. `scripts/install.mjs
 --apply` installs the extension; `--preserve-state` keeps memory across
 reinstalls.
+
+## Reproducible comparison
+
+Run `node scripts/benchmark-project-memory.mjs --live` to compare lexical-only,
+lexical + real Needle3, and lexical + real OpenRouter Qwen3. Only the checked-in
+public synthetic fixture is transmitted. The script reports relevance ranks,
+false-positive occupancy, indexing/query latency, calls, tokens and current
+provider pricing. Reranking is disabled equally for the three configurations.
+See [the measured report](PROJECT-MEMORY-EVALUATION.md) for results and limits.

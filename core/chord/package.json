@@ -1,6 +1,6 @@
 {
   "name": "@yunuspi/chord",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "description": "Application composition runtime for services, replicated state, RPC, and plugins",
   "type": "module",
   "main": "./dist/index.js",

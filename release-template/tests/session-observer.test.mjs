@@ -585,3 +585,20 @@ test('Guardian advice reaches reviewer deduplication, while status and another o
   assert.equal(other.packets[0].evidence.some(row => row.kind === 'peer reviewer note' && row.text.includes('Guardian already told')), false);
   h.close(); other.close();
 });
+
+test('observer receives role-specific project history once per accepted task and drops stale recall', async () => {
+  const key = Symbol.for('yunus-pi.project-memory-recall.v1'), prior = globalThis[key], roles = [];
+  globalThis[key] = async (_cwd, _query, role) => { roles.push(role); return '[mem_fixture] Prior correction: verify parser recovery before suggesting a rewrite.'; };
+  const h = harness();
+  try {
+    h.input('Review parser recovery against prior mistakes'); await flush(); await h.advance(30000);
+    assert.deepEqual(roles, ['observer']); assert.match(h.packets[0].text, /Prior correction/);
+    await h.advance(30000); assert.equal(roles.length, 1, 'periodic reviews reuse the same historical evidence');
+    let finish; globalThis[key] = async () => new Promise(resolve => { finish = resolve; });
+    h.input('Inspect a different parsing approach'); await flush();
+    h.ctx.sessionManager = h.newManager(); h.emit('session_switch');
+    finish('STALE_HISTORICAL_REPLY'); await flush();
+    h.input('Review current parsing code after switching'); await flush(); finish('Current history'); await flush(); await h.advance(30000);
+    assert.ok(h.packets.every(p => !p.text.includes('STALE_HISTORICAL_REPLY')));
+  } finally { h.close(); if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});

@@ -54,7 +54,7 @@ test("cascade tries tilde latest, then pinned, then discovered variations", asyn
   seen.length = 0;
   const second = await jev.askJev("probe", "different state here", { ping: { type: "noul", instructions: "Affirmative?" } }, { pi });
   assert.equal(second.ok, true);
-  assert.deepEqual(seen, ["typesafe/jev-9.9"]);
+  assert.deepEqual(seen, [jev.KEV_SLUG, "typesafe/jev-9.9"], "the other family is tried, then the working Jev alias takes over");
 });
 
 test("transport failure opens the breaker and background probe recovers", async () => {
@@ -389,11 +389,11 @@ test('one deadline bounds the entire alias cascade and reports an error-colored 
   try {
     const started = performance.now();
     const result = await jev.askJev('deadline', 'synthetic evidence', { ping: { type: 'noul' } });
-    assert.equal(result.skipped, 'timeout');
+    assert.ok(['timeout', 'unavailable'].includes(result.skipped), 'the overall or both route deadlines stop work');
     assert.ok(performance.now() - started < 250);
     assert.equal(states.at(-1), 'error');
     assert.ok(states.includes('jev'));
-    assert.equal(jev.jevHealth().state, 'closed');
+    assert.equal(jev.jevHealth().state, 'open', 'both independently timed-out routes cool down');
   } finally {
     jev.configureJevClient({ requestTimeoutMs: jev.JEV_REQUEST_TIMEOUT_MS });
     if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
@@ -432,4 +432,68 @@ test('Jev admission failures, remote failures and recovery publish sanitized per
     delete process.env.PI_JEV;
     if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
   }
+});
+
+test('healthy Jev and Kev split uncached decisions and retain cache attribution', async () => {
+  const models = [];
+  harness(async (_url, { body }) => { const { model } = JSON.parse(body); models.push(model); return jsonOk({ answers: ANSWERS, usage: { input_tokens: 37, cost: 0.000001554 } }); });
+  const questions = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  for (let i = 0; i < 6; i++) {
+    const result = await jev.askJev('balanced', `unique task ${i}`, questions);
+    assert.equal(result.ok, true); assert.equal(result.usage.inputTokens, 37); assert.equal(result.usage.costUsd, 0.000001554);
+  }
+  assert.deepEqual(models, Array.from({ length: 6 }, (_, i) => i % 2 ? jev.KEV_SLUG : '~typesafe/jev-latest'));
+  const cached = await jev.askJev('balanced', 'unique task 1', questions);
+  assert.equal(cached.usage.model, jev.KEV_SLUG); assert.equal(cached.usage.cached, true); assert.equal(models.length, 6);
+});
+
+test('concurrent decisions balance active load without sharing unrelated results', async () => {
+  const models = [], waiting = [];
+  harness(async (_url, { body }) => { models.push(JSON.parse(body).model); return new Promise(resolve => waiting.push(() => resolve(decisionsOk()))); });
+  const calls = Array.from({ length: 4 }, (_, i) => jev.askJev('parallel', `independent question ${i}`, { ping: { type: 'noul', instructions: 'Relevant?' } }));
+  for (let i = 0; i < 100 && waiting.length < 4; i++) await new Promise(r => setTimeout(r, 1));
+  assert.equal(models.filter(m => m === jev.KEV_SLUG).length, 2);
+  waiting.forEach(done => done());
+  assert.ok((await Promise.all(calls)).every(result => result.ok));
+  assert.ok(jev.jevHealth().routes.every(route => route.active === 0));
+});
+
+for (const failure of ['rate-limit', 'outage', 'network', 'malformed']) test(`${failure} cools only the failing judge and the other serves subsequent tasks`, async () => {
+  const models = [];
+  harness(async (_url, { body }) => {
+    const model = JSON.parse(body).model; models.push(model);
+    if (model === jev.KEV_SLUG) return decisionsOk();
+    if (failure === 'network') throw Error('connection failed');
+    if (failure === 'malformed') return jsonOk({ answers: {} });
+    return httpFail(failure === 'rate-limit' ? 429 : 503, 'temporary failure');
+  });
+  const q = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  assert.equal((await jev.askJev('failover', 'first task here', q)).usage.model, jev.KEV_SLUG);
+  assert.equal((await jev.askJev('failover', 'next task here', q)).usage.model, jev.KEV_SLUG);
+  assert.deepEqual(models, ['~typesafe/jev-latest', jev.KEV_SLUG, jev.KEV_SLUG]);
+  assert.equal(jev.jevHealth().state, 'closed');
+});
+
+test('Jev takes over a failed Kev turn without changing the main model route', async () => {
+  const models = [];
+  harness(async (_url, { body }) => { const model = JSON.parse(body).model; models.push(model); return model === jev.KEV_SLUG ? httpFail(503, 'outage') : decisionsOk(); });
+  const q = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  await jev.askJev('reverse', 'first task warm', q);
+  assert.equal((await jev.askJev('reverse', 'second task fallthrough', q)).usage.model, '~typesafe/jev-latest');
+  assert.deepEqual(models, ['~typesafe/jev-latest', jev.KEV_SLUG, '~typesafe/jev-latest']);
+});
+
+test('a slow Jev route leaves deadline budget for Kev; caller cancellation poisons neither', async () => {
+  harness(async (_url, { body, signal }) => JSON.parse(body).model === jev.KEV_SLUG ? decisionsOk() : new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
+  jev.configureJevClient({ requestTimeoutMs: 100 });
+  const q = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  const result = await jev.askJev('bounded', 'first task timeout', q);
+  assert.equal(result.ok, true); assert.equal(result.usage.model, jev.KEV_SLUG);
+  harness(async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
+  const c = new AbortController();
+  const pending = jev.askJev('cancel', 'cancel this task', q, { signal: c.signal });
+  await new Promise(r => setImmediate(r)); c.abort();
+  assert.equal((await pending).skipped, 'aborted');
+  assert.equal(jev.jevHealth().state, 'closed');
+  assert.ok(jev.jevHealth().routes.every(route => route.state !== 'cooling'));
 });

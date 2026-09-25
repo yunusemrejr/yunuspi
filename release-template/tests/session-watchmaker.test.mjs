@@ -26,6 +26,9 @@ function clock() {
 }
 
 test('watchmaker tracks time, memos conclusions, and skips output bodies', async (t) => {
+  const memoryKey = Symbol.for('yunus-pi.project-memory-recall.v1'), oldMemory = globalThis[memoryKey], memoryRoles = [];
+  globalThis[memoryKey] = async (_cwd, _query, role) => { memoryRoles.push(role); return '[mem_fixture] Historical stall: repeated source reads delayed the last fix.'; };
+  t.after(() => { if (oldMemory === undefined) delete globalThis[memoryKey]; else globalThis[memoryKey] = oldMemory; });
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'watchmaker-'));
   const previous = Object.fromEntries(['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_WATCHMAKER', 'PI_OBSERVER_TOOLS'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { PI_CODING_AGENT_DIR: cwd, PI_LLM_PREFERENCES_FILE: path.join(cwd, 'prefs.json'), PI_SUBAGENTS_ECONOMY_CONFIG: path.join(cwd, 'economy.json'), PI_PROVIDER_STATE_FILE: path.join(cwd, 'health.json'), PI_MODEL_EXCLUSIONS_PATH: path.join(cwd, 'exclusions.json') });
@@ -84,6 +87,7 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
   await time.advance(60000);
   await waitForNotes(1);
   assert.match(packets[0], /Guardian already told/);
+  assert.match(packets[0], /Historical stall/); assert.deepEqual(memoryRoles, ['watchmaker']);
   assert.ok(packets[0].includes('STALL: 0 edits'), 'pace row names the stall from counts');
   assert.ok(!packets[0].includes(marker), 'tool output bodies never enter the packet');
   assert.ok(Buffer.byteLength(packets[0], 'utf8') < 7000, 'packet stays small');

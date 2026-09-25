@@ -141,3 +141,47 @@ test('asset verification reports what is missing without touching the network', 
     assert.match(assets.LOCAL_LM_PINNED_FILES[1].url, /resolve\/[0-9a-f]{40}\//, 'the model is pinned to an immutable revision');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+const choiceCandidates = [{ id: 'read', text: 'Read file contents' }, { id: 'browser', text: 'Browse websites and take screenshots' }, { id: 'sql', text: 'Run database queries' }];
+const choiceResponse = (pairs) => new Response(JSON.stringify({ tokens_evaluated: 100, completion_probabilities: [{ top_probs: pairs.map(([token, prob]) => ({ token, prob })) }] }));
+
+test('local choice accepts only confident exact option tokens and memoizes bounded decisions', async () => {
+  const prev = process.env.PI_LOCAL_LM; delete process.env.PI_LOCAL_LM;
+  try {
+    let calls = 0, now = 0;
+    const lm = L.createLocalLm({ runtime, now: () => now, fetch: async (_url, { body }) => { if (JSON.parse(body).n_predict === 0) return new Response('{}'); calls++; return choiceResponse([[' B', .93], [' A', .03], [' N', .02]]); } });
+    const task = 'Take a screenshot of this website';
+    assert.equal((await lm.choose(task, choiceCandidates, 'tool-discover')).id, 'browser');
+    assert.equal((await lm.choose(task, choiceCandidates, 'tool-discover')).cached, true); assert.equal(calls, 1);
+    await lm.choose(task, [...choiceCandidates].reverse(), 'tool-discover'); assert.equal(calls, 2, 'candidate identity/order is part of the cache key');
+    now = 300_001; await lm.choose(task, choiceCandidates, 'tool-discover'); assert.equal(calls, 3);
+  } finally { if (prev === undefined) delete process.env.PI_LOCAL_LM; else process.env.PI_LOCAL_LM = prev; }
+});
+
+test('uncertain, irrelevant, malformed and oversized local choices abstain without deleting options', async () => {
+  const prev = process.env.PI_LOCAL_LM; delete process.env.PI_LOCAL_LM;
+  try {
+    for (const pairs of [[[' B', .2], [' A', .1]], [[' N', .95], [' B', .01]], [[' Browser', .95]], [[' Z', .96]], [[' B', .9], [' A', .9]], [[' B', NaN]]]) {
+      const lm = L.createLocalLm({ runtime, fetch: async () => choiceResponse(pairs) });
+      assert.equal((await lm.choose('Find useful tools for the current task', choiceCandidates, 'tool-discover')).ok, false, JSON.stringify(pairs));
+    }
+    const lm = L.createLocalLm({ runtime, fetch: async () => { throw Error('must not run'); } });
+    for (const [task, candidates] of [['x', choiceCandidates], ['a'.repeat(801), choiceCandidates], ['valid long task', [choiceCandidates[0]]], ['valid long task', [choiceCandidates[0], choiceCandidates[0]]]]) assert.equal((await lm.choose(task, candidates, 'test')).reason, 'input-budget');
+    assert.equal(L.yesProbability({ completion_probabilities: [{ top_probs: [{ token: ' yesterday', prob: 1 }] }] }), undefined);
+    assert.equal(L.yesProbability({ completion_probabilities: [{ top_probs: [{ token: ' yes', prob: Infinity }] }] }), undefined);
+  } finally { if (prev === undefined) delete process.env.PI_LOCAL_LM; else process.env.PI_LOCAL_LM = prev; }
+});
+
+test('queued local requests cancel promptly and pending work respects newly opened breaker', async () => {
+  let release, calls = 0;
+  const lm = L.createLocalLm({ runtime, fetch: async () => { calls++; return new Promise(resolve => { release = () => resolve(probs(.9, .1)); }); } });
+  const active = lm.judge('active', 'test');
+  for (let i = 0; i < 20 && !release; i++) await new Promise(r => setImmediate(r));
+  const c = new AbortController(), queued = lm.judge('queued', 'test', { signal: c.signal });
+  await new Promise(r => setImmediate(r)); c.abort();
+  assert.equal((await queued).reason, 'cancelled'); assert.equal(calls, 1); release(); assert.equal((await active).ok, true);
+  let failures = 0;
+  const failing = L.createLocalLm({ runtime, fetch: async () => { failures++; await new Promise(r => setTimeout(r, 1)); throw Error('down'); } });
+  const results = await Promise.all(Array.from({ length: 7 }, () => failing.judge('queued before outage', 'test')));
+  assert.equal(failures, 3); assert.equal(results.filter(r => r.reason === 'paused').length, 4);
+});

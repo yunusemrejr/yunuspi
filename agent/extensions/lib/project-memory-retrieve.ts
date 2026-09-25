@@ -18,6 +18,7 @@
 
 import { needleRank } from "./needle-runtime.ts";
 import { TYPE_WEIGHTS, type MemoryEmbedder } from "./project-memory-index.ts";
+import { DEFAULT_MEMORY_EMBEDDING_MODEL, embedMemory, type MemoryEmbedding } from "./project-memory-embedder.ts";
 import { type ChunkType, type ProjectVectorStore, type StoredChunk, isChunkType } from "./project-vector-store.ts";
 
 export type RetrievalRole = "main" | "observer" | "subagent" | "watchmaker";
@@ -98,6 +99,7 @@ export interface MemoryHit {
   signals: {
     lexicalRank: number | null;
     vectorRank: number | null;
+    vectorScore?: number;
     fused: number;
     reranked: boolean;
   };
@@ -115,6 +117,7 @@ export interface RetrieveOptions {
   /** False disables the re-rank stage (lexical+vector fusion only). */
   rerank?: Ranker | false;
   now?: () => number;
+  signal?: AbortSignal;
 }
 
 export interface RetrieveResult {
@@ -126,6 +129,8 @@ export interface RetrieveResult {
     reranked: boolean;
     ms: number;
     degraded: string[];
+    space?: string;
+    semanticSkipped?: string;
   };
 }
 
@@ -133,10 +138,45 @@ function rrf(rank: number, k = 60): number {
   return 1 / (k + rank + 1);
 }
 
+interface QueryEmbedding { batch: MemoryEmbedding | null; degraded: string[]; skipped?: string }
+
+const containsLiteralTerms = (chunk: StoredChunk, query: string): boolean => {
+  const text = `${chunk.title}\n${chunk.text}`.toLowerCase();
+  return query.toLowerCase().split(/\s+/).every(term => text.includes(term));
+};
+
+/** Literal symbol/path lookups already have strong lexical evidence. Keep
+ * that evidence first and avoid both embedding and reranking calls. */
+function exactLookup(stores: ProjectVectorStore[], query: string): boolean {
+  if (query.split(/\s+/).length > 3 || !/(?:[_.\/:]|[a-z][A-Z]|\b[A-Z][A-Z0-9]{2,}\b|^[a-f0-9]{7,40}$)/.test(query)) return false;
+  return stores.some(store => store.getChunks(store.lexicalSearch(query, 8).map(hit => hit.id))
+    .some(chunk => containsLiteralTerms(chunk, query)));
+}
+
+async function queryEmbedding(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions): Promise<QueryEmbedding> {
+  if (exactLookup(stores, query)) return { batch: null, degraded: [], skipped: 'exact-lexical' };
+  if (opts.signal?.aborted) return { batch: null, degraded: ['cancelled'] };
+  const spaces = stores.flatMap(store => store.embeddingSpaces().filter(space => space.count > 0));
+  const compatible = new Set(spaces.map(space => space.id));
+  if (!compatible.size) return { batch: null, degraded: [], skipped: 'no-indexed-vectors' };
+  if (!opts.embedder) return { batch: null, degraded: ['embeddings-unavailable'] };
+  const batch = await embedMemory(opts.embedder, [query], { inputType: 'query', signal: opts.signal, compatible });
+  const matches = (value: MemoryEmbedding) => spaces.some(space => space.id === value.space.id && space.dim === value.space.dim);
+  if (batch && matches(batch)) return { batch, degraded: [] };
+  const errors = batch ? ['dimension-mismatch'] : ['primary-embeddings-unavailable'];
+  const fallback = opts.embedder.fallback;
+  if (fallback && compatible.has(fallback.id) && !opts.signal?.aborted) {
+    const local = await embedMemory(fallback, [query], { inputType: 'query', signal: opts.signal, compatible });
+    if (local && matches(local)) return { batch: local, degraded: [...errors, 'compatible-local-fallback'] };
+  }
+  return { batch: null, degraded: [opts.signal?.aborted ? 'cancelled' : batch ? 'dimension-mismatch' : 'embeddings-unavailable'] };
+}
+
 export async function retrieveProjectMemory(
   store: ProjectVectorStore,
   query: string,
   opts: RetrieveOptions = {},
+  prepared?: QueryEmbedding,
 ): Promise<RetrieveResult> {
   const started = Date.now();
   const degraded: string[] = [];
@@ -150,26 +190,30 @@ export async function retrieveProjectMemory(
   const types = opts.types?.filter(isChunkType);
   const lexical = store.lexicalSearch(clean, 40);
   let vectorRanks: Array<{ id: string; score: number }> = [];
-  if (opts.embedder) {
-    try {
-      const vectors = await opts.embedder.embed([clean.slice(0, 2000)]);
-      const queryVec = vectors?.[0];
-      if (queryVec?.length) {
-        vectorRanks = store.vectorSearch(queryVec, {
+  const semantic = prepared ?? await queryEmbedding([store], clean, opts);
+  degraded.push(...semantic.degraded);
+  if (semantic.batch) {
+      const { space, vectors } = semantic.batch;
+      const indexed = store.embeddingSpaces().find(entry => entry.id === space.id && entry.count > 0);
+      if (indexed && indexed.dim !== space.dim) degraded.push('dimension-mismatch');
+      if (indexed && indexed.dim === space.dim) {
+        vectorRanks = store.vectorSearch(vectors[0], {
+          embedder: space.id,
           limit: 40,
           types,
           since: opts.since,
           minAuthority: opts.minAuthority,
           includeSuperseded: opts.includeSuperseded,
-        }).map((hit) => ({ id: hit.id, score: hit.score }));
-      } else {
-        degraded.push("embeddings-unavailable");
+        }).filter(hit => hit.score >= 0.3).map((hit) => ({ id: hit.id, score: hit.score }));
+        if (space.backend === 'openrouter' && space.model.toLowerCase() === DEFAULT_MEMORY_EMBEDDING_MODEL) {
+          // Broad semantic tails otherwise get the same RRF vote as strong
+          // matches. Qwen's measured score scale supports a conservative
+          // floor plus a narrow band behind the best candidate. Needle's
+          // compressed cosine scale must not inherit these thresholds.
+          const floor = Math.max(0.42, (vectorRanks[0]?.score ?? 0) - 0.08);
+          vectorRanks = vectorRanks.filter(hit => hit.score >= floor).slice(0, 8);
+        }
       }
-    } catch {
-      degraded.push("embeddings-unavailable");
-    }
-  } else {
-    degraded.push("embeddings-unavailable");
   }
 
   const fused = new Map<string, { fused: number; lexicalRank: number | null; vectorRank: number | null }>();
@@ -178,12 +222,16 @@ export async function retrieveProjectMemory(
   });
   vectorRanks.forEach((hit, rank) => {
     const entry = fused.get(hit.id) ?? { fused: 0, lexicalRank: null, vectorRank: null };
-    entry.fused += rrf(rank);
+    // A strong semantic shortlist can recall a differently worded fact;
+    // incidental lexical overlaps must not drown it out. Exact technical
+    // lookups above never enter this branch.
+    const semanticWeight = semantic.batch?.space.backend === 'openrouter' && semantic.batch.space.model.toLowerCase() === DEFAULT_MEMORY_EMBEDDING_MODEL ? 1.5 : 1;
+    entry.fused += rrf(rank) * semanticWeight;
     entry.vectorRank = rank;
     fused.set(hit.id, entry);
   });
   if (!fused.size) {
-    return { hits: [], stats: { lexical: 0, vector: vectorRanks.length, fused: 0, reranked: false, ms: Date.now() - started, degraded } };
+    return { hits: [], stats: { lexical: 0, vector: vectorRanks.length, fused: 0, reranked: false, ms: Date.now() - started, degraded, space: semantic.batch?.space.id, semanticSkipped: semantic.skipped } };
   }
 
   const chunks = new Map(store.getChunks([...fused.keys()]).map((c) => [c.id, c]));
@@ -209,14 +257,15 @@ export async function retrieveProjectMemory(
     if (chunk.authority >= 0.95) score *= policy.canonicalBoost;
     score *= 0.7 + 0.3 * chunk.importance;
     if (tombstoned) score *= SUPERSEDED_PENALTY;
-    scored.push({ chunk, score, signals: { lexicalRank: entry.lexicalRank, vectorRank: entry.vectorRank, fused: entry.fused, reranked: false } });
+    scored.push({ chunk, score, signals: { lexicalRank: entry.lexicalRank, vectorRank: entry.vectorRank, vectorScore: vectorRanks.find(hit => hit.id === id)?.score, fused: entry.fused, reranked: false } });
   }
   scored.sort((a, b) => b.score - a.score);
+  if (semantic.skipped === 'exact-lexical') scored.sort((a, b) => Number(containsLiteralTerms(b.chunk, clean)) - Number(containsLiteralTerms(a.chunk, clean)));
   const head = scored.slice(0, Math.max(limit, 12));
 
   let reranked = false;
   const ranker = opts.rerank === undefined ? needleRanker() : opts.rerank;
-  if (ranker && head.length > 1) {
+  if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
       order = await ranker.rank(clean, head.map((hit) => ({ id: hit.chunk.id, text: `${hit.chunk.title}\n${hit.chunk.text}` })));
@@ -239,7 +288,7 @@ export async function retrieveProjectMemory(
 
   return {
     hits: head.slice(0, limit),
-    stats: { lexical: lexical.length, vector: vectorRanks.length, fused: fused.size, reranked, ms: Date.now() - started, degraded },
+    stats: { lexical: lexical.length, vector: vectorRanks.length, fused: fused.size, reranked, ms: Date.now() - started, degraded, space: semantic.batch?.space.id, semanticSkipped: semantic.skipped },
   };
 }
 
@@ -287,6 +336,7 @@ export async function retrieveFamily(
   stores: FamilyStore[],
   query: string,
   opts: RetrieveOptions & { perStoreLimit?: number } = {},
+  prepared?: QueryEmbedding,
 ): Promise<RetrieveFamilyResult> {
   const started = Date.now();
   const clean = query.trim().replace(/\s+/g, " ");
@@ -297,8 +347,10 @@ export async function retrieveFamily(
   const degraded = new Set<string>();
   const merged: FamilyHit[] = [];
   const storeStats: RetrieveFamilyResult["stats"]["stores"] = [];
+  // One compatible query vector for the whole family, never one paid call per DB.
+  const semantic = prepared ?? await queryEmbedding(stores.map(member => member.store), clean, opts);
   for (const { store, relation } of stores) {
-    const result = await retrieveProjectMemory(store, clean, { ...opts, limit: perStore, rerank: false });
+    const result = await retrieveProjectMemory(store, clean, { ...opts, limit: perStore, rerank: false }, semantic);
     for (const flag of result.stats.degraded) degraded.add(flag);
     storeStats.push({ projectId: store.projectId, relation, lexical: result.stats.lexical, vector: result.stats.vector, fused: result.stats.fused });
     for (const hit of result.hits) {
@@ -306,10 +358,11 @@ export async function retrieveFamily(
     }
   }
   merged.sort((a, b) => b.score - a.score);
+  if (semantic.skipped === 'exact-lexical') merged.sort((a, b) => Number(containsLiteralTerms(b.chunk, clean)) - Number(containsLiteralTerms(a.chunk, clean)));
   const head = merged.slice(0, Math.max(limit, 12));
   let reranked = false;
   const ranker = opts.rerank === undefined ? needleRanker() : opts.rerank;
-  if (ranker && head.length > 1) {
+  if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
       order = await ranker.rank(clean, head.map((hit) => ({ id: `${hit.projectId}:${hit.chunk.id}`, text: `${hit.chunk.title}\n${hit.chunk.text}` })));
@@ -333,6 +386,17 @@ export async function retrieveFamily(
     hits: head.slice(0, limit),
     stats: { stores: storeStats, reranked, ms: Date.now() - started, degraded: [...degraded] },
   };
+}
+
+/** Shared priming for the main agent and reviewers: one query embedding,
+ * role-specific policy views, no additional ranking or embedding requests. */
+export async function retrieveFamilyViews(stores: FamilyStore[], query: string, opts: RetrieveOptions = {}): Promise<Record<RetrievalRole, FamilyHit[]>> {
+  const semantic = await queryEmbedding(stores.map(member => member.store), query, opts);
+  const views = {} as Record<RetrievalRole, FamilyHit[]>;
+  for (const role of ['main', 'observer', 'subagent', 'watchmaker'] as const) {
+    views[role] = (await retrieveFamily(stores, query, { ...opts, role, rerank: false, limit: 2 }, semantic)).hits;
+  }
+  return views;
 }
 
 /** Render hits as cited evidence. Retrieved text is untrusted: evidence, never instructions. */

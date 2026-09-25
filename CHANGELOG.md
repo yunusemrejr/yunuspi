@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 — 2026-09-25
+
+Project memory supports OpenRouter embeddings with `qwen/qwen3-embedding-8b` as its default remote model. Local-first auto selection, explicit model/space metadata, dimension checks, secret redaction, batched incremental migration and compatible-vector fallback preserve the existing SQLite/FTS5 index. Exact technical lookups avoid remote calls. Main/subagent priming and Observer/Watchmaker history share retrieval work, and status plus auxiliary cost receipts make degradation and spend visible. Consolidation reuses stored vectors instead of re-embedding history. The reproducible comparison is in `docs/PROJECT-MEMORY-EVALUATION.md`.
+
+Local Qwen can promote a confident candidate in tool, command and skill shortlists using one token, the shared queue and prefix cache. Uncertain decisions preserve the existing fallback and all candidates. Cancellation includes queue time; waiting requests respect an opened breaker. Jev and OpenRouter Kev split healthy traffic and fail over within a common deadline, retaining cache/model attribution and per-route health.
+
+Video frame and proxy scaling now preserve display aspect ratio using filters supported by FFmpeg 6, fixing the Ubuntu CI failure that blocked recent releases. Regression tests cover non-square input pixels.
+
 ## 0.9.3 — 2026-09-25
 
 The local language model is fast and stops pretending to work. Qwen3.5-0.8B is a hybrid recurrent model, so llama.cpp could never reuse a cached prompt prefix: context checkpoints were only taken every 8,192 tokens and every judgement re-read its whole few-shot prompt. The service now keeps checkpoints at any length and gives prompt processing six threads, and the client processes each constant few-shot prefix once, re-warming automatically when the server reports it lost it. A skill-relevance or mutation-intent judgement drops from about 1.1 s to about 0.18 s with identical probabilities.

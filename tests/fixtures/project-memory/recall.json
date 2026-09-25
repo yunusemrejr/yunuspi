@@ -1,0 +1,380 @@
+{
+  "description": "Public synthetic YunusPi architecture memories. No private session content. Exact, conceptual, multilingual and unrelated queries; relevant IDs are authored before live comparison. The final six held-out queries were added after candidate thresholds were frozen; their results do not tune thresholds.",
+  "memories": [
+    {
+      "id": "reuse",
+      "type": "decision",
+      "text": "Do not create parallel helper systems when the harness already exposes the required capability. Reuse the existing abstraction and coordinate its consumers."
+    },
+    {
+      "id": "parity",
+      "type": "convention",
+      "text": "A release is complete only when GitHub main, the annotated version tag, green CI attestations and the installed pi and yunuspi commands identify the same harness."
+    },
+    {
+      "id": "cancel",
+      "type": "bug",
+      "text": "An asynchronous reviewer once delivered advice into the next session after the user switched projects. Capture the session owner and reject results from an obsolete generation."
+    },
+    {
+      "id": "cache",
+      "type": "architecture",
+      "text": "Stable instructions belong at the beginning of a prompt. Append changing task context after the shared prefix so provider KV caches and local llama.cpp checkpoints can be reused."
+    },
+    {
+      "id": "loop",
+      "type": "bug",
+      "text": "Repeated identical failing tool calls exhausted the task budget. The anti-loop guard bounds repetition, applies backpressure, and requires a changed recovery strategy."
+    },
+    {
+      "id": "routes",
+      "type": "decision",
+      "text": "The main session keeps the model chosen by the user. Child roles resolve an ordered preference chain, validate capabilities and thinking levels, then use healthy economical fallbacks."
+    },
+    {
+      "id": "exact",
+      "type": "convention",
+      "text": "PI_MEMORY_EMBEDDER selects needle, openrouter or auto. PI_MEMORY_EMBEDDING_MODEL defaults to qwen/qwen3-embedding-8b for OpenRouter."
+    },
+    {
+      "id": "spaces",
+      "type": "bug",
+      "text": "Vectors produced by different embedding models cannot share cosine comparisons, even when their dimensions match. Persist the model and dimension and explicitly backfill compatible vectors."
+    },
+    {
+      "id": "structure",
+      "type": "architecture",
+      "text": "Use AST, language servers and project intelligence for symbol definitions and references. Embedding retrieval complements structural navigation with durable historical concepts."
+    },
+    {
+      "id": "local",
+      "type": "decision",
+      "text": "The small local Qwen model handles narrow bounded classification tasks. Weak confidence must abstain; it cannot authorize destructive actions or replace deterministic correctness checks."
+    },
+    {
+      "id": "observer",
+      "type": "observation",
+      "text": "The observer should recall user corrections, previously rejected approaches and regressions before suggesting another change. Suggestions are evidence-backed advice rather than new requirements."
+    },
+    {
+      "id": "watchmaker",
+      "type": "todo",
+      "text": "Mr. Watchmaker measures time versus progress. Review whether repeated reads or stalled delegation are wasting the session, and offer one practical way to finish sooner."
+    },
+    {
+      "id": "redact",
+      "type": "convention",
+      "text": "Before sending memory text to a remote embedding provider, redact authorization headers, passwords, private keys, API credentials and secret environment values."
+    },
+    {
+      "id": "lexical",
+      "type": "architecture",
+      "text": "FTS5 and BM25 preserve exact filenames, identifiers, error codes and commit references. Reciprocal-rank fusion combines lexical evidence with semantic candidates without discarding exact evidence."
+    },
+    {
+      "id": "jev",
+      "type": "architecture",
+      "text": "The Jev and Kev OpenRouter decision models share small judging tasks. Healthy routes split traffic; a failing route cools while its peer serves bounded failover requests."
+    },
+    {
+      "id": "incremental",
+      "type": "convention",
+      "text": "Content hashes skip unchanged memory chunks. Migration replaces only incompatible embeddings in bounded resumable batches, preserving SQLite provenance and lexical indexes."
+    },
+    {
+      "id": "quality",
+      "type": "observation",
+      "text": "Token savings are useful only while output quality stays high. Compare retrieval regressions, false matches, latency and actual cost before claiming a larger model is better."
+    },
+    {
+      "id": "turkish",
+      "type": "decision",
+      "text": "Kullanıcı düzeltmeleri kalıcı proje bilgisidir. Daha önce reddedilen bir yaklaşımı yeni oturumda tekrar önermeden önce geçmiş kararları ve gerekçelerini hatırla."
+    },
+    {
+      "id": "isolation",
+      "type": "convention",
+      "text": "Concurrent harness engineers use isolated worktrees and inspect the latest remote changes before release. Never reset another contributor's uncommitted work."
+    },
+    {
+      "id": "incident",
+      "type": "error",
+      "text": "ERR_ROUTE_CAPABILITY_MISMATCH means the selected endpoint cannot satisfy the required tool or reasoning contract. Refresh capability metadata before resolving a fallback."
+    },
+    {
+      "id": "ui",
+      "type": "session_summary",
+      "text": "The previous interface review fixed keyboard focus visibility and tab order. Screen reader labels should describe actual controls and the TUI should show honest running and degraded states."
+    },
+    {
+      "id": "security",
+      "type": "convention",
+      "text": "Bash execution uses the existing security boundary and bounded control policies. A local advisory classifier must never bypass permission or filesystem safety enforcement."
+    },
+    {
+      "id": "budget",
+      "type": "todo",
+      "text": "Investigate remote embedding cooldowns after HTTP 429. Repeated retries while a provider is rate limited waste latency and credits; lexical retrieval should remain usable."
+    },
+    {
+      "id": "rejected",
+      "type": "observation",
+      "text": "The proposal to automatically summarize every raw tool response was rejected: terminal exhaust outweighed curated decisions and consumed tokens without improving durable recall."
+    }
+  ],
+  "queries": [
+    {
+      "kind": "exact",
+      "text": "PI_MEMORY_EMBEDDING_MODEL",
+      "relevant": [
+        "exact"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "exact",
+      "text": "ERR_ROUTE_CAPABILITY_MISMATCH",
+      "relevant": [
+        "incident"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "exact",
+      "text": "FTS5 BM25 filenames",
+      "relevant": [
+        "lexical"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "exact",
+      "text": "Jev Kev OpenRouter",
+      "relevant": [
+        "jev"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "exact",
+      "text": "llama.cpp checkpoints",
+      "relevant": [
+        "cache"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "exact",
+      "text": "HTTP 429",
+      "relevant": [
+        "budget"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Why are we duplicating another subsystem instead of using what YunusPi already has?",
+      "relevant": [
+        "reuse"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "The download page and my terminal appear to be running different editions. What invariant did we forget?",
+      "relevant": [
+        "parity"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Old background feedback appeared after opening a different workspace. How was that race prevented?",
+      "relevant": [
+        "cancel"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "How can we avoid paying to process the same initial instructions on every turn?",
+      "relevant": [
+        "cache"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "The assistant is trying the same broken operation endlessly. What should stop that?",
+      "relevant": [
+        "loop"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Can a delegate's provider recovery silently replace the model I picked for the main conversation?",
+      "relevant": [
+        "routes"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Both arrays have the same length. Is it safe to measure similarity after changing the representation model?",
+      "relevant": [
+        "spaces"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Which subsystem should locate all callers of a function instead of guessing from semantic similarity?",
+      "relevant": [
+        "structure"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "What work can a tiny offline language model safely take from expensive agents?",
+      "relevant": [
+        "local",
+        "security"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "role": "observer",
+      "text": "Before advising the developer, remember mistakes they already told us not to repeat.",
+      "relevant": [
+        "observer",
+        "turkish"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "role": "watchmaker",
+      "text": "Who notices that we spend minutes inspecting things yet never produce a useful result?",
+      "relevant": [
+        "watchmaker"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Which private values must be removed before generating cloud-based representations of past notes?",
+      "relevant": [
+        "redact"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "We stopped halfway through moving old records to a new semantic representation. Can we continue cheaply?",
+      "relevant": [
+        "incremental"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "text": "Why did we reject processing all the command output into long-term knowledge?",
+      "relevant": [
+        "rejected"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "turkish",
+      "text": "Geçmişte reddettiğim çözümü yeniden önermeden önce ne yapmalısın?",
+      "relevant": [
+        "turkish",
+        "observer"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "turkish",
+      "text": "Yerel kurulumla GitHub sürümü neden birebir aynı olmalı?",
+      "relevant": [
+        "parity"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "turkish",
+      "text": "Aynı komutu sürekli deneyip para ve zaman harcayan döngüyü nasıl durduruyoruz?",
+      "relevant": [
+        "loop"
+      ],
+      "split": "development"
+    },
+    {
+      "kind": "negative",
+      "text": "Which sourdough starter hydration makes the best bread crust?",
+      "relevant": [],
+      "split": "development"
+    },
+    {
+      "kind": "negative",
+      "text": "What hotel did we book for a beach holiday in Greece?",
+      "relevant": [],
+      "split": "development"
+    },
+    {
+      "kind": "negative",
+      "text": "What are the project's quarterly revenue figures and dividend policy?",
+      "relevant": [],
+      "split": "development"
+    },
+    {
+      "kind": "paraphrase",
+      "split": "held-out",
+      "text": "Why did we preserve the same opening text instead of reordering instructions every request?",
+      "relevant": [
+        "cache"
+      ]
+    },
+    {
+      "kind": "paraphrase",
+      "split": "held-out",
+      "text": "When another engineer has edits in flight, how do I prepare my changes without damaging theirs?",
+      "relevant": [
+        "isolation"
+      ]
+    },
+    {
+      "kind": "paraphrase",
+      "split": "held-out",
+      "text": "Our cheap judge service returns errors. Which other small model is supposed to absorb its workload?",
+      "relevant": [
+        "jev"
+      ]
+    },
+    {
+      "kind": "paraphrase",
+      "split": "held-out",
+      "text": "After a cancelled migration, must all the old semantic records be generated from scratch?",
+      "relevant": [
+        "incremental"
+      ]
+    },
+    {
+      "kind": "turkish",
+      "split": "held-out",
+      "text": "Dış servise hatıra gönderirken erişim bilgilerini ve gizli değerleri nasıl koruyoruz?",
+      "relevant": [
+        "redact"
+      ]
+    },
+    {
+      "kind": "negative",
+      "split": "held-out",
+      "text": "Which fruit trees should we plant in a shaded courtyard?",
+      "relevant": []
+    }
+  ]
+}

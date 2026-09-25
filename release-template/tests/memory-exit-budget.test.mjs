@@ -182,3 +182,21 @@ test('explicit global and project priming opt-outs remain authoritative',async()
   }
  } finally {fs.rmSync(config,{force:true});}
 });
+
+test('existing priming consumes semantic project history with main and subagent policies once', async () => {
+  const key = Symbol.for('yunus-pi.project-memory-recall.v1'), prior = globalThis[key], child = process.env.PI_SUBAGENT_CHILD, roles = [];
+  globalThis[key] = async (_cwd, _query, role) => { roles.push(role); return '[mem_fixture] Reuse the existing abstraction; the previous extra subsystem was rejected.'; };
+  try {
+    for (const role of ['main', 'subagent']) {
+      if (role === 'subagent') process.env.PI_SUBAGENT_CHILD = '1'; else delete process.env.PI_SUBAGENT_CHILD;
+      const cwd = path.join(root, 'semantic-' + role); fs.mkdirSync(cwd, { recursive: true });
+      const hooks = {}, entries = [];
+      registerPriming({ on: (name, fn) => hooks[name] = fn, registerCommand() {}, appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }) }, () => ({ project: path.join(cwd, 'absent.md'), daily: path.join(cwd, 'daily'), global: '' }));
+      const ctx = { cwd, sessionManager: { getEntries: () => entries } }; hooks.session_start({}, ctx);
+      const first = await hooks.before_agent_start({ prompt: 'Why duplicate another architecture subsystem?' }, ctx);
+      assert.match(first.message.content, /existing abstraction/);
+      assert.equal(await hooks.before_agent_start({ prompt: 'Why duplicate another architecture subsystem?' }, ctx), undefined);
+    }
+    assert.deepEqual(roles, ['main', 'subagent']);
+  } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; if (child === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = child; }
+});

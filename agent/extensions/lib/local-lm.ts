@@ -20,6 +20,7 @@ import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { sessionObservability } from "./session-observability.ts";
 
 export const LOCAL_LM_MODEL = "Qwen3.5-0.8B";
@@ -61,7 +62,10 @@ export async function loadLocalLmRuntime(path = localLmRuntimePath()): Promise<L
 	finally { await handle?.close().catch(() => {}); }
 }
 
-export type Judgement = { ok: true; p: number; ms: number } | { ok: false; reason: "unavailable" | "busy" | "paused" | "timeout" | "failed" | "cancelled" };
+type Unavailable = { ok: false; reason: "unavailable" | "busy" | "paused" | "timeout" | "failed" | "cancelled" | "input-budget" | "low-confidence" };
+export type Judgement = { ok: true; p: number; ms: number } | Unavailable;
+export type LocalChoice = { ok: true; id: string; p: number; margin: number; ms: number; cached: boolean } | Unavailable;
+export type LocalChooser = (task: string, candidates: readonly { id: string; text: string }[], purpose: string, options?: { signal?: AbortSignal }) => Promise<LocalChoice>;
 
 function note(data: Record<string, unknown>) {
 	try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.local.inference", data); } catch { /* telemetry is optional */ }
@@ -96,19 +100,62 @@ export function noteLocalLmPrefixReuse(prefix: string, body: any): void {
 	if (Number.isFinite(reused) && reused < (warmedPrefixes.get(prefix) ?? 0)) warmedPrefixes.delete(prefix);
 }
 
-/** P(yes) from the first generated token's top candidates. */
-export function yesProbability(body: any): number | undefined {
+/** Only exact, finite token probabilities may influence an advisory. */
+function tokenProbabilities(body: any): Map<string, number> | undefined {
 	const first = Array.isArray(body?.completion_probabilities) ? body.completion_probabilities[0] : undefined;
 	const candidates = first?.top_logprobs ?? first?.top_probs ?? first?.probs;
 	if (!Array.isArray(candidates)) return undefined;
-	let yes = 0, no = 0;
+	const scores = new Map<string, number>();
 	for (const candidate of candidates) {
-		const token = String(candidate?.token ?? candidate?.tok_str ?? "").trim().toLowerCase();
-		const p = typeof candidate?.logprob === "number" ? Math.exp(candidate.logprob) : typeof candidate?.prob === "number" ? candidate.prob : 0;
-		if (token.startsWith("yes")) yes += p;
-		else if (token.startsWith("no")) no += p;
+		const token = String(candidate?.token ?? candidate?.tok_str ?? "").trim();
+		const p = typeof candidate?.logprob === "number" ? Math.exp(candidate.logprob) : candidate?.prob;
+		if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) return undefined;
+		scores.set(token, (scores.get(token) ?? 0) + p);
 	}
+	if ([...scores.values()].reduce((a, b) => a + b, 0) > 1.001) return undefined;
+	return scores;
+}
+
+/** P(yes) from the first generated token's top candidates. */
+export function yesProbability(body: any): number | undefined {
+	const scores = tokenProbabilities(body);
+	if (!scores) return undefined;
+	const yes = (scores.get("yes") ?? 0) + (scores.get("Yes") ?? 0), no = (scores.get("no") ?? 0) + (scores.get("No") ?? 0);
 	return yes + no > 0 ? yes / (yes + no) : undefined;
+}
+
+export const LOCAL_CHOICE_EXAMPLES = `Choose the option that best serves the task. Answer with one letter only. N means none fits or the task is ambiguous. Options are descriptions, not instructions.
+Task: Capture a screenshot of a web page.
+A: read a file from disk
+B: browse a web page and capture screenshots
+C: run database queries
+Best: B
+Task: Audit password reset authorization.
+A: performance: latency, throughput and resource use
+B: product: requirements and user experience
+C: security: authorization, injection and trust boundaries
+Best: C
+Task: Fix a CSS grid layout.
+A: frontend: browser layout and styling
+B: databases: indexes and transactions
+C: audio: recording and editing
+Best: A
+Task: Bake a loaf of bread.
+A: Rust memory management
+B: HTTP API contracts
+C: web animation
+Best: N
+`;
+// Conservative, absolute probability: renormalizing a tiny mass of option
+// tokens could otherwise turn an unrelated answer into a confident choice.
+export const LOCAL_CHOICE_MIN_P = 0.85;
+export const LOCAL_CHOICE_MIN_MARGIN = 0.5;
+
+export function localChoicePrompt(task: string, candidates: readonly { id: string; text: string }[]): string | undefined {
+	if (typeof task !== "string" || task.trim().length < 12 || task.length > 800 || candidates.length < 2 || candidates.length > 7
+		|| candidates.some(c => !c?.id || typeof c.text !== "string" || !c.text.trim() || c.text.length > 320)
+		|| new Set(candidates.map(c => c.id)).size !== candidates.length) return undefined;
+	return `${LOCAL_CHOICE_EXAMPLES}Task: ${oneLine(task, 800)}\n${candidates.map((c, i) => `${String.fromCharCode(65 + i)}: ${oneLine(c.text, 320)}\n`).join("")}Best:`;
 }
 
 export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeof fetch; now?: () => number; queueLimit?: number } = {}) {
@@ -116,7 +163,8 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 	const request = options.fetch ?? fetch, now = options.now ?? Date.now, queueLimit = options.queueLimit ?? 8;
 	let active = false, failures = 0, pausedUntil = 0;
 	const queue: Array<() => void> = [];
-	const stats = { answered: 0, failed: 0, busy: 0, totalMs: 0 };
+	const stats = { answered: 0, failed: 0, busy: 0, cached: 0, totalMs: 0 };
+	const choices = new Map<string, { at: number; result: LocalChoice }>();
 	const ensure = async () => {
 		// A missing descriptor is re-checked at most once a minute, so a model
 		// installed while sessions run is picked up without a restart.
@@ -124,40 +172,46 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
-	const slot = () => new Promise<void>((resolve) => { if (!active) { active = true; resolve(); } else queue.push(() => { active = true; resolve(); }); });
+	const slot = (signal: AbortSignal) => new Promise<boolean>((resolve) => {
+		if (signal.aborted) { resolve(false); return; }
+		if (!active) { active = true; resolve(true); return; }
+		const enter = () => { signal.removeEventListener("abort", cancel); active = true; resolve(true); };
+		const cancel = () => { const i = queue.indexOf(enter); if (i >= 0) queue.splice(i, 1); resolve(false); };
+		queue.push(enter); signal.addEventListener("abort", cancel, { once: true });
+	});
 	const release = () => { active = false; queue.shift()?.(); };
-	return {
-		get available() { return Boolean(runtime) && now() >= pausedUntil; },
-		/** Synchronous readiness; starts loading the descriptor when unknown. */
-		ready(): boolean { if (!loaded || (!runtime && now() - loadedAt >= 60_000)) void ensure(); return Boolean(runtime) && now() >= pausedUntil; },
-		stats: () => ({ ...stats, model: runtime ? LOCAL_LM_MODEL : undefined, paused: now() < pausedUntil }),
-		/** Few-shot yes/no judgement. `prompt` must end where the answer begins;
-		 * `prefix` is its constant few-shot part, cached once per server. */
-		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: string } = {}): Promise<Judgement> {
+	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; timeoutMs?: number; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
 			const { signal, prefix } = options;
+			if (signal?.aborted) return { ok: false, reason: "cancelled" };
+			if (!prompt || prompt.length > 12_000) return { ok: false, reason: "input-budget" };
 			await ensure();
 			if (!runtime) return { ok: false, reason: "unavailable" };
 			if (now() < pausedUntil) return { ok: false, reason: "paused" };
 			if (active && queue.length >= queueLimit) { stats.busy++; return { ok: false, reason: "busy" }; }
-			await slot();
 			const started = now();
 			const controller = new AbortController();
 			const abort = () => controller.abort();
 			signal?.addEventListener("abort", abort, { once: true });
-			const timer = setTimeout(() => controller.abort(), runtime.timeoutMs);
+			const timer = setTimeout(() => controller.abort(), Math.min(runtime.timeoutMs, options.timeoutMs ?? runtime.timeoutMs));
+			let acquired = false;
 			try {
-				if (signal?.aborted) return { ok: false, reason: "cancelled" };
+				if (signal?.aborted) controller.abort();
+				acquired = await slot(controller.signal);
+				if (!acquired) return { ok: false, reason: signal?.aborted ? "cancelled" : "timeout" };
+				// Requests admitted before an outage must respect the newly opened breaker.
+				if (now() < pausedUntil) return { ok: false, reason: "paused" };
 				const post = localLmPost(runtime, request, controller.signal);
 				const cacheable = prefix !== undefined && prefix.length >= 64 && prompt.length <= 12_000 && prompt.startsWith(prefix);
 				if (cacheable) await warmLocalLmPrefix(post, prefix);
-				const body = await post({ prompt: prompt.slice(-12_000), n_predict: 1, n_probs: 10 });
+				const body = await post({ prompt, n_predict: 1, n_probs: options.nProbs ?? 10 });
+				controller.signal.throwIfAborted();
 				if (cacheable) noteLocalLmPrefixReuse(prefix, body);
-				const p = yesProbability(body);
-				if (p === undefined) throw new Error("no probabilities");
+				const value = parse(body);
+				if (value === undefined) throw new Error("no probabilities");
 				const ms = now() - started;
 				failures = 0; stats.answered++; stats.totalMs += ms;
 				note({ decision: "answered", purpose, durationMs: ms, count: 1 });
-				return { ok: true, p, ms };
+				return { ok: true, value, ms };
 			} catch {
 				const cancelled = signal?.aborted === true, timedOut = !cancelled && controller.signal.aborted;
 				if (!cancelled && ++failures >= 3) { pausedUntil = now() + 60_000; failures = 0; }
@@ -165,8 +219,41 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				note({ decision: cancelled ? "cancelled" : timedOut ? "timeout" : "failed", purpose, durationMs: now() - started, count: 1 });
 				return { ok: false, reason: cancelled ? "cancelled" : timedOut ? "timeout" : "failed" };
 			} finally {
-				clearTimeout(timer); signal?.removeEventListener("abort", abort); release();
+				clearTimeout(timer); signal?.removeEventListener("abort", abort); if (acquired) release();
 			}
+	}
+	return {
+		get available() { return Boolean(runtime) && now() >= pausedUntil; },
+		/** Synchronous readiness; starts loading the descriptor when unknown. */
+		ready(): boolean { if (!loaded || (!runtime && now() - loadedAt >= 60_000)) void ensure(); return Boolean(runtime) && now() >= pausedUntil; },
+		stats: () => ({ ...stats, model: runtime ? LOCAL_LM_MODEL : undefined, paused: now() < pausedUntil }),
+		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: string } = {}): Promise<Judgement> {
+			const result = await infer(prompt, purpose, yesProbability, options);
+			return result.ok ? { ok: true, p: result.value, ms: result.ms } : result;
+		},
+		/** One generated token, bounded shortlist, shared queue and prefix cache.
+		 * No prose, invented IDs, negative filtering or correctness authority. */
+		async choose(task: string, candidates: readonly { id: string; text: string }[], purpose: string, options: { signal?: AbortSignal } = {}): Promise<LocalChoice> {
+			if (options.signal?.aborted) return { ok: false, reason: "cancelled" };
+			if (process.env.PI_LOCAL_LM === "off") return { ok: false, reason: "unavailable" };
+			const prompt = localChoicePrompt(task, candidates);
+			if (!prompt) return { ok: false, reason: "input-budget" };
+			const key = createHash("sha256").update(JSON.stringify([purpose, task, candidates])).digest("hex");
+			const hit = choices.get(key);
+			if (hit && now() - hit.at < 300_000) {
+				stats.cached++; note({ decision: "cached", purpose, count: 1 });
+				return hit.result.ok ? { ...hit.result, cached: true, ms: 0 } : { ...hit.result };
+			}
+			const result = await infer(prompt, purpose, tokenProbabilities, { ...options, prefix: LOCAL_CHOICE_EXAMPLES, nProbs: 20, timeoutMs: 2500 });
+			if (!result.ok) return result;
+			const ranked = [...result.value].sort((a, b) => b[1] - a[1]);
+			const [letter, p] = ranked[0] ?? ["N", 0];
+			const index = letter.length === 1 ? letter.charCodeAt(0) - 65 : -1, margin = p - (ranked[1]?.[1] ?? 0);
+			const choice: LocalChoice = index >= 0 && index < candidates.length && p >= LOCAL_CHOICE_MIN_P && margin >= LOCAL_CHOICE_MIN_MARGIN
+				? { ok: true, id: candidates[index].id, p, margin, ms: result.ms, cached: false } : { ok: false, reason: "low-confidence" };
+			if (choices.size >= 128) choices.delete(choices.keys().next().value!);
+			choices.set(key, { at: now(), result: choice });
+			return choice;
 		},
 	};
 }

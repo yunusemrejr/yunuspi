@@ -114,17 +114,14 @@ export async function findClusters(store: ProjectVectorStore, opts: ConsolidateO
   const seen = new Set<string>();
   const clusters: MemoryCluster[] = [];
 
-  // Optional vector pass: embed one representative text per chunk once.
-  let vectors = new Map<string, number[]>();
+  // Consolidation reuses indexed vectors. It never uploads the corpus or
+  // re-embeds unchanged history, and comparisons remain within one space.
+  const vectors = new Map<string, number[]>();
   if (opts.embedder) {
-    try {
-      const texts = live.map((c) => `${c.title}\n${c.text}`.slice(0, 1500));
-      const embedded = await opts.embedder.embed(texts);
-      if (embedded && embedded.length === live.length) {
-        vectors = new Map(live.map((c, i) => [c.id, embedded[i]]));
-      }
-    } catch {
-      vectors = new Map();
+    const allowed = new Set([opts.embedder.id, ...(opts.embedder.candidates ?? []).map(e => e.id)]);
+    for (const space of store.embeddingSpaces()) {
+      if (!allowed.has(space.id)) continue;
+      for (const [id, vector] of store.storedVectors(live.map(c => c.id), space.id)) vectors.set(id, vector);
     }
   }
 
@@ -134,21 +131,23 @@ export async function findClusters(store: ProjectVectorStore, opts: ConsolidateO
     for (let i = 0; i < members.length; i++) {
       if (grouped.has(members[i].id)) continue;
       const cluster: StoredChunk[] = [members[i]];
+      let clusterSimilarity = 1;
       for (let j = i + 1; j < members.length; j++) {
         if (grouped.has(members[j].id)) continue;
         const a = members[i];
         const b = members[j];
-        let similarity = 0;
         const va = vectors.get(a.id);
         const vb = vectors.get(b.id);
-        if (va && vb) similarity = Math.max(similarity, cosine(va, vb));
+        const semantic = va && vb && a.embedder === b.embedder ? cosine(va, vb) : 0;
         const ta = termCache.get(a.id) ?? terms(`${a.title}\n${a.text}`);
         termCache.set(a.id, ta);
         const tb = termCache.get(b.id) ?? terms(`${b.title}\n${b.text}`);
         termCache.set(b.id, tb);
-        similarity = Math.max(similarity, jaccard(ta, tb));
-        const threshold = va && vb ? Math.min(vectorThreshold, lexicalThreshold + 0.3) : lexicalThreshold;
-        if (similarity >= threshold) {
+        const lexical = jaccard(ta, tb);
+        // Similar topics are not necessarily duplicate facts. Require some
+        // shared wording before semantic proximity can ratify a duplicate.
+        if (lexical >= lexicalThreshold || (semantic >= vectorThreshold && lexical >= 0.25)) {
+          clusterSimilarity = Math.min(clusterSimilarity, Math.max(semantic, lexical));
           cluster.push(b);
           grouped.add(b.id);
         }
@@ -160,7 +159,7 @@ export async function findClusters(store: ProjectVectorStore, opts: ConsolidateO
         if (seen.has(key)) continue;
         seen.add(key);
         for (const c of cluster) grouped.add(c.id);
-        clusters.push({ ids: cluster.map((c) => c.id), concept, similarity: 1 });
+        clusters.push({ ids: cluster.map((c) => c.id), concept, similarity: clusterSimilarity });
       }
     }
   }

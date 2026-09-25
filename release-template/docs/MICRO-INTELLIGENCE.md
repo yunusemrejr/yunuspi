@@ -8,7 +8,7 @@ DETERMINISTIC HARNESS LOGIC        cheap, auditable, authoritative
         ↓
 NEEDLE3                            local semantic reflex (this machine)
         ↓
-LOCAL LM (Qwen3.5-0.8B)            calibrated yes/no judgements, line selection
+LOCAL LM (Qwen3.5-0.8B)            calibrated judgements, shortlists, line selection
         ↓
 KOMPRESS                           extractive prose paragraph selection
         ↓
@@ -170,6 +170,24 @@ for a minute. `PI_LOCAL_LM=off` disables it; the tests run with it off.
   inference (0.9 s, 1.8 s for 4–32 KiB windows) and is then sealed; the
   cooldown is eight seconds and ten-second leases bound the model fleet-wide.
 
+### Local capability shortlists
+
+Tool, command and skill discovery can use one local Qwen token to promote one
+existing candidate from a three-entry shortlist. It never removes candidates,
+creates tool names, authorizes a write or replaces correctness checks. Exact
+names, shadow mode and cancelled work preserve their prior behavior. Acceptance
+requires absolute token probability ≥ 0.85 and margin ≥ 0.50; weak/unknown answers
+retain the existing Needle/Jev fallback. Requests share the local queue, a fixed
+prefix checkpoint, total deadlines including queue time, and a bounded five-minute
+cache of exact decisions. Waiting callers cancel promptly and honor the breaker
+if earlier requests reveal an outage.
+
+A 30-case local trial accepted 6/22 discovery cases, all six correct; ambiguous
+and irrelevant requests abstained. The eight review-focus cases yielded no useful
+accepted choices, so review-focus routing was not enabled. This is conservative
+advisory coverage on a small fixture, not a general accuracy guarantee. Reproduce
+with `node scripts/benchmark-local-choices.mjs --live`.
+
 ## Kompress — extractive prose selection
 
 Kompress selects complete paragraphs from bounded successful documentation
@@ -222,13 +240,22 @@ unconnected to production review flows; their tests are not evidence of live
 review deduplication.
 
 Project graph retrieval retains its literal identity, lexical and statistical
-ranking. Memory search retains its existing qmd keyword/semantic/hybrid owner;
-these are not Needle integrations. Compaction keeps native summary and keep-boundary
+ranking. Markdown memory search retains its existing qmd owner. The project SQLite
+vector-memory system separately supports compatible Needle3/OpenRouter embeddings;
+see [Project Vector Memory](VECTOR-MEMORY.md). Compaction keeps native summary and keep-boundary
 ownership; helper salience is advisory and must not silently discard history.
 
-## Jev — remote typed semantic judge
+## Jev / Kev — remote typed semantic judges
 
-Jev validates what local layers cannot decide: ranking disagreements,
+The Jev layer balances uncached traffic between Jev on OpenRouter and
+`jaredpalmer/kev-4b` on OpenRouter. Equal-load healthy routes alternate; concurrent
+requests favor the less occupied route. Transport errors, timeouts, malformed
+answers, 429 and 5xx cool the failing family and use the other within one deadline.
+Jev model aliases remain an internal fallback within the Jev family. Shared account
+errors stop further paid attempts. Cache hits retain their actual model attribution,
+and health exposes both routes. `PI_JEV=off` disables both.
+
+The pair validates what local layers cannot decide: ranking disagreements,
 uncertain classifications, advisory batches (request kind, verification
 need, review worth, council perspectives), and error-cause refinement. A
 finding-duplicate helper is available but has no production caller. Related judgments batch into one call;

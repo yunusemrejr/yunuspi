@@ -6,14 +6,11 @@ import { sessionObservability } from './session-observability.ts';
  *
  * Resilience contract (every consumer keeps its heuristic path; Jev refines,
  * never gates):
- * - Slug cascade per call: `~typesafe/jev-latest`, then `typesafe/jev-1.13`,
- *   then any other jev variation discovered from the OpenRouter catalog.
- *   Model rejections (4xx) advance the cascade; transport failures stop it.
- * - The last working slug sticks; a fresh cascade runs on first use, after
- *   recovery, and when the sticky slug is rejected.
- * - An exhausted cascade opens the breaker for 5 minutes. A single
- *   background probe then re-tests; success resumes dynamically, failure
- *   re-arms. Callers fail fast to their fallback while open.
+ * - Jev and Kev split uncached work, with per-family cooldowns and same-call
+ *   failover. Jev's alias cascade remains inside its route; a failed Jev alias
+ *   is not a separate healthy model. Account-level failures stop both routes.
+ * - Both routes failing opens the existing breaker. Recovery is bounded;
+ *   a cooling route is retried by one real request after its cooldown.
  * - Answers are deduplicated per session (identical state+questions pay
  *   once) and every paid call is ledgered as a `jev-usage-v1` session
  *   entry so cost and metrics treat Jev like any other provider route.
@@ -29,6 +26,7 @@ import { beginHarnessActivity } from './harness-activity.ts';
 export const JEV_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 export const JEV_MODELS_URL = "https://openrouter.ai/api/v1/models";
 export const JEV_PREFERRED_SLUGS = ["~typesafe/jev-latest", "typesafe/jev-1.13"];
+export const KEV_SLUG = "jaredpalmer/kev-4b";
 export const JEV_PRICE_PER_M_INPUT = 0.042;
 export const JEV_REQUEST_TIMEOUT_MS = 15_000;
 export const JEV_DISCOVERY_TTL_MS = 10 * 60 * 1000;
@@ -36,7 +34,7 @@ export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
 const JEV_CACHE_MAX = 500;
 export const JEV_MAX_INPUT_CHARS = 32768;
 export const JEV_REMOTE_PROVIDER = "OpenRouter";
-export const JEV_INPUT_POLICY = `When Jev is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off (or PI_JEV=0) to disable remote Jev calls.`;
+export const JEV_INPUT_POLICY = `When the Jev/Kev judge is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off (or PI_JEV=0) to disable both remote judge routes.`;
 
 export function jevEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !['1', 'true', 'yes'].includes((env.PI_OFFLINE ?? '').toLowerCase())
@@ -133,6 +131,11 @@ export function configureJevClient(partial: Partial<Deps>): void {
   Object.assign(deps, partial);
 }
 
+type JudgeFamily = "jev" | "kev";
+const families: JudgeFamily[] = ["jev", "kev"];
+const routeHealth = { jev: { retryAt: 0, active: 0, failures: 0 }, kev: { retryAt: 0, active: 0, failures: 0 } };
+let nextFamily: JudgeFamily = "jev";
+let generation = 0;
 let stickySlug: string | undefined;
 let breakerOpen = false;
 let breakerOpenedAt = 0;
@@ -152,6 +155,9 @@ const inflight = new Map<string, InflightEntry>();
 
 /** Test seam: reset every module singleton. */
 export function resetJevClient(): void {
+  generation++;
+  nextFamily = "jev";
+  for (const route of Object.values(routeHealth)) Object.assign(route, { retryAt: 0, active: 0, failures: 0 });
   stickySlug = undefined;
   breakerOpen = false;
   breakerOpenedAt = 0;
@@ -169,8 +175,12 @@ export function jevHealth(): {
   slug?: string;
   lastError: string;
   nextProbeInMs: number;
+  routes: Array<{ family: JudgeFamily; model: string; state: "ready" | "cooling" | "probing"; active: number; retryInMs: number }>;
 } {
   return {
+    routes: families.map(family => ({ family, model: family === "kev" ? KEV_SLUG : stickySlug ?? JEV_PREFERRED_SLUGS[0],
+      state: routeHealth[family].retryAt > deps.now() ? "cooling" : routeHealth[family].retryAt && routeHealth[family].active ? "probing" : "ready",
+      active: routeHealth[family].active, retryInMs: Math.max(0, routeHealth[family].retryAt - deps.now()) })),
     state: breakerOpen ? "open" : "closed",
     slug: stickySlug,
     lastError,
@@ -218,7 +228,7 @@ async function discoverSlugs(): Promise<string[]> {
         const body = (await response.json()) as { data?: Array<{ id?: string }> };
         const ids = (body.data ?? [])
           .map((entry) => entry?.id)
-          .filter((id): id is string => typeof id === "string" && id.toLowerCase().includes("jev"));
+          .filter((id): id is string => typeof id === "string" && /^~?typesafe\/jev[-\w.]*$/.test(id));
         ids.sort((a, b) => Number(b.startsWith("typesafe/")) - Number(a.startsWith("typesafe/")));
         discovered = { at: deps.now(), slugs: [...new Set(ids)] };
       } finally {
@@ -267,12 +277,13 @@ async function postDecisions(
   questions: Record<string, unknown>,
   key: string,
   signal?: AbortSignal,
-): Promise<{ answers: Record<string, JevAnswer> }> {
+  timeoutMs = JEV_REQUEST_TIMEOUT_MS,
+): Promise<{ answers: Record<string, JevAnswer>; inputTokens?: number; costUsd?: number }> {
   signal?.throwIfAborted();
   const finish = beginHarnessActivity('jev');
   let returned = false;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), JEV_REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(new DOMException("Judge route timeout", "TimeoutError")), timeoutMs);
   const onAbort = () => controller.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
@@ -295,8 +306,8 @@ async function postDecisions(
       err.status = response.status;
       throw err;
     }
-    const body = (await response.json()) as { answers?: Record<string, JevAnswer> };
-    signal?.throwIfAborted();
+    const body = (await response.json()) as { answers?: Record<string, JevAnswer>; usage?: { input_tokens?: number; cost?: number } };
+    controller.signal.throwIfAborted();
     if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
       throw Error("decisions: malformed answers");
     // Validate the requested typed values before they reach routing, caches,
@@ -316,7 +327,9 @@ async function postDecisions(
       }
     }
     returned = true;
-    return { answers: body.answers };
+    return { answers: body.answers,
+      inputTokens: Number.isSafeInteger(body.usage?.input_tokens) && body.usage!.input_tokens! >= 0 ? body.usage!.input_tokens : undefined,
+      costUsd: typeof body.usage?.cost === "number" && Number.isFinite(body.usage.cost) && body.usage.cost >= 0 ? body.usage.cost : undefined };
   } finally {
     finish(returned ? 'ok' : signal?.aborted && signal.reason?.name !== 'TimeoutError' ? 'cancelled' : 'error');
     clearTimeout(timer);
@@ -340,7 +353,9 @@ function openBreaker(reason: string): void {
 function scheduleProbe(): void {
   if (probeScheduled) return;
   probeScheduled = true;
+  const epoch = generation;
   deps.schedule(() => {
+    if (epoch !== generation) return;
     probeScheduled = false;
     void recoverProbe();
   }, Math.max(0, breakerOpenedAt + deps.openMs - deps.now()));
@@ -354,22 +369,15 @@ async function recoverProbe(): Promise<void> {
     openBreaker("recover probe: no OpenRouter key");
     return;
   }
-  stickySlug = undefined;
-  const slugs = await jevCascadeSlugs();
-  for (const slug of slugs) {
-    try {
-      await postDecisions(slug, PROBE_STATE, PROBE_QUESTIONS, key);
-      stickySlug = slug;
-      breakerOpen = false;
-      lastError = "";
-      return;
-    } catch (error) {
-      // Model aliases can recover via another slug. Transport/auth failures
-      // cannot: walking every alias just repeats the same failing request.
-      if (!isModelRejection((error as { status?: number }).status, error instanceof Error ? error.message : String(error))) break;
-    }
-  }
-  openBreaker("recover probe: cascade exhausted");
+  // Reuse the same bounded route selection, validation and accounting owner.
+  // No alias discovery or request can outlive the normal overall deadline.
+  const epoch = generation;
+  breakerOpen = false;
+  for (const route of Object.values(routeHealth)) route.retryAt = 0;
+  const result = await boundedAsk(PROBE_STATE, PROBE_QUESTIONS, {});
+  if (epoch !== generation) return;
+  if (!result.ok) { if (!breakerOpen) openBreaker("recover probe: routes unavailable"); }
+  else lastError = "";
 }
 
 export type JevAskOpts = {
@@ -378,7 +386,7 @@ export type JevAskOpts = {
 };
 
 function knownSlugs(): string[] {
-  return [...new Set([...(stickySlug ? [stickySlug] : []), ...JEV_PREFERRED_SLUGS, ...discovered.slugs])];
+  return [...new Set([...(stickySlug ? [stickySlug] : []), ...JEV_PREFERRED_SLUGS, ...discovered.slugs, KEV_SLUG])];
 }
 
 /** Catalog discovery is shared, but a cancelled caller need not wait for it. */
@@ -435,7 +443,7 @@ export async function askJev(
   // Only the controlled reason is emitted: state and provider errors stay out.
   try {
     sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(result.ok ? "ml.jev.used" : "ml.jev.skipped", result.ok
-      ? { count: 1, cached: result.usage.cached, durationMs: result.usage.ms, questions: Object.keys(questions).length }
+      ? { count: 1, cached: result.usage.cached, route: result.usage.model, durationMs: result.usage.ms, questions: Object.keys(questions).length }
       : { count: 1, reason: result.skipped, site: site.slice(0, 40), durationMs: Math.max(0, deps.now() - started) });
   } catch { /* optional visibility */ }
   return result;
@@ -556,45 +564,75 @@ async function askJevOnce(
       };
     }
   }
-  let modelRejections = 0;
-  let searched = false;
-  for (let index = 0; ; index++) {
-    if (index >= ordered.length) {
-      if (searched) break;
-      searched = true;
-      const found = await discoverForCaller(opts.signal);
-      if (opts.signal?.aborted) return { ok: false, skipped: 'aborted' };
-      ordered.push(...found.filter(slug => !ordered.includes(slug)));
-      if (index >= ordered.length) break;
-    }
-    if (opts.signal?.aborted) return { ok: false, skipped: 'aborted' };
-    const slug = ordered[index];
+  const epoch = generation;
+  // Cache hits above do not advance traffic. Equal-load healthy families
+  // alternate; a recovering route admits only one probationary request.
+  const eligible = families.filter(family => routeHealth[family].retryAt <= deps.now()
+    && !(routeHealth[family].retryAt && routeHealth[family].active));
+  eligible.sort((a, b) => routeHealth[a].active - routeHealth[b].active || (a === nextFamily ? -1 : 1));
+  if (!eligible.length) return { ok: false, skipped: "unhealthy" };
+  nextFamily = eligible[0] === "jev" ? "kev" : "jev";
+  for (const family of eligible) {
+    if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+    const route = routeHealth[family];
+    if (route.retryAt > deps.now() || route.retryAt && route.active) continue;
+    route.active++;
+    const familyStarted = deps.now();
+    // Reserve time for the other route inside the one overall deadline.
+    const familyBudget = Math.max(1, Math.floor(deps.requestTimeoutMs * 0.45));
+    const familyController = new AbortController();
+    const familyTimer = setTimeout(() => familyController.abort(new DOMException("Judge route timeout", "TimeoutError")), familyBudget);
+    const familySignal = opts.signal ? AbortSignal.any([opts.signal, familyController.signal]) : familyController.signal;
+    const slugs = family === "kev" ? [KEV_SLUG] : knownSlugs().filter(slug => slug !== KEV_SLUG);
+    let searched = family === "kev";
     try {
-      const { answers } = await postDecisions(slug, state, questions, key, opts.signal);
-      stickySlug = slug;
-      cacheSet(cacheKey(slug, state, questions), { answers, inputTokens, model: slug });
-      const ms = deps.now() - started;
-      const costUsd = jevCostUsd(inputTokens);
-      return { ok: true, answers, usage: { model: slug, inputTokens, costUsd, ms, cached: false } };
-    } catch (error) {
-      if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
-      const status = (error as { status?: number }).status;
-      const message = error instanceof Error ? error.message : String(error);
-      if (isModelRejection(status, message)) {
-        modelRejections++;
-        if (slug === stickySlug) stickySlug = undefined;
-        continue;
+      for (let index = 0; ; index++) {
+        if (index >= slugs.length) {
+          if (searched) break;
+          searched = true;
+          const found = await discoverForCaller(familySignal);
+          if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+          slugs.push(...found.filter(slug => !slugs.includes(slug)).slice(0, 4));
+          if (index >= slugs.length) break;
+        }
+        const remaining = familyBudget - (deps.now() - familyStarted);
+        if (remaining <= 0 || familySignal.aborted) break;
+        const slug = slugs[index];
+        try {
+          const response = await postDecisions(slug, state, questions, key, familySignal, remaining);
+          if (epoch !== generation) return { ok: false, skipped: "aborted" };
+          route.retryAt = 0; route.failures = 0;
+          if (family === "jev") stickySlug = slug;
+          lastError = "";
+          const tokens = response.inputTokens ?? inputTokens;
+          const costUsd = response.costUsd ?? jevCostUsd(tokens);
+          cacheSet(cacheKey(slug, state, questions), { answers: response.answers, inputTokens: tokens, model: slug });
+          return { ok: true, answers: response.answers, usage: { model: slug, inputTokens: tokens, costUsd, ms: deps.now() - started, cached: false } };
+        } catch (error) {
+          if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+          const status = (error as { status?: number }).status;
+          // No provider echo, network exception text or input in health state.
+          lastError = status ? `decisions ${status}` : "judge transport or response failure";
+          if (isModelRejection(status, error instanceof Error ? error.message : "")) {
+            if (slug === stickySlug) stickySlug = undefined;
+            continue;
+          }
+          // Shared account/request failures cannot be repaired by another model.
+          if (status === 400 || status === 401 || status === 402 || status === 403 || status === 413 || status === 422) {
+            openBreaker(lastError);
+            return { ok: false, skipped: "unavailable" };
+          }
+          break; // transport, timeout, 429, 5xx or malformed answer: other family
+        }
       }
-      lastError = message.slice(0, 240);
-      openBreaker(`cascade stopped at ${slug}: ${lastError}`);
-      return { ok: false, skipped: "unavailable" };
+      route.failures++;
+      route.retryAt = deps.now() + deps.openMs;
+    } finally {
+      clearTimeout(familyTimer);
+      if (epoch === generation) route.active = Math.max(0, route.active - 1);
     }
   }
-  openBreaker(
-    modelRejections === ordered.length && ordered.length > 0
-      ? `all ${ordered.length} slugs rejected`
-      : "cascade exhausted",
-  );
+  if (families.every(family => routeHealth[family].retryAt > deps.now())) openBreaker("both judge routes unavailable");
   return { ok: false, skipped: "unavailable" };
 }
 

@@ -485,3 +485,29 @@ test('session switch during prompt-analysis display cannot return stale context 
   assert.equal(await pending, undefined, 'the old session must not receive a capsule after the display await');
   assert.equal(await f.context(), undefined, 'the replacement session cannot inherit old request advice');
 });
+
+test('confident local shortlist promotion retains all evidence and avoids paid judge calls', async () => {
+  let paid = 0;
+  const outcome = await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'capture a screenshot of the site', lexical: lexicalTools,
+    local: async (_query, candidates) => { assert.deepEqual(candidates.map(c => c.id), lexicalTools.map(c => c.id)); return { ok: true, id: 'browser_session', p: .96, margin: .92, ms: 12, cached: false }; },
+    jev: async () => { paid++; throw Error('not needed'); },
+  });
+  assert.equal(outcome.applied, 'local'); assert.equal(outcome.ordered[0].id, 'browser_session'); assert.equal(paid, 0);
+  assert.deepEqual([...outcome.ordered.map(c => c.id)].sort(), [...lexicalTools.map(c => c.id)].sort());
+});
+
+test('local discovery uncertainty, invalid choices, exact names and cancellation preserve fallback', async () => {
+  for (const choice of [{ ok: false, reason: 'low-confidence' }, { ok: true, id: 'invented', p: .99, margin: .98 }, { ok: true, id: 'bash', p: .7, margin: .5 }]) {
+    let calls = 0;
+    const result = await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'inspect a screenshot of the page', lexical: lexicalTools,
+      local: async () => choice, jev: async () => { calls++; return { ok: false, skipped: 'unavailable' }; } });
+    assert.equal(calls, 1); assert.equal(result.applied, 'lexical');
+  }
+  const c = new AbortController(); c.abort();
+  for (const extra of [{ query: 'browser_session' }, { signal: c.signal }]) {
+    let calls = 0;
+    await retrievalMod.multiStageRetrieve({ kind: 'tool', site: 'rank', query: 'take a screenshot of a site', lexical: lexicalTools,
+      local: async () => { calls++; throw Error(); }, ...extra });
+    assert.equal(calls, 0);
+  }
+});

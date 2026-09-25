@@ -76,7 +76,7 @@ const LINE_POLICY: Record<string, "all" | "error"> = {
 };
 /** Local helpers whose routine completions update the live pulse instead of
  * the transcript: they run on most tool results and change ordering only. */
-const PULSE_ONLY_INTELLIGENCE = new Set(["ml.fuzzy.used", "ml.radar.rank", "ml.retrieval.used"]);
+const PULSE_ONLY_INTELLIGENCE = new Set(["ml.fuzzy.used", "ml.radar.rank", "ml.retrieval.used", "ml.project-memory.embedding", "ml.project-memory.recalled"]);
 
 const DEDUPE_MS: Record<ActivityStatus, number> = { ok: 45_000, skip: 30_000, error: 10_000 };
 /** Infrastructure states flap slowly; a 10s window would re-log every check.
@@ -147,9 +147,12 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
     return { label: "Needle3", status: data.accepted === false ? "skip" : status, ms,
       detail: `${data.coalesced === true ? "shared in-flight result" : data.cached === true ? "cached embeddings" : "local WASM"} · ${outcome}` };
   }
+  if (kind === "ml.project-memory.embedding") return { label: "Project memory", status: decision === 'embedded' ? 'ok' : 'error', ms,
+    detail: decision === 'embedded' ? `OpenRouter embeddings ready · ${amount('count') ?? 0} texts` : 'Embedding unavailable · compatible local or lexical fallback' };
+  if (kind === "ml.project-memory.recalled") return { label: "Project memory", status: 'ok', detail: `Historical evidence retrieved · ${amount('count') ?? 0} memories` };
   if (kind === "ml.jev.used") {
     const questions = amount("questions");
-    return { label: "JEV", status, ms, detail: `${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
+    return { label: "JEV", status, ms, detail: `${data.route === "jaredpalmer/kev-4b" ? "Kev" : "Jev"} · ${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
   }
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
     label: kind === "ml.smol.inference" ? "Local LM" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status
@@ -162,7 +165,7 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   };
   if (kind === "ml.smol.used" || kind === "ml.mini.used") return { label: kind === "ml.smol.used" ? "Local LM" : "Kompress", status, detail: "selection applied" };
   if (kind === "ml.fuzzy.used") return { label: "Fuzzy matching", status, detail: `local match applied${amount("count") === undefined ? "" : ` · ${amount("count")} matches`}` };
-  if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: { needle: "Needle3 ranking applied", fused: "Needle3 + lexical fused ranking applied", jev: "JEV ranking applied" }[decision] ?? "ranking applied" };
+  if (kind === "ml.retrieval.used") return { label: "Retrieval intelligence", status, detail: { needle: "Needle3 ranking applied", fused: "Needle3 + lexical fused ranking applied", local: "Local LM ranking applied", jev: "Jev/Kev ranking applied" }[decision] ?? "ranking applied" };
   if (kind === "ml.radar.rank" && decision === "on" && (amount("count") ?? 0) > 0) return { label: "Neural ranker", status, detail: `ranking applied · ${amount("count")} results` };
   if (kind === "ml.intent") return { label: "Intent classifier", status, detail: "local route selected" };
 }

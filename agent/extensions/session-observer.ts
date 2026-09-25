@@ -1,3 +1,4 @@
+import { recallProjectContext } from "./lib/project-memory-context.ts";
 import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
@@ -48,6 +49,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // Full text behind every excerpt, searchable by the observer's read-only
   // tools. Session-scoped: a new prompt keeps it, a new session clears it.
   const journal = createObserverJournal();
+  let projectHistory = '';
   let prompts: Array<{ id: string; text: string; focused?: string }> = [], promptSequence = 0, interpretation = '';
   /** Tick-efficiency watermarks. The transcript branch is append-mostly, so the
    * opt-out scan and the child-ledger reduce reuse their result while the
@@ -176,7 +178,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
@@ -213,7 +215,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         }
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
-      const state = currentState(), evidence = [...state, ...intentRows(), ...peerRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
+      const state = currentState(), evidence = [...state, ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       // Route-selection failures are cold paths: one minimal packet each. The
@@ -499,6 +501,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
+    projectHistory = '';
+    const memoryOwner = owner, memoryTask = taskEpoch;
+    if (userRequest && !inputBlocked && process.env.PI_SESSION_OBSERVER !== 'off' && !['1', 'true', 'yes'].includes(process.env.PI_OFFLINE ?? '') && !wantsNoObserver(accepted.raw)) void recallProjectContext(context.cwd, accepted.raw, 'observer', accepted.signal).then(text => {
+      if (!text || !owns(context) || owner !== memoryOwner || taskEpoch !== memoryTask) return;
+      projectHistory = text;
+      journal.add({ id: 'project-history', kind: 'historical project evidence', at: now(), text });
+      revision++;
+    });
   });
   pi.on('before_agent_start', (event: any, context: any) => {
     if (!owns(context)) reset(context); ctx = context;

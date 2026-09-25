@@ -96,7 +96,7 @@ export function microStatusSnapshot(request?: {
     {
       layer: "jev",
       status: jevStatus(jev.state === "open", hasKey),
-      detail: jev.slug ?? jev.lastError,
+      detail: jev.routes.map(route => `${route.family}: ${route.state}`).join(", "),
     },
   ];
   return {
@@ -128,6 +128,7 @@ export function microStatusSnapshot(request?: {
       skipReasons: stats.skipReasons,
     },
     jev: {
+      routes: jev.routes,
       state: jev.state,
       slug: jev.slug ?? null,
       lastError: jev.lastError,

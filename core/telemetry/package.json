@@ -1,6 +1,6 @@
 {
   "name": "@yunuspi/telemetry",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "description": "Vendor-neutral telemetry contracts and typed schema utilities for pi",
   "type": "module",
   "main": "./dist/index.js",

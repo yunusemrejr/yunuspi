@@ -12,7 +12,10 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { needleEmbed, needleWarmup } from "./needle-runtime.ts";
+import { redactSecrets, sensitiveMemoryPath } from "./memory-redaction.ts";
+export { redactSecrets } from "./memory-redaction.ts";
+import { embedMemory, MEMORY_EMBED_BATCH, MEMORY_EMBED_CHARS, type MemoryEmbedder, type MemoryEmbedding } from "./project-memory-embedder.ts";
+export { needleMemoryEmbedder, openRouterMemoryEmbedder, configuredMemoryEmbedder, type MemoryEmbedder } from "./project-memory-embedder.ts";
 import { type ChunkType, type ProjectVectorStore, isChunkType } from "./project-vector-store.ts";
 
 /** Retrieval weight per source type. Curated knowledge outranks raw exhaust. */
@@ -48,12 +51,6 @@ export const TYPE_DEFAULT_IMPORTANCE: Record<ChunkType, number> = {
   tool_result: 0.3,
 };
 
-export interface MemoryEmbedder {
-  readonly id: string;
-  /** Embed texts in order; null when the backend is unavailable. Never throws. */
-  embed(texts: string[]): Promise<number[][] | null>;
-}
-
 /** Fake embedder for tests: hashed bag-of-trigrams, L2-normalized. */
 export function testEmbedder(dim = 64): MemoryEmbedder {
   return {
@@ -74,41 +71,9 @@ export function testEmbedder(dim = 64): MemoryEmbedder {
   };
 }
 
-const NEEDLE_TEXT_CHARS = 2000;
-const NEEDLE_BATCH = 16;
-
-/**
- * Local Needle3 embeddings. Offline-safe: skips cleanly when unavailable.
- * No health pre-check: the runtime cold-starts on first use and queues the
- * op behind init, so gating on "healthy" would strand every cold caller
- * in lexical-only mode. Disabled/cooling states still skip immediately.
- */
-export function needleMemoryEmbedder(): MemoryEmbedder {
-  return {
-    id: "needle3",
-    async embed(texts: string[]): Promise<number[][] | null> {
-      try {
-        needleWarmup();
-        const out: number[][] = [];
-        for (let i = 0; i < texts.length; i += NEEDLE_BATCH) {
-          const batch = texts.slice(i, i + NEEDLE_BATCH).map((t) => t.slice(0, NEEDLE_TEXT_CHARS));
-          const result = await needleEmbed(batch);
-          if (!result.ok) return out.length ? out : null;
-          out.push(...result.value.vectors);
-        }
-        return out;
-      } catch {
-        return null;
-      }
-    },
-  };
-}
-
-/** Secret patterns must never be indexed raw (mirrors memory search redaction). */
-const REDACT = /(?:sk-(?:ant-|proj-)?|ghp_|gho_|github_pat_|glpat-|xox[abprs]-|AKIA)[A-Za-z0-9_-]{12,}|-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*PRIVATE KEY-----|\b[A-Za-z0-9+/_-]{48,}={0,2}/g;
-
-export function redactSecrets(text: string): string {
-  return text.replace(REDACT, "[redacted]");
+/** Same minimal text for first indexing and subsequent backfill. */
+export function memoryEmbeddingText(title: string, text: string): string {
+  return redactSecrets(`${title.slice(0, 160)}\n${text}`).slice(0, MEMORY_EMBED_CHARS);
 }
 
 export function normalizeForHash(text: string): string {
@@ -316,7 +281,7 @@ export async function indexEvent(
   store: ProjectVectorStore,
   projectId: string,
   event: IndexEvent,
-  opts: { embedder?: MemoryEmbedder; now?: () => string } = {},
+  opts: { embedder?: MemoryEmbedder; now?: () => string; signal?: AbortSignal } = {},
 ): Promise<IndexResult> {
   const result: IndexResult = { inserted: 0, replaced: 0, skippedDup: 0, embedded: 0, ids: [] };
   const text = redactSecrets(event.text).trim();
@@ -327,24 +292,23 @@ export async function indexEvent(
   const now = (opts.now ?? (() => new Date().toISOString()))();
   const embedTexts: string[] = [];
   const pending: Array<{ id: string; chunk: TextChunk; hash: string }> = [];
+  const backfillIds: string[] = [];
   for (const chunk of chunks.slice(0, 4)) {
     const hash = contentHash(type, chunk.text);
-    if (store.hasHash(hash)) {
+    const duplicate = store.hasHash(hash);
+    if (duplicate) {
       result.skippedDup++;
+      const stored = store.getChunk(duplicate);
+      if (opts.embedder && (!stored?.has_embedding || stored.embedder !== opts.embedder.id)) backfillIds.push(duplicate);
       continue;
     }
     const id = newChunkId();
     pending.push({ id, chunk, hash });
-    embedTexts.push(`${event.title ?? ""}\n${chunk.text}`.slice(0, NEEDLE_TEXT_CHARS));
+    embedTexts.push(memoryEmbeddingText(event.title ?? chunk.title, chunk.text));
   }
-  let vectors: number[][] | null = null;
-  if (pending.length && opts.embedder) {
-    try {
-      vectors = await opts.embedder.embed(embedTexts);
-    } catch {
-      vectors = null;
-    }
-  }
+  let batch: MemoryEmbedding | null = null;
+  if (pending.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit' && !sensitiveMemoryPath(event.path ?? '')) batch = await embedMemory(opts.embedder, embedTexts, { signal: opts.signal });
+  const vectors = batch?.vectors;
   for (let i = 0; i < pending.length; i++) {
     const { id, chunk, hash } = pending[i];
     const outcome = store.upsertChunk({
@@ -352,10 +316,10 @@ export async function indexEvent(
       project_id: projectId,
       session_id: event.sessionId ?? "",
       source_type: type,
-      source_path: event.path ?? "",
+      source_path: redactSecrets(event.path ?? ""),
       source_start: chunk.start,
       source_end: chunk.end,
-      title: (event.title ?? chunk.title).slice(0, 160),
+      title: redactSecrets(event.title ?? chunk.title).slice(0, 160),
       text: chunk.text,
       timestamp: event.timestamp ?? now,
       valid_from: now,
@@ -364,7 +328,8 @@ export async function indexEvent(
       importance: event.importance ?? TYPE_DEFAULT_IMPORTANCE[type],
       authority: 0.5,
       content_hash: hash,
-      embedder: vectors?.[i] ? (opts.embedder?.id ?? "") : "",
+      embedder: batch?.space.id ?? "",
+      embeddingSpace: batch?.space,
       embedding: vectors?.[i] ?? null,
     }, now);
     if (outcome === "duplicate") {
@@ -373,9 +338,10 @@ export async function indexEvent(
     }
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
-    if (vectors?.[i]) result.embedded++;
+    if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
   }
+  if (backfillIds.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit') result.embedded += (await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, signal: opts.signal, now: opts.now })).embedded;
   return result;
 }
 
@@ -393,9 +359,10 @@ export async function indexFile(
   store: ProjectVectorStore,
   projectId: string,
   input: IndexFileInput,
-  opts: { embedder?: MemoryEmbedder; now?: () => string } = {},
+  opts: { embedder?: MemoryEmbedder; now?: () => string; signal?: AbortSignal } = {},
 ): Promise<IndexResult> {
   const result: IndexResult = { inserted: 0, replaced: 0, skippedDup: 0, embedded: 0, ids: [] };
+  if (sensitiveMemoryPath(input.path)) return result;
   const content = redactSecrets(input.content);
   if (content.trim().length < 24 || content.length > 500_000) return result;
   const kind = chunkerForPath(input.path);
@@ -403,22 +370,20 @@ export async function indexFile(
   const type = input.sourceType ?? (kind === "markdown" ? "architecture" : "code");
   const now = (opts.now ?? (() => new Date().toISOString()))();
   const pending: Array<{ id: string; chunk: TextChunk; hash: string }> = [];
+  const backfillIds: string[] = [];
   for (const chunk of chunks) {
     const hash = contentHash(`${type}:${input.path}`, chunk.text);
-    if (store.hasHash(hash)) {
+    const duplicate = store.hasHash(hash);
+    if (duplicate) {
       result.skippedDup++;
+      const stored = store.getChunk(duplicate);
+      if (opts.embedder && (!stored?.has_embedding || stored.embedder !== opts.embedder.id)) backfillIds.push(duplicate);
       continue;
     }
     pending.push({ id: newChunkId(), chunk, hash });
   }
-  let vectors: number[][] | null = null;
-  if (pending.length && opts.embedder) {
-    try {
-      vectors = await opts.embedder.embed(pending.map((p) => `${input.path}\n${p.chunk.text}`.slice(0, NEEDLE_TEXT_CHARS)));
-    } catch {
-      vectors = null;
-    }
-  }
+  const batch = pending.length && opts.embedder ? await embedMemory(opts.embedder, pending.map(p => memoryEmbeddingText(p.chunk.title || `${input.path}:${p.chunk.start || 0}`, p.chunk.text)), { signal: opts.signal }) : null;
+  const vectors = batch?.vectors;
   for (let i = 0; i < pending.length; i++) {
     const { id, chunk, hash } = pending[i];
     const outcome = store.upsertChunk({
@@ -438,7 +403,8 @@ export async function indexFile(
       importance: TYPE_DEFAULT_IMPORTANCE[type],
       authority: 0.5,
       content_hash: hash,
-      embedder: vectors?.[i] ? (opts.embedder?.id ?? "") : "",
+      embedder: batch?.space.id ?? "",
+      embeddingSpace: batch?.space,
       embedding: vectors?.[i] ?? null,
     }, now);
     if (outcome === "duplicate") {
@@ -447,9 +413,10 @@ export async function indexFile(
     }
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
-    if (vectors?.[i]) result.embedded++;
+    if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
   }
+  if (backfillIds.length && opts.embedder) result.embedded += (await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, signal: opts.signal, now: opts.now })).embedded;
   return result;
 }
 
@@ -457,29 +424,27 @@ export async function indexFile(
 export async function reindexEmbeddings(
   store: ProjectVectorStore,
   embedder: MemoryEmbedder,
-  opts: { limit?: number; now?: () => string } = {},
-): Promise<{ embedded: number; failed: number }> {
-  const ids = store.unembeddedIds(opts.limit ?? 500);
-  let embedded = 0;
-  let failed = 0;
-  const now = (opts.now ?? (() => new Date().toISOString()))();
-  for (let i = 0; i < ids.length; i += NEEDLE_BATCH) {
-    const batchIds = ids.slice(i, i + NEEDLE_BATCH);
-    const chunks = store.getChunks(batchIds);
-    let vectors: number[][] | null = null;
-    try {
-      vectors = await embedder.embed(chunks.map((c) => `${c.title}\n${c.text}`.slice(0, NEEDLE_TEXT_CHARS)));
-    } catch {
-      vectors = null;
-    }
-    if (!vectors || vectors.length !== chunks.length) {
-      failed += chunks.length;
-      continue;
-    }
+  opts: { limit?: number; ids?: string[]; now?: () => string; signal?: AbortSignal } = {},
+): Promise<{ embedded: number; failed: number; remaining: number; cancelled: boolean }> {
+  const limit = Math.max(1, Math.min(256, opts.limit ?? 32));
+  const ids = (opts.ids ?? store.unembeddedIds(limit, embedder.id)).slice(0, opts.ids ? 64 : limit);
+  let embedded = 0, failed = 0;
+  const now = opts.now ?? (() => new Date().toISOString());
+  for (let i = 0; i < ids.length && !opts.signal?.aborted; i += MEMORY_EMBED_BATCH) {
+    const chunks = store.getChunks(ids.slice(i, i + MEMORY_EMBED_BATCH)).filter(c => c.valid_until === null && c.source_type !== 'tool_result'
+      && !(c.source_type === 'code' && c.text.startsWith('File edited via '))
+      && !sensitiveMemoryPath(c.source_path) && (!c.has_embedding || c.embedder !== embedder.id));
+    if (!chunks.length) continue;
+    const batch = await embedMemory(embedder, chunks.map(c => memoryEmbeddingText(c.title, c.text)), { signal: opts.signal });
+    if (!batch || opts.signal?.aborted) { failed += chunks.length; break; }
     for (let j = 0; j < chunks.length; j++) {
-      if (store.setEmbedding(chunks[j].id, embedder.id, vectors[j], now)) embedded++;
+      // An edit in another session during the request invalidates this vector.
+      if (store.setEmbedding(chunks[j].id, batch.space, batch.vectors[j], now(), chunks[j].content_hash)) embedded++;
       else failed++;
     }
   }
-  return { embedded, failed };
+  const remaining = store.unembeddedIds(5000, embedder.id).length;
+  const report = { embedded, failed, remaining, cancelled: opts.signal?.aborted === true };
+  store.setMeta(`backfill:${embedder.id}`, JSON.stringify({ ...report, at: now() }));
+  return report;
 }

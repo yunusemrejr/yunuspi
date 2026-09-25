@@ -18,8 +18,15 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { sensitiveMemoryPath } from "./memory-redaction.ts";
 
-export const PROJECT_STORE_SCHEMA_VERSION = 1;
+export const PROJECT_STORE_SCHEMA_VERSION = 2;
+
+export interface EmbeddingSpace { id: string; backend: string; model: string; version: number; dim: number }
+export function legacyEmbeddingSpace(id: string, dim: number): EmbeddingSpace {
+  const remote = /^openrouter:(.+):v(\d+)$/.exec(id);
+  return { id, backend: remote ? 'openrouter' : id === 'needle3' ? 'needle' : 'local', model: remote?.[1] ?? id, version: remote ? Number(remote[2]) : 1, dim };
+}
 
 /** Chunk source types. Weights live in project-memory-index.ts. */
 export const CHUNK_TYPES = [
@@ -67,6 +74,7 @@ export interface StoredChunk {
   embedder: string;
   dim: number;
   has_embedding: boolean;
+  embedded_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +101,7 @@ export interface UpsertChunkInput {
   superseded_by?: string;
   content_hash: string;
   embedder?: string;
+  embeddingSpace?: EmbeddingSpace;
   /** L2-normalized by the store; null/empty clears the embedding. */
   embedding?: number[] | Float32Array | null;
 }
@@ -115,6 +124,8 @@ export interface StoreCounts {
   tombstoned: number;
   types: Record<string, number>;
 }
+
+const LEXICAL_STOP_WORDS = new Set('the a an and or with from this that is are was were of to in on at for as it its we our they their be been can could should would will has have had what how why which who when where bir bu şu ile ve için mi mı mu mü ne neden nasıl'.split(' '));
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -200,6 +211,7 @@ function rowToChunk(row: Record<string, unknown>): StoredChunk {
     embedder: String(row.embedder ?? ""),
     dim: Number(row.dim ?? 0),
     has_embedding: row.embedding != null,
+    embedded_at: String(row.embedded_at ?? ""),
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
   };
@@ -238,10 +250,29 @@ export class ProjectVectorStore {
       db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(PROJECT_STORE_SCHEMA_VERSION));
       db.prepare("INSERT INTO meta (key, value) VALUES ('project_id', ?)").run(opts.projectId);
       db.prepare("INSERT INTO meta (key, value) VALUES ('created_at', ?)").run(new Date().toISOString());
-    } else if (Number(version.value) !== PROJECT_STORE_SCHEMA_VERSION) {
+    } else if (![1, PROJECT_STORE_SCHEMA_VERSION].includes(Number(version.value))) {
       db.close();
       throw new Error(`Unsupported project memory schema ${version.value} (want ${PROJECT_STORE_SCHEMA_VERSION}): ${dbPath}`);
     }
+    // Additive, transactional migration: existing chunk IDs, FTS rows and
+    // provenance stay intact. One vector per chunk; backfill explicitly replaces
+    // its space while other chunks can retain their original Needle vectors.
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!(db.prepare("PRAGMA table_info(chunks)").all() as Array<{ name: string }>).some(c => c.name === 'embedded_at')) {
+        db.exec("ALTER TABLE chunks ADD COLUMN embedded_at TEXT NOT NULL DEFAULT ''");
+        db.exec("UPDATE chunks SET embedded_at = updated_at WHERE embedding IS NOT NULL");
+      }
+      db.exec("CREATE TABLE IF NOT EXISTS embedding_spaces (id TEXT PRIMARY KEY, backend TEXT NOT NULL, model TEXT NOT NULL, version INTEGER NOT NULL, dim INTEGER NOT NULL, created_at TEXT NOT NULL)");
+      db.exec("CREATE INDEX IF NOT EXISTS chunks_space ON chunks(embedder, dim)");
+      const spaces = db.prepare("SELECT embedder AS id, dim, MIN(updated_at) AS created_at FROM chunks WHERE embedding IS NOT NULL AND embedder != '' GROUP BY embedder, dim").all() as Array<{ id: string; dim: number; created_at: string }>;
+      for (const row of spaces) {
+        const space = legacyEmbeddingSpace(row.id, row.dim);
+        db.prepare("INSERT OR IGNORE INTO embedding_spaces VALUES (?, ?, ?, ?, ?, ?)").run(space.id, space.backend, space.model, space.version, space.dim, row.created_at);
+      }
+      db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(PROJECT_STORE_SCHEMA_VERSION));
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
     return new ProjectVectorStore(dbPath, opts.projectId, db);
   }
 
@@ -262,7 +293,9 @@ export class ProjectVectorStore {
   upsertChunk(input: UpsertChunkInput, now?: string): "inserted" | "replaced" | "duplicate" {
     if (!input.id || !input.text || !input.content_hash) throw new Error("upsertChunk requires id, text and content_hash");
     const at = now ?? new Date().toISOString();
-    const vec = input.embedding && input.embedding.length ? toBuffer(input.embedding) : null;
+    let vec = input.embedding && input.embedding.length ? toBuffer(input.embedding) : null;
+    if (vec && ((input.embeddingSpace && input.embeddingSpace.dim !== vec.dim)
+      || !this.registerSpace(input.embeddingSpace ?? legacyEmbeddingSpace(input.embedder ?? '', vec.dim), at))) vec = null;
     const existing = this.db.prepare("SELECT id, content_hash FROM chunks WHERE id = ?").get(input.id) as { id: string; content_hash: string } | undefined;
     const dup = this.db.prepare("SELECT id FROM chunks WHERE content_hash = ? AND id != ?").get(input.content_hash, input.id) as { id: string } | undefined;
     if (dup) return "duplicate";
@@ -287,7 +320,7 @@ export class ProjectVectorStore {
       supersedes: JSON.stringify(input.supersedes ?? []),
       superseded_by: input.superseded_by ?? "",
       content_hash: input.content_hash,
-      embedder: vec ? (input.embedder ?? "") : "",
+      embedder: vec ? (input.embeddingSpace?.id ?? input.embedder ?? "") : "",
       dim: vec ? vec.dim : 0,
       embedding: vec ? vec.buffer : null,
       created_at: at,
@@ -308,6 +341,7 @@ export class ProjectVectorStore {
       this.db.prepare("INSERT INTO chunks_fts (rowid, title, text, concepts) VALUES ((SELECT rowid FROM chunks WHERE id = ?), ?, ?, ?)").run(
         input.id, row.title, row.text, (input.concepts ?? []).join(" "),
       );
+      this.db.prepare("UPDATE chunks SET embedded_at = ? WHERE id = ?").run(vec ? at : '', input.id);
       this.db.exec("COMMIT");
     } catch (error) {
       try {
@@ -321,7 +355,7 @@ export class ProjectVectorStore {
   }
 
   getChunk(id: string): StoredChunk | undefined {
-    const row = this.db.prepare("SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, created_at, updated_at FROM chunks WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare("SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, embedded_at, created_at, updated_at FROM chunks WHERE id = ?").get(id) as Record<string, unknown> | undefined;
     return row ? rowToChunk(row) : undefined;
   }
 
@@ -331,7 +365,7 @@ export class ProjectVectorStore {
     // Bounded batches keep variable counts small.
     for (let i = 0; i < ids.length; i += 200) {
       const batch = ids.slice(i, i + 200);
-      const rows = this.db.prepare(`SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, created_at, updated_at FROM chunks WHERE id IN (${batch.map(() => "?").join(",")})`).all(...batch) as Record<string, unknown>[];
+      const rows = this.db.prepare(`SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, embedded_at, created_at, updated_at FROM chunks WHERE id IN (${batch.map(() => "?").join(",")})`).all(...batch) as Record<string, unknown>[];
       for (const row of rows) out.push(rowToChunk(row));
     }
     const order = new Map(ids.map((id, index) => [id, index]));
@@ -377,17 +411,48 @@ export class ProjectVectorStore {
     return (result.changes as number) > 0;
   }
 
-  setEmbedding(id: string, embedder: string, embedding: number[] | Float32Array, now?: string): boolean {
-    const vec = toBuffer(embedding);
-    const at = now ?? new Date().toISOString();
-    const result = this.db.prepare("UPDATE chunks SET embedder = ?, dim = ?, embedding = ?, updated_at = ? WHERE id = ?").run(
-      vec ? embedder : "", vec ? vec.dim : 0, vec ? vec.buffer : null, at, id,
+  embeddingSpaces(): Array<EmbeddingSpace & { created_at: string; count: number }> {
+    return (this.db.prepare("SELECT s.*, (SELECT COUNT(*) FROM chunks c WHERE c.embedder=s.id AND c.dim=s.dim AND c.embedding IS NOT NULL) AS count FROM embedding_spaces s ORDER BY s.id").all() as any[]).map(row => ({ ...row }));
+  }
+
+  private registerSpace(space: EmbeddingSpace, at: string): boolean {
+    if (!space.id || !space.backend || !space.model || !Number.isSafeInteger(space.dim) || space.dim < 1 || space.dim > 16384 || !Number.isSafeInteger(space.version) || space.version < 1) return false;
+    this.db.prepare("INSERT OR IGNORE INTO embedding_spaces VALUES (?, ?, ?, ?, ?, ?)").run(space.id, space.backend, space.model, space.version, space.dim, at);
+    const stored = this.db.prepare("SELECT * FROM embedding_spaces WHERE id = ?").get(space.id) as any;
+    const matches = stored.dim === space.dim && stored.backend === space.backend && stored.model === space.model && stored.version === space.version;
+    this.setMeta('embedding-error', matches ? '' : 'space-metadata-mismatch');
+    return matches;
+  }
+
+  setEmbedding(id: string, embedder: string | EmbeddingSpace, embedding: number[] | Float32Array, now?: string, expectedHash?: string): boolean {
+    const vec = toBuffer(embedding), at = now ?? new Date().toISOString();
+    const space = typeof embedder === 'string' ? legacyEmbeddingSpace(embedder, vec?.dim ?? 0) : embedder;
+    if (!vec || vec.dim !== space.dim || !this.registerSpace(space, at)) return false;
+    const result = this.db.prepare("UPDATE chunks SET embedder = ?, dim = ?, embedding = ?, embedded_at = ?, updated_at = ? WHERE id = ? AND (? IS NULL OR (content_hash = ? AND valid_until IS NULL))").run(
+      space.id, vec.dim, vec.buffer, at, at, id, expectedHash ?? null, expectedHash ?? null,
     );
     return (result.changes as number) > 0;
   }
 
+  /** Consolidation reuses persisted compatible vectors, never re-embeds history. */
+  storedVectors(ids: string[], embedder: string): Map<string, number[]> {
+    const out = new Map<string, number[]>();
+    const dim = this.embeddingSpaces().find(space => space.id === embedder)?.dim;
+    if (!dim) return out;
+    for (let i = 0; i < ids.length; i += 200) {
+      const batch = ids.slice(i, i + 200);
+      const rows = this.db.prepare(`SELECT id, embedding FROM chunks WHERE embedder = ? AND dim = ? AND id IN (${batch.map(() => '?').join(',')})`).all(embedder, dim, ...batch) as Array<{ id: string; embedding: Uint8Array }>;
+      for (const row of rows) if (row.embedding?.byteLength === dim * 4) {
+        const copy = Uint8Array.from(row.embedding);
+        const vec = Array.from(new Float32Array(copy.buffer));
+        if (vec.every(Number.isFinite)) out.set(row.id, vec);
+      }
+    }
+    return out;
+  }
+
   listRecent(limit = 20): StoredChunk[] {
-    const rows = this.db.prepare("SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, created_at, updated_at FROM chunks ORDER BY timestamp DESC LIMIT ?").all(Math.max(1, Math.min(200, limit))) as Record<string, unknown>[];
+    const rows = this.db.prepare("SELECT id, project_id, session_id, source_type, source_path, source_start, source_end, title, text, timestamp, valid_from, valid_until, commit_sha, concepts, importance, confidence, authority, supersedes, superseded_by, content_hash, embedder, dim, embedding, embedded_at, created_at, updated_at FROM chunks ORDER BY timestamp DESC LIMIT ?").all(Math.max(1, Math.min(5000, limit))) as Record<string, unknown>[];
     return rows.map(rowToChunk);
   }
 
@@ -406,8 +471,17 @@ export class ProjectVectorStore {
     return rows.map((row) => ({ dim: row.dim, n: row.n }));
   }
 
-  unembeddedIds(limit = 500): string[] {
-    return (this.db.prepare("SELECT id FROM chunks WHERE embedding IS NULL AND valid_until IS NULL ORDER BY timestamp DESC LIMIT ?").all(Math.max(1, Math.min(5000, limit))) as Array<{ id: string }>).map((row) => row.id);
+  unembeddedIds(limit = 500, embedder?: string): string[] {
+    const condition = embedder ? "(embedding IS NULL OR embedder != ?)" : "embedding IS NULL";
+    const ids: string[] = [], cap = Math.max(1, Math.min(5000, limit));
+    const rows = this.db.prepare(`SELECT id, source_path FROM chunks WHERE ${condition} AND valid_until IS NULL AND source_type != 'tool_result' AND NOT (source_type = 'code' AND text LIKE 'File edited via %') ORDER BY importance DESC, timestamp DESC, id`)
+      .iterate(...(embedder ? [embedder] : []));
+    for (const row of rows) {
+      if (sensitiveMemoryPath(String(row.source_path))) continue;
+      ids.push(String(row.id));
+      if (ids.length >= cap) break;
+    }
+    return ids;
   }
 
   /** Lexical search over title/text/concepts. Terms are OR-ed with prefix match. */
@@ -416,7 +490,11 @@ export class ProjectVectorStore {
       .normalize("NFKC")
       .toLowerCase()
       .match(/[\p{L}\p{N}][\p{L}\p{N}_.-]*/gu) ?? [];
-    const kept = [...new Set(terms.map((t) => t.replace(/[._-]+$/, "")))].filter((t) => t.length >= 2).slice(0, 12);
+    let kept = [...new Set(terms.map((t) => t.replace(/[._-]+$/, "")))].filter((t) => t.length >= 2);
+    // Long natural-language questions otherwise match nearly every row on
+    // "the"/"to" alone. Short literal/identifier queries retain every term.
+    if (terms.length > 3) kept = kept.filter(term => !LEXICAL_STOP_WORDS.has(term));
+    kept = kept.slice(0, 12);
     if (!kept.length) return [];
     const match = kept.map((t) => `"${t.replace(/"/g, "")}"*`).join(" OR ");
     const rows = this.db.prepare(`SELECT (SELECT id FROM chunks WHERE chunks.rowid = chunks_fts.rowid) AS id, bm25(chunks_fts) AS rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`).all(match, Math.max(1, Math.min(200, limit))) as Array<{ id: string | null; rank: number }>;
@@ -424,18 +502,18 @@ export class ProjectVectorStore {
   }
 
   /** Brute-force cosine over normalized vectors. Dim mismatches are skipped. */
-  vectorSearch(queryVec: number[] | Float32Array, opts: { limit?: number; scanCap?: number; types?: ChunkType[]; since?: string; minAuthority?: number; includeSuperseded?: boolean } = {}): VectorHit[] {
+  vectorSearch(queryVec: number[] | Float32Array, opts: { embedder?: string; limit?: number; scanCap?: number; types?: ChunkType[]; since?: string; minAuthority?: number; includeSuperseded?: boolean } = {}): VectorHit[] {
     const arr = Array.isArray(queryVec) ? Float32Array.from(queryVec) : queryVec;
     const limit = Math.max(1, Math.min(200, opts.limit ?? 40));
     const scanCap = Math.max(100, Math.min(50000, opts.scanCap ?? 20000));
     const dim = arr.length;
-    if (!dim) return [];
+    if (!dim || !opts.embedder || this.embeddingSpaces().find(space => space.id === opts.embedder)?.dim !== dim) return [];
     let norm = 0;
     for (let i = 0; i < dim; i++) norm += arr[i] * arr[i];
     norm = Math.sqrt(norm);
     if (!Number.isFinite(norm) || norm <= 0) return [];
-    const conditions = ["embedding IS NOT NULL", "dim = ?"];
-    const params: unknown[] = [dim];
+    const conditions = ["embedding IS NOT NULL", "dim = ?", "embedder = ?"];
+    const params: unknown[] = [dim, opts.embedder];
     if (!opts.includeSuperseded) conditions.push("valid_until IS NULL");
     if (opts.types?.length) {
       conditions.push(`source_type IN (${opts.types.map(() => "?").join(",")})`);
@@ -455,7 +533,7 @@ export class ProjectVectorStore {
     for (const row of rows) {
       const bytes = row.embedding;
       if (!bytes || bytes.byteLength !== dim * 4) continue;
-      const vec = new Float32Array(bytes.buffer, bytes.byteOffset, dim);
+      const vec = new Float32Array(Uint8Array.from(bytes).buffer);
       let dot = 0;
       for (let i = 0; i < dim; i++) dot += (arr[i] / norm) * vec[i];
       if (!Number.isFinite(dot)) continue;

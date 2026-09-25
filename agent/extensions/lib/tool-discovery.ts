@@ -7,6 +7,7 @@ import { browseCapabilities, searchCapabilities, getCapabilityDetail } from './h
 import { askJev, jevMark, tooShort } from './jev-client.ts';
 import { needleRank } from './needle-runtime.ts';
 import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
+import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillRoutes } from './skill-routing.ts';
 
 /** Multi-stage re-rank: lexical order -> Needle semantic ranking -> Jev
@@ -31,6 +32,7 @@ async function rerankWithJev<T>(
     const lexical = matches.map((item) => ({ id: idOf(item), text: textOf(item), item }));
     const outcome = await multiStageRetrieve({
       kind, site: 'rank', query, lexical,
+      local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options), signal,
       needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }),
       jev: (site, state, questions) => askJev(site, state, questions, { pi, signal }),
       jevMark: (site, detail, usage) => jevMark(site, detail, usage),

@@ -67,7 +67,11 @@ export async function videoFrames(params: any, cwd: string, signal?: AbortSignal
   const extract = async (index: number) => {
     signal?.throwIfAborted();
     const output = path.join(dir, `frame-${String(index + 1).padStart(2, "0")}.png`);
-    const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[index]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `scale=${width}:${width}:force_original_aspect_ratio=decrease:reset_sar=1,showinfo`, "-update", "1", output], signal, 20000);
+    // Fit display aspect ratio (including non-square input pixels) inside
+    // the box, then emit square pixels. reset_sar requires newer FFmpeg
+    // than Ubuntu LTS supplies; these expressions also work on FFmpeg 6.
+    const scale = `scale=w='if(gte(dar,1),${width},max(1,round(${width}*dar)))':h='if(gte(dar,1),max(1,round(${width}/dar)),${width})',setsar=1`;
+    const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[index]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `${scale},showinfo`, "-update", "1", output], signal, 20000);
     const match = /\bn:\s*0\s+pts:\s*-?\d+\s+pts_time:([\d.e+-]+)/.exec(r.stderr);
     return { ...await produced(output), requestedSeconds: times[index], decodedSeconds: match ? times[index] + Number(match[1]) : null };
   };
@@ -168,7 +172,7 @@ export async function mediaEdit(params: any, cwd: string, signal?: AbortSignal) 
       if (["smpte2084", "arib-std-b67"].includes(video.color_transfer)) throw new Error("HDR source needs explicit tone mapping; use the video-editing skill");
       args.push("-map", `0:${video.index}`);
       if (audio) args.push("-map", `0:${audio.index}`);
-      args.push("-vf", `scale=${width}:-2:reset_sar=1`, "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", String(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart");
+      args.push("-vf", `scale=${width}:max(2\\,round(${width}/dar/2)*2),setsar=1`, "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", String(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart");
       if (audio) args.push("-c:a", "aac", "-b:a", "192k", "-ar", String(rate));
     } else {
       args.push("-map", `0:${audio.index}`, "-vn", "-c:a", "pcm_s16le", "-ar", String(rate));

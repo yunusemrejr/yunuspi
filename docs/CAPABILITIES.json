@@ -2933,7 +2933,7 @@
       {
         "name": "memory-prime",
         "source": "agent/extensions/pi-memory/priming.ts",
-        "line": 220
+        "line": 221
       },
       {
         "name": "metrics",
@@ -2953,7 +2953,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 420
+        "line": 422
       },
       {
         "name": "or-provider",
@@ -2963,7 +2963,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 519
+        "line": 606
       },
       {
         "name": "prompt-workflow",
@@ -3098,7 +3098,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 246
+        "line": 248
       },
       {
         "name": "websearch",
@@ -3187,13 +3187,13 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 255,
+        "line": 259,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 273,
+        "line": 277,
         "kind": "factory"
       },
       {
@@ -3382,7 +3382,7 @@
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 254,
+        "line": 258,
         "kind": "factory"
       },
       {
@@ -3406,13 +3406,13 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 256,
+        "line": 260,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 252,
+        "line": 256,
         "kind": "factory"
       },
       {
@@ -3460,7 +3460,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 259,
+        "line": 263,
         "kind": "factory"
       },
       {
@@ -3502,43 +3502,49 @@
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 499,
+        "line": 586,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 467,
+        "line": 554,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 431,
+        "line": 516,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_reembed",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 436,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 382,
+        "line": 466,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 483,
+        "line": 570,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 262,
+        "line": 287,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 337,
+        "line": 389,
         "kind": "literal"
       },
       {
@@ -3574,13 +3580,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 269,
+        "line": 273,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 270,
+        "line": 274,
         "kind": "factory"
       },
       {
@@ -3616,7 +3622,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 702,
+        "line": 703,
         "kind": "literal"
       },
       {
@@ -3689,7 +3695,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 274,
+        "line": 276,
         "kind": "literal"
       },
       {
@@ -3701,13 +3707,13 @@
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 272,
+        "line": 276,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 253,
+        "line": 257,
         "kind": "factory"
       },
       {
@@ -3956,43 +3962,49 @@
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 499,
+        "line": 586,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 467,
+        "line": 554,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 431,
+        "line": 516,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_reembed",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 436,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 382,
+        "line": 466,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 483,
+        "line": 570,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 262,
+        "line": 287,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 337,
+        "line": 389,
         "kind": "literal"
       },
       {
@@ -4058,7 +4070,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 702,
+        "line": 703,
         "kind": "literal"
       },
       {
@@ -4082,7 +4094,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 274,
+        "line": 276,
         "kind": "literal"
       },
       {
@@ -4154,7 +4166,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          242
+          246
         ],
         "knownNames": [
           "audio_analyze",
@@ -4313,11 +4325,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 630,
-      "registrationSites": 76,
+      "sourceFiles": 633,
+      "registrationSites": 77,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 103,
-      "uniqueStableTools": 102,
+      "stableRegistrationRows": 104,
+      "uniqueStableTools": 103,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4751,6 +4763,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/memory-redaction.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/metrics-panel.ts",
         "exists": true
       },
@@ -4824,6 +4840,14 @@
       },
       {
         "path": "agent/extensions/lib/project-memory-consolidate.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-memory-context.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-memory-embedder.ts",
         "exists": true
       },
       {
@@ -6953,6 +6977,10 @@
       {
         "name": "PROJECT-INTELLIGENCE.md",
         "path": "docs/PROJECT-INTELLIGENCE.md"
+      },
+      {
+        "name": "PROJECT-MEMORY-EVALUATION.md",
+        "path": "docs/PROJECT-MEMORY-EVALUATION.md"
       },
       {
         "name": "PUBLISHING.md",

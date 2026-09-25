@@ -245,7 +245,7 @@ test('vector search ranks cosine neighbors; dim mismatches are skipped', (t) => 
   store.upsertChunk({ id: 'a', project_id: 'p', source_type: 'concept', text: 't', content_hash: 'ha', embedder: 't', embedding: [1, 0] });
   store.upsertChunk({ id: 'b', project_id: 'p', source_type: 'concept', text: 't', content_hash: 'hb', embedder: 't', embedding: [0, 1] });
   store.upsertChunk({ id: 'c', project_id: 'p', source_type: 'concept', text: 't', content_hash: 'hc', embedder: 't', embedding: [1, 1, 1] });
-  const hits = store.vectorSearch([1, 0], { limit: 5 });
+  const hits = store.vectorSearch([1, 0], { embedder: 't', limit: 5 });
   assert.deepEqual(hits.map((h) => h.id), ['a', 'b']);
   assert.ok(hits[0].score > 0.99);
   assert.deepEqual(store.vectorSearch([0, 0]), []);
@@ -449,7 +449,7 @@ test('temporal filters, superseded demotion and validation', async (t) => {
   assert.deepEqual(typed.hits, []);
   await assert.rejects(() => retrieveProjectMemory(store, 'ab', { rerank: false }), /3–512/);
   const degraded = await retrieveProjectMemory(store, 'bramblethorn build', { rerank: false });
-  assert.ok(degraded.stats.degraded.includes('embeddings-unavailable'));
+  assert.equal(degraded.stats.semanticSkipped, 'no-indexed-vectors');
 });
 
 // ---------------------------------------------------------------------------
@@ -564,7 +564,7 @@ test('extension indexes files and session events incrementally', async (t) => {
   const kinds = (await search('nebula')).details.hits;
   assert.ok(kinds.length >= 4, `expected queued events to flush, got ${kinds.length}`);
   const command = await pi.commands.get('project-memory').handler([], ctx);
-  assert.ok(command.includes('chunks'));
+  assert.match(command, /chunks/i);
 });
 
 test('children search and read only; PI_PROJECT_MEMORY=off disables all', (t) => {
@@ -573,7 +573,7 @@ test('children search and read only; PI_PROJECT_MEMORY=off disables all', (t) =>
   const child = fakePi();
   piVectorMemory(child, { env: { ...testEnv(dir), PI_SUBAGENT_CHILD: '1' }, embedder: testEmbedder(8) });
   assert.deepEqual([...child.tools.keys()].sort(), ['project_memory_search', 'project_memory_status']);
-  assert.equal(child.handlers.size, 0);
+  assert.deepEqual([...child.handlers.keys()].sort(), ['session_shutdown', 'session_start']);
   const off = fakePi();
   piVectorMemory(off, { env: { ...testEnv(dir), PI_PROJECT_MEMORY: 'off' }, embedder: testEmbedder(8) });
   assert.equal(off.tools.size, 0);

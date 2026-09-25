@@ -92,3 +92,16 @@ test("frame validation still rejects bad timestamps", { skip: !hasFfmpeg }, asyn
 });
 
 console.log("PASS video-frames: ordered parallel extraction, contact sheet with cell map, validation");
+
+test('frame scaling preserves non-square input display aspect with FFmpeg 6 compatible filters', { skip: !hasFfmpeg }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-sar-'));
+  try {
+    const source = path.join(dir, 'source.mp4');
+    const rendered = spawnSync('ffmpeg', ['-hide_banner', '-nostdin', '-y', '-f', 'lavfi', '-i', 'testsrc=duration=1:size=320x240:rate=10', '-vf', 'setsar=2/1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', source]);
+    assert.equal(rendered.status, 0);
+    const result = await videoFrames({ path: source, times: [.5], width: 160 }, dir);
+    const probed = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,sample_aspect_ratio', '-of', 'json', result.frames[0].path], { encoding: 'utf8' });
+    const stream = JSON.parse(probed.stdout).streams[0];
+    assert.equal(stream.width, 160); assert.equal(stream.height, 60); assert.equal(stream.sample_aspect_ratio, '1:1');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

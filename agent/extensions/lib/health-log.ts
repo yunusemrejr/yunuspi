@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 const zip=promisify(gzip);
 export const HEALTH_SINK=Symbol.for('yunus-pi.health.v1');
-const fields=new Set(['tool','hook','owner','decision','skill','route','outcome','durationMs','similarity','overlap','count','evaluations','similarityEvaluations','dropped','isError','partial','inputTokens','outputTokens','helper','runtime','op','cached','coalesced','shadow','accepted','reason','shape','smol','kompress','needle','jev','savedChars','questions','findings']);
+const fields=new Set(['tool','hook','owner','decision','skill','route','purpose','role','failed','outcome','durationMs','similarity','overlap','count','evaluations','similarityEvaluations','dropped','isError','partial','inputTokens','outputTokens','helper','runtime','op','cached','coalesced','shadow','accepted','reason','shape','smol','kompress','needle','jev','savedChars','questions','findings']);
 export function safeHealthEvent(kind:string,data:Record<string,unknown>={}) {
  const event:Record<string,unknown>={v:1,t:Date.now(),kind:kind.replace(/[^a-z0-9_.-]/gi,'_').slice(0,64)};
  for(const [k,v] of Object.entries(data))if(fields.has(k)) {
