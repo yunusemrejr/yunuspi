@@ -196,7 +196,7 @@ export const HOOK_RULES: readonly HookRule[] = [
 		// remote) are where "done" must be checked against the real site.
 		key: "deploy-verify-live",
 		tools: ["bash"],
-		line: "After this deploy, open the live URL (http_request status/headers, render_see for pages) and compare it with the local build before reporting done; keep the previous revision reachable for rollback.",
+		line: "After this deploy, verify the LIVE bytes, not the push: fetch each changed asset from the production URL and compare its sha256 with the local file (curl -s URL | sha256sum). A replaced image/CSS/JS served with a long Cache-Control max-age needs a new URL (?v=hash) or a cache purge, or returning visitors keep the old bytes. Keep the previous revision reachable for rollback.",
 		when: contains(DEPLOY),
 	},
 	{
@@ -264,6 +264,31 @@ export function matchHook(
  * Unknown/ambiguous shapes return false so the hook stays silent rather
  * than annotating a result that did contain matches.
  */
+/** A deploy command that ran successfully (same catalogue as deploy-verify-live). */
+export function isDeployCommand(toolName: string, args: HookArgs): boolean {
+	return toolName === "bash" && DEPLOY.test(bashCommand(args));
+}
+
+const LOCAL_URL = /^https?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(?:[:/]|$)/i;
+const REMOTE_FETCH = /\b(?:curl|wget)\b[^\n]*?(https?:\/\/[^\s'"|;)]+)/g;
+const BYTE_COMPARISON = /\b(?:sha(?:1|224|256|384|512)sum|shasum|md5sum|b2sum|cmp|diff|openssl\s+dgst|wc\s+-c)\b|size_download|content-length|etag/i;
+
+/** Evidence that the live site's bytes were compared after a deploy: a remote
+ * (non-loopback) fetch combined with a hash, byte or header comparison, or a
+ * remote http_request (which reports status, content-length and ETag). A
+ * status-only probe or a grep of the HTML proves the page answers, not that the
+ * changed bytes are what visitors get. */
+export function isLiveByteVerification(toolName: string, args: HookArgs): boolean {
+	if (toolName === "http_request") {
+		const url = typeof args.url === "string" ? args.url : "";
+		return /^https?:\/\//i.test(url) && !LOCAL_URL.test(url);
+	}
+	if (toolName !== "bash") return false;
+	const command = bashCommand(args);
+	const remote = [...command.matchAll(REMOTE_FETCH)].some((match) => !LOCAL_URL.test(match[1]));
+	return remote && BYTE_COMPARISON.test(command);
+}
+
 export function isEmptySearchResult(content: unknown): boolean {
 	if (!Array.isArray(content)) return false;
 	const text = content
