@@ -446,3 +446,37 @@ test('used popup merges a legacy automatic wrapper and names the recorded timeou
   assert.doesNotMatch(html,/failed \(unknown\)/);
   assert.match(html,/1 child · 0 main-session · 0 recoveries/);
 });
+
+test('used summary folds the live telemetry segment into hook counts like the TUI footer', () => {
+  const live = { version: 2, segment: 'live-fixture', startedAt: Date.now(), hooks: { 'session-signals.ts:tool_result': { calls: 7, errors: 1, ms: 12, changed: 2 } }, events: {} };
+  const summary = signals.buildUsedSummary([], undefined, undefined, live);
+  assert.equal(summary.session.hookCalls, 7);
+  assert.equal(summary.session.hookErrors, 1);
+  assert.ok(summary.hooks.some((row) => row.name === 'session-signals.ts:tool_result' && row.calls === 7));
+  const cold = signals.buildUsedSummary([]);
+  assert.equal(cold.session.hookCalls, null);
+});
+
+test('used and error popups stamp their capture time and total window', () => {
+  const summary = signals.buildUsedSummary([]);
+  assert.match(summary.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(signals.usedSummaryHtml(summary).includes(`Snapshot · ${summary.capturedAt}`));
+  const many = Array.from({ length: 2100 }, (_, i) => ({ type: 'message', message: { role: 'toolResult', toolCallId: `c${i}`, toolName: 'read', content: [{ type: 'text', text: 'ok' }] } }));
+  const report = errorsLib.collectSessionErrors(many);
+  assert.equal(report.totalEntries, 2100);
+  assert.equal(report.inspected, 2000);
+  assert.equal(report.truncated, true);
+  assert.match(report.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const html = signals.errorsHtml(report);
+  assert.ok(html.includes('of 2,100 session entries'));
+  assert.ok(html.includes(`captured ${report.capturedAt}`));
+});
+
+test('error hook rows include the unflushed live telemetry segment', () => {
+  const live = { version: 2, segment: 'live-fixture', startedAt: Date.now(), hooks: { 'checkpoints.ts:tool_result': { calls: 5, errors: 2, ms: 9, changed: 0 } }, events: {} };
+  const report = errorsLib.collectSessionErrors([], { live });
+  const row = report.hookErrors.find((r) => r.owner === 'checkpoints.ts');
+  assert.ok(row);
+  assert.equal(row.errors, 2);
+  assert.equal(row.calls, 5);
+});
