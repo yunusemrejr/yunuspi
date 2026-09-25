@@ -24,6 +24,10 @@ export const QUALITY_REVIEW_RUNNER = Symbol.for('yunus-pi.quality-review-runner.
 export const QUALITY_PROJECT_CONTEXT = Symbol.for('yunus-pi.quality-project-context.v1');
 const ENTRY = 'quality-review-v1';
 const EVIDENCE_CHANGED = 'Outcome evidence changed after review began; the retained report cannot approve the current artifacts.';
+// Settled events deferred to a stuck agent-actionable test need before the
+// automatic review runs anyway. Reviewers receive the test snapshot, so the
+// unresolved need rides along instead of starving review forever.
+const TESTS_WAIT_SETTLED = 3;
 const brief = (text: string) => text.length <= 6000 ? text : `${text.slice(0,3000)}\n[Middle omitted from bounded review brief; parent retains full instructions.]\n${text.slice(-2800)}`;
 const RUBRICS: Record<string, string> = {
   correctness: 'Trace the changed behavior, actual source owner, affected callers and failure/cancellation paths. Check compatibility and meaningful tests. Identify a concrete counterexample; do not request speculative refactors.',
@@ -33,12 +37,16 @@ const RUBRICS: Record<string, string> = {
   runtime: 'Check language/runtime contracts (JavaScript, PHP, Python or other touched stack), browser compatibility, resource lifetimes and WebAssembly memory/ABI/fallback behavior where relevant. Require measurements for performance claims.',
   delivery: 'Check the actual target and release configuration, backwards compatibility, environment boundaries and rollback. Distinguish local, staged and observed production behavior; never deploy or access production just to review.',
 };
-export function reviewAspects(files: string[], task = '', history: any[] = []) {
+export function reviewAspects(files: string[], task = '', history: any[] = [], patterns: Array<{key?: string}> = []) {
   const names = files.join('\n'), prose = task.slice(0, 6000);
   const selected = new Set<string>();
   if (files.some(f => /\.(?:[cm]?[jt]sx?|py|php|go|rs|java|c|cc|cpp|cs|sh|sql|ya?ml|toml|json|vue|svelte)$/i.test(f))) selected.add('correctness');
   if (/auth|permission|security|migration|schema|\.sql\b/i.test(names) || /\b(?:security|authentication|authorization)\b/i.test(prose)) selected.add('security');
   if (/\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names) || /\b(?:UI|GUI|interface|accessibility|responsive|desktop app|game|gameplay|windowed|pixel art)\b/i.test(prose)) selected.add('interface');
+  // DOM-generating scripts (vanilla JS/TS builders) touch no UI-file
+  // extension yet render interface. Their markup-shape cues promote the
+  // interface aspect so rendered verification is demanded there too.
+  if (patterns.some(p => typeof p?.key === 'string' && p.key.startsWith('ui-'))) selected.add('interface');
   if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
   if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose)) selected.add('runtime');
   if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
@@ -166,6 +174,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   let truncated = false, delivered = '', deliveryInFlight = '', noted = '', pauseReason = '', history: any[] = [], graph = 'Project graph unavailable; inspect source and label missing context.';
 	let scopeOverflow = false, dispatchGap = '', reviewedEvidence = '', reviewedEvidencePaths: string[] = [], evidenceRejected: string[] = [];
   let scanning: Promise<void> | undefined, activity = 0, reviewUnavailable = false;
+  let testsWaitSettled = 0, testsWaitNeed = '';
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   // File -> last confirmed content hash. Shared by the discovery pass and the
   // native receipt path so one real edit is charged exactly one revision.
@@ -233,7 +242,21 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     // Test assessment/execution owns the next automatic step while unresolved.
     // An explicit source review still works, but parallel automatic reviews
     // would spend their bounded rounds on source/tests that are still changing.
-    if (automatic && (testsPending() || dispatchGap || reviewUnavailable)) return summary();
+    // A stuck agent-actionable need is different from active verification: it
+    // escalates after TESTS_WAIT_SETTLED deferrals instead of starving review.
+    if (automatic && testsPending()) {
+      const need = String(options.tests()?.need ?? '');
+      if (need === 'running' || need !== testsWaitNeed) {
+        testsWaitNeed = need === 'running' ? '' : need;
+        testsWaitSettled = need === 'running' ? 0 : 1;
+        return summary();
+      }
+      if (++testsWaitSettled <= TESTS_WAIT_SETTLED) return summary();
+      testsWaitSettled = 0; testsWaitNeed = '';
+    } else if (automatic) {
+      testsWaitSettled = 0; testsWaitNeed = '';
+    }
+    if (automatic && (dispatchGap || reviewUnavailable)) return summary();
     // Trivial formatting/lint/cleanup work never earns an automatic review.
     // Deliberate quality_review({action:"review"}) always stays available.
     if (automatic && isTrivialChangeRequest(task, changed)) return summary();
@@ -286,7 +309,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
 		graph = typeof info?.graph === 'string' ? info.graph.slice(0,5000) : graph;
 		history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
 	  } catch {}
-      const aspects = reviewAspects(changed,task,history);
+      const aspects = reviewAspects(changed,task,history,patternReport());
       roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, 'pending'])); emitProgress();
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
       // Admit each completed aspect before the shared deadline. A slow peer
@@ -389,7 +412,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       releaseShared();
       hashes = {}; reviewedHashes = {};
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});
-      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; refunded = 0; followups = 0; task = ''; delivered = ''; noted = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
+      cancel(); active = true; paused = true; pauseReason = 'reload'; root = path.resolve(ctx.cwd); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; reason = ''; rounds = 0; refunded = 0; followups = 0; task = ''; delivered = ''; noted = ''; testsWaitSettled = 0; testsWaitNeed = ''; history = []; graph = 'Project graph unavailable; inspect source and label missing context.';
       patterns.clear();
       scopeOverflow = false; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = [];
       const data = ctx.sessionManager?.getBranch?.().findLast((e:any) => e.type === 'custom' && e.customType === ENTRY)?.data;
@@ -439,7 +462,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     input(event: any) {
       if (event.source === 'extension') return;
       try { shadowPlane.beginRequest('review-input'); } catch { /* shadow only */ }
-      cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; followups = 0; delivered = ''; noted = '';
+      cancel(); paused = false; pauseReason = ''; rounds = 0; refunded = 0; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; followups = 0; delivered = ''; noted = ''; testsWaitSettled = 0; testsWaitNeed = '';
       const resume = /\b(?:continue|resume|retry|recheck|review)\b/i.test(String(event.text??''));
       if (disposition && !(disposition === 'blocked' && resume)) { changed = []; scopeOverflow = false; patterns.clear(); }
       // Explicit input grants a fresh bounded attempt, including recovery from
@@ -489,9 +512,12 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     async settled(_event: any, ctx: any, signal?: AbortSignal) {
       if (!enabled() || !capable() || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.()) return;
       const ticket = generation;
+      const roundsBefore = rounds;
       await run(ctx,signal,true);
       if (ticket !== generation || !active || paused || signal?.aborted || ctx.signal?.aborted || ctx.isIdle?.() !== true || ctx.hasPendingMessages?.() || followups >= 3) return;
-      if (testsPending()) return;
+      // Pending tests gate the follow-up only when no round just ran: an
+      // escalated round's results must still reach the agent as guidance.
+      if (testsPending() && rounds === roundsBefore) return;
       if (dispatchGap || reviewUnavailable || disposition === 'blocked' && reason.startsWith('Independent review unavailable:')) {
         // Show an automatic failure receipt without asking a model to repeat it
         // or re-open completed project work merely to acknowledge capacity loss.

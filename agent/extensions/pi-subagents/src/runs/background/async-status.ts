@@ -586,6 +586,39 @@ export function listAsyncRuns(asyncDirRoot: string, options: AsyncRunListOptions
 	return options.limit !== undefined ? sorted.slice(0, options.limit) : sorted;
 }
 
+export interface AvailableAsyncRunsOptions {
+	limit?: number;
+	sessionId?: string;
+	states?: Array<AsyncRunSummary["state"]>;
+	emptyNote?: string;
+}
+
+/**
+ * One-line recovery hint for a run id that matched nothing: the newest known
+ * runs as `id (state)`, live runs first, so the caller can retry with a valid
+ * id. Never throws — a hint must not break the error path it annotates.
+ */
+export function describeAvailableAsyncRuns(asyncDirRoot: string, options: AvailableAsyncRunsOptions = {}): string {
+	const limit = options.limit ?? 5;
+	let runs: AsyncRunSummary[];
+	try {
+		runs = listAsyncRuns(asyncDirRoot, {
+			// One extra to detect overflow for the `+N more` tail.
+			limit: limit + 1,
+			reconcile: false,
+			includeNested: false,
+			...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+			...(options.states !== undefined ? { states: options.states } : {}),
+		});
+	} catch {
+		return "";
+	}
+	if (!runs.length) return options.emptyNote ?? "No async runs are known in this registry.";
+	const labels = runs.slice(0, limit).map((run) => `${run.id} (${run.state})`);
+	if (runs.length > labels.length) labels.push(`+${runs.length - labels.length} more`);
+	return `Known runs: ${labels.join(", ")}.`;
+}
+
 function formatActivityFacts(input: { activityState?: ActivityState; lastActivityAt?: number; currentTool?: string; currentToolStartedAt?: number; currentPath?: string; turnCount?: number; toolCount?: number; steering?: SteeringStatus; turnBudget?: TurnBudgetState; turnBudgetExceeded?: boolean; wrapUpRequested?: boolean }): string | undefined {
 	const facts: string[] = [];
 	if (input.currentTool && input.currentToolStartedAt !== undefined) facts.push(`tool ${input.currentTool} ${formatDuration(Math.max(0, Date.now() - input.currentToolStartedAt))}`);

@@ -3,6 +3,7 @@ import type { AgentToolResult } from "@yunuspi/agent-core";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { Compile } from "typebox/compile";
 import { resolveAsyncRunLocation } from "../runs/background/async-resume.ts";
+import { describeAvailableAsyncRuns } from "../runs/background/async-status.ts";
 import { deliverStopRequest } from "../runs/background/control-channel.ts";
 import { reconcileAsyncRun } from "../runs/background/stale-run-reconciler.ts";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
@@ -576,7 +577,18 @@ function stopAsyncRun(
 		throw new SubagentRpcError("invalid_params", error instanceof Error ? error.message : String(error));
 	}
 	if (!location.asyncDir) {
-		throw new SubagentRpcError("not_found", "Async run not found or already completed; stop requires a live async run directory.");
+		let sessionId: string | undefined;
+		try {
+			sessionId = resolveCurrentSessionId(ctx.sessionManager);
+		} catch {
+			sessionId = undefined;
+		}
+		const hint = describeAvailableAsyncRuns(asyncDirRoot, {
+			states: ["queued", "running"],
+			emptyNote: "No live async runs are known in this registry.",
+			...(sessionId !== undefined ? { sessionId } : {}),
+		});
+		throw new SubagentRpcError("not_found", `Async run not found or already completed; stop requires a live async run directory.${hint ? ` ${hint}` : ""}`);
 	}
 
 	const currentSessionId = resolveCurrentSessionId(ctx.sessionManager);

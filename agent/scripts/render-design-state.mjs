@@ -3,14 +3,16 @@
  * https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html */
 export function inspectDesignState(root) {
   const started=performance.now(),limit=600,timeLimit=120;
-  const result={version:1,visited:0,visible:0,truncated:false,viewport:{width:innerWidth,height:innerHeight},
+  const result={version:2,visited:0,visible:0,truncated:false,viewport:{width:innerWidth,height:innerHeight},
     horizontalOverflowPx:Math.max(0,document.documentElement.scrollWidth-document.documentElement.clientWidth),
     typography:[],spacing:[],surfacePatterns:{gradients:0,shadows:0,rounded:0},
+    slopSignals:{pills:0,glowShadows:0,gradientText:0,glass:0,textGlow:0},
     contrast:{checked:0,belowThreshold:0,indeterminate:0},findings:[],
     motion:{reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,running:0,infinite:0,sampled:0,truncated:false},
-    limitations:'Bounded main-document computed-style sample, not an aesthetic score or accessibility certification. No text, input values or CSS URLs returned. Contrast excludes images, opacity, filters, blending, shadows, pseudo-elements and unknown backgrounds; occlusion, focus, states, canvas, frames and shadow roots need separate inspection. Repeated surfaces may be intentional. Use screenshots and the relevant design skill to judge hierarchy, originality and composition.'};
+    limitations:'Bounded main-document computed-style sample, not an aesthetic score or accessibility certification. No text, input values or CSS URLs returned. Contrast excludes images, opacity, filters, blending, shadows, pseudo-elements and unknown backgrounds; occlusion, focus, states, canvas, frames and shadow roots need separate inspection. Repeated surfaces may be intentional. Slop-signature counts are treatment frequencies with disclosed thresholds, not verdicts. Use screenshots and the relevant design skill to judge hierarchy, originality and composition.'};
   if(!root)return result;
-  const fonts=new Map(),spaces=new Map();
+  const fonts=new Map(),spaces=new Map(),slopExample={};
+  const slop=(kind,node)=>{result.slopSignals[kind]++;if(!slopExample[kind])slopExample[kind]=node;};
   const count=(map,key)=>{if(map.has(key))map.set(key,map.get(key)+1);else if(map.size<64)map.set(key,1);else result.truncated=true;};
   const round=n=>Math.round(n*100)/100;
   const identify=node=>{const parts=[];for(let at=node;at&&parts.length<4;at=at.parentElement){let index=1,steps=0;for(let sib=at.previousElementSibling;sib;sib=sib.previousElementSibling){if(++steps>256)return null;if(sib.localName===at.localName)index++;}parts.unshift(`${at.localName}:nth-of-type(${index})`);}return parts.join(' > ').slice(0,220);};
@@ -36,6 +38,21 @@ export function inspectDesignState(root) {
       if(/gradient\(/.test(style.backgroundImage))result.surfacePatterns.gradients++;
       if(style.boxShadow!=='none')result.surfacePatterns.shadows++;
       if(parseFloat(style.borderTopLeftRadius)>0)result.surfacePatterns.rounded++;
+      // Rendered AI-slop signatures: computed-style frequencies, never verdicts.
+      // A pill is a small control with fully rounded ends (radius reaches half
+      // the short side); large rounded panels are not pills.
+      const shortSide=Math.min(rect.width,rect.height);
+      if(shortSide>=8&&shortSide<=96&&rect.width>rect.height&&parseFloat(style.borderTopLeftRadius)>=shortSide/2-1)slop('pills',node);
+      // A glow halo is a soft wide shadow with a near-zero offset (not a drop
+      // shadow and not an inset fill). Computed serialization puts color first.
+      if(style.boxShadow!=='none'&&!/inset/.test(style.boxShadow)){
+        for(const shadow of style.boxShadow.matchAll(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px/g)){
+          if(Number(shadow[3])>=16&&Math.abs(Number(shadow[1]))<=8&&Math.abs(Number(shadow[2]))<=8){slop('glowShadows',node);break;}
+        }
+      }
+      if((style.backgroundClip==='text'||style.webkitBackgroundClip==='text')&&/gradient\(/.test(style.backgroundImage))slop('gradientText',node);
+      if(style.backdropFilter&&style.backdropFilter!=='none'&&/blur\s*\(/.test(style.backdropFilter))slop('glass',node);
+      if(style.textShadow&&style.textShadow!=='none')slop('textGlow',node);
       if(rect.width>innerWidth+1&&style.position!=='fixed')finding('wider-than-viewport',node,{widthPx:round(rect.width)});
       let hasText=false,children=0;for(let child=node.firstChild;child&&children++<64;child=child.nextSibling)if(child.nodeType===Node.TEXT_NODE&&child.textContent.trim()){hasText=true;break;}
       if(hasText&&!node.matches('script,style,template,input,textarea,select,:disabled,[aria-disabled="true"]')){
@@ -51,6 +68,11 @@ export function inspectDesignState(root) {
       }
     }
     node=walker.nextNode();
+  }
+  // One locating finding per over-threshold signature; counts stay in
+  // slopSignals for the reviewer to judge against the design system.
+  for(const [kind,threshold] of [['pills',6],['glowShadows',4],['gradientText',1],['glass',3],['textGlow',4]]){
+    if(result.slopSignals[kind]>=threshold&&slopExample[kind])finding('slop-'+kind.replace(/[A-Z]/g,c=>'-'+c.toLowerCase()),slopExample[kind],{count:result.slopSignals[kind],threshold});
   }
   result.typography=[...fonts].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([key,count])=>({...JSON.parse(key),count}));
   if(fonts.size>10||spaces.size>16)result.truncated=true;

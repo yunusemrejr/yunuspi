@@ -241,3 +241,19 @@ test('a synthetic wake between input and preflight cannot replace the genuine us
   await lifecycle.start({prompt},context('different-session'),'graph');
   assert.equal(requests.length,1,'an internal wake in another session cannot inherit the prior session user direction');
 });
+
+test('a partial brief without synthesis names the missing choice and forbids silent defaults',async()=>{
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>({status:'partial',proposals:[{role:'direction-a',text:'Keep the current quiet-dark identity and extend it.'}],discussion:'',gap:'direction-b failed: timeout'})});
+  const ctx=context();await lifecycle.start({prompt},ctx,'graph');
+  const brief=lifecycle.context(ctx);
+  assert.match(brief,/Council status: partial/);
+  assert.match(brief,/chose nothing/);
+  assert.match(brief,/silently keeping a default/);
+  assert.match(brief,/quiet-dark/,'the finished perspective is still shown');
+});
+
+test('a complete brief carries no missing-choice directive',async()=>{
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>result});
+  const ctx=context();await lifecycle.start({prompt},ctx,'graph');
+  assert.doesNotMatch(lifecycle.context(ctx),/chose nothing/);
+});

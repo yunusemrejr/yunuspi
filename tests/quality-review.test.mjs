@@ -1348,3 +1348,52 @@ test('review follow-up budget is reserved while a triggered model turn edits and
  await api.settled({},ctx);assert.equal(sent.length,3);
  await api.settled({},ctx);assert.equal(sent.length,3,'edits do not replenish acknowledgement turns');
 });
+test("a test need stuck across settled events escalates to an automatic review with its follow-up", async (t) => {
+ const f = await fixture(t);
+ await f.mutate();
+ f.tests({ need: "assessment" });
+ for (let i = 0; i < 3; i++) {
+  await f.settle();
+  assert.equal(f.calls.length, 0, `deferral ${i + 1} spends no round`);
+ }
+ assert.equal(f.sent.length, 0);
+ await f.settle();
+ assert.equal(f.calls.length, 1, "the fourth stuck settle runs the review");
+ assert.equal(f.state().rounds, 1);
+ assert.equal(f.sent.length, 1, "the escalated round's results reach the agent");
+ assert.deepEqual(f.calls[0][0].tests, { need: "assessment" }, "the unresolved need rides along to the reviewers");
+});
+test("running checks keep gating automatic review without escalation", async (t) => {
+ const f = await fixture(t);
+ await f.mutate();
+ f.tests({ need: "running" });
+ for (let i = 0; i < 6; i++) await f.settle();
+ assert.equal(f.calls.length, 0, "active verification is progress, not stuckness");
+ assert.equal(f.sent.length, 0);
+ assert.equal(f.state().rounds, 0);
+});
+test("a changing test need resets the escalation wait", async (t) => {
+ const f = await fixture(t);
+ await f.mutate();
+ for (const need of ["assessment", "missing", "failed", "assessment", "missing", "failed"]) {
+  f.tests({ need });
+  await f.settle();
+ }
+ assert.equal(f.calls.length, 0, "movement in the need restarts the wait");
+ assert.equal(f.state().rounds, 0);
+});
+test("new user input resets the stuck-need escalation wait", async (t) => {
+ const f = await fixture(t);
+ await f.mutate();
+ f.tests({ need: "assessment" });
+ await f.settle();
+ await f.settle();
+ assert.equal(f.calls.length, 0);
+ f.api.input({ source: "interactive", text: "keep going" });
+ await f.settle();
+ await f.settle();
+ await f.settle();
+ assert.equal(f.calls.length, 0, "three deferrals after fresh input stay silent");
+ await f.settle();
+ assert.equal(f.calls.length, 1);
+});

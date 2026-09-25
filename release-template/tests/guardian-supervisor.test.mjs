@@ -860,3 +860,52 @@ test("a finished-sounding reply after unverified edits is steered once; verifica
 	const twice = await run("once", [async (s) => { await s.observeAgentEvent(final("Done.")); await s.observeAgentEvent(final("Done.")); }]);
 	assert.equal(twice.length, 1, "one reminder per change set");
 });
+
+test("four consecutive mixed failures across tools trigger one burst reminder; a success resets the streak", async (t) => {
+	const { supervisor, emitted } = harness("burst");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Update the site.") });
+	const fail = async (index, toolName, args, text) => {
+		await toolStart(supervisor, { toolCallId: `fail-${index}`, toolName, args });
+		await toolEnd(supervisor, { toolCallId: `fail-${index}`, toolName, text });
+	};
+	await fail(0, "edit", { path: "src/a.ts", oldText: "a", newText: "b" }, "Edit target not found in src/a.ts");
+	await fail(1, "bash", { command: "curl https://example.invalid" }, "curl: could not resolve host");
+	await fail(2, "todo", { action: "update", id: 7 }, "Complete dependencies before starting this task");
+	assert.equal(emitted.length, 0, "three varied failures stay silent");
+	await fail(3, "read", { path: "src/missing.ts" }, "ENOENT: no such file");
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, "consecutive-failure-burst");
+	assert.match(emitted[0].content, /last 4 tool calls all failed/);
+	await toolStart(supervisor, { toolCallId: "ok-0", toolName: "read", args: { path: "src/a.ts" } });
+	await toolEnd(supervisor, { toolCallId: "ok-0", toolName: "read", isError: false, text: "content" });
+	await fail(4, "edit", { path: "src/b.ts", oldText: "a", newText: "b" }, "Edit target not found in src/b.ts");
+	await fail(5, "edit", { path: "src/c.ts", oldText: "a", newText: "b" }, "Edit target not found in src/c.ts");
+	await fail(6, "edit", { path: "src/d.ts", oldText: "a", newText: "b" }, "Edit target not found in src/d.ts");
+	assert.equal(emitted.length, 1, "the success reset the streak");
+});
+
+test("same-operation retry streaks stay with the repeated-failure detector and never burst", async (t) => {
+	const { supervisor, emitted, stats } = harness("burst-identical");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Fix the header.") });
+	for (let index = 0; index < 8; index++) {
+		await toolStart(supervisor, { toolCallId: `edit-${index}` });
+		await toolEnd(supervisor, { toolCallId: `edit-${index}` });
+	}
+	assert.equal(emitted.length, 0, "one operation retried is the repeated-failure detector's turf, with or without responses");
+	assert.equal(stats().burstCandidates, 0);
+});
+
+test("a failed verification run does not satisfy the completion check", async (t) => {
+	const { supervisor, emitted } = harness("failed-verification");
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: "message_start", message: userMessage(supervisor, "request", "Fix the date bug.") });
+	await toolStart(supervisor, { toolCallId: "edit-1", args: { path: "src/date.ts", oldText: "a", newText: "b" } });
+	await toolEnd(supervisor, { toolCallId: "edit-1", isError: false, text: "Edited" });
+	await toolStart(supervisor, { toolCallId: "test-1", toolName: "project_tests", args: { action: "assess" } });
+	await toolEnd(supervisor, { toolCallId: "test-1", toolName: "project_tests", text: "3 failing" });
+	await supervisor.observeAgentEvent({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All done. The fix is complete." }] } });
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, "unverified-completion");
+});

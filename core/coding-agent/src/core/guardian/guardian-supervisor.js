@@ -27,6 +27,7 @@ const MAX_WINDOW_EVALUATIONS = 16;
 /** Deterministic loop detectors: evidence counts that justify one reminder. */
 const EDIT_MISMATCH_THRESHOLD = 3;
 const READ_CHURN_THRESHOLD = 4;
+const CONSECUTIVE_FAILURE_THRESHOLD = 4;
 const MAX_TRACKED_PATHS = 64;
 // A resumed session ID identifies a transcript, not an in-process owner. More
 // than one SDK runtime can open that transcript simultaneously.
@@ -243,7 +244,7 @@ export class GuardianSupervisor {
 		this._latestAcceptedTaskId = undefined;
 		this._inFlight = new Map();
 		this._peerReceipts = new Set();
-		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0, peerMessagesSent: 0, peerMessagesReceived: 0, editLoopCandidates: 0, readChurnCandidates: 0, completionCandidates: 0, verifications: 0, mutations: 0 };
+		this._stats = { observed: 0, toolResults: 0, classifierEvaluations: 0, similarityEvaluations: 0, candidates: 0, admitted: 0, abstained: 0, quarantined: 0, constraintCandidates: 0, constraintRejected: 0, suppressedWindow: 0, suppressedHistory: 0, peerMessagesSent: 0, peerMessagesReceived: 0, editLoopCandidates: 0, readChurnCandidates: 0, completionCandidates: 0, burstCandidates: 0, verifications: 0, mutations: 0 };
 		this._admittedAtByKind = new Map();
 		this._window = { startedAt: this._clock(), evaluations: 0 };
 		this._kernelPromise = undefined;
@@ -350,7 +351,7 @@ export class GuardianSupervisor {
 		if (!task) {
 			const parentTaskId = this._latestAcceptedTaskId ?? this._activeTaskId;
 			const rawPrompt = originalText.length <= MAX_RAW_PROMPT ? originalText : undefined;
-			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), lastMutationAt: 0, lastVerificationAt: 0, completionChecked: false };
+			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), consecutiveFailures: 0, burstErrors: [], burstPrints: [], lastMutationAt: 0, lastVerificationAt: 0, completionChecked: false };
 			task.retryDirective = hasExplicitRetryDirective(originalText);
 			this._tasks.set(requestId, task);
 			while (this._tasks.size > MAX_TASKS) {
@@ -498,7 +499,7 @@ export class GuardianSupervisor {
 			this._stats.toolResults++;
 			try {
 				const errorHash = fingerprintFailureResult(event.result, event.isError);
-				await this._trackWorkingPattern(task, call, event);
+				await this._trackWorkingPattern(task, call, event, errorHash);
 				if (!event.isError || !errorHash || !call.fingerprint || !call.shape) {
 					task.evidenceVersion++;
 					task.attempts = [];
@@ -614,10 +615,25 @@ export class GuardianSupervisor {
 	/** Working-pattern evidence per task: mutations, verification runs, edit
 	 * mismatches per file and repeated identical reads. Paths are hashed in
 	 * evidence; nothing here stores file contents. */
-	async _trackWorkingPattern(task, call, event) {
+	async _trackWorkingPattern(task, call, event, errorHash) {
 		if (!this._enabled) return;
 		const now = this._clock();
-		if (call.verification) { task.lastVerificationAt = now; this._stats.verifications++; }
+		// A failed check is evidence against completion, not verification of it.
+		if (call.verification && !event.isError) { task.lastVerificationAt = now; this._stats.verifications++; }
+		// Only fingerprintable failures extend the streak: an unfingerprintable
+		// failure breaks evidence continuity the way it resets attempt episodes.
+		const countable = event.isError && typeof errorHash === "string" && typeof call.fingerprint === "string";
+		if (countable) {
+			task.consecutiveFailures = (task.consecutiveFailures ?? 0) + 1;
+			task.burstErrors.push(errorHash);
+			task.burstPrints.push(call.fingerprint);
+			while (task.burstErrors.length > CONSECUTIVE_FAILURE_THRESHOLD) task.burstErrors.shift();
+			while (task.burstPrints.length > CONSECUTIVE_FAILURE_THRESHOLD) task.burstPrints.shift();
+		} else {
+			task.consecutiveFailures = 0;
+			task.burstErrors = [];
+			task.burstPrints = [];
+		}
 		if (!event.isError && call.mutation) {
 			task.lastMutationAt = now; task.completionChecked = false; this._stats.mutations++;
 			// File contents may have changed: earlier reads are no longer repeats.
@@ -654,6 +670,20 @@ export class GuardianSupervisor {
 					content: `Edits to the same file have failed ${failures} times without a fresh read in between. Re-read the current content of that file (the exact region) before the next edit instead of adjusting the old text from memory.`,
 					reason: "Consecutive failed edits on one file with no intervening read.", evidence: [{ kind: "failed-edit", id: `${task.requestId}:edit:${pathHash}`, hash: pathHash }] })) task.editFailures.delete(call.rawPath);
 			}
+		}
+		// Same-operation retries belong to the WASM repeated-failure detector
+		// and same-file edit loops to the detector above; this one covers a
+		// burst of consecutive failures across varied operations, which neither
+		// of those detectors can see.
+		const streak = task.consecutiveFailures ?? 0;
+		const varied = new Set(task.burstPrints).size >= 2;
+		if (countable && streak >= CONSECUTIVE_FAILURE_THRESHOLD && varied) {
+			this._stats.burstCandidates++;
+			const bucket = Math.floor(streak / CONSECUTIVE_FAILURE_THRESHOLD);
+			const burstHash = sha256(task.burstErrors.join("|") || `${task.requestId}:${streak}`).slice(0, 16);
+			await this._intervene(task, { kind: "consecutive-failure-burst", priority: 50, dedupeKey: `failure-burst:${sha256(`${task.requestId}:${bucket}:${task.burstErrors.join(",")}`)}`,
+				content: `The last ${streak} tool calls all failed. Pause new attempts, read the actual error causes, and fix the underlying issue before retrying.`,
+				reason: "Consecutive tool failures across varied operations with no success in between.", evidence: [{ kind: "failed-tool-burst", id: `${task.requestId}:burst:${bucket}`, hash: burstHash }] });
 		}
 	}
 
@@ -757,7 +787,7 @@ export class GuardianSupervisor {
 		if (command === "on") { this._enabled = true; this._stateGeneration++; }
 		else if (command === "off") {
 			this._enabled = false; this._stateGeneration++; this._inFlight.clear(); this._arbiter.releaseAll();
-			for (const task of this._tasks.values()) { task.attempts = []; task.episodeKey = undefined; task.evidenceVersion++; task.constraintEvidence.clear(); }
+			for (const task of this._tasks.values()) { task.attempts = []; task.episodeKey = undefined; task.consecutiveFailures = 0; task.burstErrors = []; task.burstPrints = []; task.evidenceVersion++; task.constraintEvidence.clear(); }
 		}
 		else if (command === "debug") this._debug = !this._debug;
 		return { command, enabled: this._enabled, debug: this._debug, stats: { ...this._stats }, activeTaskId: this._debug ? this._activeTaskId : undefined, taskCount: this._tasks.size, guardianInstanceId: this.ownerId, debugInfo: this._debug ? { relation: this._tasks.get(this._activeTaskId)?.relation, analysisConfidence: this._tasks.get(this._activeTaskId)?.analysisConfidence, verifiedConstraints: this._tasks.get(this._activeTaskId)?.effectiveConstraints.length ?? 0, observedSignals: this._observedSignals(), recentDecisions: this._arbiter.journal().slice(-8) } : undefined, kernel: this._quarantined ? `quarantined:${this._quarantineReason}` : this._kernelError ? `quarantined:${this._kernelError}` : this._kernelRuntime ? Object.entries(this._kernelRuntime.status()).map(([name, status]) => `${name}:${status.state}${status.error ? `:${status.error}` : ""}`).join(",") : this._kernelPromise ? "initializing" : "lazy" };

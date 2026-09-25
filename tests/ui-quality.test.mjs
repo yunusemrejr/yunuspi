@@ -81,3 +81,19 @@ test('anti-boilerplate intent routes the shared worker and parent policy without
   assert.deepEqual(routeSkills('Do not review font combinations'),[]);
   assert.match(reviewAspects(['Status.tsx']).find(a=>a.id==='interface').rubric,/learned similarity only select inspection targets/);
 });
+
+test('DOM-generating scripts get markup-shape cues and promote the interface aspect',()=>{
+  const dom='const card = `<div class="badge" onClick="open()"><i class="pulsing-dot"></i>Live</div><a href="#">more</a>`;';
+  assert.ok(keys('app.js',dom).includes('ui-live-pill'));
+  assert.ok(keys('app.js',dom).includes('ui-clickable-container'));
+  assert.ok(keys('app.js',dom).includes('ui-placeholder-navigation'));
+  assert.ok(keys('render.ts',dom).includes('ui-clickable-container'));
+  // Stylesheet cues need an authorial stylesheet, not an embedded declaration.
+  assert.ok(!keys('app.js','el.style.position="absolute"; el.style.position="absolute"; el.style.position="absolute";').includes('ui-fragile-placement'));
+  assert.ok(!keys('app.js','// <div onClick="x"> sketch, not code').includes('ui-clickable-container'));
+  assert.ok(!keys('server.js','const total = items.reduce((a,b)=>a+b,0);').length,'backend logic stays cue-free');
+  // Cue promotion: an app.js-only change with markup cues demands interface review.
+  assert.ok(!reviewAspects(['app.js'],'Triage mail faster').some(a=>a.id==='interface'));
+  assert.ok(reviewAspects(['app.js'],'Triage mail faster',[],[{key:'ui-clickable-container',file:'app.js'}]).some(a=>a.id==='interface'));
+  assert.ok(!reviewAspects(['app.js'],'Triage mail faster',[],[{key:'async-foreach'}]).some(a=>a.id==='interface'),'non-UI cues do not promote');
+});

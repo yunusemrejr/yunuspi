@@ -26,12 +26,16 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
   file = file.replaceAll('\\', '/');
   if (EXCLUDED.test(file)) return [];
   const ui = UI_FILE.test(file);
+  // DOM-generating scripts (vanilla JS/TS builders, template literals) carry
+  // markup structure but not authorial stylesheets: markup-shape cues apply,
+  // CSS-property cues do not.
+  const script = /\.[cm]?[jt]s$/i.test(file);
   const prose = /\.(?:md|mdx|txt|html?|jsx|tsx|vue|svelte|php)$/i.test(file);
-  if (!ui && !prose) return [];
+  if (!ui && !prose && !script) return [];
   // Examples and comments are not authored product presentation.
-  const text = value.replace(/```[\s\S]*?```|<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g,'').replace(/^\s*>.*$/gm,'');
+  const text = value.replace(/```[\s\S]*?```|<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g,'').replace(/^\s*>.*$/gm,'').replace(/^\s*\/\/.*$/gm,'');
   const out: CodeSignal[] = [];
-  if (ui) {
+  if (ui || script) {
     const add = (key: string, check: string) => out.push({key, skill:'ui-antipattern-review', check});
     // Require a short markup region containing the label, enclosure and motion.
     // aria-live, a stock ticker, or a plain status label alone is not this pattern.
@@ -47,6 +51,9 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       add('ui-clickable-container', 'A div/span has a click handler. Check its complete semantics and keyboard behavior; prefer a native button for actions or a real link for navigation. Verify accessible name, focus and Enter/Space behavior before delivery.');
     if (/<a\b[^>]{0,800}\bhref\s*=\s*["'](?:#|javascript:void\(0\))["']/i.test(text))
       add('ui-placeholder-navigation', 'A link has a placeholder destination. Connect navigation to the actual destination, or use a button for an action. Exercise the intended interaction; a convincing visual state is not working behavior.');
+    // Stylesheet cues need an authorial stylesheet; a script embedding a few
+    // declarations (inline styles, CSSOM) cannot establish these patterns.
+    if (!ui) return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
     if (/\boutline\s*:\s*(?:none|0)\s*[;}]/i.test(text) || /\b(?:outline-none|focus:outline-none)\b/.test(text))
       add('ui-focus-suppression', 'Focus outline suppression was observed. Verify a visible replacement on the rendered control for keyboard users, including forced colors; another stylesheet or utility may supply it.');
     const families = new Set([...text.matchAll(/\bfont-family\s*:\s*([^;}\n]+)/gi)]

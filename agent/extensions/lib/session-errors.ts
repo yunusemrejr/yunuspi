@@ -1,5 +1,5 @@
 import { collectSessionMetrics } from "./session-metrics.ts";
-import { errorSignature, failureCategory, incidentId } from "./session-diagnostics.ts";
+import { CHILD_REASON_TEXT, childFailureExcerpt, errorSignature, failureCategory, incidentId } from "./session-diagnostics.ts";
 import type { LogicalChildTask } from "../pi-subagents/src/runs/shared/child-ledger.ts";
 
 export type SessionErrorKind = "tool" | "model" | "child" | "workflow" | "hook";
@@ -240,7 +240,7 @@ export function collectSessionErrors(
   }
   // Launch-level spawn args keyed by every id a cost row may carry.
   const spawnArgs = new Map<string, unknown>();
-  const childEvidence = new Map<string, { outcomeReason?: unknown; attemptCount?: unknown; output?: unknown }>();
+  const childEvidence = new Map<string, { outcomeReason?: unknown; attemptCount?: unknown; output?: unknown; cause?: unknown }>();
   for (const entry of entries) {
     const message = (entry as Record<string, unknown>)?.type === "message" ? (entry as { message: Record<string, unknown> }).message : undefined;
     if (message?.role === "toolResult" && message.toolName === "subagent" && typeof message.toolCallId === "string") {
@@ -264,12 +264,7 @@ export function collectSessionErrors(
     }
   }
 
-  const reasonText: Record<string, string> = {
-    budget: "budget limit", context: "context limit", capacity: "429 capacity", timeout: "timed out",
-    permission: "permission denied", dependency: "ERR_MODULE_NOT_FOUND", "invalid-output": "invalid-output",
-    acceptance: "acceptance failed", transport: "transport failure", "process-signal": "process-signal",
-    truncated: "response truncated (length)",
-  };
+  const reasonText = CHILD_REASON_TEXT;
   // Preceding-tool context per entry position: the tool-result names seen
   // before this entry (the failing call itself excluded).
   const precedingByOrder = new Map<number, string[]>();
@@ -445,9 +440,12 @@ export function collectSessionErrors(
       const failed = Boolean(typed.error) || typed.timedOut === true || (Number.isInteger(typed.exitCode) && typed.exitCode !== 0) || ["failed", "rejected"].includes(status);
       if (!failed) continue;
       const childKey = `${(typed.runId ?? root) as string}:${typed.runId ? 0 : ((typed.workflowKey ?? typed.childId ?? typed.index ?? index) as string | number)}`;
-      const raw = String(typed.error ?? typed.errorMessage ?? (typed.timedOut ? "Child timed out" : "Child failed")).slice(0, 16000);
       const evidence = childEvidence.get(childKey);
       const reason = evidence?.outcomeReason;
+      const raw = childFailureExcerpt(
+        String(typed.error ?? typed.errorMessage ?? (typed.timedOut ? "Child timed out" : "Child failed")),
+        { reason, cause: (evidence as { cause?: unknown } | undefined)?.cause, timedOut: typed.timedOut, exitCode: typed.exitCode },
+      ).slice(0, 16000);
       const classification = failureCategory(typeof reason === "string" && Object.hasOwn(reasonText, reason) ? reasonText[reason] : raw);
       const bounded = boundText(raw, errorChars);
       const statusCode = statusCodeOf(raw);
