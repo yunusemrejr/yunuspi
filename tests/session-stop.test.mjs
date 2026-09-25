@@ -230,3 +230,34 @@ test('the requirement ledger reaches context and names unreported parts once on 
   await fire('session_start', {});
   assert.equal(appended.filter(e => e.customType === 'requirement-ledger-v1').at(-1).data.next, 3, 'persisted for resume');
 });
+
+test('deploys and the last todo completion wait for unresolved verification receipts, with a recorded waiver', async () => {
+  const { registerContinuationSource } = await import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts')));
+  const hooks = {};
+  const appended = [];
+  const pi = {
+    on: (name, fn) => { (hooks[name] ??= []).push(fn); },
+    registerTool: () => {}, registerCommand: () => {}, sendMessage: () => {},
+    appendEntry: (customType, data) => appended.push({ customType, data }),
+    getActiveTools: () => [],
+  };
+  checkpoints.default(pi);
+  const branch = [];
+  const ctx = scopeCtx(branch, 'gate-session');
+  const call = async (toolName, input) => { let out; for (const fn of hooks.tool_call) { const r = await fn({ toolCallId: 't', toolName, input }, ctx); if (r) out = r; } return out; };
+  const dispose = registerContinuationSource({ name: 'quality review', session: ctx.sessionManager, pending: () => [], verification: () => ['Independent review pending: 0 rounds'] });
+  try {
+    const refused = await call('bash', { command: 'git push namecheap main' });
+    assert.equal(refused?.block, true);
+    assert.match(refused.reason, /Deploy refused[\s\S]*0 rounds/);
+    assert.equal(await call('bash', { command: 'git push namecheap main' }), undefined, 'explicit retry proceeds');
+    assert.deepEqual(appended.filter(e => e.customType === 'completion-gate-v1').map(e => e.data.decision), ['refused', 'waived']);
+    assert.equal(await call('bash', { command: 'git push origin feature-x' }), undefined, 'ordinary pushes are not deploys');
+    branch.push({ type: 'message', message: { role: 'toolResult', toolName: 'todo', details: { tasks: [{ id: 1, subject: 'a', status: 'in_progress' }, { id: 2, subject: 'b', status: 'pending' }], nextId: 3 } } });
+    assert.equal(await call('todo', { action: 'update', id: 1, status: 'completed' }), undefined, 'intermediate progress is never gated');
+    assert.equal((await call('todo', { action: 'batch', operations: [{ action: 'update', id: 1, status: 'completed' }, { action: 'update', id: 2, status: 'completed' }] }))?.block, true);
+  } finally {
+    dispose();
+  }
+  assert.equal(await call('bash', { command: 'git push namecheap main' }), undefined, 'resolved receipts never block');
+});

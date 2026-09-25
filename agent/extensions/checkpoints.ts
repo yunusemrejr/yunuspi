@@ -47,6 +47,9 @@ import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/proje
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
+import { completesPlan, completionGate } from "./lib/completion-gate.ts";
+import { collectVerificationLines } from "./lib/continuation-notice.ts";
+import { isDeployCommand } from "./lib/session-hooks.ts";
 import {
 	emptyRequirementLedger,
 	foldRequirements,
@@ -690,6 +693,8 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		quality.message(event);
 	});
 	pi.on("tool_call", async (event, ctx) => {
+		const gate = gateCompletion(event, ctx);
+		if (gate) return gate;
 		if (
 			["bash", "read", "read_symbol", "read_enclosing"].includes(event.toolName)
 		)
@@ -830,6 +835,33 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 
 	// Effective context telemetry is owned by session-signals.ts.
 
+	/** Deploys and the call that closes the last open todo wait for the
+	 * registered verification receipts (tests, review); see completion-gate. */
+	const refusedGates = new Set<string>();
+	function gateCompletion(event: any, ctx: ExtensionContext): { block: true; reason: string } | undefined {
+		try {
+			if (SHADOW || isSessionStopped(ctx)) return undefined;
+			const moment = event.toolName === "bash" && isDeployCommand("bash", event.input ?? {}) ? "deploy"
+				: event.toolName === "todo" && completesPlan(latestTodoTasks(ctx), event.input ?? {}) ? "plan-complete"
+				: undefined;
+			if (!moment) return undefined;
+			// A previous deploy's own live-verification receipt never blocks the next deploy.
+			const lines = collectVerificationLines(8, ctx.sessionManager).filter((line) => !line.startsWith("deploy:"));
+			const decision = completionGate(moment, lines, refusedGates);
+			if (decision.waived) {
+				refusedGates.delete(decision.key);
+				pi.appendEntry("completion-gate-v1", { moment, decision: "waived", unresolved: lines });
+				return undefined;
+			}
+			if (!decision.block) return undefined;
+			refusedGates.add(decision.key);
+			pi.appendEntry("completion-gate-v1", { moment, decision: "refused", unresolved: lines });
+			return { block: true, reason: decision.reason! };
+		} catch {
+			return undefined; /* the gate never breaks a tool call it cannot evaluate */
+		}
+	}
+
 	async function snapshotWorktree(ctx: ExtensionContext, reason: string): Promise<void> {
 		try {
 			const sid = sidOf(ctx);
@@ -853,6 +885,18 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			/* ignore */
 		}
 	});
+}
+
+/** The todo tool's latest persisted snapshot (last-write-wins, as its own
+ * replay does); only ids and statuses are read. */
+function latestTodoTasks(ctx: ExtensionContext): Array<{ id: number; status?: string }> {
+	const branch = ctx.sessionManager.getBranch();
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const message = (branch[i] as any)?.type === "message" ? (branch[i] as any).message : undefined;
+		if (message?.role !== "toolResult" || message.toolName !== "todo" || !Array.isArray(message.details?.tasks)) continue;
+		return message.details.tasks.filter((task: any) => Number.isSafeInteger(task?.id)).map((task: any) => ({ id: task.id, status: String(task.status ?? "") }));
+	}
+	return [];
 }
 
 const LEDGER_ENTRY = "requirement-ledger-v1";
