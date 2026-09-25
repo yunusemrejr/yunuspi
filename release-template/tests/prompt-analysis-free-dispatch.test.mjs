@@ -12,7 +12,7 @@ process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
-const { default: microIntelligence, lastMicroRequest } = await import('../agent/extensions/micro-intelligence.ts');
+const { default: microIntelligence, lastMicroRequest, settleMicroAnalyses } = await import('../agent/extensions/micro-intelligence.ts');
 const { clearLlmPreferencesCache } = await import('../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 const evidence = await import('../agent/extensions/pi-subagents/src/runs/shared/free-route-evidence.ts');
 let sequence = 0;
@@ -57,6 +57,7 @@ async function run({ mode = 'registry', paid = false, beforeDispatch, rewritePay
     await hooks.get('session_start')({ reason: 'new' }, ctx);
     await hooks.get('input')({ source: 'interactive', originalText: 'Inspect the synthetic source.', requestId: id,
       turnId: id, sessionId: id, processId: 'fixture-process', guardianOwnerId: id, signal: new AbortController().signal }, ctx);
+    await settleMicroAnalyses();
     return { requests, responses, analysis: lastMicroRequest(id)?.promptAnalysis };
   } finally { await hooks.get('session_shutdown')(); }
 }

@@ -18,7 +18,7 @@ process.env.PI_MODEL_EXCLUSIONS_PATH = path.join(directory, 'exclusions.json');
 process.env.PI_PROVIDER_STATE_FILE = path.join(directory, 'health.json');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
-const { default: microIntelligence } = await import('../agent/extensions/micro-intelligence.ts');
+const { default: microIntelligence, settleMicroAnalyses } = await import('../agent/extensions/micro-intelligence.ts');
 const { clearLlmPreferencesCache } = await import('../agent/extensions/pi-subagents/src/runs/shared/llm-preferences.ts');
 
 const model = (id) => ({ id, provider: 'audit-fixture', name: id, api: 'openai-completions', baseUrl: 'http://localhost:1',
@@ -133,12 +133,13 @@ test('fallback visibly explains route failure and long input while preserving th
   assert.ok(!renderer(shown, { expanded: true }).render(100).join('\n').includes('Exact advisory sent to the main agent'));
 });
 
-test('real preflight handled after analysis cancels lineage before the next genuine request', async (t) => {
+test('real preflight handled after input cancels analysis and lineage before the next genuine request', async (t) => {
   preferences(['third']);
   let intercept = true;
   const f = await fixture(t, { afterInput: () => { if (intercept) return { action: 'handled' }; } });
   await f.session.prompt('Discard this handled request.');
-  assert.deepEqual(f.calls.map((call) => call.id), ['third']);
+  await settleMicroAnalyses();
+  assert.deepEqual(f.calls.map((call) => call.id), [], 'analysis no longer blocks input, so a handled request never spends a route call');
   assert.equal(f.events.length, 0);
   intercept = false;
   await f.session.prompt('Use architecture A.');
@@ -168,6 +169,7 @@ test('queued follow-ups keep explicit lineage and new routes without switching t
   preferences(['second']);
   await f.session.prompt('Also add the API validation tests.', { streamingBehavior: 'followUp' });
   await f.session.prompt('Preserve the return code in those tests.', { streamingBehavior: 'followUp' });
+  await settleMicroAnalyses();
   const tasks = [...f.session._guardian._tasks.values()];
   assert.equal(tasks.length, 3);
   assert.equal(tasks[1].parentTaskId, tasks[0].requestId);
@@ -183,7 +185,7 @@ test('queued follow-ups keep explicit lineage and new routes without switching t
   assert.deepEqual(f.errors, []);
 });
 
-test('abort of real asynchronous preflight prevents downstream input hooks and any late advisory publication', async (t) => {
+test('abort while the first turn awaits analysis cancels it and prevents any late advisory publication', async (t) => {
   preferences(['third']);
   let finishAnalysis, began, downstreamCalls = 0;
   const started = new Promise((resolve) => { began = resolve; });
@@ -202,21 +204,22 @@ test('abort of real asynchronous preflight prevents downstream input hooks and a
     },
   });
   const running = f.session.prompt('Use architecture A.');
-  // Attach rejection handling before aborting to prevent a false test-runner
-  // unhandled rejection while abort() waits for the agent idle barrier.
-  const rejected = assert.rejects(running);
+  const settledRun = running.then(() => {}, () => {});
   await started;
+  // Input no longer waits for analysis: downstream input hooks already ran.
+  assert.equal(downstreamCalls, 1);
   await f.session.abort();
-  await rejected;
+  await settledRun;
   finishAnalysis();
+  await settleMicroAnalyses();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(downstreamCalls, 0);
   assert.equal(f.events.length, 0);
   assert.equal(f.notices.length, 0);
-  assert.deepEqual(f.calls.map((call) => call.id), ['third']);
+  assert.deepEqual(f.calls.map((call) => call.id), ['third'], 'the main model is never called before the awaited analysis');
   await f.session.prompt('Use architecture A. Start a fresh request.');
   assert.equal(f.calls.at(-2).options.maxTokens, 768);
-  assert.equal(downstreamCalls, 1);
+  assert.equal(f.events.length, 1, 'only the fresh request publishes an advisory');
+  assert.equal(downstreamCalls, 2);
   assert.deepEqual(f.errors, []);
 });
 

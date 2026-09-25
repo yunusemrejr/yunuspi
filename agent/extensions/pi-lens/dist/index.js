@@ -87740,7 +87740,7 @@ function trackOldTextFailure(filePath, preview) {
   return count;
 }
 function findFirstLineOfOldText(content, oldText) {
-  const firstLine2 = oldText.replace(/\r\n/g, "\n").split("\n")[0].trim();
+  const firstLine2 = distinctiveLineOfOldText(oldText);
   if (firstLine2.length < 5)
     return void 0;
   const lines = content.split("\n");
@@ -87749,6 +87749,15 @@ function findFirstLineOfOldText(content, oldText) {
       return i + 1;
   }
   return void 0;
+}
+// The first oldText line is often "/**", "{" or a blank-ish line that says
+// nothing about where the target is; anchor hints on the most distinctive one.
+function distinctiveLineOfOldText(oldText) {
+  const lines = oldText.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
+  const first = lines[0] ?? "";
+  if (first.length >= 12 && (first.match(/[a-z0-9_]+/gi) ?? []).length >= 2)
+    return first;
+  return lines.reduce((best, line) => (line.match(/[a-z0-9_]+/gi) ?? []).length > (best.match(/[a-z0-9_]+/gi) ?? []).length ? line : best, first);
 }
 function tokenizeForSimilarity(text) {
   return text.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
@@ -87765,6 +87774,15 @@ function tokenSimilarity(a, b) {
   return intersection / (ta.size + tb.size - intersection);
 }
 function findSimilarLines(content, target, options = {}) {
+  const { nearLine, window = 60, max = 3, minScore = 0.5 } = options;
+  const strict = findSimilarLinesAbove(content, target, { nearLine, window, max, minScore });
+  if (strict.length > 0 || minScore <= 0.25)
+    return strict;
+  // Always offer the closest current lines: a weaker match still tells the
+  // agent where to re-read instead of leaving it to search blind.
+  return findSimilarLinesAbove(content, target, { nearLine: void 0, window, max: 2, minScore: 0.25 });
+}
+function findSimilarLinesAbove(content, target, options = {}) {
   const { nearLine, window = 60, max = 3, minScore = 0.5 } = options;
   const needle = target.trim();
   if (needle.length < 4)
@@ -88117,7 +88135,7 @@ function resolveOldTextEdits(edits, filePath, sessionId, correlationId) {
         }
       }
       if (!errorMsg.includes("quote style")) {
-        const similarLines = findSimilarLines(content, oldText.replace(/\r\n/g, "\n").split("\n")[0], { nearLine: findFirstLineOfOldText(content, oldText) });
+        const similarLines = findSimilarLines(content, distinctiveLineOfOldText(oldText), { nearLine: findFirstLineOfOldText(content, oldText) });
         if (similarLines.length > 0) {
           errorMsg += formatSimilarLines(similarLines, normalizeToLF(stripBom(rawContent).text));
         }
@@ -88341,7 +88359,48 @@ function tryCorrectIndentationMismatchFromContent(oldText, content) {
   if (unicodeCandidate !== void 0) {
     return unicodeCandidate;
   }
+  const reflowCandidate = findReflowInsensitiveCandidate(content, normalized);
+  if (reflowCandidate !== void 0) {
+    return reflowCandidate;
+  }
   return void 0;
+}
+// Re-wrapped prose and comments (a formatter or an earlier edit moved line
+// breaks) keep every non-whitespace character in order. Match that character
+// sequence, ignoring whitespace and line-leading comment markers, and return
+// the verbatim current span only when it is long and unique.
+function findReflowInsensitiveCandidate(content, oldText) {
+  const signature = (text) => {
+    const chars = [];
+    const offsets = [];
+    let lineStart = true;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === "\n") { lineStart = true; continue; }
+      if (/\s/.test(ch)) continue;
+      if (lineStart && (ch === "*" || ch === "#" || ch === ">" || ch === ";" || ch === "/" && text[i + 1] === "/" && ((i += 1), true))) continue;
+      lineStart = false;
+      chars.push(ch);
+      offsets.push(i);
+    }
+    return { text: chars.join(""), offsets };
+  };
+  const needle = signature(oldText);
+  if (needle.text.length < 24)
+    return void 0;
+  const haystack = signature(content);
+  const first = haystack.text.indexOf(needle.text);
+  if (first < 0 || haystack.text.indexOf(needle.text, first + 1) >= 0)
+    return void 0;
+  let start2 = haystack.offsets[first];
+  const end2 = haystack.offsets[first + needle.text.length - 1] + 1;
+  // Keep the current indentation when oldText itself began with indentation,
+  // so a newText written with leading whitespace is not indented twice.
+  const lineStart = content.lastIndexOf("\n", start2 - 1) + 1;
+  if (/^[ \t]/.test(oldText) && /^[ \t]*$/.test(content.slice(lineStart, start2)))
+    start2 = lineStart;
+  const candidate = content.slice(start2, end2);
+  return candidate !== oldText ? candidate : void 0;
 }
 function tryCorrectIndentationMismatch(oldText, filePath) {
   try {
@@ -99510,6 +99569,11 @@ function countOldTextMatches(filePath, oldText, cachedNormalizedContent) {
     return 0;
   }
 }
+function isLayoutOnlyChange(before, after) {
+  const signature = (text) => text.replace(/\r\n/g, "\n").split("\n").map((line) => line.replace(/^\s*(?:\/\/|[*#>;])?/, "")).join("").replace(/\s+/g, "");
+  const a = signature(before);
+  return a.length >= 24 && a === signature(after);
+}
 function isIndentationOnlyChange(before, after) {
   const beforeLines = before.replace(/\r\n/g, "\n").split("\n");
   const afterLines = after.replace(/\r\n/g, "\n").split("\n");
@@ -99982,10 +100046,25 @@ async function handleToolCallImpl(deps) {
         applyNewText,
         currentMatchCount: countOldTextMatches(filePath, value, matchNormalizedContent),
         correctedMatchCount: countOldTextMatches(filePath, corrected, matchNormalizedContent),
-        indentationOnly: isIndentationOnlyChange(value, corrected)
+        indentationOnly: isIndentationOnlyChange(value, corrected),
+        layoutOnly: isLayoutOnlyChange(value, corrected)
       };
     }).filter((entry) => entry !== void 0);
     for (const entry of correctedOldTexts) {
+      // Re-wrapped or re-spaced text with identical content is the same
+      // target: bind the verbatim current span instead of failing the batch.
+      if (!entry.indentationOnly && entry.layoutOnly && entry.currentMatchCount === 0 && entry.correctedMatchCount === 1) {
+        entry.apply(entry.corrected);
+        if (entry.newText && /^[ \t]/.test(entry.value) && !/^[ \t]/.test(entry.corrected))
+          entry.applyNewText(entry.newText.replace(/^[ \t]+/, ""));
+        logToolReadGuardEvent({
+          event: "oldtext_reflow_autopatched",
+          sessionId: runtime2.telemetrySessionId,
+          filePath,
+          metadata: { tool: "edit", label: entry.label, correctedMatchCount: entry.correctedMatchCount }
+        });
+        continue;
+      }
       if (entry.indentationOnly && entry.currentMatchCount === 0 && entry.correctedMatchCount === 1) {
         entry.apply(entry.corrected);
         const correctedNewText = entry.newText ? retargetReplacementIndentation(entry.newText, entry.value, entry.corrected) : void 0;

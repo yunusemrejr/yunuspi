@@ -204,6 +204,53 @@ function getNoChangeError(path, totalEdits) {
     return new Error(`No changes made to ${path}. The replacements produced identical content.`);
 }
 /**
+ * Overlapping edits in one batch are resolved only when the intent is
+ * unambiguous: an edit whose change the containing edit already makes is
+ * dropped, and a partial overlap whose shared text both edits keep unchanged
+ * is merged. Anything else is rejected with exact line ranges.
+ */
+function resolveOverlappingEdits(sortedEdits, base, path) {
+    const lineAt = (offset) => base.slice(0, offset).split("\n").length;
+    const describe = (edit) => {
+        const first = lineAt(edit.matchIndex);
+        const last = lineAt(edit.matchIndex + Math.max(0, edit.matchLength - 1));
+        return `edits[${edit.editIndex}] (line${first === last ? ` ${first}` : `s ${first}-${last}`})`;
+    };
+    const resolved = [];
+    for (const current of sortedEdits) {
+        const previous = resolved[resolved.length - 1];
+        if (!previous || previous.matchIndex + previous.matchLength <= current.matchIndex) {
+            resolved.push(current);
+            continue;
+        }
+        const previousEnd = previous.matchIndex + previous.matchLength;
+        const currentEnd = current.matchIndex + current.matchLength;
+        const currentOld = base.slice(current.matchIndex, currentEnd);
+        const previousOld = base.slice(previous.matchIndex, previousEnd);
+        // Contained edit whose result the outer edit already contains.
+        if (currentEnd <= previousEnd && previous.newText.includes(current.newText) && (currentOld === current.newText || !previous.newText.includes(currentOld)))
+            continue;
+        if (current.matchIndex === previous.matchIndex && currentEnd >= previousEnd && current.newText.includes(previous.newText) && (previousOld === previous.newText || !current.newText.includes(previousOld))) {
+            resolved[resolved.length - 1] = current;
+            continue;
+        }
+        // Partial overlap on text both edits leave unchanged at the seam.
+        const shared = base.slice(current.matchIndex, previousEnd);
+        if (currentEnd > previousEnd && shared.length > 0 && previous.newText.endsWith(shared) && current.newText.startsWith(shared)) {
+            resolved[resolved.length - 1] = {
+                ...previous,
+                matchLength: currentEnd - previous.matchIndex,
+                newText: previous.newText + current.newText.slice(shared.length),
+            };
+            continue;
+        }
+        const overlapStart = lineAt(current.matchIndex);
+        const overlapEnd = lineAt(Math.min(previousEnd, currentEnd) - 1);
+        throw new Error(`${describe(previous)} and ${describe(current)} overlap on line${overlapStart === overlapEnd ? ` ${overlapStart}` : `s ${overlapStart}-${overlapEnd}`} in ${path}, and their replacements conflict there. Combine them into one edit whose oldText spans lines ${lineAt(Math.min(previous.matchIndex, current.matchIndex))}-${lineAt(Math.max(previousEnd, currentEnd) - 1)}, or drop the inner edit if the outer newText already includes its change.`);
+    }
+    return resolved;
+}
+/**
  * Apply one or more exact-text replacements to LF-normalized content.
  *
  * All edits are matched against the same original content. Replacements are
@@ -244,13 +291,9 @@ export function applyEditsToNormalizedContent(normalizedContent, edits, path) {
         });
     }
     matchedEdits.sort((a, b) => a.matchIndex - b.matchIndex);
-    for (let i = 1; i < matchedEdits.length; i++) {
-        const previous = matchedEdits[i - 1];
-        const current = matchedEdits[i];
-        if (previous.matchIndex + previous.matchLength > current.matchIndex) {
-            throw new Error(`edits[${previous.editIndex}] and edits[${current.editIndex}] overlap in ${path}. Merge them into one edit or target disjoint regions.`);
-        }
-    }
+    const resolvedEdits = resolveOverlappingEdits(matchedEdits, replacementBaseContent, path);
+    matchedEdits.length = 0;
+    matchedEdits.push(...resolvedEdits);
     const baseContent = normalizedContent;
     const newContent = usedFuzzyMatch
         ? applyReplacementsPreservingUnchangedLines(normalizedContent, replacementBaseContent, matchedEdits)
