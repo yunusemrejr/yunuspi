@@ -2961,6 +2961,11 @@
         "line": 654
       },
       {
+        "name": "project-memory",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 519
+      },
+      {
         "name": "prompt-workflow",
         "source": "agent/extensions/pi-subagents/src/slash/prompt-workflows.ts",
         "line": 254
@@ -3495,6 +3500,48 @@
         "kind": "literal"
       },
       {
+        "name": "project_memory_consolidate",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 499,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_forget",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 467,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_index_path",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 431,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_remember",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 382,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_restore",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 483,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_search",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 262,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_status",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 337,
+        "kind": "literal"
+      },
+      {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
         "line": 538,
@@ -3907,6 +3954,48 @@
         "kind": "literal"
       },
       {
+        "name": "project_memory_consolidate",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 499,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_forget",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 467,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_index_path",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 431,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_remember",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 382,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_restore",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 483,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_search",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 262,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_status",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 337,
+        "kind": "literal"
+      },
+      {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
         "line": 538,
@@ -4224,11 +4313,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 624,
-      "registrationSites": 69,
+      "sourceFiles": 630,
+      "registrationSites": 76,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 96,
-      "uniqueStableTools": 95,
+      "stableRegistrationRows": 103,
+      "uniqueStableTools": 102,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4329,6 +4418,10 @@
       },
       {
         "path": "agent/extensions/pi-observations.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/pi-vector-memory.ts",
         "exists": true
       },
       {
@@ -4726,7 +4819,27 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/project-identity.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-memory-consolidate.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-memory-index.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-memory-retrieve.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/project-tests.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/project-vector-store.ts",
         "exists": true
       },
       {
@@ -6876,6 +6989,10 @@
       {
         "name": "UNREAL-INTEGRATION-REVIEW.md",
         "path": "docs/UNREAL-INTEGRATION-REVIEW.md"
+      },
+      {
+        "name": "VECTOR-MEMORY.md",
+        "path": "docs/VECTOR-MEMORY.md"
       },
       {
         "name": "VIDEO-STUDIO.md",
