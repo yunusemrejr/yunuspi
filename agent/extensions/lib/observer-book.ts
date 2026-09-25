@@ -686,15 +686,26 @@ const URL_LIKE = /\b(?:https?|ftp|file|ssh|git|wss?):\/\/|\bwww\.[a-z0-9-]+\.[a-
 const EXEC_RISK = /\b(?:curl|wget|iwr|Invoke-WebRequest)\b[^\n]*\|\s*(?:sh|bash|zsh|python3?|node|iex)\b|\brm\s+-[a-z]*r[a-z]*f|\bsudo\b|\bchmod\s+[0-7]*777\b|\beval\s*\(|\bbase64\s+(?:-d|--decode)\b/i;
 const INJECTION = /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous|prior|above|earlier|system|safety|user)\b|\bsystem prompt\b|\byou (?:must|are required to|shall) (?:always|never|obey)\b|\b(?:do not|don't|never) (?:tell|inform|show) (?:the )?user\b|\bnew instructions?\b/i;
 
+/** An over-long note keeps its leading whole sentences (the durable fact
+ * usually comes first); without a usable sentence boundary it is cut at a word
+ * boundary and marked. Paid observer output is compacted, never discarded. */
+function fitMargin(text: string): string {
+  const head = text.slice(0, MARGIN_MAX_CHARS + 1);
+  const sentence = head.slice(0, MARGIN_MAX_CHARS).match(/^.*[.!?;](?=\s|$)/)?.[0];
+  if (sentence && sentence.length >= 48) return sentence.trim();
+  const cut = head.slice(0, MARGIN_MAX_CHARS - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), MARGIN_MAX_CHARS / 2)).trimEnd()}…`;
+}
+
 /** Screen observer-written margin text. Protected texts (the user request and
  * provider thinking) must not be copied into durable notes. */
 export function screenMarginNote(value: unknown, protectedTexts: string[] = []): { text?: string; reason?: string } {
   if (typeof value !== 'string') return { reason: 'margin note must be text' };
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f​-‏‪-‮⁦-⁩]/.test(value)) return { reason: 'margin note contains control or bidi characters' };
-  const text = value.replace(/\s+/g, ' ').trim();
+  let text = value.replace(/\s+/g, ' ').trim();
   if (!text) return {};
   if (text.length < 12) return { reason: 'margin note is too short to be useful' };
-  if (text.length > MARGIN_MAX_CHARS) return { reason: 'margin note exceeds 240 characters' };
+  if (text.length > MARGIN_MAX_CHARS) text = fitMargin(text);
   if (SECRET.test(text)) return { reason: 'margin note looks like it contains a secret' };
   if (URL_LIKE.test(text)) return { reason: 'margin notes may not contain URLs' };
   if (EXEC_RISK.test(text)) return { reason: 'margin note contains a risky command pattern' };
