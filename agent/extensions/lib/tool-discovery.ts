@@ -165,10 +165,9 @@ function normalizedCommandCatalog(pi: any): any[] | undefined {
   return commands.filter((command: any) => command && typeof command.name === 'string' && command.name.length > 0);
 }
 
-/** Add live availability to the static ability index without presenting its
- * pointers as a claim that a configured tool is currently registered. */
-function capabilityMetadata(record: any, pi: any, detail = false): any {
-  const tools = Array.isArray(record?.tools) ? record.tools.filter((name: any) => typeof name === 'string') : [];
+/** Live tool availability for one discovery call, enumerated once and shared
+ * by every record on the page instead of once per record. */
+function availabilitySnapshot(pi: any): { registered: Set<string>; active: Set<string> } {
   const registered = new Set<string>();
   try {
     for (const tool of pi.getAllTools?.() ?? []) if (typeof tool?.name === 'string') registered.add(tool.name);
@@ -177,6 +176,13 @@ function capabilityMetadata(record: any, pi: any, detail = false): any {
   try {
     for (const name of pi.getActiveTools?.() ?? []) if (typeof name === 'string') active.add(name);
   } catch { /* Treat current activity as unknown rather than granting it. */ }
+  return { registered, active };
+}
+/** Add live availability to the static ability index without presenting its
+ * pointers as a claim that a configured tool is currently registered. */
+function capabilityMetadata(record: any, pi: any, detail = false, availability?: { registered: Set<string>; active: Set<string> }): any {
+  const tools = Array.isArray(record?.tools) ? record.tools.filter((name: any) => typeof name === 'string') : [];
+  const { registered, active } = availability ?? availabilitySnapshot(pi);
   const result: any = {
     id: String(record?.id ?? '').slice(0, 128),
     group: String(record?.group ?? '').slice(0, 64),
@@ -363,7 +369,8 @@ export function registerToolDiscovery(pi: any) {
           : record);
         if (input.enable === true) {
           const added = stageBundle(results);
-          return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,true)),staged:added,
+          const availability = availabilitySnapshot(pi);
+          return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,true,availability)),staged:added,
           ...(page.groups ? {groups:page.groups} : {}),
           ...(page.query ? {query:page.query} : {}),
           ...(page.group ? {group:page.group} : {}),
@@ -372,7 +379,8 @@ export function registerToolDiscovery(pi: any) {
           ...(jevRank ? {jev:jevRank} : {}),
           note:added.length?'Staged: the complete matched capability bundle(s) join the wire on the next model turn in this request. No tool executed.':'Matched capability bundle(s) already staged for the wire. No tool executed.'});
         }
-        return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true)),
+        const availability = availabilitySnapshot(pi);
+        return answer({capabilities:results.map((record: any)=>capabilityMetadata(record,pi,input.detail === true,availability)),
           ...(page.groups ? {groups:page.groups} : {}),
           ...(page.query ? {query:page.query} : {}),
           ...(page.group ? {group:page.group} : {}),

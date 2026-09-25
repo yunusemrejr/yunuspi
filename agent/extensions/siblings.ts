@@ -181,17 +181,28 @@ export function newlyJoined(
 	return fresh.length ? fresh : undefined;
 }
 
+/** Checkout-root walks run on every heartbeat, peer scan and edit preflight.
+ * Memoize per cwd with a short TTL: `.git` markers can appear or disappear
+ * (init, deletion), so entries revalidate after 30s. Only successes cache. */
+const coordinationRootCache = new Map<string, { root: string; at: number }>();
+const COORDINATION_ROOT_CACHE_TTL_MS = 30_000;
+const COORDINATION_ROOT_CACHE_MAX = 128;
+export function clearCoordinationRootCache() { coordinationRootCache.clear(); }
 export function coordinationRoot(cwd: string): string {
+	const cached = coordinationRootCache.get(cwd);
+	if (cached && Date.now() - cached.at < COORDINATION_ROOT_CACHE_TTL_MS) return cached.root;
 	const current = fs.realpathSync(cwd);
 	let dir = current;
 	for (let depth = 0; depth < 16; depth++) {
 		try {
 			const marker=path.join(dir,".git"), stat=fs.lstatSync(marker);
-			if (stat.isDirectory() && fs.lstatSync(path.join(marker,"HEAD")).isFile()) return dir;
-			if (stat.isFile() && stat.size <= 4096 && /^gitdir: [^\r\n]+\s*$/.test(fs.readFileSync(marker,"utf8"))) return dir;
+			if (stat.isDirectory() && fs.lstatSync(path.join(marker,"HEAD")).isFile()) { coordinationRootCache.set(cwd, { root: dir, at: Date.now() }); if (coordinationRootCache.size > COORDINATION_ROOT_CACHE_MAX) coordinationRootCache.delete(coordinationRootCache.keys().next().value!); return dir; }
+			if (stat.isFile() && stat.size <= 4096 && /^gitdir: [^\r\n]+\s*$/.test(fs.readFileSync(marker,"utf8"))) { coordinationRootCache.set(cwd, { root: dir, at: Date.now() }); if (coordinationRootCache.size > COORDINATION_ROOT_CACHE_MAX) coordinationRootCache.delete(coordinationRootCache.keys().next().value!); return dir; }
 		} catch {}
 		const parent = path.dirname(dir); if (parent === dir) break; dir = parent;
 	}
+	coordinationRootCache.set(cwd, { root: current, at: Date.now() });
+	if (coordinationRootCache.size > COORDINATION_ROOT_CACHE_MAX) coordinationRootCache.delete(coordinationRootCache.keys().next().value!);
 	return current;
 }
 function targetPath(cwd: string, file: string): string {
@@ -204,15 +215,27 @@ export function pathsOverlap(a: string, b: string): boolean {
 	const inside = (value: string) => value === "" || !path.isAbsolute(value) && value !== ".." && !value.startsWith(".." + path.sep);
 	return inside(relative) || inside(reverse);
 }
-/** A read receipt can detect a stale direct edit, but is not an interprocess lock. */
-function fileVersion(file: string, maxBytes = 1024 * 1024): string | undefined {
+/** A read receipt can detect a stale direct edit, but is not an interprocess lock.
+ * Hashes are cached by stat identity (dev:ino:size:mtime:ctime): any content
+ * change updates mtime/ctime, so an unchanged stat means unchanged bytes.
+ * Cache hits still re-stat to preserve the before/after race guard. */
+const fileVersionCache = new Map<string, string>();
+const FILE_VERSION_CACHE_MAX = 64;
+export function clearFileVersionCache() { fileVersionCache.clear(); }
+export function fileVersion(file: string, maxBytes = 1024 * 1024): string | undefined {
  let fd: number | undefined;
  try {
   fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
   const before=fs.fstatSync(fd); if(!before.isFile() || before.size>maxBytes) return;
-  const bytes=Buffer.alloc(before.size+1), length=fs.readSync(fd,bytes,0,bytes.length,0), after=fs.fstatSync(fd);
+  const key=`${before.dev}:${before.ino}:${before.size}:${before.mtimeMs}:${before.ctimeMs}`;
+  const hit=fileVersionCache.get(key);
+  const bytes=Buffer.alloc(hit?0:before.size+1), length=hit?before.size:fs.readSync(fd,bytes,0,bytes.length,0), after=fs.fstatSync(fd);
   if(length!==before.size || before.size!==after.size || before.mtimeMs!==after.mtimeMs || before.ctimeMs!==after.ctimeMs)return;
-  return `${after.dev}:${after.ino}:`+createHash("sha256").update(bytes.subarray(0,length)).digest("hex");
+  if(hit)return hit;
+  const version=`${after.dev}:${after.ino}:`+createHash("sha256").update(bytes.subarray(0,length)).digest("hex");
+  fileVersionCache.set(key,version);
+  if(fileVersionCache.size>FILE_VERSION_CACHE_MAX)fileVersionCache.delete(fileVersionCache.keys().next().value!);
+  return version;
  } catch { return; } finally { if(fd!==undefined)fs.closeSync(fd); }
 }
 const CHECK_MAX_BYTES = 256 * 1024;
@@ -381,6 +404,11 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 		} catch { /* An existing immutable retirement receipt already suffices. */ }
 	};
 
+	/** Heartbeats fire every turn, edit commit and publish. Skip the rewrite
+	 * while identity and coordination are unchanged and the last write is
+	 * fresh: liveness tolerates it (10-minute window vs 15s throttle). */
+	let lastHeartbeat = { at: 0, key: "" };
+	const HEARTBEAT_THROTTLE_MS = 15_000;
 	function heartbeat(
 		sid: string,
 		cwd: string,
@@ -388,6 +416,8 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 		parent?: string,
 	): void {
 		try {
+			const key = JSON.stringify([sid, cwd, kind, parent ?? null, bridgeEpoch ?? null, bridgeStartedAt, coordination]);
+			if (key === lastHeartbeat.key && Date.now() - lastHeartbeat.at < HEARTBEAT_THROTTLE_MS) return;
 			privateDirectory(DIR); privateDirectory(ACTIVE_DIR);
 			const p = entryPath(cwd, sid);
 			const tmp = p + `.${process.pid}.tmp`;
@@ -408,6 +438,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 				{ mode: 0o600 },
 			);
 			fs.renameSync(tmp, p);
+			lastHeartbeat = { at: Date.now(), key };
 		} catch {
 			/* awareness must never break a session */
 		}

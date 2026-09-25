@@ -45,7 +45,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // Full text behind every excerpt, searchable by the observer's read-only
   // tools. Session-scoped: a new prompt keeps it, a new session clears it.
   const journal = createObserverJournal();
-  let prompts: Array<{ id: string; text: string }> = [], promptSequence = 0, interpretation = '';
+  let prompts: Array<{ id: string; text: string; focused?: string }> = [], promptSequence = 0, interpretation = '';
+  /** Tick-efficiency watermarks. The transcript branch is append-mostly, so the
+   * opt-out scan and the child-ledger reduce reuse their result while the
+   * window identity (length + first/last refs) is unchanged; any rewrite
+   * (compaction, switch) misses the watermark and recomputes exactly. */
+  let optOutMark = { length: -1, first: undefined as unknown, last: undefined as unknown, request: '', blocked: false };
+  let childReduceMark = { window: 0, length: -1, first: undefined as unknown, last: undefined as unknown, value: undefined as any };
   const toolsEnabled = () => (process.env.PI_OBSERVER_TOOLS ?? '').toLowerCase() !== 'off';
   const routeHealth = new Map<string, { failures: number; coolUntil: number }>();
   // A timed-out request reports twice: at its deadline and again when the
@@ -101,6 +107,18 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     return Object.entries(input).filter(([key, value]) => ['path', 'file_path', 'offset', 'limit', 'action', 'operation', 'runId', 'taskId', 'id', 'query', 'pattern', 'command', 'timeout', 'timeoutMs', 'timeoutSeconds', 'async', 'background'].includes(key) && ['string', 'number', 'boolean'].includes(typeof value))
       .map(([key, value]) => `${key}=${String(value).slice(0, 140)}`).join(' ').slice(0, 220);
   };
+  /** Child-ledger reduction over the trailing branch window, memoized on the
+   * window identity. Tool/todo rows stay live; only the O(window) transcript
+   * projection is reused, and any branch rewrite recomputes it. */
+  const reducedChildren = (window: number) => {
+    const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+    const first = branch.length ? branch[Math.max(0, branch.length - window)] : undefined;
+    const last = branch.length ? branch[branch.length - 1] : undefined;
+    if (childReduceMark.window === window && childReduceMark.length === branch.length && childReduceMark.first === first && childReduceMark.last === last && childReduceMark.value) return childReduceMark.value;
+    const value = reduceChildEvents(projectTranscriptChildren(branch.slice(-window)));
+    childReduceMark = { window, length: branch.length, first, last, value };
+    return value;
+  };
   const currentState = (withElapsed = true): ObserverEvidence[] => {
     const rows: ObserverEvidence[] = [];
     if (runningTools.size) rows.push({ id: 'running-tools', kind: 'current state', text: [...runningTools.values()].slice(-3).map(tool => `${tool.name} ${tool.foreground ? 'foreground' : 'running'}${withElapsed ? ` elapsed=${Math.floor((now() - tool.startedAt) / 1000)}s` : ''} ${tool.input}`).join('; ') });
@@ -114,7 +132,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       rows.push({ id: 'todo-state', kind: 'current state', text: `${inProgress.length + pending.length} open, ${completedTodos.length} completed: ${selected.map(task => `${String(task.id).slice(0, 30)} ${String(task.status).slice(0, 30)} ${String(task.subject ?? task.title ?? task.text ?? '').slice(0, 70)}`).join('; ')}`.slice(0, 450) });
     }
     try {
-      const ledger = reduceChildEvents(projectTranscriptChildren((ctx?.sessionManager?.getBranch?.() ?? []).slice(-2048)));
+      const ledger = reducedChildren(2048);
       childSummary = { total: ledger.tasks.length, failed: ledger.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
       if (ledger.tasks.length) {
         const unresolved = ledger.tasks.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
@@ -135,7 +153,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const earlier = prompts.slice(0, -1).slice(-6);
     const each = earlier.length > 3 ? 200 : 300;
     for (const prompt of earlier) {
-      const focused = promptRequestFocus(prompt.text).replace(/\s+/g, ' ').trim();
+      const focused = prompt.focused ?? promptRequestFocus(prompt.text).replace(/\s+/g, ' ').trim();
       rows.push({ id: prompt.id, kind: 'earlier user prompt', text: focused.length <= each ? focused : `${focused.slice(0, Math.floor(each * .62))} … ${focused.slice(-Math.floor(each * .33))}` });
     }
     if (prompts.length > 7) rows.push({ id: 'prompt-count', kind: 'earlier user prompt', text: `${prompts.length - 1} earlier prompts this session; older ones are searchable with session_search.` });
@@ -151,31 +169,45 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const runtime = createSessionObserver({
     salience: () => salience,
     ...testing,
     snapshot() {
-      const state = currentState(), evidence = [...state, ...intentRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
-      const packet = buildObserverPacket(request, evidence, [], []);
-      if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet, reason: 'No active user work', silent: true };
-      if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet, reason: 'Observer disabled or offline', silent: true };
-      if (pending.size) return { packet, reason: 'User input is pending', silent: true };
-      let blocked = inputBlocked || wantsNoObserver(request);
+      // Cheap guards run before any evidence or packet work; the scheduler
+      // never reads the packet of a routeless snapshot, so cold paths build a
+      // minimal one and the dispatch path builds exactly once below.
+      const idlePacket = () => buildObserverPacket(request, [], [], []);
+      if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet: idlePacket(), reason: 'No active user work', silent: true };
+      if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet: idlePacket(), reason: 'Observer disabled or offline', silent: true };
+      if (pending.size) return { packet: idlePacket(), reason: 'User input is pending', silent: true };
+      let blocked: boolean;
       try {
         // Tool traffic must never age an explicit user opt-out out of authority.
         // Inspect retained user text in bounded chunks, including long sessions.
-        for (const entry of ctx.sessionManager.getBranch?.() ?? []) if (entry.type === 'message' && entry.message?.role === 'user') {
-          const parts = typeof entry.message.content === 'string' ? [entry.message.content]
-            : (entry.message.content ?? []).filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text);
-          for (const text of parts) blocked ||= wantsNoObserver(text);
+        // The branch is append-mostly: reuse the verdict while the branch
+        // identity is unchanged; any rewrite rescans from scratch.
+        const branch = ctx.sessionManager.getBranch?.() ?? [];
+        if (optOutMark.request === request && optOutMark.length === branch.length
+          && (branch.length === 0 || (optOutMark.first === branch[0] && optOutMark.last === branch[branch.length - 1]))) blocked = optOutMark.blocked;
+        else {
+          blocked = inputBlocked || wantsNoObserver(request);
+          for (const entry of branch) if (entry.type === 'message' && entry.message?.role === 'user') {
+            const parts = typeof entry.message.content === 'string' ? [entry.message.content]
+              : (entry.message.content ?? []).filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text);
+            for (const text of parts) blocked ||= wantsNoObserver(text);
+          }
+          optOutMark = { length: branch.length, first: branch[0], last: branch[branch.length - 1], request, blocked };
         }
-      } catch { return { packet, reason: 'User constraints unavailable' }; }
-      if (blocked) return { packet, reason: 'User requested no background observer or network' };
+      } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
+      if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
+      const state = currentState(), evidence = [...state, ...intentRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
-      let currentPacket = buildObserverPacket(request, evidence, tools, skills);
+      // Route-selection failures are cold paths: one minimal packet each. The
+      // dispatch path below builds the full packet exactly once.
+      const routePacket = () => buildObserverPacket(request, evidence, tools, skills);
       let available = ctx.modelRegistry.getAvailable();
       if (ctx.scopedModels?.length) { const scope = new Set(ctx.scopedModels.map((row: any) => `${row.model?.provider}/${row.model?.id}`)); available = available.filter((model: any) => scope.has(`${model.provider}/${model.id}`)); }
       const selection = resolveSessionObserverPreferenceChain(available.map(toModelInfo));
@@ -187,13 +219,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         fallbackNotice = entry.route;
         pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer route ${selection.routes[0].route} failed repeatedly; using configured fallback ${entry.route} for up to 10 minutes.`, display: true, excludeFromContext: true, details: { status: 'fallback', route: entry.route } }, { triggerTurn: false });
       } else if (entry?.route === selection.routes[0]?.route) fallbackNotice = '';
-      if (!entry) return { packet: currentPacket, reason: selection.status === 'disabled' ? 'Observer disabled in model preferences' : 'Configured observer model unavailable' };
+      if (!entry) return { packet: routePacket(), reason: selection.status === 'disabled' ? 'Observer disabled in model preferences' : 'Configured observer model unavailable' };
       const model = available.find((candidate: any) => `${candidate.provider}/${candidate.id}` === entry.route);
-      if (!model || !Number.isSafeInteger(model.maxTokens) || model.maxTokens < 4096) return { packet: currentPacket, reason: 'Configured observer model lacks output capacity' };
+      if (!model || !Number.isSafeInteger(model.maxTokens) || model.maxTokens < 4096) return { packet: routePacket(), reason: 'Configured observer model lacks output capacity' };
       const constraints = explicitRecoveryConstraints(ctx, request, ctx.model);
       for (const key of ['fixedRoute', 'sameModel', 'freeOnly']) constraints[key] ||= inputRestrictions[key];
-      if ((constraints.fixedRoute || constraints.sameModel) && `${ctx.model?.provider}/${ctx.model?.id}` !== entry.route) return { packet: currentPacket, reason: 'User model restriction prevents observer route' };
-      if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: currentPacket, reason: 'User free-only restriction prevents observer route' };
+      if ((constraints.fixedRoute || constraints.sameModel) && `${ctx.model?.provider}/${ctx.model?.id}` !== entry.route) return { packet: routePacket(), reason: 'User model restriction prevents observer route' };
+      if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: routePacket(), reason: 'User free-only restriction prevents observer route' };
       if (dropped !== reportedDropped) {
         reportedDropped = dropped;
         pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer coverage: ${dropped} earlier events exceeded the queue; reviewing retained chunks with incomplete historical coverage.`, display: true, excludeFromContext: true, details: { status: 'coverage', dropped } }, { triggerTurn: false });
@@ -241,7 +273,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
       else routing = 'Omitted this review to save tokens: model preferences, usage and child outcomes are unchanged since they were last shown for this task. Ask to read "routing" when model or delegation advice needs them.';
       const [stateRows, restRows] = [evidence.filter(row => row.kind === 'current state'), evidence.filter(row => row.kind !== 'current state')];
-      currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills });
+      const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills });
       const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);
@@ -436,7 +468,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     request = accepted.request; userRequest = Boolean(request.trim()); inputRestrictions = accepted.restrictions; inputBlocked = accepted.blocked;
     if (userRequest) {
       const promptId = `prompt-${++promptSequence}`;
-      prompts.push({ id: promptId, text: accepted.raw }); if (prompts.length > 64) prompts.shift();
+      // Prompt text is immutable: focus once at push instead of every tick.
+      prompts.push({ id: promptId, text: accepted.raw, focused: promptRequestFocus(accepted.raw).replace(/\s+/g, ' ').trim() }); if (prompts.length > 64) prompts.shift();
       journal.add({ id: promptId, kind: 'user prompt', at: now(), text: accepted.raw });
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';

@@ -3,7 +3,7 @@ import { projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
 import { boundedObserverText, createSessionObserver, observerAdviceText, observerDispatch, wantsNoObserver, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
-import { buildWatchmakerPacket, createWatchmakerScratchpad, formatWatchmakerDuration, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
+import { buildWatchmakerPacket, createWatchmakerScratchpad, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -31,11 +31,23 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   const now = testing.now ?? Date.now;
   let inputRestrictions: any = {}, inputBlocked = false, taskStartAt = 0, sessionStartAt = 0, watchOff = false;
   const scratchpad = createWatchmakerScratchpad();
+  /** Tick-efficiency watermarks (same contract as the session observer). */
+  let optOutMark = { length: -1, first: undefined as unknown, last: undefined as unknown, request: '', blocked: false };
+  let childReduceMark = { window: 0, length: -1, first: undefined as unknown, last: undefined as unknown, value: undefined as any };
+  const reducedChildren = (window: number) => {
+    const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+    const first = branch.length ? branch[Math.max(0, branch.length - window)] : undefined;
+    const last = branch.length ? branch[branch.length - 1] : undefined;
+    if (childReduceMark.window === window && childReduceMark.length === branch.length && childReduceMark.first === first && childReduceMark.last === last && childReduceMark.value) return childReduceMark.value;
+    const value = reduceChildEvents(projectTranscriptChildren(branch.slice(-window)));
+    childReduceMark = { window, length: branch.length, first, last, value };
+    return value;
+  };
   const routeHealth = new Map<string, { failures: number; coolUntil: number }>();
   const countedDispatches = new Set<string>();
   let fallbackNotice = '';
   const journal = createObserverJournal({ maxChars: 512_000 });
-  let prompts: Array<{ id: string; text: string }> = [], promptSequence = 0, interpretation = '';
+  let prompts: Array<{ id: string; text: string; focused?: string }> = [], promptSequence = 0, interpretation = '';
   const toolsEnabled = () => (process.env.PI_WATCHMAKER_TOOLS ?? process.env.PI_OBSERVER_TOOLS ?? '').toLowerCase() !== 'off';
   const anchor = createContextAnchor();
   const identity = (context: any) => JSON.stringify([context?.cwd ?? '', context?.sessionManager?.getSessionId?.() ?? '', context?.sessionManager?.getSessionFile?.() ?? '']);
@@ -68,18 +80,20 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     rows.push({ id: 'time-ledger', kind: 'time', text: entries.length ? `${calls} calls in ${formatWatchmakerDuration(wall)} tool wall: ${entries.slice(0, 8).map(([tool, row]) => `${tool}×${row.calls}/${formatWatchmakerDuration(row.ms)}${row.errors ? `/${row.errors} failed` : ''}`).join(' · ')}` : 'no tool calls recorded this task' });
     const dupes = [...repeats.entries()].filter(([, row]) => row.count >= 3).sort((a, b) => b[1].count - a[1].count).slice(0, 4);
     rows.push({ id: 'time-repeats', kind: 'time', text: dupes.length ? dupes.map(([key, row]) => `${key} ×${row.count} in ${formatWatchmakerDuration(row.lastAt - row.firstAt)}`).join(' · ') : 'no 3x+ repeated tool+target this task' });
+    let reduced: ReturnType<typeof reduceChildEvents> | undefined, childrenUnavailable = false;
+    try { reduced = reducedChildren(512); } catch { childrenUnavailable = true; }
+    const activeChildren = reduced ? reduced.tasks.filter(task => task.state === 'running' || task.state === 'queued').length : 0;
     const edits = (ledger.get('edit')?.calls ?? 0) + (ledger.get('write')?.calls ?? 0);
     const reads = ledger.get('read')?.calls ?? 0;
-    rows.push({ id: 'time-pace', kind: 'time', text: edits === 0 && calls >= 10 ? `STALL: 0 edits in ${formatWatchmakerDuration(elapsed)} across ${calls} calls (${reads} reads)` : `${edits} edits, ${reads} reads in ${formatWatchmakerDuration(elapsed)}` });
-    try {
-      const reduced = reduceChildEvents(projectTranscriptChildren((ctx?.sessionManager?.getBranch?.() ?? []).slice(-512)));
-      if (reduced.tasks.length) {
-        const running = reduced.tasks.filter(task => task.state === 'running' || task.state === 'queued').length;
-        const failed = reduced.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length;
-        const done = reduced.tasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed').length;
-        rows.push({ id: 'time-children', kind: 'time', text: `${reduced.tasks.length} children: ${running} active · ${failed} failed · ${done} done${failed ? ` (${reduced.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').slice(0, 3).map(task => task.label.slice(0, 40)).join('; ')})` : ''}` });
-      } else rows.push({ id: 'time-children', kind: 'time', text: 'no child agents this task' });
-    } catch { rows.push({ id: 'time-children', kind: 'time', text: 'child-agent evidence unavailable' }); }
+    const delegated = ledger.get('subagent')?.calls ?? 0;
+    rows.push({ id: 'time-pace', kind: 'time', text: formatWatchmakerPace({ elapsed, calls, edits, reads, delegated, activeChildren }) });
+    if (childrenUnavailable || !reduced) rows.push({ id: 'time-children', kind: 'time', text: 'child-agent evidence unavailable' });
+    else if (reduced.tasks.length) {
+      const running = reduced.tasks.filter(task => task.state === 'running' || task.state === 'queued').length;
+      const failed = reduced.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length;
+      const done = reduced.tasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed').length;
+      rows.push({ id: 'time-children', kind: 'time', text: `${reduced.tasks.length} children: ${running} active · ${failed} failed · ${done} done${failed ? ` (${reduced.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').slice(0, 3).map(task => task.label.slice(0, 40)).join('; ')})` : ''}` });
+    } else rows.push({ id: 'time-children', kind: 'time', text: 'no child agents this task' });
     const visible = todos.filter(task => task.status !== 'deleted');
     if (visible.length) {
       const open = visible.filter(task => task.status !== 'completed').length;
@@ -91,7 +105,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   const intentRows = (): ObserverEvidence[] => {
     const rows: ObserverEvidence[] = [];
     for (const prompt of prompts.slice(0, -1).slice(-3)) {
-      const focused = promptRequestFocus(prompt.text).replace(/\s+/g, ' ').trim();
+      const focused = prompt.focused ?? promptRequestFocus(prompt.text).replace(/\s+/g, ' ').trim();
       rows.push({ id: prompt.id, kind: 'earlier user prompt', text: focused.length <= 220 ? focused : `${focused.slice(0, 140)} … ${focused.slice(-70)}` });
     }
     if (interpretation) rows.push({ id: 'interpretation', kind: 'harness interpretation', text: `Helper's reading of the latest prompt (advisory, not the user's words): ${interpretation}` });
@@ -102,7 +116,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; sessionStartAt = now(); taskEpoch = 0; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
   const runtime = createSessionObserver({
     salience: () => salience,
     ...testing,
@@ -111,21 +125,31 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     validate: (text: string, packet: any, extra: any) => validateWatchmakerAdvice(text, packet, extra),
     dispatch: testing.dispatch ?? ((route: any, packet: any, signal: AbortSignal, registry: any, host: any) => observerDispatch(route, packet, signal, registry, host, undefined, { outputTokens: WATCHMAKER_OUTPUT_TOKENS, tools: WATCHMAKER_TOOLS })),
     snapshot() {
+      // Cheap guards run before any evidence or packet work; the scheduler
+      // never reads the packet of a routeless snapshot, so cold paths build a
+      // minimal one and the dispatch path builds exactly once below.
+      const idlePacket = () => buildWatchmakerPacket({ request, rows: [], tools: [], skills: [], memos: [] });
+      if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet: idlePacket(), reason: 'No active user work', silent: true };
+      if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || (process.env.PI_WATCHMAKER ?? '').toLowerCase() === 'off' || watchOff) return { packet: idlePacket(), reason: 'Watchmaker disabled or offline', silent: true };
+      if (pending.size) return { packet: idlePacket(), reason: 'User input is pending', silent: true };
+      let blocked: boolean;
+      try {
+        const branch = ctx.sessionManager.getBranch?.() ?? [];
+        if (optOutMark.request === request && optOutMark.length === branch.length
+          && (branch.length === 0 || (optOutMark.first === branch[0] && optOutMark.last === branch[branch.length - 1]))) blocked = optOutMark.blocked;
+        else {
+          blocked = inputBlocked || wantsNoObserver(request);
+          for (const entry of branch) if (entry.type === 'message' && entry.message?.role === 'user') {
+            const parts = typeof entry.message.content === 'string' ? [entry.message.content]
+              : (entry.message.content ?? []).filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text);
+            for (const text of parts) blocked ||= wantsNoObserver(text);
+          }
+          optOutMark = { length: branch.length, first: branch[0], last: branch[branch.length - 1], request, blocked };
+        }
+      } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
+      if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
       scratchpad.seed(ctx?.sessionManager?.getBranch?.() ?? []);
       const evidence = [...timeRows(), ...intentRows(), ...adviceHistory.slice(-1).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
-      const packet = buildWatchmakerPacket({ request, rows: evidence, tools: [], skills: [], memos: scratchpad.list().map(memo => memo.text) });
-      if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet, reason: 'No active user work', silent: true };
-      if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || (process.env.PI_WATCHMAKER ?? '').toLowerCase() === 'off' || watchOff) return { packet, reason: 'Watchmaker disabled or offline', silent: true };
-      if (pending.size) return { packet, reason: 'User input is pending', silent: true };
-      let blocked = inputBlocked || wantsNoObserver(request);
-      try {
-        for (const entry of ctx.sessionManager.getBranch?.() ?? []) if (entry.type === 'message' && entry.message?.role === 'user') {
-          const parts = typeof entry.message.content === 'string' ? [entry.message.content]
-            : (entry.message.content ?? []).filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text);
-          for (const text of parts) blocked ||= wantsNoObserver(text);
-        }
-      } catch { return { packet, reason: 'User constraints unavailable' }; }
-      if (blocked) return { packet, reason: 'User requested no background observer or network' };
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text) });
@@ -254,7 +278,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     request = accepted.request; userRequest = Boolean(request.trim()); inputRestrictions = accepted.restrictions; inputBlocked = accepted.blocked;
     if (userRequest) {
       const promptId = `prompt-${++promptSequence}`;
-      prompts.push({ id: promptId, text: accepted.raw }); if (prompts.length > 24) prompts.shift();
+      prompts.push({ id: promptId, text: accepted.raw, focused: promptRequestFocus(accepted.raw).replace(/\s+/g, ' ').trim() }); if (prompts.length > 24) prompts.shift();
       journal.add({ id: promptId, kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }

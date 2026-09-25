@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { sessionObservability } from './session-observability.ts';
 /** Catalog-wide advisory skill relevance. Pure and deterministic: no I/O,
  * inference, timers or scanning of tool-output prose. It scores the loaded
@@ -10,7 +11,13 @@ export type SkillIndex = {
   docs: { skill: SkillInfo; tokens: Set<string>; name: Set<string> }[];
   weight: Map<string, number>;
   strong: Set<string>;
+  /** Content identity of the catalog this index was built from. */
+  fingerprint?: string;
 };
+/** Catalog content identity: any name/description/file change alters it. */
+export function skillCatalogFingerprint(skills: readonly SkillInfo[]): string {
+  return createHash('sha256').update(skills.map(skill => `${skill.name}\0${skill.description}\0${skill.file}`).join('\n')).digest('hex');
+}
 export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
@@ -113,7 +120,7 @@ export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
     weight.set(term, scale * (1 + Math.log(total / count)));
     if (count <= Math.max(1, Math.round(total * 0.15))) strong.add(term);
   }
-  return { docs, weight, strong };
+  return { docs, weight, strong, fingerprint: skillCatalogFingerprint(skills) };
 }
 
 /**
@@ -198,7 +205,25 @@ export function bestSkillSection(headings: readonly { text: string; line: number
  * edit fuzzy match is allowed only for sufficiently long tokens and receives
  * a discount, so a typo can recover a skill without broadening ordinary
  * generic matches. */
+/** Repeated identical skill searches (agent retries, guidance passes) reuse the
+ * deterministic ranking. The key covers every ranking input: catalog content,
+ * full context, limit, and the local-intelligence toggle. Bounded LRU. */
+const rankSkillsCache = new Map<string, Ranked[]>();
+const RANK_SKILLS_CACHE_MAX = 32;
+export function clearRankSkillsCache() { rankSkillsCache.clear(); }
 export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranked[] {
+  const key = `${index.fingerprint ?? 'unfingerprinted'}:${limit}:${process.env.PI_LOCAL_INTELLIGENCE ?? ''}:${createHash('sha256').update(String(context ?? '')).digest('hex')}`;
+  let selected = rankSkillsCache.get(key);
+  if (!selected) {
+    selected = rankSkillsUncached(index, context, limit);
+    rankSkillsCache.set(key, selected);
+    if (rankSkillsCache.size > RANK_SKILLS_CACHE_MAX) rankSkillsCache.delete(rankSkillsCache.keys().next().value!);
+  }
+  const fuzzyMatches = selected.filter(item => item.matched.some(term => term.includes("~"))).length;
+  if(fuzzyMatches)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:fuzzyMatches});}catch{/* optional visibility */}
+  return selected.map(item => ({ skill: item.skill, score: item.score, matched: [...item.matched] }));
+}
+function rankSkillsUncached(index: SkillIndex, context: string, limit = 4): Ranked[] {
   const terms = skillTerms(context, 64);
   if (!terms.length) return [];
   // A catalogue term is naming when at least half of the documents that carry
@@ -260,8 +285,5 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
   const ranked=new Map(out.map((item,i)=>[item.skill.name,relevance[i]??0]));
   // Statistical tie-break only after all rarity, fuzzy-match and availability gates.
   out.sort((a, b) => b.score - a.score || ranked.get(b.skill.name)!-ranked.get(a.skill.name)! || a.skill.name.localeCompare(b.skill.name));
-  const selected = out.slice(0, Math.max(1, limit));
-  const fuzzyMatches = selected.filter(item => item.matched.some(term => term.includes("~"))).length;
-  if(fuzzyMatches)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:fuzzyMatches});}catch{/* optional visibility */}
-  return selected;
+  return out.slice(0, Math.max(1, limit));
 }

@@ -14,7 +14,7 @@ import { authoredReviewSnippets, authoredReviewSignals } from "./authored-review
 import { checkpointPath } from "./checkpoint-files.ts";
 import { matchGuidanceTopics } from "./guidance-topics.ts";
 import { routeSkills, routeSkillsPrecise, skillRoutes, skillTaskText, skillIntentSegments, skillActionSegments } from "./skill-routing.ts";
-import { buildSkillIndex, rankSkills, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
+import { buildSkillIndex, rankSkills, skillCatalogFingerprint, skillTerms, skillEvidenceContext, headingOutline, bestSkillSection, skillReferenceLinks } from "./skill-relevance.ts";
 import { CAPABILITY_GROUPS, capabilityGroup, groupOverview, searchCapabilityMetadata } from "./capability-groups.ts";
 import { evaluateStuckSignal, isTrivialChangeRequest, shouldSuggestReview } from "./review-coordinator.ts";
 import { lastQualityReviewCompletedAt } from "./quality-review-owner.ts";
@@ -66,7 +66,7 @@ export function createRelevantGuidance(pi: any) {
   let anchorContext = createContextAnchor();
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
-  let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null;
+  let context: string[] = [], extensions = new Set<string>(), skillIndex: ReturnType<typeof buildSkillIndex> | null = null, skillFingerprint = '';
   let skillOffers = new Map<string, { n: number; at: number }>();
   // Semantic gate for catalog-wide "session context" skill hints: the local
   // model judges each candidate against the current request once; verdicts
@@ -811,7 +811,7 @@ export function createRelevantGuidance(pi: any) {
       readOnlyPrompt = false;
       advisoryDiscoveryDelivered.clear();
       cwd = ctx.cwd ?? ""; shown = new Set(); read = new Set(); pending.clear(); releaseAllHints(); used.clear();
-      context = []; extensions = new Set(); skillIndex = null; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
+      context = []; extensions = new Set(); skillIndex = null; skillFingerprint = ''; skillOffers = new Map(); topicOffers = new Map(); outlines.clear();
       lastFailure = ""; failures = urgentCount = 0;
       skills = []; searches = polls = runCount = 0; polling = ""; sourceReads.clear(); ordinarySteps = 0;
       recentTools = []; errorRun = 0; recentErrorKinds = []; diagnosticCount = 0; trivialPrompt = false; diagSuggestedAt = 0; lastReviewAt = undefined;
@@ -904,7 +904,10 @@ export function createRelevantGuidance(pi: any) {
       // removed skill cannot suppress a current recommendation after restore.
       const availableSkillFiles = new Set(skills.map(skill => skill.file));
       read = new Set([...read].filter(file => availableSkillFiles.has(file)));
-      skillIndex = buildSkillIndex(skills);
+      // The installed catalog rarely changes between turns: rebuild the TF-IDF
+      // index only when its content fingerprint changed.
+      const catalogFingerprint = skillCatalogFingerprint(skills);
+      if (!skillIndex || skillFingerprint !== catalogFingerprint) { skillIndex = buildSkillIndex(skills); skillFingerprint = catalogFingerprint; }
       if (!enabled()) return;
       matchingPrompt = true;
       const rawPrompt = String(event.prompt ?? "");
