@@ -428,6 +428,27 @@ function classifySimple(raw: string): BashRoute | null {
   return null;
 }
 
+/** True when a command starts with `cd <dir> &&` and <dir> is the cwd. */
+export function redundantCdPrefix(command: string, cwd: string): boolean {
+  const match = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/.exec(command);
+  if (!match) return false;
+  const target = match[1].replace(/^["']|["']$/g, "").replace(/\/+$/, "");
+  return target === cwd.replace(/\/+$/, "") || target === ".";
+}
+
+/**
+ * `curl -s URL | python3 -c "...json.load(sys.stdin)..."` failing with
+ * "Expecting value: line 1 column 1" means curl produced no JSON (server not
+ * listening yet, HTTP error body, timeout). Name that cause once instead of
+ * leaving the agent to debug the Python traceback.
+ */
+export function emptyJsonPipeHint(command: unknown, content: unknown): string | null {
+  if (typeof command !== "string" || !/\bcurl\b[^|]*\|\s*(?:python\d?(?:\.\d+)?\s+-c|jq\b)/.test(command)) return null;
+  const text = Array.isArray(content) ? content.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n") : String(content ?? "");
+  if (!/Expecting value: line 1 column 1 \(char 0\)|JSONDecodeError|jq: error \(at <stdin>:0\)|parse error: Invalid numeric literal at line 1, column 1/.test(text)) return null;
+  return "curl delivered empty or non-JSON output to the JSON parser (server not ready, HTTP error page, or timeout); the parser traceback is a symptom. Check the endpoint first with `curl -sS --fail-with-body -m 10 -o /tmp/out.json -w '%{http_code}' URL`, wait for readiness, then parse the saved file.";
+}
+
 /**
  * Detect a signal tool whose `-f` pattern also matches the invoking shell's own
  * command line. `pkill -f chrome` cannot exclude the `bash -c '...pkill -f
@@ -436,14 +457,18 @@ function classifySimple(raw: string): BashRoute | null {
  * literally in the command line and is the copyable safe replacement.
  */
 export function selfMatchingSignal(command: string): { reason: string; replacement: string } | null {
-  if (typeof command !== "string" || !/\b(?:pkill|pgrep)\b/.test(command)) return null;
-  const invocations = command.matchAll(/(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:\S*\/)?(pkill|pgrep)\b([^\n;&|]*)/gi);
+  // Only pgrep: a terminating pkill is blocked by host-operation safety with
+  // the owned-task path, so a self-match advisory there is noise.
+  if (typeof command !== "string" || !/\bpgrep\b/.test(command)) return null;
+  const invocations = command.matchAll(/(?:^|[;&|]\s*|\bthen\s+|\bdo\s+|\$\(\s*)(?:\S*\/)?(pgrep)\b([^\n;&|)]*)/gi);
   for (const match of invocations) {
     const tool = match[1];
-    const args = tokenizeSimple(match[2].trim()) ?? match[2].trim().split(/\s+/).filter(Boolean);
+    // Redirections are not pgrep arguments; `2>/dev/null` is not a pattern.
+    const argText = match[2].replace(/\s*(?:\d|&)?>>?\s*\S+/g, " ").trim();
+    const args = tokenizeSimple(argText) ?? argText.split(/\s+/).filter(Boolean);
     const hasFullMatch = args.some((a) => a === "-f" || /^-[A-Za-z]*f$/.test(a) || a === "--full");
     if (!hasFullMatch) continue;
-    const pattern = [...args].reverse().find((a) => !a.startsWith("-"));
+    const pattern = args.find((a) => !a.startsWith("-"));
     if (!pattern) continue;
     const literal = pattern.replace(/^['"]|['"]$/g, "");
     // A bracket expression (e.g. [c]hrome) does not appear literally, so pkill

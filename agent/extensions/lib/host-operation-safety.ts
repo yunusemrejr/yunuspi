@@ -19,6 +19,18 @@ export function sessionAncestorPids(): number[] {
   return [...pids];
 }
 
+/** The session's own running background tasks, published by
+ * pi-background-tasks, so a blocked kill names the one-call safe path. */
+const OWNED_TASKS = Symbol.for('yunus-pi.bg-owned-tasks.v1');
+function ownedTaskHint(): string {
+  try {
+    const tasks = (globalThis as any)[OWNED_TASKS]?.() as Array<{ id: string; name?: string; pid?: number; port?: number }> | undefined;
+    if (!tasks?.length) return '';
+    return `. Your own running background tasks stop cleanly with bg_kill: ${tasks.slice(0, 5).map(task =>
+      `bg_kill ${JSON.stringify(task.name || task.id)} (${task.id}${task.pid ? `, pid ${task.pid}` : ''}${task.port ? `, port ${task.port}` : ''})`).join('; ')}`;
+  } catch { return ''; }
+}
+
 export function hostOperationRisk(name: string, values: readonly (string | undefined)[],
   ancestors?: readonly number[]): HostOperationRisk | undefined {
   const args = values.map(value => value ?? ''), has = (...words: string[]) => args.some(arg => words.includes(arg));
@@ -133,7 +145,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     const targets = args.slice(i).filter(arg => arg !== '--');
     const protectedPids = ancestors ?? sessionAncestorPids();
     if (targets.some(arg => !/^\d+$/.test(arg) || Number(arg) === 0 || protectedPids.includes(Number(arg))))
-      return risk('This signal may terminate the harness, an ancestor or a process group. Inspect sys_probe processes and target an exact unrelated PID; use process/bg tools to stop their own managed jobs');
+      return risk(`This signal may terminate the harness, an ancestor or a process group. Inspect sys_probe processes and target an exact unrelated PID; use process/bg tools to stop their own managed jobs${ownedTaskHint()}`);
   }
   if (name === 'pkill' || name === 'killall') {
     // pkill -s selects a session; only killall uses -s for a signal. A probe
@@ -146,7 +158,7 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
       else if (/^-(?:\d+|(?:SIG)?[A-Z][A-Z0-9+-]+)$/.test(arg)) signals.push(arg.slice(1));
     }
     if (signals.length && signals.every(signal => signal === '0') || name === 'killall' && flag('-l','--list')) return;
-    return risk('Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect sys_probe processes and use an exact unrelated PID or the owning managed-job tool');
+    return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications. Inspect sys_probe processes and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
   }
   if (name === 'wipefs') {
     let noAct = false, erases = false;

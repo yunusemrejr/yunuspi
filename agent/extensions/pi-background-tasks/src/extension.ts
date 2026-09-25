@@ -122,6 +122,12 @@ const BgRunParams = Type.Object({
       description: "Optional timeout; task is failed and killed when exceeded",
     }),
   ),
+  service: Type.Optional(
+    Type.Boolean({
+      description:
+        "Set true for a long-lived server or watcher (dev server, API probe server). Its exit never wakes the agent, the port it binds is recorded, and bg_kill with its name stops it cleanly. Default: false (auto-detected for common dev servers).",
+    }),
+  ),
   notifyOnCompletion: Type.Optional(
     Type.Boolean({
       description:
@@ -146,7 +152,7 @@ const BgStatusParams = Type.Object({
 });
 
 const BgLogsParams = Type.Object({
-  taskId: Type.String({ description: "Task ID or unambiguous prefix" }),
+  taskId: Type.String({ description: "Task ID, unambiguous prefix or task name" }),
   maxBytes: Type.Optional(
     Type.Number({
       description: `Maximum bytes to return, capped at ${formatSize(MAX_LOG_BYTES)}. Default: ${formatSize(DEFAULT_LOG_BYTES)}.`,
@@ -161,7 +167,7 @@ const BgLogsParams = Type.Object({
 });
 
 const BgKillParams = Type.Object({
-  taskId: Type.String({ description: "Task ID or unambiguous prefix to stop" }),
+  taskId: Type.String({ description: "Task ID, unambiguous prefix or task name to stop" }),
 });
 
 type BgRunParamsValue = Static<typeof BgRunParams>;
@@ -199,6 +205,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       eventService.publishTerminal(task);
     },
   });
+  // Host-operation safety names these when it blocks kill/pkill, so the
+  // agent stops its own servers with bg_kill instead of hunting PIDs.
+  (globalThis as any)[Symbol.for("yunus-pi.bg-owned-tasks.v1")] = () =>
+    registry.allTasks().filter((task) => task.status === "running" && !task.isAgent)
+      .map((task) => ({ id: task.id, name: task.name, pid: task.pid, port: task.port }));
   const eventService: BackgroundTaskExtensionService =
     installBackgroundTaskExtensionApi({
       events: pi.events,
@@ -684,8 +695,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         name: params.name,
         isAgent: params.isAgent,
         notifyOnCompletion: params.notifyOnCompletion ?? true,
-        triggerOnCompletion: defaultCompletionTrigger(params.command, params.isAgent, params.triggerOnCompletion),
+        triggerOnCompletion: defaultCompletionTrigger(params.command, params.isAgent, params.triggerOnCompletion, params.service),
         triggerOnCompletionExplicit: params.triggerOnCompletion !== undefined,
+        ...(params.service === true ? { service: true } : {}),
       };
       if (params.description !== undefined)
         taskOptions.description = params.description;
@@ -693,7 +705,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         taskOptions.timeoutSeconds = params.timeoutSeconds;
       const task = await startTask(ctx, params.command, taskOptions);
       const completionDelivery = serviceNotificationOnly(task)
-        ? { text: "Persistent service: completion is recorded in task status and the UI only; no agent turn will start. Continue the task without waiting for this server to exit." }
+        ? { text: `Persistent service${task.port ? ` on port ${String(task.port)}` : ""}: its exit is recorded in task status and the UI only; no agent turn will start. Continue without waiting for it; stop it with bg_kill ${JSON.stringify(taskDisplayName(task))} (never pkill/kill).` }
         : deriveCompletionDeliveryGuidance(task.notifyOnCompletion, taskTriggersCompletion(task));
       return {
         content: textContent(

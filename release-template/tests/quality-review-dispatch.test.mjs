@@ -26,6 +26,10 @@ evidence.publishFreeEvidence([...['free/a','free/b','free/c'].map(id=>({id,prici
 const free=id=>({provider:'openrouter',id,api:'openai-completions',baseUrl:evidence.FREE_BASE_URL,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},input:['text'],reasoning:false,contextWindow:65536,maxTokens:8192});
 const aspects=['correctness','security','interface','content','runtime','delivery'].map(id=>({id,rubric:'Review actual relevant source; require evidence.'}));
 const request={task:'Implement this scoped change with quality review',revision:1,files:['src/value.js'],aspects,graph:'Current project source graph',history:[],tests:{need:null}};
+function defaultLaunch(params){
+  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0] + ']');
+  return {details:{results:[compactForegroundResult({exitCode:0,messages:[{role:'assistant',content:[{type:'toolCall',id:'source-read',name:'read',arguments:{path:'src/value.js'}}]},{role:'toolResult',toolCallId:'source-read',toolName:'read',isError:false,content:[{type:'text',text:'source'}]}],output:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1: checked the stated input contract against source'],findings:[],gap:''}))})})]}};
+}
 function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result,appendThrows=false}={}) {
  resetSharedControl(); // step 21: isolate shared-control spend per scenario
  const hooks=new Map(),calls=[],entries=[];
@@ -34,9 +38,8 @@ function fixture({models=['free/a','free/b','free/c'].map(free),branch=[],result
  const pi={on:(name,fn)=>hooks.set(name,[...(hooks.get(name)??[]),fn]),getActiveTools:()=>['quality_review','subagent'],appendEntry:(customType,data)=>{if(appendThrows)throw Error('sink unavailable');entries.push({customType,data});},sendMessage(){},setModel:async()=>true};
  registerAutonomousRecovery(pi,async(id,params,signal)=>{
   calls.push({id,params,signal});
-  if(result)return result(params,signal);
-  const assigned=JSON.parse(params.task.split('assigned aspects: ')[1].split('].')[0] + ']');
-  return {details:{results:[compactForegroundResult({exitCode:0,messages:[{role:'assistant',content:[{type:'toolCall',id:'source-read',name:'read',arguments:{path:'src/value.js'}}]},{role:'toolResult',toolCallId:'source-read',toolName:'read',isError:false,content:[{type:'text',text:'source'}]}],output:JSON.stringify({reviews:assigned.map(a=>({aspect:a.id,outcome:'pass',evidence:['src/value.js:1: checked the stated input contract against source'],findings:[],gap:''}))})})]}};
+  if(result)return result(params,signal,()=>defaultLaunch(params));
+  return defaultLaunch(params);
  });
  const runner=globalThis[Symbol.for('yunus-pi.quality-review-runner.v1')];
  return {ctx,calls,entries,run:(req=request,signal=new AbortController().signal)=>runner(req,ctx,signal),switch:()=>{session='other';resetSharedControl();},emit:async(name,event)=>{for(const fn of hooks.get(name)??[])await fn(event,ctx);}};
@@ -201,6 +204,17 @@ try {
    await helpers.emit('session_shutdown',{});
   }
  }finally{for(const [key,value]of [['PI_SCOPE_COUNCIL',priorCouncil],['PI_SKILL_DISCOVERY',priorDiscovery]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+ const {REVIEW_LIMITS}=await import(shared+'automatic-budgets.ts');
+ const stragglerLimit=REVIEW_LIMITS.stragglerMs;REVIEW_LIMITS.stragglerMs=30;
+ try{
+  const straggling=fixture({result:async(params,signal,ok)=>params.model.startsWith('openrouter/free/c')?new Promise(resolve=>signal.addEventListener('abort',()=>resolve({details:{results:[{exitCode:143,stopped:true,error:'aborted'}]}}),{once:true})):ok()});
+  const started=Date.now(),reports=await straggling.run({...request,aspects:aspects.slice(0,3)});
+  assert.ok(Date.now()-started<REVIEW_LIMITS.deadlineMs/10,'finished peers are not held for a dead leg until the round deadline');
+  assert.equal(reports.filter(r=>r.ok).length,2);
+  assert.match(reports.find(r=>!r.ok).gap,/stopped after its peers finished/);
+  const health=JSON.parse(fs.readFileSync(process.env.PI_PROVIDER_STATE_FILE,'utf8'));
+  assert.match(JSON.stringify(health),/free\/c/,'the stalled reviewer route is recorded in provider health for the next round');
+ }finally{REVIEW_LIMITS.stragglerMs=stragglerLimit;}
  process.env.PI_AUTONOMOUS_FREE_ASSIST='off';const disabled=fixture();assert.ok((await disabled.run()).every(r=>!r.ok && /disabled/.test(r.gap)));assert.equal(disabled.calls.length,0);
  assert.ok(activity.includes('review')&&activity.includes('ok')&&activity.includes('error'),'native reviews report named activity with truthful success and failure outcomes');
  console.log('PASS quality dispatch: native launch contracts, free/cost routing, 3 reviewers / 6 aspects, read receipts, restrictions, failure lifecycle, accounting and session isolation');

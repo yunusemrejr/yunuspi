@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { extractJsonEnvelope } from './reviewer-envelope.ts';
 
-export type ReviewReport = { aspect: string; outcome: 'pass' | 'changes' | 'unknown'; evidence: string[]; findings: { id: string; severity: 'blocking' | 'improvement'; file: string; detail: string }[]; gap: string };
+/** `unavailable` marks an aspect whose reviewer never returned (deadline,
+ * launch or capacity failure): a verification limit, not a verdict. */
+export type ReviewReport = { aspect: string; outcome: 'pass' | 'changes' | 'unknown'; evidence: string[]; findings: { id: string; severity: 'blocking' | 'improvement'; file: string; detail: string }[]; gap: string; unavailable?: true };
 
 // The dispatcher and checkpoint share the contract. Extra citations are bounded
 // output, not grounds to discard the findings from an otherwise valid review.

@@ -63,6 +63,10 @@ export interface BgTaskSnapshot {
   notifyOnCompletion: boolean;
   triggerOnCompletion: boolean;
   triggerOnCompletionExplicit?: boolean | undefined;
+  /** Long-lived server: its exit never wakes the agent; bg_kill stops it. */
+  service?: boolean | undefined;
+  /** Port the service command binds, when stated in the command. */
+  port?: number | undefined;
   timeoutSeconds?: number | undefined;
   contextUsage?: TaskContextUsage | undefined;
   tokenUsage?: TaskTokenUsage | undefined;
@@ -191,6 +195,7 @@ export interface StartTaskOptions {
   notifyOnCompletion?: boolean | undefined;
   triggerOnCompletion?: boolean | undefined;
   triggerOnCompletionExplicit?: boolean | undefined;
+  service?: boolean | undefined;
   /** @internal EventBus protocol barrier; callers should not set this outside the extension service. */
   terminalPublicationGate?: Promise<void> | undefined;
 }
@@ -736,6 +741,8 @@ export function snapshot(task: BgTask): BgTaskSnapshot {
     notifyOnCompletion: task.notifyOnCompletion,
     triggerOnCompletion: task.triggerOnCompletion,
     triggerOnCompletionExplicit: task.triggerOnCompletionExplicit,
+    ...(task.service ? { service: true } : {}),
+    ...(task.port !== undefined ? { port: task.port } : {}),
     timeoutSeconds: task.timeoutSeconds,
     contextUsage: task.contextUsage,
     tokenUsage: task.tokenUsage,

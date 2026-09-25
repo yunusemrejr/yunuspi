@@ -215,7 +215,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     ...(evidenceRejected.length ? { evidenceRejected } : {}), truncated: truncated || scopeOverflow,
     aspects: reviewAspects(changed,task,history).map(({id}) => ({id})), historicalSamples: history.length,
     patterns: patternReport(),
-    ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted only when current reports and required checks support it, otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
+    ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted when current reports and required checks support it (an aspect whose reviewer did not return is a disclosed verification limit, not a blocker, once another aspect passed and no blocking finding remains), otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. An aspect whose reviewer did not return does not prevent accepted once another aspect passed and required checks are green; it is disclosed automatically. Record blocked only for an actual blocker. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
     scope: 'Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess the retained findings. If necessary outcome evidence was missing, attach new or updated evidence paths to an explicit review call while a round remains.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. For UI/behavior work attach outcome evidence (renders, test output) via evidence paths so reviewers judge the outcome, not the diff shape.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
   const automaticAdvice = () => testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
@@ -358,7 +358,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (ticket !== generation || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       const evidenceChanged = evidence.length > 0 && evidenceKey !== outcomeEvidenceKey(root, evidence);
       const received: ReviewReport[] = aspects.map(a => {
-        const report = carried.get(a.id) ?? completed.get(a.id) ?? { aspect:a.id, outcome:'unknown' as const, evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.' };
+        const report: ReviewReport = carried.get(a.id) ?? completed.get(a.id) ?? { aspect:a.id, outcome:'unknown' as const, evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.', unavailable:true };
         return evidenceChanged ? {...report, outcome:'unknown', gap:`${EVIDENCE_CHANGED} ${report.gap}`.slice(0,900)} : report;
       });
       // Reviewer availability is independent of the source revision. A source
@@ -592,9 +592,20 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         checkCurrent();
       }
       if (params.action === 'assess') {
+        let acceptedLimit = '';
         if (!['accepted','blocked'].includes(params.disposition) || typeof params.reason !== 'string' || params.reason.trim().length < 20) throw Error('Assessment requires a concrete rationale of at least 20 characters.');
         if (params.disposition === 'accepted') {
-          if (reviewed !== revision || !reports.length || reports.some(r=>r.outcome === 'unknown' || r.gap.trim())) {
+          // An aspect whose reviewer never returned is a verification limit,
+          // not a verdict. With another aspect passing on real evidence, no
+          // blocking finding and required checks green, the round converges
+          // to accepted with that limit disclosed. Recording "blocked" over
+          // green work was the only option before and misreported it.
+          const limited = reports.filter(r => r.unavailable === true && r.outcome === 'unknown' && !r.evidence.length && !r.findings.length);
+          const decided = reports.filter(r => !limited.includes(r));
+          const checks = options.tests();
+          const greenChecks = Boolean(checks && !checks.disabled && !checks.need && checks.assessment?.disposition === 'required' && checks.assessment.checks?.length);
+          const limitOnly = limited.length > 0 && greenChecks && decided.some(r => r.outcome === 'pass' && r.evidence.length > 0);
+          if (reviewed !== revision || !reports.length || decided.some(r=>r.outcome === 'unknown' || r.gap.trim()) || limited.length && !limitOnly) {
             // Name the open items so the caller can resolve them (repair and
             // re-review within the round budget) instead of repeating an
             // accepted assessment blind. The leading sentence is pinned: the
@@ -610,6 +621,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           if (!test?.disabled && (test?.need || test?.assessment?.disposition === 'blocked')) throw Error('Current project test evidence is unresolved.');
           const blockers = reports.flatMap(r=>r.findings).filter(f=>f.severity === 'blocking');
           for (const finding of blockers) if (!(params.dismissals??[]).some((d:any)=>d.id===finding.id && typeof d.reason==='string' && d.reason.trim().length>=20)) throw Error(`Resolve ${finding.id} through a repair/review or supply an evidence-based dismissal.`);
+          if (limited.length) acceptedLimit = `Verification limit: no independent verdict for ${limited.map(r => r.aspect).join(', ')} (reviewer did not return).`;
         } else {
           // A blocked disposition is still an assessment of the current
           // revision. Do not let a caller turn an unreviewed or stale state
@@ -627,7 +639,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
           const currentReview = reviewUnavailable || Boolean(dispatchGap) || reviewed === revision && reports.length > 0;
           if (!currentReview && !verificationBlocked && rounds < REVIEW_LIMITS.rounds) throw Error('Current independent review is still pending; run or complete the current review before recording blocked.');
         }
-        disposition = params.disposition; reason = params.reason.trim().slice(0,1200); save(); noteDisposition();
+        disposition = params.disposition; reason = (acceptedLimit ? `${acceptedLimit} ${params.reason.trim()}` : params.reason.trim()).slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
       }
       signal?.throwIfAborted(); const data={...summary(true),...(retryRationale ? {retryRationale} : {})};return {content:[{type:'text',text:JSON.stringify(data)}],details:data};

@@ -26,7 +26,7 @@ import { sessionObservability } from './lib/session-observability.ts';
  */
 
 import { isToolCallEventType } from "@yunuspi/coding-agent";
-import { classifyBashCommand, selfMatchingSignal } from "./lib/bash-routing.ts";
+import { classifyBashCommand, emptyJsonPipeHint, redundantCdPrefix, selfMatchingSignal } from "./lib/bash-routing.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 const MAX_PENDING = 256;
@@ -143,6 +143,7 @@ export default function bashRouter(pi: any) {
           activity = new Map();
           observed = new Set();
           candidateResults = new Map();
+          redundantCd = { hinted: false, callId: "" };
      };
 
      pi.on("session_start", reset);
@@ -156,7 +157,12 @@ export default function bashRouter(pi: any) {
           candidateResults.clear();
      });
 
-     pi.on("tool_call", (event: any) => {
+     // `cd <session cwd> && ...` is a no-op prefix the agent tends to repeat on
+     // every call. Say so once, on the first occurrence, then stay silent.
+     let redundantCd = { hinted: false, callId: "" };
+     pi.on("tool_call", (event: any, ctx: any) => {
+          if (!redundantCd.hinted && event.toolName === "bash" && typeof event.input?.command === "string" && typeof ctx?.cwd === "string"
+               && redundantCdPrefix(event.input.command, ctx.cwd)) redundantCd = { hinted: false, callId: event.toolCallId };
           const mode = routerMode();
           if (mode === "off") return;
           const calledTool =
@@ -317,6 +323,14 @@ export default function bashRouter(pi: any) {
                event.toolCallId.length === 0
           )
                return;
+          const extras: string[] = [];
+          const emptyJson = event.toolName === "bash" && event.isError ? emptyJsonPipeHint(event.input?.command, event.content) : null;
+          if (emptyJson) extras.push(emptyJson);
+          if (!redundantCd.hinted && redundantCd.callId === event.toolCallId) {
+               redundantCd = { hinted: true, callId: "" };
+               extras.push("bash already runs in the project directory; omit the `cd <project> &&` prefix on later calls.");
+          }
+          const withExtras = (lines: string[]) => lines.length ? { content: [...(Array.isArray(event.content) ? event.content : []), ...lines.map(text => ({ type: "text", text: `[bash-router] ${text}` }))] } : undefined;
           const candidate = candidateResults.get(event.toolCallId);
           candidateResults.delete(event.toolCallId);
           if (candidate && routerMode() !== "off")
@@ -335,12 +349,12 @@ export default function bashRouter(pi: any) {
                return;
           }
           const pendingRoute = pending.get(event.toolCallId);
-          if (!pendingRoute) return;
+          if (!pendingRoute) return withExtras(extras);
           pending.delete(event.toolCallId);
-          if (routerMode() === "off") return;
-          if (event.isError || nativeUsed.has(pendingRoute.tool)) return;
+          if (routerMode() === "off") return withExtras(extras);
+          if (event.isError || nativeUsed.has(pendingRoute.tool)) return withExtras(extras);
           const delivered = hintCounts.get(pendingRoute.ruleId) ?? 0;
-          if (delivered >= maxHintsPerRule) return;
+          if (delivered >= maxHintsPerRule) return withExtras(extras);
           hintCounts.set(pendingRoute.ruleId, delivered + 1);
           emit(
                "annotate",
@@ -348,15 +362,6 @@ export default function bashRouter(pi: any) {
                pendingRoute.ruleId,
                pendingRoute.seen,
           );
-          const content = Array.isArray(event.content) ? event.content : [];
-          return {
-               content: [
-                    ...content,
-                    {
-                         type: "text",
-                         text: `[bash-router] ${pendingRoute.hint}`,
-                    },
-               ],
-          };
+          return withExtras([pendingRoute.hint, ...extras]);
      });
 }

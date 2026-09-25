@@ -677,6 +677,21 @@ test("a peer deadline preserves completed aspect evidence but rejects late resul
  await late;
  assert.equal(JSON.stringify(f.state()), snapshot);
 });
+test("a green tree with one unreturned reviewer converges to accepted with the limit disclosed", async (t) => {
+ const original = REVIEW_LIMITS.deadlineMs;
+ REVIEW_LIMITS.deadlineMs = 40;
+ t.after(() => { REVIEW_LIMITS.deadlineMs = original; });
+ const f = await fixture(t, { runner: async (req) => { req.onResult?.(pass("correctness")); await new Promise((resolve) => setTimeout(resolve, 100)); return []; } });
+ await f.mutate();
+ await f.mutate("README.md", "Explain the current behavior.");
+ await f.settle();
+ assert.equal(f.state().reports.find((r) => r.aspect === "content").unavailable, true, "a reviewer that never returned is a limit, not a verdict");
+ await assert.rejects(f.tool({ action: "assess", disposition: "accepted", reason: "Checks were never declared, so nothing makes this tree green." }), /missing evidence/);
+ f.tests({ need: null, assessment: { revision: 1, disposition: "required", reason: "Run the project checks.", checks: [{ key: "k", label: "npm test" }] } });
+ const result = JSON.parse((await f.tool({ action: "assess", disposition: "accepted", reason: "All required checks pass and the correctness review passed with source evidence." })).content[0].text);
+ assert.equal(result.status, "accepted");
+ assert.match(f.state().reason ?? JSON.stringify(f.branch.at(-1)?.data), /Verification limit: no independent verdict for content/);
+});
 test("slow review streams aspect progress to the tool UI without adding model messages", async (t) => {
  let finish;
  const f = await fixture(t, {runner: req => new Promise(resolve => {

@@ -1,9 +1,9 @@
-import { taskTriggersCompletion } from "./service-policy.ts";
+import { isPersistentService, servicePort, taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { createWriteStream, existsSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Api, Model } from "@yunuspi/ai";
@@ -51,6 +51,8 @@ import {
   type WindowsTaskkillOptions,
 } from "./windows-taskkill.js";
 
+const NOTIFY_TAIL_BYTES = 1200;
+const NOTIFY_FAILURE_TAIL_BYTES = 2400;
 const DEFAULT_MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
 const configuredOutputBytes = Number(process.env["PI_BG_MAX_OUTPUT_BYTES"]);
 export const MAX_OUTPUT_BYTES = Number.isSafeInteger(configuredOutputBytes) && configuredOutputBytes > 0
@@ -839,6 +841,7 @@ export class BackgroundTaskRegistry {
       notifyOnCompletion: options.notifyOnCompletion ?? true,
       triggerOnCompletion: options.triggerOnCompletion ?? false,
       triggerOnCompletionExplicit: options.triggerOnCompletionExplicit ?? options.triggerOnCompletion !== undefined,
+      service: options.service === true,
     })).digest("hex");
     const key = createHash("sha256").update(JSON.stringify([ctx.cwd, ctx.sessionId, options.toolCallId])).digest("hex");
     const gate = options.terminalPublicationGate;
@@ -974,6 +977,7 @@ export class BackgroundTaskRegistry {
       notifyOnCompletion: options.notifyOnCompletion ?? true,
       triggerOnCompletion: options.triggerOnCompletion ?? false,
       triggerOnCompletionExplicit: options.triggerOnCompletionExplicit ?? options.triggerOnCompletion !== undefined,
+      ...(options.service === true || isPersistentService(command) ? { service: true, port: servicePort(command) } : {}),
       timeoutSeconds,
       terminalPublicationGate: options.terminalPublicationGate,
       waiters: [],
@@ -1185,7 +1189,18 @@ export class BackgroundTaskRegistry {
       throw new Error(
         `Ambiguous task ID prefix "${id}": ${matches.map((task) => task.id).join(", ")}`,
       );
-    throw new Error(`Unknown background task ID: ${id}`);
+    // Notifications lead with the task name, so names resolve too: the
+    // running task of that name wins, otherwise the most recent one.
+    const named = [...this.tasks.values()].filter((task) => task.name === id);
+    const running = named.filter((task) => task.status === "running");
+    if (running.length > 1)
+      throw new Error(
+        `Ambiguous task name "${id}": running tasks ${running.map((task) => task.id).join(", ")}; pass the task ID`,
+      );
+    const byName = running[0] ?? named.sort((a, b) => b.startTime - a.startTime)[0];
+    if (byName) return byName;
+    const known = [...this.tasks.values()].slice(-6).map((task) => `${task.id}${task.name ? ` (${task.name})` : ""}`);
+    throw new Error(`Unknown background task ID or name: ${id}${known.length ? `. Known: ${known.join(", ")}` : ""}`);
   }
 
   async stopTask(
@@ -2054,6 +2069,30 @@ export class BackgroundTaskRegistry {
     }
   }
 
+  /** Bounded output tail carried by the terminal notification, so the agent
+   * sees the result (or the failure cause) without a bg_status/bg_logs turn. */
+  private notificationTail(task: BgTask): string {
+    const limit = task.status === "completed" ? NOTIFY_TAIL_BYTES : NOTIFY_FAILURE_TAIL_BYTES;
+    let fd: number | undefined;
+    try {
+      fd = openSync(task.outputAbsPath, "r");
+      const size = fstatSync(fd).size;
+      if (!size) return "";
+      const length = Math.min(limit, size);
+      const buffer = Buffer.alloc(length);
+      readSync(fd, buffer, 0, length, size - length);
+      // Drop a partial first line and terminal control sequences.
+      let text = buffer.toString("utf8").replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "");
+      if (size > length) text = text.slice(text.indexOf("\n") + 1);
+      text = text.trimEnd();
+      return text ? `${size > length ? `[last ${formatSize(Buffer.byteLength(text))} of ${formatSize(size)}]\n` : ""}${text}` : "";
+    } catch {
+      return "";
+    } finally {
+      if (fd !== undefined) try { closeSync(fd); } catch { /* read-only handle */ }
+    }
+  }
+
   private notifyCompletion(task: BgTask): void {
     if (!task.notifyOnCompletion || task.notified || this.shuttingDown) return;
     task.notified = true;
@@ -2068,7 +2107,8 @@ export class BackgroundTaskRegistry {
     const requestedCleanup = task.status === "killed" && (task.killKind === "user" || task.killKind === "shutdown");
     const guidance = requestedCleanup
       ? "Requested cancellation is complete. This is a terminal receipt; no acknowledgement or follow-up turn is needed."
-      : "Terminal state and output metadata are durable. Do not call bg_status to reconfirm; use bg_logs only if output is needed.";
+      : "Terminal state is final and the output tail is included. Do not call bg_status or bg_logs to reconfirm; use bg_logs only for output beyond this tail.";
+    const tail = requestedCleanup ? "" : this.notificationTail(task);
     const content = [
       "<background-task-notification>",
       `  <task-id>${task.id}</task-id>`,
@@ -2077,6 +2117,7 @@ export class BackgroundTaskRegistry {
       exit,
       error,
       `  <output-file>${escapeXml(task.outputPath)}</output-file>`,
+      tail ? `  <output-tail>\n${escapeXml(tail)}\n  </output-tail>` : "",
       `  <summary>${escapeXml(`Background task ${JSON.stringify(taskName)} ${task.status}`)}</summary>`,
       `  <guidance>${escapeXml(guidance)}</guidance>`,
       "</background-task-notification>",
