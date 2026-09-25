@@ -25,7 +25,7 @@ import { evaluateQuotaHealth, type QuotaEvent } from "./quota-health.ts";
 import { readJournalQuotaEvents } from "./quota-journal.ts";
 import { evaluateRoute, readHealth } from "./provider-health.ts";
 import { modelIdentity } from "./model-quality.ts";
-import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting, normalizePreferenceRole, readLlmPreferencesDocument, validateLlmPreferencesDocumentForWrite, SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_ROLE, type LlmModelEntry } from "./llm-preferences.ts";
+import { inferPreferenceRole, loadLlmPreferences, normalizeThinking, preferenceEntriesFor, providerOptionsToRouting, normalizePreferenceRole, readLlmPreferencesDocument, validateLlmPreferencesDocumentForWrite, SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_ROLE, WATCHMAKER_DEFAULT, WATCHMAKER_ROLE, type LlmModelEntry } from "./llm-preferences.ts";
 import { modelRouteCandidateKey, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { childRequirementsFromTask, type ChildRouteRequirements } from "./child-route-requirements.ts";
 import { extractTaskIntent } from "./task-intent-model.ts";
@@ -606,46 +606,69 @@ export const SESSION_OBSERVER_REQUIREMENTS: Readonly<LlmPreferenceRequirements> 
 	inputModalities: ["text"], minContextWindow: 12288, minOutputTokens: 4096,
 });
 
-/** An optional observer has a fixed default, not autonomous routing. Callers
- * supply authenticated available models and attempt at most one selected route.
- * An explicit empty role opts out; corrupt config never enables the default. */
-export function resolveSessionObserverPreferenceChain(availableModels: AvailableModelInfo[] | undefined, options?: LlmPreferenceOptions): SessionObserverPreferenceSelection {
+/** Watchmaker admission floor for its smaller time packet and short notes. */
+export const WATCHMAKER_REQUIREMENTS: Readonly<LlmPreferenceRequirements> = Object.freeze({
+	inputModalities: ["text"], minContextWindow: 8192, minOutputTokens: 2048,
+});
+
+export interface WatchmakerPreferenceSelection {
+	source: "default" | "watchmaker";
+	status: "ready" | "disabled" | "unavailable";
+	routes: LlmPreferenceRoute[];
+	reason?: string;
+}
+
+type FixedDefaultSelection = { source: string; status: "ready" | "disabled" | "unavailable"; routes: LlmPreferenceRoute[]; reason?: string };
+
+/** Fixed-default roles (observer, watchmaker) share one resolver: a fixed
+ * default, not autonomous routing. Callers supply authenticated available
+ * models and attempt at most one selected route. An explicit empty role opts
+ * out; corrupt config never enables the default. */
+function resolveFixedDefaultChain(
+	role: string,
+	displayName: string,
+	defaults: { provider: string; model: string; thinking: string },
+	floor: { minContextWindow: number; minOutputTokens: number },
+	availableModels: AvailableModelInfo[] | undefined,
+	options?: LlmPreferenceOptions,
+): FixedDefaultSelection {
 	const loaded = readLlmPreferencesDocument(options?.configPath);
-	const unavailable = (source: "default" | "session_observer", reason: string): SessionObserverPreferenceSelection => ({ source, status: "unavailable", routes: [], reason });
-	if (loaded.exists && !loaded.ok) return unavailable("session_observer", "Observer preferences could not be read or validated.");
-	const keys = Object.keys((loaded.document?.preferences ?? {}) as object).filter(key => normalizePreferenceRole(key) === SESSION_OBSERVER_ROLE);
-	if (keys.length > 1) return unavailable("session_observer", "Observer preferences contain duplicate role names.");
+	const unavailable = (source: string, reason: string): FixedDefaultSelection => ({ source, status: "unavailable", routes: [], reason });
+	if (loaded.exists && !loaded.ok) return unavailable(role, `${displayName} preferences could not be read or validated.`);
+	const keys = Object.keys((loaded.document?.preferences ?? {}) as object).filter(key => normalizePreferenceRole(key) === role);
+	if (keys.length > 1) return unavailable(role, `${displayName} preferences contain duplicate role names.`);
 	const explicit = keys.length === 1;
-	const source = explicit ? "session_observer" : "default";
+	const source = explicit ? role : "default";
 	const raw = explicit ? (loaded.document!.preferences as Record<string, any>)[keys[0]!] : undefined;
 	const list = Array.isArray(raw) ? raw : raw?.models;
-	if (explicit && !Array.isArray(list)) return unavailable(source, "Observer model list is invalid.");
+	if (explicit && !Array.isArray(list)) return unavailable(source, `${displayName} model list is invalid.`);
 	if (explicit && !list.length) return { source, status: "disabled", routes: [] };
 	if (explicit) {
 		// Validate this role and only its referenced aliases strictly. The general
 		// loader intentionally tolerates malformed entries for other workloads.
 		const registry = (loaded.document?.models ?? {}) as Record<string, unknown>;
 		const aliases = Object.fromEntries(list.filter((item: unknown) => typeof item === "string" && Object.hasOwn(registry, item.trim())).map((item: string) => [item.trim(), registry[item.trim()]]));
-		const checked = validateLlmPreferencesDocumentForWrite({ models: aliases, preferences: { [SESSION_OBSERVER_ROLE]: raw } });
-		if (!checked.ok) return unavailable(source, "Observer model entries are invalid.");
+		const checked = validateLlmPreferencesDocumentForWrite({ models: aliases, preferences: { [role]: raw } });
+		if (!checked.ok) return unavailable(source, `${displayName} model entries are invalid.`);
 	}
-	const entries = explicit && loaded.config ? preferenceEntriesFor(SESSION_OBSERVER_ROLE, loaded.config) : [{ ...SESSION_OBSERVER_DEFAULT }];
-	if (!entries.length) return unavailable(source, "Observer model entries could not be resolved.");
+	const entries = explicit && loaded.config ? preferenceEntriesFor(role, loaded.config) : [{ ...defaults }];
+	if (!entries.length) return unavailable(source, `${displayName} model entries could not be resolved.`);
 	const models = availableModels ?? [];
 	const requirements: LlmPreferenceRequirements = {
 		...options?.requirements,
 		inputModalities: [...new Set(["text", ...(options?.requirements?.inputModalities ?? [])])],
-		minContextWindow: Math.max(SESSION_OBSERVER_REQUIREMENTS.minContextWindow!, options?.requirements?.minContextWindow ?? 0),
-		minOutputTokens: Math.max(SESSION_OBSERVER_REQUIREMENTS.minOutputTokens!, options?.requirements?.minOutputTokens ?? 0),
+		minContextWindow: Math.max(floor.minContextWindow, options?.requirements?.minContextWindow ?? 0),
+		minOutputTokens: Math.max(floor.minOutputTokens, options?.requirements?.minOutputTokens ?? 0),
 	};
 	const routes: LlmPreferenceRoute[] = [];
 	const seen = new Set<string>();
+	const lower = displayName.toLowerCase();
 	for (const [entryIndex, entry] of entries.entries()) {
 		const reportSkip = (route: string, reason: string) => {
-			try { options?.onSkip?.({ role: SESSION_OBSERVER_ROLE, priority: entryIndex + 1, route, reason }); } catch { /* diagnostics must not affect selection */ }
+			try { options?.onSkip?.({ role, priority: entryIndex + 1, route, reason }); } catch { /* diagnostics must not affect selection */ }
 		};
 		// Aliases are already expanded. Only canonical formatting is flexible:
-		// observer routes never use owner/leaf or undated revision substitutions.
+		// fixed-default routes never use owner/leaf or undated revision substitutions.
 		const query = splitThinkingSuffix(entry.model ?? "").baseModel;
 		const qualified = splitQualifiedModelQuery(query, models);
 		const provider = entry.provider ? resolveProviderName(entry.provider, models) : qualified.queryProvider;
@@ -655,7 +678,7 @@ export function resolveSessionObserverPreferenceChain(availableModels: Available
 		}
 		const formatted = models.flatMap(model => {
 			if (provider && model.provider !== provider) return [];
-			if (source === "default" && (model.provider !== SESSION_OBSERVER_DEFAULT.provider || model.id !== SESSION_OBSERVER_DEFAULT.model)) return [];
+			if (source === "default" && (model.provider !== defaults.provider || model.id !== defaults.model)) return [];
 			const queries = [query, ...(qualified.queryProvider === model.provider ? [qualified.queryIdRaw] : [])];
 			const rank = Math.min(...queries.map(value => modelMatchRank(value, model.id) ?? Infinity));
 			return rank <= 2 ? [{ model, rank }] : [];
@@ -668,16 +691,16 @@ export function resolveSessionObserverPreferenceChain(availableModels: Available
 		}
 		const pool = exact.filter(model => {
 			// The Codex native request has no finite output allowance on the wire.
-			// It remains available to ordinary agent roles, but cannot run observers.
+			// It remains available to ordinary agent roles, but cannot run fixed-default reviewers.
 			if (model.api === "openai-codex-responses") {
-				reportSkip(`${model.provider}/${model.id}`, "API cannot enforce the observer output limit");
+				reportSkip(`${model.provider}/${model.id}`, `API cannot enforce the ${lower} output limit`);
 				return false;
 			}
 			return model.provider !== "deepseek" || model.id !== "deepseek-flash"
 				|| ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(model.baseUrl?.replace(/\/$/, "") ?? "");
 		});
 		const canonicalEntry = pool[0] ? { ...entry, provider: pool[0].provider, model: `${pool[0].provider}/${pool[0].id}${splitThinkingSuffix(entry.model ?? "").thinkingSuffix}` } : entry;
-		const candidates = resolvePreferenceEntries(SESSION_OBSERVER_ROLE, pool, { ...options, requirements, onSkip: skip => reportSkip(skip.route, skip.reason) }, [canonicalEntry]);
+		const candidates = resolvePreferenceEntries(role, pool, { ...options, requirements, onSkip: skip => reportSkip(skip.route, skip.reason) }, [canonicalEntry]);
 		const wanted = normalizeThinking(splitThinkingSuffix(entry.model ?? "").thinkingSuffix.slice(1) || entry.thinking);
 		for (const candidate of candidates) {
 			if (!wanted.dynamic && candidate.thinking !== wanted.thinking) {
@@ -690,7 +713,20 @@ export function resolveSessionObserverPreferenceChain(availableModels: Available
 			routes.push(candidate);
 		}
 	}
-	return routes.length ? { source, status: "ready", routes } : unavailable(source, "No configured observer route is authenticated, supported and available; no fallback was selected.");
+	return routes.length ? { source, status: "ready", routes } : unavailable(source, `No configured ${lower} route is authenticated, supported and available; no fallback was selected.`);
+}
+
+/** An optional observer has a fixed default, not autonomous routing. Callers
+ * supply authenticated available models and attempt at most one selected route.
+ * An explicit empty role opts out; corrupt config never enables the default. */
+export function resolveSessionObserverPreferenceChain(availableModels: AvailableModelInfo[] | undefined, options?: LlmPreferenceOptions): SessionObserverPreferenceSelection {
+	return resolveFixedDefaultChain(SESSION_OBSERVER_ROLE, "Observer", SESSION_OBSERVER_DEFAULT, SESSION_OBSERVER_REQUIREMENTS, availableModels, options) as SessionObserverPreferenceSelection;
+}
+
+/** Mr. Watchmaker resolves exactly like the session observer: a fixed
+ * default, an explicit ordered list, or an explicit empty list to disable. */
+export function resolveWatchmakerPreferenceChain(availableModels: AvailableModelInfo[] | undefined, options?: LlmPreferenceOptions): WatchmakerPreferenceSelection {
+	return resolveFixedDefaultChain(WATCHMAKER_ROLE, "Watchmaker", WATCHMAKER_DEFAULT, WATCHMAKER_REQUIREMENTS, availableModels, options) as WatchmakerPreferenceSelection;
 }
 
 function stableRouteJson(value: unknown): string {

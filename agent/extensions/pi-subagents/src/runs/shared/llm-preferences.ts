@@ -36,6 +36,8 @@ export const LLM_PREFERENCES_ENV = "PI_LLM_PREFERENCES_FILE";
 export const LLM_PREFERENCES_VERSION = 1;
 export const SESSION_OBSERVER_ROLE = "session_observer";
 export const SESSION_OBSERVER_DEFAULT = Object.freeze({ provider: "deepseek", model: "deepseek-flash", thinking: "high" });
+export const WATCHMAKER_ROLE = "watchmaker";
+export const WATCHMAKER_DEFAULT = Object.freeze({ provider: "deepseek", model: "deepseek-flash", thinking: "low" });
 
 /** Per-request OpenRouter backend control. Vocabulary matches the existing
  * `/provider` pins (provider-cmd.ts) and the wire path
@@ -590,6 +592,9 @@ export function normalizePreferenceRole(role: unknown): string | undefined {
 			return "prompt_analysis";
 		case "sessionobserver":
 			return SESSION_OBSERVER_ROLE;
+		case "watchmaker":
+		case "mrwatchmaker":
+			return WATCHMAKER_ROLE;
 		default:
 			return key;
 	}

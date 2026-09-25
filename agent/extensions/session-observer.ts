@@ -3,7 +3,7 @@ import { projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -81,13 +81,6 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (result?.ok && state === bookState && Array.isArray(result.value?.ranked)) state.needle = { signature: selection.signature, order: result.value.ranked.map((row: any) => String(row.id)) };
     } catch { /* Lexical order remains authoritative. */ } finally { needleFlight = false; }
   }
-  const observerOptOutChunk = (text: string) => /\b(?:work|stay|remain|operate)\s+offline\b|\boffline[- ]only\b|\b(?:no|without)\s+(?:network|internet)\b|\b(?:do not|don't|never)\s+(?:use|access)\s+(?:the\s+)?(?:network|internet)\b|\b(?:no|disable|stop|do not use|don't use)\s+(?:(?:background|automatic|periodic)\s+)*(?:observers?|advis[oe]rs?)\b/i.test(text);
-  const noObserver = (text: string) => {
-    // Constraint scanning is incremental, not a reason to disable long tasks.
-    // Overlap covers opt-out phrases crossing the inspection boundary.
-    for (let offset = 0; offset < text.length; offset += 65_536) if (observerOptOutChunk(text.slice(Math.max(0, offset - 256), offset + 65_536))) return true;
-    return false;
-  };
   const anchor = createContextAnchor();
   const identity = (context: any) => JSON.stringify([context?.cwd ?? '', context?.sessionManager?.getSessionId?.() ?? '', context?.sessionManager?.getSessionFile?.() ?? '']);
   const owns = (context: any) => { try { return !closed && context && context.sessionManager === manager && identity(context) === ownerIdentity; } catch { return false; } };
@@ -169,14 +162,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet, reason: 'No active user work', silent: true };
       if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet, reason: 'Observer disabled or offline', silent: true };
       if (pending.size) return { packet, reason: 'User input is pending', silent: true };
-      let blocked = inputBlocked || noObserver(request);
+      let blocked = inputBlocked || wantsNoObserver(request);
       try {
         // Tool traffic must never age an explicit user opt-out out of authority.
         // Inspect retained user text in bounded chunks, including long sessions.
         for (const entry of ctx.sessionManager.getBranch?.() ?? []) if (entry.type === 'message' && entry.message?.role === 'user') {
           const parts = typeof entry.message.content === 'string' ? [entry.message.content]
             : (entry.message.content ?? []).filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text);
-          for (const text of parts) blocked ||= noObserver(text);
+          for (const text of parts) blocked ||= wantsNoObserver(text);
         }
       } catch { return { packet, reason: 'User constraints unavailable' }; }
       if (blocked) return { packet, reason: 'User requested no background observer or network' };
@@ -419,7 +412,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!['interactive', 'rpc'].includes(event.source) || typeof event.requestId !== 'string') return;
     if (!owns(context)) reset(context);
     ctx = context; const raw = typeof (event.originalText ?? event.text) === 'string' ? (event.originalText ?? event.text) : '';
-    let restrictions: any = {}, blocked = noObserver(raw);
+    let restrictions: any = {}, blocked = wantsNoObserver(raw);
     try { restrictions = explicitRecoveryConstraints(context, raw, context.model); } catch { blocked = true; }
     runtime.stop('New user input');
     latestAdviceId = undefined; preparedAdvice = undefined;
@@ -546,11 +539,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const note = owns(context) ? runtime.context(false) : undefined;
     if (!note) return messages.length !== event.messages.length ? { messages } : undefined;
     // Repeated advice with no parent edit is restated as required reading:
-    // the observer has measured the stall, not guessed it.
+    // the observer has measured the stall, not guessed it. The receipt line
+    // stays first: core matches advice capsules anchored at the text start.
     const repeat = notesThisTask >= 3 && parentEditsThisTask === 0
-      ? `[Observer context: note #${notesThisTask} this task with 0 parent edits recorded. Address this note before further reads or dispatches.]\n`
+      ? `\n[Observer context: note #${notesThisTask} this task with 0 parent edits recorded. Address this note before further reads or dispatches.]`
       : '';
-    const content = `${repeat}[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
+    const content = `[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]${repeat}\n${note}`;
     const prepared = anchor(messages, { role: 'custom', customType: OBSERVER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
     // This attests context preparation, not provider acceptance or action by the
     // main agent. A later context hook or cancelled request can still omit it.

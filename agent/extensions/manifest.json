@@ -40,6 +40,7 @@
     "model-routing-config.ts",
     "micro-intelligence.ts",
     "session-observer.ts",
+    "session-watchmaker.ts",
     "design-studio.ts",
     "desktop-session.ts",
     "video-studio.ts"
@@ -150,6 +151,7 @@
     "session-metrics.ts",
     "session-observability.ts",
     "session-observer.ts",
+    "session-watchmaker.ts",
     "session-report.ts",
     "session-signals.ts",
     "session-stop.ts",

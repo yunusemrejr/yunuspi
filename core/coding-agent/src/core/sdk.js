@@ -241,8 +241,13 @@ export async function createAgentSession(options = {}) {
             const requestSessionId = sessionManager.getSessionId();
             let capsules = [];
             try {
+                // Advice capsules from the session observer and Mr. Watchmaker
+                // share this receipt array; ids are namespaced per reviewer and
+                // each extension confirms only its own ids. The receipt line
+                // must start the capsule text: extensions put any escalation
+                // prefix after it, never before.
                 capsules = requestText({ messages: context.messages }).filter(text => text.length <= 4096)
-                    .map(text => ({ text, id: /^\[Observer advice receipt=(observer-advice-[0-9a-f-]{36})\b/.exec(text)?.[1] }))
+                    .map(text => ({ text, id: /^\[Observer advice receipt=(observer-advice-[0-9a-f-]{36})\b/.exec(text)?.[1] ?? /^\[Watchmaker advice receipt=(watchmaker-advice-[0-9a-f-]{36})\b/.exec(text)?.[1] }))
                     .filter(row => row.id).slice(-4);
             } catch { /* Optional receipt metadata cannot fail inference. */ }
             let observerAdviceReceipts = [];
