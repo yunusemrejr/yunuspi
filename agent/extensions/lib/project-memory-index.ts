@@ -12,7 +12,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { needleEmbed, needleHealth } from "./needle-runtime.ts";
+import { needleEmbed, needleWarmup } from "./needle-runtime.ts";
 import { type ChunkType, type ProjectVectorStore, isChunkType } from "./project-vector-store.ts";
 
 /** Retrieval weight per source type. Curated knowledge outranks raw exhaust. */
@@ -77,13 +77,18 @@ export function testEmbedder(dim = 64): MemoryEmbedder {
 const NEEDLE_TEXT_CHARS = 2000;
 const NEEDLE_BATCH = 16;
 
-/** Local Needle3 embeddings. Offline-safe: skips cleanly when unavailable. */
+/**
+ * Local Needle3 embeddings. Offline-safe: skips cleanly when unavailable.
+ * No health pre-check: the runtime cold-starts on first use and queues the
+ * op behind init, so gating on "healthy" would strand every cold caller
+ * in lexical-only mode. Disabled/cooling states still skip immediately.
+ */
 export function needleMemoryEmbedder(): MemoryEmbedder {
   return {
     id: "needle3",
     async embed(texts: string[]): Promise<number[][] | null> {
       try {
-        if (needleHealth().state !== "healthy") return null;
+        needleWarmup();
         const out: number[][] = [];
         for (let i = 0; i < texts.length; i += NEEDLE_BATCH) {
           const batch = texts.slice(i, i + NEEDLE_BATCH).map((t) => t.slice(0, NEEDLE_TEXT_CHARS));
