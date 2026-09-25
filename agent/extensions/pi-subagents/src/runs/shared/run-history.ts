@@ -8,6 +8,9 @@ import { getAgentDir, lastAssistantStopReason, PI_CODING_AGENT_PACKAGE_ROOT_ENV 
 import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
 import { classifyFailure, readFailureCause, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
+import { recordFailure } from "./provider-health.ts";
+import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
+import { sessionObservability } from "../../../../lib/session-observability.ts";
 
 /** Legacy outcomeReason strings are preserved for existing consumers; the
  * structured `cause` beside them carries the full machine-readable detail. */
@@ -84,6 +87,49 @@ export function failureOf(result: any): { cause: FailureCause; reason: string | 
 }
 
 export type RunOutcome = "completed" | "failed" | "timed_out" | "stopped" | "interrupted";
+
+export interface RunHistoryErrorState {
+	at: number;
+	op: "record" | "load";
+	message: string;
+}
+
+let lastHistoryError: RunHistoryErrorState | undefined;
+
+/** The most recent history storage failure, cleared by the next success. */
+export function lastRunHistoryError(): RunHistoryErrorState | undefined {
+	return lastHistoryError;
+}
+
+function noteHealth(kind: string, data: Record<string, unknown>): void {
+	try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
+}
+
+function recordHistoryError(op: "record" | "load", error: unknown): void {
+	const message = (error instanceof Error ? error.message : String(error)).slice(0, 160);
+	lastHistoryError = { at: Date.now(), op, message };
+	noteHealth("subagent.history-degraded", { op, error: message });
+}
+
+/** First-slash provider split (same convention as child-spawn-preflight). */
+function splitRouteForHealth(route: string): { provider?: string; model?: string } {
+	const base = splitKnownThinkingSuffix(route).baseModel;
+	const slash = base.indexOf("/");
+	if (slash <= 0 || slash >= base.length - 1) return {};
+	return { provider: base.slice(0, slash), model: base.slice(slash + 1) };
+}
+
+/** A child wall-clock timeout is the route's own stall: cool it in shared
+ * provider health so the next selection can skip it. Best-effort and
+ * outside the history lock — cooling must never break history recording. */
+function recordTimeoutStall(terminal: { model?: string }, durationMs: number): void {
+	const route = typeof terminal?.model === "string" ? terminal.model : undefined;
+	if (!route || !/^[a-z0-9_.:/@+-]{1,200}$/i.test(route)) return;
+	const { provider, model } = splitRouteForHealth(route);
+	if (!provider || !model) return;
+	const secs = Number.isFinite(durationMs) && durationMs > 0 ? Math.round(durationMs / 1000) : 0;
+	recordFailure({ provider, model, errorMessage: `Subagent timed out after ${secs}s`, source: "run-history" });
+}
 
 export interface RunEntry {
 	agent: string;
@@ -281,10 +327,11 @@ export function recordRun(
 	task: string,
 	exitCode: number,
 	durationMs: number,
-	terminal: { interrupted?: boolean; processSignal?: string | null; stopped?: boolean; timedOut?: boolean; turnBudgetExceeded?: boolean } = {},
+	terminal: { interrupted?: boolean; processSignal?: string | null; stopped?: boolean; timedOut?: boolean; turnBudgetExceeded?: boolean; model?: string } = {},
 ): void {
+	let outcome: RunOutcome = "failed";
 	try {
-		const outcome: RunOutcome = terminal.stopped
+		outcome = terminal.stopped
 			? "stopped"
 			: terminal.interrupted
 				? "interrupted"
@@ -311,8 +358,17 @@ export function recordRun(
 			appendPrivateHistoryLine(historyPath, JSON.stringify(entry));
 			rememberHistoryFile(historyPath, lineCount + 1);
 		});
-	} catch {
-		// Best-effort — never crash the execution flow for history recording
+		lastHistoryError = undefined;
+	} catch (error) {
+		// Best-effort — never crash the execution flow for history recording,
+		// but a lost ledger entry must stay visible as degraded history.
+		recordHistoryError("record", error);
+		return;
+	}
+	if (outcome === "timed_out") {
+		try {
+			recordTimeoutStall(terminal, durationMs);
+		} catch { /* stall cooling is best-effort */ }
 	}
 }
 
@@ -322,9 +378,16 @@ export function loadRunsForAgent(agent: string): RunEntry[] {
 		hardenHistoryStorage(historyPath);
 		if (!fs.existsSync(historyPath)) return [];
 		try { withHistoryLock(historyPath, () => sanitizeHistoryFile(historyPath)); } catch { /* still provide a read-only snapshot when storage is busy */ }
-		return sanitizeHistoryLines(fs.readFileSync(historyPath, "utf-8")).lines.slice(-ROTATE_READ_THRESHOLD)
+		const entries = sanitizeHistoryLines(fs.readFileSync(historyPath, "utf-8")).lines.slice(-ROTATE_READ_THRESHOLD)
 			.map(line => JSON.parse(line) as RunEntry)
 			.filter(entry => entry.agent === agent)
 			.reverse();
-	} catch { return []; }
+		lastHistoryError = undefined;
+		return entries;
+	} catch (error) {
+		// An unreadable ledger reads as "no runs" to callers; flag it so
+		// the empty result is not mistaken for clean history.
+		recordHistoryError("load", error);
+		return [];
+	}
 }

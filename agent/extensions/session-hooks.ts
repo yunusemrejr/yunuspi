@@ -79,14 +79,17 @@ export default function (pi: any) {
 				unverifiedDeployAt = Date.now();
 				// Final answers carry this receipt until a live byte comparison runs:
 				// a successful push is not the state visitors receive.
-				if (ctx?.sessionManager) disposeDeployNotice = registerContinuationSource({
-					name: "deploy",
-					session: ctx.sessionManager,
-					pending: () => [],
-					verification: () => unverifiedDeployAt === undefined ? [] : [
-						`deploy at ${new Date(unverifiedDeployAt).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`,
-					],
-				});
+				if (ctx?.sessionManager) {
+					disposeDeployNotice?.();
+					disposeDeployNotice = registerContinuationSource({
+						name: "deploy",
+						session: ctx.sessionManager,
+						pending: () => [],
+						verification: () => unverifiedDeployAt === undefined ? [] : [
+							`deploy at ${new Date(unverifiedDeployAt).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`,
+						],
+					});
+				}
 			}
 			if (deployRole.verify) unverifiedDeployAt = undefined;
 		}

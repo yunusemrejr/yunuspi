@@ -544,6 +544,9 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 			}
 			return out.sort((a, b) => a.sid.localeCompare(b.sid));
 		} catch {
+			// A failed scan is unknown state, never "no peers": mark truncation
+			// so overlap warnings are not silently suppressed downstream.
+			scanTruncated = true;
 			return [];
 		}
 	}

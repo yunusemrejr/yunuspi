@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.4 — 2026-09-26
+
+Edge-case hardening across the harness: silent failures now leave traces, corrupt state degrades instead of lying, and session switches start clean windows.
+
+Failures that used to vanish are now visible. The harness event bus reports handler errors that have no subscribers instead of dropping them. Skill discovery keeps the skills it already collected when a directory cannot be read and records which subtree stopped. Sibling peer scans that fail report truncation rather than an empty peer list, so overlap warnings are not silently suppressed. Checkpoint state reads distinguish a missing file from corruption or permission faults, and failed state writes leave a shadow trace plus a throttled warning instead of pretending the restore point was saved. Terminate tracking in session signals and reminders tolerates tool results that never arrive.
+
+Budgets and memory fail closed instead of open. An unreadable or corrupt subagent economy config keeps the last-good ceilings and flags the failure instead of silently relaxing to defaults; invalid values still throw their actionable validation error. Memory recall failures are recorded separately from genuinely empty results and surface in memory status. Run-history storage faults are flagged instead of reading as clean history, and every child wall-clock timeout now cools its route in shared provider health so the next selection can skip a stalling route.
+
+Stale state no longer leaks across session switches. Checkpoints and session signals share one reset path for session start, switch, and branch events, so strikes, pending notices, thresholds, and terminating-tool tracking cannot bleed into the next session. Context-profile disk state is normalized field by field on load, so a corrupt file degrades to defaults instead of breaking the diagnostics tool. A second deploy in one session disposes the previous deploy notice before registering its own.
+
 ## 0.10.3 — 2026-09-26
 
 Tool and hook integrity fixes. Session-hook guidance no longer names the retired `context_code` tool: the empty-search hook points at identifier-ranked `symbol_search` with a shorter identifier, and repeated-read guidance offers only registered structural tools. A new regression test pins every hook rule binding and every guidance tool reference to the registered tool universe.

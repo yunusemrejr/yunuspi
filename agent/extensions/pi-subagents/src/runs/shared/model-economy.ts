@@ -8,6 +8,7 @@ import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/util
 import { isProvenFreeRoute, capFreeRequest, FREE_BASE_URL } from "./free-route-evidence.ts";
 import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../../shared/file-system-retry.ts";
 import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
+import { sessionObservability } from "../../../../lib/session-observability.ts";
 
 /**
  * Cost-aware subagent economy policy (2026-09-22 relaxed).
@@ -148,13 +149,59 @@ function configSourceStamp(filePath: string): string {
 	}
 }
 
-function readJsonObjectFile(filePath: string): Record<string, unknown> {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-		return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-	} catch {
-		return {};
+/** A config file that exists but cannot be read or parsed. Unlike a
+ * missing file (clean "no operator config" signal), this must never silently
+ * relax operator-tightened ceilings back to defaults. */
+export class EconomyConfigReadError extends Error {
+	readonly filePath: string;
+	readonly code?: string;
+	constructor(filePath: string, message: string, code?: string) {
+		super(`${filePath}: ${message}`);
+		this.name = "EconomyConfigReadError";
+		this.filePath = filePath;
+		this.code = code;
 	}
+}
+
+export interface EconomyConfigErrorState {
+	at: number;
+	filePath: string;
+	message: string;
+}
+
+let lastConfigError: EconomyConfigErrorState | undefined;
+
+/** The most recent config-file read failure, cleared by a successful load. */
+export function lastModelEconomyConfigError(): EconomyConfigErrorState | undefined {
+	return lastConfigError;
+}
+
+function noteHealth(kind: string, data: Record<string, unknown>): void {
+	try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.(kind, data); } catch { /* telemetry is optional */ }
+}
+
+function recordConfigError(error: EconomyConfigReadError, lastGood: boolean): void {
+	const message = error.code ?? error.message.slice(0, 160);
+	if (lastConfigError?.filePath === error.filePath && lastConfigError?.message === message) return;
+	lastConfigError = { at: Date.now(), filePath: error.filePath, message };
+	noteHealth("subagent.economy-config", { filePath: error.filePath, error: message, lastGood });
+}
+
+function readJsonObjectFile(filePath: string): Record<string, unknown> {
+	let raw: string;
+	try {
+		raw = fs.readFileSync(filePath, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+		throw new EconomyConfigReadError(filePath, "cannot read config file", (error as NodeJS.ErrnoException)?.code);
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new EconomyConfigReadError(filePath, "invalid JSON", "EJSONPARSE");
+	}
+	return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
 }
 
 function canonicalSettingsEconomy(): { economy: unknown; filePath: string } {
@@ -164,19 +211,36 @@ function canonicalSettingsEconomy(): { economy: unknown; filePath: string } {
 	return { economy: subagents.economy, filePath };
 }
 
-/** Load and cache the effective economy config (see precedence at the top). */
+/** Load and cache the effective economy config (see precedence at the top).
+ * An unreadable/corrupt config file fails closed to the last-good config
+ * (or defaults on first load) and records the failure; invalid VALUES still
+ * throw with the actionable validation message, as before. */
 export function loadModelEconomyConfig(): ModelEconomyConfig {
 	const envPath = process.env[ECONOMY_CONFIG_ENV]?.trim() || undefined;
 	const key = envPath ?? "";
 	const sourcePath = envPath ?? path.join(getAgentDir(), "settings.json");
 	const stamp = configSourceStamp(sourcePath);
 	if (configCache && configCacheKey === key && configCacheStamp === stamp) return configCache;
-	const { economy, filePath } = envPath
-		? { economy: readJsonObjectFile(envPath), filePath: envPath }
-		: canonicalSettingsEconomy();
+	let economy: unknown;
+	let filePath: string;
+	try {
+		({ economy, filePath } = envPath
+			? { economy: readJsonObjectFile(envPath), filePath: envPath }
+			: canonicalSettingsEconomy());
+	} catch (error) {
+		if (!(error instanceof EconomyConfigReadError)) throw error;
+		const lastGood = Boolean(configCache && configCacheKey === key);
+		recordConfigError(error, lastGood);
+		if (lastGood) return configCache!;
+		configCache = parseModelEconomyConfig(undefined, { filePath: error.filePath });
+		configCacheKey = key;
+		configCacheStamp = stamp;
+		return configCache;
+	}
 	configCache = parseModelEconomyConfig(economy, { filePath });
 	configCacheKey = key;
 	configCacheStamp = stamp;
+	lastConfigError = undefined;
 	return configCache;
 }
 
@@ -186,6 +250,7 @@ export function clearModelEconomyConfigCache(): void {
 	configCacheKey = undefined;
 	configCacheStamp = undefined;
 	healthSnapshot = undefined;
+	lastConfigError = undefined;
 }
 
 /** Strip a known thinking suffix; used for exact-route comparisons. */

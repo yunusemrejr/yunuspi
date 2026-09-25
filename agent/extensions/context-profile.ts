@@ -119,13 +119,56 @@ function getState(id: string): SessionState {
   let state = emptyState(id);
   try {
     const parsed = JSON.parse(fs.readFileSync(stateFile(id), "utf8"));
-    if (parsed?.v === PROFILE_VERSION && Array.isArray(parsed.records))
+    if (parsed?.v === PROFILE_VERSION && Array.isArray(parsed.records)) {
       state = { ...state, ...parsed, pending: null };
+      normalizeState(state, id);
+    }
   } catch {
     // First run or unreadable state: start a fresh bounded profile.
   }
   sessions.set(id, state);
   return state;
+}
+
+/** Disk state is untrusted: a corrupt file degrades to defaults field by
+ * field instead of throwing in renderProfile or poisoning the ring. */
+export function normalizeState(state: SessionState, id: string): void {
+  if (typeof state.session !== "string" || !state.session) state.session = id;
+  if (typeof state.updatedAt !== "string")
+    state.updatedAt = new Date(0).toISOString();
+  if (!Number.isSafeInteger(state.seq) || state.seq < 0) state.seq = 0;
+  if (state.lastAt !== null && typeof state.lastAt !== "number")
+    state.lastAt = null;
+  if (!Array.isArray(state.digests)) state.digests = [];
+  else state.digests = state.digests.slice(-1000);
+  if (!Array.isArray(state.records)) state.records = [];
+  else
+    state.records = state.records
+      .filter((record) => record && typeof record === "object")
+      .slice(-DEFAULT_RING);
+  const totals = (state.totals ?? {}) as Record<string, unknown>;
+  state.totals = {
+    requests: number(totals.requests),
+    breaks: number(totals.breaks),
+    envelopeBreaks: number(totals.envelopeBreaks),
+    resentChars: number(totals.resentChars),
+    input: number(totals.input),
+    output: number(totals.output),
+    cacheRead: number(totals.cacheRead),
+    cacheWrite: number(totals.cacheWrite),
+  };
+  if (
+    state.tools !== null &&
+    state.tools !== undefined &&
+    !Array.isArray(state.tools)
+  )
+    state.tools = null;
+  if (
+    state.pending !== null &&
+    state.pending !== undefined &&
+    !Array.isArray(state.pending)
+  )
+    state.pending = null;
 }
 
 function writeState(id: string, state: SessionState): void {

@@ -957,7 +957,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		terminatingTools.clear();
 	});
 	pi.on("tool_execution_end", (event) => {
-		if (event.result.terminate === true) terminatingTools.add(event.toolCallId);
+		if (event.result?.terminate === true) terminatingTools.add(event.toolCallId);
 	});
 
 	// Streaming detection queues normal Pi steering; never abort/restart the

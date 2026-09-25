@@ -1455,9 +1455,12 @@ export default function (pi: any) {
     terminatingTools.clear();
   });
   pi.on("tool_execution_end", (event: any) => {
-    if (event.result.terminate === true) terminatingTools.add(event.toolCallId);
+    if (event.result?.terminate === true) terminatingTools.add(event.toolCallId);
   });
-  pi.on("session_start", () => {
+  // Entering a session (start or switch) begins a new signal window: stale
+  // one-shot warnings, thresholds, and output accounting must not leak
+  // across the boundary.
+  const resetSessionState = () => {
     resetPressureSignals();
     toolJson.reset();
     outputRequest = undefined;
@@ -1465,7 +1468,8 @@ export default function (pi: any) {
     terminatingTools.clear();
     thresholds.reset();
     riskAnnounced = false;
-  });
+  };
+  pi.on("session_start", resetSessionState);
   pi.on("session_compact", () => {
     resetPressureSignals();
     toolJson.reset();
@@ -1473,7 +1477,7 @@ export default function (pi: any) {
     thresholds.reset();
     riskAnnounced = false;
   });
-  pi.on("session_switch", () => resetPressureSignals());
+  pi.on("session_switch", resetSessionState);
   // Runtime identity is available on demand via session_self. Remove legacy
   // conversation signals rather than moving them to the most recent position.
   pi.on("context", (event: any, ctx: any) => {

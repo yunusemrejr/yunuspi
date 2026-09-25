@@ -135,8 +135,16 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
     addIgnoreRules(ig, dir, root);
+    let entries;
     try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        entries = readdirSync(dir, { withFileTypes: true });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : "failed to read skills directory";
+        diagnostics.push({ type: "warning", message, path: dir });
+        return { skills, diagnostics };
+    }
+    try {
         for (const entry of entries) {
             if (entry.name !== "SKILL.md") {
                 continue;
@@ -206,7 +214,12 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
             diagnostics.push(...result.diagnostics);
         }
     }
-    catch { }
+    catch (error) {
+        // Never break startup, but never silently discard either: keep the
+        // skills collected so far and record why this subtree stopped.
+        const message = error instanceof Error ? error.message : "failed to scan skills directory";
+        diagnostics.push({ type: "warning", message, path: dir });
+    }
     return { skills, diagnostics };
 }
 function loadSkillFromFile(filePath, source) {

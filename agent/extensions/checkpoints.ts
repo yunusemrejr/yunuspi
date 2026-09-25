@@ -553,21 +553,50 @@ export function normalizeCheckpointState(raw: unknown, sid: string): CheckpointS
 	return state;
 }
 
-function readState(sid: string): CheckpointState {
-	try { return normalizeCheckpointState(JSON.parse(fs.readFileSync(stateFile(sid), "utf8")), sid); }
-	catch { return defaultState(sid); }
+function errorCode(error: unknown): string {
+	const code = (error as NodeJS.ErrnoException)?.code;
+	if (typeof code === "string" && code) return code;
+	return error instanceof Error ? error.name || "Error" : "unknown";
 }
 
-function writeState(st: CheckpointState): void {
+export function readState(sid: string): CheckpointState {
+	try {
+		return normalizeCheckpointState(JSON.parse(fs.readFileSync(stateFile(sid), "utf8")), sid);
+	} catch (error) {
+		// A missing file is a fresh session; corruption or a permissions
+		// fault must leave a trace instead of reading as "no checkpoints".
+		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+			shadowLog(sid, "state-corrupt", errorCode(error));
+		}
+		return defaultState(sid);
+	}
+}
+
+let lastStateWriteWarnAt = 0;
+
+export function writeState(st: CheckpointState): void {
 	const tmp = `${stateFile(st.sid)}.${process.pid}.${randomUUID()}.tmp`;
 	try {
 		fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
 		fs.chmodSync(STATE_DIR, 0o700);
 		fs.writeFileSync(tmp, JSON.stringify(st), { mode: 0o600, flag: "wx" });
 		fs.renameSync(tmp, stateFile(st.sid));
-	} catch {
-		/* checkpoints must never break a session */
+	} catch (error) {
+		// Checkpoints must never break a session, but a lost restore point
+		// must leave a trace: shadow log first, throttled stderr warn when
+		// even the shadow write is impossible.
+		shadowLog(st.sid, "state-write-failed", errorCode(error));
+		warnStateWriteFailed(st.sid, error);
 	} finally { try { fs.unlinkSync(tmp); } catch {} }
+}
+
+function warnStateWriteFailed(sid: string, error: unknown): void {
+	const now = Date.now();
+	if (now - lastStateWriteWarnAt < 300_000) return;
+	lastStateWriteWarnAt = now;
+	try {
+		console.warn(`[checkpoints] cannot persist state for ${sid.slice(0, 48)} (${errorCode(error)}); restore points are stale until writes succeed.`);
+	} catch { /* never break a session */ }
 }
 
 function shadowLog(sid: string, kind: string, detail: string): void {
@@ -704,30 +733,30 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			});
 		await projectTests.call(event, ctx);
 	});
-	pi.on("session_tree", async (_event, ctx) => {
-		// A heuristic window is branch-local; authoritative file history remains reconstructible.
+	// A heuristic window is branch/session-local: entering a new branch,
+	// session, or restart must not inherit the previous window's strikes,
+	// pending notices, or in-flight read tracking. Authoritative file
+	// history remains reconstructible outside the window.
+	const resetHeuristicWindow = (ctx: ExtensionContext): void => {
 		st = defaultState(sidOf(ctx));
 		pending.clear();
 		starts.clear();
 		mutationVersion = 0;
 		lastMutationBatch = undefined;
 		writeState(st);
+	};
+	pi.on("session_tree", async (_event, ctx) => {
+		resetHeuristicWindow(ctx);
 		quality.restore(ctx); await projectTests.restore(ctx);
 		// A branch rewrite is a new work context; a stop for the old one ends here.
 		unlockSessionStop(ctx);
 	});
-	pi.on("session_switch", async (_event, ctx) => { quality.restore(ctx); await projectTests.restore(ctx); });
+	pi.on("session_switch", async (_event, ctx) => { resetHeuristicWindow(ctx); quality.restore(ctx); await projectTests.restore(ctx); });
 	pi.on("session_start", async (_event, ctx) => {
 		try {
 			quality.restore(ctx); await projectTests.restore(ctx);
-			// Restart/reload begins a new heuristic window, not a claim about inherited edits.
-			st = defaultState(sidOf(ctx));
-			pending.clear();
-			starts.clear();
-			mutationVersion = 0;
-			lastMutationBatch = undefined;
-			writeState(st);
-			cleanupStale(st.sid);
+			resetHeuristicWindow(ctx);
+			cleanupStale(st!.sid);
 		} catch {
 			/* never break startup */
 		}

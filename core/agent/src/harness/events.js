@@ -1,4 +1,17 @@
 /** Passive harness event bus with isolated handler failures. */
+/** Last-resort visibility: a handler_error with no subscribers must not vanish silently. */
+function reportUnobservedHandlerError(event) {
+    try {
+        const where = event.kind === "hook"
+            ? `hook ${event.hook ?? "unknown"}`
+            : `event ${event.event ?? "unknown"}`;
+        console.error(`[harness] unobserved handler_error (${where}, lane ${event.lane ?? "unknown"}): ${String(event.error ?? "unknown error").slice(0, 500)}`);
+        if (typeof event.stack === "string" && event.stack) {
+            console.error(event.stack.slice(0, 2000));
+        }
+    }
+    catch { /* last-resort reporting must never throw */ }
+}
 export class HarnessEventBus {
     listeners = new Map();
     watchListeners = new Set();
@@ -109,6 +122,9 @@ export class HarnessEventBus {
         return [...(this.listeners.get(event.type) ?? []), ...this.watchListeners];
     }
     async deliver(event, recipients, reportErrors, context) {
+        if (event.type === "handler_error" && recipients.length === 0) {
+            reportUnobservedHandlerError(event);
+        }
         for (const listener of recipients) {
             try {
                 await listener(structuredClone(event), context);

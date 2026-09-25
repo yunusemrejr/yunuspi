@@ -1527,6 +1527,23 @@ async function runQmdUpdateNow() {
 	// embed; not chained here so shutdown stays fast.
 }
 
+/**
+ * Last recall failure (qmd crash/timeout/unparseable output). Empty search
+ * results are NOT recorded here: "" from a healthy probe and "" from a
+ * failed probe must stay distinguishable.
+ */
+export interface MemoryRecallError {
+	at: number;
+	reason: string;
+}
+
+let lastRecallError: MemoryRecallError | null = null;
+
+/** The most recent recall failure, cleared by the next successful search. */
+export function lastMemoryRecallError(): MemoryRecallError | null {
+	return lastRecallError;
+}
+
 /** Search for memories relevant to the user's prompt. Returns formatted markdown or empty string on error. */
 export async function searchRelevantMemories(prompt: string): Promise<string> {
 	if (!qmdAvailable || !prompt.trim()) return "";
@@ -1542,7 +1559,10 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		const hasCollection = await checkCollection("pi-memory");
-		if (!hasCollection) return "";
+		if (!hasCollection) {
+			lastRecallError = null;
+			return "";
+		}
 
 		const results = await Promise.race([
 			runQmdSearch("keyword", sanitized, 3),
@@ -1551,7 +1571,10 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 			}),
 		]);
 
-		if (!results || results.results.length === 0) return "";
+		if (!results || results.results.length === 0) {
+			lastRecallError = null;
+			return "";
+		}
 
 		const snippets = results.results
 			.map((r) => {
@@ -1563,9 +1586,15 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 			})
 			.filter(Boolean);
 
-		if (snippets.length === 0) return "";
+		if (snippets.length === 0) {
+			lastRecallError = null;
+			return "";
+		}
+		lastRecallError = null;
 		return snippets.join("\n\n---\n\n");
-	} catch {
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		lastRecallError = { at: Date.now(), reason: reason.slice(0, 160) };
 		return "";
 	} finally {
 		clearTimeout(timer);
@@ -2994,6 +3023,14 @@ export default function (pi: ExtensionAPI) {
 				lines.push("", qmdInstallInstructions());
 			}
 
+			const recallError = lastMemoryRecallError();
+			if (recallError) {
+				lines.push(
+					`- Last recall error: ${recallError.reason} (${new Date(recallError.at).toISOString()})`,
+					"  - Recall failures inject nothing; empty results below may mean degraded search, not absent memories.",
+				);
+			}
+
 			lines.push(
 				"",
 				"## Configuration",
@@ -3013,6 +3050,7 @@ export default function (pi: ExtensionAPI) {
 					qmd: qmdOk,
 					collection: collectionOk,
 					embeddings,
+					...(recallError ? { recallError } : {}),
 					snapshotMode: getSnapshotMode(),
 					qmdUpdateMode: getQmdUpdateMode(),
 				},
