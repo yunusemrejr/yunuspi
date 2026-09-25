@@ -122,7 +122,14 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
     if (path.relative(cwd, directory).startsWith('..')) return { reason: 'cd escapes the project working directory' };
   }
   const commandTokens = tokenizeSimple(bodyCommand);
-  if (!commandTokens?.length) return { reason: 'shell operators (| ; > < ( ) &) are not allowed; declare one simple command' };
+  if (!commandTokens?.length) {
+    // A trailing parenthetical is almost always a natural-language
+    // annotation ("cmd (why)"), not shell composition. Name it so the
+    // caller drops it instead of guessing across retries.
+    const annotation = bodyCommand.match(/\s+\([^()]*\)\s*$/);
+    if (annotation) return { reason: `trailing ${JSON.stringify(annotation[0].trim()).slice(0, 80)} looks like an annotation, not part of the command; declare the bare command without it` };
+    return { reason: 'shell operators (| ; > < ( ) &) are not allowed; declare one simple command' };
+  }
   // Literal leading environment assignments do not mask the runner's exit.
   // Retain them in the receipt key: a pass with different environment values
   // is not evidence for the declared command. Shell expansion stays rejected.
