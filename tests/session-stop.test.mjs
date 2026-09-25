@@ -202,3 +202,31 @@ test('extension-sourced input does not unlock a stopped session', async () => {
   await hooks.agent_settled({}, ctx);
   assert.equal(sent.length, 0);
 });
+
+test('the requirement ledger reaches context and names unreported parts once on a final answer', async () => {
+  const hooks = {};
+  const appended = [];
+  const pi = {
+    on: (name, fn) => { (hooks[name] ??= []).push(fn); },
+    registerTool: () => {}, registerCommand: () => {}, sendMessage: () => {},
+    appendEntry: (customType, data) => appended.push({ type: 'custom', customType, data }),
+    getActiveTools: () => [],
+  };
+  checkpoints.default(pi);
+  const ctx = scopeCtx(appended, 'ledger-session');
+  const fire = async (name, event) => { let out; for (const fn of hooks[name] ?? []) { const r = await fn(event, ctx); if (r !== undefined) out = r; } return out; };
+  await fire('session_start', {});
+  await fire('input', { source: 'interactive', text: '1. Add the chart\n2. Fix the footer credit\n3. Move the AI disclosure' });
+  const context = await fire('context', { messages: [{ role: 'user', content: 'x' }] });
+  const ledgerMessage = context.messages.find(m => m.customType === 'requirement-ledger');
+  assert.match(ledgerMessage.content, /R1: Add the chart[\s\S]*R3: Move the AI disclosure/);
+  const final = (text) => fire('message_end', { message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] } });
+  const answered = await final('R1 chart added and rendered. R2 footer fixed.');
+  assert.match(answered.message.content.at(-1).text, /R3: Move the AI disclosure/);
+  assert.equal(await final('Anything else?'), undefined, 'the same open set is named once');
+  await final('R3 moved to the article header.');
+  const after = await fire('context', { messages: [{ role: 'user', content: 'x' }] });
+  assert.equal(after?.messages?.some(m => m.customType === 'requirement-ledger') ?? false, false, 'a fully reported ledger leaves context');
+  await fire('session_start', {});
+  assert.equal(appended.filter(e => e.customType === 'requirement-ledger-v1').at(-1).data.next, 3, 'persisted for resume');
+});

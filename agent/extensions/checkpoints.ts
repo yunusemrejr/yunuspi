@@ -47,6 +47,13 @@ import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/proje
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
+import {
+	emptyRequirementLedger,
+	foldRequirements,
+	renderRequirementLedger,
+	settleRequirements,
+	type RequirementLedger,
+} from "./lib/requirement-ledger.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
 import { enforceShared, getSharedSession, noteUserInput, sharedSourceAudit } from "./lib/intervention-shared.ts";
 import {
@@ -634,6 +641,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	const revision = createWorkspaceRevision();
 	const quality = createQualityReviewLifecycle(pi, { shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot(), revision });
 	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe, token) => quality.observe(facts, observe, token), revision });
+	registerRequirementLedger(pi);
 	let st: CheckpointState | null = null;
 	const pending = new Map<string, string>();
 	let mutationVersion = 0;
@@ -844,5 +852,64 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		} catch {
 			/* ignore */
 		}
+	});
+}
+
+const LEDGER_ENTRY = "requirement-ledger-v1";
+
+/** Multi-part demands become numbered requirements the model sees on every
+ * call; a final answer that leaves some unreported carries a receipt naming
+ * them (once per open set), so no part of a demand drops silently. */
+function registerRequirementLedger(pi: ExtensionAPI): void {
+	let ledger: RequirementLedger = emptyRequirementLedger();
+	let warnedKey = "";
+	const save = () => {
+		try { pi.appendEntry(LEDGER_ENTRY, ledger); } catch { /* the ledger stays live in-process */ }
+	};
+	const restore = (ctx: ExtensionContext) => {
+		ledger = emptyRequirementLedger();
+		warnedKey = "";
+		try {
+			const entry = [...ctx.sessionManager.getBranch()].reverse().find((e: any) => e.type === "custom" && e.customType === LEDGER_ENTRY) as any;
+			const data = entry?.data;
+			if (data && Array.isArray(data.items) && Number.isSafeInteger(data.next))
+				ledger = { items: data.items.slice(-20), subjective: Array.isArray(data.subjective) ? data.subjective : [], unbounded: data.unbounded === true, next: data.next };
+		} catch {
+			/* an unreadable branch starts an empty ledger */
+		}
+	};
+	pi.on("session_start", (_event, ctx) => restore(ctx));
+	pi.on("session_switch", (_event, ctx) => restore(ctx));
+	pi.on("session_tree", (_event, ctx) => restore(ctx));
+	pi.on("input", (event: any) => {
+		if (event.source === "extension" || typeof event.text !== "string") return;
+		const folded = foldRequirements(ledger, event.text);
+		if (folded.ledger === ledger) return;
+		ledger = folded.ledger;
+		save();
+	});
+	pi.on("context", (event) => {
+		const text = renderRequirementLedger(ledger);
+		const clean = event.messages.filter((m: any) => !(m.role === "custom" && m.customType === "requirement-ledger"));
+		if (!text) return clean.length === event.messages.length ? undefined : { messages: clean };
+		clean.push({ role: "custom", customType: "requirement-ledger", content: text, display: false, timestamp: 0 } as any);
+		return { messages: clean };
+	});
+	pi.on("message_end", (event) => {
+		const message = event.message;
+		if (message.role !== "assistant" || message.stopReason !== "stop" || !ledger.items.length) return undefined;
+		const answer = typeof message.content === "string" ? message.content
+			: message.content.map((part: any) => (part?.type === "text" ? part.text : "")).join("\n");
+		const settled = settleRequirements(ledger, answer);
+		if (settled.ledger.items.length !== ledger.items.length || settled.ledger.unbounded !== ledger.unbounded) {
+			ledger = settled.ledger;
+			save();
+		}
+		const key = settled.open.map((item) => item.id).join(",");
+		if (!settled.open.length || key === warnedKey) return undefined;
+		warnedKey = key;
+		const warning = `\n\n---\n⚠️ Requirements not reported in this answer (requirement ledger):\n${settled.open.slice(0, 8).map((item) => `- ${item.id}: ${item.text.slice(0, 140)}`).join("\n")}\nThey stay open until an answer maps them to evidence or states they are not done.`;
+		const content = typeof message.content === "string" ? message.content + warning : [...message.content, { type: "text" as const, text: warning }];
+		return { message: { ...message, content } } as { message: typeof message };
 	});
 }
