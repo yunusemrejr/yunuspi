@@ -38,6 +38,12 @@ role restores the default. The `/models` editor exposes these controls under
 **Session Observer**, including the route's thinking level. Saving changes
 affects subsequent observations, not a request already in flight.
 
+`watchmaker` (Mr. Watchmaker, the timekeeper) follows the same rules with a
+smaller budget: an absent role uses only `deepseek/deepseek-flash` through the
+official DeepSeek API with `low` thinking, routes require at least 8,192
+context tokens and 2,048 output tokens, and `"watchmaker": { "models": [] }`
+disables it. Configure it under **Mr. Watchmaker** in `/models`.
+
 A viable preference keeps its place across repeated requests and sessions.
 Usage frequency and random rotation do not move free alternatives ahead of it.
 Context, output, modality, tool-support and quota failures explain why an entry
