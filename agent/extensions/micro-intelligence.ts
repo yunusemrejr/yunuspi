@@ -106,6 +106,13 @@ interface PendingPromptAnalysis {
   retainedChars: number;
 }
 
+let latestAnalysisChain: Promise<void> = Promise.resolve();
+/** Resolves once every prompt analysis started so far has settled. Input
+ * accepts prompts immediately; callers needing the finished analysis await this. */
+export function settleMicroAnalyses(): Promise<void> {
+  return latestAnalysisChain;
+}
+
 /** Read a single unambiguous request state. If multiple sessions are active,
  * callers must name the Guardian owner or session, otherwise this abstains. */
 export function lastMicroRequest(owner?: string): MicroRequestState | undefined {
@@ -406,6 +413,10 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
    * post-resume prompt is classified with real context. */
   let resumedAnalysisContext: PromptAnalysisPrevious | undefined;
   let preflightChain: Promise<void> = Promise.resolve();
+  const inflightAnalyses = new Map<string, { settled: Promise<void>; controller: AbortController }>();
+  /** Accepted requests no context pass has carried yet. A run that ends
+   * without carrying one abandoned it: its analysis is not a prior task. */
+  const unconsumed = new Map<string, AbortController>();
   const pendingContext = new Map<string, PendingPromptAnalysis>();
   /** Requests whose advisory may currently be injected, and the requests seen
    * in the previous context pass. Together they bound the injected advisory to
@@ -459,6 +470,9 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     generation++;
     if (activeOwnerId) requestStateRegistry().delete(activeOwnerId);
     pendingContext.clear();
+    for (const entry of inflightAnalyses.values()) entry.controller.abort(new Error("Prompt-analysis session owner changed"));
+    inflightAnalyses.clear();
+    unconsumed.clear();
     retainedAnalysisChars = 0;
     activeAdvisoryRequestIds = new Set();
     knownPendingRequestIds = new Set();
@@ -483,6 +497,10 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     try { ctx.ui?.setStatus?.("prompt-analysis", undefined); } catch { /* optional UI */ }
     resetMicroMetrics();
   });
+  pi.on("agent_end", () => {
+    for (const controller of unconsumed.values()) controller.abort(new Error("The request ended before any model turn carried it"));
+    unconsumed.clear();
+  });
   pi.on("session_shutdown", () => {
     reset();
     try { void needleHandle().shutdown().catch(() => {}); } catch { /* Shutdown is hygiene. */ }
@@ -506,13 +524,26 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     const eventSessionId = event.sessionId as string;
     const guardianOwnerId = event.guardianOwnerId as string;
 
-    // Core also serializes preflight, but retain arrival ordering when older
-    // callers or test harnesses invoke input handlers concurrently.
+    // Analysis runs off the input critical path: the prompt is accepted and
+    // before_agent_start work (memory priming, councils, guidance) proceeds in
+    // parallel, while the first context pass awaits this request's analysis.
+    // Arrival ordering is still serialized for consecutive prompts.
     const previousPreflight = preflightChain;
-    let releasePreflight!: () => void;
-    preflightChain = new Promise<void>((resolve) => { releasePreflight = resolve; });
-    await previousPreflight;
-    try {
+    // Aborting the turn that waits for this analysis cancels it, so an
+    // abandoned request can never publish a late advisory.
+    const controller = new AbortController();
+    const job = previousPreflight.then(() => analyzeRequest(event, ctx, rawPrompt, arrivalGeneration, arrivalSessionId, arrivalOwnerId, eventSessionId, guardianOwnerId, controller.signal));
+    const settled = job.catch(() => { /* analysis failures degrade to the literal prompt */ });
+    const entry = { settled, controller };
+    preflightChain = settled;
+    latestAnalysisChain = settled;
+    inflightAnalyses.set(event.requestId, entry);
+    unconsumed.set(event.requestId, controller);
+    void settled.then(() => { if (inflightAnalyses.get(event.requestId) === entry) inflightAnalyses.delete(event.requestId); });
+  });
+
+  const analyzeRequest = async (event: any, ctx: any, rawPrompt: string, arrivalGeneration: number, arrivalSessionId: string, arrivalOwnerId: string, eventSessionId: string, guardianOwnerId: string, turnSignal: AbortSignal): Promise<void> => {
+    {
       // A session switch/disposal can happen while this input waits behind an
       // earlier analysis. Never let an aborted queued request reset the new
       // session's state or publish stale metadata.
@@ -527,7 +558,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       activeOwnerId = guardianOwnerId;
       const currentGeneration = generation;
       const sessionSignal = sessionController.signal;
-      const signal = event.signal ? AbortSignal.any([sessionSignal, event.signal]) : sessionSignal;
+      const signal = AbortSignal.any([sessionSignal, turnSignal, ...(event.signal ? [event.signal] : [])]);
       const owns = () => currentGeneration === generation && activeSessionId === sessionId && !signal.aborted;
       if (!owns()) return;
 
@@ -682,13 +713,27 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         usagePendingAttempts: result.usagePendingAttempts,
         count: 1,
       });
-    } finally {
-      releasePreflight();
     }
-  });
+  };
 
   pi.on("context", async (event: any, ctx: any) => {
     if (!Array.isArray(event?.messages) || !Array.isArray(event.requestMessages) || ctx.signal?.aborted) return;
+    // The analysis started at input time; wait only for requests in this
+    // payload that are still being analysed (bounded by the route timeouts).
+    const waiting = event.requestMessages.map((request: any) => inflightAnalyses.get(request?.requestId) ?? (unconsumed.get(request?.requestId) ? { settled: Promise.resolve(), controller: unconsumed.get(request?.requestId)! } : undefined))
+      .filter((entry: any): entry is { settled: Promise<void>; controller: AbortController } => Boolean(entry));
+    if (waiting.length) {
+      const signal: AbortSignal | undefined = ctx.signal;
+      let onAbort: (() => void) | undefined;
+      await Promise.race([
+        Promise.all(waiting.map((entry) => entry.settled)),
+        new Promise<void>((resolve) => { onAbort = resolve; signal?.addEventListener?.("abort", onAbort, { once: true }); }),
+      ]);
+      if (onAbort) signal?.removeEventListener?.("abort", onAbort);
+      if (signal?.aborted) for (const entry of waiting) entry.controller.abort(new Error("The turn awaiting this prompt analysis was aborted"));
+    }
+    if (ctx.signal?.aborted) return;
+    for (const request of event.requestMessages) unconsumed.delete(request?.requestId);
     const next = [...event.messages];
     const inserts: Array<{ index: number; message: any }> = [];
     const matching = [...event.requestMessages]

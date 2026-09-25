@@ -18,7 +18,7 @@ process.env.PI_SUBAGENTS_ECONOMY_CONFIG = path.join(directory, 'economy.json');
 fs.writeFileSync(process.env.PI_SUBAGENTS_ECONOMY_CONFIG, '{}');
 delete process.env.PI_MICRO_INTELLIGENCE;
 delete process.env.PI_SUBAGENT_CHILD;
-const { default: register, lastMicroRequest } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
+const { default: register, lastMicroRequest, settleMicroAnalyses } = await import(pathToFileURL(path.join(agent, 'extensions/micro-intelligence.ts')));
 const { clearLlmPreferencesCache } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/shared/llm-preferences.ts')));
 const { runPromptAnalysis } = await import(pathToFileURL(path.join(agent, 'extensions/lib/prompt-analysis-runtime.ts')));
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -80,7 +80,7 @@ async function fixture(t, { mode = 'registry', thinking, mandatoryReasoning = tr
   const emit = (name, event = {}) => hooks.get(name)?.(event, ctx);
   const input = (requestId, signal = new AbortController().signal) => {
     const event = { source: 'interactive', text: prompt, originalText: prompt, requestId, turnId: `turn-${requestId}`, processId: 'synthetic-process', sessionId, guardianOwnerId: `owner-${sessionId}`, signal };
-    return { event, run: () => emit('input', event) };
+    return { event, run: async () => { const result = await emit('input', event); await settleMicroAnalyses(); return result; } };
   };
   const context = event => emit('context', { messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }], requestMessages: [{ requestId: event.requestId, turnId: event.turnId, messageIndex: 0 }] });
   await emit('session_start', { reason: 'new' });

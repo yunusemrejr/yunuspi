@@ -104,6 +104,9 @@ export const INTENT_BUNDLES: ReadonlyArray<{ skill: string; tools: readonly stri
 const DIRECT_BUNDLES: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
   { pattern: /\b(?:refactor\w*|clean ?up|de-?dup\w*|duplicat\w* (?:code|logic)|dry (?:up|principle|violations?)|dead code|unused (?:code|imports?|exports?)|code (?:quality|review|smells?)|lint(?:ing|er|s)?|cyclomatic|complexity|slop|tech(?:nical)? debt|simplif(?:y|ication) (?:the |this )?code)\b/i, tools: ['code_quality', 'git_info'] },
   { pattern: /\b(?:commit(?:ting)?|pull request|open (?:a )?pr|push (?:it|the|this|to)|ready to (?:merge|ship)|pre-?commit)\b/i, tools: ['git_info'] },
+  // Visual UI work is verified by rendering it: stage the browser tools with
+  // the first turn instead of waiting for a late discovery heuristic.
+  { pattern: /\b(?:(?:re-?design|restyle|re-?skin|revamp|remake|moderni[sz]e|beautify|polish|improve|fix|build|create|make|update|rework)\w*\s+(?:[\w'-]+\s+){0,3}(?:user interfaces?|ui|ux|front-?end|web ?(?:app|page|site)s?|landing pages?|websites?|dashboards?|layouts?|css|themes?|mascots?|animations?|visuals?)|(?:user interface|ui|ux|front-?end|visual) (?:re-?design|overhaul|polish|revamp|refresh))\b/i, tools: ['browser_session', 'render_see'] },
   { pattern: /\b(?:desktop (?:app|application|gui|window)s?|electron app|gtk|pyqt|pyside|qt (?:app|widget|window)s?|tkinter|wxpython|x11 (?:app|window)s?|gui (?:app|application|test)s?)\b/i, tools: ['desktop_session'] },
   { pattern: /\b(?:copywriting|(?:landing|marketing|sales|product) (?:page )?copy|blog post|newsletter|press release|release notes|proofread|rewrite (?:the |this )?(?:text|copy|prose|docs?)|readme|documentation)\b/i, tools: ['code_quality'] },
 ];
