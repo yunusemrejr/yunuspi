@@ -1103,7 +1103,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 127; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
-- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 241; literal)
+- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 249; literal)
 - `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
@@ -1142,7 +1142,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 294; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 396; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 618; literal)
-- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 240; literal)
+- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 248; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 273; factory)
@@ -1171,7 +1171,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 22; factory)
 - `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 30; factory)
 - `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 26; factory)
-- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 82; literal)
+- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 90; literal)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
@@ -1193,7 +1193,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1659, 2247, 2401, 2800)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 96)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 104)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
 - [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_synth`, `narration_tts`, `video_project`, `video_qa`, `video_render` (lines 11)
 
@@ -1268,7 +1268,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 ### Dynamic command owners
 
 - [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 145)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 153)
 
 ## MCP and wrapper service owners
 

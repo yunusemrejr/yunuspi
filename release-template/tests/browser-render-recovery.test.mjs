@@ -269,3 +269,15 @@ test("missing local sources name the caller-supplied path in text output", { tim
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("file: URL render sources normalize to plain paths before resolve", async () => {
+  const { stripFileScheme } = await load("scripts/browser-diagnostics.mjs");
+  const { resolveRenderSource } = await load("extensions/render-and-wait.ts");
+  assert.equal(stripFileScheme("file:///tmp/site/index.html"), "/tmp/site/index.html");
+  assert.equal(stripFileScheme("file:///tmp/site/index.html#route"), "/tmp/site/index.html#route");
+  assert.equal(stripFileScheme("https://example.com/x"), "https://example.com/x");
+  assert.equal(stripFileScheme("file://remote-host/x.html"), "file://remote-host/x.html");
+  assert.equal(resolveRenderSource("file:///tmp/site/index.html", "/cwd"), "/tmp/site/index.html");
+  assert.equal(resolveRenderSource("@rel/page.html", "/cwd"), path.join("/cwd", "rel/page.html"));
+  assert.equal(resolveRenderSource("https://example.com/x", "/cwd"), "https://example.com/x");
+});

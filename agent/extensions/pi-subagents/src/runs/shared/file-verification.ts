@@ -183,8 +183,19 @@ export function verifyObservedWriteScope(contract: AcceptanceFileContract | unde
 		if (!call || message.isError === true || message.error) continue;
 		if (call.name === "bash") shellResults++;
 		if (!["write", "edit"].includes(call.name) || typeof call.target !== "string") continue;
+		const target = path.resolve(cwd, call.target);
+		const relative = path.relative(cwd, target);
+		// Scope constrains the project change, not scratch: temp helpers and
+		// harness-instructed artifact writes outside the tree are not project
+		// edits (shell writes there are unattributed by this check too).
+		if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+		// Project-scoped harness artifacts are runtime data, not edits. The
+		// directory is owned by pi-subagents/src/shared/artifacts.ts
+		// (PROJECT_SUBAGENTS_RELATIVE_DIR); repeated here so this light
+		// verifier does not inherit that module's dependency graph.
+		if (relative === ".pi/subagents" || relative.startsWith(`.pi/subagents${path.sep}`)) continue;
 		writes++;
-		if (!allowed.has(path.resolve(cwd, call.target))) outside.add(call.target);
+		if (!allowed.has(target)) outside.add(call.target);
 	}
 	return [{ id: "file-contract:write-scope", status: outside.size ? "failed" : writes ? "passed" : "not-applicable", message: outside.size
 		? `Successful native write/edit calls targeted files outside declared scope: ${[...outside].slice(0, 8).join(", ")}.`

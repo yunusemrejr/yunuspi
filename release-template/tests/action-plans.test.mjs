@@ -159,3 +159,16 @@ test('todo dependency and child refusals name the blocking tasks',()=>{
  assert.match(done.op.message,/Reopen the parent before adding or reopening unfinished children/);
  assert.match(done.op.message,/#3 "Verify: build and run" \(completed\) still has unfinished #4 "Sub-verify" \(pending\)/);
 });
+const {prepareTodoArguments}=await load('todo.ts');
+test('todo batch recovery coerces numeric-string ids before validation',()=>{
+ // Live sessions send {"id":"2","status":"in_progress"} without action; the
+ // schema needs a numeric id and an explicit action for each operation.
+ assert.deepEqual(prepareTodoArguments({action:'batch',operations:[{id:'2',status:'in_progress'}]}).operations,[{id:2,status:'in_progress',action:'update'}]);
+ assert.deepEqual(prepareTodoArguments({action:'batch',operations:[{id:'-1',subject:'Outcome'}]}).operations,[{id:-1,subject:'Outcome',action:'create'}]);
+ assert.equal(prepareTodoArguments({batch:true,operations:[{action:'create',subject:'x'}]}).action,'batch');
+ assert.deepEqual(prepareTodoArguments({action:'batch',operations:[{action:'update',id:'2',status:'completed'}]}).operations,[{action:'update',id:2,status:'completed'}]);
+ // No guessing beyond the documented shapes: delete is never inferred and
+ // non-numeric ids pass through untouched to fail validation visibly.
+ assert.deepEqual(prepareTodoArguments({action:'batch',operations:[{id:'2.5',status:'x'}]}).operations,[{id:'2.5',status:'x'}]);
+ assert.deepEqual(prepareTodoArguments({action:'batch',operations:[{evidence:'done'}]}).operations,[{evidence:'done'}]);
+});

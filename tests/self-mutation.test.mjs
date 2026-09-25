@@ -445,3 +445,25 @@ const apply=await tool.execute('apply',{...params,action:'apply',token:preview.d
   f.close();
  }
 });
+test("session subagent artifacts stay writable from project sessions", () => {
+ const f = fixture();
+ try {
+  // Chain workers are instructed to maintain progress.md and write outputs
+  // under their session's subagent-artifacts dir; blocking those writes
+  // fails runs the harness itself set up. Transcripts stay protected.
+  const writable = [
+   path.join(harness, "agent/sessions/proj/subagent-artifacts/progress/run-id/progress.md"),
+   path.join(harness, "agent/sessions/proj/subagent-artifacts/outputs/run-id/out.md"),
+  ];
+  const blocked = [
+   path.join(harness, "agent/sessions/proj/2026-01-01_session.jsonl"),
+   path.join(harness, "agent/extensions/lib/self-mutation-guard.ts"),
+  ];
+  const code = `const g=await import(${JSON.stringify(moduleUrl)});console.log(JSON.stringify(${JSON.stringify([...writable, ...blocked])}.map(t=>!!g.selfMutationDenial(t,${JSON.stringify(f.project)}))));`;
+  const result = node(f.project, code);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), [false, false, true, true]);
+ } finally {
+  f.close();
+ }
+});

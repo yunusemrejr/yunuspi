@@ -3122,7 +3122,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          145
+          153
         ]
       }
     ],
@@ -3332,7 +3332,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 241,
+        "line": 249,
         "kind": "literal"
       },
       {
@@ -3568,7 +3568,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 240,
+        "line": 248,
         "kind": "literal"
       },
       {
@@ -3743,7 +3743,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 82,
+        "line": 90,
         "kind": "literal"
       },
       {
@@ -3890,7 +3890,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 241,
+        "line": 249,
         "kind": "literal"
       },
       {
@@ -4040,7 +4040,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 240,
+        "line": 248,
         "kind": "literal"
       },
       {
@@ -4118,7 +4118,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 82,
+        "line": 90,
         "kind": "literal"
       },
       {
@@ -4301,7 +4301,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          96
+          104
         ],
         "knownNames": [
           "todo"

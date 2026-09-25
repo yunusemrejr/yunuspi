@@ -1,5 +1,6 @@
 import {registerBrowserSession, isolatedBrowserEnvironment} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
+import {stripFileScheme} from "../scripts/browser-diagnostics.mjs";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -53,6 +54,13 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
     if (signal?.aborted) abort();
   });
 }
+/** Local sources arrive as paths, @-paths or file: URLs; HTTP(S) passes
+ * through untouched. file: URLs must be stripped before resolve, which would
+ * otherwise mangle them onto the cwd ("<cwd>/file:/abs/path"). */
+export function resolveRenderSource(source: string, cwd: string): string {
+  if (/^https?:\/\//i.test(source)) return source;
+  return path.resolve(cwd, stripFileScheme(source.replace(/^@/, "")));
+}
 const captureQueue = createRenderQueue();
 /** One trusted capture for other bounded tools (visual_diff). The PNG is
  * copied to `destination`, which the caller owns; staging stays outside the
@@ -64,7 +72,7 @@ export async function captureToFile(params: { source: string; width: number; hei
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-render-"));
     await fs.chmod(tempRoot, 0o700);
     const staged = path.join(tempRoot, "capture.png");
-    const source = /^https?:\/\//i.test(params.source) ? params.source : path.resolve(cwd, params.source.replace(/^@/, ""));
+    const source = resolveRenderSource(params.source, cwd);
     const details = JSON.parse((await runCapture({ ...params, source, output: "image" }, staged, tempRoot, cwd, signal)).trim());
     if (!details.output) throw new Error("Render produced no image");
     const stat = await fs.lstat(staged);
@@ -93,7 +101,7 @@ export default function (pi: any) {
     }),
     async execute(_id: any, p: any, signal: any, _update: any, ctx: any) {
       if (p.kind !== "http")
-        p = { ...p, target: path.resolve(ctx.cwd, p.target.replace(/^@/, "")) };
+        p = { ...p, target: resolveRenderSource(p.target, ctx.cwd) };
       const r = await runManagedCommand(
         `${quote(process.execPath)} ${quote(path.join(scripts, "wait-condition.mjs"))} ${quote(encode(p))}`,
         ctx.cwd,
@@ -178,7 +186,7 @@ export default function (pi: any) {
         if (!/^https?:\/\//i.test(p.source))
           p = {
             ...p,
-            source: path.resolve(ctx.cwd, p.source.replace(/^@/, "")),
+            source: resolveRenderSource(p.source, ctx.cwd),
           };
         const captureResult = await runCapture(p, stagedOutput, tempRoot, ctx.cwd, signal);
         const details = JSON.parse(captureResult.trim());

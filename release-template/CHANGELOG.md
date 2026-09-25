@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.8 — 2026-09-26
+
+Port of session-evidenced live fixes that were rejecting legitimate work. The self-mutation guard now allows harness-instructed `subagent-artifacts` writes under session directories while transcripts and session state stay protected; the child file verifier stops flagging out-of-tree helper writes and `.pi/subagents` artifact writes as out-of-scope edits; render sources accept `file:` URLs without mangling them onto the working directory; todo batch recovery coerces numeric-string ids before validation; and project test checks no longer mistake `curl`/`wget` write-out flags for watch mode. Regression tests cover each fix.
+
 ## 0.10.7 — 2026-09-26
 
 Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.

@@ -1,4 +1,20 @@
 // Bounded diagnostics shared by the browser runner and its regression fixtures.
+import { fileURLToPath } from "node:url";
+// Models pass file: URLs as local render sources; path.resolve would mangle
+// them onto the cwd ("<cwd>/file:/abs/path"). Normalize to a plain path
+// (fragment preserved for HTML routes). Non-local hosts stay untouched so
+// they fail visibly instead of resolving to a wrong local file.
+export function stripFileScheme(source) {
+  if (typeof source !== "string" || !/^file:/i.test(source)) return source;
+  try {
+    const url = new URL(source);
+    if (url.protocol.toLowerCase() !== "file:") return source;
+    if (url.hostname && url.hostname.toLowerCase() !== "localhost") return source;
+    return fileURLToPath(url) + url.hash;
+  } catch {
+    return source;
+  }
+}
 export function safeBrowserUrl(raw) {
   try {
     const url = new URL(raw);

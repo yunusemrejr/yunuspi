@@ -140,8 +140,12 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
   const firstCommand = commandTokens.findIndex(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
   if (firstCommand < 0) return { reason: 'only environment assignments, no command' };
   const tokens = commandTokens.slice(firstCommand);
-  if (tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|-w|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return { reason: 'watch/list/help/dry-run/skip-test flags do not verify behavior' };
   const executable = path.basename(tokens[0]);
+  // Bare -w is watch mode for JS runners (mocha) but --write-out/--wait for
+  // HTTP clients: declared `curl -w '%{http_code}'` status assertions verify
+  // behavior and must not be mistaken for watch mode.
+  const watchShort = !/^(?:curl|wget|wget2)$/.test(executable) && tokens.some(t => t === '-w');
+  if (watchShort || tokens.some(t => /^(?:--watch(?:All)?(?:=true)?|--help|-h|--version|--listTests|--collect-only|--list(?:-tests)?|-list|--passWithNoTests|--dry-run|--no-run|-DskipTests(?:=true)?|-Dmaven\.test\.skip(?:=true)?)$/.test(t))) return { reason: 'watch/list/help/dry-run/skip-test flags do not verify behavior' };
   if (/^(?:sh|bash|zsh|dash|ksh|fish)$/.test(executable)) {
     // A shell argv can hide composition (-c/-s), so shells are banned as
     // general runners — except two honest shapes whose exit IS the check:

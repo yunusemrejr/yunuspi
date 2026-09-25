@@ -67,5 +67,8 @@ try {
  const chain=expandCommonTask({commonTask:'SHARED',chain:[{agent:'a',task:'A'},{agent:'b'},{parallel:[{agent:'c',task:'C'}]},{expand:'x',parallel:{agent:'d',task:'{item}'}}]});
  assert.match(chain.chain[1].task,/\{previous\}/);assert.match(chain.chain[2].parallel[0].task,/SHARED/);assert.match(chain.chain[3].parallel.task,/\{item\}/);
  for(const input of [{commonTask:''},{commonTask:2,agent:'a'},{commonTask:'x',action:'status'},{commonTask:'x',workflowScript:'x'}]) assert.throws(()=>expandCommonTask(input));
+ const scratch=path.join(os.tmpdir(),'pi-file-contract-helper-'+Date.now()+'.mjs');
+ assert.equal(verifyObservedWriteScope(contract,nativeWrite(scratch),root)[0].status,'not-applicable','out-of-tree helper writes are unattributed, like shell writes');
+ assert.equal(verifyObservedWriteScope(contract,nativeWrite('.pi/subagents/run.md'),root)[0].status,'not-applicable','harness artifact writes are unattributed runtime data');
  console.log('PASS: independent file baseline checks, bounds, scripts, fragments, missing baseline, native shared brief fan-out/chain normalization');
 }finally{fs.rmSync(root,{recursive:true,force:true});}

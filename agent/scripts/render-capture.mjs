@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { inspectPageState } from "./render-page-state.mjs";
 import { inspectDesignState } from "./render-design-state.mjs";
 import { inspectNoiseState } from "./render-noise-state.mjs";
-import { renderNavigationFailure, safeBrowserUrl } from "./browser-diagnostics.mjs";
+import { renderNavigationFailure, safeBrowserUrl, stripFileScheme } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
@@ -14,6 +14,7 @@ export async function resolveLocalRenderSource(source) {
   // A literal '#' in an existing filename wins. Only a missing HTML path is
   // interpreted as a route fragment; the filesystem and asset boundary never
   // include that fragment, which belongs exclusively to the browser URL.
+  source = stripFileScheme(source);
   try { return { target: await fs.realpath(source), fragment: "" }; }
   catch (error) {
     const hash = source.indexOf("#");

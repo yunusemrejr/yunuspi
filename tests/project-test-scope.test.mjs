@@ -276,3 +276,15 @@ test('project tests and quality review share one workspace revision per change',
  revision.seed(7);assert.equal(revision.current,7,'restored revisions seed the shared counter');
  revision.seed(3);assert.equal(revision.current,7,'seeding never moves it backwards');
 });
+test('bare -w rejects watch mode but keeps curl/wget write-out checks',()=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-curlw-'));
+ try{
+  // Live sessions declare HTTP status assertions via curl -w '%{http_code}';
+  // -w is --write-out there, watch mode only for JS runners.
+  assert.ok(projectCheckCommand(`curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9/app.css`,cwd,true));
+  assert.ok(projectCheckCommand('wget -q -O /dev/null http://127.0.0.1:9/app.css',cwd,true));
+  assert.equal(projectCheckCommand(`curl -sS -w '%{http_code}' http://127.0.0.1:9/app.css`,cwd),null,'undeclared curl is still not a test runner');
+  assert.equal(projectCheckCommand('mocha -w',cwd,true),null,'mocha -w is still watch mode');
+  assert.equal(projectCheckCommand('jest --watchAll',cwd,true),null);
+ }finally{fs.rmSync(cwd,{recursive:true,force:true});}
+});
