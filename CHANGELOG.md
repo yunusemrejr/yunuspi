@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.7 — 2026-09-26
+
+Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.
+
+Edit-time cues get sharper and less repetitive. A catch or except block that only logs now cues the same contract check as an empty catch, mirroring the explicit code-quality rule. Hype-density cues nest: a buzzword stack subsumes the stock cluster, and the generated-prose cue needs two distinct tell kinds, so one buzzword-dense paragraph reports once with the strongest check instead of three times.
+
+This release also repairs the 0.10.6 test mirror: the committed `video-motion-upgrade` suite is now mirrored to the release template, and the template changelog is synchronized with the root changelog.
+
 ## 0.10.6 — 2026-09-26
 
 Motion graphics, code-to-video and sound take a substantial step forward. The Remotion template gains four progress-driven primitives — `LowerThird` speaker captions, `Counter` jitter-free counting numbers, `ProgressBar` stepped story tracking and `Callout` diagram annotations — plus a dependency-free `src/timing.ts` (`beat`, `pulse`, `beatCount`, `loopProgress`, `pingpong`, `hold`, re-exported by `motion.ts`) so picture and the `audio_synth` bed share one clock, and vertical `slideup`/`slidedown` scene entries alongside the existing transitions.
@@ -29,10 +37,6 @@ Stale state no longer leaks across session switches. Checkpoints and session sig
 Tool and hook integrity fixes. Session-hook guidance no longer names the retired `context_code` tool: the empty-search hook points at identifier-ranked `symbol_search` with a shorter identifier, and repeated-read guidance offers only registered structural tools. A new regression test pins every hook rule binding and every guidance tool reference to the registered tool universe.
 
 The installed-verifier manifest now registers the live `completion-gate.ts` and `requirement-ledger.ts` libraries, closing the integrity blind spot for deploy/completion gating and the requirement ledger. The capability inventory is regenerated for the current tool registrations.
-
-Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.
-
-Edit-time cues get sharper and less repetitive. A catch or except block that only logs now cues the same contract check as an empty catch, mirroring the explicit code-quality rule. Hype-density cues nest: a buzzword stack subsumes the stock cluster, and the generated-prose cue needs two distinct tell kinds, so one buzzword-dense paragraph reports once with the strongest check instead of three times.
 
 Anti-slop UI/UX coverage expands across every layer. Sixteen new edit-time cues flag pill clusters, hype badges, gradient text, glass panels, oversized type, rounded excess, emoji chrome, fake terminals, missing alt, unnamed icon buttons, skipped headings, autoplaying carousels, custom cursors, transformation CTAs, vague headings and placeholder identities — each with negative controls so legitimate filters, code samples, docs examples and single functional treatments stay quiet. Rendered audits match: `design_audit` counts oversized type and heavy radius, while the noise scanner reports missing alt, unnamed controls, emoji chrome, hype badge clusters and fake terminals with locations. Rendered findings join the quality-review cue set, the interface rubric and design preflight name every family, and de-slop plus ornament-specific complaints route the anti-slop workflows.
 

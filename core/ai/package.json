@@ -1,6 +1,6 @@
 {
   "name": "@yunuspi/ai",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "description": "Unified LLM API with automatic model discovery and provider configuration",
   "type": "module",
   "main": "./dist/index.js",
@@ -58,7 +58,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.123.0",
     "@aws-sdk/client-bedrock-runtime": "3.1048.0",
-    "@yunuspi/telemetry": "0.10.6",
+    "@yunuspi/telemetry": "0.10.7",
     "@google/genai": "1.52.0",
     "@smithy/node-http-handler": "4.7.3",
     "http-proxy-agent": "7.0.2",

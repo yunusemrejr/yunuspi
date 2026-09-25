@@ -1,14 +1,44 @@
 # Changelog
 
+## 0.10.7 — 2026-09-26
+
+Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.
+
+Edit-time cues get sharper and less repetitive. A catch or except block that only logs now cues the same contract check as an empty catch, mirroring the explicit code-quality rule. Hype-density cues nest: a buzzword stack subsumes the stock cluster, and the generated-prose cue needs two distinct tell kinds, so one buzzword-dense paragraph reports once with the strongest check instead of three times.
+
+This release also repairs the 0.10.6 test mirror: the committed `video-motion-upgrade` suite is now mirrored to the release template, and the template changelog is synchronized with the root changelog.
+
+## 0.10.6 — 2026-09-26
+
+Motion graphics, code-to-video and sound take a substantial step forward. The Remotion template gains four progress-driven primitives — `LowerThird` speaker captions, `Counter` jitter-free counting numbers, `ProgressBar` stepped story tracking and `Callout` diagram annotations — plus a dependency-free `src/timing.ts` (`beat`, `pulse`, `beatCount`, `loopProgress`, `pingpong`, `hold`, re-exported by `motion.ts`) so picture and the `audio_synth` bed share one clock, and vertical `slideup`/`slidedown` scene entries alongside the existing transitions.
+
+Timeline checks get stricter where it matters and stay silent otherwise. `video_project check` validates the new transitions, warns when `musicDuckedVolume` sits at or above `musicVolume` or a caption line runs past ~24 characters/s (`captionPace` in the template is the single source), and bounds mix volumes and per-sfx volume. `narration_tts synthesize` accepts a pronunciation `lexicon` (`{"Vaswani": "Vas-wah-nee"}`), applied to the spoken text only while `video.json` keeps the display spelling for captions and on-screen text; per-scene `lexiconEdits` report what changed.
+
+Procedural sound grows without changing existing bytes. The synth gains a `drums` music layer (kick on beats 1 and 3, eighth hats, intensity-automated, off by default so historical specs render identically) and `downlifter`/`pop` effects. `music_compose` auditions add band-limited `square`/`saw` oscillators beside sine/triangle, per-track `pan`, and `stereo:true` constant-power mixes; mono sine/triangle output is byte-identical to before.
+
+Six session-hook rules carry the video review loop: timeline checks, render review, QA review, narration fit, synth balance and timeline-compose review fire once per session on their tools. The tool-source inventory now enumerates the `video-studio.ts` factory, so `video_project`, `video_render`, `video_qa`, `narration_tts` and `audio_synth` appear in the capability inventory and the hook bindings verify against it. Skills (`remotion-video`, `code-first-video` narration/sound and QA references, `procedural-audio`, `music-composition`) document the new primitives, beat sync, lexicon, drums and waveforms. Eight new `video-motion-upgrade` tests pin timing, pace, lexicon, drum determinism, score stereo imaging, hooks and template wiring.
+
+## 0.10.5 — 2026-09-26
+
+Ports the local runtime's stream-idle hotfix into the reviewed tree. The main agent reaches providers through `ModelRuntime.stream`/`streamSimple`, and without the idle wrapper a stalled provider stream hangs the turn silently (measured: 14 minutes with no error until the user aborts). Both paths now run inside the shared `piWithStreamIdle` budget, so a stalled stream surfaces as a stream error and retry/recovery runs instead. The port is byte-identical to the production-proven live hotfix; this also unblocks local installation parity for the 0.10.4 edge-case hardening.
+
+## 0.10.4 — 2026-09-26
+
+Edge-case hardening across the harness: silent failures now leave traces, corrupt state degrades instead of lying, and session switches start clean windows.
+
+Failures that used to vanish are now visible. The harness event bus reports handler errors that have no subscribers instead of dropping them. Skill discovery keeps the skills it already collected when a directory cannot be read and records which subtree stopped. Sibling peer scans that fail report truncation rather than an empty peer list, so overlap warnings are not silently suppressed. Checkpoint state reads distinguish a missing file from corruption or permission faults, and failed state writes leave a shadow trace plus a throttled warning instead of pretending the restore point was saved. Terminate tracking in session signals and reminders tolerates tool results that never arrive.
+
+Budgets and memory fail closed instead of open. An unreadable or corrupt subagent economy config keeps the last-good ceilings and flags the failure instead of silently relaxing to defaults; invalid values still throw their actionable validation error. Memory recall failures are recorded separately from genuinely empty results and surface in memory status. Run-history storage faults are flagged instead of reading as clean history, and every child wall-clock timeout now cools its route in shared provider health so the next selection can skip a stalling route.
+
+Stale state no longer leaks across session switches. Checkpoints and session signals share one reset path for session start, switch, and branch events, so strikes, pending notices, thresholds, and terminating-tool tracking cannot bleed into the next session. Context-profile disk state is normalized field by field on load, so a corrupt file degrades to defaults instead of breaking the diagnostics tool. A second deploy in one session disposes the previous deploy notice before registering its own.
+
 ## 0.10.3 — 2026-09-26
 
 Tool and hook integrity fixes. Session-hook guidance no longer names the retired `context_code` tool: the empty-search hook points at identifier-ranked `symbol_search` with a shorter identifier, and repeated-read guidance offers only registered structural tools. A new regression test pins every hook rule binding and every guidance tool reference to the registered tool universe.
 
 The installed-verifier manifest now registers the live `completion-gate.ts` and `requirement-ledger.ts` libraries, closing the integrity blind spot for deploy/completion gating and the requirement ledger. The capability inventory is regenerated for the current tool registrations.
 
-Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.
-
-Edit-time cues get sharper and less repetitive. A catch or except block that only logs now cues the same contract check as an empty catch, mirroring the explicit code-quality rule. Hype-density cues nest: a buzzword stack subsumes the stock cluster, and the generated-prose cue needs two distinct tell kinds, so one buzzword-dense paragraph reports once with the strongest check instead of three times.
+Anti-slop UI/UX coverage expands across every layer. Sixteen new edit-time cues flag pill clusters, hype badges, gradient text, glass panels, oversized type, rounded excess, emoji chrome, fake terminals, missing alt, unnamed icon buttons, skipped headings, autoplaying carousels, custom cursors, transformation CTAs, vague headings and placeholder identities — each with negative controls so legitimate filters, code samples, docs examples and single functional treatments stay quiet. Rendered audits match: `design_audit` counts oversized type and heavy radius, while the noise scanner reports missing alt, unnamed controls, emoji chrome, hype badge clusters and fake terminals with locations. Rendered findings join the quality-review cue set, the interface rubric and design preflight name every family, and de-slop plus ornament-specific complaints route the anti-slop workflows.
 
 ## 0.10.1 — 2026-09-26
 
