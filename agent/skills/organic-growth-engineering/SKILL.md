@@ -9,6 +9,8 @@ Use when creating or materially changing public landing pages, articles, documen
 
 Start with the audience's task and the site's existing information architecture. Prefer original answers, examples, resources and honest limitations over thin keyword pages. Link related material where it helps the reader continue; use stable URLs, descriptive anchors and unobtrusive sharing. Preserve established canonicals and public/private boundaries.
 
+Hold new public pages to the anti-slop necessity test before optimizing their discovery: every section, widget, claim and effect must earn its place for this reader (`anti-ai-slop` skill, `docs/ANTI-SLOP-CHECKLIST.md` core principle and agent decision test). Never ship stock generated-UI ornaments, template landing sequences, invented proof or boilerplate copy to get there faster; a short honest page outranks a long performed one.
+
 Read [content and measurement](references/content-measurement.md) for durable growth design; [change-driven discovery](references/change-discovery.md) for sitemaps and IndexNow; [machine-readable publishing](references/machine-readable.md) for semantic HTML, structured data and Markdown alternatives. Load only what the current work needs.
 
 Generate public representations from the same source and test that their claims agree. Important text should be accessible without expensive client execution. Metadata and structured data describe visible facts; never fabricate ratings, authorship or freshness. Keep private material out of feeds, exports and discovery files.

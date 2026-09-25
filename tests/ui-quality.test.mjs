@@ -97,6 +97,38 @@ test('anti-boilerplate intent routes the shared worker and parent policy without
   assert.match(reviewAspects(['Status.tsx']).find(a=>a.id==='interface').rubric,/learned similarity only select inspection targets/);
 });
 
+test('redesign and generic-look prompts route anti-slop doctrine instead of nothing',()=>{
+  for(const prompt of ['Redesign our pricing page','Restyle the homepage','Polish the homepage and fix the links','The homepage looks generic, fix it','Make the site look less generic','Make the homepage look more premium'])
+    assert.ok(routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+  for(const prompt of ['Rebuild the site search index','Rebuild the container image','Do not redesign the homepage','Explain how to redesign a website','> Redesign the homepage'])
+    assert.ok(!routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+});
+
+test('log-only error handlers cue the same contract check as an empty catch',()=>{
+  const code=(file,text)=>authoredReviewSignals(file,[text]).map(s=>s.key);
+  for(const [file,text] of [['a.js','try{save()}catch(e){console.warn(e)}'],['a.ts','try{save()}catch{console.error("failed")}'],['a.py','try:\n    save()\nexcept Exception:\n    pass\nprint("done")\n'],['a.py','try:\n    save()\nexcept Exception:\n    logger.exception("failed")\nprint("done")\n']])
+    assert.ok(code(file,text).includes('swallowed-catch'),text);
+  assert.ok(code('a.js','try{save()}catch(e){}').includes('empty-catch'));
+  assert.ok(!code('a.js','try{save()}catch(e){}').includes('swallowed-catch'));
+  for(const [file,text] of [['a.js','try{save()}catch(e){console.warn(e);throw e}'],['a.js','try{save()}catch(e){logger.error(e)}'],['a.js','try{save()}catch(e){report(e)}'],['a.py','try:\n    save()\nexcept Exception:\n    pass\n    retry()\n']])
+    assert.ok(!code(file,text).includes('swallowed-catch'),text);
+});
+
+test('hype-density cues report once with the stronger check',()=>{
+  const dense='Our seamless, revolutionary, cutting-edge, robust platform.';
+  assert.ok(keys('p.md',dense).includes('prose-buzzword-stack'));
+  assert.ok(!keys('p.md',dense).includes('prose-stock-cluster'),'buzzword stack subsumes the stock cluster');
+  const stockOnly="In today's fast-paced world, unlock the full potential of our seamless all-in-one platform.";
+  assert.ok(keys('p.md',stockOnly).includes('prose-stock-cluster'));
+  assert.ok(!keys('p.md',stockOnly).includes('prose-buzzword-stack'),'stock-only copy keeps the weaker cue');
+  // One tell kind repeated is not generated-sounding patterns: stock phrases
+  // alone stay with the hype-density cue even past 120 words.
+  const sentences=['Teams leverage the seamless platform for robust synergy daily.','A robust workflow with seamless leverage and quiet synergy helps.','Engineers keep synergy high with seamless, robust leverage.','The seamless path to robust synergy starts with leverage.','Operators report robust synergy from seamless leverage weekly.','Our leverage compounds when synergy stays seamless and robust.'];
+  const long=sentences.join(' ').repeat(4);
+  assert.ok(keys('p.md',long).includes('prose-buzzword-stack'));
+  assert.ok(!keys('p.md',long).includes('prose-ai-tells'),'single-kind tells do not compound');
+});
+
 test('DOM-generating scripts get markup-shape cues and promote the interface aspect',()=>{
   const dom='const card = `<div class="badge" onClick="open()"><i class="pulsing-dot"></i>Live</div><a href="#">more</a>`;';
   assert.ok(keys('app.js',dom).includes('ui-live-pill'));

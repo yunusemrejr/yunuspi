@@ -190,11 +190,6 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       out.push({key:'ui-template-sequence',skill:'anti-ai-slop',check:`Section headings follow the stock landing template (${families} of trusted-by, features, how-it-works, testimonials, pricing, FAQ, final CTA). Order sections by this product's own argument: the one thing it does, proof specific to it, the action. Drop sections that exist only because templates have them.`});
   }
   if (prose) {
-    const stock = [/\bin today.s (?:fast.paced|rapidly evolving|digital)\b/i,/\bunlock (?:the |your )?(?:full |true )?potential\b/i,/\bseamless(?:ly)?\b/i,/\brevolutionary\b/i,/\bcutting.edge\b/i,/\ball.in.one (?:solution|platform)\b/i];
-    if (stock.filter(re=>re.test(text)).length >= 3)
-      out.push({key:'prose-stock-cluster',skill:'natural-editorial-writing',check:'Several stock promotional phrases occur together. Replace unsupported generalities with specific behavior and reader value, preserving the requested voice and required wording. This is not evidence of AI authorship.'});
-    if (/\blorem ipsum\b/i.test(text))
-      out.push({key:'placeholder-copy',skill:'anti-ai-slop',check:'Placeholder copy was observed. Before delivery, confirm whether a mockup was requested; otherwise use supplied content or clearly disclose missing facts. Never invent testimonials, customers or performance numbers to fill space.'});
     // Reader-visible text only: front matter, inline code, link targets and
     // embedded script/style are not copy, and hrefs are not claims.
     const visible = text.replace(/^---[\s\S]*?\n---(\n|$)/,'').replace(/`[^`\n]*`/g,' ')
@@ -203,6 +198,15 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     const inDocs = DOCS_PATH.test(file);
     const policyPage = POLICY_FILE.test(file);
     const push = (key: string, skill: string, check: string) => out.push({key,skill,check});
+    // Hype-density cues nest: a buzzword stack subsumes the stock cluster, so
+    // a buzzword-dense paragraph reports once with the stronger check while a
+    // stock-only paragraph still reports the weaker one.
+    const buzzHits = new Set(BUZZWORDS.filter(w=>wordRe(w).test(visible))).size;
+    const stock = [/\bin today.s (?:fast.paced|rapidly evolving|digital)\b/i,/\bunlock (?:the |your )?(?:full |true )?potential\b/i,/\bseamless(?:ly)?\b/i,/\brevolutionary\b/i,/\bcutting.edge\b/i,/\ball.in.one (?:solution|platform)\b/i];
+    if (buzzHits < 4 && stock.filter(re=>re.test(text)).length >= 3)
+      out.push({key:'prose-stock-cluster',skill:'natural-editorial-writing',check:'Several stock promotional phrases occur together. Replace unsupported generalities with specific behavior and reader value, preserving the requested voice and required wording. This is not evidence of AI authorship.'});
+    if (/\blorem ipsum\b/i.test(text))
+      out.push({key:'placeholder-copy',skill:'anti-ai-slop',check:'Placeholder copy was observed. Before delivery, confirm whether a mockup was requested; otherwise use supplied content or clearly disclose missing facts. Never invent testimonials, customers or performance numbers to fill space.'});
     if (!inDocs) {
       const weakHits = new Set(LEAK_WEAK.filter(w=>wordRe(w).test(visible))).size;
       if (LEAK_STRONG.test(visible) || DESIGN_LEAK.test(visible) || weakHits >= 2)
@@ -212,7 +216,7 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       if (AI_PROVENANCE.test(visible))
         push('prose-ai-provenance','copywriting','An AI-provenance claim occurs (AI-powered, AI-assisted, AI-generated). Keep it only when the reader chose this product for AI; otherwise it is clutter about production, not value. Describe the capability, not how the words were made.');
     }
-    if (new Set(BUZZWORDS.filter(w=>wordRe(w).test(visible))).size >= 4)
+    if (buzzHits >= 4)
       push('prose-buzzword-stack','natural-editorial-writing','Four or more promotional buzzwords occur together. Replace stacked adjectives with one specific, verifiable claim each; buzzword density reads as generated even when every word is true.');
     if (SELF_PRAISE.test(visible))
       push('prose-self-praise','copywriting','Self-congratulatory copy occurs (careful, thoughtful, elegant or beautiful craft claims). Cut praise of the work itself; demonstrate the quality in the content and let the reader conclude it.');
@@ -230,7 +234,10 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if (!inDocs) {
       const report = proseReport(visible.replace(/<[^>]+>/g,' '));
       const tells = report.words >= 120 ? report.findings.filter(f=>['stock-phrase','dash-density','rule-of-three','repeated-opener','boilerplate-heading'].includes(f.rule)) : [];
-      if (tells.length >= 3)
+      // Breadth, not repetition: stock phrases alone are already covered by
+      // the hype-density cues above, so this cue needs two distinct tell
+      // kinds before it reports generated-sounding patterns.
+      if (tells.length >= 3 && new Set(tells.map(f=>f.rule)).size >= 2)
         push('prose-ai-tells','natural-editorial-writing',`Generated-sounding prose patterns: ${[...new Set(tells.map(f=>f.message))].slice(0,4).join(' · ').slice(0,420)}. Rewrite in the product's own voice with concrete specifics.`);
     }
     if (metricBare)

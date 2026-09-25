@@ -175,6 +175,9 @@ test('interface policy is a standing constraint, with baseline and motion eviden
  const rubric=reviewAspects(['ui.css'],'Improve the interface')[0].rubric;
  assert.match(rubric,/generic lightbulb branding/);assert.match(rubric,/muddy orange/);
  assert.match(rubric,/baseline and final captures/);assert.match(rubric,/constraints as blocking/);
+ assert.match(rubric,/docs\/ANTI-SLOP-CHECKLIST\.md/,'reviewers get a resolvable checklist path, not just a name');
+ const content=reviewAspects(['page.md'],'Write launch copy').find(a=>a.id==='content').rubric;
+ assert.match(content,/buzzword stacks/);assert.match(content,/ANTI-SLOP-CHECKLIST\.md/);
 });
 
 test('an unavailable UI reviewer cannot erase observed policy cues behind a passing peer', async t => {

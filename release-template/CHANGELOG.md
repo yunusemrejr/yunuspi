@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.3 — 2026-09-26
+
+Tool and hook integrity fixes. Session-hook guidance no longer names the retired `context_code` tool: the empty-search hook points at identifier-ranked `symbol_search` with a shorter identifier, and repeated-read guidance offers only registered structural tools. A new regression test pins every hook rule binding and every guidance tool reference to the registered tool universe.
+
+The installed-verifier manifest now registers the live `completion-gate.ts` and `requirement-ledger.ts` libraries, closing the integrity blind spot for deploy/completion gating and the requirement ledger. The capability inventory is regenerated for the current tool registrations.
+
+Quality doctrine now reaches agents before the slop ships. Redesign, restyle and polish prompts plus generic-look complaints ("the homepage looks generic") route the anti-ai-slop workflow proactively instead of matching nothing; the website-build skill carries the necessity test and checklist pointer, so the workflow that wins the slot for plain website and blog builds teaches subtraction first. Review rubrics point at the resolvable `docs/ANTI-SLOP-CHECKLIST.md` path, and the content rubric holds promotional copy to specific supported claims over buzzword stacks, invented metrics and AI-provenance clutter.
+
+Edit-time cues get sharper and less repetitive. A catch or except block that only logs now cues the same contract check as an empty catch, mirroring the explicit code-quality rule. Hype-density cues nest: a buzzword stack subsumes the stock cluster, and the generated-prose cue needs two distinct tell kinds, so one buzzword-dense paragraph reports once with the strongest check instead of three times.
+
 ## 0.10.1 — 2026-09-26
 
 UI review now enforces standing anti-slop constraints through the existing checkpoint. Large edits and command-generated source retain bounded checks; interactive browser captures and `render_see` share findings. Visible `aria-hidden` SVG branding, full-width heading dots and decorative markers inside large live regions no longer escape inspection. Interface reviewers must read changed implementation source, budget representative screenshots, and compare baseline/final evidence for visual, 3D and motion upgrades. Unaddressed policy cues block acceptance unless repaired or dismissed with specific evidence; they remain separate from independent reviewer reports.
