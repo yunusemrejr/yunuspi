@@ -173,3 +173,60 @@ test("oversized embedded resources return a precise tool failure independent of 
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("unreachable remote renders fail before browser launch with the navigation shape", { timeout: 60000 }, async () => {
+  const { renderCapture, probeRemoteReadiness } = await load("scripts/render-capture.mjs");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "render-prefail-"));
+  const server = http.createServer((req, res) => {
+    if (req.url === "/boom") { res.statusCode = 500; res.end("unhappy"); return; }
+    if (req.url === "/slow") { setTimeout(() => { try { res.end("late"); } catch {} }, 400); return; }
+    res.setHeader("Content-Type", "text/html");
+    res.end("<!doctype html><title>Probe fixture</title><h1>Up</h1>");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  // A port bound then released here is guaranteed closed: nothing else claims it.
+  const closed = await new Promise(resolve => {
+    const held = http.createServer();
+    held.listen(0, "127.0.0.1", () => { const port = held.address().port; held.close(() => resolve(port)); });
+  });
+  const dead = `http://127.0.0.1:${closed}/fixture.html`;
+  const oldChannel = process.env.PI_RENDER_BROWSER_CHANNEL;
+  const assertNavigationRefused = error => {
+    assert.equal(error.failure?.stage, "navigation");
+    assert.equal(error.failure?.kind, "unreachable");
+    assert.deepEqual(error.failure?.codes, ["ECONNREFUSED"]);
+    return true;
+  };
+  try {
+    // Any HTTP response — even an error status — proves a listener.
+    await probeRemoteReadiness(new URL(base + "/"), 5000);
+    await probeRemoteReadiness(new URL(base + "/boom"), 5000);
+    // A probe that outlasts its budget proceeds instead of failing: slow is not down.
+    await probeRemoteReadiness(new URL(base + "/slow"), 50);
+    // A refused connection fails with the structured navigation shape...
+    await assert.rejects(probeRemoteReadiness(new URL(dead), 5000), assertNavigationRefused);
+    // ...before any browser launch is attempted: the channel is bogus, so a
+    // launch attempt would throw a startup error instead of this shape.
+    process.env.PI_RENDER_BROWSER_CHANNEL = "definitely-not-a-browser";
+    await assert.rejects(
+      renderCapture({ source: dead, output: "text", width: 800, height: 600, timeoutMs: 8000 },
+        path.join(scratch, "refused.png")),
+      assertNavigationRefused);
+    // And a live server still reaches launch: the probe never blocks healthy targets.
+    await assert.rejects(
+      renderCapture({ source: base + "/", output: "text", width: 800, height: 600, timeoutMs: 8000 },
+        path.join(scratch, "live.png")),
+      error => {
+        assert.equal(error.failure, undefined);
+        assert.match(String(error.message), /browser startup failure/);
+        return true;
+      });
+  } finally {
+    if (oldChannel === undefined) delete process.env.PI_RENDER_BROWSER_CHANNEL;
+    else process.env.PI_RENDER_BROWSER_CHANNEL = oldChannel;
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
