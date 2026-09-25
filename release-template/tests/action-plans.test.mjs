@@ -131,3 +131,31 @@ test('todo recovers only unambiguous batch operations that omit their action bef
  assert.equal(valid(prepareTodoArguments(ambiguous)),false);
  const correct={action:'list'};assert.equal(prepareTodoArguments(correct),correct,'valid calls pass through untouched');
 });
+
+test('todo dependency and child refusals name the blocking tasks',()=>{
+ const empty={tasks:[],nextId:1};
+ const made=applyTaskMutation(empty,'batch',{operations:[
+  {action:'create',id:-1,subject:'Rebuild UI shell'},
+  {action:'create',id:-2,subject:'Refine backend surface'},
+  {action:'create',subject:'Verify: build and run',blockedBy:[-1,-2]},
+ ]});
+ assert.equal(made.op.kind,'batch');
+ const refused=applyTaskMutation(made.state,'update',{id:3,status:'in_progress'});
+ assert.equal(refused.op.kind,'error');
+ assert.match(refused.op.message,/Complete dependencies before starting or completing this task/);
+ assert.match(refused.op.message,/#1 "Rebuild UI shell" \(pending\)/);
+ assert.match(refused.op.message,/#2 "Refine backend surface" \(pending\)/);
+ // Ancestor-held blockers are attributed to the holding parent.
+ const sub=applyTaskMutation(made.state,'create',{subject:'Sub-verify',parentId:3,status:'in_progress'});
+ assert.equal(sub.op.kind,'error');
+ assert.match(sub.op.message,/via parent #3/);
+ // Completing a parent with unfinished children names them too.
+ const c1=applyTaskMutation(made.state,'update',{id:1,status:'completed'});
+ const c2=applyTaskMutation(c1.state,'update',{id:2,status:'completed'});
+ const withChild=applyTaskMutation(c2.state,'create',{subject:'Sub-verify',parentId:3});
+ assert.equal(withChild.op.kind,'create');
+ const done=applyTaskMutation(withChild.state,'update',{id:3,status:'completed'});
+ assert.equal(done.op.kind,'error');
+ assert.match(done.op.message,/Reopen the parent before adding or reopening unfinished children/);
+ assert.match(done.op.message,/#3 "Verify: build and run" \(completed\) still has unfinished #4 "Sub-verify" \(pending\)/);
+});
