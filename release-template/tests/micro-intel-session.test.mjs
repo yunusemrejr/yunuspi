@@ -91,7 +91,7 @@ test("coding session: every layer does distinct useful work", async () => {
   // 4. Real Smol owner, schema validation and sealing; only transport is mocked.
   const log = ["Build completed and bundles ready.", ...Array(36).fill("Routine compilation background describes ordinary bundling activity and surrounding workspace operations."), "Deployment remains pending verification."].join("\n");
   const lineClient = smol.createSmolPreprocessor({
-    runtime: { version: 2, enabled: true, model: "Qwen3.5-0.8B", endpoint: "http://127.0.0.1:18736/completion", apiKey: "TEST_SYNTHETIC_LOCAL_KEY", execution: "background", timeoutMs: 1000 },
+    runtime: { version: 2, enabled: true, model: "Qwen3.5-0.8B", endpoint: "http://127.0.0.1:18735/completion", apiKey: "TEST_SYNTHETIC_LOCAL_KEY", execution: "background", timeoutMs: 1000 },
     acquireLease: async () => true,
     fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: [2] }) })),
   });
@@ -199,7 +199,7 @@ test("smol and kompress selections stay source-linked under load", async () => {
   const sp = smol.createSmolPreprocessor({
     runtime: {
       version: 2, enabled: true, model: "Qwen3.5-0.8B",
-      endpoint: "http://127.0.0.1:18736/completion",
+      endpoint: "http://127.0.0.1:18735/completion",
       apiKey: "TEST_SMOL_KEY_1234567890abcdef", execution: "background", timeoutMs: 2000,
     },
     acquireLease: async () => true,

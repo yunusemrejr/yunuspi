@@ -21,7 +21,7 @@ import { pathToFileURL } from "node:url";
 import { downloadFile, needleAgentDir } from "./needle-assets.mjs";
 
 export const LOCAL_LM_MODEL = "Qwen3.5-0.8B";
-export const LOCAL_LM_PORT = 18736;
+export const LOCAL_LM_PORT = 18735;
 export const LOCAL_LM_ENDPOINT = `http://127.0.0.1:${LOCAL_LM_PORT}/completion`;
 export const LOCAL_LM_DIRNAME = "qwen3.5-0.8b";
 export const LOCAL_LM_SERVICE = "pi-local-lm.service";
@@ -120,6 +120,16 @@ export async function installLocalLm(options = {}) {
   const { agentDir = needleAgentDir(), fetchImpl = globalThis.fetch, force = false, service = true, onProgress = null } = options;
   const dir = localLmDir(agentDir);
   const notes = [];
+  // Verified weights and runtime with a stale descriptor (for example an
+  // endpoint change between releases) are refreshed in place, not re-downloaded.
+  const current = force ? undefined : await verifyLocalLm(dir, true);
+  if (current && !current.ok && current.problems.every((problem) => /runtime\.json/.test(problem))) {
+    let apiKey = "";
+    try { apiKey = (await readFile(join(dir, "api-key"), "utf8")).trim(); } catch { /* new key below */ }
+    if (!/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)) { apiKey = randomBytes(32).toString("hex"); await writeFile(join(dir, "api-key"), `${apiKey}\n`, { mode: 0o600 }); }
+    await writeFile(join(dir, "runtime.json"), `${JSON.stringify({ version: 2, enabled: true, model: LOCAL_LM_MODEL, endpoint: LOCAL_LM_ENDPOINT, apiKey, execution: "background", timeoutMs: 5000 }, null, 2)}\n`, { mode: 0o600 });
+    notes.push("refreshed the runtime descriptor");
+  }
   if (force || !(await verifyLocalLm(dir, true)).ok) {
     await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
     const stage = join(dirname(dir), `.${LOCAL_LM_DIRNAME}-stage-${process.pid}-${Date.now()}`);
@@ -161,6 +171,7 @@ export async function installLocalLm(options = {}) {
       let current = "";
       try { current = await readFile(unitPath, "utf8"); } catch { /* new unit */ }
       if (current !== text) { await writeFile(unitPath, text, { mode: 0o644 }); systemctl("daemon-reload"); }
+      systemctl("reset-failed", LOCAL_LM_SERVICE);
       const started = systemctl("enable", "--now", LOCAL_LM_SERVICE);
       if (current && current !== text) systemctl("restart", LOCAL_LM_SERVICE);
       notes.push(started.status === 0 ? `service ${LOCAL_LM_SERVICE} enabled` : `service start failed: ${String(started.stderr).slice(0, 160)}`);

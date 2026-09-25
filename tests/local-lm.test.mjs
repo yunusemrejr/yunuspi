@@ -16,12 +16,12 @@ const assets = await load('extensions/lib/local-lm-assets.mjs');
 const { cheapMutationScreen } = await load('extensions/lib/micro-intelligence/intent.ts');
 const { createRelevantGuidance } = await load('extensions/lib/relevant-guidance.ts');
 
-const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18736/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
+const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18735/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
 const probs = (yes, no) => new Response(JSON.stringify({ completion_probabilities: [{ top_logprobs: [{ token: ' yes', logprob: Math.log(yes) }, { token: ' no', logprob: Math.log(no) }] }] }));
 
 test('the runtime descriptor names only the pinned model and loopback endpoint', () => {
   assert.equal(L.validLocalLmRuntime(runtime), true);
-  for (const patch of [{ model: 'SmolLM2-135M-Instruct' }, { endpoint: 'http://127.0.0.1:18735/completion' }, { timeoutMs: 9000 }, { apiKey: 'bad-synthetic' }]) assert.equal(L.validLocalLmRuntime({ ...runtime, ...patch }), false, JSON.stringify(patch));
+  for (const patch of [{ model: 'SmolLM2-135M-Instruct' }, { endpoint: 'http://127.0.0.1:18799/completion' }, { timeoutMs: 9000 }, { apiKey: 'bad-synthetic' }]) assert.equal(L.validLocalLmRuntime({ ...runtime, ...patch }), false, JSON.stringify(patch));
 });
 
 test('judgements return a calibrated P(yes) from the first token and report each inference', async () => {

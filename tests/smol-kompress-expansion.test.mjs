@@ -19,7 +19,7 @@ const intent = await load("extensions/lib/micro-intelligence/intent.ts");
 
 const smolRuntime = {
   version: 2, enabled: true, model: "Qwen3.5-0.8B",
-  endpoint: "http://127.0.0.1:18736/completion",
+  endpoint: "http://127.0.0.1:18735/completion",
   apiKey: "TEST_SMOL_KEY_1234567890abcdef", execution: "background", timeoutMs: 2000,
 };
 

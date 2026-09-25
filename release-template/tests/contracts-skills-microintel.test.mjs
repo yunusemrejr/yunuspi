@@ -76,7 +76,7 @@ test('smol offers carry structured skip reasons on the live gates', async () => 
     // Unsafe content: protected.
     smol.createSmolPreprocessor({}).offer('k2', `${clean} the password is hunter2`.slice(0, 4100), 1);
     // Valid runtime but a short result: too small to benefit.
-    const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18736/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
+    const runtime = { version: 2, enabled: true, model: 'Qwen3.5-0.8B', endpoint: 'http://127.0.0.1:18735/completion', apiKey: 'TEST_LOCAL_KEY_1234567890', execution: 'background', timeoutMs: 2000 };
     smol.createSmolPreprocessor({ runtime }).offer('k3', clean.slice(0, 2000), 1);
   } finally {
     if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior;

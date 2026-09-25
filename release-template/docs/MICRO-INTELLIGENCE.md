@@ -127,7 +127,7 @@ prompt, file, or tool content leaves the machine for Needle.
 
 Qwen3.5-0.8B (Apache-2.0, 4-bit GGUF, about 580 MB with the pinned llama.cpp
 `b10878` server) runs as a loopback-only user service (`pi-local-lm.service`,
-port 18736, API key, four threads, 2 GB memory ceiling). It replaced the
+port 18735, API key, four threads, 2 GB memory ceiling). It replaced the
 SmolLM2-135M selector, which chose at chance level on harness data and almost
 never ran. `agent/extensions/lib/local-lm-assets.mjs
 <status|verify|install|repair|smoke|uninstall>` installs it with pinned

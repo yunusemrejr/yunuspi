@@ -134,7 +134,7 @@ const smolRuntime = {
  version: 2,
  enabled: true,
  model: "Qwen3.5-0.8B",
- endpoint: "http://127.0.0.1:18736/completion",
+ endpoint: "http://127.0.0.1:18735/completion",
  apiKey: "TEST_SYNTHETIC_LOCAL_KEY",
  execution: "background",
  timeoutMs: 1000,

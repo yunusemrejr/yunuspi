@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { sessionObservability } from "./session-observability.ts";
 
 export const LOCAL_LM_MODEL = "Qwen3.5-0.8B";
-export const LOCAL_LM_ENDPOINT = "http://127.0.0.1:18736/completion";
+export const LOCAL_LM_ENDPOINT = "http://127.0.0.1:18735/completion";
 
 export interface LocalLmRuntime { version: 2; enabled: true; model: typeof LOCAL_LM_MODEL; endpoint: typeof LOCAL_LM_ENDPOINT; apiKey: string; execution: "background"; timeoutMs: number }
 
