@@ -29,6 +29,8 @@ import { registerContextTools } from './context-tools.ts';
 import { addCompactionSalience } from './context-salience.ts';
 import { projectMemoryKey } from './project-identity.ts';
 import { acquireMemoryMutation, readMemoryForMutation, replaceMemoryFile } from './mutation.ts';
+import { checkpointWorktree, exitFallbackSummary } from "../lib/worktree-checkpoint.ts";
+import { readRemindersRestore } from "../lib/reminders-state.ts";
 import { type ExecFileOptions, execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -587,6 +589,28 @@ function resolveExitSummaryModel(
 		}
 	}
 	return undefined;
+}
+
+async function fallbackExitSummary(ctx: ExtensionContext): Promise<ExitSummaryResult | undefined> {
+	try {
+		const branch = getSessionBranch(ctx);
+		if (!branch || branch.filter(entry => entry.type === "message").length < EXIT_SUMMARY_MIN_MESSAGES) return undefined;
+		const sourceMessageId = [...branch].reverse().find(entry => entry.type === "message")?.id;
+		if (sourceMessageId && branch.some(entry => entry.type === "custom" && entry.customType === "memory-exit-summary-v1" &&
+			(entry.data as any)?.sourceMessageId === sourceMessageId)) return undefined;
+		const sessionId = ctx.sessionManager.getSessionId();
+		const reminders = readRemindersRestore(sessionId);
+		const summary = exitFallbackSummary({
+			sessionId,
+			reason: "model summary unavailable",
+			branch: branch as any,
+			...(reminders.ok ? { todos: { pending: reminders.pending, inProgress: reminders.inProgress } } : {}),
+			checkpoint: await checkpointWorktree(ctx.cwd, sessionId, "shutdown"),
+		});
+		return summary ? { summary, hasMessages: true, sourceMessageId } : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 async function generateExitSummary(
@@ -1856,7 +1880,13 @@ export default function (pi: ExtensionAPI) {
 				const expired = new Promise<null>((resolve) => {
 					summaryTimer = setTimeout(() => { summaryAbort.abort(); resolve(null); }, getExitSummaryTimeoutMs());
 				});
-				const result = await Promise.race([summaryWork, expired]);
+				const modelResult = await Promise.race([summaryWork, expired]);
+				// An expired or failed model summary on a substantive session gets a
+				// deterministic, content-bearing fallback (demand, todos, worktree
+				// snapshot) so a killed run never leaves the next session nothing.
+				const result = modelResult?.summary || (modelResult && !modelResult.hasMessages)
+					? modelResult
+					: await fallbackExitSummary(ctx) ?? modelResult;
 				// Only persist real summaries. The old fallback appended an
 				// all-"None." boilerplate block on every failed summarization
 				// (no API key, empty response, ...), polluting the daily log —
