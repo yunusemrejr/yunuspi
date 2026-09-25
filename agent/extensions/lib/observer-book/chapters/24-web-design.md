@@ -3,7 +3,7 @@ id: web-design
 part: design
 title: Modern web design patterns
 summary: Contemporary patterns and when they fit: landing page anatomy, bento grids, hero sections, sticky and command navigation, cards, micro-interactions, scroll storytelling, glass and gradients, design tokens and view transitions.
-terms: landing page landing hero section bento grid cards card sticky navbar command palette micro-interaction micro-interactions scroll storytelling parallax glassmorphism gradient gradients blur modern website site homepage marketing page saas portfolio tailwind shadcn tokens view transitions animation section layout
+terms: landing page landing hero section bento grid cards card sticky navbar command palette micro-interaction micro-interactions scroll storytelling parallax glassmorphism gradient gradients blur modern website site homepage marketing page saas portfolio tailwind shadcn tokens view transitions animation section layout necessity slop leakage meta theater
 files: .html .css .scss .tsx .jsx .vue .svelte .astro
 tools: browser_session render_see design_audit web_asset_check
 skills: frontend-design web-patterns modern-frontend-frameworks scroll-animated-websites web-effects component-libraries web-ui-stack-selection
@@ -142,3 +142,29 @@ Patterns are solutions that users already understand. Used well, they reduce cog
 **Ask.** Which directions were considered, what peers informed them, and why does the chosen one fit this brand better than the others?
 
 **Traps.** Endless exploration that delays shipping; copying one peer instead of learning from several; ignoring constraints the user did state.
+
+## Every element earns its place for this reader {#necessity}
+<!-- terms: necessity completeness theater scope overreach sprawl cards sections footer icons motion widget onboarding faq testimonial minimal cut remove unrequested invented -->
+
+**Principle.** Build for contextual necessity, not visible completeness: every section, claim, widget and page must earn its place for this reader, or be cut.
+
+**Why.** Agents equate more output with more finished, so unasked pages accumulate thin sections, card grids, badge rows, giant footers, icons beside every heading, tours, chatbots and FAQs nobody asked — completion theater. Each addition costs maintenance and dilutes what matters, while looking impressive in a screenshot. The removal test decides: take the element away and ask what the reader loses; if the answer is nothing, it was theater. Unrequested scope (agentic overreach) gets proposed, never silently built.
+
+**Signals.** Pages, features, copy or categories appear that the request never mentioned; sections thinner than their own chrome; repeated identical shapes (cards, badges, stats) carrying thin content.
+
+**Ask.** For each added element: what does the reader lose if it is removed — and was it requested or invented?
+
+**Traps.** Cutting to barrenness; removing richness the user explicitly asked for.
+
+## Reader pages never expose the backstage {#no-leakage}
+<!-- terms: leakage implementation stack framework hosting repository pipeline schema AI-powered provenance transparency architecture meta backstage built-with docs -->
+
+**Principle.** User-facing pages never expose implementation, process or provenance details unless the page exists to document them; every visible detail serves the reader's purpose.
+
+**Why.** Stack badges, framework and hosting names, pipeline talk, "AI-assisted" labels and how-this-site-works sections narrate production instead of delivering value — the reader came for the outcome, not the backstage tour. Such leakage also dates the page and invites questions nobody can answer from marketing copy. The exception is pages whose purpose is the implementation (docs, changelog, status, engineering blog), where specificity is the virtue; marketing pages link to those instead of inlining the tour.
+
+**Signals.** Framework, hosting, repo, pipeline or schema names in marketing and product copy; meta sections about the site itself; AI-production labels on non-AI products; process narration (generated, reviewed, deployed).
+
+**Ask.** Does this line help the reader decide or do the next thing — or only prove how the thing was made?
+
+**Traps.** Stripping legitimate docs; removing names the reader chose (payment rails on pricing).

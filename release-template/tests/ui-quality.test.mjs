@@ -97,3 +97,47 @@ test('DOM-generating scripts get markup-shape cues and promote the interface asp
   assert.ok(reviewAspects(['app.js'],'Triage mail faster',[],[{key:'ui-clickable-container',file:'app.js'}]).some(a=>a.id==='interface'));
   assert.ok(!reviewAspects(['app.js'],'Triage mail faster',[],[{key:'async-foreach'}]).some(a=>a.id==='interface'),'non-UI cues do not promote');
 });
+
+test('reader-facing copy cues flag leakage, hype and theater with docs scoping',()=>{
+  for(const [file,text,key] of [
+    ['page.md','Built with Next.js and hosted on Vercel.','prose-implementation-leak'],
+    ['page.md','Our React frontend talks to a Postgres schema through a GraphQL pipeline.','prose-implementation-leak'],
+    ['page.md','Set in our signature typography on a strict 8-pt spacing grid.','prose-implementation-leak'],
+    ['page.md','## How this site works','prose-transparency-section'],
+    ['page.html','<h2>Our process</h2>','prose-transparency-section'],
+    ['page.md','Our AI-powered workflow writes every draft.','prose-ai-provenance'],
+    ['page.md','A revolutionary, seamless, robust and scalable next-generation platform.','prose-buzzword-stack'],
+    ['page.md','A carefully curated exploration of our features.','prose-self-praise'],
+    ['page.md','Private by design with military-grade 256-bit encryption.','prose-theater-claim'],
+    ['page.md','Our mission is to revolutionize teamwork.','prose-mission-speak'],
+    ['page.md','Ship 10x faster with 99% smarter reviews.','prose-metric-theater'],
+    ['nav.html','<a href="/i">Insights</a><a href="/d">Discover</a>','prose-vague-nav'],
+    ['nav.md','[Explore](/e) and [Resources](/r) are top-level.','prose-vague-nav'],
+  ]) assert.ok(keys(file,text).includes(key),`${key} :: ${text}`);
+  // Scoping: docs explain internals legitimately; policy pages explain postures.
+  assert.ok(!keys('docs/setup.md','Built with Next.js, deployed with Docker.').includes('prose-implementation-leak'));
+  assert.ok(!keys('docs/setup.md','## Methodology').includes('prose-transparency-section'));
+  assert.ok(!keys('privacy-policy.md','Private by design with end-to-end encrypted storage.').includes('prose-theater-claim'));
+  // Basis nearby clears metric theater; single buzzwords stay quiet.
+  assert.ok(!keys('page.md','10x faster in our benchmark suite, measured on 400 teams.').includes('prose-metric-theater'));
+  assert.ok(!keys('page.md','A robust tool for daily use.').includes('prose-buzzword-stack'));
+  // Links and code are not copy.
+  assert.ok(!keys('page.md','See [repo](https://github.com/acme/site) and `docker run`.').includes('prose-implementation-leak'));
+});
+
+test('structural cues flag card, section, footer, icon, tour and widget excess',()=>{
+  const cards = n => Array.from({length:n},(_,i)=>`<div class="card">c${i}</div>`).join('');
+  assert.ok(keys('Grid.tsx',cards(6)).includes('ui-card-cluster'));
+  assert.ok(!keys('Grid.tsx',cards(5)).includes('ui-card-cluster'));
+  const thin = Array.from({length:6},(_,i)=>`<section><h2>Part ${i}</h2><p>Short.</p></section>`).join('');
+  assert.ok(keys('Page.tsx',thin).includes('ui-section-sprawl'));
+  const fat = Array.from({length:6},(_,i)=>`<section><h2>Part ${i}</h2><p>${'Words '.repeat(150)}</p></section>`).join('');
+  assert.ok(!keys('Page.tsx',fat).includes('ui-section-sprawl'));
+  const footer = `<footer>${Array.from({length:15},(_,i)=>`<a href="/${i}">l${i}</a>`).join('')}</footer>`;
+  assert.ok(keys('Page.tsx',footer).includes('ui-footer-bloat'));
+  const icons = Array.from({length:12},()=>'<svg viewBox="0 0 1 1"></svg>').join('');
+  assert.ok(keys('Page.tsx',icons).includes('ui-icon-density'));
+  assert.ok(keys('Page.tsx','<button>Take the tour</button>').includes('ui-onboarding-nudge'));
+  assert.ok(keys('Page.tsx','<button>Ask AI anything</button>').includes('ui-ai-widget'));
+  assert.ok(!keys('Page.tsx','<button>Save</button>').some(k=>k.startsWith('ui-')),'clean button stays cue-free');
+});

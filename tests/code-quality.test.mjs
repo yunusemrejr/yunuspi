@@ -113,6 +113,25 @@ test("prose report flags stock phrases with replacements and measures readabilit
   assert.equal(cq.proseReport("The service stores each order in one table. Refunds reverse the charge within a day.").findings.length, 0);
 });
 
+test("prose report flags leakage phrases, meta headings and basis-free metrics", () => {
+  const text = [
+    "# How this site works",
+    "",
+    "Our next-generation platform is AI-powered and built for everyone.",
+    "Take your workflow to the next level with our carefully curated toolkit.",
+    "It runs 10x faster with military-grade privacy by design.",
+  ].join("\n");
+  const report = cq.proseReport(text);
+  const rules = report.findings.map(f => f.rule);
+  assert.ok(rules.includes("transparency-heading"));
+  assert.ok(rules.includes("metric-without-basis"));
+  const phrases = report.phrases.map(p => p.phrase);
+  for (const phrase of ["next-generation", "ai-powered", "built for everyone", "take your workflow to the next level", "carefully curated", "military-grade", "privacy by design"]) assert.ok(phrases.some(p => p.includes(phrase)), phrase);
+  // Basis nearby clears the metric; clean copy stays clean.
+  assert.ok(!cq.proseReport("Our tool is 10x faster in tests measured on 400 teams.").findings.some(f => f.rule === "metric-without-basis"));
+  assert.equal(cq.proseReport("The service stores each order in one table.").findings.length, 0);
+});
+
 test("complexity ranks functions with tree-sitter and flags async without await", async () => {
   const parser = await parserFor(".js");
   const branches = Array.from({ length: 14 }, (_, i) => `  if (x === ${i}) y += ${i};`).join("\n");
