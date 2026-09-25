@@ -43,6 +43,14 @@ test("writer leases attribute concrete paths and surface overlap without blockin
 		assert.equal(attributeWorkspacePath(dir, "session-b", "src.txt").status, "another_session");
 		releaseWorkspaceWriterLease(dir, "session-a");
 		assert.equal(attributeWorkspacePath(dir, "session-b", "src.txt").status, "current_session");
+		// Shell-made changes never name a path; while another writer is active they stay ambiguous.
+		acquireWorkspaceWriterLease(dir, "session-c");
+		assert.equal(attributeWorkspacePath(dir, "session-b", "generated.txt").status, "unattributed");
+		releaseWorkspaceWriterLease(dir, "session-c");
+		const sole = attributeWorkspacePath(dir, "session-b", "generated.txt");
+		assert.deepEqual([sole.status, sole.detail], ["current_session", "sole active writer in this checkout"]);
+		releaseWorkspaceWriterLease(dir, "session-b");
+		assert.equal(attributeWorkspacePath(dir, "session-b", "generated.txt").status, "unattributed", "no lease, no ownership claim");
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

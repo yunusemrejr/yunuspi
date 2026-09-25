@@ -248,5 +248,9 @@ export function attributeWorkspacePath(cwd: string, sessionId: string, relativeP
 	const owner = leases.find((lease) => lease.sessionId === sessionId && lease.paths.includes(relativePath));
 	if (owner) return { status: "current_session", sessionId };
 	if (leases.some((lease) => lease.sessionId !== sessionId)) return { status: "unattributed", detail: "another active writer lease exists, but it did not name this path" };
+	// Shell-made changes (sed -i, generators, cp) never name paths in a lease.
+	// When this session is the only active writer in the checkout, they are its
+	// own: saying "unattributed" there only hides the owner from the gates.
+	if (leases.some((lease) => lease.sessionId === sessionId)) return { status: "current_session", sessionId, detail: "sole active writer in this checkout" };
 	return { status: "unattributed", detail: "no writer lease named this path" };
 }
