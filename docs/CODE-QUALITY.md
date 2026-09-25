@@ -15,7 +15,7 @@ Scans stay inside the workspace, skip `node_modules`, build output, vendored and
 
 ## Automatic hints after edits
 
-After a successful `write` or `edit`, the existing syntax hook adds one short advisory when the changed span contains a high-precision pattern (placeholder or elided code, debug statements, swallowed errors, commented-out code, redundant booleans) or when the new block repeats code in the same directory or in files edited earlier in the session ("L40-58 repeats src/cart.js:1-9 (9 lines, renamed; differs in subtotal→sum): reuse or extract it"). At most six checks run per request and each file revision is checked once.
+After a successful `write` or `edit`, the existing syntax hook adds one short advisory when the changed span contains a high-precision pattern (placeholder or elided code, debug statements, swallowed errors, commented-out code, redundant booleans) or when the new block repeats code in the same directory or in files edited earlier in the session ("L40-58 repeats src/cart.js:1-9 (9 lines, renamed; differs in subtotal→sum): reuse or extract it"). Batched `edit` calls are checked in each of their changed spans. At most 24 checks run per request (a local WASM parse takes about 20 ms), and each file revision is checked once.
 
 ## `git_info` review and blame
 

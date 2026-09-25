@@ -198,33 +198,40 @@ export default function registerSourceCheck(pi: any) {
   for (const event of ['session_start','session_switch','session_tree','session_shutdown']) pi.on(event,reset);
   pi.on('before_agent_start',() => {checks = 0;});
   pi.on('tool_result',async (event: any,ctx: any) => {
-    if (process.env.PI_REASONING_AIDS === 'off' || event.isError || !['write','edit'].includes(event.toolName) || checks >= 6 || seen.size >= 512) return;
+    // A local WASM parse costs ~20ms; the cap only bounds a runaway turn.
+    if (process.env.PI_REASONING_AIDS === 'off' || event.isError || !['write','edit'].includes(event.toolName) || checks >= 24 || seen.size >= 512) return;
     const filename = event.input?.path;
     if (typeof filename !== 'string' || (!codeNoiseSupported(filename) && !familyOf(filename))) return;
     const owner = generation;
-    checks++;
     try {
       const data = await readSourceFiles(ctx.cwd,[filename],undefined,(file: string) => codeNoiseSupported(file) || !!familyOf(file));
       const file = data.files[0];
       if (owner !== generation || !file || Buffer.byteLength(file.source) > 65536) return;
-      let changedLines: [number,number] | undefined;
+      let changedLines: [number,number] | undefined, spans: Array<[number,number]> = [];
       if (event.toolName === 'edit') {
-        const replacement = event.input?.newText;
-        // Only diagnose the changed region. An ambiguous repeated replacement
+        // Batched edits carry their replacements in `edits`; a top-level
+        // newText is the single-edit form. Every edit in a session used the
+        // batch form, so reading only newText skipped nearly every check.
+        const replacements = [event.input?.newText, ...(Array.isArray(event.input?.edits) ? event.input.edits.map((entry: any) => entry?.newText) : [])]
+          .filter((text: unknown): text is string => typeof text === 'string' && text.trim().length > 0);
+        // Only diagnose changed regions. An ambiguous repeated replacement
         // cannot establish which existing code belongs to this edit.
-        if (typeof replacement !== 'string' || !replacement) return;
-        const offset = file.source.indexOf(replacement);
-        if (offset < 0 || file.source.indexOf(replacement,offset + 1) !== -1) return;
-        const start = file.source.slice(0,offset).split('\n').length;
-        changedLines = [start,start + replacement.replace(/\n$/,'').split('\n').length - 1];
+        for (const replacement of replacements) {
+          const offset = file.source.indexOf(replacement);
+          if (offset < 0 || file.source.indexOf(replacement,offset + 1) !== -1) continue;
+          const start = file.source.slice(0,offset).split('\n').length;
+          spans.push([start,start + replacement.replace(/\n$/,'').split('\n').length - 1]);
+        }
+        if (!spans.length) return;
+        changedLines = [Math.min(...spans.map(span => span[0])),Math.max(...spans.map(span => span[1]))];
       }
       const key = `${ctx.sessionManager?.getSessionId?.() ?? 'current'}:${ctx.cwd}:${file.path}:${file.digest}`;
       if (seen.has(key)) return;
-      seen.add(key);
+      seen.add(key); checks++;
       const noise: any = codeNoiseSupported(file.path) ? await inspectCodeNoise(file.path,file.source) : {status:'unsupported',findings:[],scope:''};
       if (owner !== generation) return;
       if (changedLines) {
-        noise.findings = noise.findings.filter((f: any) => f.line >= changedLines[0] && f.line <= changedLines[1]);
+        noise.findings = noise.findings.filter((f: any) => spans.some(([from,to]) => f.line >= from && f.line <= to));
         noise.scope += ' Automatic edit findings are restricted to the unambiguous replacement span.';
       }
       noiseActivity(noise);

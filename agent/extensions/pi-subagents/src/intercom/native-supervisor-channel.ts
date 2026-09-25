@@ -532,9 +532,25 @@ function formatPendingLine(request: PendingSupervisorRequest): string {
 	return `- ${request.id}: ${request.agent} [${request.runId}#${request.childIndex}] ${request.reason}.${replyHint}`;
 }
 
-function requestVisibleText(request: PendingSupervisorRequest): string {
-	if (request.reason === "guardian_intervention") return `Guardian · ${request.agent} [${request.runId}#${request.childIndex}]\n${request.message}`;
-	if (request.reason === "intelligence_used") return `Internal intelligence · ${request.agent} [${request.runId}#${request.childIndex}]\n${request.message}`;
+/** Human name for the child an internal notice came from: its session name
+ * or model when the run is known, never a bare run id. */
+function childSubject(request: SupervisorRequest, state?: SubagentState): string {
+	const child = state ? rememberedForegroundChild(request, state)?.child : undefined;
+	const agent = request.agent === "automatic-free-assistant" ? "harness helper" : request.agent === "automatic-skill-discovery" ? "skill discovery" : request.agent;
+	const detail = child?.sessionName?.trim() || child?.model?.split("/").pop();
+	return detail ? `${agent} (${detail})` : agent;
+}
+
+/** One legible line: what ran, for whom, with what outcome. Run ids stay in
+ * the message details for tooling; "1441ms" reads as "1.4s". */
+function internalNoticeText(request: PendingSupervisorRequest, state?: SubagentState): string {
+	const body = request.message.replace(/^Internal intelligence · /, "").replace(/\.$/, "")
+		.replace(/\b(\d{4,})ms\b/g, (_, ms: string) => `${(Number(ms) / 1000).toFixed(1)}s`);
+	return request.reason === "guardian_intervention" ? `Guardian · ${childSubject(request, state)}\n${request.message}` : `${body} · for ${childSubject(request, state)}`;
+}
+
+function requestVisibleText(request: PendingSupervisorRequest, state?: SubagentState): string {
+	if (request.reason === "guardian_intervention" || request.reason === "intelligence_used") return internalNoticeText(request, state);
 	const lines = [request.message];
 	if (request.expectsReply) {
 		lines.push("", `Reply with: ${NATIVE_SUPERVISOR_TOOL_NAME}({ action: "reply", replyTo: "${request.id}", message: "..." })`);
@@ -683,7 +699,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
 				try {
 					// Notify synchronously: sendMessage(triggerTurn:false) is intentionally
 					// deferred until agent_end while a parent run is streaming.
-					ctx.ui.notify(requestVisibleText(request), "info");
+					ctx.ui.notify(requestVisibleText(request, state), "info");
 					guardianNoticeAcknowledged = true;
 				} catch {
 					guardianNoticeAcknowledged = false;
@@ -691,7 +707,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
 			}
 			pi.sendMessage({
 				customType: "subagent_supervisor_request",
-				content: requestVisibleText(request),
+				content: requestVisibleText(request, state),
 				display: true,
 				...(internalNotice ? { excludeFromContext: true } : {}),
 				details: {

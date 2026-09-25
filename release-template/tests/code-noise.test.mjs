@@ -74,16 +74,20 @@ test('successful edit hook emits one bounded advisory per source revision and re
     hooks.get('session_switch')();
     assert.ok(await hooks.get('tool_result')(event,{...ctx,sessionManager:{getSessionId:()=> 'second'}}));
     hooks.get('session_start')();
-    for(let index=0;index<7;index++) {
+    for(let index=0;index<25;index++) {
       fs.writeFileSync(path.join(directory,'module.js'),`try { call(${index}); } catch {}`);
       const note=await hooks.get('tool_result')(event,ctx);
-      assert.equal(Boolean(note),index<6);
+      assert.equal(Boolean(note),index<24);
     }
     hooks.get('before_agent_start')();
     assert.ok(await hooks.get('tool_result')(event,ctx));
     hooks.get('session_start')();
     fs.writeFileSync(path.join(directory,'module.js'),'try { previous(); } catch {}\nexport const value = 2;');
     assert.equal(await hooks.get('tool_result')({...event,toolName:'edit',input:{path:'module.js',newText:'export const value = 2;'}},ctx),undefined,'an edit cannot flag unrelated legacy code');
+    hooks.get('session_start')();
+    fs.writeFileSync(path.join(directory,'module.js'),'export const value = 3;\ntry { batched(); } catch {}');
+    const batched=await hooks.get('tool_result')({...event,toolName:'edit',input:{path:'module.js',edits:[{oldText:'x',newText:'export const value = 3;'},{oldText:'y',newText:'try { batched(); } catch {}'}]}},ctx);
+    assert.match(batched?.content?.[1]?.text ?? '',/advisory/,'a batched edit is checked in its changed spans');
     hooks.get('session_start')();
     const pending=hooks.get('tool_result')(event,ctx);
     hooks.get('session_switch')();
