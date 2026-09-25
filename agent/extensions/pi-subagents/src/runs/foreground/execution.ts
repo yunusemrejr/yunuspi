@@ -1484,6 +1484,10 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			// its signal on a successful result misclassifies later acceptance
 			// failures and even clean completions in the canonical child ledger.
 			if (signal && !(forcedTerminationSignal && forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal)) result.processSignal = signal;
+			// A parent-signal abort is a stop the parent owns (superseded skill
+			// discovery, cancelled helper). A child trapping SIGTERM exits 143
+			// with no signal, which otherwise lands in the "unknown" failure bucket.
+			if (abortedBySignal && !forcedDrainAfterFinalSuccess && !result.timedOut && !result.interrupted) result.stopped = true;
 			if (!closeError && forcedDrainAfterEmptyTerminal && stderr.trim()) {
 				closeError = stderr.trim();
 			}

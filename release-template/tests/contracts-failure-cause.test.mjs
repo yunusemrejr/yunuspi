@@ -61,6 +61,14 @@ test('bare exit codes stay unknown without specific evidence', () => {
   assert.equal(classifyFailure({ error: true, exitCode: 1, signal: 'SIGTERM' }).category, 'process-signal');
 });
 
+test('128+N exit codes of a signal-trapping child are process signals, not unknown', () => {
+  for (const exitCode of [129, 130, 137, 143]) assert.equal(classifyFailure({ error: true, exitCode }).category, 'process-signal');
+  assert.equal(failureOf({ exitCode: 143, error: 'child-error' }).reason, 'process-signal');
+  // A specific report in the message still outranks the bare exit code.
+  assert.equal(classifyFailure({ error: true, exitCode: 143, message: 'HTTP 503 service unavailable' }).category, 'transport');
+  assert.equal(classifyFailure({ error: true, exitCode: 2 }).category, 'unknown');
+});
+
 test('explicit lifecycle flags win over everything', () => {
   assert.equal(classifyFailure({ stopped: true, providerCode: 503 }).category, 'stopped');
   assert.equal(classifyFailure({ interrupted: true, exitCode: 1 }).category, 'interrupted');

@@ -358,6 +358,11 @@ export function classifyFailure(evidence: StructuredFailureEvidence = {}): Failu
 		if (/\b(?:killed|terminated)\b|signal (?:term|kill|segv|abrt)/i.test(message)) return finish("process-signal", { healthScopes: {} });
 	}
 
+	// 11. A child that traps a signal exits with the conventional 128+N code
+	// and no signal field (143 SIGTERM, 129 SIGHUP, 130 SIGINT, 137 SIGKILL).
+	// Only after every message cue, so a specific report still wins.
+	if (evidence.exitCode !== undefined && [129, 130, 137, 143].includes(evidence.exitCode)) return finish("process-signal", { healthScopes: {} });
+
 	return finish("unknown", { healthScopes: {} });
 }
 

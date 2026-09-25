@@ -33,6 +33,10 @@ import { isLocalModelResolutionFailure } from "./local-model-failure.ts";
  *                    content — route-scoped (that model misbehaved).
  *   deterministic    content moderation rejections — route-scoped; retry
  *                    loops fail fast on these already.
+ *   route-failure    (stall) a child attempt that exhausted its wall-clock
+ *                    deadline on the route: route-scoped, and the cooldown
+ *                    grows per consecutive stall (a stalled route burns
+ *                    minutes, not a 25s retry, so repeats must stop picking it).
  *
  * Cooldown policy (user spec; retry-429-policy.mjs is the authority for the
  * fallback constant):
@@ -94,6 +98,16 @@ export const CONSECUTIVE_ESCALATION_MS = 10_000;
 export const CONSECUTIVE_ESCALATION_CAP_MS = 30_000;
 /** Deterministic rejections: short route-level hold (retry loops fail fast anyway). */
 export const DETERMINISTIC_COOLDOWN_MS = 60_000;
+/** Exhausted credit/billing (402) and rejected credentials (401) cannot heal
+ *  within a retry window; hold the provider for an hour instead of 25s/10min
+ *  probes that each burn a failed request. A success still clears it at once. */
+export const ACCOUNT_HOLD_MS = 60 * 60_000;
+/** Expired failure records older than this are dropped on the next mutation:
+ *  a days-old 401/402/429 must not keep describing a provider as failing. */
+export const STALE_FAILURE_MS = 24 * 60 * 60_000;
+/** Route stalls (child wall-clock timeouts): 5 min per consecutive stall, capped at 30 min. */
+export const STALL_COOLDOWN_MS = 5 * 60_000;
+export const STALL_COOLDOWN_CAP_MS = 30 * 60_000;
 /** Maximum in-gate defer: cooldowns longer than this are DENIED (rate-limit
  *  class) instead of silently stalling the request inside the send path. */
 export const DEFAULT_MAX_IN_GATE_WAIT_MS = 90_000;
@@ -127,6 +141,10 @@ export interface FailureClassification {
 	scope: FailureScope;
 	/** Retry-After-style hint parsed from the message; null when absent. */
 	retryAfterMs: number | null;
+	/** The route consumed a whole child deadline without finishing. */
+	stall?: boolean;
+	/** Credit or billing exhaustion (402), distinct from transient rate pressure. */
+	billing?: boolean;
 }
 
 export interface FailureRecord {
@@ -270,6 +288,8 @@ const ROUTE_TRANSPORT_RE =
 	/json error injected into sse stream|stream_read_error|websocket error|h2 protocol error|gateway|bad gateway|\b50[024]\b|\b529\b|\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|\bEAI_AGAIN\b|fetch failed|socket hang up|connection (?:reset|closed)|request timed out|overloaded/i;
 const MODEL_FAILURE_RE =
 	/finish_reason: error|no actionable content|empty(?:\/thinking-only)? response/i;
+const BILLING_RE = /\b402\b|insufficient credits|insufficient_quota|credit limit|out of budget|billing/i;
+const ROUTE_STALL_RE = /\bsubagent timed out after\b/i;
 const DETERMINISTIC_RE =
 	/data_inspection_failed|inappropriate content|content inspection|content filter|content moderation/i;
 
@@ -290,9 +310,10 @@ export function classifyFailure(errorMessage: string | undefined | null): Failur
 	const retryAfterMs = parseRetryAfterMs(text);
 	if (DETERMINISTIC_RE.test(text)) return { kind: "deterministic", scope: "route", retryAfterMs };
 	if (PROVIDER_AUTH_RE.test(text)) return { kind: "provider-auth", scope: "provider", retryAfterMs };
-	if (QUOTA_RATE_RE.test(text)) return { kind: "quota-rate", scope: "provider", retryAfterMs };
+	if (QUOTA_RATE_RE.test(text)) return { kind: "quota-rate", scope: "provider", retryAfterMs, ...(BILLING_RE.test(text) ? { billing: true } : {}) };
 	if (PROVIDER_OUTAGE_RE.test(text)) return { kind: "provider-outage", scope: "provider", retryAfterMs };
 	if (MODEL_FAILURE_RE.test(text)) return { kind: "model-failure", scope: "route", retryAfterMs };
+	if (ROUTE_STALL_RE.test(text)) return { kind: "route-failure", scope: "route", retryAfterMs, stall: true };
 	if (ROUTE_TRANSPORT_RE.test(text)) return { kind: "route-failure", scope: "route", retryAfterMs };
 	// Backstop: the policy authority's cooldown-class regex (covers any
 	// phrasing the specific patterns above miss but the retry loop cools on).
@@ -307,7 +328,8 @@ export function cooldownFor(
  consecutive: number,
 ): number {
  if (classification.kind === "deterministic") return DETERMINISTIC_COOLDOWN_MS;
- if (classification.kind === "provider-auth") return RETRY_AFTER_CEILING_MS;
+ if (classification.kind === "provider-auth" || classification.billing) return ACCOUNT_HOLD_MS;
+ if (classification.stall) return Math.min(STALL_COOLDOWN_CAP_MS, STALL_COOLDOWN_MS * Math.max(1, Math.floor(Number.isFinite(consecutive) ? consecutive : 1)));
  const hint = classification.retryAfterMs;
  if (typeof hint === "number" && Number.isFinite(hint) && hint >= 0)
   return Math.min(RETRY_AFTER_CEILING_MS, hint);
@@ -437,6 +459,7 @@ export function mutateHealth<T>(mutator: (state: ProviderHealthState) => T): T {
 		const state = readHealth();
 		const result = mutator(state);
 		state.updatedAt = Date.now();
+		expireStaleFailures(state, state.updatedAt);
 		const tmp = `${file}.${process.pid}.tmp`;
 		fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
 		fs.renameSync(tmp, file);
@@ -449,6 +472,16 @@ export function mutateHealth<T>(mutator: (state: ProviderHealthState) => T): T {
 // ---------------------------------------------------------------------------
 // Recording (request pressure, failures, successes)
 // ---------------------------------------------------------------------------
+
+function expireStaleFailures(state: ProviderHealthState, now: number): void {
+	const stale = (holder: { cooldownUntil: number; failure?: FailureRecord }) =>
+		holder.failure !== undefined && holder.cooldownUntil <= now && now - holder.failure.at > STALE_FAILURE_MS;
+	for (const entry of Object.values(state.providers)) {
+		if (!entry || typeof entry !== "object") continue;
+		if (stale(entry)) { entry.failure = undefined; entry.cooldownSource = undefined; }
+		for (const model of Object.values(entry.models ?? {})) if (model && stale(model)) model.failure = undefined;
+	}
+}
 
 function pruneWindow(entry: ProviderHealthEntry, now: number): void {
 	entry.requests = entry.requests
@@ -536,7 +569,10 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
         }
 		const priorConsecutive =
 			(classification.scope === "provider" ? entry.failure?.consecutive : routeState?.failure?.consecutive) ?? 0;
-		const consecutive = (now - (classification.scope === "provider" ? entry.failure?.at ?? 0 : routeState?.failure?.at ?? 0) <= WINDOW_MAX_AGE_MS
+		// A stall retry happens only after its own cooldown plus another full
+		// deadline, so repeated stalls stay consecutive across that longer gap.
+		const window = classification.stall ? WINDOW_MAX_AGE_MS + STALL_COOLDOWN_CAP_MS : WINDOW_MAX_AGE_MS;
+		const consecutive = (now - (classification.scope === "provider" ? entry.failure?.at ?? 0 : routeState?.failure?.at ?? 0) <= window
 			? priorConsecutive
 			: 0) + 1;
 		const estTokens =

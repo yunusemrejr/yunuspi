@@ -566,7 +566,10 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				if (signal.aborted) return { key, ok: false, output: "" };
 				const output = ok ? children.map(child=>automaticHelperBody(child)).filter(Boolean).join("\n").slice(0,6000) : "";
 				if (!ok) {
-					const errorText = (Array.isArray(result?.content) ? result.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n").slice(0,1000) : "") || "no successful child result";
+					// A child deadline is the route's own stall: record its exact
+					// timeout text so provider-health escalates that route's cooldown.
+					const stalled = children.find((r: any) => r.timedOut && typeof r.error === "string")?.error as string | undefined;
+					const errorText = stalled?.slice(0, 1000) || (Array.isArray(result?.content) ? result.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n").slice(0,1000) : "") || "no successful child result";
 					// Track the failure at ROUTE level first (fix_provider_cooldown_enforcement):
 					// one free route's quota failure must not discard every alternative
 					// behind the same provider. Provider-wide exhaustion only when the

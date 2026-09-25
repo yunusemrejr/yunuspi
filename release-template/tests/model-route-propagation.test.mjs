@@ -415,6 +415,7 @@ setInterval(() => {}, 1000);
     assert.ok(result, 'sending SIGTERM must not be mistaken for child exit; escalate after the 3s grace period');
     assert.equal(result.processSignal, 'SIGKILL');
     assert.notEqual(result.exitCode, 0, 'an aborted active task is not successful final-answer cleanup');
+    assert.equal(result.stopped, true, 'a parent-signal abort is an owned stop, never an unknown failure');
   } finally {
     clearTimeout(deadlineTimer);
     controller.abort();
