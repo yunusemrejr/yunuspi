@@ -18,6 +18,14 @@ The single most under-weighted lever in web design: a beautiful layout with weak
 6. **CTA** (one primary per screen — see below).
 The hierarchy rule: each level is *shorter and more specific* than the last; a value-prop that needs a second sentence is not a value-prop.
 
+## No implementation leakage (reader-serving details only)
+
+A core rule for every user-facing page: never expose internal architecture, AI usage, agent workflows, repositories, frameworks, hosting choices, pipelines, generation processes, or other developer-facing details — unless the page explicitly exists to document those subjects. Every visible detail must serve the reader's purpose in that context.
+
+- The test is one question: *does this line help the reader decide or do the next thing?* If it only proves how the thing was made, cut it — the reader came for the outcome, not the backstage tour.
+- The usual leaks: "Built with X" / "Powered by Y" badges (unless Y is the reader's concern — payment rails on a pricing page earn their line, the CSS framework never does), "AI-generated/powered" labels on products the reader didn't buy for AI, repo and framework names, pipeline/deploy mentions, "our agents/workflows" meta-talk, version numbers outside changelogs.
+- The docs exception: when the page *is* the docs (guides, API reference, changelog, status, engineering blog), the reader's purpose *is* the implementation — then specificity is the virtue (versions, endpoints, configs, migration steps). The rule inverts; it doesn't vanish. A marketing page linking *to* those docs is how the curious reader gets depth without every page paying the tax.
+
 ## Headlines: specific > clever (the real rule)
 
 - **Specific beats clever, every time** ("Reports that write themselves" is a claim; "Your Friday report, drafted from your tools before you leave Thursday" is a *scene* — the scene is what a skimmer actually reads).
@@ -97,6 +105,7 @@ The AI-default words — if a draft has 3+, it was not written, it was *generate
 6. The kill-word pass (the list above, grep the draft).
 7. One number in the whole page? (a page with zero specific numbers is *all* claim — find the one defensible number, put it in the proof beat).
 8. Read the 404 + the 429 + the login-error aloud. Same person wrote them all? (the voice drift check).
+9. The leak pass: any framework/repo/hosting/AI/pipeline mention the reader didn't come for? (cut it unless the page is the docs — see above).
 
 ## Detailed coverage
 
