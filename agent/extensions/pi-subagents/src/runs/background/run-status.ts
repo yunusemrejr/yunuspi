@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@yunuspi/agent-core";
 import { safeTerminalText } from "../../shared/display-text.ts";
-import { formatAsyncRunList, formatAsyncRunOutputPath, formatAsyncRunProgressLabel, formatWorkflowStageLine, listAsyncRuns } from "./async-status.ts";
+import { describeAvailableAsyncRuns, formatAsyncRunList, formatAsyncRunOutputPath, formatAsyncRunProgressLabel, formatWorkflowStageLine, listAsyncRuns } from "./async-status.ts";
 import { formatAsyncResultTranscript, formatAsyncRunTranscript, formatNestedRunTranscript, inspectSubagentFleet } from "./fleet-view.ts";
 import { formatNestedRunStatusLines } from "../shared/nested-render.ts";
 import { formatModelThinking } from "../../shared/formatters.ts";
@@ -396,8 +396,10 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 	const { asyncDir, resultPath, resolvedId } = location;
 
 	if (!asyncDir && !resultPath) {
+		const target = resolvedId ?? params.id ?? params.runId ?? params.dir ?? "unknown";
+		const hint = describeAvailableAsyncRuns(asyncDirRoot, currentSessionId !== undefined ? { sessionId: currentSessionId } : {});
 		return {
-			content: [{ type: "text", text: "Async run not found. Provide id or dir." }],
+			content: [{ type: "text", text: `Async run not found. No live or retained run matches '${target}'.${hint ? ` ${hint}` : ""} Provide id or dir.` }],
 			isError: true,
 			details: { mode: "single", results: [] },
 		};

@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { inspectPageState } from "./render-page-state.mjs";
 import { inspectDesignState } from "./render-design-state.mjs";
 import { inspectNoiseState } from "./render-noise-state.mjs";
-import { renderNavigationFailure } from "./browser-diagnostics.mjs";
+import { renderNavigationFailure, safeBrowserUrl } from "./browser-diagnostics.mjs";
 const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
@@ -21,6 +21,57 @@ export async function resolveLocalRenderSource(source) {
     const fragment = source.slice(hash);
     if (fragment.length > 8192) throw Error("Local HTML route fragment exceeds 8192 characters");
     return { target: await fs.realpath(source.slice(0, hash)), fragment };
+  }
+}
+// Connection-level failures prove no listener is reachable, so they fail
+// before Chromium launches. Timeouts, TLS errors and HTTP statuses never
+// fail fast: a slow, strict or unhappy server still gets the full navigation
+// path with its own budget and waitUntil semantics.
+const PREFLIGHT_UNREACHABLE = new Set([
+  "ECONNREFUSED", "ECONNRESET",
+  "EHOSTUNREACH", "ENETUNREACH", "ENETDOWN", "EHOSTDOWN",
+  "ENOTFOUND", "EAI_AGAIN",
+]);
+function preflightUnreachable(error) {
+  const pending = [error], seen = new Set();
+  for (let n = 0; pending.length && n < 12; n++) {
+    const item = pending.shift();
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    if (typeof item.code === "string" && PREFLIGHT_UNREACHABLE.has(item.code)) return true;
+    if (item.cause) pending.push(item.cause);
+    if (Array.isArray(item.errors)) pending.push(...item.errors.slice(0, 8));
+  }
+  return false;
+}
+/** Caller-supplied source echo for ENOENT failures. The caller provided this
+ * value, so repeating it exposes no page-discovered data; HTTP queries are
+ * still stripped. Empty unless the missing path is the source itself rather
+ * than a helper executable or a later-stage artifact. */
+export function enoentSourceHint(source, stage, error) {
+  if (stage !== "source") return "";
+  const missing = error?.path;
+  if (typeof missing === "string" && !/[/\\]/.test(missing) && /[/\\]/.test(String(source))) return "";
+  const text = /^https?:\/\//i.test(String(source)) ? safeBrowserUrl(source) : String(source);
+  return ` (${text.slice(0, 256)})`;
+}
+/** Bounded readiness probe for remote renders. Resolves when any HTTP
+ * response (any status) proves a listener; throws the structured navigation
+ * failure only when the cause chain proves no listener. Never throws on
+ * timeout: a slow server proceeds to full navigation. */
+export async function probeRemoteReadiness(url, budgetMs, signal) {
+  const deadline = AbortSignal.timeout(Math.max(1, Math.min(5000, budgetMs)));
+  try {
+    const response = await fetch(url, {
+      redirect: "manual",
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+    });
+    try { await response.body?.cancel(); } catch { /* headers already proved the listener */ }
+  } catch (error) {
+    if (signal?.aborted) throw Error("Render cancelled");
+    if (!preflightUnreachable(error)) return;
+    const failure = renderNavigationFailure(error);
+    throw Object.assign(new Error(`Render ${failure.reason} (stage: navigation). ${failure.network} ${failure.nextStep}`), { failure });
   }
 }
 function boundedCaptureResult(result) {
@@ -184,6 +235,8 @@ export async function renderCapture(p, output, signal) {
         const u = new URL(p.source);
         if (u.username || u.password)
           throw Error("Credentials in URLs are not allowed");
+        stage = "navigation";
+        await probeRemoteReadiness(u, ms - (Date.now() - start), signal);
       }
       browserStarting = true;
       stage = "launch";
@@ -589,7 +642,7 @@ export async function renderCapture(p, output, signal) {
           : /strict mode violation/.test(String(e.message))
             ? "ambiguous selector; inspect current DOM and choose one target"
         : e.code === "ENOENT"
-          ? "ENOENT: source not found"
+          ? `ENOENT: source not found${enoentSourceHint(p.source, stage, e)}`
           : browserStarting
             ? "browser startup failure"
             : e.name === "TimeoutError" || Date.now() - start >= ms

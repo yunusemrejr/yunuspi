@@ -1,6 +1,7 @@
 ---
 name: delegate
 description: Lightweight subagent that inherits the parent model with no default reads
+aliases: generic
 subagentOnlyExtensions: ../../utility-tools.ts, ../../bash-router.ts, ../../reminders.ts, ../../media-tools.ts, ../../reasoning-aids.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../bulk-edit.ts, ../../sys-probe.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: append
 inheritProjectContext: true

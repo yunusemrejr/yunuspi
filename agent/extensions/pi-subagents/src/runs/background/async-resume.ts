@@ -10,6 +10,7 @@ import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
 import { intersectSubagentCapabilityCeilings, parseSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
 import { validateRunFanoutBudgetDescriptor } from "../shared/run-fanout-budget.ts";
 import { reconcileAsyncRun } from "./stale-run-reconciler.ts";
+import { describeAvailableAsyncRuns } from "./async-status.ts";
 import { resultFilePath, resultPayloadPathForIndexedRun } from "./result-files.ts";
 import { canScanAsyncRunPrefix, MIN_SAFE_ASYNC_RUN_PREFIX_LENGTH } from "./run-id-query.ts";
 import { parallelHandoffPath, resolveRetainedWorktreeCwd } from "../shared/parallel-handoff.ts";
@@ -460,7 +461,9 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 	const requireSessionFile = options.requireSessionFile ?? true;
 	const location = resolveAsyncRunLocation(params, asyncDirRoot, resultsDir);
 	if (!location.asyncDir && !location.resultPath) {
-		throw new Error("Async run not found. Provide id or dir.");
+		const target = location.resolvedId ?? params.id ?? params.runId ?? params.dir ?? "unknown";
+		const hint = describeAvailableAsyncRuns(asyncDirRoot, options.sessionId !== undefined ? { sessionId: options.sessionId } : {});
+		throw new Error(`Async run not found. No live or retained run matches '${target}'.${hint ? ` ${hint}` : ""} Provide id or dir.`);
 	}
 
 	const reconciliation = location.asyncDir

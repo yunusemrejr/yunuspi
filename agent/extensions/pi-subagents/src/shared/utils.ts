@@ -239,8 +239,12 @@ export function findLatestSessionFile(sessionDir: string): string | null {
 	return latest ? latest.path : null;
 }
 
+/** Final answer text: every text part of the latest substantive assistant
+ * message, joined. Hooks append trailing notice parts (continuation,
+ * verification) to the finished message; returning only the last part would
+ * drop the actual answer once transcripts are compacted away. */
 export function getFinalOutput(messages: Message[]): string {
-	const validTextParts: string[] = [];
+	let latestMessageText: string | undefined;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (!msg || msg.role !== "assistant") continue;
@@ -251,10 +255,10 @@ export function getFinalOutput(messages: Message[]): string {
 			.filter((part) => part.type === "text" && part.text.trim().length > 0)
 			.map((part) => part.type === "text" ? part.text : "")
 			.join("\n");
+		if (messageText && latestMessageText === undefined) latestMessageText = messageText;
 		for (let j = msg.content.length - 1; j >= 0; j--) {
 			const part = msg.content[j];
 			if (!part || part.type !== "text" || part.text.trim().length === 0) continue;
-			validTextParts.push(part.text);
 			if (/```acceptance[-_]report\s*\n[\s\S]*?```/i.test(part.text)) return messageText;
 			for (const match of part.text.matchAll(/```(?:json|jsonc|json5)\s*\n([\s\S]*?)```/gi)) {
 				const body = match[1] ?? "";
@@ -265,7 +269,7 @@ export function getFinalOutput(messages: Message[]): string {
 			if (/ACCEPTANCE_REPORT\s*:/i.test(part.text)) return messageText;
 		}
 	}
-	return validTextParts[0] ?? "";
+	return latestMessageText ?? "";
 }
 
 export function getSingleResultOutput(result: Pick<SingleResult, "finalOutput" | "messages">): string {

@@ -120,7 +120,14 @@ function councilBrief(result: any): string {
   const independence=result.selfCritique
     ? 'Critique independence: reduced (same member reviewed its own perspective); weigh it accordingly.\n'
     : '';
-  return `Council status: ${result.status}. Advisory, not approval or verification.\n${independence}${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
+  // Synthesis is what turns finished perspectives into a choice. A partial
+  // brief with no discussion text chose nothing, yet a parent has read the
+  // first finished perspective (in direction mode usually the case for keeping
+  // the current design) as the verdict and skipped its own explicit choice.
+  const noSynthesis=result.status==='partial' && !result.discussion
+    ? 'No synthesis ran: the council chose nothing. Decide from the finished perspectives above with stated criteria; silently keeping a default (including the current design for an explicit redesign) is not a decision.\n'
+    : '';
+  return `Council status: ${result.status}. Advisory, not approval or verification.\n${independence}${noSynthesis}${JSON.stringify({proposals:result.proposals,discussion:result.discussion,gap:result.gap})}`;
 }
 
 /** The project-intelligence extension owns this state and supplies its existing

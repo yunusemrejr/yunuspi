@@ -19,7 +19,7 @@ export function failureCategory(error: string) {
     return { category: "verification", recovery: "Inspect current review and test evidence. Record unavailable evidence as blocked; do not repeat an accepted assessment while gaps remain." };
   if (/No verified read-tool coverage|Edit without read|RE-READ REQUIRED/i.test(error))
     return {category:"read-coverage",recovery:"Read the target range with the native read tool, then retry the edit. Shell output and previews do not establish edit coverage."};
-  if (/Edit target not found|oldText.*(?:not found|appears \d+ times)/i.test(error))
+  if (/Edit target not found|oldText.*(?:not found|appears \d+ times)|Edits rejected:[\s\S]*changed since [\s\S]*last read|optimistic-concurrency conflict/i.test(error))
     return {category:"edit-conflict",recovery:"Read the current target and rebuild a unique oldText match; do not retry the same stale or ambiguous edit."};
   if (/Offset \d+ is beyond end of file/i.test(error))
     return {category:"read-range",recovery:"Refresh the file's current line range. If a same-file write is running, let it finish before reading."};
@@ -57,7 +57,7 @@ export function failureCategory(error: string) {
     return { category: "dependency", recovery: "Check the exact missing path or executable and its loader environment before relaunching." };
   if (/acceptance.{0,32}(?:failed|rejected|missing|required|unresolved|not met)|verification.{0,32}(?:failed|missing|required|unresolved)|outside.{0,20}file|contract.{0,32}(?:violation|breach|failed|mismatch|required|not met)/i.test(error))
     return { category: "verification", recovery: "Inspect the changed files and failed acceptance condition; repair the specific result before treating the child as complete." };
-  if (/invalid.{0,20}(?:argument|parameter|schema)|validation|unknown (?:tool|action)/i.test(error))
+  if (/invalid.{0,20}(?:argument|parameter|schema)|validation|unknown (?:tool|action|agent)/i.test(error))
     return { category: "input", recovery: "Read the active tool schema and correct the rejected arguments before retrying." };
   if (/invalid[- ]output|structured.?output|invalid.?json|no (?:final|useful) output/i.test(error))
     return { category: "output", recovery: "Inspect the required output contract and retained artifacts; missing or invalid output is not successful completion." };
@@ -67,7 +67,62 @@ export function failureCategory(error: string) {
     return { category: "process", recovery: "Inspect the recorded exit signal and resource limits before restarting the owned process." };
   if (/^\s*blocked:/i.test(error))
     return { category: "guard", recovery: "Inspect the guard's specific reason and satisfy the missing precondition; do not repeat the rejected call or bypass the guard." };
+  if (/Complete dependencies before (?:starting|completing)/i.test(error))
+    return { category: "guard", recovery: "Complete the listed blockers (or reorder the plan) before starting this task; do not retry the same blocked transition." };
   return { category: "unclassified", recovery: "Inspect the original error and retained evidence; an error count alone does not establish a harness defect." };
+}
+
+/** Rendered words for structured child outcome reasons. Shared so text classification cannot drift between diagnostics views. */
+export const CHILD_REASON_TEXT: Record<string, string> = { budget: "budget limit", context: "context limit", capacity: "429 capacity",
+  timeout: "timed out", permission: "permission denied", dependency: "ERR_MODULE_NOT_FOUND",
+  "invalid-output": "invalid-output", acceptance: "acceptance failed", transport: "transport failure",
+  "process-signal": "process-signal", truncated: "response truncated (length)" };
+
+const GENERIC_CHILD_ERROR = /^\s*(child-error|child\s+failed|child\s+timed\s+out)\s*$/i;
+
+/**
+ * Cause categories that are not themselves reason words, projected the way
+ * run-history.ts LEGACY_REASON projects them (that map is the authority;
+ * this mirrors only the entries that differ from identity).
+ */
+const CAUSE_REASON: Record<string, string> = { "invalid-request": "invalid-output", "schema-incompatible": "invalid-output",
+  "unsupported-field": "invalid-output", quota: "capacity", "rate-limit": "capacity", overload: "capacity",
+  "context-overflow": "context", "output-truncated": "truncated", "budget-exhausted": "budget" };
+
+/**
+ * A failed-child excerpt names the recorded cause (outcome reason + stage +
+ * retryability) when one exists; it never reports a bare generic marker while
+ * cause data sits in the same record. Specific upstream text is returned
+ * unchanged. Only classified fields enter the excerpt, never raw error text.
+ */
+export function childFailureExcerpt(base: string, info?: {
+  reason?: unknown; cause?: unknown; timedOut?: unknown; exitCode?: unknown;
+}): string {
+  const generic = GENERIC_CHILD_ERROR.exec(base ?? "");
+  if (!generic) return base;
+  const head = generic[1];
+  const lower = head.toLowerCase();
+  const cause = info?.cause && typeof info.cause === "object" ? (info.cause as Record<string, unknown>) : undefined;
+  const clean = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : "");
+  const stage = clean(cause?.stage);
+  const category = clean(cause?.category);
+  const reasonKey = typeof info?.reason === "string" ? info.reason : "";
+  const reasonWord = Object.hasOwn(CHILD_REASON_TEXT, reasonKey) ? CHILD_REASON_TEXT[reasonKey] : "";
+  const projected = CAUSE_REASON[category] ?? category;
+  const categoryWord = Object.hasOwn(CHILD_REASON_TEXT, projected) ? CHILD_REASON_TEXT[projected] : "";
+  const lead = reasonWord || categoryWord || (category && category !== "unknown" && category !== "none" ? category : "");
+  const parts: string[] = [];
+  if (lead) {
+    const firstWord = lead.toLowerCase().split(/\s+/, 1)[0];
+    parts.push(lower.includes(firstWord) && stage ? `at ${stage}` : stage ? `${lead} at ${stage}` : lead);
+  } else if (stage) {
+    parts.push(`at ${stage}`);
+  }
+  if ((lead || stage) && cause?.retryable === true) parts.push("retryable");
+  if ((lead || stage) && cause?.retryable === false) parts.push("not retryable");
+  if (Number.isInteger(info?.exitCode)) parts.push(`exit ${info?.exitCode}`);
+  if (!lead && !stage) parts.push("no failure cause recorded");
+  return `${head} (${parts.join("; ")})`;
 }
 
 function fnv1aHex(value) {
@@ -110,10 +165,7 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
       childEvidence.set(metrics.agentAliases[id] ?? id, row.evidence);
     }
   }
-  const reasonText: Record<string, string> = { budget: 'budget limit', context: 'context limit', capacity: '429 capacity',
-    timeout: 'timed out', permission: 'permission denied', dependency: 'ERR_MODULE_NOT_FOUND',
-    'invalid-output': 'invalid-output', acceptance: 'acceptance failed', transport: 'transport failure', 'process-signal': 'process-signal',
-    truncated: 'response truncated (length)' };
+  const reasonText = CHILD_REASON_TEXT;
   const failures: any[] = [], seen = new Set(), groups = new Map();
   const incidents = new Map();
   let total = 0;
@@ -170,8 +222,11 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
       if (seen.has(key)) continue;
       const status = r.state ?? r.status;
       if (r.stopped || r.interrupted || ["stopped", "paused"].includes(status)) { seen.add(key); continue; }
-      if (r.error || r.timedOut || r.exitCode !== undefined && r.exitCode !== 0 || ["failed", "rejected"].includes(status))
-        add("child", "subagent", key, String(r.error ?? r.errorMessage ?? (r.timedOut ? "Child timed out" : "Child failed")), msg?.toolCallId, childEvidence.get(canonical));
+      if (r.error || r.timedOut || r.exitCode !== undefined && r.exitCode !== 0 || ["failed", "rejected"].includes(status)) {
+        const evidence = childEvidence.get(canonical);
+        add("child", "subagent", key, childFailureExcerpt(String(r.error ?? r.errorMessage ?? (r.timedOut ? "Child timed out" : "Child failed")),
+          { reason: evidence?.outcomeReason, cause: evidence?.cause, timedOut: r.timedOut, exitCode: r.exitCode }), msg?.toolCallId, evidence);
+      }
       else if (r.exitCode === 0 || ["complete", "completed"].includes(status)) seen.add(key);
     }
   }

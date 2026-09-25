@@ -4,7 +4,7 @@ import type {
 	TaskMutationParams,
 	TaskStatus,
 } from "../tool/types.js";
-import { PLAN_FIELDS, planFieldError, planGraphError, blockers } from "./plan.ts";
+import { PLAN_FIELDS, planFieldError, planGraphError, blockers, describeBlockers, taskLabel } from "./plan.ts";
 import { isTransitionValid } from "./invariants.js";
 import type { TaskState } from "./state.js";
 import { detectCycle } from "./task-graph.js";
@@ -343,9 +343,14 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
  // create must not bypass what an update would refuse.
  const task = action === "create" ? result.state.tasks[result.state.tasks.length - 1] : result.state.tasks.find(t => t.id === params.id);
  if ((action === "update" || action === "create") && task && ["in_progress", "completed"].includes(task.status)) {
-  if (blockers(task, result.state.tasks).length) return errorResult(state, "Complete dependencies before starting or completing this task");
+  if (blockers(task, result.state.tasks).length) return errorResult(state, `Complete dependencies before starting or completing this task: blocked by ${describeBlockers(task, result.state.tasks)}`);
   if (task.status === "completed") {
-   if (result.state.tasks.some(t => t.parentId === task.id && !["completed", "deleted"].includes(t.status))) return errorResult(state, "Complete or explicitly remove unfinished children first");
+   const open = result.state.tasks.filter(t => t.parentId === task.id && !["completed", "deleted"].includes(t.status));
+   if (open.length) {
+    const labels = open.slice(0, 5).map(taskLabel);
+    if (open.length > labels.length) labels.push(`+${open.length - labels.length} more`);
+    return errorResult(state, `Complete or explicitly remove unfinished children first: ${labels.join(", ")}`);
+   }
    if (task.acceptance?.trim() && !task.evidence?.trim()) return errorResult(state, "Record verification evidence before completing this task");
   }
  }

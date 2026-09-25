@@ -30,7 +30,7 @@ export function planGraphError(tasks: readonly Task[]): string | undefined {
     const parent = byId.get(task.parentId);
     if (!parent || parent.id === task.id) return 'parentId must name another existing task';
     if (task.status !== 'deleted' && parent.status === 'deleted') return 'Reparent or delete children before deleting their parent';
-    if (task.status !== 'deleted' && task.status !== 'completed' && parent.status === 'completed') return 'Reopen the parent before adding or reopening unfinished children';
+    if (task.status !== 'deleted' && task.status !== 'completed' && parent.status === 'completed') return `Reopen the parent before adding or reopening unfinished children: ${taskLabel(parent)} still has unfinished ${taskLabel(task)}`;
     if (task.status !== 'deleted') edges.get(parent.id)!.push(task.id);
   }
   // Starting a child inherits the parent's prerequisites. Include those edges
@@ -59,6 +59,37 @@ export function blockers(task: Task, tasks: readonly Task[], byId = new Map(task
     for (const id of at.blockedBy ?? []) if (byId.get(id)?.status !== 'completed') blocked.add(id);
   }
   return [...blocked];
+}
+
+/** Compact `#id "subject" (status)` label for refusal messages. Subjects are
+ * collapsed to one terminal-safe line and truncated so the refusal stays a
+ * hint, not a dump. */
+export function taskLabel(t: Task): string {
+  const flat = sanitizeTerminalText(t.subject).replace(/\s+/g, ' ').trim();
+  const subject = flat.length > 60 ? flat.slice(0, 57) + '…' : flat;
+  return `#${t.id} "${subject}" (${t.status})`;
+}
+
+/** Labels for the tasks blocking `task`: each unfinished blocker as
+ * `#id "subject" (status)`, attributed to the holding ancestor when the edge
+ * is inherited (`via parent #N`). Bounded to five labels with a `+N more`
+ * tail; missing ids are labelled `(missing)` rather than dropped, so stale
+ * edges surface instead of refusing silently. */
+export function describeBlockers(task: Task, tasks: readonly Task[], byId = new Map(tasks.map(t => [t.id, t]))): string {
+  const ids = blockers(task, tasks, byId);
+  const holders = new Map<number, number>();
+  for (let at: Task | undefined = task, guard = 0; at && guard <= tasks.length; at = at.parentId ? byId.get(at.parentId) : undefined, guard++) {
+    for (const id of at.blockedBy ?? []) if (!holders.has(id)) holders.set(id, at.id);
+  }
+  const labels = ids.slice(0, 5).map(id => {
+    const dep = byId.get(id);
+    if (!dep) return `#${id} (missing)`;
+    const holder = holders.get(id);
+    const via = holder !== undefined && holder !== task.id ? ` via parent #${holder}` : '';
+    return `${taskLabel(dep)}${via}`;
+  });
+  if (ids.length > labels.length) labels.push(`+${ids.length - labels.length} more`);
+  return labels.join(', ');
 }
 
 export function planRows(tasks: readonly Task[]) {

@@ -173,3 +173,99 @@ test("oversized embedded resources return a precise tool failure independent of 
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("unreachable remote renders fail before browser launch with the navigation shape", { timeout: 60000 }, async () => {
+  const { renderCapture, probeRemoteReadiness } = await load("scripts/render-capture.mjs");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "render-prefail-"));
+  const server = http.createServer((req, res) => {
+    if (req.url === "/boom") { res.statusCode = 500; res.end("unhappy"); return; }
+    if (req.url === "/slow") { setTimeout(() => { try { res.end("late"); } catch {} }, 400); return; }
+    res.setHeader("Content-Type", "text/html");
+    res.end("<!doctype html><title>Probe fixture</title><h1>Up</h1>");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  // A port bound then released here is guaranteed closed: nothing else claims it.
+  const closed = await new Promise(resolve => {
+    const held = http.createServer();
+    held.listen(0, "127.0.0.1", () => { const port = held.address().port; held.close(() => resolve(port)); });
+  });
+  const dead = `http://127.0.0.1:${closed}/fixture.html`;
+  const oldChannel = process.env.PI_RENDER_BROWSER_CHANNEL;
+  const assertNavigationRefused = error => {
+    assert.equal(error.failure?.stage, "navigation");
+    assert.equal(error.failure?.kind, "unreachable");
+    assert.deepEqual(error.failure?.codes, ["ECONNREFUSED"]);
+    return true;
+  };
+  try {
+    // Any HTTP response — even an error status — proves a listener.
+    await probeRemoteReadiness(new URL(base + "/"), 5000);
+    await probeRemoteReadiness(new URL(base + "/boom"), 5000);
+    // A probe that outlasts its budget proceeds instead of failing: slow is not down.
+    await probeRemoteReadiness(new URL(base + "/slow"), 50);
+    // A refused connection fails with the structured navigation shape...
+    await assert.rejects(probeRemoteReadiness(new URL(dead), 5000), assertNavigationRefused);
+    // ...before any browser launch is attempted: the channel is bogus, so a
+    // launch attempt would throw a startup error instead of this shape.
+    process.env.PI_RENDER_BROWSER_CHANNEL = "definitely-not-a-browser";
+    await assert.rejects(
+      renderCapture({ source: dead, output: "text", width: 800, height: 600, timeoutMs: 8000 },
+        path.join(scratch, "refused.png")),
+      assertNavigationRefused);
+    // And a live server still reaches launch: the probe never blocks healthy targets.
+    await assert.rejects(
+      renderCapture({ source: base + "/", output: "text", width: 800, height: 600, timeoutMs: 8000 },
+        path.join(scratch, "live.png")),
+      error => {
+        assert.equal(error.failure, undefined);
+        assert.match(String(error.message), /browser startup failure/);
+        return true;
+      });
+  } finally {
+    if (oldChannel === undefined) delete process.env.PI_RENDER_BROWSER_CHANNEL;
+    else process.env.PI_RENDER_BROWSER_CHANNEL = oldChannel;
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("missing local sources name the caller-supplied path in text output", { timeout: 60000 }, async () => {
+  const { renderCapture, enoentSourceHint } = await load("scripts/render-capture.mjs");
+  const enoent = missingPath => Object.assign(Error("missing"), { code: "ENOENT", path: missingPath });
+  assert.equal(enoentSourceHint("/work/site/index.html", "source", enoent("/work/site/index.html")), " (/work/site/index.html)");
+  assert.equal(enoentSourceHint("http://127.0.0.1:8899/page?token=secret", "source", enoent("/work/site/index.html")), " (http://127.0.0.1:8899/page)");
+  assert.equal(enoentSourceHint("/work/doc.pdf", "source", enoent("pdfinfo")), "");
+  assert.equal(enoentSourceHint("/work/site/index.html", "launch", enoent("/work/site/index.html")), "");
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "render-enoent-"));
+  const missing = path.join(scratch, "no-such-dir", "fixture.html");
+  const oldChannel = process.env.PI_RENDER_BROWSER_CHANNEL;
+  try {
+    await assert.rejects(
+      renderCapture({ source: missing, output: "text", width: 800, height: 600 },
+        path.join(scratch, "capture.png")),
+      error => {
+        assert.match(String(error.message), /ENOENT: source not found/);
+        assert.ok(String(error.message).includes(missing), "names the missing source");
+        return true;
+      });
+    // A later-stage ENOENT (here: no browser behind a bogus channel) keeps
+    // its own classification instead of blaming the existing source.
+    const present = path.join(scratch, "present.html");
+    fs.writeFileSync(present, "<!doctype html><title>Present</title><h1>Here</h1>");
+    process.env.PI_RENDER_BROWSER_CHANNEL = "definitely-not-a-browser";
+    await assert.rejects(
+      renderCapture({ source: present, output: "text", width: 800, height: 600 },
+        path.join(scratch, "launch.png")),
+      error => {
+        assert.match(String(error.message), /browser startup failure/);
+        assert.doesNotMatch(String(error.message), /source not found/);
+        return true;
+      });
+  } finally {
+    if (oldChannel === undefined) delete process.env.PI_RENDER_BROWSER_CHANNEL;
+    else process.env.PI_RENDER_BROWSER_CHANNEL = oldChannel;
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});

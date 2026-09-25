@@ -346,6 +346,72 @@ export function unknownAgentDiagnosticContext(discovered: Pick<AgentDiscoveryRes
 	};
 }
 
+function agentNameDistance(left: string, right: string): number {
+	const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+	for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+		let diagonal = previous[0]!;
+		previous[0] = leftIndex;
+		for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+			const above = previous[rightIndex]!;
+			previous[rightIndex] = left[leftIndex - 1] === right[rightIndex - 1]
+				? diagonal
+				: Math.min(diagonal, above, previous[rightIndex - 1]!) + 1;
+			diagonal = above;
+		}
+	}
+	return previous[right.length]!;
+}
+
+function hasSingleAdjacentTransposition(left: string, right: string): boolean {
+	if (left.length !== right.length) return false;
+	const mismatch = [...left].findIndex((character, index) => character !== right[index]);
+	return mismatch >= 0
+		&& left[mismatch] === right[mismatch + 1]
+		&& left[mismatch + 1] === right[mismatch]
+		&& left.slice(mismatch + 2) === right.slice(mismatch + 2);
+}
+
+/**
+ * Closest discovered agent names for an unresolved request, ranked best
+ * first. Matches over names, local names and aliases; a candidate qualifies
+ * on a close edit distance (same bar as unknown-action suggestions),
+ * a single transposition, or a shared substring of at least three
+ * characters. Empty when nothing is close — callers then point at the
+ * agent list instead of guessing.
+ */
+export function suggestAgentNames(name: string, agents: readonly AgentConfig[], limit = 3): string[] {
+	const requested = name.trim().toLowerCase();
+	if (requested.length < 2) return [];
+	const seen = new Set<string>();
+	const scored: Array<{ name: string; score: number }> = [];
+	for (const agent of agents) {
+		if (seen.has(agent.name)) continue;
+		seen.add(agent.name);
+		const candidates = [agent.name, ...(agent.aliases ?? [])];
+		if (agent.localName) candidates.push(agent.localName);
+		let best = Number.POSITIVE_INFINITY;
+		for (const candidate of candidates) {
+			const lower = candidate.toLowerCase();
+			if (!lower || lower === requested) continue;
+			const substring = requested.length >= 3 && lower.length >= 3
+				&& (lower.includes(requested) || requested.includes(lower));
+			if (substring) {
+				best = Math.min(best, 1);
+				continue;
+			}
+			const distance = agentNameDistance(requested, lower);
+			if (distance <= Math.max(1, Math.floor(lower.length / 4)) || hasSingleAdjacentTransposition(requested, lower)) {
+				best = Math.min(best, distance);
+			}
+		}
+		if (best !== Number.POSITIVE_INFINITY) scored.push({ name: agent.name, score: best });
+	}
+	return scored
+		.sort((left, right) => left.score - right.score || left.name.localeCompare(right.name))
+		.slice(0, limit)
+		.map((entry) => entry.name);
+}
+
 /** Render local discovery evidence without exposing filesystem error details. */
 export function formatUnknownAgentError(name: string, context: UnknownAgentDiagnosticContext, prefix = "Unknown agent"): string {
 	const directories = context.directories.map((directory) => {
@@ -356,16 +422,24 @@ export function formatUnknownAgentError(name: string, context: UnknownAgentDiagn
 					: directory.state;
 		return `- ${directory.source}: ${directory.path} (${state})`;
 	});
-	const agents = [...context.agents]
-		.sort((left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source))
-		.map((agent) => `- ${agent.name} (${agent.source})`);
+	const suggestions = suggestAgentNames(name, context.agents);
+	const recovery = suggestions.length
+		? `Did you mean ${suggestions.map((suggestion) => `'${suggestion}'`).join(", ")}?`
+		: `No close match; use subagent({ action: "list" }) to inspect available agents.`;
+	const sorted = [...context.agents]
+		.sort((left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source));
+	// Large catalogs truncate blindly in transit; cap the wall of names with a
+	// pointer at the full list so the recovery line above always survives.
+	const shown = sorted.slice(0, 40).map((agent) => `- ${agent.name} (${agent.source})`);
+	if (sorted.length > shown.length) shown.push(`- ... and ${sorted.length - shown.length} more; use subagent({ action: "list" }) for the full list`);
 	return [
 		`${prefix}: ${name}`,
+		recovery,
 		`Effective cwd: ${path.resolve(context.cwd)}`,
 		"Consulted agent-definition directories:",
 		...(directories.length ? directories : ["- (none)"]),
 		"Discovered agents:",
-		...(agents.length ? agents : ["- (none)"]),
+		...(shown.length ? shown : ["- (none)"]),
 	].join("\n");
 }
 
@@ -732,6 +806,20 @@ export function resolveAgentName(name: string, agents: AgentConfig[]): { agent?:
 		const effective = effectiveAgentMatch(aliases);
 		if (effective.agent) return effective;
 		return { error: `Ambiguous agent alias '${name}': ${aliases.map((agent) => agent.name).join(", ")}` };
+	}
+
+	// Case differs only: accept a unique case-insensitive match over names,
+	// local names and aliases. Distinct names that differ only by case stay
+	// ambiguous rather than guessing.
+	const lowered = raw.toLowerCase();
+	const folded = agents.filter((agent) => agent.name.toLowerCase() === lowered
+		|| agent.localName?.toLowerCase() === lowered
+		|| agent.aliases?.some((alias) => alias.toLowerCase() === lowered));
+	if (folded.length === 1) return folded[0] ? { agent: folded[0] } : {};
+	if (folded.length > 1) {
+		const effective = effectiveAgentMatch(folded);
+		if (effective.agent) return effective;
+		return { error: `Ambiguous agent name '${name}': ${folded.map((agent) => agent.name).join(", ")}` };
 	}
 	return {};
 }
