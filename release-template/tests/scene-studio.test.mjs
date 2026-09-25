@@ -107,3 +107,37 @@ test('actual 3D renderer produces deterministic frames, changing geometry pixels
     assert.deepEqual(await fs.readdir(dir), before, 'in-flight cancellation cleans its fresh output');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+test('key-visual scenes validate glass, spot, beam, gradient and post fields strictly', () => {
+  const scene = scenePreset('keyvisual');
+  assert.equal(scene.style, 'luminous');
+  assert.deepEqual(validateScene(scene), scene);
+  assert.ok(scene.objects.some(o => o.geometry === 'arch' && o.material === 'glass'));
+  assert.ok(scene.lights.some(l => l.type === 'spot' && l.target && l.penumbra > 0));
+  assert.equal(scene.beams.length, 1);
+  assert.ok(scene.post.grain > 0 && scene.post.vignette > 0 && scene.post.bloom > 0);
+  for (const change of [
+    { post: { bloom: 3 } }, { post: { shader: 'x' } }, { beams: [{ from: [0, 0, 0], to: [0, 0, 0] }] },
+    { beams: Array.from({ length: 5 }, () => ({ from: [0, 1, 0], to: [1, 0, 0] })) },
+    { backgroundGradient: { from: 'red' } }, { softShadows: 99 },
+    { objects: [{ id: 'a', material: 'lava' }] }, { objects: [{ id: 'a', geometry: 'arch', tube: 2 }] },
+    { lights: [{ type: 'spot', angle: 3 }] },
+  ]) assert.throws(() => validateScene({ ...scene, ...change }), JSON.stringify(change));
+});
+
+test('key-visual preset renders real glass and compositing pixels', { timeout: 120000 }, async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scene-keyvisual-'));
+  try {
+    const source = await sceneCreate({ preset: 'keyvisual' }, dir);
+    let rendered;
+    try { rendered = await sceneRender({ path: source.scene.path, mode: 'frame', time: 1, width: 320, height: 128 }, dir); }
+    catch (error) {
+      if (process.env.PI_REQUIRE_MEDIA_TEST !== '1' && /Executable doesn't exist|not installed or not on PATH|distribution.*not found/i.test(error.message)) { t.skip('Media prerequisites unavailable'); return; }
+      throw error;
+    }
+    const bytes = await fs.readFile(rendered.poster.path);
+    assert.equal(bytes.readUInt32BE(16), 320);
+    assert.equal(bytes.readUInt32BE(20), 128);
+    assert.ok(bytes.length > 20_000, 'a lit, graded frame is not a flat fill');
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});

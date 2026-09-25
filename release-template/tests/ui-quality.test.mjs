@@ -141,3 +141,32 @@ test('structural cues flag card, section, footer, icon, tour and widget excess',
   assert.ok(keys('Page.tsx','<button>Ask AI anything</button>').includes('ui-ai-widget'));
   assert.ok(!keys('Page.tsx','<button>Save</button>').some(k=>k.startsWith('ui-')),'clean button stays cue-free');
 });
+
+test('color, order, placement and prose-tell cues fire on stock patterns and stay quiet on systemized work', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  assert.ok(keys('site/hero.css', '.hero{background:linear-gradient(90deg,#6366f1,#ec4899)}').includes('ui-stock-palette'));
+  assert.ok(keys('site/Hero.tsx', '<div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500">').includes('ui-stock-palette'));
+  assert.ok(!keys('site/brand.css', ':root{--accent:#0f766e}.hero{background:linear-gradient(90deg,#0f766e,#134e4a)}').includes('ui-stock-palette'));
+  const sprawl = Array.from({ length: 13 }, (_, i) => `.c${i}{color:#${(0x102030 + i * 0x010101).toString(16)}}`).join('');
+  assert.ok(keys('site/a.css', sprawl).includes('ui-hue-sprawl'));
+  assert.ok(!keys('site/a.css', `:root{${Array.from({ length: 13 }, (_, i) => `--c${i}:#${(0x102030 + i * 0x010101).toString(16)};`).join('')}}.a{color:var(--c1)}.b{color:var(--c2)}.c{color:var(--c3)}`).includes('ui-hue-sprawl'));
+  assert.ok(keys('site/a.css', Array.from({ length: 9 }, (_, i) => `.s${i}{text-align:center}`).join('')).includes('ui-centered-everything'));
+  assert.ok(keys('site/index.html', '<h2>Trusted by teams</h2><h2>Features</h2><h2>How it works</h2><h2>What our customers say</h2><h2>Pricing</h2>').includes('ui-template-sequence'));
+  assert.ok(!keys('site/index.html', '<h2>Features</h2><h2>Pricing</h2><h2>Contact</h2>').includes('ui-template-sequence'));
+  const tells = "We delve into the rich tapestry of ideas. ".repeat(3) + 'The tool is fast, simple and reliable. It is clean, calm and quick. It is bright, bold and brave. We ship fast, test often and care deeply. '.repeat(4) + 'This is a testament to our work. '.repeat(3);
+  assert.ok(keys('site/about.md', tells).includes('prose-ai-tells'));
+  assert.ok(!keys('site/about.md', 'We make bread every morning at five. The rye takes two days. Come early on Saturdays; it sells out by ten.').includes('prose-ai-tells'));
+});
+
+test('user-banned ornaments are cued at edit time: accent rails, dot markers and icon tiles', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  assert.ok(keys('a.css', '.card{border-left:3px solid #4aa3ff;padding:12px}').includes('ui-accent-rail'));
+  assert.ok(keys('a.css', '.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:gold}').includes('ui-accent-rail'));
+  assert.ok(keys('a.tsx', '<div className="pl-4 border-l-4 border-blue-500">').includes('ui-accent-rail'));
+  assert.ok(!keys('a.css', 'blockquote{border-left:4px solid #ccc}').includes('ui-accent-rail'));
+  assert.ok(keys('a.css', '.dot{width:8px;height:8px;border-radius:50%;background:#4aa3ff;box-shadow:0 0 8px #4aa3ff}').includes('ui-dot-marker'));
+  assert.ok(keys('a.tsx', '<span className="h-2 w-2 rounded-full bg-emerald-500"/>').includes('ui-dot-marker'));
+  assert.ok(keys('a.css', '.icon-wrap{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;border:1px solid #c9a24a}').includes('ui-icon-tile'));
+  assert.ok(keys('a.tsx', '<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10">').includes('ui-icon-tile'));
+  assert.deepEqual(keys('a.tsx', '<button className="h-10 px-4 rounded-lg bg-black text-white">Save</button>'), []);
+});

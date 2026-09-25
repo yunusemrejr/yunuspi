@@ -1397,3 +1397,18 @@ test("new user input resets the stuck-need escalation wait", async (t) => {
  await f.settle();
  assert.equal(f.calls.length, 1);
 });
+
+test('a repair round re-reviews only aspects the delta touches; clean passes carry forward', async (t) => {
+ const f = await fixture(t);
+ await f.mutate('src/value.js', 'export const value=1;');
+ await f.mutate('src/site.css', '.a{color:#111}');
+ await f.tool({ action: 'review' });
+ assert.deepEqual(f.calls.at(-1)[0].aspects.map(a => a.id).sort(), ['correctness', 'interface']);
+ await f.mutate('src/value.js', 'export const value=2;');
+ const second = await f.tool({ action: 'review' });
+ assert.deepEqual(f.calls.at(-1)[0].aspects.map(a => a.id), ['correctness'], 'interface passed and its files did not change');
+ const data = second.details ?? JSON.parse(second.content[0].text);
+ const carried = data.reports.find(r => r.aspect === 'interface');
+ assert.equal(carried.outcome, 'pass');
+ assert.match(carried.evidence[0], /Carried forward from revision/);
+});

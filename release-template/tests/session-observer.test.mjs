@@ -211,7 +211,7 @@ function harness(dispatch) {
     const request=`r${++requestId}`,controller=new AbortController();
     emit('input',{source,text,originalText:text,requestId:request,signal:controller.signal});
     const message=tagGuardianRequestMessage({role:'user',content:[{type:'text',text}]},{requestId:request,sessionId:'synthetic-session'});
-    if(accept){branch.push({type:'message',message});emit('message_start',{message});}
+    if(accept){branch.push({type:'message',message});emit('message_start',{message});emit('message_start',{message:{role:'assistant',content:[]}});}
     return{controller,message,request};
   }
   return{...time,ctx,emit,input,sent,receipts,packets,publish:(name,payload)=>listeners.get(name)?.(payload),newManager,setBranch:value=>{branch=value;},setIdle:value=>{idle=value;},close:()=>emit('session_shutdown')};
@@ -474,6 +474,13 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could useful independent work continue while that check runs?',evidence:['running-tools'],tools:[],skills:[]})}]});await flush();
   assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/Cited running work finished/);active.close();
+  // Advice that also rests on other evidence keeps its paid value, with a caveat.
+  const mixed=harness(async()=>new Promise(resolve=>{finish=resolve;}));mixed.input('Fix parser validation.');
+  mixed.emit('tool_result',{toolName:'read',input:{path:'src/parser.ts'},content:[{type:'text',text:'Required input checks are absent.'}]});
+  mixed.emit('tool_execution_start',{toolCallId:'build',toolName:'bash',args:{command:'npm test',timeout:120}});await mixed.advance(30000);
+  mixed.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
+  finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could the parser enforce its input contract before parsing?',evidence:['running-tools','event-1'],tools:[],skills:[]})}]});await flush();
+  assert.ok(mixed.sent.some(([message])=>/returned a note.*the running command it cited has since finished/.test(message.content)));mixed.close();
 });
 
 test('changed cited plan state is delivered with a named caveat instead of discarding the paid review', async () => {
@@ -503,7 +510,7 @@ test('a review whose cited running work finished retains its chronological event
   await h.advance(30000);
   assert.ok(h.packets[0].evidence.some(row => row.id === 'event-1'));
   h.emit('tool_result', { toolCallId: 'build', toolName: 'bash', input: { command: 'npm test' }, content: [{ type: 'text', text: 'Tests passed.' }] });
-  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could independent work continue while the test run finishes?', evidence: ['running-tools', 'event-1'], tools: [], skills: [] }) }] });
+  finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could independent work continue while the test run finishes?', evidence: ['running-tools'], tools: [], skills: [] }) }] });
   await flush();
   assert.match(h.sent.at(-1)[0].content, /Cited running work finished/);
   await h.advance(30000);
