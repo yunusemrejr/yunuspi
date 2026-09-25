@@ -570,3 +570,18 @@ test('the observer sees every user prompt, the interpretation, delivered reminde
   assert.ok(result.text.length<600,'the packet carries an excerpt');
   h.close();
 });
+
+test('Guardian advice reaches reviewer deduplication, while status and another owner do not', async () => {
+  const note = 'Read the exact current parser region before another edit attempt.';
+  const h = harness(async () => ({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence: ['request'], tools: [], skills: [] }) }] }));
+  h.input('Fix parser validation.');
+  h.emit('message_end', { message: { role: 'custom', customType: 'guardian_status', content: 'STATUS-ONLY-MARKER', excludeFromContext: true } });
+  h.emit('message_end', { message: { role: 'custom', customType: 'guardian_intervention', content: note } });
+  await h.advance(30000);
+  assert.ok(h.packets[0].evidence.some(row => row.kind === 'peer reviewer note' && row.text.includes('Guardian already told')));
+  assert.doesNotMatch(h.packets[0].text, /STATUS-ONLY-MARKER/);
+  assert.equal(h.emit('context', { messages: [] }), undefined, 'duplicate Guardian advice is not injected by the observer');
+  const other = harness(); other.input('Fix parser validation.'); await other.advance(30000);
+  assert.equal(other.packets[0].evidence.some(row => row.kind === 'peer reviewer note' && row.text.includes('Guardian already told')), false);
+  h.close(); other.close();
+});

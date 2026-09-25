@@ -7,6 +7,39 @@ integrated that work with the current owned core, repaired defects, and checked
 source/export/installation parity. This report distinguishes exercised behavior
 from architecture that is still absent.
 
+## Subsequent coordination and kernel update (2026-09-25)
+
+The audit below is a historical record. The current supervisor has six detectors, documented
+in [Guardian Intelligence](GUARDIAN-INTELLIGENCE.md). The subsequent changes add causal
+verification generations, owned background-check completion, cooldown fairness, fresh
+OFF/ON working evidence, and Guardian-to-reviewer advice deduplication scoped to the live
+session manager. The C++ similarity kernel preserves exact multiset Dice scores while
+using an identical-input fast path and bounded O(n log n) comparison. The model weights,
+threshold and synthetic calibration claims remain unchanged.
+
+Regression fixtures exercise overlapping checks/edits, identical timestamps, partial
+mutations, pending/failed/foreign background jobs, masked exits, reviewer ownership and
+more than 600 differential similarity cases. These are offline behavior checks, not a
+claim of semantic correctness or whole-session speedup. Rebuild provenance and the
+public scanner fingerprint accompany the modified binary.
+
+### Kernel comparison
+
+On Node 22.22.3/Linux with Clang 21.1.8, alternating old/new kernels in one process
+(10 measured batches of 5,000 calls after two warm-up batches) gave these median
+batch means for the raw exported similarity function:
+
+| Input | Previous | Updated |
+| --- | ---: | ---: |
+| Typical identical argument shape | 1.56 µs | 0.40 µs |
+| 512 identical bytes | 152.54 µs | 3.65 µs |
+| 512 disjoint bytes | 311.25 µs | 11.29 µs |
+
+This comparison excludes host encoding, event dispatch and model inference. Separate
+full-supervisor runs on the busy laptop were noisy and did not demonstrate an end-to-end
+speedup. The binary grew from 943 to 1,437 bytes; its fixed 128 KiB memory and import-free
+ABI are unchanged. Source-built hashes and score equivalence are independently checked.
+
 ## Verified correct
 
 | Requirements | Runtime path and evidence |

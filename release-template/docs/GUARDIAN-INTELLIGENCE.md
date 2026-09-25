@@ -2,7 +2,7 @@
 
 Guardian Intelligence provides narrow, event-driven checks. The independent conversational
 quality reviewer is the [session observer](SESSION-OBSERVER.md). Guardians observe a running session and, only
-when verified evidence accumulates, injects one short piece of bounded guidance. It is not an
+when verified evidence accumulates, inject one short piece of bounded guidance. It is not an
 agent: it never plans, never calls a model for its own decisions, never spawns work, and cannot
 block a tool call.
 
@@ -71,10 +71,43 @@ each detector admits at most one intervention per two-minute window.
    steered once per change set to run the proving check or state what remains unverified. A reply
    that already says the work is unverified or blocked does not trigger it.
 
+6. **Consecutive failure burst.** Four consecutive fingerprintable failures across varied
+   operations produce one reminder to diagnose the causes; a success resets the streak.
+   Identical operations stay with the WASM detector.
+
 Anything else abstains. There is no keyword or topic classifier, so a CSS file in a backend task,
 the word "architecture" in documentation, or a discussion of an unrelated earlier task cannot
-produce guidance. Detectors 3–5 are deterministic evidence counts; paths are hashed in evidence and
+produce guidance. Detectors 3–6 are deterministic evidence counts; paths are hashed in evidence and
 no file content is stored.
+
+### Verification and coordination
+
+Completion supervision uses mutation generations rather than wall-clock ordering. A check
+must start after the latest observed mutation and finish without an overlapping mutation.
+A failed bulk edit carrying `fileMutation` also invalidates earlier verification. A later
+failed or pending check retires an earlier pass. These receipts establish execution, not
+proof that a check covers every user requirement.
+
+`project_tests` and `quality_review` inspection/assessment calls, browser-session setup,
+background launches, and shell text merely mentioning tests do not count as executed
+verification. Shell recognition is conservative: a supported leading check, optionally
+following a simple `cd`, without compound commands or masked exits. Explicit `bg_run`
+checks retain at most 32 owned job IDs; only `completed` with exit code zero and no signal,
+observed through a background notification or `bg_status`, satisfies their generation.
+A job from another request cannot satisfy the current request. Detached managed-bash
+launches remain unverified here; their richer receipts belong to `project_tests`.
+
+Delivered Guardian intervention messages join the existing reviewer note board. The
+observer and Watchmaker see an attributed Guardian peer note and suppress restatements
+through their normal advice deduplication. Status/debug messages do not become advice.
+The board is scoped to the live session manager, so two runtimes reopening the same
+transcript cannot consume each other's notes. This is coordination of optional guidance,
+not shared authority or permission to act. Guardian itself still makes no model calls.
+
+Cooldown-suppressed candidates do not spend the evaluation allowance for other detector
+categories. Turning Guardian off clears pending checks, reads, and edit evidence; turning
+it back on starts fresh observation, while already-delivered advice retains its bounded
+history.
 
 ## Kernels
 
@@ -83,7 +116,9 @@ by `node scripts/guardian/build-wasm.mjs`:
 
 - `classifier.wasm` — a 12-feature linear scorer with hard minimum-evidence gates and a monotone
   calibration table; it imports nothing and holds no task state.
-- `similarity.wasm` — a byte n-gram similarity kernel used only as a corroborating signal.
+- `similarity.wasm` — exact byte n-gram multiset Dice similarity, used only as a
+  corroborating signal. Identical normalized inputs take a linear fast path; other
+  inputs use allocation-free heapsort and merge, bounding worst-case work to O(n log n).
 
 The provenance manifest (`wasm-provenance.json`) records compiler, flags, artifact hashes and
 source hashes, and `scripts/check-public.mjs` re-verifies them. A missing, modified or corrupt
@@ -118,7 +153,7 @@ measurements, exercised paths and remaining implementation gaps.
 
 ## Boundaries and measured overhead
 
-This is a narrow supervisor, not a general semantic task or architecture classifier. The five
+This is a narrow supervisor, not a general semantic task or architecture classifier. The six
 detectors above are its complete intervention set. Architecture/tool-choice constraints may be
 retained as verified metadata but are not enforced. JEV/Needle3/fuzzy usage is observable through
 the intelligence event system; those scores do not feed Guardian decisions. Path constraints

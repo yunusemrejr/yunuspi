@@ -63,6 +63,8 @@ if (process.argv.includes("--worker")) {
 	const features = new Array(12).fill(1000);
 	assert.ok(kernel.evaluate(features).probability >= 9500);
 	const wasm = { coldInitMs, classifier: sampleLatency(() => kernel.evaluate(features)), similarity: sampleLatency(() => kernel.similarity("edit|newText:string|oldText:string|path:string", "edit|newText:string|oldText:string|path:string")) };
+	wasm.similarityLongIdentical = sampleLatency(() => kernel.similarity("a".repeat(512), "a".repeat(512)));
+	wasm.similarityLongDisjoint = sampleLatency(() => kernel.similarity("a".repeat(512), "b".repeat(512)));
 	const sessions = [];
 	for (const count of [1, 16, 64]) sessions.push(await scenario(count));
 	const workersStarted = performance.now();

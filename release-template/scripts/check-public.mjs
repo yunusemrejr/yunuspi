@@ -46,8 +46,16 @@ const PUBLIC_BINARY_SHA256 = {
   "core/coding-agent/src/core/guardian/classifier.wasm":
     "d325cf354b67fa27ff46d0299bf01f50ca778d3c23ae7afccdd1785e0fb5626c",
   "core/coding-agent/src/core/guardian/similarity.wasm":
-    "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
+    "ac0f25247763dfd90bfb95b8c85bf0a01794ff330c2f0eb33338cddebf83ae52",
 };
+
+// Previously published import-free Guardian kernel, reviewed at 511b6f4.
+// History-only: these bytes are NEVER accepted in the tree or index, where
+// the current binary and matching source/build provenance remain mandatory.
+const REVIEWED_HISTORICAL_GUARDIAN = Object.freeze({
+  "core/coding-agent/src/core/guardian/similarity.wasm":
+    "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
+});
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const runtimeDirs =
@@ -290,8 +298,11 @@ export function scanGit(root, { history = true } = {}) {
       const end = headerEnd + 1 + size;
       if (end >= data.length || data[end] !== 10) throw Error('Truncated Git blob; publication blocked.');
       const content = data.subarray(headerEnd + 1, end);
-      for (const [filename, origin] of objects.get(oid))
-        findings.push(...scanContent(filename, content).map(f => ({ ...f, origin })));
+      for (const [filename, origin] of objects.get(oid)) {
+        const reviewedHistory = origin === "history" && Object.hasOwn(REVIEWED_HISTORICAL_GUARDIAN, filename)
+          && createHash("sha256").update(content).digest("hex") === REVIEWED_HISTORICAL_GUARDIAN[filename];
+        if (!reviewedHistory) findings.push(...scanContent(filename, content).map(f => ({ ...f, origin })));
+      }
       offset = end + 1;
     }
     batch = []; batchBytes = 0;

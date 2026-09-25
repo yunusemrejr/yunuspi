@@ -909,3 +909,122 @@ test("a failed verification run does not satisfy the completion check", async (t
 	assert.equal(emitted.length, 1);
 	assert.equal(emitted[0].detail.kind, "unverified-completion");
 });
+
+const finished = { type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Done.' }] } };
+for (const scenario of ['same-tick-edit', 'check-overlaps-edit', 'edit-overlaps-check', 'launch-only', 'background-success', 'background-failure', 'background-stale', 'foreign-job', 'status-success', 'checkpoint-only', 'echo-tests', 'masked-exit', 'failed-exit', 'pass-then-fail', 'partial-mutation']) {
+	test(`verification evidence is causal and owned: ${scenario}`, async t => {
+		const { supervisor, emitted } = harness(`verification-${scenario}`, process.cwd(), { clock: () => 0 });
+		t.after(() => supervisor.dispose());
+		await supervisor.observeAgentEvent({ type: 'message_start', message: userMessage(supervisor, 'request', 'Fix the parser.') });
+		let id = 0;
+		const start = async (toolName, args) => { const toolCallId = `v-${++id}`; await toolStart(supervisor, { toolCallId, toolName, args }); return toolCallId; };
+		const end = async (toolCallId, details = {}, isError = false, text = 'ok') => supervisor.observeAgentEvent({ type: 'tool_execution_end', toolCallId, isError, result: { content: [{ type: 'text', text }], details } });
+		const mutate = async () => end(await start('edit', { path: 'parser.js', oldText: 'a', newText: 'b' }));
+		await mutate();
+		if (['same-tick-edit', 'pass-then-fail', 'partial-mutation'].includes(scenario)) {
+			await end(await start('bash', { command: 'npm test' }));
+			if (scenario === 'same-tick-edit') await mutate();
+			if (scenario === 'pass-then-fail') await end(await start('bash', { command: 'npm test' }), {}, true);
+			if (scenario === 'partial-mutation') await end(await start('bulk_edit', { path: 'parser.js' }), { fileMutation: true }, true);
+		} else if (scenario === 'check-overlaps-edit') {
+			const check = await start('bash', { command: 'npm test' }); await mutate(); await end(check);
+		} else if (scenario === 'edit-overlaps-check') {
+			const edit = await start('edit', { path: 'parser.js' }); const check = await start('bash', { command: 'npm test' }); await end(edit); await end(check);
+		} else if (scenario.startsWith('background-') || ['launch-only', 'foreign-job', 'status-success'].includes(scenario)) {
+			await end(await start('bg_run', { command: 'npm test' }), { task: { id: 'owned-job', status: 'running' } });
+			if (scenario === 'background-stale') await mutate();
+			const job = { id: scenario === 'foreign-job' ? 'foreign-job' : 'owned-job', status: scenario === 'background-failure' ? 'failed' : 'completed', exitCode: scenario === 'background-failure' ? 1 : 0 };
+			if (scenario === 'status-success') await end(await start('bg_status', {}), { tasks: [job] });
+			else if (scenario !== 'launch-only') await supervisor.observeAgentEvent({ type: 'message_end', message: { role: 'custom', customType: 'background-task-notification', details: job } });
+		} else if (scenario === 'checkpoint-only') await end(await start('project_tests', { action: 'inspect' }));
+		else await end(await start('bash', { command: scenario === 'echo-tests' ? 'echo tests' : scenario === 'masked-exit' ? 'npm test || true' : 'npm test' }), scenario === 'failed-exit' ? { exitCode: 1 } : {});
+		await supervisor.observeAgentEvent(finished);
+		assert.equal(emitted.filter(e => e.detail.kind === 'unverified-completion').length, ['background-success', 'status-success'].includes(scenario) ? 0 : 1);
+	});
+}
+
+test('cooldown-suppressed reads cannot starve a distinct failure detector', async t => {
+	const { supervisor, emitted } = harness('window-fairness'); t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: 'message_start', message: userMessage(supervisor, 'request', 'Fix the parser.') });
+	for (const file of ['a.js', 'b.js']) for (let i = 0; i < 24; i++) {
+		const toolCallId = `${file}-${i}`;
+		await toolStart(supervisor, { toolCallId, toolName: 'read', args: { path: file } });
+		await toolEnd(supervisor, { toolCallId, toolName: 'read', isError: false });
+	}
+	await repeatIdenticalFailure(supervisor);
+	assert.deepEqual(emitted.map(e => e.detail.kind), ['repeated-identical-read', 'repeated-identical-failure']);
+});
+
+test('off/on starts fresh working-pattern evidence rather than reviving stale reads and edits', async t => {
+	const { supervisor, emitted } = harness('pattern-reset'); t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: 'message_start', message: userMessage(supervisor, 'request', 'Fix the parser.') });
+	await toolStart(supervisor, { toolCallId: 'edit', toolName: 'edit', args: { path: 'a.js' } });
+	await toolEnd(supervisor, { toolCallId: 'edit', isError: false });
+	for (let i = 0; i < 3; i++) {
+		await toolStart(supervisor, { toolCallId: `read-${i}`, toolName: 'read', args: { path: 'a.js' } });
+		await toolEnd(supervisor, { toolCallId: `read-${i}`, toolName: 'read', isError: false });
+	}
+	supervisor.handleCommand('/guardian off'); supervisor.handleCommand('/guardian on');
+	await toolStart(supervisor, { toolCallId: 'read-new', toolName: 'read', args: { path: 'a.js' } });
+	await toolEnd(supervisor, { toolCallId: 'read-new', toolName: 'read', isError: false });
+	await supervisor.observeAgentEvent(finished);
+	assert.equal(emitted.length, 0);
+});
+
+test('WASM similarity preserves exact multiset Dice scores over bounded adversarial inputs', async () => {
+	const runtime = new GuardianKernelRuntime(); await runtime.initialize();
+	const grams = text => {
+		const bytes = new TextEncoder().encode(text).slice(0, 512); const counts = new Map();
+		for (let i = 0; i + 2 < bytes.length; i++) {
+			const g = [...bytes.slice(i, i + 3)].map(b => b >= 65 && b <= 90 ? b + 32 : b);
+			if (g.includes(32)) continue;
+			const key = g.join(','); counts.set(key, (counts.get(key) ?? 0) + 1);
+		}
+		return counts;
+	};
+	const reference = (left, right) => {
+		if (!left || !right) return undefined;
+		const a = grams(left), b = grams(right); const n = [...a.values(), ...b.values()].reduce((a,b) => a+b, 0);
+		return n ? Math.floor(2000 * [...a].reduce((sum, [g, count]) => sum + Math.min(count, b.get(g) ?? 0), 0) / n) : 0;
+	};
+	let seed = 19;
+	const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+	const alphabet = 'aABxyz 0123é🎯';
+	const text = () => Array.from({ length: random() % 600 }, () => alphabet[random() % alphabet.length]).join('');
+	const pairs = [['', 'a'], ['ab', 'ab'], ['   ', '   '], ['ABc', 'abc'], ['a'.repeat(512), 'b'.repeat(512)], ['aaaab', 'baaaa'], ['é'.repeat(300), 'é'.repeat(300)]];
+	for (let i = 0; i < 300; i++) { const a = text(), b = text(); pairs.push([a, b], [a, a]); }
+	for (const [a,b] of pairs) assert.equal(runtime.similarity(a,b), reference(a,b));
+	assert.equal(runtime.status().similarity.state, 'ready');
+});
+
+
+test('OFF/ON retains monotone change identities so a new change can receive completion guidance', async t => {
+	let now = 1000;
+	const { supervisor, emitted } = harness('completion-reset-history', process.cwd(), { clock: () => now });
+	t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: 'message_start', message: userMessage(supervisor, 'request', 'Fix the parser.') });
+	for (let i = 0; i < 2; i++) {
+		await toolStart(supervisor, { toolCallId: `edit-${i}`, toolName: 'edit', args: { path: 'parser.js', oldText: String(i), newText: String(i+1) } });
+		await toolEnd(supervisor, { toolCallId: `edit-${i}`, isError: false });
+		await supervisor.observeAgentEvent(finished);
+		supervisor.handleCommand('/guardian off'); supervisor.handleCommand('/guardian on'); now += 120001;
+	}
+	assert.equal(emitted.length, 2);
+	assert.notEqual(emitted[0].detail.dedupeKey, emitted[1].detail.dedupeKey);
+});
+
+
+test('an older background pass cannot overwrite a newer failed check', async t => {
+	const { supervisor, emitted } = harness('late-check-pass'); t.after(() => supervisor.dispose());
+	await supervisor.observeAgentEvent({ type: 'message_start', message: userMessage(supervisor, 'request', 'Fix the parser.') });
+	await toolStart(supervisor, { toolCallId: 'edit', args: { path: 'parser.js' } });
+	await toolEnd(supervisor, { toolCallId: 'edit', isError: false });
+	await toolStart(supervisor, { toolCallId: 'bg', toolName: 'bg_run', args: { command: 'npm test' } });
+	await supervisor.observeAgentEvent({ type: 'tool_execution_end', toolCallId: 'bg', isError: false, result: { content: [], details: { task: { id: 'old', status: 'running' } } } });
+	await toolStart(supervisor, { toolCallId: 'new', toolName: 'bash', args: { command: 'npm run lint' } });
+	await toolEnd(supervisor, { toolCallId: 'new', toolName: 'bash', isError: true });
+	await supervisor.observeAgentEvent({ type: 'message_end', message: { role: 'custom', customType: 'background-task-notification', details: { id: 'old', status: 'completed', exitCode: 0 } } });
+	await supervisor.observeAgentEvent(finished);
+	assert.equal(emitted.length, 1);
+	assert.equal(emitted[0].detail.kind, 'unverified-completion');
+});

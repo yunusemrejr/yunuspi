@@ -206,11 +206,17 @@ export function hasExplicitRetryDirective(text) {
 
 /** Commands and tools that verify behaviour rather than change it. A match is
  * evidence that a check ran, not that it passed or covered the change. */
-const VERIFY_COMMAND = /\b(?:test|tests|spec|vitest|jest|pytest|mocha|ava|tap|cargo (?:test|check|build|clippy)|go (?:test|vet|build)|npm (?:run )?(?:test|build|lint|check|typecheck)|pnpm (?:test|build|lint)|yarn (?:test|build|lint)|tsc|eslint|ruff|mypy|flake8|pylint|php -l|node --check|bash -n|shellcheck|make(?: (?:test|check|build))?|gradle|mvn|dotnet (?:test|build)|playwright|lighthouse|curl -[a-zA-Z]*[fsSI]|validate|verify|lint|typecheck|build)\b/i;
-const VERIFY_TOOLS = new Set(["project_tests", "render_see", "browser_session", "web_probe", "syntax_check", "code_quality", "quality_review", "design_audit", "artifact_check", "source_check", "sandbox_run"]);
+// Match executable positions, never words inside echo/rg/cat arguments.
+// Deliberately conservative: a checkpoint/status/launch is not a passing check.
+const VERIFY_COMMAND = /^(?:npm (?:run )?(?:test|build|lint|check|typecheck)|pnpm (?:run )?(?:test|build|lint|check|typecheck)|yarn (?:test|build|lint|check|typecheck)|(?:npx )?(?:vitest|jest|mocha|tsc|eslint|playwright)|(?:python[23]? -m )?pytest|cargo (?:test|check|build|clippy)|go (?:test|vet|build)|ruff check|mypy|flake8|pylint|php -l|node --(?:check|test)|bash -n|shellcheck|make(?: (?:test|check|build))?|gradle|mvn|dotnet (?:test|build))(?=\s|$)/i;
+const VERIFY_TOOLS = new Set(["render_see", "syntax_check", "code_quality", "design_audit", "artifact_check", "source_check"]);
 export function isVerificationCall(toolName, args) {
 	if (VERIFY_TOOLS.has(toolName)) return true;
-	return (toolName === "bash" || toolName === "bg_run") && typeof args?.command === "string" && VERIFY_COMMAND.test(args.command);
+	if (toolName !== "bash" && toolName !== "bg_run" || typeof args?.command !== "string" || args.command.length > MAX_STRING_LENGTH) return false;
+	// Only a leading check (optionally after a simple cd) whose exit is not
+	// masked can establish this limited execution receipt. No shell evaluation.
+	const command = args.command.trim().replace(/^cd\s+[\w./~-]+\s*&&\s*/, "");
+	return !/[;|&\n`]|\$\(/.test(command) && VERIFY_COMMAND.test(command);
 }
 const MUTATING_TOOLS = new Set(["write", "edit", "bulk_edit", "multi_edit", "apply_patch"]);
 export function isMutationCall(toolName, args) {

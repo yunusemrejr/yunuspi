@@ -90,3 +90,23 @@ test('generated caches are skipped but shipped dist source is still scanned', ()
     assert.ok(scanPath('agent/scripts/__pycache__/fixture.pyc').length);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('retired Guardian binary is accepted only as exact reviewed history, never reintroduced or renamed', () => {
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/guardian-similarity-v1.json', import.meta.url)));
+  const bytes = Buffer.from(fixture.base64, 'base64');
+  const name = 'core/coding-agent/src/core/guardian/similarity.wasm';
+  assert.ok(scanContent(name, bytes).some(f => f.rule === 'binary-unreviewed-file'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guardian-binary-history-'));
+  const git = args => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
+  try {
+    git(['init', '-q']); git(['config', 'user.email', 'test@example.com']); git(['config', 'user.name', 'Test']);
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), bytes); git(['add', '.']); git(['commit', '-qm', 'old reviewed kernel']);
+    assert.ok(scanGit(dir).some(f => f.origin === 'index' && f.rule === 'binary-unreviewed-file'));
+    git(['rm', name]); git(['commit', '-qm', 'retire old kernel']);
+    assert.deepEqual(scanGit(dir), [], 'the reviewed public kernel remains valid historical provenance');
+    fs.writeFileSync(path.join(dir, 'renamed.wasm'), bytes); git(['add', '.']); git(['commit', '-qm', 'renamed bytes']);
+    git(['rm', 'renamed.wasm']); git(['commit', '-qm', 'remove renamed bytes']);
+    assert.ok(scanGit(dir).some(f => f.origin === 'history' && f.path === 'renamed.wasm' && f.rule === 'binary-unreviewed-file'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

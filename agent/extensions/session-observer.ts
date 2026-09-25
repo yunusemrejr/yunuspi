@@ -3,7 +3,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, peerReviewerNotes, publishReviewerNote, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -178,11 +178,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   };
   const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
-  const peerRows = (): ObserverEvidence[] => peerReviewerNotes(ownerIdentity, 'observer', now()).slice(0, 1)
-    .map(peer => ({ id: 'peer-note', kind: 'peer reviewer note', text: `Watchmaker already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
+  const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
+    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     salience: () => salience,
-    peerNotes: () => peerReviewerNotes(ownerIdentity, 'observer', now()),
+    peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()),
     ...testing,
     snapshot() {
       // Cheap guards run before any evidence or packet work; the scheduler
@@ -371,7 +371,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
       if (advice) {
-        publishReviewerNote(ownerIdentity, 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
+        publishReviewerNote(reviewerSessionKey(ctx), 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         // A previous note that never reached a context build is superseded,
         // not delivered: ledger the drop instead of losing it silently.
         // Prepared-but-unconfirmed notes keep their prepared-context receipt
@@ -541,7 +541,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (guidance.length) add('harness guidance to agent', guidance.join(' | '), undefined, text);
       revision++; return;
     }
-    if (/guardian/.test(message.customType)) { add('guardian intervention', text, undefined, text); salience++; revision++; return; }
+    if (message.customType === 'guardian_intervention' && !message.excludeFromContext) { publishReviewerNote(reviewerSessionKey(ctx), 'guardian', text, [], now()); add('guardian intervention', text, undefined, text); salience++; revision++; return; }
     if (['memory-prime', 'todo-plan', 'relevant-guidance'].includes(message.customType)) { add('harness guidance to agent', text, undefined, text); revision++; }
   };
   pi.on('tool_execution_start', (event: any, context: any) => {

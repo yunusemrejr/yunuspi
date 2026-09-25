@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const MAX_SIMILARITY_BYTES = 512;
+const encoder = new TextEncoder();
 const DEFAULT_FILES = Object.freeze({
 	classifier: new URL("./classifier.wasm", import.meta.url),
 	similarity: new URL("./similarity.wasm", import.meta.url),
@@ -110,9 +111,11 @@ export class GuardianKernelRuntime {
 	}
 
 	similarity(left, right) {
-		const encoder = new TextEncoder();
-		const leftBytes = encoder.encode(String(left)).slice(0, MAX_SIMILARITY_BYTES);
-		const rightBytes = encoder.encode(String(right)).slice(0, MAX_SIMILARITY_BYTES);
+		if (typeof left !== "string" || typeof right !== "string") return undefined;
+		// One extra UTF-16 code unit preserves a surrogate crossing the prefix.
+		// Encoding is bounded before allocation, with identical first-512-byte semantics.
+		const leftBytes = encoder.encode(left.slice(0, MAX_SIMILARITY_BYTES + 1)).subarray(0, MAX_SIMILARITY_BYTES);
+		const rightBytes = encoder.encode(right.slice(0, MAX_SIMILARITY_BYTES + 1)).subarray(0, MAX_SIMILARITY_BYTES);
 		if (!leftBytes.length || !rightBytes.length) return undefined;
 		return this._eval("similarity", (exports, memory) => {
 			if (exports.guardian_similarity_version() !== 1) throw new Error("unsupported-similarity-abi");

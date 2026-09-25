@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { boundedObserverText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, wantsNoObserver, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { boundedObserverText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { buildWatchmakerPacket, createWatchmakerScratchpad, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
@@ -125,11 +125,11 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     return rows;
   };
   const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
-  const peerRows = (): ObserverEvidence[] => peerReviewerNotes(ownerIdentity, 'watchmaker', now()).slice(0, 1)
-    .map(peer => ({ id: 'peer-note', kind: 'peer reviewer note', text: `Observer already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
+  const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
+    .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     salience: () => salience,
-    peerNotes: () => peerReviewerNotes(ownerIdentity, 'watchmaker', now()),
+    peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()),
     ...testing,
     label: 'Watchmaker',
     intervalMs: WATCHMAKER_INTERVAL_MS,
@@ -208,7 +208,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
       if (advice) {
-        publishReviewerNote(ownerIdentity, 'watchmaker', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
+        publishReviewerNote(reviewerSessionKey(ctx), 'watchmaker', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         if (latestAdviceId && preparedAdvice?.id !== latestAdviceId) {
           try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
         }
@@ -331,7 +331,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if (own.length) add('user reminder delivered', `Delivered: ${boundedObserverText(own.join(' | '), 200)}`);
       revision++; return;
     }
-    if (/guardian/.test(message.customType)) { add('guardian intervention', boundedObserverText(text, 200)); salience++; revision++; return; }
+    if (message.customType === 'guardian_intervention' && !message.excludeFromContext) { publishReviewerNote(reviewerSessionKey(ctx), 'guardian', text, [], now()); add('guardian intervention', boundedObserverText(text, 200)); salience++; revision++; return; }
     if (['memory-prime', 'todo-plan', 'relevant-guidance'].includes(message.customType)) { add('harness guidance to agent', boundedObserverText(text, 160)); revision++; }
   };
   pi.on('tool_execution_start', (event: any, context: any) => {

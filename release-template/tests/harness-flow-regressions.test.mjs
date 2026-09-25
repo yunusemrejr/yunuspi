@@ -172,3 +172,17 @@ test('a deliberate harness gate is not counted as a tool failure', async () => {
   assert.equal(collectSessionMetrics([gate]).errors, 0);
   assert.equal(collectSessionMetrics([gate, failure]).errors, 1);
 });
+
+test('reviewer note scope follows live manager identity, not an identical reopened transcript', async () => {
+  const { reviewerSessionKey, publishReviewerNote, peerReviewerNotes } = await import(lib('session-observer.ts'));
+  const manager = () => ({ getSessionId: () => 'same-transcript', getSessionFile: () => '/fixture/same.jsonl' });
+  const a = { cwd: '/fixture', sessionManager: manager() }, b = { ...a, sessionManager: manager() };
+  const key = reviewerSessionKey(a);
+  assert.equal(reviewerSessionKey({ ...a }), key, 'observer and Watchmaker on one manager share a board');
+  assert.notEqual(reviewerSessionKey(b), key);
+  publishReviewerNote(key, 'guardian', 'Inspect the failed edit before another attempt.', [], 1000);
+  assert.equal(peerReviewerNotes(reviewerSessionKey(a), 'watchmaker', 1000).length, 1);
+  assert.equal(peerReviewerNotes(reviewerSessionKey(b), 'watchmaker', 1000).length, 0);
+  a.sessionManager.getSessionId = () => 'new-transcript';
+  assert.notEqual(reviewerSessionKey(a), key);
+});

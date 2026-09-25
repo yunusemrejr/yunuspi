@@ -305,9 +305,10 @@ export class GuardianSupervisor {
 		const now = this._clock();
 		if (now - this._window.startedAt >= SUPERVISORY_WINDOW_MS) this._window = { startedAt: now, evaluations: 0 };
 		if (this._window.evaluations >= MAX_WINDOW_EVALUATIONS) return false;
-		this._window.evaluations++;
 		const last = this._admittedAtByKind.get(kind);
-		return !(typeof last === "number" && now - last < SUPERVISORY_WINDOW_MS);
+		if (typeof last === "number" && now - last < SUPERVISORY_WINDOW_MS) return false;
+		this._window.evaluations++;
+		return true;
 	}
 
 	_admitWindow(kind) { this._admittedAtByKind.set(kind, this._clock()); }
@@ -351,7 +352,7 @@ export class GuardianSupervisor {
 		if (!task) {
 			const parentTaskId = this._latestAcceptedTaskId ?? this._activeTaskId;
 			const rawPrompt = originalText.length <= MAX_RAW_PROMPT ? originalText : undefined;
-			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), consecutiveFailures: 0, burstErrors: [], burstPrints: [], lastMutationAt: 0, lastVerificationAt: 0, completionChecked: false };
+			task = { requestId, turnId, parentTaskId, lineageIds: [requestId], source, openedAt: this._clock(), rawPromptHash: rawPrompt === undefined ? undefined : sha256(rawPrompt), rawPrompt, taskLabel: "", relation: undefined, analysisConfidence: 0, constraints: [], effectiveConstraints: [], attempts: [], episodeKey: undefined, responseEpoch: 0, evidenceVersion: 0, constraintEvidence: new Map(), emittedConstraintIds: new Set(), emittedFailureKeys: new Set(), toolCount: 0, fileTypes: new Map(), skills: new Set(), editFailures: new Map(), reads: new Map(), consecutiveFailures: 0, burstErrors: [], burstPrints: [], mutationVersion: 0, verifiedVersion: 0, verificationEpoch: 0, pendingChecks: new Map(), completionChecked: false };
 			task.retryDirective = hasExplicitRetryDirective(originalText);
 			this._tasks.set(requestId, task);
 			while (this._tasks.size > MAX_TASKS) {
@@ -459,6 +460,10 @@ export class GuardianSupervisor {
 		}
 		const task = this._tasks.get(this._activeTaskId);
 		if (!task) return;
+		if (event.type === "message_end" && event.message?.role === "custom" && event.message.customType === "background-task-notification") {
+			this._completeBackgroundCheck(task, event.message.details);
+			return;
+		}
 		if (event.type === "message_end" && event.message?.role === "assistant") {
 			task.responseEpoch++;
 			for (const attempt of task.attempts) if (!attempt.responseSeen && attempt.responseEpoch < task.responseEpoch) attempt.responseSeen = true;
@@ -481,12 +486,15 @@ export class GuardianSupervisor {
 			}
 			task.episodeKey = key;
 			task.toolCount++;
+			const verification = isVerificationCall(toolName, event.args);
+			if (verification) { task.verifiedVersion = -1; task.verificationEpoch++; }
 			const rawPath = typeof event.args?.path === "string" && event.args.path.length <= 1024 ? event.args.path : undefined;
 			if (rawPath) this._noteTouchedPath(task, toolName, rawPath);
 			const candidatePath = (toolName === "write" || toolName === "edit") && rawPath ? rawPath : undefined;
 			const readKey = toolName === "read" && rawPath ? `${rawPath}|${Number(event.args?.offset) || 0}|${Number(event.args?.limit) || 0}` : undefined;
 			this._inFlight.set(event.toolCallId ?? "active", { toolName, fingerprint, shape, taskId: task.requestId, responseEpoch: task.responseEpoch, at: this._clock(), candidatePath, rawPath, readKey,
-				mutation: isMutationCall(toolName, event.args), verification: isVerificationCall(toolName, event.args) });
+				mutation: isMutationCall(toolName, event.args), verification, verificationEpoch: task.verificationEpoch,
+				verificationVersion: task.mutationVersion, verificationEligible: ![...this._inFlight.values()].some(call => call.taskId === task.requestId && call.mutation) });
 			while (this._inFlight.size > 64) this._inFlight.delete(this._inFlight.keys().next().value);
 			return;
 		}
@@ -612,14 +620,45 @@ export class GuardianSupervisor {
 		return true;
 	}
 
+	_recordVerification(task, call) {
+		// Completion order and millisecond timestamps cannot prove which source
+		// a concurrent check saw. Only a stable mutation generation can.
+		if (!call.verificationEligible || call.mutation || call.verificationEpoch !== task.verificationEpoch || call.verificationVersion !== task.mutationVersion
+			|| [...this._inFlight.values()].some(active => active.taskId === task.requestId && active.mutation)) return;
+		task.verifiedVersion = task.mutationVersion;
+		this._stats.verifications++;
+	}
+
+	_completeBackgroundCheck(task, result) {
+		if (!result || typeof result.id !== "string") return;
+		const call = task.pendingChecks.get(result.id);
+		if (!call || !["completed", "failed", "killed", "timed_out"].includes(result.status)) return;
+		task.pendingChecks.delete(result.id);
+		if (result.status === "completed" && result.exitCode === 0 && !result.signal) this._recordVerification(task, call);
+	}
+
 	/** Working-pattern evidence per task: mutations, verification runs, edit
 	 * mismatches per file and repeated identical reads. Paths are hashed in
 	 * evidence; nothing here stores file contents. */
 	async _trackWorkingPattern(task, call, event, errorHash) {
 		if (!this._enabled) return;
-		const now = this._clock();
 		// A failed check is evidence against completion, not verification of it.
-		if (call.verification && !event.isError) { task.lastVerificationAt = now; this._stats.verifications++; }
+		if (call.verification && event.isError === false) {
+			const details = event.result?.details;
+			const job = details?.task;
+			if (job && typeof job.id === "string" && job.id.length <= 256) {
+				task.pendingChecks.set(job.id, call);
+				while (task.pendingChecks.size > 32) task.pendingChecks.delete(task.pendingChecks.keys().next().value);
+				this._completeBackgroundCheck(task, job);
+			} else if (call.toolName !== "bg_run" && !details?.signal
+				&& (details?.exitCode ?? details?.exit_code ?? 0) === 0
+				&& !event.result?.content?.some(part => part.type === "text" && /\[managed bash\] Still running/.test(part.text))) {
+				this._recordVerification(task, call);
+			}
+		}
+		if (call.toolName === "bg_status" && event.isError === false) {
+			for (const job of (Array.isArray(event.result?.details?.tasks) ? event.result.details.tasks.slice(0, 64) : [])) this._completeBackgroundCheck(task, job);
+		}
 		// Only fingerprintable failures extend the streak: an unfingerprintable
 		// failure breaks evidence continuity the way it resets attempt episodes.
 		const countable = event.isError && typeof errorHash === "string" && typeof call.fingerprint === "string";
@@ -634,8 +673,8 @@ export class GuardianSupervisor {
 			task.burstErrors = [];
 			task.burstPrints = [];
 		}
-		if (!event.isError && call.mutation) {
-			task.lastMutationAt = now; task.completionChecked = false; this._stats.mutations++;
+		if (call.mutation && (!event.isError || event.result?.details?.fileMutation)) {
+			task.mutationVersion++; task.completionChecked = false; this._stats.mutations++;
 			// File contents may have changed: earlier reads are no longer repeats.
 			task.reads.clear();
 			if (call.rawPath) task.editFailures.delete(call.rawPath);
@@ -690,15 +729,15 @@ export class GuardianSupervisor {
 	/** A final reply that presents changed work as finished while no
 	 * verification ran after the last change. At most once per change set. */
 	async _considerUnverifiedCompletion(task, message) {
-		if (!this._enabled || !task.lastMutationAt || task.completionChecked || message?.stopReason !== "stop") return;
+		if (!this._enabled || !task.mutationVersion || task.completionChecked || message?.stopReason !== "stop") return;
 		const parts = Array.isArray(message.content) ? message.content : [];
 		if (parts.some((part) => part?.type === "toolCall")) return;
-		if (task.lastVerificationAt >= task.lastMutationAt) return;
+		if (task.verifiedVersion === task.mutationVersion) return;
 		const text = parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n");
 		if (!claimsCompletion(text)) return;
 		task.completionChecked = true;
 		this._stats.completionCandidates++;
-		await this._intervene(task, { kind: "unverified-completion", priority: 55, dedupeKey: `unverified-completion:${sha256(`${task.requestId}:${task.lastMutationAt}`)}`,
+		await this._intervene(task, { kind: "unverified-completion", priority: 55, dedupeKey: `unverified-completion:${sha256(`${task.requestId}:${task.mutationVersion}`)}`,
 			content: "Files changed after the last verification run, and this reply presents the work as finished. Run the check that proves the change (tests, build, syntax check or a rendered view) or state plainly which parts remain unverified before finishing.",
 			reason: "Completion claim with mutations newer than any verification run.", evidence: [{ kind: "completion-claim", id: `${task.requestId}:${task.responseEpoch}`, hash: sha256(text.slice(-400)) }] });
 	}
@@ -787,7 +826,7 @@ export class GuardianSupervisor {
 		if (command === "on") { this._enabled = true; this._stateGeneration++; }
 		else if (command === "off") {
 			this._enabled = false; this._stateGeneration++; this._inFlight.clear(); this._arbiter.releaseAll();
-			for (const task of this._tasks.values()) { task.attempts = []; task.episodeKey = undefined; task.consecutiveFailures = 0; task.burstErrors = []; task.burstPrints = []; task.evidenceVersion++; task.constraintEvidence.clear(); }
+			for (const task of this._tasks.values()) { task.attempts = []; task.episodeKey = undefined; task.consecutiveFailures = 0; task.burstErrors = []; task.burstPrints = []; task.evidenceVersion++; task.constraintEvidence.clear(); task.editFailures.clear(); task.reads.clear(); task.pendingChecks.clear(); task.verifiedVersion = task.mutationVersion; task.completionChecked = false; }
 		}
 		else if (command === "debug") this._debug = !this._debug;
 		return { command, enabled: this._enabled, debug: this._debug, stats: { ...this._stats }, activeTaskId: this._debug ? this._activeTaskId : undefined, taskCount: this._tasks.size, guardianInstanceId: this.ownerId, debugInfo: this._debug ? { relation: this._tasks.get(this._activeTaskId)?.relation, analysisConfidence: this._tasks.get(this._activeTaskId)?.analysisConfidence, verifiedConstraints: this._tasks.get(this._activeTaskId)?.effectiveConstraints.length ?? 0, observedSignals: this._observedSignals(), recentDecisions: this._arbiter.journal().slice(-8) } : undefined, kernel: this._quarantined ? `quarantined:${this._quarantineReason}` : this._kernelError ? `quarantined:${this._kernelError}` : this._kernelRuntime ? Object.entries(this._kernelRuntime.status()).map(([name, status]) => `${name}:${status.state}${status.error ? `:${status.error}` : ""}`).join(",") : this._kernelPromise ? "initializing" : "lazy" };

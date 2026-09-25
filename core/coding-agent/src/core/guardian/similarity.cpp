@@ -19,6 +19,25 @@ static u32 gram_count(const unsigned char* bytes, u32 length, u32 out[512]) {
     return count;
 }
 
+// In-place heapsort bounds worst-case work to O(n log n), including
+// unrelated 512-byte inputs. No allocator, imports, or shared mutable state.
+static void sift_down(u32* values, u32 root, u32 count) {
+    while (root * 2 + 1 < count) {
+        u32 child = root * 2 + 1;
+        if (child + 1 < count && values[child] < values[child + 1]) ++child;
+        if (values[root] >= values[child]) return;
+        const u32 value = values[root]; values[root] = values[child]; values[child] = value;
+        root = child;
+    }
+}
+static void sort_grams(u32* values, u32 count) {
+    for (u32 i = count / 2; i > 0; --i) sift_down(values, i - 1, count);
+    for (u32 end = count; end > 1; --end) {
+        const u32 value = values[0]; values[0] = values[end - 1]; values[end - 1] = value;
+        sift_down(values, 0, end - 1);
+    }
+}
+
 extern "C" __attribute__((visibility("default"))) u32 guardian_similarity(
     u32 left_ptr, u32 left_length, u32 right_ptr, u32 right_length) {
     if (left_ptr != static_cast<u32>(reinterpret_cast<unsigned long>(g_left_scratch)) ||
@@ -32,17 +51,21 @@ extern "C" __attribute__((visibility("default"))) u32 guardian_similarity(
     const u32 right_count = gram_count(right, right_length, right_grams);
     if (left_count == 0 || right_count == 0) return 0;
 
-    // Greedy multiset overlap, bounded by the fixed 512-gram scratch arrays.
-    unsigned char matched[512] = {};
-    u32 overlap = 0;
-    for (u32 i = 0; i < left_count; ++i) {
-        for (u32 j = 0; j < right_count; ++j) {
-            if (!matched[j] && left_grams[i] == right_grams[j]) {
-                matched[j] = 1;
-                ++overlap;
-                break;
-            }
+    // Identical normalized shapes are the common supervision path.
+    bool identical = left_count == right_count;
+    if (identical) {
+        for (u32 i = 0; i < left_count; ++i) {
+            if (left_grams[i] != right_grams[i]) { identical = false; break; }
         }
+        if (identical) return 1000;
+    }
+    sort_grams(left_grams, left_count);
+    sort_grams(right_grams, right_count);
+    u32 overlap = 0, i = 0, j = 0;
+    while (i < left_count && j < right_count) {
+        if (left_grams[i] == right_grams[j]) { ++overlap; ++i; ++j; }
+        else if (left_grams[i] < right_grams[j]) ++i;
+        else ++j;
     }
     return (2000u * overlap) / (left_count + right_count); // Dice score × 1000
 }

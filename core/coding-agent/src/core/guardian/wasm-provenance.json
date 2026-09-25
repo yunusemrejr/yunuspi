@@ -25,7 +25,7 @@
   "modelHeaderSha256": "b512c7d51f1b89aa76c30bc0a573a5e820e2afdb69dcdc41e7e7b0999759821c",
   "sources": {
     "classifier.cpp": "a90a8579a09809fcd7d40f0c3eef1341cb4e03b85fa5cbae90962204fdb03b5c",
-    "similarity.cpp": "5ef5f7b6cc6b4f13d994ba8a75d6dd82df1f6081868d73ae2753e4e887d311fe",
+    "similarity.cpp": "2cd01a633baba97a5fd754f592e015e5e48d1484dcb76a6af31e0c0da385679c",
     "model-parameters.generated.h": "b512c7d51f1b89aa76c30bc0a573a5e820e2afdb69dcdc41e7e7b0999759821c"
   },
   "trainingSources": {
@@ -47,8 +47,8 @@
       "imports": []
     },
     "similarity.wasm": {
-      "sha256": "8c7650bb3c798e0c3c0c1d84d04b9c8e4b14ea3db29c66028ea36dd789850d95",
-      "bytes": 943,
+      "sha256": "ac0f25247763dfd90bfb95b8c85bf0a01794ff330c2f0eb33338cddebf83ae52",
+      "bytes": 1437,
       "exports": [
         "guardian_similarity",
         "guardian_similarity_version",

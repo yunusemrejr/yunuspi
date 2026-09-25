@@ -80,8 +80,10 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
     await time.advance(1000);
     fire('tool_result', { toolCallId: `read-${i}`, toolName: 'read', input: { path: `src/file-${i}.ts` }, isError: false, content: [{ type: 'text', text: marker }], details: {} });
   }
+  fire('message_end', { message: { role: 'custom', customType: 'guardian_intervention', content: 'Check the latest tool failure before retrying.' } });
   await time.advance(60000);
   await waitForNotes(1);
+  assert.match(packets[0], /Guardian already told/);
   assert.ok(packets[0].includes('STALL: 0 edits'), 'pace row names the stall from counts');
   assert.ok(!packets[0].includes(marker), 'tool output bodies never enter the packet');
   assert.ok(Buffer.byteLength(packets[0], 'utf8') < 7000, 'packet stays small');
