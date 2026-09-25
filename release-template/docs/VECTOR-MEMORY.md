@@ -25,7 +25,11 @@ tests/project-vector-memory.test.mjs            33 tests (mirrored to release-te
 ## Storage layout
 
 Default projects root is `<agentDir>/projects` (`PI_PROJECTS_DIR` overrides;
-`PI_CODING_AGENT_DIR` overrides the agent dir):
+`PI_CODING_AGENT_DIR` overrides the agent dir) — under the agent dir so
+installer state preservation, backups and containment treat project
+memories like every other private state. Set
+`PI_PROJECTS_DIR=~/.pi/projects` for the literal `~/.pi/projects/<id>/`
+layout from the original proposal:
 
 ```text
 projects/
@@ -98,7 +102,9 @@ shas) plus Needle cosine candidates, fused by reciprocal rank, scored by
 role policy (type weights × recency × authority × importance), then one
 shared Needle re-rank over the merged head. Without embeddings the lexical
 baseline still serves; degradation is reported in `stats.degraded`, never
-silent. Tombstoned/superseded chunks stay retrievable for provenance at
+silent. The re-ranker is local Needle, not remote JEV: retrieval stays
+offline and free, and JEV remains available as an opt-in escalation for
+judgment calls, mirroring its role elsewhere in the harness. Tombstoned/superseded chunks stay retrievable for provenance at
 ×0.25 score unless `include_superseded`.
 
 Role policies (`role` param) — same store, different ranking:
