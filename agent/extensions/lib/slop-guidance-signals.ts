@@ -1,5 +1,6 @@
 import type { CodeSignal } from './code-guidance-signals.ts';
 import { createHash } from 'node:crypto';
+import { proseReport } from './code-quality.ts';
 
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|php)$/i;
 const EXCLUDED = /(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|__fixtures__|skills|references)\/|\.(?:min|generated|test|spec)\.|(?:^|\/)SKILL\.md$/i;
@@ -20,6 +21,11 @@ const VAGUE_NAV_LABEL = 'insights|discover|explore|solutions|resources';
 const TOUR = /guided tour|product tour|onboarding tour|welcome modal|take (?:the|a) tour|walkthrough (?:modal|overlay)/i;
 const AI_WIDGET = /\bask ai\b|ai (?:assistant|chatbot)|ai chat\b|chat with (?:our )?ai/i;
 const METRIC_BASIS = /measured|study|survey|benchmark|tested|based on|report|data|customers|teams/i;
+/** The default AI-product palette: indigo/violet into purple/pink gradients,
+ * as Tailwind stops or the stock hexes. A brand may own it; most do not. */
+const STOCK_PALETTE = /\bfrom-(?:indigo|violet|purple|blue)-[3-7]00\b[^"'`\n]{0,80}\b(?:via|to)-(?:purple|fuchsia|pink|violet)-[3-7]00\b|(?:linear|radial|conic)-gradient\([^)]{0,160}#(?:6366f1|4f46e5|7c3aed|8b5cf6|a855f7)\b[^)]{0,160}#(?:a855f7|ec4899|d946ef|db2777|c026d3|8b5cf6)\b/i;
+/** Section families of the stock landing template, in its usual order. */
+const TEMPLATE_SECTIONS = [/trusted by|used by|loved by|as seen (?:in|on)|our (?:clients|partners)/i, /\bfeatures?\b|why (?:choose|us)|what we offer|benefits/i, /how it works|in (?:three|3) (?:simple )?steps|get started in/i, /testimonials?|what (?:our )?(?:customers|clients|users) say|reviews/i, /pricing|plans?\b/i, /\bfaq\b|frequently asked/i, /ready to (?:get started|begin|join)|get started today|join (?:thousands|us)|start your (?:free )?trial/i];
 const wordRe = (w: string) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'i');
 const luminance = (hex: string) => {
   const full = hex.length === 3 ? [...hex].map(c=>c+c).join('') : hex;
@@ -120,6 +126,49 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     if ((text.match(/animation(?:-iteration-count)?\s*:[^;}\n]{0,240}\binfinite\b/gi)||[]).length >= 2)
       out.push({key:'ui-continuous-motion',skill:'ui-antipattern-review',check:'Multiple continuous animations were observed. Check attention, interruption and reduced-motion behavior in the complete component; this partial change cannot establish whether safeguards are missing.'});
   }
+  if (ui) {
+    // Color: stock palette and unsystematic hue sprawl (explicit hex outside
+    // custom-property definitions; a token system reuses a few values).
+    if (STOCK_PALETTE.test(text))
+      out.push({key:'ui-stock-palette',skill:'colors',check:'The default AI-product palette (indigo or violet into purple or pink gradients) occurs. Derive color from this brand and content (logo, photography, existing tokens) as a value ramp with one accent; keep the gradient only if the brand already owns it.'});
+    const hexes = new Set((text.replace(/--[\w-]+\s*:[^;}\n]*/g,' ').match(/#(?:[\da-f]{6}|[\da-f]{3})\b/gi) ?? []).map(h=>h.toLowerCase()));
+    if (hexes.size >= 12 && (text.match(/var\(--/g) ?? []).length < 3)
+      out.push({key:'ui-hue-sprawl',skill:'color-theory',check:`${hexes.size} distinct hard-coded colors occur without custom properties. Define a small token set (ground, surface, text, muted text, accent, states) and reuse it; ad hoc near-duplicates read as unplanned.`});
+    // Placement: centered everything loses the reading axis.
+    const centered = (text.match(/text-align\s*:\s*center|\btext-center\b/gi) ?? []).length;
+    const leftAligned = (text.match(/text-align\s*:\s*(?:left|start)|\btext-(?:left|start)\b/gi) ?? []).length;
+    if (centered >= 8 && leftAligned <= 1)
+      out.push({key:'ui-centered-everything',skill:'visual-composition',check:`${centered} centered text rules and almost no left-aligned ones. Center only short display lines; body copy, lists, cards and forms read faster on a strong left axis. Check the rendered page for a clear reading line.`});
+  }
+  if (ui) {
+    // Generated-UI ornaments (user-banned): accent rails, dot markers, icon tiles.
+    // Utility-class lists are order-free: test each class attribute as a set.
+    const classLists = [...text.matchAll(/\bclass(?:Name)?\s*=\s*["'`{]([^"'`}]{1,400})/g)].map(m => ` ${m[1]} `);
+    const has = (list: string, re: RegExp) => re.test(list);
+    const blocks = [...text.matchAll(/([^{}]{0,200})\{([^{}]{1,1200})\}/g)].map(m => ({selector: m[1].trim(), body: m[2]}));
+    const quoteLike = /blockquote|quote|code|pre\b|callout-quote/i;
+    const px = (body: string, prop: string) => { const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*(\\d+(?:\\.\\d+)?)px`, 'i').exec(body); return m ? Number(m[1]) : undefined; };
+    const rails = blocks.filter(b => !quoteLike.test(b.selector) && (/(?:^|;)\s*border-(?:left|inline-start)\s*:\s*[2-8]px\s+solid/i.test(b.body)
+      || /::?(?:before|after)/.test(b.selector) && /position\s*:\s*absolute/i.test(b.body) && (px(b.body, 'width') ?? 99) <= 6 && /(?:top\s*:\s*0[^;]*;[^}]*bottom\s*:\s*0|height\s*:\s*100%)/i.test(b.body))).length
+      + classLists.filter(list => has(list, /\sborder-l-(?:2|4|8|\[\dpx\])\s/) && has(list, /\sborder-(?:[a-z]+-)?\d{2,3}(?:\/\d+)?\s/)).length;
+    if (rails)
+      out.push({key:'ui-accent-rail',skill:'anti-ai-slop',check:'A colored left rail (border-left or a pseudo-element bar) accents a card or panel. This is a stock generated-UI ornament; remove it and group with spacing, headings or a real surface change. Keep a rail only where it encodes a distinct state the user needs (and then pair it with text).'});
+    const dots = blocks.filter(b => { const w = px(b.body, 'width'), h = px(b.body, 'height'); return w !== undefined && h !== undefined && w >= 4 && w <= 14 && Math.abs(w - h) <= 2 && /border-radius\s*:\s*(?:50%|100%|9{3,}px|\d{2,}px)/i.test(b.body) && /background(?:-color)?\s*:/i.test(b.body); }).length
+      + classLists.filter(list => has(list, /\s(?:size|[wh])-(?:1\.5|2|2\.5|3)\s/) && has(list, /\srounded-full\s/) && has(list, /\sbg-[a-z]/)).length;
+    if (dots)
+      out.push({key:'ui-dot-marker',skill:'anti-ai-slop',check:'A small colored dot (often glowing) is styled as a marker before labels, chips or list items. This is a stock generated-UI tell; remove it. Keep a dot only for a real, changing state with an accessible text equivalent.'});
+    const tiles = blocks.filter(b => { const w = px(b.body, 'width'), h = px(b.body, 'height'), r = px(b.body, 'border-radius'); return w !== undefined && h !== undefined && w >= 24 && w <= 72 && Math.abs(w - h) <= 2 && r !== undefined && r >= 4 && /(?:display\s*:\s*(?:inline-)?(?:flex|grid))/i.test(b.body) && /(?:place-items|align-items|justify-content)\s*:\s*center/i.test(b.body) && /(?:background|border)\s*:/i.test(b.body); }).length
+      + classLists.filter(list => has(list, /\s(?:size|h)-(?:8|9|10|11|12|14)\s/) && has(list, /\srounded-(?:md|lg|xl|2xl)\s/) && has(list, /\s(?:items-center|place-items-center|justify-center)\s/) && has(list, /\s(?:bg|border)-[a-z]/)).length;
+    if (tiles)
+      out.push({key:'ui-icon-tile',skill:'anti-ai-slop',check:'An icon is wrapped in a tinted or bordered rounded tile (icon badge). This is a stock generated-UI ornament; show the icon plainly at text size, or drop it when the label already carries the meaning.'});
+  }
+  if (ui || prose) {
+    // Order: the stock landing sequence, section by section. Headings only.
+    const headings = [...text.matchAll(/<h[1-3]\b[^>]*>([\s\S]{0,160}?)<\/h[1-3]>|^#{1,3}\s+(.{1,160})$/gim)].map(m=>(m[1] ?? m[2] ?? '').replace(/<[^>]+>/g,' '));
+    const families = TEMPLATE_SECTIONS.filter(re=>headings.some(h=>re.test(h))).length;
+    if (families >= 4)
+      out.push({key:'ui-template-sequence',skill:'anti-ai-slop',check:`Section headings follow the stock landing template (${families} of trusted-by, features, how-it-works, testimonials, pricing, FAQ, final CTA). Order sections by this product's own argument: the one thing it does, proof specific to it, the action. Drop sections that exist only because templates have them.`});
+  }
   if (prose) {
     const stock = [/\bin today.s (?:fast.paced|rapidly evolving|digital)\b/i,/\bunlock (?:the |your )?(?:full |true )?potential\b/i,/\bseamless(?:ly)?\b/i,/\brevolutionary\b/i,/\bcutting.edge\b/i,/\ball.in.one (?:solution|platform)\b/i];
     if (stock.filter(re=>re.test(text)).length >= 3)
@@ -155,6 +204,14 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     for (const match of visible.matchAll(/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b/gi)) {
       const at = match.index ?? 0;
       if (!METRIC_BASIS.test(visible.slice(Math.max(0,at-300),at+match[0].length+300))) { metricBare = true; break; }
+    }
+    // Chatbot prose tells, measured by the shared prose checker (stock
+    // phrases, em-dash density, triads, repeated openers) on real copy only.
+    if (!inDocs) {
+      const report = proseReport(visible.replace(/<[^>]+>/g,' '));
+      const tells = report.words >= 120 ? report.findings.filter(f=>['stock-phrase','dash-density','rule-of-three','repeated-opener','boilerplate-heading'].includes(f.rule)) : [];
+      if (tells.length >= 3)
+        push('prose-ai-tells','natural-editorial-writing',`Generated-sounding prose patterns: ${[...new Set(tells.map(f=>f.message))].slice(0,4).join(' · ').slice(0,420)}. Rewrite in the product's own voice with concrete specifics.`);
     }
     if (metricBare)
       push('prose-metric-theater','copywriting','A performance multiple or percentage claim occurs without a nearby basis (measured where, on what, against what). Add the basis or cut the number; unsupported precision reads as invented even when it is real.');

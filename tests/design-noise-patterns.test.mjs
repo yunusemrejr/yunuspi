@@ -24,12 +24,27 @@ test('actual repeated dot motion in a status capsule produces measured automatic
  assert.equal(rendered.noise.measurements,undefined,'automatic receipt stays compact');
 });
 
-test('status semantics, static dots, single entrances, hidden layouts and quoted/user content abstain',async()=>{
+test('status semantics, state controls, hidden layouts and quoted/user content abstain; decorative dots are one aggregated finding',async()=>{
  const badge='<i aria-hidden="true" class="dot"></i>Active';
- const {rendered}=await capture(`<span class="pill" role="status">${badge}</span><span class="pill" aria-live="polite">${badge}</span><button class="pill">${badge}</button><span class="pill static">${badge}</span><span class="pill entrance">${badge}</span><span class="pill square">${badge}</span><span hidden class="pill">${badge}</span><span class="pill" style="opacity:0">${badge}</span><article><span class="pill">${badge}</span></article><div data-user-content><span class="pill">${badge}</span></div><blockquote><span class="pill">${badge}</span></blockquote><span class="pill">${badge} directory</span>`);
- assert.deepEqual(kinds(rendered),[]);
+ const {rendered}=await capture(`<span class="pill" role="status">${badge}</span><span class="pill" aria-live="polite">${badge}</span><button class="pill" aria-pressed="true">${badge}</button><button class="pill">${badge}</button><span class="pill static">${badge}</span><span class="pill entrance">${badge}</span><span class="pill square">${badge}</span><span hidden class="pill">${badge}</span><span class="pill" style="opacity:0">${badge}</span><article><span class="pill">${badge}</span></article><div data-user-content><span class="pill">${badge}</span></div><blockquote><span class="pill">${badge}</span></blockquote><span class="pill">${badge} directory</span>`);
+ // No animated-status-pill: none of these dots repeat motion without semantics.
+ // Every unexempt static dot prefixing a label is the stock tell, reported once.
+ assert.deepEqual(kinds(rendered),['decorative-dot-marker']);
+ assert.equal(rendered.noise.findings[0].markers,5);
  const reduced=await capture(`<span class="pill">${badge}</span>`,{designAudit:true,reducedMotion:'reduce'});
- assert.deepEqual(kinds(reduced.rendered),[]);assert.equal(reduced.rendered.noise.measurements.reducedMotion,true);
+ assert.deepEqual(kinds(reduced.rendered),['decorative-dot-marker']);assert.equal(reduced.rendered.noise.measurements.reducedMotion,true);
+ const plain=await capture('<span class="pill">Invoices</span><span class="pill" role="status">${badge}</span>');
+ assert.deepEqual(kinds(plain.rendered),[]);
+});
+
+test('accent rails, pseudo-element bars and icon tiles are flagged; plain icons and single accents are not',async()=>{
+ const rails=await capture('<style>.card{position:relative;width:260px;height:60px;margin:6px;padding:8px 14px;border-radius:10px;background:#f4f4f4}.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#4aa3ff}.thin{border-left:2px solid #c9a24a;width:260px;height:60px;margin:6px}</style><div class="card">One</div><div class="card">Two</div><div class="thin">Three</div>',{designAudit:true});
+ const rail=rails.rendered.noise.findings.find(f=>f.kind==='repeated-heavy-left-border');
+ assert.equal(rail.panels,3);assert.deepEqual(rail.borderWidthsPx.sort(),[2,3]);
+ const tile=await capture('<style>.tile{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;border:1px solid #c9a24a;background:#2a2410}</style><div class="tile"><svg width="20" height="20"><circle cx="10" cy="10" r="8"/></svg></div>');
+ assert.deepEqual(kinds(tile.rendered),['icon-tile']);
+ const plainIcon=await capture('<p><svg width="16" height="16"><circle cx="8" cy="8" r="6"/></svg> Settings</p><div style="border-left:6px solid blue;width:240px;height:50px">Only accent</div>');
+ assert.deepEqual(kinds(plainIcon.rendered),[]);
 });
 
 test('font families count repeated UI text declarations, not sizes, fallback lists or article typography',async()=>{

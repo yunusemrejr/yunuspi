@@ -2853,7 +2853,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 852
+        "line": 870
       },
       {
         "name": "harness-backup",
@@ -2953,7 +2953,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 367
+        "line": 420
       },
       {
         "name": "or-provider",
@@ -3098,7 +3098,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 207
+        "line": 246
       },
       {
         "name": "websearch",
@@ -3496,7 +3496,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 728,
+        "line": 746,
         "kind": "literal"
       },
       {
@@ -3550,7 +3550,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 556,
+        "line": 568,
         "kind": "literal"
       },
       {
@@ -3598,7 +3598,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 768,
+        "line": 799,
         "kind": "literal"
       },
       {
@@ -3689,7 +3689,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 267,
+        "line": 274,
         "kind": "literal"
       },
       {
@@ -3950,7 +3950,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 728,
+        "line": 746,
         "kind": "literal"
       },
       {
@@ -4004,7 +4004,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 556,
+        "line": 568,
         "kind": "literal"
       },
       {
@@ -4040,7 +4040,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 768,
+        "line": 799,
         "kind": "literal"
       },
       {
@@ -4082,7 +4082,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 267,
+        "line": 274,
         "kind": "literal"
       },
       {
@@ -6297,6 +6297,10 @@
         "path": "agent/skills/custom-svg/SKILL.md"
       },
       {
+        "name": "data-analysis",
+        "path": "agent/skills/data-analysis/SKILL.md"
+      },
+      {
         "name": "data-lineage-validation",
         "path": "agent/skills/data-lineage-validation/SKILL.md"
       },
@@ -6347,6 +6351,10 @@
       {
         "name": "evidence-first-engineering",
         "path": "agent/skills/evidence-first-engineering/SKILL.md"
+      },
+      {
+        "name": "financial-modeling",
+        "path": "agent/skills/financial-modeling/SKILL.md"
       },
       {
         "name": "financial-statement-analysis",
@@ -6451,6 +6459,10 @@
       {
         "name": "java-platform-engineering",
         "path": "agent/skills/java-platform-engineering/SKILL.md"
+      },
+      {
+        "name": "key-visual-art-direction",
+        "path": "agent/skills/key-visual-art-direction/SKILL.md"
       },
       {
         "name": "libreoffice-automation",

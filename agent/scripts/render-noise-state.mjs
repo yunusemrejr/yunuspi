@@ -74,7 +74,9 @@ export function inspectNoiseState(root, options = {}) {
     list.push({pseudo: effect.pseudoElement || null, durationMs: typeof timing.duration === 'number' ? Math.round(timing.duration) : null, repeating: true});
     moving.set(target, list);
   }
-  const fonts = new Map(), regions = new Map(), borders = [];
+  const fonts = new Map(), regions = new Map(), borders = [], tiles = [], animatedPills = new Set();
+  let dots = [];
+  const pseudoStyle = (node, which) => getComputedStyle(node, which);
   const regionFor = node => {
     const region = node.closest('form,nav,header,section,aside,main,[role="dialog"],[role="toolbar"],[role="menu"],[role="region"]');
     return region && (root === region || root.contains(region)) ? region : null;
@@ -128,9 +130,41 @@ export function inspectNoiseState(root, options = {}) {
           const family = style.fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '').toLowerCase();
           const data = fonts.get(family) ?? {count: 0, node}; data.count++; fonts.set(family, data);
         }
-        if (node.matches('div,section,aside') && rect.width >= 160 && rect.height >= 40 &&
-            parseFloat(style.borderLeftWidth) >= 4 && ['borderTopWidth','borderRightWidth','borderBottomWidth'].every(key => parseFloat(style[key]) <= 1) && painted(style.borderLeftColor) && !node.closest(semanticState) && !node.querySelector(semanticState))
-          borders.push({node, widthPx: parseFloat(style.borderLeftWidth)});
+        if (node.matches('div,section,aside,li,a') && rect.width >= 120 && rect.height >= 32 && !node.closest(semanticState) && !node.querySelector(semanticState)) {
+          // Accent rail: a colored edge (2px+) as the panel's only strong
+          // border, or an absolutely positioned pseudo-element bar doing the same.
+          if (parseFloat(style.borderLeftWidth) >= 2 && ['borderTopWidth','borderRightWidth','borderBottomWidth'].every(key => parseFloat(style[key]) <= 1) && painted(style.borderLeftColor))
+            borders.push({node, widthPx: parseFloat(style.borderLeftWidth)});
+          else for (const which of ['::before', '::after']) {
+            const bar = pseudoStyle(node, which);
+            if (['none', 'normal'].includes(bar.content) || bar.position !== 'absolute' || !painted(bar.backgroundColor)) continue;
+            const width = parseFloat(bar.width), height = parseFloat(bar.height);
+            if (width >= 2 && width <= 8 && height >= rect.height * 0.6) { borders.push({node, widthPx: width, pseudo: which}); break; }
+          }
+        }
+        // Decorative dot: a small painted round mark with no text, prefixing a
+        // short label (static or glowing). Live/status semantics are exempt.
+        if (!node.closest(semanticState) && !node.matches('[aria-pressed],[aria-checked],[aria-selected],[role="switch"],[role="checkbox"]') && rect.width <= 320 && rect.height <= 64) {
+          const label = directText(node);
+          if (label && label.length <= 40) {
+            const candidates = [...[...node.children].slice(0, 3).map(child => ({element: child, style: styleOf(child), rect: rectOf(child), pseudo: null})),
+              ...['::before', '::after'].map(which => { const dot = pseudoStyle(node, which); return {element: node, style: dot, rect: {width: parseFloat(dot.width), height: parseFloat(dot.height)}, pseudo: which}; })];
+            for (const dot of candidates) {
+              if (dot.pseudo && ['none', 'normal'].includes(dot.style.content)) continue;
+              if (!dot.pseudo && (directText(dot.element) || dot.element.childElementCount)) continue;
+              const {width, height} = dot.rect;
+              if (width >= 4 && width <= 14 && height >= 4 && height <= 14 && width / height >= .7 && width / height <= 1.4 && painted(dot.style.backgroundColor) && isRounded(dot.style, Math.min(width, height))) {
+                dots.push({node, widthPx: Math.round(width), glow: dot.style.boxShadow !== 'none', pseudo: dot.pseudo}); break;
+              }
+            }
+          }
+        }
+        // Icon tile: a square (or round) tinted/bordered box wrapping one icon.
+        if (rect.width >= 24 && rect.width <= 72 && Math.abs(rect.width - rect.height) <= 2 && node.childElementCount === 1 && !directText(node) &&
+            (node.firstElementChild.matches('svg,img') || node.firstElementChild.matches('i,span') && !node.firstElementChild.childElementCount && directText(node.firstElementChild).length <= 32) &&
+            (painted(style.backgroundColor) || parseFloat(style.borderTopWidth) >= 1 && painted(style.borderTopColor)) && parseFloat(style.borderTopLeftRadius) >= 4 &&
+            !node.matches('button,a[href],input,[role="button"]') && !node.closest(semanticState))
+          tiles.push({node, sizePx: Math.round(rect.width)});
         if (rect.width <= 300 && rect.height <= 64 && isRounded(style, rect.height) && !node.closest(semanticState) && !node.matches('button,a,input,[role="button"],[role="switch"],[role="checkbox"]')) {
           // A short status label, actual capsule geometry and repeated dot motion
           // must all agree. Meaningful live regions and state controls are exempt.
@@ -147,6 +181,7 @@ export function inspectNoiseState(root, options = {}) {
                 const dotRect = motion.pseudo ? {width: parseFloat(dotStyle.width), height: parseFloat(dotStyle.height)} : rectOf(dot);
                 if (dotStyle.display === 'none' || dotStyle.visibility !== 'visible' || !painted(dotStyle.backgroundColor) || (motion.pseudo && ['none','normal'].includes(dotStyle.content))) continue;
                 if (dotRect.width >= 2 && dotRect.width <= 16 && dotRect.height >= 2 && dotRect.height <= 16 && dotRect.width / dotRect.height >= .65 && dotRect.width / dotRect.height <= 1.5 && isRounded(dotStyle, Math.min(dotRect.width, dotRect.height))) {
+                  animatedPills.add(node);
                   add('animated-status-pill', node, {reason: 'A short status capsule contains a repeatedly animated dot without explicit live/status semantics; confirm the motion conveys a necessary state.', dot: {selector: identify(dot), pseudo: motion.pseudo, widthPx: Math.round(dotRect.width), heightPx: Math.round(dotRect.height), durationMs: motion.durationMs}});
                   matched = true; break;
                 }
@@ -169,7 +204,10 @@ export function inspectNoiseState(root, options = {}) {
   }
   const frequentFonts = [...fonts.values()].filter(data => data.count >= 2);
   if (frequentFonts.length >= 4) add('many-interface-font-families', frequentFonts[0].node, {reason: 'At least four primary CSS font families each occur on multiple visible controls or headings. Check whether this variation has a consistent purpose.', families: frequentFonts.length, textElements: frequentFonts.reduce((sum, data) => sum + data.count, 0), relatedSelectors: frequentFonts.slice(1, 4).map(data => identify(data.node))});
-  if (borders.length >= 3) add('repeated-heavy-left-border', borders[0].node, {reason: 'Several visible panels use a heavy left edge as their only prominent border. Review whether each accent represents a distinct necessary state.', panels: borders.length, borderWidthsPx: [...new Set(borders.map(data => data.widthPx))].slice(0, 4), relatedSelectors: borders.slice(1, 4).map(data => identify(data.node))});
-  if (options.detailed) result.measurements = {viewport: {width: innerWidth, height: innerHeight}, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, animationsSampled: Math.min(animations.length, 100), textBearingInterfaceFamilies: fonts.size, repeatedHeavyLeftBorders: borders.length, interfaceCopy: densities};
+  if (borders.length >= 2) add('repeated-heavy-left-border', borders[0].node, {reason: 'Several visible panels use a colored left edge (border or pseudo-element rail) as their only prominent accent: a stock generated-UI pattern. Remove the rails unless each encodes a distinct necessary state; group with spacing and headings instead.', panels: borders.length, borderWidthsPx: [...new Set(borders.map(data => data.widthPx))].slice(0, 4), relatedSelectors: borders.slice(1, 4).map(data => identify(data.node))});
+  dots = dots.filter(dot => !animatedPills.has(dot.node));
+  if (dots.length) add('decorative-dot-marker', dots[0].node, {reason: 'A small colored dot prefixes a short label (a stock generated-UI tell). Remove it unless it encodes a real, changing state; a label reads fine without it.', markers: dots.length, glowing: dots.filter(dot => dot.glow).length, relatedSelectors: dots.slice(1, 4).map(dot => identify(dot.node))});
+  if (tiles.length) add('icon-tile', tiles[0].node, {reason: 'An icon sits inside a tinted or bordered rounded tile (a stock generated-UI badge). Show the icon plainly at text size, or drop it when the label already says it.', tiles: tiles.length, sizesPx: [...new Set(tiles.map(tile => tile.sizePx))].slice(0, 4), relatedSelectors: tiles.slice(1, 4).map(tile => identify(tile.node))});
+  if (options.detailed) result.measurements = {viewport: {width: innerWidth, height: innerHeight}, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, animationsSampled: Math.min(animations.length, 100), textBearingInterfaceFamilies: fonts.size, repeatedHeavyLeftBorders: borders.length, decorativeDots: dots.length, iconTiles: tiles.length, interfaceCopy: densities};
   return result;
 }

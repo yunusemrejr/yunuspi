@@ -19,6 +19,19 @@ Read `references/patterns.md` for code and evidence review. For prose, use `../n
 ## Interfaces
 Read `../ui-antipattern-review/SKILL.md` when UI is central. For website work, apply the 200-rule checklist in `docs/ANTI-SLOP-CHECKLIST.md` (core principle, decision test, final rule) and the observer-book `anti-slop` passages. Inspect real content and interaction states. A screenshot demonstrates appearance, not keyboard behavior. When visual tooling is unavailable, use DOM, geometry and contrast evidence and explicitly limit the conclusion.
 
+## Never produce (generated-UI ornaments)
+
+These read as machine-made at a glance; do not write them, and remove them when found unless the user's brand or an explicit state need requires one:
+- a colored left rail on cards, callouts or list items (thick or 2–3px `border-left`, or a pseudo-element bar);
+- small colored dots before labels, chips, nav items or headings, glowing or not (a dot is allowed only for a real, changing state with a text equivalent);
+- icons boxed in tinted or bordered rounded tiles ("icon badges"), including the app logo as a glowing tile;
+- label pills for things that are not filters or states ("● Invoices"), pill clusters, gradient text, glow halos, glassmorphism panels;
+- the stock landing order (trusted-by, three feature cards, how-it-works, testimonials, pricing, FAQ, final CTA) and centered-everything layouts;
+- the default indigo/violet-to-pink palette on a brand that does not own it;
+- boilerplate copy: "Unlock", "Seamless", "Elevate", "In today's fast-paced", em-dash floods, rhythmic triads, invented metrics or testimonials.
+
+Replace ornament with structure: spacing and alignment for grouping, one clear type hierarchy, plain icons at text size only where they aid scanning, color reserved for meaning. The edit-time cues (`ui-accent-rail`, `ui-dot-marker`, `ui-icon-tile`, `ui-stock-palette`, `ui-template-sequence`, `prose-ai-tells`) and `design_audit` findings (`repeated-heavy-left-border`, `decorative-dot-marker`, `icon-tile`) flag these automatically.
+
 ## Final check
 Does the artifact solve the requested problem? Are claims supported? Are boundaries and failure behavior coherent? Did verification exercise the actual change? Optimize for contextual necessity, not visible completeness: every section, claim, widget and page must earn its place for this reader — apparent sophistication without necessity is the underlying failure mode (see the website necessity catalog in `references/patterns.md`). Avoid broad rewrites solely to satisfy a style heuristic.
 

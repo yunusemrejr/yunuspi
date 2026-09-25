@@ -78,3 +78,12 @@ test('rpc stop for an unknown id replies with live runs only',async()=>{
   bridge.dispose();
  }
 });
+
+test('status on a harness-owned automatic run explains it instead of erroring',()=>{
+ const {asyncDirRoot,resultsDir,root}=fixture();
+ const result=inspectSubagentStatus({id:'scope-council-peer-critique-3da157f5'},{asyncDirRoot,resultsDir,state:{currentSessionId:'sess-1',foregroundControls:new Map(),asyncJobs:new Map(),foregroundRuns:new Map()}});
+ assert.notEqual(result.isError,true);
+ assert.match(result.content[0].text,/harness-owned scope council run, not a child you launched/);
+ assert.match(result.content[0].text,/nothing to poll, wait for or harvest/);
+ fs.rmSync(root,{recursive:true,force:true});
+});

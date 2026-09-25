@@ -68,6 +68,7 @@ Premium is **restraint with one flourish**, not ornament density. The page budge
 - Equal-weight everything (no display/label *juxtaposition* — the monotone, the remove-test-failer).
 - A hero with three CTAs (the view has no opinion — one action per view, the hierarchy rule applied to CTAs).
 - The gradient text, the glassmorphism pane with no backdrop reason, the animated blob (the 2022–2024 stock moves — `anti-ai-slop`'s visual tells).
+- The generated-UI ornaments: colored left rails on cards, dots before labels and chips, icons boxed in tinted rounded tiles, label pills for non-filters (`anti-ai-slop` "Never produce" — never write them).
 - A "feature grid" of 6 identical cards (the 3×2 of the same-shape = the no-opinion grid; the varied card *sizes* per the content's importance is the editorial answer).
 - Mobile: the desktop-priority reflow (the 3-column grid that becomes a 0.5-column soup), the hover-only affordances, the <44px targets.
 - The 100vh-empty hero, the 6-breakpoint pixel-panic, the hover-gradient-border neon.

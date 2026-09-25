@@ -1130,7 +1130,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
 - `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 604; literal)
-- `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 728; literal)
+- `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 746; literal)
 - `project_memory_consolidate` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 499; literal)
 - `project_memory_forget` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 467; literal)
 - `project_memory_index_path` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 431; literal)
@@ -1139,7 +1139,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 262; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 337; literal)
 - `project_tests` — [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts) (line 538; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 556; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 568; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 240; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
@@ -1147,7 +1147,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `scene_render` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 270; factory)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2181; literal)
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1878; literal)
-- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 768; literal)
+- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 799; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1815; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 360; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 702; literal)
@@ -1162,7 +1162,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `syntax_check` — [`agent/extensions/lib/source-check.ts`](../agent/extensions/lib/source-check.ts) (line 255; literal)
 - `sys_probe` — [`agent/extensions/sys-probe.ts`](../agent/extensions/sys-probe.ts) (line 254; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 11; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 267; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 274; literal)
 - `value_convert` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 123; factory)
 - `video_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 272; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 253; factory)
@@ -1208,7 +1208,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /errors — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1752)
 - /export-json — [`agent/extensions/session-export-json.ts`](../agent/extensions/session-export-json.ts) (line 72)
 - /google-account — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3437)
-- /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 852)
+- /graph — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 870)
 - /harness-backup — [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts) (line 37)
 - /hook-audit — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 76)
 - /jobs — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 553)
@@ -1228,7 +1228,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 427)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 893)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 367)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 420)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 519)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
@@ -1257,7 +1257,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1701)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 499)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1720)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 207)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 246)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3134)
 
 ### Dynamic command owners
@@ -1674,7 +1674,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 161 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 164 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `accessible-interaction-design` — [`agent/skills/accessible-interaction-design/SKILL.md`](../agent/skills/accessible-interaction-design/SKILL.md)
 - `ai-engineering` — [`agent/skills/ai-engineering/SKILL.md`](../agent/skills/ai-engineering/SKILL.md)
@@ -1708,6 +1708,7 @@ The exporter includes 161 public skill directories. This list is a path inventor
 - `cpp-performance-engineering` — [`agent/skills/cpp-performance-engineering/SKILL.md`](../agent/skills/cpp-performance-engineering/SKILL.md)
 - `css-battle` — [`agent/skills/css-battle/SKILL.md`](../agent/skills/css-battle/SKILL.md)
 - `custom-svg` — [`agent/skills/custom-svg/SKILL.md`](../agent/skills/custom-svg/SKILL.md)
+- `data-analysis` — [`agent/skills/data-analysis/SKILL.md`](../agent/skills/data-analysis/SKILL.md)
 - `data-lineage-validation` — [`agent/skills/data-lineage-validation/SKILL.md`](../agent/skills/data-lineage-validation/SKILL.md)
 - `data-viz` — [`agent/skills/data-viz/SKILL.md`](../agent/skills/data-viz/SKILL.md)
 - `databases` — [`agent/skills/databases/SKILL.md`](../agent/skills/databases/SKILL.md)
@@ -1721,6 +1722,7 @@ The exporter includes 161 public skill directories. This list is a path inventor
 - `email` — [`agent/skills/email/SKILL.md`](../agent/skills/email/SKILL.md)
 - `embedded-device-engineering` — [`agent/skills/embedded-device-engineering/SKILL.md`](../agent/skills/embedded-device-engineering/SKILL.md)
 - `evidence-first-engineering` — [`agent/skills/evidence-first-engineering/SKILL.md`](../agent/skills/evidence-first-engineering/SKILL.md)
+- `financial-modeling` — [`agent/skills/financial-modeling/SKILL.md`](../agent/skills/financial-modeling/SKILL.md)
 - `financial-statement-analysis` — [`agent/skills/financial-statement-analysis/SKILL.md`](../agent/skills/financial-statement-analysis/SKILL.md)
 - `fonts` — [`agent/skills/fonts/SKILL.md`](../agent/skills/fonts/SKILL.md)
 - `formal-model-checking` — [`agent/skills/formal-model-checking/SKILL.md`](../agent/skills/formal-model-checking/SKILL.md)
@@ -1747,6 +1749,7 @@ The exporter includes 161 public skill directories. This list is a path inventor
 - `investment-risk-analysis` — [`agent/skills/investment-risk-analysis/SKILL.md`](../agent/skills/investment-risk-analysis/SKILL.md)
 - `java-cross-platform` — [`agent/skills/java-cross-platform/SKILL.md`](../agent/skills/java-cross-platform/SKILL.md)
 - `java-platform-engineering` — [`agent/skills/java-platform-engineering/SKILL.md`](../agent/skills/java-platform-engineering/SKILL.md)
+- `key-visual-art-direction` — [`agent/skills/key-visual-art-direction/SKILL.md`](../agent/skills/key-visual-art-direction/SKILL.md)
 - `libreoffice-automation` — [`agent/skills/libreoffice-automation/SKILL.md`](../agent/skills/libreoffice-automation/SKILL.md)
 - `linux` — [`agent/skills/linux/SKILL.md`](../agent/skills/linux/SKILL.md)
 - `linux-desktop-ui-ux` — [`agent/skills/linux-desktop-ui-ux/SKILL.md`](../agent/skills/linux-desktop-ui-ux/SKILL.md)

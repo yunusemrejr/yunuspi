@@ -397,6 +397,17 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 
 	if (!asyncDir && !resultPath) {
 		const target = resolvedId ?? params.id ?? params.runId ?? params.dir ?? "unknown";
+		// Harness-owned automatic runs (scope councils, skill discovery,
+		// automatic review/assist) are not async children of the agent: their
+		// results reach its context on their own. Agents queried them repeatedly
+		// and got a "not found" error for work they never launched.
+		if (/^(?:scope-council|skill-discovery|quality-review|auto-assist)-/.test(String(target))) {
+			const kind = String(target).startsWith("scope-council") ? "scope council" : String(target).startsWith("skill-discovery") ? "skill discovery" : String(target).startsWith("quality-review") ? "quality review (use quality_review status)" : "automatic assistance";
+			return {
+				content: [{ type: "text", text: `'${target}' is a harness-owned ${kind} run, not a child you launched. Its result is delivered into your context automatically when it finishes; there is nothing to poll, wait for or harvest. Continue your own work.` }],
+				details: { mode: "single", results: [] },
+			};
+		}
 		const hint = describeAvailableAsyncRuns(asyncDirRoot, currentSessionId !== undefined ? { sessionId: currentSessionId } : {});
 		return {
 			content: [{ type: "text", text: `Async run not found. No live or retained run matches '${target}'.${hint ? ` ${hint}` : ""} Provide id or dir.` }],

@@ -74,6 +74,20 @@ Structure without scale:
 - Dashboardification and data visualization without data need — KPI panels and charts as professionalism costume. Reviewer check: what decision does each number serve?
 - Fake sophistication through motion — gradients, blobs, particles, parallax, glow, animated grids. Signals `ui-decoration-cluster` and `ui-continuous-motion`, plus `design_audit` slop kinds on rendered output.
 - Content duplication across pages — About, Home, Mission, Philosophy saying the same thing. Reviewer check: one canonical page, links elsewhere.
+- Template section order — trusted-by, features, how-it-works, testimonials, pricing, FAQ, final CTA in the stock sequence. Signal `ui-template-sequence`; order sections by this product's own argument.
+- Centered everything — every block centered, no reading axis. Signal `ui-centered-everything`; center only short display lines.
+
+Generated-UI ornaments (never produce):
+- Accent rails — colored left borders or pseudo-element bars on cards. Signal `ui-accent-rail`; rendered `repeated-heavy-left-border`.
+- Dot markers — small (often glowing) dots before labels and chips. Signal `ui-dot-marker`; rendered `decorative-dot-marker`.
+- Icon tiles — icons boxed in tinted or bordered rounded squares. Signal `ui-icon-tile`; rendered `icon-tile`.
+
+Color without a system:
+- The stock AI palette — indigo or violet into purple or pink gradients on a product that does not own them. Signal `ui-stock-palette`; derive a value ramp and one accent from the brand.
+- Hue sprawl — a dozen ad hoc hex values, no tokens. Signal `ui-hue-sprawl`; a small token set reused everywhere.
+
+Generated-sounding prose:
+- Delve/tapestry/testament phrasing, em-dash floods, rhythmic triads, repeated sentence openers. Signal `prose-ai-tells` (the shared `code_quality prose` checker, run automatically on authored copy).
 
 Features without need:
 - Premature ecosystem language — a few pages called a "platform", "ecosystem" or "suite". Reviewer check: name what it is today.

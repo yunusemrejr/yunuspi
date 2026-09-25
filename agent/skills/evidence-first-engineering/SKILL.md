@@ -15,4 +15,13 @@ Explicit user requirements override these defaults. Do not reinterpret a vague r
 
 For uncertain work, choose the next check that can change the implementation decision. Small reversible edits need a small check; concurrency, data loss and public contracts deserve failure-path evidence. Do not equate reasoning length with quality or keep exploring after the relevant checks pass.
 
+## Double-check protocol (before claiming done)
+
+When asked to double-check, or before a completion claim on consequential work:
+1. List every claim the answer makes (fixed, faster, compatible, total = X, all tests pass) and the evidence for each; a claim without evidence is marked unverified or removed.
+2. Re-derive, do not re-read: rerun the test or build after the last edit, recompute key numbers a second way, re-render UI, re-query data. Reading your own diff again is not verification.
+3. Attack the result: the negative case, the boundary, empty input, the other platform or locale, the concurrent path. Try to make it fail once.
+4. Check the request again: every explicit requirement and constraint from all user messages and reminders is met, or its gap is stated.
+5. Compare against the original baseline: nothing unrelated changed (diff scope, public contracts, config, generated files).
+
 For data/API claims, inspect actual schema, units, nulls, keys and installed versions. Calculate consequential totals in executable code; validate join cardinality and denominators. Keep observations, calculations and assumptions distinct. Record the source or command behind a claim; missing evidence stays unknown. Mocked success is not live-service validation.

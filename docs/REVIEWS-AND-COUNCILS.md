@@ -35,7 +35,14 @@ Automatic intervention complements deliberate invocation; it never replaces
 it:
 
 - Quality reviews run at completion checkpoints with changed-source evidence
-  (two rounds, bounded aspects, strict evidence parsing).
+  (two rounds, bounded aspects, strict evidence parsing). A repair round
+  re-reviews only the aspects the files changed since the last review would
+  select, plus any that did not pass cleanly; a clean pass whose files did not
+  change carries forward with a note naming the revision it came from.
+- Harness-owned runs (scope councils, skill discovery, automatic review) are
+  not the agent's children: `subagent` status on their ids explains that their
+  results arrive in context by themselves, and the background reviewers count
+  them separately from agent-launched children.
 - The scope council runs only for qualifying change-scope requests, and in
   design-direction mode for a new open visual brief: the same three members,
   budgets and read-only limits read the brief (classifying mentioned sites as

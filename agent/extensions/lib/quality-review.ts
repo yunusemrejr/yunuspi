@@ -290,11 +290,22 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     }
 		dispatchGap = ''; reviewUnavailable = false; disposition = ''; reason = ''; evidenceRejected = rejectedEvidence.slice(0, 8);
     const reviewScopeHashes = Object.fromEntries(changed.map(file => [file, reviewContentHash(path.join(root, file))]).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+    const previousEvidence = reviewedEvidence;
     const previousReview = reviewed >= 0 && reports.length ? {
       revision: reviewed,
       changedFiles: changed.filter(file => !reviewScopeHashes[file] || reviewScopeHashes[file] !== reviewedHashes[file]),
       reports: reports.map(report => ({aspect:report.aspect, outcome:report.outcome, gap:report.gap.slice(0,300), findings:report.findings.filter(f => f.severity === 'blocking').map(f => ({id:f.id,file:f.file,detail:f.detail.slice(0,600)}))})),
     } : undefined;
+    // A repair round re-reviews only what the repair could have affected: an
+    // aspect that passed cleanly, whose files the delta would not select and
+    // whose outcome evidence is unchanged, keeps its verdict. Measured: full
+    // second rounds re-ran every aspect for 4-5 minutes after one-file fixes.
+    const carried = new Map<string, ReviewReport>();
+    if (previousReview && reviewed !== rev && (!evidence.length || evidenceKey === previousEvidence)) {
+      const touched = new Set(reviewAspects(previousReview.changedFiles, '', [], patternReport()).map(aspect => aspect.id));
+      for (const report of reports) if (report.outcome === 'pass' && !report.gap.trim() && !touched.has(report.aspect))
+        carried.set(report.aspect, { ...report, evidence: [`Carried forward from revision ${reviewed}: no file this aspect covers changed since that review.`, ...report.evidence].slice(0, 6) });
+    }
     rounds++; reviewedEvidence = evidenceKey; reviewedEvidencePaths = [...evidence]; save();
     const roundProgress = { round: rounds, startedAt: Date.now(), startedClock: performance.now(), deadlineMs: REVIEW_LIMITS.deadlineMs, aspects: {} as Record<string,string> };
     progress = roundProgress; emitProgress();
@@ -310,7 +321,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
 		history = Array.isArray(info?.history) ? info.history.slice(-20) : [];
 	  } catch {}
       const aspects = reviewAspects(changed,task,history,patternReport());
-      roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, 'pending'])); emitProgress();
+      const pendingAspects = aspects.filter(aspect => !carried.has(aspect.id));
+      roundProgress.aspects = Object.fromEntries(aspects.map(aspect => [aspect.id, carried.has(aspect.id) ? 'carried' : 'pending'])); emitProgress();
       const runner = options.runner ?? (globalThis as any)[QUALITY_REVIEW_RUNNER];
       // Admit each completed aspect before the shared deadline. A slow peer
       // must not erase valid evidence, and late callbacks must not revive it.
@@ -319,7 +331,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       const unattempted = new Set<string>();
       const onResult = (item: any) => {
         if (ticket !== generation || !active || paused || combined.aborted ||
-          !aspects.some(a => a.id === item?.aspect) || completed.has(item.aspect)) return;
+          !pendingAspects.some(a => a.id === item?.aspect) || completed.has(item.aspect)) return;
         if (item?.unattempted === true) unattempted.add(item.aspect);
         if (!item.ok || typeof item.text !== 'string') {
           if (typeof item.gap === 'string') failures.set(item.aspect,item.gap.slice(0,900));
@@ -332,7 +344,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       let failure = typeof runner !== 'function' ? 'The native quality review runner is unavailable.' : '';
       try {
         combined.throwIfAborted();
-        const result = await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS, onResult, automatic, evidence, previousReview }, ctx, combined)),combined);
+        const result = !pendingAspects.length ? [] : await withinDeadline(Promise.resolve(runner?.({ revision:rev, files:[...changed], task, aspects:pendingAspects, graph, history, patterns:patternReport(), tests:options.tests(), limits:REVIEW_LIMITS, onResult, automatic, evidence, previousReview }, ctx, combined)),combined);
         if (Array.isArray(result)) result.forEach(onResult);
       } catch { failure = combined.aborted ? 'The review deadline expired before this aspect completed.' : 'The native quality review runner failed before returning this aspect.'; }
 		// A user/session cancellation discards the in-flight turn. The local
@@ -343,13 +355,13 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
       if (ticket !== generation || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       const evidenceChanged = evidence.length > 0 && evidenceKey !== outcomeEvidenceKey(root, evidence);
       const received: ReviewReport[] = aspects.map(a => {
-        const report = completed.get(a.id) ?? { aspect:a.id, outcome:'unknown' as const, evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.' };
+        const report = carried.get(a.id) ?? completed.get(a.id) ?? { aspect:a.id, outcome:'unknown' as const, evidence:[], findings:[], gap:failures.get(a.id) || failure || 'No permitted reviewer returned an assessment for this aspect.' };
         return evidenceChanged ? {...report, outcome:'unknown', gap:`${EVIDENCE_CHANGED} ${report.gap}`.slice(0,900)} : report;
       });
       // Reviewer availability is independent of the source revision. A source
       // edit during failed startup cannot repair the launch or authorize retry.
-      reviewUnavailable = completed.size === 0;
-      if (aspects.length > 0 && aspects.every(a => unattempted.has(a.id))) {
+      reviewUnavailable = completed.size === 0 && carried.size === 0;
+      if (pendingAspects.length > 0 && pendingAspects.every(a => unattempted.has(a.id))) {
         // No reviewer was dispatched (no capacity, disabled assistance,
         // delegation block): refund the round so the 2-round budget is spent
         // on real attempts. Keep the reason and stop automatic retry loops.
@@ -361,7 +373,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         reports = received.map(report => ({...report,outcome:'unknown',gap:`Source changed during this review; evidence may span revisions and cannot approve current source. ${report.gap}`.slice(0,900)}));
         reviewed = rev; save(); return summary();
       }
-      reports = received; reviewed = rev; reviewedHashes = reviewScopeHashes; reviewUnavailable = completed.size === 0;
+      reports = received; reviewed = rev; reviewedHashes = reviewScopeHashes; reviewUnavailable = completed.size === 0 && carried.size === 0;
       // A decisive round suppresses near-term stuck-signal review suggestions;
       // an all-unknown round stays suggestible since no review evidence exists.
       if (received.some(r => r.outcome !== 'unknown')) { try { noteQualityReviewCompleted(ctx); } catch {} }
