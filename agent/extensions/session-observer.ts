@@ -26,6 +26,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let todos: any[] = [], adviceHistory: string[] = [];
   let latestAdviceId: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
+  // Note text awaiting provider confirmation. Only confirmed-delivered notes
+  // join adviceHistory; unconfirmed notes must not pose as "already delivered".
+  let pendingAdviceText: string | undefined;
+  // Task-level momentum for repeat escalation: completed notes vs parent edits.
+  let notesThisTask = 0, parentEditsThisTask = 0;
   const completed = new Map<string, string>(), toolInputs = new Map<string, string>(), startedEvents = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
@@ -153,7 +158,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false;
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const runtime = createSessionObserver({
     salience: () => salience,
@@ -320,7 +325,16 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     },
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
-      if (advice) { latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; adviceHistory.push(observerAdviceText(advice)); if (adviceHistory.length > 8) adviceHistory.shift(); }
+      if (advice) {
+        // A previous note that never reached a context build is superseded,
+        // not delivered: ledger the drop instead of losing it silently.
+        // Prepared-but-unconfirmed notes keep their prepared-context receipt
+        // as the existing honest signal.
+        if (latestAdviceId && preparedAdvice?.id !== latestAdviceId) {
+          try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+        }
+        latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdviceText = observerAdviceText(advice); notesThisTask++;
+      }
       const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
       const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: boundedObserverText(detail, 140),
         ...(advice ? { adviceId: latestAdviceId, note: advice.note, evidence: advice.evidence, tools: advice.tools, skills: advice.skills, ...(advice.discoverableTools?.length ? { discoverableTools: advice.discoverableTools } : {}) } : {}) } }, { triggerTurn: false });
@@ -434,7 +448,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++;
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
   });
@@ -491,6 +505,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   });
   pi.on('tool_result', (event: any, context: any) => {
     if (!owns(context)) return;
+    if (!event.isError && (event.toolName === 'edit' || event.toolName === 'write')) parentEditsThisTask++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);
     // The result row repeats the input, so an unread start row only doubles
@@ -530,7 +545,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const messages = event.messages.filter((message: any) => message.customType !== OBSERVER_CONTEXT && message.customType !== OBSERVER_MESSAGE);
     const note = owns(context) ? runtime.context(false) : undefined;
     if (!note) return messages.length !== event.messages.length ? { messages } : undefined;
-    const content = `[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
+    // Repeated advice with no parent edit is restated as required reading:
+    // the observer has measured the stall, not guessed it.
+    const repeat = notesThisTask >= 3 && parentEditsThisTask === 0
+      ? `[Observer context: note #${notesThisTask} this task with 0 parent edits recorded. Address this note before further reads or dispatches.]\n`
+      : '';
+    const content = `${repeat}[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
     const prepared = anchor(messages, { role: 'custom', customType: OBSERVER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
     // This attests context preparation, not provider acceptance or action by the
     // main agent. A later context hook or cancelled request can still omit it.
@@ -545,10 +565,20 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (event.provider !== context.model?.provider || event.model !== context.model?.id) return;
     if (!event.observerAdviceReceipts?.some((receipt: any) => receipt.id === preparedAdvice!.id && receipt.sha256 === preparedAdvice!.sha256)) return;
     try { pi.appendEntry('session-observer-delivery-v1', { adviceId: preparedAdvice.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
-    runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined;
+    // Only confirmed-delivered notes join the history the next packet calls
+    // "previous advice already delivered".
+    if (pendingAdviceText) { adviceHistory.push(pendingAdviceText); if (adviceHistory.length > 8) adviceHistory.shift(); }
+    runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
   });
   // Native agent_end may be followed by retry/compaction/queued continuation.
   // Only agent_settled closes the current active run and its observer cadence.
-  pi.on('agent_settled', (_: any, context: any) => { if (owns(context)) { runtime.stop('Active work settled'); streaming = []; latestAdviceId = undefined; preparedAdvice = undefined; } });
+  pi.on('agent_settled', (_: any, context: any) => {
+    if (!owns(context)) return;
+    runtime.stop('Active work settled'); streaming = [];
+    if (latestAdviceId && preparedAdvice?.id !== latestAdviceId) {
+      try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'dropped:settled', at: now() }); } catch { /* Accounting only. */ }
+    }
+    latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+  });
   pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); removeHookListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
 }

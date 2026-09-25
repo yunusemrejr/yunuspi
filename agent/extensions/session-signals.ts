@@ -377,6 +377,8 @@ export type UsedSummary = {
   councils: { status: string; evidence: number; incomplete: boolean }[];
   reviews: { rounds: number; disposition: string; aspects: { aspect: string; outcome: string }[] } | null;
   inspected: number;
+  /** Wall-clock capture time; the popup is a snapshot, not a live view. */
+  capturedAt: string;
   /** Canonical logical child tasks from the shared child ledger (aggregate-first). */
   logicalTasks: LogicalChildTask[];
   attemptsTotal: number;
@@ -401,9 +403,9 @@ const skillName = (p: string) =>
  * selection-boundary routes, child runs, council deliberations and review
  * state. Unknown provider/thinking/nested values stay absent — the renderer
  * shows a dash rather than a guess. */
-export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, liveHelpers?: unknown): UsedSummary {
+export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, liveHelpers?: unknown, live?: unknown): UsedSummary {
   const list = Array.isArray(entries) ? entries : [];
-  const metrics = collectSessionMetrics(list);
+  const metrics = collectSessionMetrics(list, live);
   const cost = collectSessionCost(list);
   const isNonnegative = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
   const finite = (value: unknown) => isNonnegative(value) ? value : 0;
@@ -727,6 +729,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
     councils,
     reviews,
     inspected: list.length,
+    capturedAt: new Date().toISOString(),
     logicalTasks,
     attemptsTotal: ledgerSummary.attempts,
     unresolvedLinkage: ledger.unresolved.length + ledger.tasks.filter((task) => task.unresolvedLinkage === true).length,
@@ -775,7 +778,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const session = summary.session ?? { responses: 0, toolCalls: 0, toolResults: tools.reduce((sum, tool) => sum + tool.count, 0), parentErrors: 0, blockedTools: 0, compactions: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cacheRate: null, childTokens: 0, hookCalls: null, hookChanged: null, hookErrors: null, cost: "$?", costUnknown: true, costPending: 0 };
   const hooks = Array.isArray(summary.hooks) ? summary.hooks : [];
   const sections: string[] = [
-    `<div class="used-report"><div class="usage-heading"><div><span class="usage-eyebrow">Session evidence</span><h1>What this session used</h1><p class="sub">${formatCount(summary.inspected)} retained branch entries · open a section for the evidence behind each count.</p></div><span class="usage-snapshot">Snapshot</span></div>`,
+    `<div class="used-report"><div class="usage-heading"><div><span class="usage-eyebrow">Session evidence</span><h1>What this session used</h1><p class="sub">${formatCount(summary.inspected)} retained session entries · open a section for the evidence behind each count.</p></div><span class="usage-snapshot">Snapshot · ${escapeHtml((summary as { capturedAt?: unknown }).capturedAt ?? "time not recorded")}</span></div>`,
     `<div class="overview"><div class="stat"><strong>${formatCount(models.length + (summary.modelsOmitted ?? 0))}</strong><span>model routes recorded</span></div><div class="stat"><strong>${formatCount(summary.toolDistinctTotal ?? tools.length)}</strong><span>distinct tools used</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child agents observed</span></div></div>`,
     `<p class="note">Counts describe recorded session activity. “Suggested” is not the same as opened or applied; missing model or usage data stays explicitly unknown.</p>`,
     harnessUsageHtml(summary.harnessUsage??collectHarnessUsage([])),
@@ -958,7 +961,7 @@ export function errorsHtml(report: SessionErrorsReport): string {
   const byKind = report?.byKind && typeof report.byKind === "object" ? report.byKind : {};
   const oneLine = (text: unknown) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "no excerpt";
   const sections: string[] = [
-    `<h1>🚨 Session errors</h1><p class="sub">${formatCount(report?.total ?? 0)} errors in ${formatCount(report?.inspected ?? 0)} retained branch entries. Newest first. The JSON block is the copy source.</p>`,
+    `<h1>🚨 Session errors</h1><p class="sub">${formatCount(report?.total ?? 0)} errors in ${formatCount(report?.inspected ?? 0)} of ${formatCount(report?.totalEntries ?? report?.inspected ?? 0)} session entries · captured ${escapeHtml(report?.capturedAt ?? "time not recorded")}. Newest first. The JSON block is the copy source.</p>`,
     `<div class="copy-row"><button id="copy-errors" type="button">Copy JSON</button><span id="copy-status" class="dim"></span></div>`,
     `<div class="overview"><div class="stat"><strong>${formatCount(report?.total ?? 0)}</strong><span>errors recorded</span></div><div class="stat"><strong>${formatCount(byKind.tool ?? 0)}</strong><span>tool failures</span></div><div class="stat"><strong>${formatCount((byKind.model ?? 0) + (byKind.child ?? 0) + (byKind.workflow ?? 0))}</strong><span>model / child / workflow</span></div><div class="stat"><strong>${formatCount(hookErrors.reduce((sum, row) => sum + row.errors, 0))}</strong><span>hook errors</span></div></div>`,
   ];
@@ -1345,7 +1348,9 @@ export default function (pi: any) {
       sid = "";
     }
     const dir = popupDir();
-    const file = writePopupFile(dir, `${kind}-${sanitizeFileSegment(sid || "session")}.html`, renderPopupHtml(title, bodyHtml));
+    // Unique per invocation: reopening the command must open fresh numbers,
+    // never a browser tab cached on the previous snapshot.
+    const file = writePopupFile(dir, `${kind}-${sanitizeFileSegment(sid || "session")}-${Date.now().toString(36)}.html`, renderPopupHtml(title, bodyHtml));
     pruneStaleFiles(dir, 7 * 24 * 3600_000, path.basename(file));
     if (ctx.hasUI === false) return file;
     const error = await openExternal(pathToFileURL(file).href);
@@ -1719,17 +1724,26 @@ export default function (pi: any) {
       return (async () => {
         let entries: unknown;
         try {
-          entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+          // Full retained history plus the live telemetry segment, like the
+          // TUI footer and /cost: branch-only reads undercount after forks
+          // and skew from the live numbers.
+          entries = ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? [];
         } catch (error) {
           throw new Error(
             `Session usage is unavailable: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
+        let live: unknown;
+        try {
+          live = sessionObservability()[Symbol.for("yunus-pi.metrics-view.v1")]?.(ctx?.sessionManager?.getSessionId?.());
+        } catch {
+          live = undefined;
+        }
         const summary = buildUsedSummary(entries, {
           provider: ctx?.model?.provider,
           id: ctx?.model?.id,
           thinking: ctx?.thinkingLevel,
-        }, helperUsageView(ctx.sessionManager.getSessionId()));
+        }, helperUsageView(ctx.sessionManager.getSessionId()), live);
         const file = await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
         ctx.ui?.notify?.(`Detailed session usage ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("used", error, ctx));
@@ -1742,7 +1756,9 @@ export default function (pi: any) {
       return (async () => {
         let entries: unknown;
         try {
-          entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+          // Full retained history like the TUI footer: branch-only reads miss
+          // failures outside the current branch.
+          entries = ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? [];
         } catch (error) {
           throw new Error(
             `Session errors are unavailable: ${error instanceof Error ? error.message : String(error)}`,
@@ -1755,7 +1771,13 @@ export default function (pi: any) {
         } catch {
           ledgerTasks = undefined;
         }
-        const report = collectSessionErrors(list, { ledgerTasks });
+        let live: unknown;
+        try {
+          live = sessionObservability()[Symbol.for("yunus-pi.metrics-view.v1")]?.(ctx?.sessionManager?.getSessionId?.());
+        } catch {
+          live = undefined;
+        }
+        const report = collectSessionErrors(list, { ledgerTasks, live });
         const file = await openHtmlPopup("errors", "Session errors", errorsHtml(report), ctx);
         ctx.ui?.notify?.(`Detailed session errors ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("errors", error, ctx));

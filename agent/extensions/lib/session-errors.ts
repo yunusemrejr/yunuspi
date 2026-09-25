@@ -52,6 +52,10 @@ export type SessionErrorDetail = {
 export type SessionErrorsReport = {
   inspected: number;
   truncated: boolean;
+  /** Full input length before the 2000-entry window; inspected ≤ totalEntries. */
+  totalEntries: number;
+  /** Wall-clock capture time; the popup is a snapshot, not a live view. */
+  capturedAt: string;
   total: number;
   omitted: number;
   limit: number;
@@ -209,7 +213,7 @@ export function moduleForTool(tool: string): string {
 
 export function collectSessionErrors(
   allEntries: unknown,
-  options: { limit?: number; errorChars?: number; ledgerTasks?: LogicalChildTask[] } = {},
+  options: { limit?: number; errorChars?: number; ledgerTasks?: LogicalChildTask[]; live?: unknown } = {},
 ): SessionErrorsReport {
   const limit = Number.isSafeInteger(options.limit) && (options.limit as number) > 0 ? Math.min(options.limit as number, 200) : DEFAULT_ERROR_LIMIT;
   const errorChars = Number.isSafeInteger(options.errorChars) && (options.errorChars as number) > 0 ? Math.min(options.errorChars as number, 8000) : ERROR_CHARS;
@@ -554,7 +558,7 @@ export function collectSessionErrors(
 
   let hookErrors: SessionErrorsReport["hookErrors"] = [];
   try {
-    const metrics = collectSessionMetrics(entries);
+    const metrics = collectSessionMetrics(entries, options.live);
     hookErrors = Object.entries(metrics.hooks ?? {})
       .filter(([, value]) => ((value as { errors?: number }).errors ?? 0) > 0)
       .map(([key, value]) => {
@@ -577,6 +581,8 @@ export function collectSessionErrors(
   return {
     inspected: entries.length,
     truncated: Array.isArray(allEntries) && allEntries.length > entries.length,
+    totalEntries: Array.isArray(allEntries) ? allEntries.length : entries.length,
+    capturedAt: new Date().toISOString(),
     total: all.length,
     omitted: Math.max(0, all.length - errors.length),
     limit,
@@ -587,6 +593,6 @@ export function collectSessionErrors(
     omittedSignatures: Math.max(0, signatures.size - 16),
     byKind,
     hookErrors,
-    scope: "Newest failures within the last 2000 branch entries; hook rows are telemetry summaries without excerpts. Records sharing one incident id are one incident — the same stable id /metrics shows. Signatures dedup one recurring cause across linkages over the full window with preceding-tool co-occurrence. Missing payload or usage stays absent, never guessed.",
+    scope: "Newest failures within the last 2000 session entries; hook rows are telemetry summaries without excerpts. Records sharing one incident id are one incident — the same stable id /metrics shows. Signatures dedup one recurring cause across linkages over the full window with preceding-tool co-occurrence. Missing payload or usage stays absent, never guessed.",
   };
 }
