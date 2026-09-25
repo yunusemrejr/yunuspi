@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
-import { contentText } from "@yunuspi/ai";
+import { contentText, isFlatPlanProvider } from "@yunuspi/ai";
 import { clampThinkingLevel, cleanupSessionResources, getSupportedThinkingLevels, isContextOverflow, isRecoverableLength, isRetryableAssistantError, modelsAreEqual, resetApiProviders, streamSimple, } from "@yunuspi/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
@@ -439,7 +439,7 @@ export class AgentSession {
         // Emit to extensions first
         await this._emitExtensionEvent((/* PI_RESPONSE_BILLING_V1 */
   event.type === 'message_end' && event.message?.role === 'assistant' && event.message.usage?.cost &&
-    (event.message.usage.cost.billing = this.modelRuntime.isUsingSubscription(event.message.provider) ? 'subscription' : 'metered'), event));
+    (event.message.usage.cost.billing = this.modelRuntime.isUsingSubscription(event.message.provider) || isFlatPlanProvider(event.message.provider) ? 'subscription' : 'metered'), event));
         // Notify all listeners
         this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
         // Handle session persistence

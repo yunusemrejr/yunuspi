@@ -34,6 +34,9 @@ export const SCOPE_COUNCIL_LIMITS = Object.freeze({
 	// 45s shared deadline with 25s first-wave timeouts cannot cover free-tier
 	// turn latency (measured ~21s/turn). Two waves × ~4 slow turns + synthesis.
 	deadlineMs: 240_000,
+	/** Synthesis ceiling. A high-thinking critic has run 157-160s and then hit
+	 * the shared deadline, discarding both finished perspectives with it. */
+	synthesisMs: 90_000,
 	/** Aggregate token and tool ceilings. Each of three possible launches gets
 	 * one equal reservation. Fresh children need enough room for their system
 	 * and tool context before producing a useful opinion. */
@@ -515,6 +518,10 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			} catch { return false; }
 		};
 		const current = () => !signal.aborted && ownsContext();
+		// Only the council's own deadline fired: finished perspectives are paid,
+		// current advice and are returned as a partial result, not discarded.
+		const expired = () => controller.signal.aborted && !lifetime.signal.aborted && !parentSignal?.aborted && !ctx.signal?.aborted && ownsContext();
+		const superseded = () => !ownsContext() || (signal.aborted && !expired());
 		const deadlineAt = now() + limits.deadlineMs;
 		const deadlineTimer = setTimeout(() => controller.abort(new Error("Scope council deadline reached.")), limits.deadlineMs);
 		deadlineTimer.unref?.();
@@ -537,7 +544,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		const mode = councilMode(request.task);
 		const councilName = mode === "direction" ? "Design council" : "Scope council";
 		const progress = (phase: string, status: string, member?: AssistanceMember, elapsedMs?: number, advice?: string) => {
-			if (!ownsContext() || statusOwner !== statusToken || (signal.aborted && status !== "stopped")) return;
+			if (!ownsContext() || statusOwner !== statusToken || (signal.aborted && !expired() && status !== "stopped")) return;
 			const detail = [phase, status, member ? formatModelThinking(member.route) : "", elapsedMs === undefined ? "" : `${Math.round(elapsedMs / 1000)}s`].filter(Boolean).join(" · ");
 			try {
 				const delivery = pi.sendMessage?.({ customType: SCOPE_COUNCIL_PROGRESS, content: `${councilName}: ${visibleText(detail, 420)}`,
@@ -565,16 +572,16 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				label: phase === "preservation" ? "Scope council: preserve requirements" : phase === "meaningful-change" ? "Scope council: assess changes" : "Scope council: critique advice",
 				scopeId: phase, model: member.route };
 			if (current()) appendCost(pi, sessionFile, runId, { ...identity, status: "running" }, "running");
-			let row: any;
+			let row: any, work: Promise<any> | undefined;
 			try {
 				const remaining = Math.max(1, Math.floor(deadlineAt - now()));
 				// Give the first wave enough time to read source, while reserving a
 				// bounded synthesis window. A quick first wave leaves the synthesizer
 				// the full remaining deadline; no child can outlive the shared signal.
 				const timeoutMs = phase === "peer-critique"
-					? remaining
+					? Math.min(remaining, SCOPE_COUNCIL_LIMITS.synthesisMs)
 					: Math.min(120_000, Math.max(1, remaining - 30_000));
-				const work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs, mode), signal, undefined, ctx);
+				work = deps.launch(runId, launchParams(member, limits, phase, source.packet, evidence, timeoutMs, mode), signal, undefined, ctx);
 				const result = await boundedAwait(work, signal);
 				const returnedRow = rawResultRow(result);
 				const rawRow = { ...identity, ...returnedRow,
@@ -598,10 +605,19 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text, row };
 			} catch (error) {
 				if (!signal.aborted) progress(phaseLabel, "unavailable", member, now() - startedAt);
-				if (current()) {
+				// An aborted peer (deadline, supersession) still ran and may have
+				// billed: settle its record now, and add the child's measured usage
+				// and native run link when the launch itself settles. Skipping this
+				// left the footer total permanently partial ("+?").
+				if (ownsContext()) {
 					const failed = { ...identity, ...row, exitCode: 1, error: error instanceof Error ? error.message : "Council peer launch failed" };
 					appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", failed);
 					appendCost(pi, sessionFile, runId, failed, signal.aborted ? "stopped" : "failed");
+					if (signal.aborted && work) void work.then(late => {
+						const lateRow = rawResultRow(late);
+						if (!lateRow || !ownsContext()) return;
+						appendCost(pi, sessionFile, runId, { ...identity, ...lateRow, ...(typeof late?.details?.runId === "string" ? { runId: late.details.runId } : {}), stopped: true }, "stopped");
+					}, () => { /* no usage to add */ });
 				}
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
 			}
@@ -628,7 +644,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				preservation.text ? { role: "preservation", text: preservation.text.slice(0, limits.proposalChars) } : undefined,
 				meaningful.text ? { role: "meaningful-change", text: meaningful.text.slice(0, limits.proposalChars) } : undefined,
 			].filter((proposal): proposal is ScopeCouncilProposal => Boolean(proposal));
-			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
+			if (superseded()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
 			if (!proposals.length) {
 				const result: ScopeCouncilResult = { status: "unavailable", proposals, discussion: "", gap: mergeGaps(gaps) || "Both independent scope perspectives were unavailable; parent must decide from explicit current evidence." };
 				try { request.onResult?.(result); } catch { /* observer cannot change the result */ }
@@ -661,9 +677,11 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			const focus = COUNCIL_PERSPECTIVES.filter(entry => [...perspectiveIds, ...(advisory?.perspectives ?? [])].includes(entry.id)).slice(0, 3);
 			const cue = focus.length ? `Optional semantic focus cues (similarity only; these do not establish findings or limit required review): ${focus.map(entry => `${entry.id}: ${entry.text}`).join("; ")}. Independently assess relevance and all evidence above.` : "";
 			if (cue && perspectiveIds.length) microMetrics().accept("needle");
-			const synthesis = await run(critic, "peer-critique", cue ? `${evidence}\n\n${cue}` : evidence);
-			if (synthesis.gap) gaps.push(synthesis.gap);
-			if (!current()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
+			const synthesis = expired()
+				? { text: "", gap: "Synthesis did not start: the council deadline expired after the independent perspectives finished." }
+				: await run(critic, "peer-critique", cue ? `${evidence}\n\n${cue}` : evidence);
+			if (synthesis.gap) gaps.push(expired() && !synthesis.text ? "Synthesis did not finish before the council deadline; the finished perspectives above are kept." : synthesis.gap);
+			if (superseded()) return unavailable("Scope deliberation was cancelled or superseded; the parent retains current instructions.");
 			const result: ScopeCouncilResult = {
 				status: synthesis.text && both ? "complete" : "partial",
 				proposals,
@@ -676,9 +694,9 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
-			progress("Council", signal.aborted ? "stopped" : activityOutcome === "ok" ? "completed" : activityOutcome === "skipped" ? "partial" : "unavailable");
+			progress("Council", signal.aborted && !expired() && activityOutcome !== "skipped" ? "stopped" : activityOutcome === "ok" ? "completed" : activityOutcome === "skipped" ? "partial" : "unavailable");
 			clearStatus();
-      try { finishActivity?.(signal.aborted ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
+      try { finishActivity?.(signal.aborted && !expired() ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
 			controller.abort();
 		}
 	};

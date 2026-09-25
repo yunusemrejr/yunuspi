@@ -179,13 +179,16 @@ test('native provider/auth billing classification follows each response across s
  const exprEnd=sessionSrc.indexOf(', event))',mStart);
  assert.ok(exprEnd>mStart,'owned core billing expression anchor drift');
  const expr=sessionSrc.slice(mStart+marker.length,exprEnd).trim();
- const handle=vm.runInNewContext('(async function handle(event){await this._emitExtensionEvent(('+expr+', event))})');
+ const {isFlatPlanProvider}=await import(pathToFileURL(path.join(coreRoot,'ai','src','models.js')).href);
+ const handle=vm.runInNewContext('(async function handle(event){await this._emitExtensionEvent(('+expr+', event))})',{isFlatPlanProvider});
  const delivered=[];
  const owner={modelRuntime:{isUsingSubscription:provider=>provider==='subscription-provider'},_emitExtensionEvent:event=>delivered.push(event)};
- for(const provider of ['subscription-provider','openai']){
+ // API-key token/step plans are flat subscriptions too, never marginal spend.
+ for(const provider of ['subscription-provider','openai','stepfun-ai-step-plan','xiaomi-token-plan-sgp']){
   const event={type:'message_end',message:{role:'assistant',provider,model:'same-model',usage:usage(1,'estimate')}};
   await handle.call(owner,event);assert.equal(event.message.usage.cost.billing,provider==='openai'?'metered':'subscription');
  }
+ assert.equal(isFlatPlanProvider('deepseek'),false);assert.equal(isFlatPlanProvider('kimi-coding'),true);
  const c=collect(delivered.map(event=>({type:'message',message:event.message})));
  assert.equal(c.total,1);assert.equal(c.subscription,true);
 });

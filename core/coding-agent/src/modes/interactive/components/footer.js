@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isFlatPlanProvider } from "@yunuspi/ai";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@yunuspi/tui";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.js";
 import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.js";
@@ -194,27 +195,28 @@ export class FooterComponent {
         if (usageTotals.cacheWrite)
             statsParts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
         statsParts.push((function formatCacheHit(entries, model) {
-  let rate, previous = false;
+  // Main agent only, token-weighted across its responses on the current model
+  // since the last model change: one uncached turn no longer swings the KPI
+  // and harness/auxiliary calls never enter it.
+  let read = 0, total = 0;
   for (const entry of entries) {
-    if (entry.type === 'model_change') { rate = undefined; previous = false; continue; }
+    if (entry.type === 'model_change') { read = 0; total = 0; continue; }
     const message = entry.type === 'message' ? entry.message : undefined;
     if (message?.role !== 'assistant') continue;
-    if (message.provider !== model?.provider || message.model !== model?.id) { rate = undefined; previous = false; continue; }
+    if (message.provider !== model?.provider || message.model !== model?.id) { read = 0; total = 0; continue; }
     const usage = message.usage;
     const counters = [usage?.input, usage?.cacheRead, usage?.cacheWrite];
-    const valid = counters.every(v => Number.isFinite(v) && v >= 0);
-    const total = valid ? counters.reduce((a,b) => a+b, 0) : 0;
-    // Legacy positive counters establish hits. A normalized zero without raw
-    // telemetry does not establish a miss; never invent historical precision.
-    const reported = usage?.cacheReadReported === true || (usage?.cacheReadReported !== false && usage?.cacheRead > 0);
-    if (reported && Number.isFinite(total) && total > 0) { rate = 100 * usage.cacheRead / total; previous = false; }
-    else previous = true;
+    if (!counters.every(v => Number.isFinite(v) && v >= 0)) continue;
+    // A normalized zero without raw telemetry does not establish a miss.
+    const reported = usage.cacheReadReported === true || (usage.cacheReadReported !== false && usage.cacheRead > 0);
+    if (!reported) continue;
+    read += usage.cacheRead; total += counters.reduce((a,b) => a+b, 0);
   }
-  return rate === undefined ? 'CH?' : `CH${rate.toFixed(1)}%${previous ? ' last' : ''}`;
+  return total > 0 ? `CH${(100 * read / total).toFixed(1)}%` : 'CH?';
 })(this.session.sessionManager.getBranch(), this.session.state.model)); /* PI_CACHE_HIT_FOOTER_V1 */
-        // Kimi Coding is subscription-backed despite using API-key authentication.
+        // Flat token/coding plans are subscription-backed despite API-key auth.
         const usingSubscription = state.model
-            ? state.model.provider === "kimi-coding" || this.session.modelRuntime.isUsingSubscription(state.model.provider)
+            ? isFlatPlanProvider(state.model.provider) || this.session.modelRuntime.isUsingSubscription(state.model.provider)
             : false;
         statsParts.push((function formatSessionCost(entries, subscription) {
 function mergeCostEvidence(left, right) {
@@ -314,7 +316,11 @@ function collectSessionCost(entries, subscription = false) {
     if (entry.type === 'custom' && entry.customType === 'subagent-lifecycle-v1') {
       const data = entry.data;
       // Terminal lifecycle without cost remains pending until accounting arrives.
-      if (typeof data?.runId === 'string' && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
+      // A harness helper's native run is accounted by its wrapper record
+      // (scope council, review, skill discovery); pending it separately left
+      // the total partial ("+?") whenever a helper was aborted.
+      const helperNative = data?.results?.length === 1 && ['automatic-free-assistant','automatic-skill-discovery'].includes(data.results[0]?.agent) && !/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(data.runId);
+      if (typeof data?.runId === 'string' && !helperNative && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
     }
     // Jev judgments bill input-only through OpenRouter; cost is estimated
     // from measured payload characters like any other estimated route.

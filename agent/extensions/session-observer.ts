@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
+import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, peerReviewerNotes, publishReviewerNote, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -15,7 +15,7 @@ import { createBookSelectionState, createMarginStore, createSessionProfile, load
   selectBookPassages, selectMargins, type BookSection, type BookSelection, type MarginStore, type ObserverBook } from './lib/observer-book.ts';
 import path from 'node:path';
 import { createObserverJournal } from './lib/observer-journal.ts';
-import { messageText, renderHarnessNotice } from './lib/harness-notice.ts';
+import { displayText, messageText, renderHarnessNotice } from './lib/harness-notice.ts';
 import { readRemindersState } from './lib/reminders-state.ts';
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
@@ -31,6 +31,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let pendingAdviceText: string | undefined;
   // Task-level momentum for repeat escalation: completed notes vs parent edits.
   let notesThisTask = 0, parentEditsThisTask = 0;
+  /** Set at the agent's first assistant message of the task: before it, only
+   * harness preparation runs and there is no agent work to review. */
+  let agentResponded = false;
   const completed = new Map<string, string>(), toolInputs = new Map<string, string>(), startedEvents = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
@@ -133,10 +136,14 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     }
     try {
       const ledger = reducedChildren(2048);
-      childSummary = { total: ledger.tasks.length, failed: ledger.tasks.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
-      if (ledger.tasks.length) {
-        const unresolved = ledger.tasks.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
-        const finished = ledger.tasks.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');
+      // Harness-owned automatic runs (councils, skill discovery, automatic
+      // review) are not the agent's delegation and need no harvesting.
+      const own = ledger.tasks.filter(task => !isHarnessOwnedChild(task)), harness = ledger.tasks.length - own.length;
+      childSummary = { total: own.length, failed: own.filter(task => task.execution.status === 'failed' || task.acceptance.status === 'failed').length };
+      if (harness) rows.push({ id: 'harness-runs', kind: 'current state', text: `${harness} harness-owned automatic run${harness === 1 ? '' : 's'} (scope council, skill discovery or automatic review) this session: launched by the harness, not the agent; results arrive in context on their own and need no harvesting.` });
+      if (own.length) {
+        const unresolved = own.filter(task => task.state !== 'completed' || task.acceptance.status === 'failed');
+        const finished = own.filter(task => task.state === 'completed' && task.acceptance.status !== 'failed');
         const selected = [...unresolved.slice(-6), ...finished.slice(-2)].slice(0, 6);
         rows.push({ id: 'child-state', kind: 'current state', text: selected.map(task => `${task.label.slice(0, 55)}: ${task.state}; execution=${task.execution.status}${task.execution.cause ? ` (${task.execution.cause.category})` : ''}; acceptance=${task.acceptance.status}${task.acceptance.status === 'failed' && task.acceptance.reason ? ` (${boundedObserverText(task.acceptance.reason, 70)})` : ''}; attempts=${task.attempts.length}${task.todoId ? `; todo=${task.todoId.slice(0, 30)}` : ''}${task.unresolvedLinkage ? '; identity unresolved' : ''}`).join(' | ').slice(0, 450) });
       }
@@ -169,10 +176,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
+  const peerRows = (): ObserverEvidence[] => peerReviewerNotes(ownerIdentity, 'observer', now()).slice(0, 1)
+    .map(peer => ({ id: 'peer-note', kind: 'peer reviewer note', text: `Watchmaker already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     salience: () => salience,
+    peerNotes: () => peerReviewerNotes(ownerIdentity, 'observer', now()),
     ...testing,
     snapshot() {
       // Cheap guards run before any evidence or packet work; the scheduler
@@ -180,6 +190,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // minimal one and the dispatch path builds exactly once below.
       const idlePacket = () => buildObserverPacket(request, [], [], []);
       if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet: idlePacket(), reason: 'No active user work', silent: true };
+      if (!agentResponded) return { packet: idlePacket(), reason: 'Waiting for the main agent\'s first response', silent: true };
       if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet: idlePacket(), reason: 'Observer disabled or offline', silent: true };
       if (pending.size) return { packet: idlePacket(), reason: 'User input is pending', silent: true };
       let blocked: boolean;
@@ -202,7 +213,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         }
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
-      const state = currentState(), evidence = [...state, ...intentRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
+      const state = currentState(), evidence = [...state, ...intentRows(), ...peerRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       // Route-selection failures are cold paths: one minimal packet each. The
@@ -289,8 +300,17 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         // child state it weighed changed. Todo/child/completed-tool rows change
         // on almost every step of an active session (measured 18 of 20 paid
         // reviews discarded); such changes are named in the delivery caveat.
-        if (changed.includes('running-tools') && ![...capturedRunning].some(id => runningTools.has(id))) return false;
-        if (advice?.evidence?.includes('model-routing') && capturedStates.get('child-state') !== currentStates.get('child-state')) return false;
+        // A finished command or changed child state no longer voids a paid
+        // review that also rests on other evidence (it discarded 10k-token
+        // notes); the agent gets it with a caveat naming what changed. A model
+        // switch, or advice resting only on the finished command, still voids it.
+        const runningDone = changed.includes('running-tools') && ![...capturedRunning].some(id => runningTools.has(id));
+        // Advice resting only on work that was running is moot once it ends.
+        if (runningDone && (advice?.evidence ?? []).every((id: string) => ['running-tools', 'request'].includes(id))) return false;
+        const premise = [
+          runningDone ? 'the running command it cited has since finished' : '',
+          advice?.evidence?.includes('model-routing') && capturedStates.get('child-state') !== currentStates.get('child-state') ? 'the child state its routing advice weighed has since changed' : '',
+        ].filter(Boolean).join('; ');
         const citedText = cited.filter(row => row.kind !== 'user request').map(row => row.text).join(' ');
         const targets = resources(`${citedText} ${advice?.note ?? ''}`), focus = relevantWords(advice?.note ?? '');
         const suggestedTools = new Set<string>(advice?.tools ?? []);
@@ -309,7 +329,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
             : row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size) ? `a later ${row.tool} call may have covered this` : '';
           if (overlap) break;
         }
-        return [changed.length ? `cited ${changed.join(', ')} changed` : '', overlap].filter(Boolean).join('; ') || true;
+        return [premise, changed.length && !premise ? `cited ${changed.join(', ')} changed` : '', overlap].filter(Boolean).join('; ') || true;
       };
       // Reviewer billing and its own prior note must not create new work for
       // itself. Task activity, queue progress and available capabilities do.
@@ -351,6 +371,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
       if (advice) {
+        publishReviewerNote(ownerIdentity, 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         // A previous note that never reached a context build is superseded,
         // not delivered: ledger the drop instead of losing it silently.
         // Prepared-but-unconfirmed notes keep their prepared-context receipt
@@ -361,7 +382,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdviceText = observerAdviceText(advice); notesThisTask++;
       }
       const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
-      const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: boundedObserverText(detail, 140),
+      const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: displayText(detail, 240),
         ...(advice ? { adviceId: latestAdviceId, note: advice.note, evidence: advice.evidence, tools: advice.tools, skills: advice.skills, ...(advice.discoverableTools?.length ? { discoverableTools: advice.discoverableTools } : {}) } : {}) } }, { triggerTurn: false });
       void Promise.resolve(delivery).catch(() => { /* Native delivery reports display failures independently. */ });
     },
@@ -388,7 +409,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (details.status === 'completed') {
       const [first, ...advice] = text.split('\n');
       const summary = typeof details.detail === 'string' ? details.detail : first.replace(/^Observer returned a note(?: · )?/, '');
-      return renderHarnessNotice({ icon: '◉', tone: 'accent', title: 'Observer note', summary: boundedObserverText(summary, 200), body: advice.join('\n') }, options, theme);
+      return renderHarnessNotice({ icon: '◉', tone: 'accent', title: 'Observer note', summary: displayText(summary, 240), body: advice.join('\n') }, options, theme);
     }
     const tone = details.status === 'unavailable' ? 'warning' : details.status === 'fallback' ? 'warning' : 'muted';
     const title = { started: 'Observer reviewing', checked: 'Observer', reviewed: 'Observer reviewed', skipped: 'Observer skipped', stopped: 'Observer stopped', unavailable: 'Observer unavailable', coverage: 'Observer coverage', fallback: 'Observer route', book: 'Observer Book' }[details.status as string] ?? 'Observer';
@@ -460,6 +481,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     while (pending.size > 8) { const oldest = pending.keys().next().value!; pending.get(oldest)?.cleanup(); pending.delete(oldest); }
   });
   pi.on('message_start', (event: any, context: any) => {
+    if (owns(context) && event.message?.role === 'assistant' && userRequest && !agentResponded) { agentResponded = true; revision++; return; }
     if (!owns(context) || event.message?.role !== 'user') return;
     const id = event.message[Symbol.for('yunuspi.guardian.request-meta.v1')]?.requestId;
     const accepted = pending.get(id);
@@ -474,7 +496,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0;
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
   });
@@ -485,6 +507,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   pi.on('agent_start', (_: any, context: any) => { if (owns(context) && userRequest) { ctx = context; runtime.start(); } });
   pi.on('message_update', (event: any, context: any) => {
     if (!owns(context) || event.message?.role !== 'assistant') return;
+    if (userRequest && event.message?.role === 'assistant') agentResponded = true;
     const text = textParts(event.message), thinking = textParts(event.message, 'thinking', 450);
     streaming = [text ? { id: 'current-assistant', kind: 'assistant text', text } : null,
       thinking ? { id: 'current-thinking', kind: 'provider-returned thinking', text: thinking } : null].filter(Boolean) as ObserverEvidence[];
@@ -493,6 +516,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!owns(context)) return;
     if (event.message?.role === 'custom') { observeHarnessMessage(event.message); return; }
     if (event.message?.role !== 'assistant') return;
+    if (userRequest) agentResponded = true;
     const said = textParts(event.message);
     add('assistant text', said, undefined, textParts(event.message, 'text', 64_000));
     add('provider-returned thinking', textParts(event.message, 'thinking', 450), undefined, textParts(event.message, 'thinking', 64_000)); streaming = []; revision++;
@@ -522,6 +546,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   };
   pi.on('tool_execution_start', (event: any, context: any) => {
     if (!owns(context)) return;
+    if (userRequest && true) agentResponded = true;
     const input = compactInput(event.args);
     if (event.toolCallId) { runningTools.set(event.toolCallId, { name: event.toolName, input, startedAt: now(), foreground: ['bash', 'powershell'].includes(event.toolName) && event.args?.background !== true && event.args?.async !== true });
       if (runningTools.size > 128) runningTools.delete(runningTools.keys().next().value!);
@@ -531,6 +556,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   });
   pi.on('tool_result', (event: any, context: any) => {
     if (!owns(context)) return;
+    if (userRequest && true) agentResponded = true;
     if (!event.isError && (event.toolName === 'edit' || event.toolName === 'write')) parentEditsThisTask++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);

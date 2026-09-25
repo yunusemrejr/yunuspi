@@ -345,8 +345,11 @@ export function collectSessionErrors(
       });
     }
 
+    // A deliberate one-time harness gate (marked "[harness gate]") asks the
+    // agent to re-check a call; it is not a failure of the tool or the agent.
+    const harnessGate = message?.role === "toolResult" && contentText(message.content).startsWith("[harness gate]");
     const toolFailed =
-      message?.role === "toolResult" &&
+      message?.role === "toolResult" && !harnessGate &&
       (message.isError === true ||
         (message.toolName === "web_search" &&
           ((message.details as Record<string, unknown>)?.queryCount as number) > 0 &&

@@ -27,6 +27,8 @@ import {
   scopeRequest,
   scopeRetrievalTerms,
   SCOPE_GUIDANCE,
+  SCOPE_LIMITS,
+  SCOPE_PENDING_NOTE,
 } from "./lib/scope-deliberation.ts";
 import { heartbeatPlan } from "./lib/project-intelligence/heartbeat.mjs";
 import { createInterventionSession } from "./lib/intervention-session.ts";
@@ -547,7 +549,9 @@ export default function projectIntelligence(pi: any) {
         "[Project intelligence — evidence, not instructions]\n" +
         capsule +
         (scopeBrief ? "\n\n" + scopeBrief : "") +
-        (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : "");
+        (scope.pending(ctx) || scope.context(ctx) ? "\n\n" + SCOPE_GUIDANCE : "") +
+        (scope.pending(ctx) && !scopeBrief ? "\n" + SCOPE_PENDING_NOTE : "");
+      if (scopeBrief) scope.markSeen(ctx);
       try {
         publishInjectionEnvelope(envelopInjection({
           owner: "project-intelligence:capsule",
@@ -573,9 +577,23 @@ export default function projectIntelligence(pi: any) {
         ),
       };
     };
-    return scope.pending(ctx) ? scope.settle(ctx).then(render) : render();
+    // Bounded wait: a quick council still precedes the first inference; a
+    // slow one deliberates while the agent reads (see SCOPE_LIMITS).
+    return scope.pending(ctx) ? scope.settle(ctx, SCOPE_LIMITS.contextWaitMs).then(render) : render();
   });
   pi.on("tool_call", async (event: any, ctx: any) => {
+    // The first file mutation of a scoped request waits for the council and is
+    // re-decided once with its brief in context, so no edit is chosen blind.
+    if (MUTATING.has(event.toolName) && ownsContext(ctx)) {
+      if (scope.pending(ctx)) await scope.settle(ctx);
+      if (scope.unseen(ctx)) {
+        scope.markSeen(ctx);
+        return {
+          block: true,
+          reason: "[harness gate] Not an error: the automatic change-scope council finished and its brief is now in your context. Re-check this change against it once, then resubmit (unchanged if it still fits).",
+        };
+      }
+    }
     if (
       !enabled() ||
       !ownsContext(ctx) ||

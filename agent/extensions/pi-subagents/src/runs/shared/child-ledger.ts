@@ -96,6 +96,17 @@ export interface LogicalChildTask {
 	unresolvedLinkage?: boolean;
 }
 
+/** Children the harness launched on its own (scope councils, skill discovery,
+ * automatic review/assist). Their results reach the parent without a harvest
+ * step; reviewers that count them as the agent's children told an agent with
+ * no children to "harvest" and "stop idling" (2026-09-25 sessions). */
+const HARNESS_CHILD_AGENTS = new Set(["automatic-free-assistant", "automatic-skill-discovery"]);
+const HARNESS_CHILD_RUN = /^(?:auto-assist|quality-review|skill-discovery|scope-council)-/;
+export function isHarnessOwnedChild(task: LogicalChildTask): boolean {
+	return HARNESS_CHILD_AGENTS.has(task.agent ?? "") || HARNESS_CHILD_RUN.test(task.taskId)
+		|| task.attempts.some(attempt => HARNESS_CHILD_AGENTS.has(attempt.agent ?? "") || HARNESS_CHILD_RUN.test(attempt.runId ?? ""));
+}
+
 export interface UnresolvedEvidence {
 	kind: "missing-task-id" | "missing-attempt" | "orphan-accounting" | "conflict";
 	detail: string;

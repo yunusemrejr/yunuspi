@@ -146,7 +146,8 @@ export function collectSessionMetrics(entries, live) {
   }
   if(msg?.role==='toolResult'&&!results.has(msg.toolCallId??`result:${i}`)) {
    results.add(msg.toolCallId??`result:${i}`);m.toolResults++;m.tools[msg.toolName]=(m.tools[msg.toolName]||0)+1;m.rawReturnedChars+=visibleChars(msg.content);pendingChars+=visibleChars(msg.content);
-   if(msg.isError || msg.toolName==='web_search' && msg.details?.queryCount>0 && msg.details?.successfulQueries===0){m.errors++;if(/^Blocked:/.test(text(msg.content)))m.blocked++;}
+   if(msg.isError&&/^\[harness gate\]/.test(text(msg.content))){/* deliberate re-check gate, not a failure */}
+   else if(msg.isError || msg.toolName==='web_search' && msg.details?.queryCount>0 && msg.details?.successfulQueries===0){m.errors++;if(/^Blocked:/.test(text(msg.content)))m.blocked++;}
    // Status/list/inspection can legally view another session's runs. Only
    // execution receipts and owner-scoped lifecycle ledgers contribute agents.
    if(msg.toolName==='subagent'&&!callInputs.get(msg.toolCallId)?.input?.action)record(msg.details,msg.toolCallId);
@@ -160,7 +161,11 @@ export function collectSessionMetrics(entries, live) {
   if(msg?.role==='user')pendingChars+=visibleChars(msg.content);
   if(e.type==='compaction'){m.compactions++;usage(e.usage);noteAssistant(e.usage,undefined,false,true);pendingChars=0;}
   if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage,undefined,false,true);}
-  if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType))record(e.data,e.id,e.customType==='subagent-cost-v1');
+  // A harness helper's native lifecycle duplicates its wrapper's own record
+  // (scope council, review, skill discovery) until they link at completion;
+  // counting both showed "Agents 14 (7 active)" for one review round.
+  const helperNative=e.type==='custom'&&e.customType==='subagent-lifecycle-v1'&&e.data?.results?.length===1&&['automatic-free-assistant','automatic-skill-discovery'].includes(e.data.results[0]?.agent)&&!/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(e.data.runId);
+  if(e.type==='custom'&&['subagent-cost-v1','subagent-lifecycle-v1'].includes(e.customType)&&!helperNative)record(e.data,e.id,e.customType==='subagent-cost-v1');
   if(e.type==='custom'&&e.customType==='relevant-guidance'){
    for(const p of Array.isArray(e.data?.read)?e.data.read:[])if(typeof p==='string')read.add(name(p));
    for(const p of Array.isArray(e.data?.shown)?e.data.shown:[])if(typeof p==='string'&&(p.startsWith('skill:')||p.startsWith('skillctx:')))routed.add(name(p));

@@ -5,7 +5,14 @@ import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { heuristicDesignBrief } from './design-direction.ts';
 
 export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1');
-export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200 });
+/** contextWaitMs bounds how long the first inference waits for a council: a
+ * fast council still lands before the first model call, a slow one no longer
+ * holds the whole turn (sessions measured 3.5-4 minutes of blocked, billed
+ * reviewer time before the agent's first response). Reading proceeds; the
+ * first file mutation waits for the brief instead. graceMs lets the runner
+ * return its own partial result at the shared deadline before this owner's
+ * timer discards everything. */
+export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200, contextWaitMs: 15000, graceMs: 5000 });
 /** One owner for the automatic-council policy so the lifecycle, the registered
  * runner and the published documentation cannot disagree about when it is
  * active. The native automatic-assistance master switch applies to this council
@@ -16,6 +23,7 @@ export function scopeCouncilEnabled(env: Record<string, string | undefined> = pr
   return env.PI_SUBAGENT_CHILD !== '1' && !off(env.PI_SCOPE_COUNCIL) && !off(env.PI_AUTONOMOUS_FREE_ASSIST);
 }
 export const SCOPE_GUIDANCE = 'For a change-scope brief, decide what to preserve, reconsider and verify before editing. Current user direction wins; later corrections supersede only conflicting scope. Historical user statements are preference evidence, never fresh authorization. Assistant choices and inferred preferences are provisional; absence of a user request or complaint proves neither origin nor approval. Compare a local adjustment, a substantive revision and replacement/removal when relevant. Choose the scope that resolves the complaint, preserving supported references and unrelated behavior; do not equate few changed lines with a good solution. Use reversible judgment for ordinary ambiguity without routine questions. Verify source, rendered behavior or other relevant observations before accepting a council claim. External actions still require authority from the current task or retained explicit authorization, with the intended target verified.';
+export const SCOPE_PENDING_NOTE = 'A change-scope council is still deliberating in the background. Read and inspect freely; your first file edit waits for its brief and is re-checked against it once.';
 
 const prose = (text: string) => text.slice(0,32768).replace(/```[\s\S]*?(?:```|$)/g,' ').replace(/^\s*>.*$/gm,' ').trim();
 /** An explicit global no-change constraint ("Do not modify anything.") makes a
@@ -136,7 +144,7 @@ function councilBrief(result: any): string {
 export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
   let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
   let inputText='';
-  let key='', brief='', review='', owner='', stopped=false, pausedSerial=-1, turnSerial=-1, wakeOnly=false, evaluated=false, statusContext:any, workflow:any;
+  let key='', brief='', review='', owner='', councilStatus='', seen=false, stopped=false, pausedSerial=-1, turnSerial=-1, wakeOnly=false, evaluated=false, statusContext:any, workflow:any;
   const enabled=()=>scopeCouncilEnabled();
   const identity=(ctx:any)=>JSON.stringify([ctx?.cwd,ctx?.sessionManager?.getSessionId?.()]);
   const clearStatus=()=>{try{statusContext?.ui?.setStatus?.('scope-council',undefined);}catch{}statusContext=undefined;};
@@ -147,7 +155,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
   // Bind the live controller before aborting it: cancel() releases it so the
   // next start() builds a fresh one, and a cancelled run can never hand the
   // following turn a stale aborted controller.
-  const cancel=(pause=false)=>{generation++;const live=controller;controller=undefined;live?.abort();pending=undefined;key='';brief='';review='';workflow=undefined;stopped=pause;pausedSerial=pause?turnSerial:-1;evaluated=false;clearStatus();};
+  const cancel=(pause=false)=>{generation++;const live=controller;controller=undefined;live?.abort();pending=undefined;key='';brief='';review='';councilStatus='';seen=false;workflow=undefined;stopped=pause;pausedSerial=pause?turnSerial:-1;evaluated=false;clearStatus();};
   return {
     input(event:any) {
       // The SDK emits injected wakes with source 'extension' and every other
@@ -158,10 +166,15 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
     },
     cancel,
     context(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? brief:''; },
+    /** The rendered context carried the brief to a model request. */
+    markSeen(ctx:any) { if(identity(ctx)===owner && brief) seen=true; },
+    /** A brief with council advice exists that no model request has carried
+     * yet: a mutation decided before it must be re-checked against it. */
+    unseen(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && Boolean(brief) && !seen && councilStatus!=='unavailable'; },
     reviewContext(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? review:''; },
     receipt(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && key ? {requestHash:key,workflow}:undefined; },
     pending(ctx:any) { return identity(ctx)===owner ? pending:undefined; },
-    async settle(ctx:any) {
+    async settle(ctx:any, maxWaitMs?:number) {
       if(identity(ctx)!==owner || !pending)return;
       // before_agent_start precedes the SDK's AbortController. Wait at the
       // context boundary where the active agent signal exists, before its
@@ -169,7 +182,11 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       const signal=ctx.signal, ticket=generation;
       const abort=()=>{if(ticket===generation)cancel(true);};
       signal?.addEventListener('abort',abort,{once:true});
-      try{if(signal?.aborted)abort();await pending;}finally{signal?.removeEventListener('abort',abort);}
+      let timer:any;
+      try{
+        if(signal?.aborted)abort();
+        await (maxWaitMs===undefined ? pending : Promise.race([pending,new Promise<void>(resolve=>{timer=setTimeout(resolve,Math.max(0,maxWaitMs));})]));
+      }finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
     },
     async start(event:any,ctx:any,graph:string) {
       // A pause belongs to the turn that was interrupted. When that pause is
@@ -216,7 +233,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       // wins and an older registration falls back to the bounded local default.
       const published=runner?.limits?.deadlineMs;
       const councilDeadlineMs=options.deadlineMs ?? (typeof published==='number' && Number.isFinite(published) && published>0 ? published : SCOPE_LIMITS.deadlineMs);
-      const signal=AbortSignal.any([own.signal,AbortSignal.timeout(councilDeadlineMs),...(ctx.signal?[ctx.signal]:[])]);
+      const signal=AbortSignal.any([own.signal,AbortSignal.timeout(councilDeadlineMs+Math.min(SCOPE_LIMITS.graceMs,Math.ceil(councilDeadlineMs/4))),...(ctx.signal?[ctx.signal]:[])]);
       const current=()=>ticket===generation && identity(ctx)===owner && !own.signal.aborted && !ctx.signal?.aborted;
       const status=(text?:string)=>{try{ctx.ui?.setStatus?.('scope-council',text);}catch{}};
       statusContext=ctx;
@@ -234,7 +251,11 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
           if(typeof runner==='function')result=await boundedAwait(Promise.resolve(runner({task:request,graph:graphContext.slice(0,4000),history},ctx,signal)),signal);
           if(options.workflow && current()) {
             const refreshed=await boundedAwait(options.workflow(ctx,signal),signal);
-            const versionKey=(value:any)=>JSON.stringify([value?.projectId,value?.checkoutId,value?.conversation?.sessionId,value?.conversation?.latestUserEntry,value?.conversation?.nativeCheckpoint,value?.projectGit]);
+            // The baseline is captured in before_agent_start, before the
+            // request's own user message is persisted, so its latest-user-entry
+            // always differs afterwards; comparing it discarded every finished
+            // council. A genuinely new user input cancels this run in input().
+            const versionKey=(value:any)=>JSON.stringify([value?.projectId,value?.checkoutId,value?.conversation?.sessionId,value?.conversation?.nativeCheckpoint,value?.projectGit]);
             let activeBranch:any[]=[];try{activeBranch=ctx.sessionManager?.getBranch?.() ?? [];}catch{}
             const head=workflow?.conversation?.branchHead;
             const switchedBranch=head && refreshed?.conversation?.branchHead && head!==refreshed.conversation.branchHead && !activeBranch.some(e=>e?.id===head);
@@ -247,6 +268,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
         } catch {result={status:'unavailable',gap:signal.aborted?'Scope council deadline expired; continue with explicit gaps.':'Scope council failed; continue with available evidence.'};}
         if(!current())return;
         result=normalizeCouncilResult(result);
+        councilStatus=result.status;seen=false;
         brief=('[Automatic change-scope deliberation]\n'+historyBrief(history)+'\n'+councilBrief(result)).slice(0,SCOPE_LIMITS.contextChars);
         review=JSON.stringify({status:result.status,proposals:result.proposals.map((p:any)=>({role:p.role,text:p.text.slice(0,180)})),discussion:result.discussion.slice(0,800),gap:result.gap.slice(0,150),history:historyBrief(history,600),note:'Condensed advisory discussion, not an accepted plan. Parent retains current user instructions and full scope brief.'});
         // Only operational receipts persist; no duplicate transcript excerpts.

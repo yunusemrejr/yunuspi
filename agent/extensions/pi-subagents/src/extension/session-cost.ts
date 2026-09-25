@@ -64,6 +64,7 @@ export function persistSubagentActivity(pi: any, state: any, payload: any): void
   const results = payload.results.map((r:any,index:number)=>({index:r.index??index,
     ...(typeof r.runId==='string'?{runId:r.runId}:{}),
     ...(typeof r.workflowKey==='string'?{workflowKey:r.workflowKey}:{}),
+    ...(typeof r.agent==='string'&&r.agent?{agent:r.agent.slice(0,80)}:{}),
     status:['queued','running','complete','completed','failed','stopped','paused','detached','unknown'].includes(r.status)?r.status:'unknown',
   }));
   const data={runId:payload.runId,mode:payload.mode,state:payload.state,results,

@@ -29,9 +29,19 @@ the scratchpad instead of re-deriving history, which keeps token spend low.
 
 ## Cadence and cost
 
+Reviews wait for the main agent's first response of each task: prompt
+analysis and a scope council run before it, and that preparation is reported
+as such in the elapsed row, never as agent idle time. Children the harness
+launched on its own (scope councils, skill discovery, automatic review) are
+counted separately from the agent's children: their results arrive in context
+by themselves, so there is nothing for the agent to harvest. A memo the
+Watchmaker writes does not make the next review due, and a note that only
+re-recommends tools or skills its last notes already named is suppressed as a
+repeat.
+
 Review opportunities start every 60 seconds with a two-minute request
 allowance. Quiet stretches (empty or repeated notes, unusable responses) back
-off the same way the observer's do. Answers are capped at 2,048 output tokens
+off the same way the observer's do. Answers are capped at 4,096 output tokens (low-thinking routes spent a 2,048 cap on reasoning alone)
 and notes at 60 words.
 
 The default route is `deepseek/deepseek-flash` through the official DeepSeek

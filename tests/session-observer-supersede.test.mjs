@@ -73,6 +73,7 @@ test('superseded observer notes are ledgered and never pose as delivered', async
   fire('input', { source: 'interactive', requestId: 'req-1', originalText: 'Complete the synthetic fixture now.' });
   fire('before_agent_start', { systemPromptOptions: {} });
   fire('message_start', { message: { role: 'user', [GUARDIAN_META]: { requestId: 'req-1' } } });
+  fire('message_start', { message: { role: 'assistant', content: [] } });
 
   await time.advance(30000);
   await waitForNotes(1);

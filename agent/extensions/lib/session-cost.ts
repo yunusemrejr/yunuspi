@@ -91,7 +91,11 @@ export function collectSessionCost(entries, subscription = false) {
     if (entry.type === 'custom' && entry.customType === 'subagent-lifecycle-v1') {
       const data = entry.data;
       // Terminal lifecycle without cost remains pending until accounting arrives.
-      if (typeof data?.runId === 'string' && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
+      // A harness helper's native run is accounted by its wrapper record
+      // (scope council, review, skill discovery); pending it separately left
+      // the total partial ("+?") whenever a helper was aborted.
+      const helperNative = data?.results?.length === 1 && ['automatic-free-assistant','automatic-skill-discovery'].includes(data.results[0]?.agent) && !/^(?:auto-assist|quality-review|skill-discovery|scope-council)-/.test(data.runId);
+      if (typeof data?.runId === 'string' && !helperNative && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
     }
     // Jev judgments bill input-only through OpenRouter; cost is estimated
     // from measured payload characters like any other estimated route.

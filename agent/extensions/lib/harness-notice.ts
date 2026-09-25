@@ -29,3 +29,12 @@ export function messageText(message: any): string {
 	if (typeof message?.content === "string") return message.content;
 	return Array.isArray(message?.content) ? message.content.filter((part: any) => part?.type === "text" && typeof part.text === "string").map((part: any) => part.text).join("\n") : "";
 }
+
+/** Head-first bound for visible summaries: evidence text keeps its newest tail,
+ * but a notice line must keep its beginning ("Returned advice in 84s", not
+ * "rned advice in 84s"). */
+export function displayText(value: unknown, limit: number): string {
+  if (typeof value !== "string") return "";
+  const clean = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
+  return clean.length <= limit ? clean : `${clean.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}

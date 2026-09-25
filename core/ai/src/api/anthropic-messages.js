@@ -409,6 +409,8 @@ export const stream = (model, context, options) => {
                     output.usage.input = event.message.usage.input_tokens || 0;
                     output.usage.output = event.message.usage.output_tokens || 0;
                     output.usage.cacheRead = event.message.usage.cache_read_input_tokens || 0;
+                    // Explicit counter (including 0) lets cache-hit KPIs count genuine misses. /* PI_CACHE_USAGE_ACCURACY_V1 */
+                    output.usage.cacheReadReported = Number.isFinite(event.message.usage.cache_read_input_tokens) && event.message.usage.cache_read_input_tokens >= 0;
                     output.usage.cacheWrite = event.message.usage.cache_creation_input_tokens || 0;
                     output.usage.cacheWrite1h = event.message.usage.cache_creation?.ephemeral_1h_input_tokens || 0;
                     // Anthropic doesn't provide total_tokens, compute from components
@@ -576,6 +578,7 @@ export const stream = (model, context, options) => {
                         }
                         if (event.usage.cache_read_input_tokens != null) {
                             output.usage.cacheRead = event.usage.cache_read_input_tokens;
+                            output.usage.cacheReadReported = true;
                         }
                         if (event.usage.cache_creation_input_tokens != null) {
                             output.usage.cacheWrite = event.usage.cache_creation_input_tokens;

@@ -3821,7 +3821,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	try {
 		const launchOptions = compactOptional<Parameters<typeof runSync>[4]>({
 			onProcessStarted: () => { data.childProcessStarted = true; },
-			onLifecycle: status => persistSubagentActivity(deps.pi, deps.state, {sessionId:lifecycleSessionId,runId,mode:'single',state:status,results:[{index:0,status}]}),
+			onLifecycle: status => persistSubagentActivity(deps.pi, deps.state, {sessionId:lifecycleSessionId,runId,mode:'single',state:status,results:[{index:0,status,...(params.agent?{agent:params.agent}:{})}]}),
 			permissions: deps.config.permissions,
 			runtimeSnapshotHost: deps.pi,
 			parentSessionId: ctx.sessionManager.getSessionId() ?? undefined,
