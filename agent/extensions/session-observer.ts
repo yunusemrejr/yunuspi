@@ -4,7 +4,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { buildObserverPacket, boundedObserverText, createSessionObserver, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { buildObserverPacket, boundedObserverText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { resolveSessionObserverPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -35,6 +35,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   /** Set at the agent's first assistant message of the task: before it, only
    * harness preparation runs and there is no agent work to review. */
   let agentResponded = false;
+  const failureKeys = new Map<string, string>();
   const completed = new Map<string, string>(), toolInputs = new Map<string, string>(), startedEvents = new Map<string, string>();
   const runningTools = new Map<string, { name: string; input: string; startedAt: number; foreground: boolean }>();
   const now = testing.now ?? Date.now;
@@ -44,6 +45,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const profile = createSessionProfile(now);
   let bookState = createBookSelectionState(), bookOff = false, salience = 0, childSummary = { total: 0, failed: 0 };
   let marginStore: MarginStore | undefined, marginKey = '', needleFlight = false;
+  /** Margin notes written or raised this session (see the book selection). */
+  const sessionMargins = new Set<string>();
+  /** Parent edit count when the wrap-up note on finished work was delivered;
+   * -1 while none was. Finished work gets one closing note, not a loop. */
+  let closeNoteEdits = -1;
+  const workFinished = () => { const visible = todos.filter(task => task.status !== 'deleted'); return visible.length > 0 && visible.every(task => task.status === 'completed'); };
   let routingEpoch = -1, routingChildState = '', lastFired = '';
   let lastBookView: Array<{ id: string; title: string; trigger?: string }> = [];
   // Full text behind every excerpt, searchable by the observer's read-only
@@ -104,7 +111,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const id = `event-${++sequence}`;
     journal.add({ id, kind, at: now(), text: full && full.length > text.length ? full : text, ...(tool ? { tool } : {}) });
     recent.push({ id, kind, text: boundedObserverText(text, 700), ...(tool ? { tool } : {}) });
-    if (recent.length > 256) { dropped += recent.length - 256; recent = recent.slice(-256); }
+    // Overflow is folded into one digest row, never silently dropped.
+    if (recent.length > 256) { const fold = recent.splice(0, recent.length - 200); dropped += fold.filter(row => row.kind !== 'event digest').length; recent.unshift(digestObserverEvents(fold, `digest-${id}`)); }
     return id;
   };
   const compactInput = (input: any) => {
@@ -151,8 +159,20 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       }
       if (ledger.unresolved.length) rows.push({ id: 'child-uncertainty', kind: 'current state', text: `${ledger.unresolved.length} child identity/accounting links are unresolved; task coverage and attribution may be incomplete.` });
     } catch { rows.push({ id: 'children-unavailable', kind: 'current state', text: 'Child-agent lifecycle evidence is unavailable; do not infer that there are no children.' }); }
-    if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events exceeded the bounded observation queue; historical coverage is incomplete. Do not infer omitted work was not done.` });
+    if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events were folded into digest rows; their details are summarized, not shown. Full text is searchable with session_search. Do not infer omitted work was not done.` });
     return rows;
+  };
+  /** Unread events for one review. Within the window they are shown as they
+   * are; a larger backlog shows the newest events and recent failures
+   * verbatim and folds the rest into one digest, so every review keeps pace
+   * with the session instead of trailing it by hundreds of events. */
+  const QUEUE_WINDOW = 12;
+  const queueRows = (): { rows: ObserverEvidence[]; folded: Set<string> } => {
+    if (recent.length <= QUEUE_WINDOW) return { rows: recent.slice(), folded: new Set() };
+    const newest = recent.slice(-8), older = recent.slice(0, -8);
+    const errors = older.filter(row => row.kind === 'tool error').slice(-3);
+    const rest = older.filter(row => !errors.includes(row));
+    return { rows: [digestObserverEvents(rest, `digest-${rest[rest.length - 1]?.id ?? 'backlog'}`), ...errors, ...newest], folded: new Set(rest.map(row => row.id)) };
   };
   /** What the user wants, across the whole session: earlier prompts (the
    * current one is the "request" row), the harness interpretation and the
@@ -178,12 +198,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     salience: () => salience,
+    position: () => sequence,
     peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()),
     ...testing,
     snapshot() {
@@ -195,6 +216,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (!agentResponded) return { packet: idlePacket(), reason: 'Waiting for the main agent\'s first response', silent: true };
       if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet: idlePacket(), reason: 'Observer disabled or offline', silent: true };
       if (pending.size) return { packet: idlePacket(), reason: 'User input is pending', silent: true };
+      // Measured: eight "confirm once more before closing" notes after all
+      // todos were done. After the wrap-up note only new edits reopen review.
+      if (workFinished() && closeNoteEdits === parentEditsThisTask) return { packet: idlePacket(), reason: 'Work is finished and its wrap-up note was delivered; waiting for new edits', silent: true };
       let blocked: boolean;
       try {
         // Tool traffic must never age an explicit user opt-out out of authority.
@@ -215,7 +239,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         }
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
-      const state = currentState(), evidence = [...state, ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...recent.slice(0, 12)];
+      const queue = queueRows();
+      const state = currentState(), evidence = [...state, ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-2).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...streaming, ...queue.rows];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       // Route-selection failures are cold paths: one minimal packet each. The
@@ -241,7 +266,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: routePacket(), reason: 'User free-only restriction prevents observer route' };
       if (dropped !== reportedDropped) {
         reportedDropped = dropped;
-        pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer coverage: ${dropped} earlier events exceeded the queue; reviewing retained chunks with incomplete historical coverage.`, display: true, excludeFromContext: true, details: { status: 'coverage', dropped } }, { triggerTurn: false });
+        pi.sendMessage({ customType: OBSERVER_MESSAGE, content: `Observer coverage: ${dropped} older events summarized into a digest; full text stays searchable.`, display: true, excludeFromContext: true, details: { status: 'coverage', dropped } }, { triggerTurn: false });
       }
       const capturedStates = new Map(currentState(false).map(row => [row.id, row.text]));
       // Deterministic working-pattern measurements for the observer and the book.
@@ -261,7 +286,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
           const focus = { request, recent: focusText.slice(request.length) };
           bookSelection = selectBookPassages(book, focus, profile, bookState);
           const store = margins(ctx);
-          const notes = store ? selectMargins(store.list(), focus, now()) : [];
+          // A margin note written or already raised this session is not shown
+          // back: the observer re-read its own notes and restated them (13
+          // notes in 45 minutes, one concern raised again after proof).
+          const notes = store ? selectMargins(store.list().filter(note => !sessionMargins.has(note.id)), focus, now()) : [];
           section = renderBookSection(book, bookSelection, notes);
           lastBookView = (section?.passages ?? []).map(id => ({ id, title: section!.titles[id] ?? id, ...(bookSelection!.passages.find(row => row.passage.id === id)?.trigger ? { trigger: bookSelection!.passages.find(row => row.passage.id === id)!.trigger } : {}) }));
           for (const row of bookSelection.passages) { const chapter = book.chapterById.get(row.passage.chapter); if (chapter) { preferTools.push(...chapter.tools); preferSkills.push(...chapter.skills); } }
@@ -307,6 +335,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         // notes); the agent gets it with a caveat naming what changed. A model
         // switch, or advice resting only on the finished command, still voids it.
         const runningDone = changed.includes('running-tools') && ![...capturedRunning].some(id => runningTools.has(id));
+        // A cited failure that the same call has since passed is a superseded
+        // premise (the observer cited a fixed failure thirty minutes later).
+        const citedFailures = (advice?.evidence ?? []).map((id: string) => failureKeys.get(id)).filter(Boolean) as string[];
+        if (citedFailures.length && citedFailures.every(key => completed.get(key)?.endsWith(': completed'))) return false;
         // Advice resting only on work that was running is moot once it ends.
         if (runningDone && (advice?.evidence ?? []).every((id: string) => ['running-tools', 'request'].includes(id))) return false;
         const premise = [
@@ -331,7 +363,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
             : row.tool && suggestedTools.has(row.tool) && (!targets.size || !changedTargets.size) ? `a later ${row.tool} call may have covered this` : '';
           if (overlap) break;
         }
-        return [premise, changed.length && !premise ? `cited ${changed.join(', ')} changed` : '', overlap].filter(Boolean).join('; ') || true;
+        // Evidence fetched from the journal can be far older than the packet;
+        // name its age so the agent re-validates instead of acting on it.
+        const oldest = (advice?.evidence ?? []).map((id: string) => journal.list().find(entry => entry.id === id)?.at).filter((at: unknown): at is number => typeof at === 'number').reduce((min: number, at: number) => Math.min(min, at), Infinity);
+        const aged = Number.isFinite(oldest) && now() - oldest > 600_000 ? `it cites evidence from ${Math.round((now() - oldest) / 60_000)} min ago that may be superseded` : '';
+        return [premise, changed.length && !premise ? `cited ${changed.join(', ')} changed` : '', aged, overlap].filter(Boolean).join('; ') || true;
       };
       // Reviewer billing and its own prior note must not create new work for
       // itself. Task activity, queue progress and available capabilities do.
@@ -347,9 +383,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         return undefined;
       } } : undefined;
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd, book: bookReader } : undefined;
-      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id),
-        reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
-        backlog: recent.filter(row => !reviewedIds.has(row.id)).length,
+      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
+        reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
+        backlog: recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)).length,
         bookPassages: section?.passages ?? [],
         dispatched: () => {
           noteBookReview(bookState, section?.passages ?? []);
@@ -364,7 +400,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
           if (advice.read?.length) { noteBookmarks(bookState, advice.read); parts.push(`reading ${advice.read.join(', ')}`); }
           if (advice.strike?.length && store) { try { if (store.strike(advice.strike)) parts.push(`struck margin ${advice.strike.join(', ')}`); } catch { /* A read-only store keeps its notes. */ } }
           if (advice.margin && store) {
-            try { const kept = store.add(advice.margin, { passage: advice.book?.[0], model: routeName }); parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`); }
+            try { const kept = store.add(advice.margin, { passage: advice.book?.[0], model: routeName }); sessionMargins.add(kept.id); parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`); }
             catch { parts.push('margin note not saved'); }
           } else if (advice.marginRejected) parts.push(`margin note dropped (${advice.marginRejected})`);
           return parts.join(' · ') || undefined;
@@ -374,6 +410,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (!owns(ctx)) return;
       if (advice) {
         publishReviewerNote(reviewerSessionKey(ctx), 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
+        for (const id of String(advice.note).match(/\bm\d+\b/g) ?? []) sessionMargins.add(id);
+        closeNoteEdits = workFinished() ? parentEditsThisTask : -1;
         // A previous note that never reached a context build is superseded,
         // not delivered: ledger the drop instead of losing it silently.
         // Prepared-but-unconfirmed notes keep their prepared-context receipt
@@ -397,7 +435,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         if (dispatch) { countedDispatches.add(dispatch); if (countedDispatches.size > 64) countedDispatches.delete(countedDispatches.values().next().value!); }
         const health = routeHealth.get(route) ?? { failures: 0, coolUntil: 0 };
         if (data.status === 'completed') { health.failures = 0; health.coolUntil = 0; }
-        else if (++health.failures >= 2) health.coolUntil = now() + 600_000;
+        // One timeout already cost a full deadline; a configured fallback serves
+        // next instead of the same route timing out a second time.
+        else if (++health.failures >= 2 || data.status === 'timeout') health.coolUntil = now() + 600_000;
         routeHealth.set(route, health); if (routeHealth.size > 32) routeHealth.delete(routeHealth.keys().next().value!);
       }
       // The exposed append owner is the current session only. Retain an honest
@@ -498,7 +538,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false;
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0; closeNoteEdits = -1; agentResponded = false;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
@@ -567,7 +607,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   pi.on('tool_result', (event: any, context: any) => {
     if (!owns(context)) return;
     if (userRequest && true) agentResponded = true;
-    if (!event.isError && (event.toolName === 'edit' || event.toolName === 'write')) parentEditsThisTask++;
+    if (!event.isError && ['edit', 'write', 'bulk_edit'].includes(event.toolName)) parentEditsThisTask++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);
     // The result row repeats the input, so an unread start row only doubles
@@ -580,7 +620,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     completed.set(`${event.toolName}:${input}`, summary);
     if (completed.size > 16) completed.delete(completed.keys().next().value!);
     const fullOutput = Array.isArray(event.content) ? event.content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n') : '';
-    add(event.isError ? 'tool error' : 'tool result', `${summary}. ${textParts({ content: event.content }, 'text', 400) || 'No text result exposed.'}`, event.toolName, fullOutput ? `${summary}. Input: ${JSON.stringify(event.input ?? {}).slice(0, 2000)}\n${fullOutput}` : undefined);
+    const resultId = add(event.isError ? 'tool error' : 'tool result', `${summary}. ${textParts({ content: event.content }, 'text', 400) || 'No text result exposed.'}`, event.toolName, fullOutput ? `${summary}. Input: ${JSON.stringify(event.input ?? {}).slice(0, 2000)}\n${fullOutput}` : undefined);
+    if (event.isError && resultId) { failureKeys.set(resultId, `${event.toolName}:${input}`); if (failureKeys.size > 128) failureKeys.delete(failureKeys.keys().next().value!); }
     revision++;
   });
   pi.on('tool_execution_end', (event: any, context: any) => {

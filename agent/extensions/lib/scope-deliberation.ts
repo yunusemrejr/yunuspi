@@ -168,9 +168,12 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
     context(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? brief:''; },
     /** The rendered context carried the brief to a model request. */
     markSeen(ctx:any) { if(identity(ctx)===owner && brief) seen=true; },
-    /** A brief with council advice exists that no model request has carried
-     * yet: a mutation decided before it must be re-checked against it. */
-    unseen(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && Boolean(brief) && !seen && councilStatus!=='unavailable'; },
+    /** A complete brief exists that no model request has carried yet: a
+     * mutation decided before it must be re-checked against it. A partial
+     * council (a failed or timed-out leg) is advisory only and never gates:
+     * a 2-of-3 brief blocked the first write of a session while its critique
+     * leg had already failed. */
+    unseen(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && Boolean(brief) && !seen && councilStatus==='complete'; },
     reviewContext(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? review:''; },
     receipt(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && key ? {requestHash:key,workflow}:undefined; },
     pending(ctx:any) { return identity(ctx)===owner ? pending:undefined; },

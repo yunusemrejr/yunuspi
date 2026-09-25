@@ -622,7 +622,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
 			}
 		};
-    let finishActivity: FinishActivity | undefined, activityOutcome: ActivityOutcome = 'error';
+    let finishActivity: FinishActivity | undefined, activityOutcome: ActivityOutcome = 'error', finalAdvice = '';
     try { if (current()) finishActivity=(globalThis as any)[Symbol.for('yunus-pi.activity.v1')]?.({action:'start',id:`scope-${randomUUID()}`,label:'council'},ctx); } catch { /* UI is optional. */ }
 		try {
 			// Overlap one local semantic cue with the existing peer wave. Never
@@ -690,11 +690,15 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				independence,
 			};
 			activityOutcome = result.status === 'complete' ? 'ok' : 'skipped';
+			// The brief the parent will be asked to honour is shown to the human
+			// before any gate enforces it: synthesis when it ran, else the
+			// finished perspectives, labelled as partial.
+			finalAdvice = result.discussion || proposals.map(p => `${p.role}: ${p.text}`).join("\n");
 			try { request.onResult?.(result); } catch { /* observer cannot change the result */ }
 			return result;
 		} finally {
 			clearTimeout(deadlineTimer);
-			progress("Council", signal.aborted && !expired() && activityOutcome !== "skipped" ? "stopped" : activityOutcome === "ok" ? "completed" : activityOutcome === "skipped" ? "partial" : "unavailable");
+			progress("Council", signal.aborted && !expired() && activityOutcome !== "skipped" ? "stopped" : activityOutcome === "ok" ? "completed" : activityOutcome === "skipped" ? "partial · advisory only" : "unavailable", undefined, undefined, finalAdvice);
 			clearStatus();
       try { finishActivity?.(signal.aborted && !expired() ? 'cancelled' : activityOutcome); } catch { /* UI cannot change advice. */ }
 			controller.abort();

@@ -587,10 +587,14 @@ export default function projectIntelligence(pi: any) {
     if (MUTATING.has(event.toolName) && ownsContext(ctx)) {
       if (scope.pending(ctx)) await scope.settle(ctx);
       if (scope.unseen(ctx)) {
+        // The gate carries the brief itself: a context render can be refused
+        // by the injection budget, and an edit must never be blocked on advice
+        // the agent cannot read.
+        const brief = scope.context(ctx);
         scope.markSeen(ctx);
         return {
           block: true,
-          reason: "[harness gate] Not an error: the automatic change-scope council finished and its brief is now in your context. Re-check this change against it once, then resubmit (unchanged if it still fits).",
+          reason: `[harness gate] Not an error: the automatic change-scope council finished. Re-check this change against its brief below once, then resubmit (unchanged if it still fits).\n\n${brief}`,
         };
       }
     }

@@ -304,10 +304,13 @@ test('observer reviews chronological chunks without losing earlier tool outcomes
   h.setBranch([{type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'review-child',results:[{index:0,status:'completed'}]}}]);
   for(let i=0;i<25;i++) h.emit('tool_result',{toolName:'read',input:{path:`/fixture/parser-${i}.ts`,offset:i+1,limit:20},content:[{type:'text',text:`Evidence ${i}: required field validation is still absent.`}]});
   await h.advance(150000);
-  const ids=h.packets.flatMap(p=>p.evidence.filter(row=>/^event-/.test(row.id)).map(row=>row.id));
-  assert.equal(new Set(ids).size,25,'all unread outcomes are eventually reviewed, not only the last eight');
-  assert.deepEqual(ids,Array.from({length:25},(_,i)=>`event-${i+1}`));
-  assert.match(h.packets[0].evidence.find(row=>row.id==='event-1').text,/parser-0.ts.*offset=1.*limit=20/);
+  // One review covers the whole backlog: older outcomes as a digest, the
+  // newest verbatim, so the observer keeps pace instead of trailing.
+  const ids=h.packets[0].evidence.filter(row=>/^event-/.test(row.id)).map(row=>row.id);
+  assert.deepEqual(ids,Array.from({length:8},(_,i)=>`event-${i+18}`));
+  const digest=h.packets[0].evidence.find(row=>row.kind==='event digest');
+  assert.match(digest.text,/^17 earlier events summarized \(event-1…event-17;.*Tools: read×17.*parser-0\.ts/);
+  assert.match(h.packets[0].evidence.find(row=>row.id==='event-18').text,/parser-17.ts.*offset=18.*limit=20/);
   assert.match(h.packets[0].evidence.find(row=>row.id==='todo-state').text,/Verify parser boundary checks/);
   assert.match(h.packets[0].evidence.find(row=>row.id==='child-state').text,/completed/);
   assert.equal(h.packets[0].evidence[0].text,'Fix parser validation.');
@@ -353,7 +356,9 @@ test('bounded observer queue reports overflow and malformed responses retry with
   for(let i=0;i<300;i++)h.emit('tool_result',{toolName:'read',input:{path:`/fixture/${i}.ts`},content:[{type:'text',text:`Result ${i}`}]});
   await h.advance(60000);
   assert.equal(h.packets.length,2);assert.deepEqual(h.packets[0].evidence.filter(row=>row.id.startsWith('event-')),h.packets[1].evidence.filter(row=>row.id.startsWith('event-')),'invalid response does not move the chunk cursor');
-  assert.match(h.packets[0].evidence.find(row=>row.id.startsWith('overflow-')).text,/44 early events.*incomplete/);assert.ok(h.sent.some(([message])=>/Observer coverage: 44/.test(message.content)));h.close();
+  assert.match(h.packets[0].evidence.find(row=>row.id.startsWith('overflow-')).text,/57 early events were folded into digest rows/);assert.ok(h.sent.some(([message])=>/Observer coverage: 57 older events summarized/.test(message.content)));
+  const digest=h.packets[0].evidence.find(row=>row.kind==='event digest');assert.match(digest.text,/^292 earlier events summarized/,'overflow and backlog are summarized, never reviewed blind');
+  assert.equal(h.packets[0].evidence.filter(row=>/^event-/.test(row.id)).length,8,'the newest events stay verbatim');h.close();
 });
 
 
@@ -468,7 +473,7 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   h.emit('tool_result',{toolName:'read',input:{path:'src/style.css'},content:[{type:'text',text:'Stylesheet color definitions.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could the parser enforce its input contract before parsing?',evidence:['event-1'],tools:['read'],skills:[]})}]});await flush();
   assert.ok(h.sent.some(([message])=>/returned a note.*snapshot event-1/.test(message.content)),'unrelated file read should not discard useful parser advice');
-  assert.match(h.emit('context',{messages:[]}).messages.at(-1).content,/Reviewed snapshot: event-1/);h.close();
+  assert.match(h.emit('context',{messages:[]}).messages.at(-1).content,/Reviewed snapshot as of event-1 \(1 newer event since\): event-1/,'the note names the snapshot position and the work since');h.close();
   const active=harness(async()=>new Promise(resolve=>{finish=resolve;}));active.input('Fix parser validation.');
   active.emit('tool_execution_start',{toolCallId:'build',toolName:'bash',args:{command:'npm test',timeout:120}});await active.advance(30000);
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});

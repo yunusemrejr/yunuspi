@@ -68,6 +68,14 @@ test('the first inference waits only briefly; the brief lands later and gates on
   assert.equal(lifecycle.unseen(ctx), false, 'only once');
 });
 
+test('a partial council is advisory only and never gates a mutation', async () => {
+  const lifecycle = createScopeDeliberation({}, { history: async () => history, runner: async () => ({ status: 'partial', proposals: [complete.proposals[0]], discussion: '', gap: 'critique leg timed out' }) });
+  const ctx = context();
+  await lifecycle.start({ prompt }, ctx, 'graph');
+  assert.match(lifecycle.context(ctx), /Council status: partial/);
+  assert.equal(lifecycle.unseen(ctx), false, 'a 2-of-3 brief must not block the first write');
+});
+
 test('a council whose synthesis misses the deadline keeps its finished perspectives', async () => {
   resetSharedControl();
   const ids = ['free/preservation', 'free/change', 'free/synthesis'];

@@ -29,7 +29,10 @@ export const OBSERVER_CONTEXT = 'session-observer-context';
 export interface ObserverEvidence { id: string; kind: string; text: string; tool?: string; }
 export interface ObserverCapability { name: string; description: string; availability?: 'active' | 'discoverable'; }
 export interface ObserverPacketBook { hash: string; passages: string[]; deep: string[]; margins: string[]; readable: string[]; titles: Record<string, string>; }
-export interface ObserverPacket { text: string; hash: string; evidence: ObserverEvidence[]; tools: ObserverCapability[]; skills: ObserverCapability[]; harness?: Array<{ tools: Array<{ name: string; availability: string }> }>; book?: ObserverPacketBook; }
+export interface ObserverPacket { text: string; hash: string; evidence: ObserverEvidence[]; tools: ObserverCapability[]; skills: ObserverCapability[]; harness?: Array<{ tools: Array<{ name: string; availability: string }> }>; book?: ObserverPacketBook;
+  /** Every registered tool and skill name, not only those selected into the
+   * packet; names outside it cannot be activated in this session. */
+  registered?: ReadonlySet<string>; }
 export interface ObserverAdvice {
   note: string; evidence: string[]; tools: string[]; skills: string[]; discoverableTools?: string[];
   /** Book passages the note applies, with display titles. */
@@ -98,8 +101,35 @@ export function relevant(items: ObserverCapability[], text: string, limit: numbe
 /** Per-kind excerpt limits. Full text stays in the observer journal. */
 const KIND_LIMITS: Record<string, number> = {
   'current model routing': 2600, 'provider-returned thinking': 360, 'current state': 460, 'session profile': 460,
-  'earlier user prompt': 320, 'harness interpretation': 620, 'user reminders': 620, 'design brief': 420,
+  'earlier user prompt': 320, 'harness interpretation': 620, 'user reminders': 620, 'design brief': 420, 'event digest': 620,
 };
+/** Fold a run of observed events into one row: per-tool counts and failures,
+ * touched files and the last assistant statement. A backlog is reviewed as a
+ * summary instead of being dropped (a session lost 208 events that way and
+ * the observer reviewed half of it blind). Full text stays in the journal. */
+export function digestObserverEvents(rows: ObserverEvidence[], id: string): ObserverEvidence {
+  const ids = rows.map(row => row.id).filter(value => /^event-\d+$/.test(value));
+  const tools = new Map<string, { calls: number; failed: number }>();
+  const files = new Set<string>();
+  let said = '', nested = 0, events = 0;
+  for (const row of rows) {
+    if (row.kind === 'event digest') { nested += Number(/^(\d+)/.exec(row.text)?.[1] ?? 0); continue; }
+    events++;
+    if (row.tool && (row.kind === 'tool result' || row.kind === 'tool error')) {
+      const entry = tools.get(row.tool) ?? { calls: 0, failed: 0 };
+      entry.calls++; if (row.kind === 'tool error') entry.failed++;
+      tools.set(row.tool, entry);
+    }
+    for (const file of row.text.match(/(?:[\w.-]+\/)*[\w.-]+\.[a-z0-9]{1,8}\b/gi) ?? []) if (files.size < 12 && !/^\d/.test(file)) files.add(file);
+    if (row.kind === 'assistant text') said = row.text;
+  }
+  const span = ids.length ? `${ids[0]}…${ids[ids.length - 1]}` : 'earlier events';
+  const text = [`${events + nested} earlier events summarized (${span}; full text via session_search/session_detail).`,
+    tools.size ? `Tools: ${[...tools].sort((a, b) => b[1].calls - a[1].calls).slice(0, 8).map(([name, row]) => `${name}×${row.calls}${row.failed ? ` (${row.failed} failed)` : ''}`).join(', ')}.` : '',
+    files.size ? `Files: ${[...files].join(', ')}.` : '',
+    said ? `Last assistant statement: ${boundedObserverText(said, 160)}` : ''].filter(Boolean).join(' ');
+  return { id, kind: 'event digest', text };
+}
 /** Rows that describe what the user wants; never evicted for catalog space. */
 const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'design brief', 'peer reviewer note']);
 export function buildObserverPacket(request: string, recent: ObserverEvidence[], tools: ObserverCapability[], skills: ObserverCapability[], options: ObserverPacketOptions = {}): ObserverPacket {
@@ -113,7 +143,9 @@ export function buildObserverPacket(request: string, recent: ObserverEvidence[],
   const extra = relevant(HARNESS_CAPABILITIES.filter(row => !core.has(row.id)).map(row => ({ name: row.id, description: row.summary })), textForRanking, 2);
   const relevanceOrder = new Map(relevant(HARNESS_CAPABILITIES.map(row => ({ name: row.id, description: row.summary })), textForRanking, HARNESS_CAPABILITIES.length).map((row, index) => [row.name, index]));
   const harness = HARNESS_CAPABILITIES.filter(row => core.has(row.id) || extra.some(item => item.name === row.id)).map(row => ({ id: row.id, summary: row.summary,
-    tools: row.tools.map(name => ({ name, availability: tools.find(tool => tool.name === name)?.availability ?? (tools.some(tool => tool.name === name) ? 'active' : 'not registered') })) })).sort((a, b) => (relevanceOrder.get(a.id) ?? 999) - (relevanceOrder.get(b.id) ?? 999));
+    // An unregistered tool cannot be activated in one step, so it is never
+    // offered: listing it produced notes recommending tools the session lacked.
+    tools: row.tools.flatMap(name => { const tool = tools.find(item => item.name === name); return tool ? [{ name, availability: tool.availability ?? 'active' }] : []; }) })).sort((a, b) => (relevanceOrder.get(a.id) ?? 999) - (relevanceOrder.get(b.id) ?? 999));
   const value = { evidence, tools: selectedTools, skills: selectedSkills, harness, catalogScope: 'Tools are marked active or discoverable. Harness metadata does not grant access or prove enablement. Skills are installed and invocable. Selection omissions are not evidence of unavailability.' };
   let text = '';
   // Static text first so providers can reuse the cached prompt prefix: the
@@ -156,7 +188,7 @@ export function buildObserverPacket(request: string, recent: ObserverEvidence[],
   if (encode()) for (const row of evidence) if (row.kind !== 'current model routing') row.text = excerpt(row.text, 160);
   if (encode()) for (const row of evidence) if (row.kind !== 'current model routing') row.text = excerpt(row.text, 96);
   if (encode()) throw new Error('Observer packet exceeds its input bound');
-  return { text, hash: createHash('sha256').update(text).digest('hex'), ...value,
+  return { text, hash: createHash('sha256').update(text).digest('hex'), ...value, registered: new Set([...tools.map(tool => tool.name), ...skills.map(skill => skill.name)]),
     ...(book ? { book: { hash: book.hash, passages: book.passages, deep: book.deep, margins: book.margins, readable: book.readable, titles: book.titles } } : {}) };
 }
 export function parseObserverAdvice(text: string, packet: ObserverPacket): ObserverAdvice | undefined {
@@ -192,14 +224,28 @@ export function validateObserverAdvice(text: string, packet: ObserverPacket, ext
     if (['active', 'discoverable'].includes(tool.availability) && !advertisedTools.has(tool.name)) advertisedTools.set(tool.name, tool.availability as ObserverCapability['availability']);
   }
   const allowed = { evidence: new Set([...packet.evidence.map(x => x.id), ...extraEvidence]), tools: new Set(advertisedTools.keys()), skills: new Set(packet.skills.map(x => x.name)) };
-  const dropped: string[] = [];
+  const dropped: string[] = [], unknownNames: string[] = [];
   for (const key of ['evidence', 'tools', 'skills'] as const) {
     if (!Array.isArray(value[key])) return invalid(`${key} list has an invalid shape`);
     // Unknown identifiers are dropped, never delivered: an invented tool name
     // must not reach the agent, but it does not void the rest of the review.
     const known = [...new Set(value[key].filter((x: unknown) => typeof x === 'string' && allowed[key].has(x)))] as string[];
     if (known.length < value[key].length) dropped.push(key);
+    if (key !== 'evidence' && packet.registered?.size) unknownNames.push(...value[key].filter((x: unknown): x is string => typeof x === 'string' && x.length >= 3 && !packet.registered!.has(x)));
     value[key] = known.slice(0, key === 'evidence' ? 8 : 3);
+  }
+  // Dropping the id is not enough when the note's prose still recommends the
+  // unavailable tool (measured: ast_grep_search, desktop_session, visual_diff
+  // named in delivered notes after their ids were removed). Sentences naming
+  // one are removed; a note left with nothing is not advice.
+  if (unknownNames.length && value.note) {
+    const names = unknownNames.map(name => name.toLowerCase());
+    const sentences = value.note.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [value.note];
+    const kept = sentences.filter((sentence: string) => !names.some(name => new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(sentence)));
+    if (kept.length < sentences.length) {
+      value.note = kept.join('').replace(/\s+/g, ' ').trim();
+      if (!value.note) return invalid('note only recommends tools or skills unavailable in this session');
+    }
   }
   const uncited = Boolean(value.note) && value.evidence.length === 0;
   // Advice may refer to observations but must not copy sizeable prompt/thinking
@@ -423,6 +469,9 @@ interface ObserverSnapshot {
   toolHost?: ObserverToolHost;
   /** Journal ids that are valid evidence citations beyond the packet rows. */
   knownIds?: () => Iterable<string>;
+  /** Newest event number this packet covered; the delivered note names it so
+   * the agent can tell how much work happened after the snapshot. */
+  position?: number;
 }
 interface ObserverPorts {
   snapshot: () => ObserverSnapshot;
@@ -431,6 +480,11 @@ interface ObserverPorts {
   /** Response validation (default validateObserverAdvice). Reviewers with
    * extra fields (Watchmaker memos) screen them here. */
   validate?: typeof validateObserverAdvice;
+  /** Topic of a note (e.g. the time sink it names). One topic is delivered at
+   * most twice per task: a third restatement is a nag, not advice. */
+  repeatKey?: (advice: ObserverAdvice) => string | undefined;
+  /** Current newest event number, for the delivered snapshot age. */
+  position?: () => number;
   /** Delivered-note rendering (default observerAdviceText). */
   adviceText?: typeof observerAdviceText;
   /** Monotonic count of salient session events (errors, verification results,
@@ -479,13 +533,17 @@ export function createSessionObserver(ports: ObserverPorts) {
   };
   const thinkingNote = (route: ObserverRoute) => { const next = adapted(route); return next.thinking !== route.thinking ? `; next review uses ${next.thinking} thinking` : ''; };
   const delivered = new Set<string>(), recentAdvice: Set<string>[] = [], recentPicks: Set<string>[] = [];
-  let current: { evidence: string; body: string; at: number; generation: number; freshness: () => boolean | string | undefined } | undefined;
+  let current: { evidence: string; body: string; at: number; generation: number; position?: number; freshness: () => boolean | string | undefined } | undefined;
   const deliverable = (note: NonNullable<typeof current>) => {
     const freshness = note.freshness();
     if (freshness === false) return undefined;
     const overlap = typeof freshness === 'string' ? `${freshness} after this snapshot, so it may already be addressed; ` : '';
-    return `[Reviewed snapshot: ${note.evidence}; ${overlap}verify against newer work.]\n${note.body}`;
+    let newer = 0; try { newer = note.position === undefined ? 0 : Math.max(0, (ports.position?.() ?? note.position) - note.position); } catch { /* Age is presentation only. */ }
+    const asOf = note.position === undefined ? '' : ` as of event-${note.position}${newer ? ` (${newer} newer event${newer === 1 ? '' : 's'} since)` : ''}`;
+    return `[Reviewed snapshot${asOf}: ${note.evidence}; ${overlap}verify against newer work.]\n${note.body}`;
   };
+  // Topic counts for this task (see ObserverPorts.repeatKey).
+  const topics = new Map<string, number>();
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, ' ').trim();
   const notice = (status: string, detail: string, advice?: ObserverAdvice) => { const key = `${status}:${detail}:${advice?.note ?? ''}`; if (lastNotice === key) return; lastNotice = key; lastCheckAt = now(); try { ports.notice(status, detail, advice); } catch {} };
   // A check-in is not a review: no counter, so an unchanged idle state is
@@ -503,7 +561,7 @@ export function createSessionObserver(ports: ObserverPorts) {
     if (now() - lastReviewAt < OBSERVER_MIN_GAP_MS) return;
     const epoch = generation, origin = owner;
     let snapshot: ObserverSnapshot;
-    try { snapshot = ports.snapshot(); } catch { notice('unavailable', 'Current evidence unavailable'); return; }
+    try { snapshot = ports.snapshot(); } catch (error) { notice('unavailable', `Current evidence unavailable (${boundedObserverText(String((error as any)?.message ?? error), 120)})`); return; }
     if (!snapshot.route) { if (!snapshot.silent) notice('skipped', snapshot.reason ?? 'No configured observer route'); return; }
     if (!ports.dispatch && typeof snapshot.registry?.completeSimple !== 'function') { notice('unavailable', 'Native model dispatch unavailable'); return; }
     if ((snapshot.reviewKey ?? snapshot.packet.hash) === lastHash) { checkIn('No new evidence to review; no repeated advice sent.'); return; }
@@ -527,7 +585,9 @@ export function createSessionObserver(ports: ObserverPorts) {
     try { snapshot.dispatched?.(); } catch { /* Book bookkeeping never blocks a review. */ }
     account('pending'); notice('started', `${route.route}${route.thinking ? ` · ${route.thinking} thinking${(route as any).configuredThinking ? ` (adapted from ${(route as any).configuredThinking})` : ''}` : ''}${snapshot.toolHost ? ' · read-only tools' : ''} · up to ${Math.ceil(deadlineMs / 1000)}s${snapshot.bookPassages?.length ? ` · book: ${snapshot.bookPassages.slice(0, 3).join(', ')}` : ''}`);
     const deadline = schedule(() => {
-      timedOut = true; failures++; lowerThinking(route.route); controller.abort(Error('Observer deadline exceeded')); account('timeout'); release();
+      // A timed-out review paid for nothing: the next one on this route drops
+      // two thinking levels at once (high -> low) instead of timing out again.
+      timedOut = true; failures++; lowerThinking(route.route); lowerThinking(route.route); controller.abort(Error('Observer deadline exceeded')); account('timeout'); release();
       if (generation === epoch && active && owner === origin) { current = undefined; notice('unavailable', `${label} timed out after ${Math.ceil(deadlineMs / 1000)}s; cancellation requested. Evidence retained for the next review.`); }
     }, deadlineMs);
     deadline.unref?.();
@@ -597,17 +657,20 @@ export function createSessionObserver(ports: ObserverPorts) {
         const score = stemSimilarity(mine, adviceStems(peer.note));
         return score >= .45 || picks.size > 0 && [...picks].every(pick => peer.picks.includes(pick)) && score >= .25;
       });
-      const repeated = delivered.has(key) || sameMove || peerRepeat || recentAdvice.some(previous => tokens.size >= 6 && similarity(previous) >= .8);
+      let topic: string | undefined; try { topic = ports.repeatKey?.(advice); } catch { topic = undefined; }
+      const topicRepeat = Boolean(topic) && (topics.get(topic!) ?? 0) >= 2;
+      const repeated = delivered.has(key) || sameMove || peerRepeat || topicRepeat || recentAdvice.some(previous => tokens.size >= 6 && similarity(previous) >= .8);
       if (repeated) { quiet = backlog ? 0 : quiet + 1; current = undefined; notice('reviewed', `Chunk ${++check}: repeated advice suppressed${suffix}.`); return; }
       quiet = 0;
+      if (topic) topics.set(topic, (topics.get(topic) ?? 0) + 1);
       delivered.add(key); recentAdvice.push(tokens); if (recentAdvice.length > 256) recentAdvice.shift();
       recentPicks.push(picks); if (recentPicks.length > 8) recentPicks.shift();
-      current = { evidence: advice.evidence.join(', '), body, at: now(), generation: epoch, freshness: () => snapshot.current?.(advice) };
+      current = { evidence: advice.evidence.join(', '), body, at: now(), generation: epoch, position: snapshot.position, freshness: () => snapshot.current?.(advice) };
       notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s${overlap ? ` · ${overlap} meanwhile` : ''}${suffix}`, advice);
     } catch { if (!controller.signal.aborted && generation === epoch && active && owner === origin) notice('unavailable', `${label} evidence could not be reconciled`); } finally { unschedule(deadline); if (!terminal && !cancelled && !timedOut) thisFlight.cancel(); }
   }
   return {
-    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; quiet = failures = consults = 0; flight?.cancel(); active = false; stopTimer(); },
+    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; quiet = failures = consults = 0; topics.clear(); flight?.cancel(); active = false; stopTimer(); },
     start() { if (closed || active) return; active = true; lastCheckAt = now(); arm(); },
     stop(reason = 'Current work ended') {
       if (active && flight && !flight.controller.signal.aborted) notice('stopped', `${reason}; cancellation requested`);

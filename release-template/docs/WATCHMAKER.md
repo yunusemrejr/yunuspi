@@ -25,7 +25,11 @@ heads for spot checks with the same bounded read-only tools the observer uses
 
 Durable conclusions persist as short `watchmaker-memo-v1` session entries (at
 most 140 characters each, twelve kept in the working ring). Later reviews read
-the scratchpad instead of re-deriving history, which keeps token spend low.
+the scratchpad instead of re-deriving history, which keeps token spend low. A
+memo that restates an earlier one replaces it. When the scratchpad and intent
+rows would overflow the packet bound, the oldest memos and then intent rows
+are dropped, so a review still runs with its time evidence instead of being
+skipped.
 
 ## Cadence and cost
 
@@ -37,7 +41,10 @@ counted separately from the agent's children: their results arrive in context
 by themselves, so there is nothing for the agent to harvest. A memo the
 Watchmaker writes does not make the next review due, and a note that only
 re-recommends tools or skills its last notes already named is suppressed as a
-repeat.
+repeat. The time sink a note leads with (for example bash) is delivered at most
+twice per task; further diagnoses of the same sink are suppressed. The packet
+lists only registered tools, and a note may not call verification that another
+reviewer asked for churn; it names a cheaper way to meet that check instead.
 
 Review opportunities start every 60 seconds with a two-minute request
 allowance. Quiet stretches (empty or repeated notes, unusable responses) back

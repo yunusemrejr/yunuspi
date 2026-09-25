@@ -4,7 +4,7 @@ import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } fro
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
 import { boundedObserverText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
-import { buildWatchmakerPacket, createWatchmakerScratchpad, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
+import { buildWatchmakerPacket, createWatchmakerScratchpad, watchmakerSink, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
 import { explicitRecoveryConstraints } from './pi-subagents/src/extension/autonomous-recovery.ts';
@@ -131,9 +131,13 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
     salience: () => salience,
+    position: () => sequence,
     peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()),
     ...testing,
     label: 'Watchmaker',
+    // The time sink a note names is its topic: twelve notes re-diagnosed shell
+    // recon in one session with no effect. Twice per task is the ceiling.
+    repeatKey: (advice: any) => watchmakerSink(String(advice?.note ?? ''), [...ledger.keys()]),
     intervalMs: WATCHMAKER_INTERVAL_MS,
     deadlineMs: WATCHMAKER_DEADLINE_MS,
     validate: (text: string, packet: any, extra: any) => validateWatchmakerAdvice(text, packet, extra),
@@ -192,7 +196,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, ledger: [...ledger.entries()].map(([tool, row]) => [tool, row.calls, row.errors, Math.round(row.ms / 1000)]), model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name) });
       const routeName = entry.route;
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd } : undefined;
-      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id),
+      return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
         reviewed: () => { recent = recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)).length,
         dispatched: () => {},
@@ -228,7 +232,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
         if (dispatch) { countedDispatches.add(dispatch); if (countedDispatches.size > 64) countedDispatches.delete(countedDispatches.values().next().value!); }
         const health = routeHealth.get(route) ?? { failures: 0, coolUntil: 0 };
         if (data.status === 'completed') { health.failures = 0; health.coolUntil = 0; }
-        else if (++health.failures >= 2) health.coolUntil = now() + 600_000;
+        // One timeout already cost a full deadline; a configured fallback serves
+        // next instead of the same route timing out a second time.
+        else if (++health.failures >= 2 || data.status === 'timeout') health.coolUntil = now() + 600_000;
         routeHealth.set(route, health); if (routeHealth.size > 32) routeHealth.delete(routeHealth.keys().next().value!);
       }
       if (owns(ctx) && origin === owner) pi.appendEntry('auxiliary-model-usage-v1', data);

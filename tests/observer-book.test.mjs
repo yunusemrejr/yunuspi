@@ -389,11 +389,12 @@ test('the observer extension reads its book, applies doctrine and keeps margin n
   assert.match(returned.content, /Observer book: UI and UX craft › Verify what renders/);
   const capsule = h.emit('context', { messages: [] }).messages.at(-1).content;
   assert.match(capsule, /Observer book: UI and UX craft › Verify what renders, not what was written/);
-  // The kept margin note is relevant to later settings work and reaches the next packet.
+  // The kept margin note is a lesson for later sessions; this session already
+  // heard it, so it is not fed back to the observer to restate.
   h.setReply(() => ({ note: '', evidence: [] }));
   h.emit('tool_result', { toolCallId: 'd', toolName: 'read', input: { path: 'src/Settings.tsx' }, content: [{ type: 'text', text: 'Settings page buttons.' }] });
   await h.advance(30000);
-  assert.match(h.packets.at(-1).text, /\[m1\] Settings UI lives in src\/Settings\.tsx/);
+  assert.doesNotMatch(h.packets.at(-1).text, /\[m1\] Settings UI lives in src\/Settings\.tsx/);
   assert.ok(!h.packets.at(-1).book.passages.includes('ui-ux.verify-rendered') || /⚑/.test(h.packets.at(-1).text), 'just-cited doctrine rests unless its trigger still fires');
   // Model routing evidence is sent once per task and omitted while unchanged.
   const routing = h.packets.map(p => p.evidence.find(row => row.id === 'model-routing').text);
@@ -453,9 +454,7 @@ test('one timed-out review counts once toward cooling its route', async () => {
     assert.equal(timeouts.length, 2, 'the deadline and the settled transport both report');
     assert.equal(new Set(timeouts.map(([, data]) => data.id)).size, 1, 'for one dispatch');
     await review(1);
-    assert.deepEqual(h.routes.slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-flash'], 'one timeout does not cool the route');
-    await review(2);
-    assert.equal(h.routes[2], 'zai/glm-flash', 'two timed-out reviews do');
+    assert.deepEqual(h.routes.slice(0, 2), ['deepseek/deepseek-flash', 'zai/glm-flash'], 'one timeout already cost a full deadline: the configured fallback serves next');
     h.close();
   } finally { fs.rmSync(prefs, { force: true }); }
 });
