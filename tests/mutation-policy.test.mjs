@@ -446,3 +446,14 @@ test("extension mutations invoke the same filesystem policy before any write", a
     assert.deepEqual(fs.readdirSync(root),['a.txt']);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test("agent memory has one write policy for shell and edit: entries writable, trees never wiped", () => {
+  const memory = path.join(agent, "memory");
+  for (const command of [
+    `echo "- [ ] note" >> ${memory}/SCRATCHPAD.md`,
+    `cp ${cwd}/notes.md ${memory}/projects/notes.md`,
+  ]) assert.equal(risk(command)?.level, undefined, command);
+  for (const command of [`rm -rf ${memory}`, `rm -rf ${memory}/projects`, `rm -f ${memory}/*`])
+    assert.equal(risk(command)?.level, "block", command);
+  assert.equal(risk(`echo x >> ${home}/.bashrc`)?.level, "block", "other home files stay protected");
+});

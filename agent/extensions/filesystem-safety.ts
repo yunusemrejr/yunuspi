@@ -344,6 +344,7 @@ function isPathProtected(
 	targetPath: string,
 	cwd: string,
 	followLeaf = true,
+	recursive = false,
 ): boolean {
 	let resolved: string, normalizedCwd: string;
 	try {
@@ -362,9 +363,28 @@ function isPathProtected(
 		return false;
 	if (resolved.startsWith("/tmp/") || resolved.startsWith("/var/tmp/"))
 		return false;
+	if (!recursive && withinAgentMemory(resolved)) return false;
 	return PROTECTED_DIRS.some(
 		(root) => root !== "/" && containsPath(root, resolved),
 	);
+}
+
+/** Agent memory (SCRATCHPAD.md, daily logs, MEMORY.md) is runtime data the
+ * self-mutation guard documents as writable from project sessions. One rule
+ * for shell and edit/write: entries strictly inside the memory root are
+ * writable without a scope prompt; the root itself and recursive or broad
+ * shell mutations stay protected, so memory trees cannot be wiped. */
+function withinAgentMemory(resolved: string): boolean {
+	const roots = [path.join(getAgentDir(), "memory"), process.env.PI_MEMORY_DIR?.trim()];
+	return roots.some((root) => {
+		if (!root) return false;
+		try {
+			const physical = canonicalMutationPath(root);
+			return physical !== resolved && containsPath(physical, resolved);
+		} catch {
+			return false;
+		}
+	});
 }
 
 function assessShellMutation(
@@ -447,7 +467,7 @@ function assessShellMutation(
 			state.cwd ?? cwd,
 			followLeaf,
 		);
-		if (harnessDenial || isPathProtected(physical, cwd, followLeaf)) {
+		if (harnessDenial || isPathProtected(physical, cwd, followLeaf, recursive || broad)) {
 			note({
 				level: "block",
 				target: raw,
