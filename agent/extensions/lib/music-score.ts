@@ -3,6 +3,27 @@ import path from "node:path";
 import { integer, number, outputFolder, produced } from "./media-process.ts";
 
 const PPQ = 480, RATE = 44100;
+/** Band-limited oscillator: harmonics stop below Nyquist, so square and saw
+ * stay clean at high pitches. Sine and triangle match the original audition
+ * exactly. Pure. */
+export function oscillator(waveform: string, phase: number, freq: number): number {
+  if (waveform === "triangle") {
+    let wave = 0;
+    for (let h = 1; h <= 15 && h * freq < RATE / 2; h += 2) wave += (h % 4 === 1 ? 1 : -1) * Math.sin(h * phase) / (h * h);
+    return wave * 8 / (Math.PI * Math.PI);
+  }
+  if (waveform === "square") {
+    let wave = 0;
+    for (let h = 1; h <= 15 && h * freq < RATE / 2; h += 2) wave += Math.sin(h * phase) / h;
+    return wave * 4 / Math.PI;
+  }
+  if (waveform === "saw") {
+    let wave = 0;
+    for (let h = 1; h <= 15 && h * freq < RATE / 2; h++) wave += (h % 2 === 1 ? 1 : -1) * Math.sin(h * phase) / h;
+    return wave * 2 / Math.PI;
+  }
+  return Math.sin(phase);
+}
 function vlq(n: number): number[] {
   const out = [n & 127];
   while ((n = Math.floor(n / 128)) > 0) out.unshift((n & 127) | 128);
@@ -29,6 +50,8 @@ export function validateScore(input: any) {
   const denominator = integer(input.denominator, 4, 2, 16, "denominator");
   if (![2, 4, 8, 16].includes(denominator)) throw new Error("denominator must be 2, 4, 8 or 16");
   if (!Array.isArray(input.tracks) || input.tracks.length < 1 || input.tracks.length > 8) throw new Error("Provide 1..8 tracks");
+  const stereo = input.stereo ?? false;
+  if (typeof stereo !== "boolean") throw new Error("stereo must be true or false");
   let count = 0, noteSeconds = 0;
   const tracks = input.tracks.map((t: any, channel: number) => {
     if (!t || typeof t !== "object" || !Array.isArray(t.notes) || !t.notes.length) throw new Error("Each track needs notes");
@@ -36,7 +59,8 @@ export function validateScore(input: any) {
     const name = typeof t.name === "string" ? t.name.slice(0, 64) : `Track ${channel + 1}`;
     const program = integer(t.program, 0, 0, 127, "program");
     const waveform = t.waveform ?? "sine";
-    if (!["sine", "triangle"].includes(waveform)) throw new Error("waveform must be sine or triangle");
+    if (!["sine", "triangle", "square", "saw"].includes(waveform)) throw new Error("waveform must be sine, triangle, square or saw");
+    const pan = number(t.pan, 0, -1, 1, "pan");
     const notes = t.notes.map((n: any) => {
       if (!n || typeof n !== "object") throw new Error("Each note must be an object");
       const pitch = integer(n.pitch, 60, 0, 127, "pitch");
@@ -54,10 +78,10 @@ export function validateScore(input: any) {
       const lane = notes.filter((n: any) => n.pitch === pitch).sort((a: any, b: any) => a.start - b.start);
       for (let i = 1; i < lane.length; i++) if (lane[i].start < lane[i - 1].start + lane[i - 1].duration - 1e-8) throw new Error("Overlapping same-pitch notes need separate tracks");
     }
-    return { name, program, waveform, notes };
+    return { name, program, waveform, pan, notes };
   });
   if (noteSeconds > 1200) throw new Error("Score exceeds the preview work limit");
-  return { bpm, beats, numerator, denominator, seconds, tracks };
+  return { bpm, beats, numerator, denominator, seconds, stereo, tracks };
 }
 export async function composeMusic(params: any, cwd: string, signal?: AbortSignal) {
   const score = validateScore(params.score);
@@ -79,39 +103,40 @@ export async function composeMusic(params: any, cwd: string, signal?: AbortSigna
   const header = Buffer.alloc(6); header.writeUInt16BE(1); header.writeUInt16BE(tracks.length + 1, 2); header.writeUInt16BE(PPQ, 4);
   const midi = Buffer.concat([chunk("MThd", header), conductor, ...tracks]);
   // An intentionally simple audition synth. MIDI program changes remain in the MIDI.
-  const samples = new Float32Array(Math.ceil(score.seconds * RATE));
+  const frames = Math.ceil(score.seconds * RATE);
+  const left = new Float32Array(frames), right = new Float32Array(frames);
   for (const t of score.tracks) for (const n of t.notes) {
     signal?.throwIfAborted();
     const from = Math.round(n.start * 60 / score.bpm * RATE);
     const length = Math.round(n.duration * 60 / score.bpm * RATE);
     const freq = 440 * 2 ** ((n.pitch - 69) / 12);
-    if (freq < RATE / 2) for (let i = 0; i < length && from + i < samples.length; i++) {
-      const phase = 2 * Math.PI * freq * i / RATE;
-      // Add only harmonics below Nyquist to avoid triangle aliasing.
-      let wave = Math.sin(phase);
-      if (t.waveform === "triangle") {
-        wave = 0;
-        for (let h = 1; h <= 15 && h * freq < RATE / 2; h += 2) wave += (h % 4 === 1 ? 1 : -1) * Math.sin(h * phase) / (h * h);
-        wave *= 8 / (Math.PI * Math.PI);
-      }
+    // Constant-power pan; mono mixes keep the original center sum exactly.
+    const angle = (t.pan + 1) * Math.PI / 4;
+    const gl = Math.cos(angle), gr = Math.sin(angle);
+    if (freq < RATE / 2) for (let i = 0; i < length && from + i < frames; i++) {
+      const wave = oscillator(t.waveform, 2 * Math.PI * freq * i / RATE, freq);
       const envelope = Math.min(1, i / (RATE * 0.008), (length - 1 - i) / (RATE * 0.025));
-      samples[from + i] += wave * Math.max(0, envelope) * n.velocity / 127 * 0.18;
+      const sample = wave * Math.max(0, envelope) * n.velocity / 127 * 0.18;
+      left[from + i] += sample * (score.stereo ? gl : 1);
+      if (score.stereo) right[from + i] += sample * gr;
     }
     await new Promise<void>(resolve => setImmediate(resolve));
   }
-  let peak = 0; for (const v of samples) peak = Math.max(peak, Math.abs(v));
+  const mix = score.stereo ? [left, right] : [left];
+  let peak = 0; for (const channel of mix) for (const v of channel) peak = Math.max(peak, Math.abs(v));
   const gain = peak > 0.89 ? 0.89 / peak : 1;
-  const wav = Buffer.alloc(44 + samples.length * 2);
+  const channels = mix.length, block = channels * 2;
+  const wav = Buffer.alloc(44 + frames * block);
   wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8); wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(RATE, 24); wav.writeUInt32LE(RATE * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
-  wav.write("data", 36); wav.writeUInt32LE(samples.length * 2, 40);
-  for (let i = 0; i < samples.length; i++) wav.writeInt16LE(Math.round(samples[i] * gain * 32767), 44 + i * 2);
+  wav.writeUInt16LE(1, 20); wav.writeUInt16LE(channels, 22); wav.writeUInt32LE(RATE, 24); wav.writeUInt32LE(RATE * block, 28); wav.writeUInt16LE(block, 32); wav.writeUInt16LE(16, 34);
+  wav.write("data", 36); wav.writeUInt32LE(frames * block, 40);
+  for (let i = 0; i < frames; i++) for (let c = 0; c < channels; c++) wav.writeInt16LE(Math.round(mix[c][i] * gain * 32767), 44 + (i * channels + c) * 2);
   signal?.throwIfAborted();
   const dir = await outputFolder(params.outputDir, cwd);
   try {
     await fs.writeFile(path.join(dir, "score.mid"), midi, { flag: "wx" });
     await fs.writeFile(path.join(dir, "preview.wav"), wav, { flag: "wx" });
     await fs.writeFile(path.join(dir, "score.json"), JSON.stringify(score, null, 2) + "\n", { flag: "wx" });
-    return { files: await Promise.all(["score.mid", "preview.wav", "score.json"].map(f => produced(path.join(dir, f)))), seconds: score.seconds, bpm: score.bpm, previewGain: gain, note: "Editable MIDI and score; WAV is a mono sine/triangle audition, not a General MIDI instrument rendering. Beat units are quarter notes." };
+    return { files: await Promise.all(["score.mid", "preview.wav", "score.json"].map(f => produced(path.join(dir, f)))), seconds: score.seconds, bpm: score.bpm, channels, previewGain: gain, note: "Editable MIDI and score; WAV is a sine/triangle/square/saw audition (mono unless stereo:true), not a General MIDI instrument rendering. Beat units are quarter notes." };
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
 }

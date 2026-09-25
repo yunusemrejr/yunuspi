@@ -21,6 +21,15 @@ export function estimateSeconds(text: string): number {
   return Math.max(1, Math.round((words / 2.6) * 10) / 10);
 }
 
+/** Caption reading pace in characters per second. Viewers comfortably read
+ * ~17-20 cps; above ~24 cps chunks flash past. Returns null for empty text
+ * or non-positive seconds. */
+export function captionPace(text: string, seconds: number): number | null {
+  const chars = text.replace(/\s+/g, " ").trim().length;
+  if (!chars || !(seconds > 0)) return null;
+  return Math.round((chars / seconds) * 10) / 10;
+}
+
 /** Start and end seconds (relative to the narration start) for each word. */
 export function timeWords(text: string, seconds: number): CaptionWord[] {
   const words = text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);

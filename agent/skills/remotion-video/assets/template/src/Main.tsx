@@ -17,6 +17,8 @@ const Entry: React.FC<{ transition?: SceneSpec["transition"]; children: React.Re
   const style: React.CSSProperties =
     transition.type === "fade" ? { opacity: p }
     : transition.type === "slide" ? { opacity: p, transform: `translateX(${(1 - p) * 8}%)` }
+    : transition.type === "slideup" ? { opacity: p, transform: `translateY(${(1 - p) * 8}%)` }
+    : transition.type === "slidedown" ? { opacity: p, transform: `translateY(${(p - 1) * 8}%)` }
     : transition.type === "wipe" ? { clipPath: `inset(0 ${(1 - p) * 100}% 0 0)` }
     : transition.type === "zoom" ? { opacity: p, transform: `scale(${1.08 - 0.08 * p})` }
     : { opacity: Math.min(1, p * 1.5), filter: `blur(${(1 - p) * 16}px)` };

@@ -17,12 +17,28 @@ Staggered primitives (`TokenRow`, `Matrix`, `BarChart`, `Graph`) take linear gro
 ## Animation recipes
 
 - Draw-on lines and paths: `strokeDasharray={len} strokeDashoffset={len * (1 - t)}`.
-- Counting numbers: `Math.round(interpolate(t, [0, 1], [0, target]))` in a monospace font with tabular figures to avoid jitter.
+- Counting numbers: `<Counter to={target} progress={p} />` (tabular monospace figures, no jitter), or `Math.round(interpolate(t, [0, 1], [0, target]))` inline.
+- Lower thirds: `<LowerThird name="…" title="…" progress={hold(p)} />` for speaker captions; keep name + title under ~6 words.
+- Stepped explanations: `<ProgressBar progress={p} steps={["One", "Two", "Three"]} />` derives the active step, so narration and motion agree.
+- Diagram annotation: `<Callout from={[0.3, 0.4]} to={[0.6, 0.2]} label="…" progress={p} />` draws its elbow line, then fades the label in.
 - Morph between layouts: interpolate positions of the same element ids from layout A to layout B with `ease.inOut`.
 - Camera moves: wrap the scene content in a `div` with `transform: translate(x, y) scale(s)` driven by eased progress. Move the world, not every element.
 - Emphasis: `settle(frame, fps, at)` for a spring overshoot ≤ 8%. Avoid continuous wobble.
 - Masked text reveal: `overflow: hidden` wrapper plus a `translateY` of the inner line (see `Heading`).
 - Scene continuity: pass the same data and positions into consecutive scenes, and let the outgoing scene skip its exit fade when the next one continues the object.
+- Scene entries: `transition.type` in `video.json` supports `fade`, `slide` (horizontal), `slideup`/`slidedown` (vertical), `wipe`, `zoom`, `blur` and `none`. Match the direction to the reading flow.
+
+## Beat-synced and looping motion
+
+`src/timing.ts` (re-exported by `motion.ts`) holds beat and loop helpers with no imports. Use the same `bpm` as the `audio_synth` music bed so picture and track share a clock:
+
+```tsx
+const thump = pulse(frame, fps, 84);            // 1 on the beat, decaying after
+const n = beatCount(frame, fps, 84);            // whole beats elapsed: step items per beat
+style={{ transform: `scale(${1 + 0.04 * thump})` }}
+```
+
+`beat()` gives the 0..1 phase inside the current beat for anything that should cycle per beat. `loopProgress(frame, frames)` is a seamless 0..1 saw for loops (rotation, marquee, shimmer); `pingpong(frame, frames)` is a 0..1..0 triangle for oscillation (hover, breathing). `hold(p, attack, release)` wraps a 0..1 progress with read/hold/clear fades for lower thirds and callouts. One synced accent per beat at most; if everything pulses, nothing does.
 
 ## SVG vs Canvas vs Three.js
 

@@ -18,7 +18,7 @@ export type SceneSpec = {
   props?: Record<string, unknown>;
   cues?: Record<string, number>;
   /** Entry transition from the previous scene's end. */
-  transition?: { type: "fade" | "slide" | "wipe" | "zoom" | "blur" | "none"; seconds?: number };
+  transition?: { type: "fade" | "slide" | "slideup" | "slidedown" | "wipe" | "zoom" | "blur" | "none"; seconds?: number };
 };
 export type SfxSpec = { src: string; at: number; volume?: number };
 export type CaptionSpec = { enabled: boolean; style?: "chunks" | "karaoke"; maxWords?: number; position?: "bottom" | "top" };

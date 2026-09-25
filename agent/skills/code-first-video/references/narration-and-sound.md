@@ -19,7 +19,7 @@ narration_tts({ action: "synthesize", dir: "my-video", scenes: ["intro"], speed:
 
 `synthesize` writes `public/audio/narration/<scene>.wav` and records `narrationAudio` and `narrationSeconds` in `video.json`. With `fitScenes: true`, scenes shorter than their narration are lengthened. Cues are scene-relative, so visuals keep their internal timing. Re-time cues to the spoken words afterwards.
 
-Pronunciation: TTS guesses at names and acronyms. Write "G P T" or "transformer" plainly, respell names phonetically ("Vaswani" → "Vas-wah-nee"), and re-synthesize only the affected scenes. Keep the original spelling for on-screen text.
+Pronunciation: TTS guesses at names and acronyms. Pass a `lexicon` to `synthesize` instead of respelling narration text: `narration_tts({action: "synthesize", dir: "my-video", lexicon: {"Vaswani": "Vas-wah-nee", "GPT": "G P T"}})`. The lexicon applies to the spoken text only; `video.json` keeps the display spelling for captions and on-screen text, and the result reports `lexiconEdits` per scene. Re-synthesize only the affected scenes. Keep one project lexicon and reuse it for every synthesis run.
 
 A human recording can replace any scene: put the file in `public/audio/narration/`, set `narrationAudio`, and measure `narrationSeconds` with `media_info`.
 
@@ -30,14 +30,14 @@ A human recording can replace any scene: put the file in `public/audio/narration
 - `key`/`mode`: minor or dorian for reflective and documentary tones, major for optimistic tones.
 - `progression`: four chords, `barsPerChord` 2 for calm, 1 for momentum.
 - `bpm` 70–90 under narration. Faster tempos compete with speech.
-- `layers`: lower `pulse` and `bell` for dense narration; raise them for visual-only beats.
-- `intensity`: automation points `[seconds, 0..1]` that follow the story arc: low in exposition, rising into the key reveal, resolving at the end.
+- `layers`: lower `pulse` and `bell` for dense narration; raise them for visual-only beats. Add `drums` (0.2–0.4, kick on beats 1 and 3 plus eighth hats) for momentum sections and explainer energy; leave it at 0 under dense narration.
+- `intensity`: automation points `[seconds, 0..1]` that follow the story arc: low in exposition, rising into the key reveal, resolving at the end. Drums follow the same automation.
 
 The template ducks music under narration windows automatically (`musicVolume` to `musicDuckedVolume`). Measure the result with `video_qa`; adjust the two volumes in `video.json`.
 
 ## Sound accents
 
-`audio_synth kind:"sfx"` with `type` whoosh (object crossing frame, transition), riser (tension into a reveal), impact (reveal lands), tick (items counting or stepping), chime (conclusion, success). Use one accent per idea, place it at the visual event (`video.json` `audio.sfx: [{src, at, volume}]`), and keep it 6–12 dB under narration. If you can't say which visual event a sound belongs to, delete it.
+`audio_synth kind:"sfx"` with `type` whoosh (object crossing frame, transition), riser (tension into a reveal), downlifter (energy draining out, section end), impact (reveal lands), tick (items counting or stepping), pop (UI confirmations, small appearances), chime (conclusion, success). Use one accent per idea, place it at the visual event (`video.json` `audio.sfx: [{src, at, volume}]`), and keep it 6–12 dB under narration. If you can't say which visual event a sound belongs to, delete it.
 
 ## Captions and sound-driven visuals
 

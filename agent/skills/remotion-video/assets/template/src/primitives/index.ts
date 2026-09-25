@@ -13,3 +13,7 @@ export { Captions } from "./Captions";
 export { FilmGrain, LightLeak, CameraMove, Glitch } from "./Effects";
 export { KineticText } from "./KineticText";
 export { AudioSpectrum } from "./AudioSpectrum";
+export { LowerThird } from "./LowerThird";
+export { Counter } from "./Counter";
+export { ProgressBar } from "./ProgressBar";
+export { Callout } from "./Callout";

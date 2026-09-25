@@ -12,7 +12,7 @@ import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial
 import { createRenderQueue } from "./render-queue.ts";
 // The template's caption timing is the single source for burned-in captions
 // and sidecar subtitles; it is plain TypeScript with no Remotion imports.
-import { captionChunks, estimateSeconds, toSrt, toVtt } from "../../skills/remotion-video/assets/template/src/captions.ts";
+import { captionChunks, captionPace, estimateSeconds, toSrt, toVtt } from "../../skills/remotion-video/assets/template/src/captions.ts";
 
 const AGENT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 export const VIDEO_PATHS = {
@@ -85,7 +85,7 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
     }
     if (raw.transition !== undefined) {
       const kind = raw.transition?.type, length = raw.transition?.seconds ?? 0.5;
-      if (!["fade", "slide", "wipe", "zoom", "blur", "none"].includes(kind)) err('transition.type must be fade, slide, wipe, zoom, blur or none', id);
+      if (!["fade", "slide", "slideup", "slidedown", "wipe", "zoom", "blur", "none"].includes(kind)) err('transition.type must be fade, slide, slideup, slidedown, wipe, zoom, blur or none', id);
       else if (typeof length !== "number" || length < 0.05 || length > Math.min(3, seconds / 2)) err(`transition.seconds must be 0.05..${Math.min(3, seconds / 2)}`, id);
     }
     const offset = raw.narrationOffset ?? 0;
@@ -99,6 +99,8 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
         else if (seconds - offset - spoken > 3.5) warn(`${(seconds - offset - spoken).toFixed(1)}s of the scene has no narration; make sure the visuals carry that time`, id);
         const rate = syllables(raw.narration) / spoken;
         if (rate > 4.6) warn(`narration pace ${rate.toFixed(1)} syllables/s is hard to follow; aim for 3.3-4.3 (slower speed or shorter line)`, id);
+        const pace = typeof raw.narration === "string" ? captionPace(raw.narration, spoken) : null;
+        if (pace !== null && pace > 24) warn(`caption text runs at ${pace} characters/s; viewers read ~17-20 (shorten the line or lengthen the scene)`, id);
       }
     } else if (words(raw.narration)) {
       const needed = syllables(raw.narration) / 3.8 + offset + 0.6;
@@ -122,9 +124,15 @@ export function validateVideoSpec(spec: any, components: Set<string>, exists: (p
   }
   const audio = spec.audio ?? {};
   if (audio.music && !exists(audio.music)) err(`music public/${audio.music} is missing`);
+  for (const key of ["musicVolume", "musicDuckedVolume", "narrationVolume"]) {
+    const volume = audio[key];
+    if (volume !== undefined && (typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 2)) err(`${key} must be a number 0..2`);
+  }
+  if (typeof audio.musicVolume === "number" && typeof audio.musicDuckedVolume === "number" && audio.musicDuckedVolume >= audio.musicVolume) warn("musicDuckedVolume should sit below musicVolume or ducking under narration does nothing");
   for (const sfx of audio.sfx ?? []) {
     if (!sfx?.src || !exists(sfx.src)) err(`sfx public/${sfx?.src} is missing`);
     if (typeof sfx?.at !== "number" || sfx.at < 0 || sfx.at >= at) err(`sfx ${sfx?.src} at ${sfx?.at}s is outside the timeline`);
+    if (sfx.volume !== undefined && (typeof sfx.volume !== "number" || !Number.isFinite(sfx.volume) || sfx.volume < 0 || sfx.volume > 2)) err(`sfx ${sfx?.src} volume must be a number 0..2`);
   }
   return { issues, scenes, seconds: at };
 }
@@ -372,7 +380,7 @@ export async function videoProject(params: any, cwd: string, signal?: AbortSigna
     if (params.install !== false) await npmInstall(dir, signal, progress);
     return {
       project: dir, installed: params.install !== false,
-      files: ["video.json (master timeline: scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry)", "src/primitives/* (Stage, Heading, KineticText, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch)", "src/motion.ts, src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx)"],
+      files: ["video.json (master timeline: scenes, narration, cues, transitions, captions, audio)", "src/scenes/*.tsx + index.ts (scene registry)", "src/primitives/* (Stage, Heading, KineticText, LowerThird, Counter, ProgressBar, Callout, TokenRow, NeuralNet, Matrix, Graph, BarChart, TimelineAxis, CodeBlock, ParticleField, Backdrop, Captions, AudioSpectrum, FilmGrain, LightLeak, CameraMove, Glitch)", "src/motion.ts, src/timing.ts (beat/loop helpers), src/theme.tsx, src/timeline.ts, src/captions.ts", "public/audio/ (narration, music, sfx)"],
       next: ["Write storyboard.md (beats, visual metaphor per beat, on-screen text ≤ 8 words) before coding", "Replace video.json scenes; build scene components from primitives", "video_project check → video_render stills → inspect the contact sheet → fix → repeat", "narration_tts synthesize → audio_synth music/sfx → video_render preview → video_render final → video_qa"],
       note: "The two template scenes are mechanical examples; replace them with components designed for this video.",
     };
@@ -530,6 +538,31 @@ export async function videoQa(params: any, cwd: string, signal?: AbortSignal, pr
 
 // ───────────────────────────── narration (Piper) ─────────────────────────────
 
+/** Pronunciation lexicon: display spelling -> spoken respelling, applied to
+ * the text sent to Piper while video.json keeps the display spelling (used
+ * for captions and on-screen text). Longest spellings win, so "GPT-4" beats
+ * "GPT". Pure. */
+export function validateLexicon(input: unknown): Array<[string, string]> {
+  if (input === undefined) return [];
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("lexicon must be an object of spelling to pronunciation");
+  const entries = Object.entries(input);
+  if (entries.length > 64) throw new Error("lexicon accepts at most 64 entries");
+  for (const [from, to] of entries) {
+    if (typeof from !== "string" || !from.trim() || from.length > 64) throw new Error("lexicon spellings must be 1..64 characters");
+    if (typeof to !== "string" || !to.trim() || to.length > 128) throw new Error("lexicon pronunciations must be 1..128 characters");
+  }
+  return (entries as Array<[string, string]>).sort((a, b) => b[0].length - a[0].length);
+}
+export function applyLexicon(text: string, lexicon: Array<[string, string]>): { text: string; edits: number } {
+  let edits = 0, out = text;
+  for (const [from, to] of lexicon) {
+    if (!out.includes(from)) continue;
+    out = out.split(from).join(to);
+    edits++;
+  }
+  return { text: out, edits };
+}
+
 const piperPython = () => path.join(piperHome(), "venv", "bin", "python");
 function voiceFiles(voice: string) {
   const entry = PIPER_VOICES[voice];
@@ -582,6 +615,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     return { ...(await piperStatus()), installedVoice: voice };
   }
   if (action !== "synthesize") throw new Error("action must be status, install or synthesize");
+  const lexicon = validateLexicon(params.lexicon);
   const dir = await projectDir(params.dir, cwd);
   const spec = await readSpec(dir);
   const only = Array.isArray(params.scenes) ? new Set(params.scenes) : undefined;
@@ -606,9 +640,10 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     const text = typeof scene.narration === "string" ? scene.narration.trim() : "";
     if (!text) continue;
     progress?.(`Narrating ${scene.id}…`);
+    const spoken = applyLexicon(text, lexicon);
     const textPath = projectWritePath(dir, "public", "audio", "narration", `.${scene.id}.txt`);
     const wav = projectWritePath(dir, "public", "audio", "narration", `${scene.id}.wav`);
-    await fs.writeFile(textPath, text + "\n");
+    await fs.writeFile(textPath, spoken.text + "\n");
     try {
       await runGuarded(piperPython(), ["-m", "piper", "-m", voiceFiles(voice)[0].path, "-f", wav, "--length-scale", String(lengthScale), "--sentence-silence", "0.45", "-i", textPath], { cwd: dir, signal, timeoutMs: 300_000 });
     } finally { await fs.rm(textPath, { force: true }); }
@@ -622,7 +657,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     let adjusted: number | undefined;
     if (params.fitScenes === true && needed > scene.seconds) { adjusted = needed; scene.seconds = needed; }
     results.push({ scene: scene.id, audio: scene.narrationAudio, seconds: scene.narrationSeconds,
-      sentences: sentences.map((sentence) => ({ ...sentence, at: Number((sentence.at + offset).toFixed(2)) })), words: words(text), syllablesPerSecond: Number((syllables(text) / seconds).toFixed(2)), sceneSeconds: scene.seconds, ...(adjusted ? { lengthenedTo: adjusted } : needed > scene.seconds ? { overrun: Number((needed - scene.seconds).toFixed(2)) } : {}) });
+      sentences: sentences.map((sentence) => ({ ...sentence, at: Number((sentence.at + offset).toFixed(2)) })), words: words(text), syllablesPerSecond: Number((syllables(text) / seconds).toFixed(2)), sceneSeconds: scene.seconds, ...(spoken.edits ? { lexiconEdits: spoken.edits } : {}), ...(adjusted ? { lengthenedTo: adjusted } : needed > scene.seconds ? { overrun: Number((needed - scene.seconds).toFixed(2)) } : {}) });
   }
   await fs.writeFile(specPath, JSON.stringify(spec, null, 2) + "\n");
   return { voice, narrated: results, note: "Durations are measured from the synthesized audio and written to video.json. Cues are scene-relative seconds: re-time cues to the narration's key words, then render stills/previews again. Listen-check pronunciation of names and acronyms (spell them phonetically in the narration text if needed)." };

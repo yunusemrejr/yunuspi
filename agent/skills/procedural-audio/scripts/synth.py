@@ -5,9 +5,9 @@ Usage: synth.py SPEC.json OUTPUT.wav
 Spec kinds:
   {"kind":"music","seconds":30,"bpm":84,"key":"D","mode":"minor",
    "progression":["i","VI","III","VII"],"barsPerChord":2,
-   "layers":{"pad":0.5,"bass":0.35,"pulse":0.22,"bell":0.12},
+   "layers":{"pad":0.5,"bass":0.35,"pulse":0.22,"bell":0.12,"drums":0.0},
    "intensity":[[0,0.35],[12,0.8],[26,0.4]],"seed":7}
-  {"kind":"sfx","type":"whoosh|riser|impact|tick|chime","seconds":0.8,"seed":3,"pitch":1.0}
+  {"kind":"sfx","type":"whoosh|riser|downlifter|impact|tick|pop|chime","seconds":0.8,"seed":3,"pitch":1.0}
 Output: 48 kHz 16-bit stereo WAV. Numpy only; every random choice is seeded.
 """
 import json
@@ -120,7 +120,7 @@ def music(spec, rng):
     progression = spec.get("progression", ["i", "VI", "III", "VII"])
     bar = 4 * 60 / bpm
     chord_len = bar * float(spec.get("barsPerChord", 2))
-    layers = {"pad": 0.5, "bass": 0.35, "pulse": 0.22, "bell": 0.12, **spec.get("layers", {})}
+    layers = {"pad": 0.5, "bass": 0.35, "pulse": 0.22, "bell": 0.12, "drums": 0.0, **spec.get("layers", {})}
     t = np.arange(n) / SR
     left, right = np.zeros(n), np.zeros(n)
     intensity = automation(spec.get("intensity"), n)
@@ -181,9 +181,35 @@ def music(spec, rng):
             bell = (np.sin(2 * np.pi * f * seg_t) + 0.4 * np.sin(2 * np.pi * f * 2.76 * seg_t) * np.exp(-seg_t * 4)) * np.exp(-seg_t * 1.6) * layers["bell"]
             left[start:start + length] += bell * 0.6
             right[start:start + length] += bell * 0.4
+    drum_l, drum_r = np.zeros(n), np.zeros(n)
+    if layers["drums"]:
+        # Kick on beats 1 and 3, hats on every eighth. Rendered dry and
+        # added after the bed low-pass so hats keep their air; intensity,
+        # reverb and fades below still apply. Seeded velocities only.
+        beat = 60 / bpm
+        for k in range(int(seconds / beat) * 2 + 2):
+            start = int(k * beat / 2 * SR)
+            if start >= n:
+                break
+            on_beat = k % 2 == 0
+            if on_beat and (k // 2) % 4 in (0, 2):
+                length = min(n - start, int(0.35 * SR))
+                seg_t = np.arange(length) / SR
+                drop = np.sin(2 * np.pi * np.cumsum(120 * np.exp(-seg_t * 18) + 42) / SR) * np.exp(-seg_t * 11)
+                kick = drop * layers["drums"] * 0.5 * (0.9 + 0.1 * rng.random())
+                drum_l[start:start + length] += kick
+                drum_r[start:start + length] += kick
+            length = min(n - start, int(0.06 * SR))
+            seg_t = np.arange(length) / SR
+            hat = rng.standard_normal(length) * np.exp(-seg_t * 90) * layers["drums"] * (0.16 if on_beat else 0.1)
+            pan = 0.55 + 0.1 * rng.random()
+            drum_l[start:start + length] += hat * pan
+            drum_r[start:start + length] += hat * (1 - pan)
     left, right = left * intensity, right * intensity
     brightness = 900 + 2600 * intensity.mean()
     left, right = lowpass_fast(left, brightness), lowpass_fast(right, brightness)
+    if layers["drums"]:
+        left, right = left + drum_l * intensity, right + drum_r * intensity
     left, right = reverb(left, 0.3), reverb(right, 0.3, 1.07)
     left, right = highpass(left, 45.0), highpass(right, 45.0)
     fade = envelope(n, min(2.0, seconds / 6), min(3.0, seconds / 5))
@@ -192,7 +218,7 @@ def music(spec, rng):
 
 def sfx(spec, rng):
     kind = spec.get("type")
-    seconds = float(spec.get("seconds", {"whoosh": 0.8, "riser": 2.0, "impact": 1.2, "tick": 0.08, "chime": 1.6}.get(kind, 1)))
+    seconds = float(spec.get("seconds", {"whoosh": 0.8, "riser": 2.0, "downlifter": 2.0, "impact": 1.2, "tick": 0.08, "pop": 0.25, "chime": 1.6}.get(kind, 1)))
     if not 0.02 <= seconds <= 20:
         fail("sfx seconds must be 0.02..20")
     pitch = float(spec.get("pitch", 1.0))
@@ -211,6 +237,17 @@ def sfx(spec, rng):
         air = lowpass(noise, 300 + 6000 * rise) * 0.5
         mono = (tone + air) * rise * envelope(n, 0.01, 0.05)
         return np.stack([mono, mono], axis=1)
+    if kind == "downlifter":
+        fall = 1 - t / seconds
+        tone = np.sin(2 * np.pi * np.cumsum(180 * pitch * (1 + 3 * fall)) / SR) * 0.35
+        air = lowpass(noise, 300 + 6000 * fall) * 0.5
+        mono = (tone + air) * fall * envelope(n, 0.01, 0.05)
+        return np.stack([mono, mono], axis=1)
+    if kind == "pop":
+        body = np.sin(2 * np.pi * np.cumsum(700 * pitch * np.exp(-t * 25) + 220) / SR) * np.exp(-t * 22)
+        click = noise * np.exp(-t * 220) * 0.25
+        mono = (body + click) * 0.7
+        return np.stack([mono, mono], axis=1)
     if kind == "impact":
         body = np.sin(2 * np.pi * np.cumsum(90 * pitch * np.exp(-t * 6) + 38) / SR) * np.exp(-t * 5)
         crack = lowpass_fast(noise, 2400) * np.exp(-t * 30) * 0.6
@@ -225,7 +262,7 @@ def sfx(spec, rng):
         mono = sum(a * np.sin(2 * np.pi * f * r * t) * np.exp(-t * d) for a, r, d in ((1, 1, 2.2), (0.5, 2.01, 3.5), (0.25, 3.02, 5)))
         mono = reverb(mono * 0.35, 0.3)
         return np.stack([mono * 0.55, mono * 0.45], axis=1)
-    fail("sfx type must be whoosh, riser, impact, tick or chime")
+    fail("sfx type must be whoosh, riser, downlifter, impact, tick, pop or chime")
 
 
 def write(path, stereo, target_rms_db):

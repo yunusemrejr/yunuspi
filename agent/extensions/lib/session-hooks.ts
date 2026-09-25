@@ -116,6 +116,30 @@ export const HOOK_RULES: readonly HookRule[] = [
 		line: "Review the MIDI and audition the WAV for rhythm, harmony and endings. The preview uses simple oscillators; MIDI program changes need a soundfont or DAW for instrument-quality rendering.",
 	},
 	{
+		key: "video-timeline-check", tools: ["video_project"],
+		line: "Keep timing in video.json: resolve every check error, then render stills and inspect the contact sheet before any preview or final. A valid timeline is not visual approval.",
+	},
+	{
+		key: "video-render-review", tools: ["video_render"],
+		line: "Stills need contact-sheet inspection (hierarchy, clipping, density, consistency); previews judge pacing, easing and transitions; finals need video_qa plus a listen-check. A successful render never approves itself.",
+	},
+	{
+		key: "video-qa-review", tools: ["video_qa"],
+		line: "Fix every error finding, then review the QA contact sheet frame by frame and spot-check narration sync around transitions. Automated passes find technical defects only.",
+	},
+	{
+		key: "narration-fit", tools: ["narration_tts"],
+		line: "After synthesis, re-time scene cues to the spoken words, resolve overruns and fast pacing, and keep a pronunciation lexicon for names and acronyms instead of respelling narration text.",
+	},
+	{
+		key: "audio-synth-balance", tools: ["audio_synth"],
+		line: "Place one sound accent per visual event in video.json audio.sfx, keep music 15-20 LU under narration, and verify the balance with video_qa. If no visual event owns a sound, delete it.",
+	},
+	{
+		key: "timeline-compose-review", tools: ["video_compose", "audio_mix"],
+		line: "Inspect representative playback for framing, timing and audible quality, and measure loudness with audio_analyze. Clean decodes and peak limiting do not establish sync or intelligibility.",
+	},
+	{
 		key: "ffmpeg-source-review", tools: ["bash"],
 		when: (args) => /^(?:(?:\/[\w.-]+)+\/)?ffmpeg\s/.test(bashCommand(args).trim()),
 		line: "Probe source streams and preserve originals. Set mappings and timing explicitly; use media_edit for bounded presets and inspect decoded output plus representative playback before delivery.",

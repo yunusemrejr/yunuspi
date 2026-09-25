@@ -3,6 +3,8 @@
 // idea claims attention. Every value is a pure function of the frame.
 import { Easing, interpolate, spring } from "remotion";
 
+export { beat, beatCount, hold, loopProgress, pingpong, pulse } from "./timing";
+
 export const ease = {
   linear: (t: number) => t,
   out: Easing.bezier(0.16, 1, 0.3, 1),

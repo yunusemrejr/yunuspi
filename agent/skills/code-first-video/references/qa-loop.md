@@ -36,7 +36,8 @@ Render `video_render mode:"preview" scene:"<id>"` and inspect it. Extract 8–12
 
 - `video_qa` gives integrated loudness (target -16 LUFS for web, -14 for platforms that normalize), peak (≤ -1 dBFS) and loudness range. It also flags silence gaps and narration windows that are barely audible.
 - Narration dominates: music sits about 15–20 LU under the voice while narration plays. The template ducks music automatically; verify it.
-- Listen-check proper nouns and acronyms in narration; respell phonetically in `video.json` narration text when wrong, then re-synthesize those scenes.
+- Listen-check proper nouns and acronyms in narration; fix with a `narration_tts` lexicon (never by respelling `video.json` narration text, which captions and on-screen text share), then re-synthesize those scenes.
+- Watch caption pace: `video_project check` warns past ~24 characters/s. Viewers read ~17–20; shorten the line or lengthen the scene instead of flashing chunks.
 - Silence longer than about 1.5 s mid-video feels broken unless it is a deliberate beat under strong visuals.
 
 ## Sync review

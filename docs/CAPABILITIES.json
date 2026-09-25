@@ -2818,7 +2818,7 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1786
+        "line": 1790
       },
       {
         "name": "cost",
@@ -2838,7 +2838,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1752
+        "line": 1756
       },
       {
         "name": "export-json",
@@ -2998,7 +2998,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1696
+        "line": 1700
       },
       {
         "name": "subagent-cost",
@@ -3083,7 +3083,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1701
+        "line": 1705
       },
       {
         "name": "tasks",
@@ -3093,7 +3093,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1720
+        "line": 1724
       },
       {
         "name": "watchmaker",
@@ -3197,6 +3197,12 @@
         "kind": "factory"
       },
       {
+        "name": "audio_synth",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 38,
+        "kind": "factory"
+      },
+      {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
         "line": 576,
@@ -3272,7 +3278,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 342,
+        "line": 385,
         "kind": "literal"
       },
       {
@@ -3418,37 +3424,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2538,
+        "line": 2567,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2398,
+        "line": 2427,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2681,
+        "line": 2710,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2780,
+        "line": 2809,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2935,
+        "line": 2964,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2050,
+        "line": 2079,
         "kind": "literal"
       },
       {
@@ -3461,6 +3467,12 @@
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
         "line": 263,
+        "kind": "factory"
+      },
+      {
+        "name": "narration_tts",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 34,
         "kind": "factory"
       },
       {
@@ -3586,25 +3598,25 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2211,
+        "line": 2240,
         "kind": "literal"
       },
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1878,
+        "line": 1882,
         "kind": "literal"
       },
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 799,
+        "line": 802,
         "kind": "literal"
       },
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1815,
+        "line": 1819,
         "kind": "literal"
       },
       {
@@ -3708,6 +3720,24 @@
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
         "line": 257,
+        "kind": "factory"
+      },
+      {
+        "name": "video_project",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 22,
+        "kind": "factory"
+      },
+      {
+        "name": "video_qa",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 30,
+        "kind": "factory"
+      },
+      {
+        "name": "video_render",
+        "source": "agent/extensions/video-studio.ts",
+        "line": 26,
         "kind": "factory"
       },
       {
@@ -3848,7 +3878,7 @@
       {
         "name": "context_profile",
         "source": "agent/extensions/context-profile.ts",
-        "line": 342,
+        "line": 385,
         "kind": "literal"
       },
       {
@@ -3896,37 +3926,37 @@
       {
         "name": "memory_forget",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2538,
+        "line": 2567,
         "kind": "literal"
       },
       {
         "name": "memory_read",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2398,
+        "line": 2427,
         "kind": "literal"
       },
       {
         "name": "memory_restore",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2681,
+        "line": 2710,
         "kind": "literal"
       },
       {
         "name": "memory_search",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2780,
+        "line": 2809,
         "kind": "literal"
       },
       {
         "name": "memory_status",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2935,
+        "line": 2964,
         "kind": "literal"
       },
       {
         "name": "memory_write",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2050,
+        "line": 2079,
         "kind": "literal"
       },
       {
@@ -4028,25 +4058,25 @@
       {
         "name": "scratchpad",
         "source": "agent/extensions/pi-memory/index.ts",
-        "line": 2211,
+        "line": 2240,
         "kind": "literal"
       },
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1878,
+        "line": 1882,
         "kind": "literal"
       },
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 799,
+        "line": 802,
         "kind": "literal"
       },
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1815,
+        "line": 1819,
         "kind": "literal"
       },
       {
@@ -4305,10 +4335,17 @@
       {
         "source": "agent/extensions/video-studio.ts",
         "signals": [
-          "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
+          "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
           11
+        ],
+        "knownNames": [
+          "audio_synth",
+          "narration_tts",
+          "video_project",
+          "video_qa",
+          "video_render"
         ]
       }
     ],
@@ -4316,8 +4353,8 @@
       "sourceFiles": 636,
       "registrationSites": 76,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 103,
-      "uniqueStableTools": 102,
+      "stableRegistrationRows": 108,
+      "uniqueStableTools": 107,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",

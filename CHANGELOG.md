@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.6 — 2026-09-26
+
+Motion graphics, code-to-video and sound take a substantial step forward. The Remotion template gains four progress-driven primitives — `LowerThird` speaker captions, `Counter` jitter-free counting numbers, `ProgressBar` stepped story tracking and `Callout` diagram annotations — plus a dependency-free `src/timing.ts` (`beat`, `pulse`, `beatCount`, `loopProgress`, `pingpong`, `hold`, re-exported by `motion.ts`) so picture and the `audio_synth` bed share one clock, and vertical `slideup`/`slidedown` scene entries alongside the existing transitions.
+
+Timeline checks get stricter where it matters and stay silent otherwise. `video_project check` validates the new transitions, warns when `musicDuckedVolume` sits at or above `musicVolume` or a caption line runs past ~24 characters/s (`captionPace` in the template is the single source), and bounds mix volumes and per-sfx volume. `narration_tts synthesize` accepts a pronunciation `lexicon` (`{"Vaswani": "Vas-wah-nee"}`), applied to the spoken text only while `video.json` keeps the display spelling for captions and on-screen text; per-scene `lexiconEdits` report what changed.
+
+Procedural sound grows without changing existing bytes. The synth gains a `drums` music layer (kick on beats 1 and 3, eighth hats, intensity-automated, off by default so historical specs render identically) and `downlifter`/`pop` effects. `music_compose` auditions add band-limited `square`/`saw` oscillators beside sine/triangle, per-track `pan`, and `stereo:true` constant-power mixes; mono sine/triangle output is byte-identical to before.
+
+Six session-hook rules carry the video review loop: timeline checks, render review, QA review, narration fit, synth balance and timeline-compose review fire once per session on their tools. The tool-source inventory now enumerates the `video-studio.ts` factory, so `video_project`, `video_render`, `video_qa`, `narration_tts` and `audio_synth` appear in the capability inventory and the hook bindings verify against it. Skills (`remotion-video`, `code-first-video` narration/sound and QA references, `procedural-audio`, `music-composition`) document the new primitives, beat sync, lexicon, drums and waveforms. Eight new `video-motion-upgrade` tests pin timing, pace, lexicon, drum determinism, score stereo imaging, hooks and template wiring.
+
 ## 0.10.5 — 2026-09-26
 
 Ports the local runtime's stream-idle hotfix into the reviewed tree. The main agent reaches providers through `ModelRuntime.stream`/`streamSimple`, and without the idle wrapper a stalled provider stream hangs the turn silently (measured: 14 minutes with no error until the user aborts). Both paths now run inside the shared `piWithStreamIdle` budget, so a stalled stream surfaces as a stream error and retry/recovery runs instead. The port is byte-identical to the production-proven live hotfix; this also unblocks local installation parity for the 0.10.4 edge-case hardening.
