@@ -23,6 +23,9 @@ const smolRuntime = {
   apiKey: "TEST_SMOL_KEY_1234567890abcdef", execution: "background", timeoutMs: 2000,
 };
 
+/** The selector first processes its constant instruction alone (n_predict 0). */
+const isWarm = (init) => JSON.parse(init.body).n_predict === 0;
+
 const listing = (lines = 82, width = 42) => {
   const rows = ["header line for output"];
   for (let i = 0; i < lines - 2; i++) rows.push(`entry-${String(i).padStart(3, "0")}.log bytes=${10000 + i * 137}`.padEnd(width, "."));
@@ -34,9 +37,9 @@ test("numeric listings are eligible (line-calibrated retention)", () => {
   const raw = listing();
   assert.ok(raw.length >= 3000 && raw.length <= 4096);
   assert.equal(smol.safeSmolOutput("bash", raw, false, undefined), true);
-  // Extended line-oriented tools share the same safety gates.
+  // read/grep/find/ls return exactly what the agent asked for.
   for (const tool of ["read", "grep", "find", "ls"]) {
-    assert.equal(smol.safeSmolOutput(tool, raw, false, undefined), true, tool);
+    assert.equal(smol.smolOutputSkipReason(tool, raw, false, undefined), "requested-content", tool);
   }
   assert.equal(smol.safeSmolOutput("edit", raw, false, undefined), false);
   assert.equal(smol.safeSmolOutput("bash", raw, true, undefined), false);
@@ -52,7 +55,8 @@ test("retention deduplicates exact boilerplate and abstains on distinct protecte
   ]);
   assert.deepEqual(reps, [1, 2, 99]);
   assert.equal(smol.compressRequired(many(20, "status")), undefined);
-  assert.equal(smol.compressRequired(many(11, "task")), undefined);
+  const scored = many(11, "task").map((e, i) => ({ ...e, text: `task fact ${i}`, score: i }));
+  assert.deepEqual(smol.compressRequired(scored), Array.from({ length: smol.SMOL_TASK_REQUIRED }, (_, i) => 12 - smol.SMOL_TASK_REQUIRED + i), "only the strongest task matches are mandatory");
   assert.ok(smol.compressRequired([...many(10, "task"), { id: 50, reason: "boundary" }]).length <= 16);
 });
 
@@ -111,28 +115,30 @@ test("tiny-model input is bounded, task-aware and deduplicates exact rows", () =
   const raw = ["inventory begins", ...Array(35).fill("Background activity handles ordinary application housekeeping and general administration."), "Deployment remains pending verification."].join("\n");
   const source = ext.prepareSmolExtraction(raw, [1, 37]);
   const input = smol.smolModelInput(source, "investigate connection setup");
-  assert.ok(Buffer.byteLength(input.prompt) <= 2048);
+  assert.ok(Buffer.byteLength(input.prompt) <= smol.SMOL_PROMPT_BYTES);
+  assert.ok(input.prompt.startsWith(smol.SMOL_SYSTEM), "the constant instruction is a cacheable prefix");
   assert.match(input.prompt, /Task: investigate connection setup/);
   assert.equal(input.prompt.match(/Background activity/g).length, 1);
   assert.ok(input.lineIds.has(2), "repeated rows use their first source ID");
-  assert.ok(input.lineIds.has(37));
+  assert.ok(!input.lineIds.has(37), "required facts are kept by the host, not re-shown");
   for (const id of input.lineIds) assert.ok(input.prompt.includes(`${id}: ${source.lines[id - 1].text}`));
   const dense = smol.smolModelInput(ext.prepareSmolExtraction(listing()), "entry ".repeat(800));
-  assert.ok(Buffer.byteLength(dense.prompt) <= 2048, "prompt budget includes task and framing");
+  assert.ok(Buffer.byteLength(dense.prompt) <= smol.SMOL_PROMPT_BYTES, "prompt budget includes task and framing");
   assert.ok(dense.lineIds.size < 82);
 });
 
-test("exact repeated task matches share a retention slot; distinct matches remain mandatory", () => {
+test("exact repeated task matches share a retention slot; the strongest distinct matches remain mandatory", () => {
   const repeated = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, reason: "task", text: "same task fact\n" }));
   assert.deepEqual(smol.compressRequired(repeated), [1]);
-  assert.equal(smol.compressRequired(repeated.map((row, i) => ({ ...row, text: `task fact ${i}\n` }))), undefined);
+  assert.equal(smol.compressRequired(repeated.map((row, i) => ({ ...row, text: `task fact ${i}\n` }))).length, smol.SMOL_TASK_REQUIRED);
 });
 
 test("the host orders valid model IDs but rejects duplicates and unoffered source IDs", async () => {
   const raw = listing();
   const source = ext.prepareSmolExtraction(raw, [1, 82]);
   const offered = smol.smolModelInput(source).lineIds;
-  const omitted = source.lines.find(line => !offered.has(line.id)).id;
+  assert.ok(!offered.has(1) && !offered.has(82), "the host keeps required lines without showing them");
+  const omitted = source.lines.find(line => !offered.has(line.id) && !source.requiredLineIds.includes(line.id)).id;
   for (const [ids, accepted] of [[[82, 1], true], [[1, 1], false], [[omitted], false]]) {
     const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
       fetch: async () => new Response(JSON.stringify({ content: JSON.stringify({ status: "SELECT", lineIds: ids }) })),
@@ -149,7 +155,7 @@ test("an unbounded wait cannot stall context rendering or rewrite its first expo
   const raw = listing();
   let finish;
   const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
-    fetch: () => new Promise(resolve => { finish = resolve; }),
+    fetch: (_url, init) => isWarm(init) ? Promise.resolve(new Response("{}")) : new Promise(resolve => { finish = resolve; }),
   });
   helper.offer("wait", raw, 0);
   await new Promise(resolve => setImmediate(resolve));
@@ -204,7 +210,7 @@ test("window slots keep serving across turns and failed offers consume no capaci
   const raw = ["first line of the build output", ...Array(300).fill("Background compilation activity ...................."), "last line of the build output"].join("\n");
   let calls = 0;
   const helper = smol.createSmolPreprocessor({ runtime: smolRuntime, acquireLease: async () => true,
-    fetch: async () => { calls++; return new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })); },
+    fetch: async (_url, init) => { if (!isWarm(init)) calls++; return new Response(JSON.stringify({ content: '{"status":"SELECT","lineIds":[1]}' })); },
   });
   for (let index = 0; index < 40; index++) {
     helper.offerWindowed(`window-${index}`, raw, 0, "summarize output");

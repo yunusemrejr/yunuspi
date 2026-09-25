@@ -18,6 +18,17 @@ export function errorFingerprint(text: string): string {
 export function isSearchCommand(command: unknown): boolean {
   return typeof command === 'string' && /(?:^|[;&|\n])\s*(?:\/(?:[\w.-]+\/)*)?(?:rg|grep)\b/.test(command);
 }
+/** Programs whose output is file content or a listing the agent asked for. */
+const fileView = /^(?:cat|tac|sed|head|tail|nl|bat|batcat|less|more|grep|egrep|fgrep|rg|ag|awk|gawk|jq|yq|find|fd|ls|tree|stat|file|xxd|od|hexdump|strings|diff|git\s+(?:show|diff|blame|grep|ls-files|cat-file))\b/;
+/** True when the last command's first pipeline stage prints requested content
+ * (`cd src && sed -n 1,80p a.ts`, `cat log | head`), not when a view filters a
+ * command's output (`npm test 2>&1 | tail -40`). */
+export function isFileViewCommand(command: unknown): boolean {
+  if (typeof command !== 'string' || command.length > 4096) return false;
+  const last = command.split(/&&|\|\||[;\n]/).map(part => part.trim()).filter(Boolean).pop() ?? '';
+  const stage = (last.split('|')[0] ?? '').trim().replace(/^(?:\w+=\S*\s+|sudo\s+|time\s+|command\s+|env\s+)+/, '');
+  return fileView.test(stage.replace(/^\S*\//, ''));
+}
 const searchPointer = /^(?:\d+(?::\d+)?:|.{1,512}:\d+(?::\d+)?:)/;
 function familyOf(tool: string, text: string, search: boolean): OutputFamily | undefined {
   if (tool === 'grep' || tool === 'find' || tool === 'ls') return 'search';

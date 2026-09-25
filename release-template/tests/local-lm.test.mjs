@@ -38,6 +38,28 @@ test('judgements return a calibrated P(yes) from the first token and report each
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
 });
 
+test('a constant few-shot prefix is processed once and again only after the server loses it', async () => {
+  const prefix = `Unique few-shot examples ${Date.now()} ${'example '.repeat(12)}\n`;
+  const bodies = [];
+  let reused = 40;
+  const lm = L.createLocalLm({ runtime, fetch: async (_url, init) => {
+    const body = JSON.parse(init.body); bodies.push(body);
+    if (body.n_predict === 0) return new Response(JSON.stringify({ tokens_evaluated: 40 }));
+    const response = JSON.parse(await probs(0.8, 0.2).text());
+    return new Response(JSON.stringify({ ...response, timings: { cache_n: reused } }));
+  } });
+  for (const task of ['a', 'b']) assert.equal((await lm.judge(`${prefix}Task: ${task}\nAnswer:`, 'unit', { prefix })).ok, true);
+  assert.deepEqual(bodies.map(body => body.n_predict), [0, 1, 1], 'warmed once, then reused');
+  assert.equal(bodies[0].prompt, prefix);
+  reused = 0;
+  await lm.judge(`${prefix}Task: c\nAnswer:`, 'unit', { prefix });
+  await lm.judge(`${prefix}Task: d\nAnswer:`, 'unit', { prefix });
+  assert.deepEqual(bodies.slice(3).map(body => body.n_predict), [1, 0, 1], 'a lost checkpoint is warmed again');
+  bodies.length = 0;
+  await lm.judge('Short unrelated prompt\nAnswer:', 'unit', { prefix });
+  assert.deepEqual(bodies.map(body => body.n_predict), [1], 'a prompt without the prefix is never warmed');
+});
+
 test('one inference runs at a time, bursts beyond the queue are refused and repeated failures pause use', async () => {
   let active = 0, peak = 0;
   const slow = L.createLocalLm({ runtime, queueLimit: 2, fetch: async () => { active++; peak = Math.max(peak, active); await new Promise(r => setTimeout(r, 5)); active--; return probs(0.5, 0.5); } });
@@ -87,7 +109,7 @@ test('session-context skill hints pass through the local judge: off-topic matche
   try {
     const filtered = await offeredWith(false);
     assert.ok(filtered.asked.length >= 1, 'the local judge was consulted');
-    assert.match(filtered.asked[0], /Skill ledger-inventory: Applicable workflow\nHelps:$/);
+    assert.ok(filtered.asked.some(prompt => /Skill ledger-inventory: Applicable workflow\nHelps:$/.test(prompt)));
     assert.ok(!filtered.offers.some(file => file.includes('ledger-inventory')), 'an off-topic hint is not delivered');
     const kept = await offeredWith(true);
     assert.ok(kept.offers.some(file => file.includes('ledger-inventory')), 'a relevant hint is delivered after judgement');

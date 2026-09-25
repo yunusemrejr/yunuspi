@@ -8,6 +8,13 @@
  * bursts and anything beyond it is refused as busy. Three consecutive
  * failures pause use for a minute. Every real inference is reported to the
  * health sink as ml.local.inference so the TUI pulse can show it working.
+ *
+ * Qwen3.5 is a hybrid recurrent model: llama.cpp can reuse a cached prompt
+ * prefix only from a context checkpoint at or before the point where two
+ * prompts diverge. A caller's constant few-shot prefix is therefore processed
+ * once on its own (n_predict 0), which leaves a checkpoint exactly at its end
+ * (the service runs with --checkpoint-min-step 0). Measured on the pinned
+ * model: 1.1 s per judgement without it, 0.18 s with it, identical P(yes).
  */
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -60,6 +67,35 @@ function note(data: Record<string, unknown>) {
 	try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.local.inference", data); } catch { /* telemetry is optional */ }
 }
 
+type Post = (body: Record<string, unknown>) => Promise<any>;
+/** Bounded JSON POST to the local server, shared by judgements and line selection. */
+export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, signal: AbortSignal): Post {
+	return async (body) => {
+		const response = await request(runtime.endpoint, { method: "POST", redirect: "error", signal,
+			headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.apiKey}` },
+			body: JSON.stringify({ temperature: 0, cache_prompt: true, ...body }) });
+		if (!response.ok) throw new Error(`http ${response.status}`);
+		const text = await response.text();
+		if (text.length > 65_536) throw new Error("oversized response");
+		return JSON.parse(text);
+	};
+}
+
+/** Prefix -> token count, for prefixes whose checkpoint the server holds. */
+const warmedPrefixes = new Map<string, number>();
+/** Process a constant prompt prefix alone, once, so the server keeps a
+ * context checkpoint exactly where the variable part begins. */
+export async function warmLocalLmPrefix(post: Post, prefix: string): Promise<void> {
+	if (warmedPrefixes.has(prefix)) return;
+	const tokens = Number((await post({ prompt: prefix, n_predict: 0 }))?.tokens_evaluated);
+	if (Number.isSafeInteger(tokens) && tokens > 0) warmedPrefixes.set(prefix, tokens);
+}
+/** A restarted or evicted server no longer holds the checkpoint: warm again next time. */
+export function noteLocalLmPrefixReuse(prefix: string, body: any): void {
+	const reused = Number(body?.timings?.cache_n);
+	if (Number.isFinite(reused) && reused < (warmedPrefixes.get(prefix) ?? 0)) warmedPrefixes.delete(prefix);
+}
+
 /** P(yes) from the first generated token's top candidates. */
 export function yesProbability(body: any): number | undefined {
 	const first = Array.isArray(body?.completion_probabilities) ? body.completion_probabilities[0] : undefined;
@@ -95,8 +131,10 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		/** Synchronous readiness; starts loading the descriptor when unknown. */
 		ready(): boolean { if (!loaded || (!runtime && now() - loadedAt >= 60_000)) void ensure(); return Boolean(runtime) && now() >= pausedUntil; },
 		stats: () => ({ ...stats, model: runtime ? LOCAL_LM_MODEL : undefined, paused: now() < pausedUntil }),
-		/** Few-shot yes/no judgement. `prompt` must end where the answer begins. */
-		async judge(prompt: string, purpose: string, signal?: AbortSignal): Promise<Judgement> {
+		/** Few-shot yes/no judgement. `prompt` must end where the answer begins;
+		 * `prefix` is its constant few-shot part, cached once per server. */
+		async judge(prompt: string, purpose: string, options: { signal?: AbortSignal; prefix?: string } = {}): Promise<Judgement> {
+			const { signal, prefix } = options;
 			await ensure();
 			if (!runtime) return { ok: false, reason: "unavailable" };
 			if (now() < pausedUntil) return { ok: false, reason: "paused" };
@@ -109,13 +147,12 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			const timer = setTimeout(() => controller.abort(), runtime.timeoutMs);
 			try {
 				if (signal?.aborted) return { ok: false, reason: "cancelled" };
-				const response = await request(runtime.endpoint, { method: "POST", redirect: "error", signal: controller.signal,
-					headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.apiKey}` },
-					body: JSON.stringify({ prompt: prompt.slice(-12_000), n_predict: 1, temperature: 0, n_probs: 10, cache_prompt: true }) });
-				if (!response.ok) throw new Error(`http ${response.status}`);
-				const text = await response.text();
-				if (text.length > 65_536) throw new Error("oversized response");
-				const p = yesProbability(JSON.parse(text));
+				const post = localLmPost(runtime, request, controller.signal);
+				const cacheable = prefix !== undefined && prefix.length >= 64 && prompt.length <= 12_000 && prompt.startsWith(prefix);
+				if (cacheable) await warmLocalLmPrefix(post, prefix);
+				const body = await post({ prompt: prompt.slice(-12_000), n_predict: 1, n_probs: 10 });
+				if (cacheable) noteLocalLmPrefixReuse(prefix, body);
+				const p = yesProbability(body);
 				if (p === undefined) throw new Error("no probabilities");
 				const ms = now() - started;
 				failures = 0; stats.answered++; stats.totalMs += ms;
@@ -138,7 +175,7 @@ let shared: ReturnType<typeof createLocalLm> | undefined;
 export function localLm() { return shared ??= createLocalLm(); }
 export function resetLocalLmForTests(next?: ReturnType<typeof createLocalLm>) { shared = next; }
 
-const RELEVANCE_EXAMPLES = `Decide if a skill guide helps an AI agent with a task. The skill must match the task's actual domain or technology.
+export const SKILL_RELEVANCE_EXAMPLES = `Decide if a skill guide helps an AI agent with a task. The skill must match the task's actual domain or technology.
 Task: Write a REST API in Go with PostgreSQL.
 Skill kubernetes-operators: Build Kubernetes operators and CRDs.
 Helps: no
@@ -158,5 +195,5 @@ Helps: yes
 export const SKILL_RELEVANCE_THRESHOLD = 0.70;
 const oneLine = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 export function skillRelevancePrompt(task: string, skill: { name: string; description: string }): string {
-	return `${RELEVANCE_EXAMPLES}Task: ${oneLine(task, 600)}\nSkill ${oneLine(skill.name, 80)}: ${oneLine(skill.description, 320)}\nHelps:`;
+	return `${SKILL_RELEVANCE_EXAMPLES}Task: ${oneLine(task, 600)}\nSkill ${oneLine(skill.name, 80)}: ${oneLine(skill.description, 320)}\nHelps:`;
 }

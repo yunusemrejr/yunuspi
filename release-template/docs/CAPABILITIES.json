@@ -2948,7 +2948,7 @@
       {
         "name": "obs",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 893
+        "line": 897
       },
       {
         "name": "observer-book",
@@ -3472,7 +3472,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 817,
+        "line": 821,
         "kind": "literal"
       },
       {
@@ -3938,7 +3938,7 @@
       {
         "name": "obs_read",
         "source": "agent/extensions/pi-observations.ts",
-        "line": 817,
+        "line": 821,
         "kind": "literal"
       },
       {

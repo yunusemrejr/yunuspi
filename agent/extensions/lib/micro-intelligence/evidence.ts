@@ -142,7 +142,7 @@ export function routeEvidence(input: RouteInput): EvidenceRoute {
     if (safeSmolOutput(tool, text, false, input.details)) {
       route.smol = true;
       reasons.push("smol:line-shaped");
-    } else if (["bash", "read", "grep", "find", "ls"].includes(tool) && text.length <= 32768 && text.split("\n").length >= 8) {
+    } else if (tool === "bash" && text.length <= 32768 && text.split("\n").length >= 8) {
       // Chunked async opportunity (see smol-preprocessor chunk offers):
       // large line output the sync gate rejects can still warm selections.
       route.smol = true;

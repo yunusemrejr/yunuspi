@@ -98,14 +98,16 @@ test('Smol reports size and shape eligibility separately without weakening prote
     ['bash', 'short output', false, undefined, 'too-small-to-benefit'],
     ['bash', clean.repeat(2), false, undefined, 'input-budget'],
     ['bash', clean + 'é ✓ → ├──', false, undefined, undefined],
-    ['bash', clean + '\u202e', false, undefined, 'input-shape-unsupported'],
-    ['bash', clean + '\x1b[31m', false, undefined, 'input-shape-unsupported'],
+    ['bash', clean + '\u202e', false, undefined, 'control-characters'],
+    ['bash', clean + '\x1b[31m', false, undefined, 'control-characters'],
     ['bash', clean, false, { truncated: true }, 'protected-content'],
     ['bash', clean + ' warning: inspect this evidence', false, undefined, undefined],
     ['bash', clean + '\nTraceback (most recent call last):', false, undefined, 'protected-content'],
     ['bash', clean + ' Authorization: Bearer abc', false, undefined, 'protected-content'],
     ['bash', clean, true, undefined, 'protected-content'],
     ['custom', clean, false, undefined, 'unsupported-tool'],
+    ['read', clean, false, undefined, 'requested-content'],
+    ['grep', clean, false, undefined, 'requested-content'],
     ['bash', clean, false, undefined, undefined],
   ];
   for (const [tool, raw, isError, details, reason] of cases) {

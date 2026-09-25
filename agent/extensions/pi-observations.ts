@@ -37,6 +37,7 @@ import {
 	outputDelta,
 	outputLineDelta,
 	MAX_OUTPUT_CHARS,
+	isFileViewCommand,
 	isSearchCommand,
 } from "./lib/output-distiller.ts";
 import { askJev, selectDistillChunks, jevEnabled } from "./lib/jev-client.ts";
@@ -49,9 +50,6 @@ import {
 /** Providers whose encoded request body has a hard size cap (independent of the
  *  token window). Inlined from the retired request-body-gate transform — owned
  *  source no longer depends on any transform catalogue. */
-/** A 4–32 KiB window takes about two local inferences' prompt time; its
- * first exposure waits that long once, then every later turn reuses it. */
-const SMOL_WINDOW_WAIT_MS = SMOL_TAKE_WAIT_MS * 2;
 const BODY_LIMIT_PROVIDERS = new Set(["openrouter", "runinfra", "friendli"]);
 function hasRequestBodyLimit(provider: string | undefined): boolean {
 	return !provider || BODY_LIMIT_PROVIDERS.has(provider);
@@ -449,9 +447,14 @@ export default function piObservationsExtension(
 				.select(text, ctx?.model?.cost?.input, taskSignal)
 				.then(finish, () => finish());
 		// Structured successful line output complements Kompress prose selection.
-		// Speculate without delaying this result; a pending first exposure stays
-		// raw while a validated source/task cache can serve later observations.
+		// Speculate without delaying this result; the first exposure waits about
+		// one local inference, then seals. File views are requested content: a
+		// selection of them would only force an obs_read round trip.
+		const fileView = event.toolName === "bash" && isFileViewCommand(event.input?.command);
+		if (fileView && route.smol && !preserveRaw && !distilled)
+			noteHealth("ml.smol.offer", { decision: "ineligible", reason: "requested-content" });
 		if (
+			!fileView &&
 			process.env.PI_OUTPUT_DISTILLER !== "off" &&
 			pi.getActiveTools().includes("obs_read") &&
 			safeSmolOutput(
@@ -475,6 +478,7 @@ export default function piObservationsExtension(
 		// tail and select within the window. Rendered with original line
 		// numbers; the full original stays behind obs_read.
 		if (
+			!fileView &&
 			route.smol &&
 			!event.isError &&
 			typeof (smol as { offerWindowed?: unknown }).offerWindowed === "function" &&
@@ -599,7 +603,7 @@ export default function piObservationsExtension(
 							smolReady.set(
 								index,
 								value ?? (typeof takeWindowed === "function"
-										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, SMOL_WINDOW_WAIT_MS, raw)
+										? await takeWindowed.call(smol, `${ref.id}:${ref.signature}`, SMOL_TAKE_WAIT_MS, raw)
 									: undefined),
 							);
 						}),

@@ -83,7 +83,7 @@ export async function cheapMutationScreen(task: string, deps: { classify?: typeo
     /* Fall through to the local model, Jev, then the full arbiter. */
   }
   try {
-    const judge = deps.judge ?? ((prompt: string) => localLm().judge(prompt, "mutation-intent"));
+    const judge = deps.judge ?? ((prompt: string) => localLm().judge(prompt, "mutation-intent", { prefix: MUTATION_EXAMPLES }));
     const local = await judge(`${MUTATION_EXAMPLES}Task: ${task.replace(/\s+/g, " ").slice(0, 600)}\nChanges files:`);
     if (local.ok && typeof local.p === "number" && local.p >= LOCAL_IMPLEMENTATION_AT) {
       metrics.llmAvoided(800);

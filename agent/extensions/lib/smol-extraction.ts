@@ -3,13 +3,23 @@ import { createHash } from 'node:crypto';
 import { protectedEvidence } from './local-intelligence.mjs';
 
 export const SMOL_MAX_INPUT_BYTES = 4096;
-export const SMOL_MAX_LINES = 128;
+/** Short-line listings (process tables, package lists) fit 4 KiB in 256 rows. */
+export const SMOL_MAX_LINES = 256;
 export const SMOL_MAX_SELECTED_LINES = 16;
-/** Only plain inventory rows may treat a number/path as background. Distinct
- * status, decisions, quantities and source qualifications remain mandatory. */
-export function smolProtectedLine(text: string): boolean {
-  if (/^[\w./-]+\s+bytes=\d+[. ]*\r?\n?$/.test(text)) return false;
-  return protectedEvidence.test(text) || /\b(?:balance|elapsed|result|summary|totals?)\b/i.test(text);
+// Status, outcome and quantity facts, plus negations and qualifications.
+const statusFact = /\b(?:exit[ _-]?code|status|result|summary|totals?|passed|failed|errors?|failures?|warnings?|completed?|success(?:ful|fully)?|denied|blocked|refused|mismatch|expected|actual|balance|elapsed|not|no|never|none|neither|without|cannot|invalid|unavailable|incomplete|partial|cancelled|aborted|skipped|unless|except|however|only|possibly|maybe|uncertain|unverified|pending|but|exception|fatal|panic|traceback|assertion|deprecated)\b|n't\b|\$\s?[\d,]+|\b\d+(?:\.\d+)?\s?%|^\s*(?:not ok\b|FAIL\b)/i;
+/** Structural template of a row: numbers, words and repeated punctuation collapse. */
+const rowShape = (text: string) => text.trim().replace(/\d+/g, '0').replace(/[\p{L}_]+/gu, 'a').replace(/(.)\1+/g, '$1');
+/** Lines the host always keeps: status, outcome and quantity facts, and any
+ * qualified fact (number, path, name, qualifier) on a line that is not one of
+ * three or more rows sharing a template. Listing, process-table and progress
+ * rows are background the model may omit: protecting every row with a number
+ * or path made nearly every real command output "all facts" (2,416 of 3,300
+ * recorded outputs), so the selector abstained on all of them. */
+export function smolFactLines(lines: readonly string[]): boolean[] {
+  const shapes = lines.map(rowShape), counts = new Map<string, number>();
+  for (const shape of shapes) counts.set(shape, (counts.get(shape) ?? 0) + 1);
+  return lines.map((text, i) => statusFact.test(text) || (protectedEvidence.test(text) && counts.get(shapes[i])! < 3));
 }
 export interface SmolSourceLine { readonly id: number; readonly start: number; readonly end: number; readonly text: string }
 export interface SmolExtractionSource {
@@ -95,9 +105,9 @@ export function prepareSmolWindow(raw: string, requiredLineIds: readonly number[
   // Protect the complete source BEFORE making a lossy window. Deduplicate
   // exact repeated facts only; changed numbers/statuses are different facts.
   const protectedLines = new Set([0, lines.length - 1, ...requiredLineIds.map(id => id - 1)]);
-  const seen = new Set<string>();
+  const seen = new Set<string>(), facts = smolFactLines(lines);
   lines.forEach((line, index) => {
-    if (!smolProtectedLine(line) || seen.has(line)) return;
+    if (!facts[index] || seen.has(line)) return;
     seen.add(line); protectedLines.add(index);
   });
   const cost = (index: number) => Buffer.byteLength(lines[index], 'utf8') + 1;

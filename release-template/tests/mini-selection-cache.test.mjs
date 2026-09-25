@@ -171,6 +171,8 @@ test("background SLM freezes first exposure and reuses validated source/task cac
   runtime: smolRuntime,
   acquireLease: async () => true,
   fetch: async (_url, options) => {
+   // The constant instruction is processed alone first (n_predict 0).
+   if (JSON.parse(options.body).n_predict === 0) return new Response("{}");
    calls++;
    signal = options.signal;
    return new Promise((resolve) => (finish = resolve));
@@ -275,9 +277,10 @@ test("native observation consumer uses background SLM alongside Kompress without
  );
  let finish;
  const client = createSmolPreprocessor({
-  runtime: smolRuntime,
+  // Outlives the first-exposure wait, as the installed 5 s timeout does.
+  runtime: { ...smolRuntime, timeoutMs: 3000 },
   acquireLease: async () => true,
-  fetch: async () => new Promise((resolve) => (finish = resolve)),
+  fetch: async (_url, options) => JSON.parse(options.body).n_predict === 0 ? new Response("{}") : new Promise((resolve) => (finish = resolve)),
  });
  const handlers = {},
   tools = {},
@@ -338,7 +341,7 @@ test("native observation consumer uses background SLM alongside Kompress without
   ((await handlers.context({ messages: [first] }, ctx))?.messages ?? [first])[0]
    .content[0].text,
   lineRaw,
-  "native first exposure is immediate raw",
+  "a first exposure still pending after the bounded wait stays raw",
  );
  finish(
   new Response(

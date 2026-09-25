@@ -114,11 +114,13 @@ function observations() {
   register(pi,
     { reset: () => {}, endTurn: () => {}, select: async (text) => { selects.push(text); } },
     { reset: () => {}, endTurn: () => {}, offer: (_key, text) => offers.push(text), take: () => undefined, takeAsync: async () => undefined });
-  const read = (text, file = "notes.md") => handlers.get("tool_result")[0]({
-    toolName: "read", toolCallId: `call-${selects.length + offers.length}`, input: { path: file }, isError: false,
+  const result = (toolName, input, text) => handlers.get("tool_result")[0]({
+    toolName, toolCallId: `call-${selects.length + offers.length}`, input, isError: false,
     content: [{ type: "text", text }], details: {},
   }, { model: { cost: { input: 3 } } });
-  return { selects, offers, read };
+  const read = (text, file = "notes.md") => result("read", { path: file }, text);
+  const run = (text, command = "python3 report.py") => result("bash", { command }, text);
+  return { selects, offers, read, run };
 }
 
 test("Kompress claims only output it could shorten; the rest stays with Smol", async () => {
@@ -135,7 +137,10 @@ test("Kompress claims only output it could shorten; the rest stays with Smol", a
   assert.equal(mini.miniAdmissible(protectedDoc, 3), false);
   await s.read(protectedDoc);
   assert.equal(s.selects.length, 1, "no Kompress request for unshortenable prose");
-  assert.deepEqual(s.offers, [protectedDoc], "Smol receives the output instead");
+  assert.deepEqual(s.offers, [], "a file read is requested content and stays exact");
+  await s.run(protectedDoc);
+  assert.equal(s.selects.length, 1, "no Kompress request for unshortenable command output");
+  assert.deepEqual(s.offers, [protectedDoc], "Smol receives command output instead");
 });
 
 test("the worker answers shape refusals without spending its inference slot", (t) => {

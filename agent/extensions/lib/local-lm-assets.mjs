@@ -6,6 +6,10 @@
  * 0.53 for SmolLM2-135M (chance), 0.47 for LFM2.5-350M and 0.85 for the 1.4x
  * slower LFM2.5-1.2B; it also picked exactly the failing-test lines from a
  * test log. p50 latency ~0.9 s per judgement, ~1.4 GB RSS at 4K context.
+ * Prompt processing dominates (answers are 1-10 tokens), so it gets six
+ * threads; --checkpoint-min-step 0 lets the hybrid model keep a checkpoint at
+ * a short few-shot prefix (local-lm.ts warms it), cutting a judgement from
+ * ~1.1 s to ~0.18 s on a Ryzen 5 7530U.
  * License: Apache-2.0 (Qwen/Qwen3.5-0.8B). Nothing is committed: weights and
  * the llama.cpp runtime download at install time and are checksum-pinned.
  *
@@ -81,10 +85,10 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStart=${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 4 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
+ExecStart=${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 6 --checkpoint-min-step 0 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
 WorkingDirectory=${dir}
 Nice=10
-CPUQuota=400%
+CPUQuota=600%
 MemoryMax=2G
 TasksMax=32
 NoNewPrivileges=true

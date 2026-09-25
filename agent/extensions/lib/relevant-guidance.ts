@@ -1,4 +1,4 @@
-import { localLm, skillRelevancePrompt, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
+import { localLm, skillRelevancePrompt, SKILL_RELEVANCE_EXAMPLES, SKILL_RELEVANCE_THRESHOLD } from "./local-lm.ts";
 import { sessionObservability } from './session-observability.ts';
 /** Bounded capability hints and task/file skill review owned by reminders.ts.
  * Deterministic routes remain authoritative; optional asynchronous discovery
@@ -387,7 +387,7 @@ export function createRelevantGuidance(pi: any) {
     skillVerdicts.set(key, "pending");
     if (skillVerdicts.size > 256) skillVerdicts.delete(skillVerdicts.keys().next().value!);
     const epoch = focusEpoch;
-    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance").then(result => {
+    void localLm().judge(skillRelevancePrompt(taskFocus, skill), "skill-relevance", { prefix: SKILL_RELEVANCE_EXAMPLES }).then(result => {
       if (epoch !== focusEpoch) return;
       // Without a usable model the lexical hint keeps its previous behavior.
       if (!result.ok) { skillVerdicts.delete(key); add(hint); return; }
