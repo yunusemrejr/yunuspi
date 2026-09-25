@@ -192,8 +192,18 @@ export async function smokeLocalLm(agentDir = needleAgentDir(), timeoutMs = 60_0
     try {
       const started = Date.now();
       const response = await fetch(runtime.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${runtime.apiKey}` },
-        body: JSON.stringify({ prompt: "Question: Is Paris the capital of France? Answer yes or no.\nAnswer:", n_predict: 2, temperature: 0 }), signal: AbortSignal.timeout(20_000) });
-      if (response.ok) { const body = await response.json(); return { ok: /yes/i.test(String(body.content)), ms: Date.now() - started, answer: String(body.content).trim().slice(0, 20) }; }
+        // Same method as the harness: first-token P(yes) on a few-shot prompt.
+        body: JSON.stringify({ prompt: "Answer yes or no.\nQuestion: Is water wet?\nAnswer: yes\nQuestion: Is fire cold?\nAnswer: no\nQuestion: Is Paris the capital of France?\nAnswer:", n_predict: 1, n_probs: 10, temperature: 0 }), signal: AbortSignal.timeout(20_000) });
+      if (response.ok) {
+        const body = await response.json();
+        let yes = 0, no = 0;
+        for (const candidate of body.completion_probabilities?.[0]?.top_logprobs ?? []) {
+          const token = String(candidate.token ?? "").trim().toLowerCase(), p = Math.exp(candidate.logprob ?? -Infinity);
+          if (token.startsWith("yes")) yes += p; else if (token.startsWith("no")) no += p;
+        }
+        const pYes = yes + no > 0 ? yes / (yes + no) : 0;
+        return { ok: pYes > 0.5, ms: Date.now() - started, pYes: Math.round(pYes * 1000) / 1000 };
+      }
       last = `http ${response.status}`;
     } catch (error) { last = String(error?.message ?? error).slice(0, 120); }
     await new Promise((resolve) => setTimeout(resolve, 1000));

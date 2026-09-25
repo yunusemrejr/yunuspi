@@ -136,7 +136,7 @@ service and weights; `scripts/install.mjs` runs it on Linux x86-64 unless
 `--skip-local-lm`.
 
 Measured on real harness decisions (2026-09-25, four threads): skill-hint
-relevance AUC 0.88 and 0.88 accuracy at P(relevant) 0.66, against 0.53 for
+relevance AUC 0.88, and against the served model 0.88 accuracy with no off-topic hint kept at P(relevant) 0.70, against 0.53 for
 SmolLM2-135M, 0.47 for LFM2.5-350M and 0.85 for the slower LFM2.5-1.2B; p50
 about 0.9 s per judgement. On a test log it selected exactly the failing
 test's lines. These are small fixtures, not production accuracy.

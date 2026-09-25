@@ -152,8 +152,10 @@ Task: Build an e-commerce site in PHP on shared hosting.
 Skill php-app: Secure PHP applications on FPM and cPanel hosting.
 Helps: yes
 `;
-/** Calibrated on real session pairs: 0.88 accuracy at this threshold. */
-export const SKILL_RELEVANCE_THRESHOLD = 0.66;
+/** Calibrated against the served model on 24 labelled pairs from real
+ * sessions: 0.88 accuracy and no off-topic hint kept (precision 1.00) at 0.70;
+ * 0.66 let an ERP reference through for a PHP music blog (P 0.68). */
+export const SKILL_RELEVANCE_THRESHOLD = 0.70;
 const oneLine = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 export function skillRelevancePrompt(task: string, skill: { name: string; description: string }): string {
 	return `${RELEVANCE_EXAMPLES}Task: ${oneLine(task, 600)}\nSkill ${oneLine(skill.name, 80)}: ${oneLine(skill.description, 320)}\nHelps:`;
