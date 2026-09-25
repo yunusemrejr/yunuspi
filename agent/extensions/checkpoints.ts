@@ -43,7 +43,7 @@ import {
 	fileCheckpoints,
 	fileCheckpointText,
 } from "./lib/checkpoint-files.ts";
-import { createProjectTestLifecycle } from "./lib/project-tests.ts";
+import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { registerShadowSource } from "./lib/intervention-registry.ts";
@@ -629,8 +629,10 @@ function emit(
 export default function checkpointsExtension(pi: ExtensionAPI) {
 	// Keep all tools/hooks disabled under the documented PI_CHECKPOINTS=0 contract.
 	if (DISABLED) return;
-	const quality = createQualityReviewLifecycle(pi, { shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot() });
-	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe) => quality.observe(facts, observe) });
+	// One workspace revision for tests and reviews of the same tree.
+	const revision = createWorkspaceRevision();
+	const quality = createQualityReviewLifecycle(pi, { shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot(), revision });
+	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe, token) => quality.observe(facts, observe, token), revision });
 	let st: CheckpointState | null = null;
 	const pending = new Map<string, string>();
 	let mutationVersion = 0;

@@ -167,7 +167,8 @@ function verifyReviewTree(root: string, changed: string[], persisted: unknown): 
   return verified;
 }
 
-export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any } ) {
+export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any; revision?: { readonly current: number; advance(token: string): number; seed(value: number): void } } ) {
+  let changeSequence = 0;
   let releaseShared = () => {}, disposeContinuationNotice = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
   let reports: ReviewReport[] = [], reviewed = -1, disposition = '', reason = '', paused = true, active = true, generation = 0, busy: Promise<any> | undefined, controller: AbortController | undefined;
@@ -197,11 +198,13 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const testsPending = () => { const tests = options.tests(); return !tests?.disabled && !!tests?.need; };
   const save = () => { try { pi.appendEntry?.(ENTRY, { root, revision, changed, task, rounds, refunded, followups, reports, reviewed, disposition, reason, scopeOverflow, dispatchGap, reviewedEvidence, reviewedEvidencePaths, evidenceRejected, reviewUnavailable,
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => changed.includes(file)).slice(-128)) }); } catch {} };
-  const invalidate = (files: string[]) => {
-    if (!files.length) return;
+  const invalidate = (files: string[], token = `quality:${++changeSequence}`): boolean => {
+    if (!files.length) return false;
     for (const file of files) patterns.delete(file);
     const all = [...new Set([...changed,...files])]; scopeOverflow ||= all.length > 128;
-    revision++; changed = all.slice(-128); disposition = ''; reason = ''; delivered = ''; save();
+    // The workspace revision is shared with project tests: one tree, one number.
+    revision = options.revision ? options.revision.advance(token) : revision + 1; changed = all.slice(-128); disposition = ''; reason = ''; delivered = ''; save();
+    return true;
   };
   const unavailableReason = () => dispatchGap || reason || (reviewUnavailable ? 'Independent review unavailable: ' + [...new Set(reports.map(r => r.gap))].join(' ').slice(0, 1000) : '');
   const status = () => !changed.length ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
@@ -391,8 +394,9 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     try { return await operation; } finally { clearInterval(progressTimer); if (progress === roundProgress) progress = undefined; own.abort(); if (busy === operation) busy = undefined; if (controller === own) controller = undefined; }
   };
   const api = {
-    observe(facts: any, observeChanges: boolean) {
-      if (!active || !enabled()) return;
+    observe(facts: any, observeChanges: boolean, token?: string): boolean {
+      if (!active || !enabled()) return false;
+      let invalidated = false;
     if (root && root !== facts.root) { cancel(); baseline = undefined; revision = 0; changed = []; reports = []; reviewed = -1; disposition = ''; rounds = 0; refunded = 0; history = []; scopeOverflow = false; dispatchGap = ''; reviewUnavailable = false; reviewedEvidence = ''; reviewedEvidencePaths = []; evidenceRejected = []; patterns.clear(); hashes = {}; }
       root = facts.root; truncated = facts.truncated === true;
       if (truncated && disposition === 'accepted') { disposition = ''; reviewed = -1; reason = 'Current source discovery is incomplete; earlier acceptance cannot establish the current scope.'; }
@@ -404,19 +408,20 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // exact content was already accounted for instead of double-counting it.
         const candidates = [...new Set([...Object.keys(baseline),...Object.keys(next)])].filter(f =>
           (observeChanges || changed.includes(f)) && next[f] !== baseline![f] && (next[f] !== undefined || !truncated));
-        invalidate(candidates.filter(f => {
+        invalidated = invalidate(candidates.filter(f => {
           if (next[f] === undefined) { delete hashes[f]; return true; }
           const current = reviewContentHash(path.join(root,f));
           if (current && hashes[f] === current) return false;
           if (current) hashes[f] = current;
           return true;
-        }));
+        }), token);
       }
       for (const f of Object.keys(next)) if (hashes[f] === undefined && next[f] !== undefined) {
         const current = reviewContentHash(path.join(root,f));
         if (current) hashes[f] = current;
       }
       baseline = truncated && baseline ? Object.fromEntries(Object.entries({...baseline,...next}).slice(-4000)) : next;
+      return invalidated;
     },
     restore(ctx: any) {
       disposeContinuationNotice();
@@ -437,6 +442,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // were persisted, takes the conservative bump-and-drop path below.
         const verified = verifyReviewTree(root, restoredChanged, (data as any)?.hashes);
         revision = verified ? data.revision : data.revision + 1;
+        options.revision?.seed(revision);
         changed = restoredChanged;
         if (verified) { hashes = verified; if (data.reviewed === data.revision) reviewedHashes = {...verified}; }
         rounds = Math.min(2, Math.max(0,Number(data.rounds)||0)); refunded = Math.max(0,Math.min(99,Number(data.refunded)||0)); followups = Math.min(3,Math.max(0,Number(data.followups)||0)); task = String(data.task??'').slice(0,6000);
@@ -496,7 +502,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         // for, so a single edit cannot bump the review revision twice.
         const current = reviewContentHash(path.resolve(root || ctx.cwd,file));
         if (!(current && hashes[file] === current)) {
-          invalidate([file]);
+          invalidate([file], `native:${event.toolCallId}`);
           if (current) hashes[file] = current;
         }
         if (patterns.size >= 128) patterns.delete(patterns.keys().next().value!);

@@ -11,12 +11,16 @@ import { registerContinuationSource } from './continuation-notice.ts';
 import { attributeWorkspacePath, recordWorkspaceMutation } from './workspace-write-lease.ts';
 
 const ENTRY = 'project-test-checkpoint-v1';
+/** pi-background-tasks' terminal publication channel (extension-api.ts). */
+const BG_TERMINAL_CHANNEL = 'pi-background-tasks:terminal:v1';
 const MAX_FOLLOWUPS = 2;
 type Check = { key: string; label: string; revision: number; outcome: 'passed' | 'failed' | 'unknown' | 'running'; callId: string; handle?: string; tree?: string };
 type Assessment = { revision: number; disposition: 'required' | 'not_needed' | 'blocked'; reason: string; checks: { key: string; label: string }[] };
 type ChangeAttribution = { status: 'current_session' | 'another_session' | 'unattributed'; sessionId?: string; detail?: string };
 type State = { root: string; revision: number; changed: string[]; attribution: Record<string, ChangeAttribution>; assessment?: Assessment; checks: Check[]; evidence: Check[]; tree?: string; treeComplete?: boolean; followups: number; paused: boolean; optedOut: boolean };
 const fresh = (root = ''): State => ({ root, revision: 0, changed: [], attribution: {}, checks: [], evidence: [], followups: 0, paused: false, optedOut: false });
+const NO_GIT_OBSERVED = 'content-hash observed (no Git checkout)';
+const nativeAttribution = (sessionId: string, tool: string): ChangeAttribution => ({ status: 'current_session', sessionId, detail: `native ${tool} (content-hash tracked, no Git)` });
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 /** Stable identity of the observed sources: sorted path:hash entries hashed.
  * Revision counters reset across scopes and reloads; the tree hash is what
@@ -176,6 +180,33 @@ function checkCommandInner(command: unknown, cwd: string, declared: boolean): Ch
   return { check: { key: digest(JSON.stringify([directory, commandTokens])), label: command.trim() } };
 }
 
+/** Output shaping that leaves the check's exit observable: a trailing
+ * `2>&1`, a redirect into a file (such as build/verify/*.txt) and, when run
+ * with pipefail, `| tail|head [-n] N`. Returns the bare check plus whether the
+ * run needs pipefail to report the check's exit instead of the filter's. */
+export function checkInvocation(command: unknown): { body: string; pipefail: boolean } | undefined {
+  if (typeof command !== 'string' || /[$`\r\n;]/.test(command)) return undefined;
+  let body = command.trim(), pipefail = false;
+  const tail = /\s*\|\s*(?:tail|head)(?:\s+-n)?\s+-?\d+\s*$/.exec(body);
+  if (tail) { body = body.slice(0, tail.index); pipefail = true; }
+  let previous = '';
+  while (previous !== body) {
+    previous = body;
+    body = body.replace(/\s+2>&1\s*$/, '').replace(/\s+(?:1|2|&)?>>?\s*[\w./@-]+\s*$/, '').trim();
+  }
+  return body && body !== command.trim() ? { body, pipefail } : undefined;
+}
+/** Read-only reconnaissance proves nothing about behavior: never evidence. */
+const RECON = /^(?:ls|ll|cat|head|tail|less|more|find|fd|grep|rg|ag|wc|stat|file|du|df|tree|pwd|which|type|whereis|realpath|readlink|basename|dirname|date|whoami|uname|id|env|printenv|sed|awk|sort|uniq|cut|tr|diff|cmp|md5sum|sha256sum|jq|curl|wget|ps|pgrep|lsof|ss|netstat)$/;
+function reconCommand(command: string): boolean {
+  const segments = command.split('&&');
+  const body = segments.length === 2 && segments[0].trim().startsWith('cd ') ? segments[1] : command;
+  const tokens = body.trim().split(/\s+/).filter(t => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t));
+  const exe = path.basename(tokens[0] ?? '');
+  if (exe === 'git') return /^(?:log|status|diff|show|branch|remote|rev-parse|ls-files|describe|blame)$/.test(tokens[1] ?? '');
+  return RECON.test(exe);
+}
+
 export function projectCheckCommand(command: unknown, cwd: string, declared = false) {
   const verdict = checkCommandInner(command, cwd, declared);
   return 'check' in verdict ? verdict.check : null;
@@ -189,8 +220,11 @@ export function projectCheckCommandReason(command: unknown, cwd: string): string
 }
 
 function currentProjectCheck(state: State, key: string) {
+  // Content identity, not the revision counter, decides reuse: a receipt
+  // earned on byte-identical sources stays current after edits that were
+  // reverted or touched nothing the scan hashes, so no re-run is demanded.
   return state.checks.findLast(c => c.key === key && c.revision === state.revision)
-    ?? (state.treeComplete && state.tree ? state.evidence.findLast(c => c.key === key && c.tree === state.tree) : undefined);
+    ?? (state.treeComplete && state.tree ? [...state.checks, ...state.evidence].findLast(c => c.key === key && c.tree === state.tree && c.outcome !== 'running') : undefined);
 }
 
 export function projectTestNeed(state: State): string | null {
@@ -216,12 +250,28 @@ export function userSkipsProjectTests(input: string): boolean {
   return [...matches].some(match => !/^\s+(?:for|in|on|under|inside|against|of|that|which)\b/i.test(prose.slice(match.index! + match[0].length)));
 }
 
-export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts; onFacts?: (facts: any, observeChanges: boolean) => void } = {}) {
+/** One monotonic revision for the workspace, shared by the project-test and
+ * quality-review lifecycles: the same byte change is the same revision in
+ * both, and one scan or native write advances it at most once. */
+export interface WorkspaceRevision { readonly current: number; advance(token: string): number; seed(value: number): void }
+export function createWorkspaceRevision(): WorkspaceRevision {
+  let current = 0, lastToken = '';
+  return {
+    get current() { return current; },
+    advance(token: string) { if (token && token === lastToken) return current; lastToken = token; return ++current; },
+    seed(value: number) { if (Number.isSafeInteger(value) && value > current) current = value; },
+  };
+}
+
+export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean; discover?: typeof projectTestFacts; onFacts?: (facts: any, observeChanges: boolean, token: string) => void; revision?: WorkspaceRevision } = {}) {
+  const workspaceRevision = options.revision ?? createWorkspaceRevision();
+  let scanSequence = 0;
   let disposeContinuationNotice = () => {};
   let state = fresh(), facts: any, baseline: Record<string, string> | undefined, epoch = 0, active = true;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1, delivered = '', deliveryInFlight = '', deliveryVersion = 0;
   let hashes: Record<string, string> = {};
+  let lastCtx: any;
   const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number; observeOnly?: boolean }>();
   const earlyTerminals = new Map<string, any>();
   // Recent commands that LOOK like a planned check (same executable) but did
@@ -241,13 +291,19 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   const capable = () => pi.getActiveTools?.().includes('project_tests') && pi.getActiveTools?.().some((t: string) => ['bash', 'bg_run'].includes(t));
   const save = () => { try { pi.appendEntry?.(ENTRY, { ...state, changed: state.changed.slice(-128), attribution: Object.fromEntries(state.changed.slice(-128).map(file => [file, state.attribution[file]]).filter(([, value]) => value)), checks: state.checks.slice(-32),
     hashes: Object.fromEntries(Object.entries(hashes).filter(([file]) => state.changed.includes(file)).slice(-128)) }); } catch { /* history persistence is best effort */ } };
-  const changed = (files: string[], ctx?: any) => {
+  const changed = (files: string[], ctx?: any, nativeWriter?: string, token = `change:${++scanSequence}`) => {
     if (!files.length) return;
-    state.revision++;
+    state.revision = workspaceRevision.advance(token);
     state.changed = [...new Set([...state.changed, ...files])].slice(-128);
     for (const file of files) {
       const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
-      state.attribution[file] = attributeWorkspacePath(ctx?.cwd ?? state.root, sid, file);
+      const leased = attributeWorkspacePath(ctx?.cwd ?? state.root, sid, file);
+      // Without Git there are no writer leases. This session's own native
+      // write/edit is still known exactly; other changes are identified by
+      // content hash rather than reported as a repeated failure.
+      state.attribution[file] = leased.detail !== 'not a Git checkout' ? leased
+        : nativeWriter && sid ? nativeAttribution(sid, nativeWriter)
+        : { status: 'unattributed', detail: NO_GIT_OBSERVED };
     }
     for (const file of Object.keys(state.attribution)) if (!state.changed.includes(file)) delete state.attribution[file];
     notedRevision = -1;
@@ -270,17 +326,18 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     const ticket = epoch;
     const perform = async () => {
       if (ticket !== epoch) return;
+      const token = `scan:${++scanSequence}`;
       let next: any;
       try { next = await discover(ctx.cwd, ctx.signal); }
       catch {
         if (ticket === epoch) {
           facts = { unavailable: true, tests: [], manifests: [], scripts: [], truncated: true };
-          options.onFacts?.({ ...facts, root: state.root || ctx.cwd, reviewSources: {} }, observeChanges);
+          options.onFacts?.({ ...facts, root: state.root || ctx.cwd, reviewSources: {} }, observeChanges, token);
         }
         return;
       }
       if (ticket !== epoch || !active) return;
-      options.onFacts?.(next, observeChanges);
+      options.onFacts?.(next, observeChanges, token);
       if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; hashes = {}; starts.clear(); }
       state.root = next.root;
       const nextSources = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
@@ -298,7 +355,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         changed([...paths].filter(file => (observeChanges || state.changed.includes(file))
           && (next.sources[file] !== undefined || !next.truncated)
           && (next.sources[file] !== baseline![file] || currentHashes[file] && hashes[file] && currentHashes[file] !== hashes[file])
-          && (!currentHashes[file] || currentHashes[file] !== hashes[file])), ctx);
+          && (!currentHashes[file] || currentHashes[file] !== hashes[file])), ctx, undefined, token);
       }
       Object.assign(hashes, currentHashes);
       for (const file of Object.keys(hashes)) if (!(file in nextSources)) delete hashes[file];
@@ -310,7 +367,18 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     };
     const run = scanTail.then(perform, perform); scanTail = run.catch(() => {}); await run;
   };
-  const summary = () => ({ ...state, plannedChecks: (state.assessment?.checks ?? []).map(check => {
+  /** One line per distinct attribution instead of one per changed file. */
+  const attributionSummary = () => {
+    const groups = new Map<string, { status: string; detail?: string; count: number; files: string[] }>();
+    for (const [file, value] of Object.entries(state.attribution)) {
+      const key = `${value.status}\u0000${value.detail ?? ''}`;
+      const group = groups.get(key) ?? { status: value.status, ...(value.detail ? { detail: value.detail } : {}), count: 0, files: [] };
+      group.count++; if (group.files.length < 3) group.files.push(file);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  };
+  const summary = () => ({ ...state, attribution: attributionSummary(), plannedChecks: (state.assessment?.checks ?? []).map(check => {
     const receipt = currentProjectCheck(state, check.key);
     return { command: check.label, outcome: receipt?.outcome ?? ([...state.checks, ...state.evidence].some(c => c.key === check.key) ? 'stale' : 'missing'), ...(receipt ? { callId: receipt.callId } : {}) };
   }), disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
@@ -359,6 +427,19 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   const completesOwnedCheck = (task: any) => task?.id
     && !/^(?:running|pending|queued|starting)$/.test(task.status ?? task.state ?? '')
     && [...state.checks, ...state.evidence].some(c => c.handle === task.id && c.outcome === 'running');
+  // Terminal state comes from the background-task registry the moment a task
+  // settles. The <background-task-notification> message is queued as a
+  // follow-up and reaches message hooks only when the agent run ends, which
+  // left receipts "running" for minutes while the agent re-verified by hand.
+  try {
+    pi.events?.on?.(BG_TERMINAL_CHANNEL, (data: any) => {
+      const task = data?.task;
+      if (!active || !task?.id) return;
+      const epochAtArrival = epoch;
+      if (completesOwnedCheck(task) && lastCtx) void scan(lastCtx, true).catch(() => {}).then(() => { if (epoch === epochAtArrival) terminal(task); });
+      else terminal(task);
+    });
+  } catch { /* the message path below remains a fallback */ }
   const api = {
     async restore(ctx: any) {
       disposeContinuationNotice();
@@ -378,7 +459,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         // tree-bound evidence survives: the next scan recomputes the tree
         // and reuse applies only on an identical hash (stale-marked by
         // mismatch, never silently honored).
-        const evidence = Array.isArray(data.evidence) ? data.evidence.filter((c: any) => c && typeof c.key === 'string' && typeof c.label === 'string' && typeof c.tree === 'string' && c.outcome === 'passed').slice(-32) : [];
+        const evidence = Array.isArray(data.evidence) ? data.evidence.filter((c: any) => c && typeof c.key === 'string' && typeof c.label === 'string' && typeof c.tree === 'string' && c.outcome === 'passed' && !reconCommand(c.label)).slice(-32) : [];
         // Byte-identical tree (content hashes persisted alongside the change
         // match the current bytes for every restored file): the persisted
         // assessment and receipts still describe this exact content, so they
@@ -400,12 +481,13 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
             optedOut: data.optedOut === true, followups: Math.min(MAX_FOLLOWUPS, Math.max(0, Number(data.followups) || 0)), evidence, paused: true };
         }
         pauseReason = 'reload';
+        workspaceRevision.seed(state.revision);
       }
       await scan(ctx);
       // A dependency outside changed[] may have changed while this session was
       // down. Its old command receipts cannot verify the newly observed tree.
       if (ticket === epoch && restoredChecks && state.root === data.root && (!restoredTree || !state.treeComplete || state.tree !== restoredTree)) {
-        state.revision++; state.assessment = undefined; state.checks = []; save();
+        state.revision = workspaceRevision.advance(`restore:${ticket}`); state.assessment = undefined; state.checks = []; save();
       }
     },
     input(event: any) {
@@ -420,6 +502,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         epoch++; starts.clear(); earlyTerminals.clear();
         const carry = [...state.evidence, ...state.checks.filter(c => c.outcome === 'passed' && typeof c.tree === 'string')].slice(-32);
         const optedOut = state.optedOut; const attribution = state.attribution; state = fresh(state.root); state.optedOut = optedOut; state.evidence = carry; state.attribution = attribution;
+        state.revision = workspaceRevision.current;
       }
       deliveryVersion++; state.paused = false; pauseReason = undefined; state.followups = 0; notedRevision = -1; delivered = ''; deliveryInFlight = '';
       if (typeof event.text === 'string') {
@@ -432,9 +515,21 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     async call(event: any, ctx: any) {
       if (!enabled() || !['bash', 'bg_run'].includes(event.toolName) || event.input?.isAgent === true) return;
       await scan(ctx);
-      const candidate = projectCheckCommand(event.input?.command, ctx.cwd, true);
-      const check = candidate && (state.assessment?.checks.some(c => c.key === candidate.key) ? candidate : projectCheckCommand(event.input?.command, ctx.cwd));
-      if (candidate) {
+      lastCtx = ctx;
+      let candidate = projectCheckCommand(event.input?.command, ctx.cwd, true);
+      // `check 2>&1 | tail -60` or `check > build/verify/out.txt 2>&1` is the
+      // planned check with its output shaped. Bind it to the plan's receipt;
+      // pipefail keeps the check's own exit status observable.
+      const shaped = candidate ? undefined : checkInvocation(event.input?.command);
+      if (shaped) {
+        const bare = projectCheckCommand(shaped.body, ctx.cwd, true);
+        if (bare && (state.assessment?.checks.some(c => c.key === bare.key) || projectCheckCommand(shaped.body, ctx.cwd))) {
+          candidate = bare;
+          if (shaped.pipefail && typeof event.input?.command === 'string' && !/^\s*set -o pipefail;/.test(event.input.command)) event.input.command = `set -o pipefail; ${event.input.command}`;
+        }
+      }
+      const check = candidate && (state.assessment?.checks.some(c => c.key === candidate!.key) ? candidate : projectCheckCommand(shaped && candidate ? shaped.body : event.input?.command, ctx.cwd));
+      if (candidate && (check || !reconCommand(candidate.label))) {
         if (starts.size >= 64) starts.delete(starts.keys().next().value!);
         starts.set(event.toolCallId, { revision: state.revision, tree: state.tree, check: candidate, epoch, observeOnly: !check });
       } else if (state.assessment?.revision === state.revision && state.assessment.disposition === 'required' && typeof event.input?.command === 'string') {
@@ -448,6 +543,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     },
     async result(event: any, ctx: any) {
       if ((!enabled() && !options.onFacts) || !active) return;
+      lastCtx = ctx;
       const ticket = epoch;
       const start = starts.get(event.toolCallId); starts.delete(event.toolCallId);
       const mutationPath = event.details?.fileMutation?.resolved ?? event.input?.path;
@@ -465,9 +561,12 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
             if (!current || current !== previousHash) {
               const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
               if (sid) recordWorkspaceMutation(ctx.cwd, sid, relative, event.toolName);
-              changed([relative], ctx);
+              changed([relative], ctx, event.toolName, `native:${event.toolCallId}`);
             }
           }
+          // The scan may have observed this native write first; credit it.
+          const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
+          if (sid && state.attribution[relative]?.detail === NO_GIT_OBSERVED) state.attribution[relative] = nativeAttribution(sid, event.toolName);
         }
       }
       if (start && start.epoch === epoch) {

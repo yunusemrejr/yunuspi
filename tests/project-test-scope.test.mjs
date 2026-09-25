@@ -235,3 +235,44 @@ test('planned command labels preserve working-directory prefixes and long litera
  assert.equal(projectCheckCommand(check.label,'/project',true).key,check.key);
  assert.notEqual(projectCheckCommand('node check.js "'+'fixture-value'.repeat(35)+'"','/project',true).key,check.key);
 });
+
+test('shaped planned checks bind receipts, bg terminal events settle them at once, recon is never evidence', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-shaped-')),tools={},listeners={};
+ const ctx={cwd,sessionManager:{getSessionId:()=>'session-a'}};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash','bg_run'],appendEntry(){},
+  events:{on:(channel,handler)=>{listeners[channel]=handler;return()=>{};}}});
+ t.after(()=>{api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ await api.restore(ctx);api.input({source:'interactive',text:'Fix the value'});
+ const recon={toolName:'bash',toolCallId:'recon',input:{command:'ls -la'}};
+ await api.call(recon,ctx);await api.result({...recon,isError:false,details:{exitCode:0},content:[{type:'text',text:'x'}]},ctx);
+ assert.equal(api.snapshot().evidence.length,0,'read-only reconnaissance is not verification evidence');
+ fs.writeFileSync(path.join(cwd,'value.js'),'export const value=1;');
+ await api.result({toolName:'write',toolCallId:'w',input:{path:'value.js'},isError:false},ctx);
+ const attribution=api.snapshot().attribution;
+ assert.equal(attribution.length,1,'attribution is collapsed to one line per distinct status');
+ assert.equal(attribution[0].status,'current_session','this session\'s native write is attributed without Git');
+ await tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The focused check covers the change.',commands:['node --test']},undefined,undefined,ctx);
+ const shaped={toolName:'bg_run',toolCallId:'shaped',input:{command:'node --test 2>&1 | tail -40'}};
+ await api.call(shaped,ctx);
+ assert.match(shaped.input.command,/^set -o pipefail; node --test 2>&1 \| tail -40$/,'pipefail keeps the check exit observable');
+ await api.result({...shaped,isError:false,details:{task:{id:'b1',status:'running'}},content:[{type:'text',text:'started'}]},ctx);
+ assert.equal(api.snapshot().need,'running');
+ listeners['pi-background-tasks:terminal:v1']({task:{id:'b1',status:'completed',exitCode:0}});
+ await new Promise(resolve=>setTimeout(resolve,20));
+ assert.equal(api.snapshot().need,null,'the registry terminal event settles the receipt without waiting for the queued notification');
+ const redirect={toolName:'bash',toolCallId:'redirect',input:{command:'node --test > build/verify/out.txt 2>&1'}};
+ await api.call(redirect,ctx);
+ assert.equal(redirect.input.command,'node --test > build/verify/out.txt 2>&1','a file redirect needs no rewrite');
+ await api.result({...redirect,isError:true,details:{exitCode:1},content:[{type:'text',text:''}]},ctx);
+ assert.equal(api.snapshot().need,'failed','a redirected check still records its real exit');
+});
+
+test('project tests and quality review share one workspace revision per change', async () => {
+ const {createWorkspaceRevision}=await import(pathToFileURL(path.join(agent,'extensions/lib/project-tests.ts')));
+ const revision=createWorkspaceRevision();
+ assert.equal(revision.advance('scan:1'),1);
+ assert.equal(revision.advance('scan:1'),1,'both lifecycles observing one scan advance it once');
+ assert.equal(revision.advance('native:call-1'),2);
+ revision.seed(7);assert.equal(revision.current,7,'restored revisions seed the shared counter');
+ revision.seed(3);assert.equal(revision.current,7,'seeding never moves it backwards');
+});
