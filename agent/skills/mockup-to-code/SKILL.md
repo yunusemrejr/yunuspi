@@ -27,6 +27,7 @@ Keep the content, structure and behavior; change the system. Analyze the referen
 
 ## Failure modes
 
+- Rebuilding the reference's generic SaaS costume (glow, gradient blobs, badge rows, bento filler, chatbot) instead of its system; hold every addition to `docs/ANTI-SLOP-CHECKLIST.md` and the observer-book `anti-slop` passages.
 - Absolute positioning, fixed heights or magic numbers to force a pixel match; text rendered as images; tracing type.
 - Fifteen nearly equal grays copied from pixels instead of four roles; a new radius or shadow per card.
 - Shipping mockup placeholder copy, stock photos or logos cut from the mockup as final assets.

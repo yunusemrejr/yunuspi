@@ -3187,13 +3187,13 @@
       {
         "name": "audio_analyze",
         "source": "agent/extensions/media-tools.ts",
-        "line": 218,
+        "line": 255,
         "kind": "factory"
       },
       {
         "name": "audio_mix",
         "source": "agent/extensions/media-tools.ts",
-        "line": 236,
+        "line": 273,
         "kind": "factory"
       },
       {
@@ -3382,7 +3382,7 @@
       {
         "name": "image_ocr",
         "source": "agent/extensions/media-tools.ts",
-        "line": 217,
+        "line": 254,
         "kind": "factory"
       },
       {
@@ -3406,13 +3406,13 @@
       {
         "name": "media_edit",
         "source": "agent/extensions/media-tools.ts",
-        "line": 219,
+        "line": 256,
         "kind": "factory"
       },
       {
         "name": "media_info",
         "source": "agent/extensions/media-tools.ts",
-        "line": 215,
+        "line": 252,
         "kind": "factory"
       },
       {
@@ -3460,7 +3460,7 @@
       {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 222,
+        "line": 259,
         "kind": "factory"
       },
       {
@@ -3574,13 +3574,13 @@
       {
         "name": "scene_create",
         "source": "agent/extensions/media-tools.ts",
-        "line": 232,
+        "line": 269,
         "kind": "factory"
       },
       {
         "name": "scene_render",
         "source": "agent/extensions/media-tools.ts",
-        "line": 233,
+        "line": 270,
         "kind": "factory"
       },
       {
@@ -3701,13 +3701,13 @@
       {
         "name": "video_compose",
         "source": "agent/extensions/media-tools.ts",
-        "line": 235,
+        "line": 272,
         "kind": "factory"
       },
       {
         "name": "video_frames",
         "source": "agent/extensions/media-tools.ts",
-        "line": 216,
+        "line": 253,
         "kind": "factory"
       },
       {
@@ -4154,7 +4154,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          205
+          242
         ],
         "knownNames": [
           "audio_analyze",

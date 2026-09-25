@@ -38,4 +38,6 @@ Offline regression coverage includes model switches, long-context thresholds, ho
 
 Unchanged project and skill guidance keeps its original position during tool continuations, preserving the reusable request prefix. Utility tools share one guidance entry while retaining their individual schemas. Structured tool JSON loses only insignificant whitespace; numeric spellings and string contents remain intact. HTTP responses default to a 16 KiB body limit, report truncation, and accept an explicit larger `maxBytes` when needed.
 
+Measured per-turn schema tax (0.9.1): lazy discovery narrows 122 registered extension tools to 23 always-on core tools plus host built-ins, about 43,000 description and schema characters (~11k tokens) with another ~3,700 in prompt guidelines. The weight is delegation, background-task and todo contract text; trimming it would trade behavior for tokens, so it stays. Tool-result `details` never reach providers — only `content` text and images are serialized. `video_frames` with `contactSheet:true` collapses up to 12 vision attachments into one tiled image.
+
 Offline sessions and subagents do not automatically refresh the model catalog. Regression tests intercept provider requests to check request counts and payload preservation without paid inference. Character and byte reductions in fixtures are not measurements of billed token savings.

@@ -44,7 +44,11 @@ test('all popup commands execute through dispatch, await completion, and save pr
   fs.writeFileSync(path.join(sysPromptDir(), 'synthetic.json'), JSON.stringify({ at: 'synthetic', system: 'Synthetic opening prompt', tools: [], toolCount: 0 }));
   for (const name of ['used', 'errors', 'commands', 'sys-prompt']) {
     assert.equal(await f.dispatch(`/${name}\t`), true);
-    const file = path.join(popupDir(), `${name}-synthetic.html`);
+    // Filenames are unique per invocation (cache-busting suffix); the run
+    // writes exactly one file per command.
+    const matches = fs.readdirSync(popupDir()).filter(entry => entry.startsWith(`${name}-synthetic-`) && entry.endsWith('.html'));
+    assert.equal(matches.length, 1);
+    const file = path.join(popupDir(), matches[0]);
     assert.match(fs.readFileSync(file, 'utf8'), /<!DOCTYPE html>/);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.ok(f.notices.at(-1)[0].includes(file));
@@ -58,7 +62,9 @@ test('/used launches its popup and reports the file only after the browser accep
   const launches = fakeBrowser(t, child => child.emit('exit', 0, null));
   assert.equal(await f.dispatch('/used'), true);
   assert.equal(launches.length, 1);
-  const url = pathToFileURL(path.join(popupDir(), 'used-synthetic.html')).href;
+  const matches = fs.readdirSync(popupDir()).filter(entry => entry.startsWith('used-synthetic-') && entry.endsWith('.html'));
+  assert.equal(matches.length, 1);
+  const url = pathToFileURL(path.join(popupDir(), matches[0])).href;
   assert.ok(launches[0].args.some(arg => arg.includes(url)));
   assert.match(f.notices.at(-1)[0], /opened/); assert.deepEqual(f.modelCalls, []);
 });

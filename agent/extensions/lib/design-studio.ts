@@ -104,9 +104,10 @@ export async function probeImage(bytes: Buffer, signal?: AbortSignal): Promise<{
 }
 
 /** Decode to RGBA, optionally cropping (source pixels) and bounding the
- * output by width and total pixels. Returns the scale applied. */
-export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; maxPixels?: number; crop?: Box; exactWidth?: number; upscale?: number } = {}, signal?: AbortSignal): Promise<Decoded> {
-  const info = await probeImage(bytes, signal);
+ * output by width and total pixels. Returns the scale applied. Callers
+ * that already probed these bytes pass `probed` to skip a repeat ffprobe. */
+export async function decodeImage(bytes: Buffer, options: { maxWidth?: number; maxPixels?: number; crop?: Box; exactWidth?: number; upscale?: number; probed?: { width: number; height: number } } = {}, signal?: AbortSignal): Promise<Decoded> {
+  const info = options.probed ?? await probeImage(bytes, signal);
   const crop = options.crop ? clampBox(options.crop, info.width, info.height) : undefined;
   const inW = crop?.width ?? info.width, inH = crop?.height ?? info.height;
   let outW: number;
@@ -219,7 +220,7 @@ export async function imageAnalyze(params: any, cwd: string, signal?: AbortSigna
   const cssWidth = Math.round(info.width / dprInfo.dpr);
   // Analyze near CSS resolution: detection thresholds are tuned for it.
   const maxWidth = integer(params.maxWidth, Math.min(1920, Math.max(cssWidth, Math.min(info.width, 480))), 240, 2560, "maxWidth");
-  const img = await decodeImage(source.bytes, { maxWidth, maxPixels: 14_000_000 }, signal);
+  const img = await decodeImage(source.bytes, { maxWidth, maxPixels: 14_000_000, probed: info }, signal);
   const cssPerPx = 1 / (img.scale * dprInfo.dpr);
   const dir = await studioFolder(params.outputDir, cwd, "analyze");
   let savedSource: string | undefined;
@@ -393,11 +394,16 @@ export async function imageCrop(params: any, cwd: string, signal?: AbortSignal) 
   const quality = integer(params.quality, 85, 1, 100, "quality");
   const outputWidth = params.outputWidth === undefined ? undefined : integer(params.outputWidth, 0, 8, 4096, "outputWidth");
   const dir = await studioFolder(params.outputDir, cwd, "assets");
+  // One decode serves every target when the source fits the per-target
+  // pixel bound: no path downscales, so in-memory crops are pixel-identical
+  // to per-target decodes. The scale guard keeps float edge cases on the
+  // proven per-target path.
+  const full = info.width * info.height <= 24_000_000 ? await decodeImage(source.bytes, { maxPixels: 24_000_000, probed: info }, signal) : undefined;
   const assets: any[] = [], used = new Set<string>();
   for (const target of targets) {
     signal?.throwIfAborted();
     const box = clampBox({ x: target.box.x - padding, y: target.box.y - padding, width: target.box.width + 2 * padding, height: target.box.height + 2 * padding }, info.width, info.height);
-    let img: Rgba = await decodeImage(source.bytes, { crop: box, maxPixels: 24_000_000 }, signal);
+    let img: Rgba = full && full.scale === 1 ? cropRgba(full, box) : await decodeImage(source.bytes, { crop: box, maxPixels: 24_000_000, probed: info }, signal);
     let keyed: number | undefined, background: Rgb | undefined;
     if (key !== "none") {
       background = key === "auto" ? borderColor(img).rgb : parseHex(key)!;
@@ -408,7 +414,8 @@ export async function imageCrop(params: any, cwd: string, signal?: AbortSignal) 
       const inner = trimBox(img, key === "none" ? borderColor(img).rgb : undefined);
       if (inner.width < img.width || inner.height < img.height) { img = cropRgba(img, inner); trimmed = inner; }
     }
-    const transparent = img.data.some((_, i) => i % 4 === 3 && img.data[i] < 250);
+    let transparent = false;
+    for (let i = 3; i < img.data.length; i += 4) if (img.data[i] < 250) { transparent = true; break; }
     const unique = extractPalette(img, { max: 24, mergeDelta: 3 }).length;
     const chosen = format !== "auto" ? format : transparent ? (unique >= 20 ? "webp" : "png") : unique >= 20 || target.kind === "image" ? "webp" : "png";
     let bytes: Buffer, ext = chosen;
@@ -455,12 +462,12 @@ export async function imageTrace(params: any, cwd: string, signal?: AbortSignal)
   else if (typeof params.background === "string" && params.background !== "auto") { background = parseHex(params.background); if (!background) throw new Error('background must be "auto", "none" or #rrggbb'); }
   // Palette from native pixels (few anti-aliased pixels), tracing on an
   // upscaled copy so contours follow sub-pixel edges instead of the grid.
-  const native = await decodeImage(source.bytes, { crop: box }, signal);
+  const native = await decodeImage(source.bytes, { crop: box, probed: info }, signal);
   const nativeBackground = background === null ? undefined : background ?? borderColor(native).rgb;
   const palette = tracePalette(native, nativeBackground, colors);
   if (!palette.length) throw new Error("No fill colors distinct from the background: nothing to trace");
   const upscale = Math.max(1, Math.min(8, Math.floor(512 / Math.max(box.width, box.height))));
-  const big = upscale > 1 ? await decodeImage(source.bytes, { crop: box, upscale, maxPixels: 4_200_000 }, signal) : native;
+  const big = upscale > 1 ? await decodeImage(source.bytes, { crop: box, upscale, maxPixels: 4_200_000, probed: info }, signal) : native;
   const epsilon = number(params.epsilon, 0.6 * Math.max(1, big.width / box.width), 0.2, 16, "epsilon");
   const traced = traceToSvg(big, { x: 0, y: 0, width: big.width, height: big.height }, { background: background === null ? null : nativeBackground, palette, epsilon, outputWidth: Math.round(box.width / dpr), outputHeight: Math.round(box.height / dpr) });
   const dir = await studioFolder(params.outputDir, cwd, "trace");
@@ -509,7 +516,7 @@ export async function visualDiff(params: any, cwd: string, signal: AbortSignal |
     region = { x: region?.x ?? 0, y: region?.y ?? 0, width: region?.width ?? info.width, height: Math.floor(maxCssHeight * dpr) };
     notes.push(`Compared the top ${maxCssHeight} CSS px of the reference${params.region ? " region" : ""}; pass region to compare lower parts.`);
   }
-  const ref = await decodeImage(reference.bytes, { crop: region, exactWidth: refCssWidth }, signal);
+  const ref = await decodeImage(reference.bytes, { crop: region, exactWidth: refCssWidth, probed: info }, signal);
   const dir = await studioFolder(params.outputDir, cwd, "diff");
   let cand: Rgba, candidateInfo: any;
   if (params.candidate !== undefined) {
@@ -519,7 +526,7 @@ export async function visualDiff(params: any, cwd: string, signal: AbortSignal |
     const k = candInfo.width / Math.round(info.width / dpr);
     const crop = region ? clampBox({ x: region.x / dpr * k, y: region.y / dpr * k, width: region.width / dpr * k, height: region.height / dpr * k }, candInfo.width, candInfo.height) : undefined;
     if (Math.abs(k - Math.round(k)) > 0.02) notes.push(`Candidate is ${candInfo.width}px wide for a ${Math.round(info.width / dpr)} CSS px reference and was scaled; capture at the reference width for a faithful comparison.`);
-    cand = await decodeImage(candidate.bytes, { crop, exactWidth: refCssWidth }, signal);
+    cand = await decodeImage(candidate.bytes, { crop, exactWidth: refCssWidth, probed: candInfo }, signal);
     candidateInfo = { image: relative(cwd, candidate.path!), pixelsPerCssPx: Math.round(k * 100) / 100 };
   } else if (typeof params.source === "string") {
     if (!capture) throw new Error("Rendering is unavailable here; capture the page with render_see and pass its PNG as candidate");
@@ -589,7 +596,7 @@ export async function visualDiff(params: any, cwd: string, signal: AbortSignal |
     size: { reference: { width: ref.width, height: ref.height }, compared: { width: ref.width, height: Math.min(ref.height, cand.height) }, ...(heightDelta !== undefined ? { heightDelta } : {}) },
     candidate: candidateInfo, ...(notes.length ? { notes } : {}),
     worstSections: worst, shifts: shifted,
-    regions: comparison.regions.slice(0, 6).map((r, i) => ({ x: r.x, y: r.y, width: r.width, height: r.height, meanDelta: r.score, ...(i < zooms.length ? { zoom: zooms[i] } : {}), ...(blocksAt(r)?.length ? { referenceBlocks: blocksAt(r) } : {}) })),
+    regions: comparison.regions.slice(0, 6).map((r, i) => { const under = blocksAt(r); return { x: r.x, y: r.y, width: r.width, height: r.height, meanDelta: r.score, ...(i < zooms.length ? { zoom: zooms[i] } : {}), ...(under?.length ? { referenceBlocks: under } : {}) }; }),
     missingColors: comparison.missingColors.map(color => { const role = palette.find((p: any) => deltaE(parseHex(p.hex)!, parseHex(color.hex)!) < 6)?.role; return `${color.hex} ${color.coverage}%${role ? ` (${role})` : ""}`; }),
     extraColors: comparison.extraColors.map(color => `${color.hex} ${color.coverage}% in the build, absent from the reference`),
     files: { compare: relative(cwd, comparePath), heat: relative(cwd, heatPath), zooms },

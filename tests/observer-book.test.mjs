@@ -58,7 +58,7 @@ test('the shipped book is complete, bounded and well formed', () => {
       assert.ok(passage.terms.length >= 3, `${passage.id} has ranking terms`);
     }
   }
-  for (const topic of ['marketing', 'promotion', 'copywriting', 'communication', 'color', 'typography', 'separation', 'minimalism', 'web-design', 'motion', 'video', 'linux', 'devops', 'dataops', 'math', 'science', 'coding', 'design-to-code'])
+  for (const topic of ['marketing', 'promotion', 'copywriting', 'communication', 'color', 'typography', 'separation', 'minimalism', 'web-design', 'motion', 'video', 'linux', 'devops', 'dataops', 'math', 'science', 'coding', 'design-to-code', 'anti-slop'])
     assert.ok(book.chapterById.has(topic), topic);
   assert.ok(Buffer.byteLength(book.toc, 'utf8') < 900, 'contents stay compact enough for every packet');
 });
@@ -162,6 +162,7 @@ test('selection routes sessions to the doctrine they need', () => {
   assert.ok(ids(select('Plan a Product Hunt launch for our invoicing app', [])).some(id => id.startsWith('promotion.')));
   assert.ok(ids(select('Here are two screenshots; apply this new look to the whole site', [['read', { path: 'ref1.png' }]])).includes('design-to-code.generalize'));
   assert.ok(ids(select('Pick a color palette and fonts for our brand refresh', [])).some(id => id.startsWith('color.')));
+  assert.ok(ids(select('Review this landing page for generic SaaS cliches: glow badges bento grid fake testimonials and chatbot', [])).some(id => id.startsWith('anti-slop.')), 'website slop vocabulary promotes the checklist');
   const quiet = select('Rename a variable', []);
   assert.ok(quiet.passages.length <= 2, 'unrelated sessions do not pull in the whole book');
   const section = B.renderBookSection(book, quiet, []);

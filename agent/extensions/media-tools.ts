@@ -11,23 +11,30 @@ export { sceneCreate, sceneRender, audioMix, videoCompose };
 export async function mediaInfo(params: any, cwd: string, signal?: AbortSignal) {
   const action = params.action ?? "probe";
   if (action === "capabilities") {
-    const binaries: Record<string, any> = {};
-    for (const [binary, flag] of [["ffmpeg", "-version"], ["ffprobe", "-version"], ["tesseract", "--version"]]) {
-      try { const r = await run(binary, [flag], signal, 10000); binaries[binary] = { available: true, version: r.stdout.split("\n")[0] }; }
-      catch (e: any) { if (signal?.aborted) throw e; binaries[binary] = { available: false, reason: e.message }; }
-    }
-    if (binaries.tesseract.available) {
+    // One round of subprocesses instead of six sequential spawns. The
+    // result shape, error tolerance and abort behavior are unchanged.
+    const probeBinary = async (binary: string, flag: string) => {
+      try { const r = await run(binary, [flag], signal, 10000); return { available: true, version: r.stdout.split("\n")[0] }; }
+      catch (e: any) { if (signal?.aborted) throw e; return { available: false, reason: e.message }; }
+    };
+    const [ffmpeg, ffprobe, tesseract] = await Promise.all([probeBinary("ffmpeg", "-version"), probeBinary("ffprobe", "-version"), probeBinary("tesseract", "--version")]);
+    const binaries: Record<string, any> = { ffmpeg, ffprobe, tesseract };
+    const detail: Promise<void>[] = [];
+    if (binaries.tesseract.available) detail.push((async () => {
       try {
         const langs = (await run("tesseract", ["--list-langs"], signal, 10000)).stdout;
         binaries.tesseract.languages = langs.split("\n").slice(1).map((s: string) => s.trim()).filter(Boolean).slice(0, 32);
       } catch { binaries.tesseract.languages = []; }
-    }
-    if (binaries.ffmpeg.available) {
-      const filters = (await run("ffmpeg", ["-hide_banner", "-filters"], signal, 10000)).stdout;
-      const encoders = (await run("ffmpeg", ["-hide_banner", "-encoders"], signal, 10000)).stdout;
+    })());
+    if (binaries.ffmpeg.available) detail.push((async () => {
+      const [filters, encoders] = await Promise.all([
+        run("ffmpeg", ["-hide_banner", "-filters"], signal, 10000).then(r => r.stdout),
+        run("ffmpeg", ["-hide_banner", "-encoders"], signal, 10000).then(r => r.stdout),
+      ]);
       binaries.filters = Object.fromEntries(["scdet", "showinfo", "loudnorm", "silencedetect", "astats", "showspectrumpic", "scale", "fps", "xfade", "concat", "amix", "alimiter", "pan", "afade", "aecho"].map(x => [x, new RegExp(`\\b${x}\\b`).test(filters)]));
       binaries.encoders = Object.fromEntries(["libx264", "aac", "pcm_s16le", "png"].map(x => [x, new RegExp(`\\b${x}\\b`).test(encoders)]));
-    }
+    })());
+    await Promise.all(detail);
     return { ...binaries, musicCompose: { available: true, engine: "built-in MIDI writer and sine/triangle audition synth" }, sceneStudio: sceneCapabilities() };
   }
   if (!["probe", "scenes"].includes(action)) throw new Error("action must be probe, capabilities or scenes");
@@ -56,19 +63,49 @@ export async function videoFrames(params: any, cwd: string, signal?: AbortSignal
     times = Array.from({ length: count }, (_, i) => total * (i + 0.5) / count);
   }
   if (Number.isFinite(total) && times.some(t => t >= total)) throw new Error("Timestamp is outside the source duration");
-  const dir = await outputFolder(params.outputDir, cwd), frames: any[] = [];
+  const dir = await outputFolder(params.outputDir, cwd);
+  const extract = async (index: number) => {
+    signal?.throwIfAborted();
+    const output = path.join(dir, `frame-${String(index + 1).padStart(2, "0")}.png`);
+    const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[index]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `scale=${width}:${width}:force_original_aspect_ratio=decrease:reset_sar=1,showinfo`, "-update", "1", output], signal, 20000);
+    const match = /\bn:\s*0\s+pts:\s*-?\d+\s+pts_time:([\d.e+-]+)/.exec(r.stderr);
+    return { ...await produced(output), requestedSeconds: times[index], decodedSeconds: match ? times[index] + Number(match[1]) : null };
+  };
   try {
-    for (let i = 0; i < times.length; i++) {
-      signal?.throwIfAborted();
-      const output = path.join(dir, `frame-${String(i + 1).padStart(2, "0")}.png`);
-      const r = await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "info", ...inputArgs(file, times[i]), "-map", `0:${stream.index}`, "-frames:v", "1", "-vf", `scale=${width}:${width}:force_original_aspect_ratio=decrease:reset_sar=1,showinfo`, "-update", "1", output], signal, 20000);
-      const match = /\bn:\s*0\s+pts:\s*-?\d+\s+pts_time:([\d.e+-]+)/.exec(r.stderr);
-      frames.push({ ...await produced(output), requestedSeconds: times[i], decodedSeconds: match ? times[i] + Number(match[1]) : null });
-    }
-    const result = { source: file, timestampOrigin: "seconds from source presentation start; decodedSeconds adds post-seek PTS and may reflect decoder rounding", frames, note: "Sparse frames do not establish continuous motion or events between samples." };
+    // Identical per-frame commands, bounded-parallel: four workers share the
+    // queue and results land by index, so output order never changes.
+    const frames: any[] = new Array(times.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(4, times.length) }, async () => { while (next < times.length) { const i = next++; frames[i] = await extract(i); } });
+    const settled = await Promise.allSettled(workers);
+    for (const outcome of settled) if (outcome.status === "rejected") throw outcome.reason;
+    let sheet: any;
+    if (params.contactSheet === true) sheet = await contactSheet(frames, dir, signal);
+    const result = { source: file, timestampOrigin: "seconds from source presentation start; decodedSeconds adds post-seek PTS and may reflect decoder rounding", frames, ...(sheet ? { contactSheet: sheet } : {}), note: "Sparse frames do not establish continuous motion or events between samples." };
     await fs.writeFile(path.join(dir, "frames.json"), JSON.stringify(result, null, 2) + "\n", { flag: "wx" });
     return result;
   } catch (error) { await fs.rm(dir, { recursive: true, force: true }); throw error; }
+}
+
+/** Tile extracted frames into one contact sheet so a single visual read
+ * covers the whole sample. Cells are 480 px wide regardless of the
+ * extraction width; the grid prefers landscape for video frames. Pure
+ * layout: gridForFrames is tested without FFmpeg. */
+export function gridForFrames(count: number): { cols: number; rows: number } {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(Math.max(1, count) * 16 / 9)));
+  return { cols, rows: Math.max(1, Math.ceil(Math.max(1, count) / cols)) };
+}
+
+async function contactSheet(frames: any[], dir: string, signal?: AbortSignal) {
+  const { cols, rows } = gridForFrames(frames.length);
+  const inputs = frames.flatMap(frame => ["-i", frame.path]);
+  const scaled = frames.map((_, i) => `[${i}:v]scale=480:-1,setsar=1[x${i}]`).join(";");
+  const filter = `${scaled};${frames.map((_, i) => `[x${i}]`).join("")}concat=n=${frames.length}:v=1:a=0[c];[c]tile=${cols}x${rows}:margin=4:padding=4:color=black`;
+  const output = path.join(dir, "contact-sheet.png");
+  await run("ffmpeg", [...FFMPEG_FLAGS, "-loglevel", "error", ...inputs, "-filter_complex", filter, "-update", "1", output], signal, 60000);
+  return { ...await produced(output), grid: { cols, rows, cellWidth: 480 },
+    cells: frames.map((frame, i) => ({ frame: i + 1, row: Math.floor(i / cols), col: i % cols, requestedSeconds: frame.requestedSeconds, decodedSeconds: frame.decodedSeconds })),
+    note: "One image for the whole sample: inspect this sheet first and open individual frames only for detail." };
 }
 
 export async function audioAnalyze(params: any, cwd: string, signal?: AbortSignal) {
@@ -213,7 +250,7 @@ export default function mediaTools(pi: any) {
     });
   }
   register("media_info", "Probe local media streams, check installed FFmpeg/Tesseract capabilities or find approximate scene cuts in a bounded window. No uploads. Probe is the default action.", Type.Object({ action: Type.Optional(choices(["probe", "capabilities", "scenes"])), path: Type.Optional(localPath), ...windowSchema, threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 100 })) }), mediaInfo);
-  register("video_frames", "Extract 1..12 PNG frames at explicit seconds or evenly spaced timestamps (default 6). Returns frame paths and timing manifest. Fresh output folder inside cwd; originals preserved. Use read/vision to inspect returned images, or image_ocr for printed text in them.", Type.Object({ path: localPath, times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 86400 }), { minItems: 1, maxItems: 12 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), ...outputSchema }), videoFrames);
+  register("video_frames", "Extract 1..12 PNG frames at explicit seconds or evenly spaced timestamps (default 6). Returns frame paths and timing manifest. contactSheet:true also writes one tiled contact-sheet.png with a cell map: inspect that single image first instead of opening every frame. Fresh output folder inside cwd; originals preserved. Use read/vision to inspect returned images, or image_ocr for printed text in them.", Type.Object({ path: localPath, times: Type.Optional(Type.Array(Type.Number({ minimum: 0, maximum: 86400 }), { minItems: 1, maxItems: 12 })), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 12 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), contactSheet: Type.Optional(Type.Boolean()), ...outputSchema }), videoFrames);
   register("image_ocr", "Extract printed text from a local image or PDF with on-device Tesseract (default English, see media_info capabilities for installed languages). Text only: it cannot judge layout, color, composition or meaning — use a vision model for those. Fast local path for text questions; no uploads, no delegation.", Type.Object({ path: localPath, language: Type.Optional(Type.String({ minLength: 3, maxLength: 31, pattern: "^[A-Za-z]{2,3}([+][A-Za-z]{2,3})*$" })), psm: Type.Optional(Type.Integer({ minimum: 0, maximum: 13 })), maxChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 100000 })) }), imageOcr);
   register("audio_analyze", "Measure windowed LUFS, true/sample peak, RMS, DC offset and silence; optionally render a spectrum PNG. Default first 30 seconds, maximum 600. Numeric evidence, no speech transcription or music recognition.", Type.Object({ path: localPath, ...windowSchema, silenceDb: Type.Optional(Type.Number({ minimum: -100, maximum: -1 })), silenceDuration: Type.Optional(Type.Number({ minimum: 0.05, maximum: 10 })), spectrum: Type.Optional(Type.Boolean()), ...outputSchema }), audioAnalyze);
   register("media_edit", "Create a bounded SDR H.264/AAC clip, extract WAV audio, or perform measured two-pass loudness normalization to WAV. Default first 30 seconds, maximum 600. Fresh output folder; probe and decode validation included. For long/complex edits use FFmpeg through existing background tools.", Type.Object({ action: choices(["clip", "audio", "normalize"]), path: localPath, ...windowSchema, width: Type.Optional(Type.Integer({ minimum: 64, maximum: 3840 })), crf: Type.Optional(Type.Integer({ minimum: 0, maximum: 40 })), sampleRate: Type.Optional(Type.Integer({ minimum: 8000, maximum: 96000 })), targetLufs: Type.Optional(Type.Number({ minimum: -36, maximum: -5 })), ...outputSchema }), mediaEdit);

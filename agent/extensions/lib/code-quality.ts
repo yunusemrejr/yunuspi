@@ -415,7 +415,7 @@ export function unusedImports(file: string, source: string): Finding[] {
 const PROSE_PATTERNS: Array<[RegExp, string]> = [
   [/\bdelv(?:e|es|ing) (?:into|deeper)\b/gi, "explore, examine, look at"], [/\b(?:rich |vibrant )?tapestry\b/gi, "mix, range (or cut)"], [/\b(?:a |is a |stands as a )?testament to\b/gi, "shows, proves"],
   [/\bmeticulous(?:ly)?\b/gi, "careful(ly)"], [/\bseamless(?:ly)?\b/gi, "smooth, without extra steps"], [/\bleverag(?:e|es|ed|ing)\b/gi, "use"], [/\butiliz(?:e|es|ed|ing)\b/gi, "use"],
-  [/\brobust\b/gi, "reliable, strong (say how)"], [/\bcutting[- ]edge\b/gi, "new, the specific capability"], [/\bgame[- ]chang(?:er|ing)\b/gi, "the specific change"], [/\bunlock(?:s|ing)? (?:the )?(?:full |true )?(?:potential|power)\b/gi, "the concrete benefit"],
+  [/\brobust\b/gi, "reliable, strong (say how)"], [/\bcutting[- ]edge\b/gi, "new, the specific capability"], [/\bgame[- ]chang(?:er|ing)\b/gi, "the specific change"], [/\bunlock(?:s|ing)? (?:your |the )?(?:full |true )?(?:potential|power|insights|productivity|possibilities)\b/gi, "the concrete benefit"],
   [/\belevat(?:e|es|ing) (?:your|the)\b/gi, "improve, raise"], [/\bembark(?:s|ing)? on\b/gi, "start, begin"], [/\bnavigat(?:e|ing) the (?:complexities|landscape|world|intricacies)\b/gi, "handle, work through"],
   [/\bin (?:today'?s|the) (?:fast[- ]paced|ever[- ]changing|rapidly evolving|digital) (?:world|landscape|age|era)\b/gi, "(cut; start with the point)"], [/\bever[- ]evolving\b/gi, "changing"],
   [/\bit(?:'s| is) (?:important|worth|crucial) (?:to note|noting|to remember)(?: that)?\b/gi, "(cut; state the point)"], [/\bin conclusion\b/gi, "(cut)"], [/\bin the (?:realm|world) of\b/gi, "in"],
@@ -430,6 +430,9 @@ const PROSE_PATTERNS: Array<[RegExp, string]> = [
   [/\bfrictionless\b/gi, "the specific step removed"], [/\b(?:limitless|endless) possibilities\b/gi, "the concrete options"], [/\bbuilt for everyone\b/gi, "the named reader"],
   [/\btake your [\w ]{2,24} to the next level\b/gi, "the concrete improvement"], [/\bcarefully curated\b/gi, "(cut the praise; show the selection)"], [/\bthoughtfully (?:designed|crafted)\b/gi, "(cut the praise)"],
   [/\bprivacy by design\b/gi, "the specific practice"], [/\b(?:military-grade|bank-level)\b/gi, "the specific standard"], [/\b256[- ]bit\b/gi, "name only where the reader decides on it"],
+  [/\b(?:innovative|effortless|intuitive|premium)\b/gi, "the specific quality (say how)"], [/\b(?:beautifully simple|intentionally minimal|elegantly engineered)\b/gi, "(cut the praise)"],
+  [/\bin an era where\b/gi, "(cut; start with the point)"], [/\b(?:what does this mean for you|so where do we go from here)\b\??/gi, "(cut; state the implication)"],
+  [/\bnot just [\w ,'-]{2,48}?,? but\b/gi, "state both facts plainly"],
 ];
 const HEDGES = /\b(?:might|may|could|perhaps|possibly|potentially|arguably|somewhat|fairly|relatively)\b/gi;
 const FILLERS = /\b(?:very|really|just|actually|basically|literally|truly|simply|quite|extremely|incredibly)\b/gi;
@@ -465,6 +468,7 @@ export function proseReport(text: string): ProseReport {
     if (/^#{1,3}\s+(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*$/i.test(line.trim()) || /<h[12]\b[^>]*>\s*(?:how this (?:site|website|page) works|how it was built|our process|under the hood)\s*</i.test(line)) findings.push({ rule: "transparency-heading", line: i + 1, message: "Meta heading about the site itself: cut unless this page documents those subjects." });
     if (/\b\d+(?:\.\d+)?\s*x\b|\b\d{2,3}%\s+(?:faster|smarter|better|cheaper|more \w+|accurate|efficient)\b/i.test(line) && !/measured|study|survey|benchmark|tested|based on|report|data|customers|teams/i.test(lines.slice(Math.max(0, i - 2), i + 3).join("\n"))) findings.push({ rule: "metric-without-basis", line: i + 1, message: "Metric claim without a nearby basis: add measured-where/on-what/against-what, or cut the number." });
     if (/^\s*[-*]\s*(?:\p{Extended_Pictographic})/u.test(line)) findings.push({ rule: "emoji-bullet", line: i + 1, message: "Emoji as bullet decoration: plain bullets read as more credible." });
+    if (/^#{1,6}\s+.*\p{Extended_Pictographic}/u.test(line)) findings.push({ rule: "emoji-heading", line: i + 1, message: "Emoji in a heading: words carry the meaning; cut unless the brand owns it." });
   });
   const triads = (body.match(/\b\w+(?: \w+)?, \w+(?: \w+)?,? and \w+/g) ?? []).length;
   if (sentences.length >= 6 && triads / sentences.length > 0.3) findings.push({ rule: "rule-of-three", line: 1, message: `${triads} "X, Y and Z" triads in ${sentences.length} sentences: vary rhythm; not every list has three items.` });

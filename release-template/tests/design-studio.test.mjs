@@ -190,6 +190,16 @@ test("image_crop cuts mapped assets, keys backgrounds with de-fringing and picks
   await assert.rejects(studio.imageCrop({ path: mock, blocks: ["b1"] }, work), /need the map/);
 });
 
+test("image_crop serves every region from one decode without cross-talk", async () => {
+  const box = { x: 10, y: 10, width: 120, height: 80 };
+  const cut = await studio.imageCrop({ path: mock, regions: [{ ...box, name: "a" }, { ...box, name: "b" }], key: "auto", format: "png" }, work);
+  assert.equal(cut.assets.length, 2);
+  assert.deepEqual(cut.assets[0].pixels, cut.assets[1].pixels);
+  const [a, b] = await Promise.all(cut.assets.map(asset => studio.decodeImage(fs.readFileSync(path.join(work, asset.file)))));
+  assert.equal(a.width, 120); assert.equal(a.height, 80);
+  assert.deepEqual(Buffer.from(a.data), Buffer.from(b.data), "identical keyed regions decode identically: no target mutates the shared decode");
+});
+
 test("image_trace vectorizes flat marks faithfully and flags photographs", async () => {
   const result = await analyze();
   const map = JSON.parse(fs.readFileSync(path.join(work, result.files.map), "utf8"));

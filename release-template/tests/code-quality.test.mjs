@@ -132,6 +132,22 @@ test("prose report flags leakage phrases, meta headings and basis-free metrics",
   assert.equal(cq.proseReport("The service stores each order in one table.").findings.length, 0);
 });
 
+test("prose report flags checklist copy patterns and emoji headings", () => {
+  const text = [
+    "## 🚀 Launch day",
+    "",
+    "In an era where teams want more, our innovative platform offers effortless setup and an intuitive, premium feel.",
+    "Unlock your productivity with beautifully simple design. It's not just a tool, but a companion.",
+    "But what does this mean for you?",
+  ].join("\n");
+  const report = cq.proseReport(text);
+  const rules = report.findings.map(f => f.rule);
+  assert.ok(rules.includes("emoji-heading"));
+  const phrases = report.phrases.map(p => p.phrase);
+  for (const phrase of ["in an era where", "innovative", "effortless", "intuitive", "premium", "unlock your productivity", "beautifully simple", "not just a tool, but", "what does this mean for you"]) assert.ok(phrases.some(p => p.includes(phrase)), phrase);
+  assert.equal(cq.proseReport("Setup takes five minutes. The dashboard shows orders, refunds and payouts.").findings.length, 0);
+});
+
 test("complexity ranks functions with tree-sitter and flags async without await", async () => {
   const parser = await parserFor(".js");
   const branches = Array.from({ length: 14 }, (_, i) => `  if (x === ${i}) y += ${i};`).join("\n");

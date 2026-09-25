@@ -28,7 +28,7 @@ For code, inspect the existing owner and callers before creating a wrapper, serv
 
 ## Website necessity review
 
-AI website work fails one underlying way: it optimizes for visible completeness and apparent sophistication instead of contextual necessity. Every section, claim, widget and page below must earn its place for this reader; cut what does not. Each mode names its harness mechanism: source signals fire on edits and `artifact_check {operation:"ui"}`; `code_quality prose` reports stock phrases and copy rules; `design_audit` inspects rendered output; skills and observer-book passages carry the doctrine.
+AI website work fails one underlying way: it optimizes for visible completeness and apparent sophistication instead of contextual necessity. Every section, claim, widget and page below must earn its place for this reader; cut what does not. Each mode names its harness mechanism: source signals fire on edits and `artifact_check {operation:"ui"}`; `code_quality prose` reports stock phrases and copy rules; `design_audit` inspects rendered output; skills and observer-book passages carry the doctrine. The full 200-rule website checklist is `docs/ANTI-SLOP-CHECKLIST.md`, distilled for review in the observer-book `anti-slop` chapter.
 
 Backstage leakage (reader never came for this):
 - Implementation-detail leakage — frameworks, hosting, databases, build and deploy names in reader copy. Signal `prose-implementation-leak`; copywriting "No implementation leakage" rule; observer `web-design.no-leakage`.

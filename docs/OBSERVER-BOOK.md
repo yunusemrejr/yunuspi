@@ -6,7 +6,7 @@ The book changes what the observer can say, not what it may do. Its only tools a
 
 ## What is in it
 
-58 chapters and about 400 passages, grouped into parts. Design doctrine includes "a mentioned site is context, not a template" and "diverge before you converge on an open brief"; the observer's own craft includes "open requests deserve a thought experiment".
+59 chapters and about 410 passages, grouped into parts. Design doctrine includes "a mentioned site is context, not a template" and "diverge before you converge on an open brief"; the observer's own craft includes "open requests deserve a thought experiment".
 
 | Part | Chapters |
 | --- | --- |
