@@ -154,7 +154,9 @@ test('skill discovery uses shared Jev with local IDs while preserving exact name
     assert.ok(body.state.candidates.every(candidate => /^skill-\d+$/.test(candidate.id)));
     if (unavailable) return new Response('', {status: 503});
     const top = body.state.candidates.find(candidate => candidate.text.startsWith(target + ':')).id;
-    return new Response(JSON.stringify({answers: {rank: {type:'choice', choice:top, probabilities:{[top]:.98}}, exists:{type:'noul',noul:.98}}, usage:{input_tokens:40,cost:.000001}}), {status:200});
+    const optionsForRank=Object.keys(body.questions.rank.criteria);
+    const probabilities=Object.fromEntries(optionsForRank.map(id=>[id,id === top ? .98 : .02 / (optionsForRank.length - 1)]));
+    return new Response(JSON.stringify({answers: {rank: {type:'choice', choice:top, probabilities}, exists:{type:'noul',noul:.98}}, usage:{input_tokens:40,cost:.000001}}), {status:200});
   }});
   try {
     resetJevClient();

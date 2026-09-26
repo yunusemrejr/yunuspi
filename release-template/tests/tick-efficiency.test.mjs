@@ -107,11 +107,11 @@ test('file versions cache by stat identity and change with content', () => {
   }
 });
 
-test('watchmaker pace counts delegation as progress, not a stall', () => {
-  const stalled = formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 0 });
-  assert.match(stalled, /^STALL: 0 edits/, 'reads without edits or delegation still flag a stall');
-  assert.match(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 10, delegated: 2, activeChildren: 0 }), /0 edits, 10 reads, 2 dispatches/, 'dispatches name their own progress');
-  assert.doesNotMatch(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 10, delegated: 2, activeChildren: 0 }), /^STALL/, 'delegation suppresses the stall flag');
-  assert.doesNotMatch(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 3 }), /^STALL/, 'active children suppress the stall flag');
-  assert.match(formatWatchmakerPace({ elapsed: 65_000, calls: 3, edits: 1, reads: 2, delegated: 0, activeChildren: 0 }), /1 edits, 2 reads in 1m5s/, 'ordinary progress text is unchanged');
+test('watchmaker counts direct calls without treating missing edit calls as proof of a stall', () => {
+  const reads = formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 0 });
+  assert.match(reads, /12 completed calls in 10m0s.*12 direct read calls/);
+  assert.doesNotMatch(reads, /STALL|0 edits/, 'shell, script and child work cannot be inferred from direct-call counts');
+  assert.match(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 10, delegated: 2, activeChildren: 0 }), /10 direct read calls.*2 subagent calls/);
+  assert.match(formatWatchmakerPace({ elapsed: 600_000, calls: 12, edits: 0, reads: 12, delegated: 0, activeChildren: 3 }), /3 children active/);
+  assert.match(formatWatchmakerPace({ elapsed: 65_000, calls: 3, edits: 1, reads: 2, delegated: 0, activeChildren: 0 }), /3 completed calls in 1m5s.*2 direct read calls.*1 direct edit\/write calls/);
 });
