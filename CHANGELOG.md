@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.3 — 2026-09-27
+
+Watchmaker uses recent completed results when assessing progress, labels repetition spans separately from execution time, qualifies advice when newer results arrive, and discards advice whose cited task state has changed. Potentially stale memos are not persisted. Councils cancelled by a follow-up persist terminal state and can later attach actual child usage without delivering obsolete advice. Verified shell reads of skills consume the existing guidance receipt, preventing repeated hints; unknown background handles explain the correct task registry.
+
+The terminal footer and reports now share one core accounting implementation. Late native child IDs reconcile with their earlier wrapper receipts instead of double charging. Span provider charges are included, missing costs remain unknown, helper snapshots retain newer evidence, and background helper events flush through the existing health timer. `/used` counts observed main, auxiliary, child and judge models and shows one canonical child state. Shadow executions remain distinguishable from applied decisions. Cache diagnostics no longer double-count reasoning or present a character-based estimate as proven rebilling.
+
+JEV analysis shares one bounded evidence packet across ranking, grouping and up to four additional criteria, with optional task-defining reference evidence. It retains complete category distributions and uncertainty rather than only the winner, rejects malformed partial distributions, and checks the actual serialized request budget. The adaptation follows [Just Ask Jev](https://arxiv.org/pdf/2609.29429v1); raw scores and existing heuristic thresholds are not claimed to be calibrated for the current task. A synthetic twelve-item categorized packet shrank from 34,045 to 22,377 characters by removing duplicated evidence, bringing it within the request limit; this is not a billed-token or accuracy measurement.
+
+Image generation and reference editing can use the existing OpenRouter image provider and catalog. Explicit configuration keeps precedence; available credentials expose the route and models without a paid discovery call. Generated files must decode before becoming registered artifacts, and corrupt or cancelled outputs are cleaned up. Existing OpenAI-compatible generation and mask editing remain available.
+
+The local Qwen service retains prefix reuse with four checkpoints and a 256 MiB prompt cache inside its 2 GiB memory limit, replacing runtime defaults that could exceed that limit. Choices and judgments share the configured request deadline instead of a conflicting shorter choice timeout. Service updates reuse verified assets and report restart failures accurately. Regression coverage extends existing suites; release tags still reuse the exact main commit's successful CI run.
+
 ## 0.12.2 — 2026-09-27
 
 Resumed sessions retain explicitly activated tools within their existing authority. Native chain and parallel children now save each executed child's exact recovery contract, including its model and tool ceiling. Explicit parent follow-ups can resume stopped children; automatic recovery still respects cancellation. Status reports distinguish recoverable children from legacy runs whose contracts were never saved, and asynchronous dispatch allows independent work to continue.

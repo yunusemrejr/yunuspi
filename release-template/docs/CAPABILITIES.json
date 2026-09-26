@@ -2451,7 +2451,7 @@
     {
       "id": "art-direction",
       "group": "web_media",
-      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples temporal frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search; image_generate briefs and calls a configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples temporal frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search; image_generate briefs and calls the native OpenRouter or configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
       "entrypoints": [
         "creative_direct",
         "visual_review",
@@ -2981,12 +2981,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1818
+        "line": 1840
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1399
+        "line": 1421
       },
       {
         "name": "curator",
@@ -3001,7 +3001,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1784
+        "line": 1806
       },
       {
         "name": "export-json",
@@ -3161,7 +3161,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1728
+        "line": 1750
       },
       {
         "name": "subagent-cost",
@@ -3246,7 +3246,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1733
+        "line": 1755
       },
       {
         "name": "task-state",
@@ -3261,12 +3261,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1752
+        "line": 1774
       },
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 317
+        "line": 323
       },
       {
         "name": "websearch",
@@ -3349,7 +3349,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 265,
+        "line": 269,
         "kind": "factory"
       },
       {
@@ -3488,13 +3488,13 @@
       {
         "name": "creative_compare",
         "source": "agent/extensions/art-direction.ts",
-        "line": 338,
+        "line": 354,
         "kind": "factory"
       },
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 130,
+        "line": 134,
         "kind": "factory"
       },
       {
@@ -3580,7 +3580,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 309,
+        "line": 313,
         "kind": "factory"
       },
       {
@@ -3664,13 +3664,13 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 44,
+        "line": 45,
         "kind": "literal"
       },
       {
         "name": "motion_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 219,
+        "line": 223,
         "kind": "factory"
       },
       {
@@ -3820,7 +3820,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1910,
+        "line": 1932,
         "kind": "literal"
       },
       {
@@ -3832,7 +3832,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1847,
+        "line": 1869,
         "kind": "literal"
       },
       {
@@ -3844,7 +3844,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 740,
+        "line": 745,
         "kind": "literal"
       },
       {
@@ -3893,7 +3893,7 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 240,
+        "line": 244,
         "kind": "factory"
       },
       {
@@ -3935,7 +3935,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 207,
+        "line": 211,
         "kind": "factory"
       },
       {
@@ -3977,7 +3977,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 171,
+        "line": 175,
         "kind": "factory"
       },
       {
@@ -4214,7 +4214,7 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 44,
+        "line": 45,
         "kind": "literal"
       },
       {
@@ -4322,7 +4322,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1910,
+        "line": 1932,
         "kind": "literal"
       },
       {
@@ -4334,7 +4334,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1847,
+        "line": 1869,
         "kind": "literal"
       },
       {
@@ -4346,7 +4346,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 740,
+        "line": 745,
         "kind": "literal"
       },
       {
@@ -4411,7 +4411,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          98
+          102
         ],
         "knownNames": [
           "asset_register",
