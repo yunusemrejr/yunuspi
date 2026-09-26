@@ -79,6 +79,20 @@ test("repeated-read guidance never offers the retired context_code tool", () => 
 	}
 });
 
+test("semantic packet guidance requires a matching task and an active helper", () => {
+ for (const [prompt, active, expected] of [
+  ["Rank candidates and categorize the findings", true, true],
+  ["Rank candidates and categorize the findings", false, false],
+  ["Explain what ranking means", true, false],
+  ["Do not use tools to compare options", true, false],
+ ]) {
+  const ctx = { cwd: "/hook/tools", sessionManager: { getBranch: () => [] } };
+  const g = createRelevantGuidance({ getActiveTools: () => active ? ["micro_task"] : [], appendEntry() {} });
+  g.restore(ctx); g.userInput(); g.start({ prompt, systemPrompt: "" }, ctx);
+  assert.equal(g.candidates().some(hint => hint.tool === "micro_task"), expected, prompt);
+ }
+});
+
 console.log(
 	"PASS hook-guidance-tools: hook rules and guidance name only registered tools",
 );

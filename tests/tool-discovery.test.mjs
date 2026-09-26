@@ -118,7 +118,8 @@ function fixture(extraTools = []) {
  };
 }
 test("startup retains essential operations and loads specialized schemas only on discovery", async () => {
- const f = fixture();
+ const f = fixture([{ name: "micro_task", description: "Bounded semantic analysis", parameters: { type: "object" } }]);
+ assert.ok(f.active().includes("micro_task"), "bounded helpers are available without a discovery round trip");
  assert.ok(
   f.active().includes("subagent") && f.active().includes("quality_review"),
  );
