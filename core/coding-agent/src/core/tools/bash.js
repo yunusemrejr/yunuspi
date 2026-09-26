@@ -112,7 +112,10 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 }
                 // Handle shell spawn errors and wait for the process to terminate without hanging
                 // on inherited stdio handles held by detached descendants.
-                const exitCode = await waitForChildProcess(child, { isOutputBackpressured: () => pendingOutput.size > 0 });
+                const exitCode = await waitForChildProcess(child, {
+                    isOutputBackpressured: () => pendingOutput.size > 0,
+                    isCancelled: () => signal?.aborted || timedOut || outputError !== undefined,
+                });
                 await Promise.all(pendingOutput);
                 if (outputError) throw outputError;
                 if (signal?.aborted) {

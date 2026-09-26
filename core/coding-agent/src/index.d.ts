@@ -37,3 +37,5 @@ export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
 export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
+
+export { waitForChildProcess } from "./utils/child-process.js";

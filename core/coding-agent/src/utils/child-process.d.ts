@@ -16,4 +16,6 @@ export declare function spawnProcessSync(command: string, args: string[], option
  */
 export declare function waitForChildProcess(child: ChildProcess, options?: {
     isOutputBackpressured?: () => boolean;
+    /** Stop draining inherited handles after the grace period when cancelled. */
+    isCancelled?: () => boolean;
 }): Promise<number | null>;

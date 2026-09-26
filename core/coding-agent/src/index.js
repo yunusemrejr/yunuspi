@@ -49,3 +49,5 @@ export { formatDimensionNote, resizeImage } from "./utils/image-resize.js";
 export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
 // Shell utilities
 export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
+
+export { waitForChildProcess } from "./utils/child-process.js";

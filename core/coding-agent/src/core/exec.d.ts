@@ -7,7 +7,7 @@
 export interface ExecOptions {
     /** AbortSignal to cancel the command */
     signal?: AbortSignal;
-    /** Timeout in milliseconds */
+    /** Timeout in milliseconds, 0 disables it; maximum 2147483647. */
     timeout?: number;
     /** Working directory */
     cwd?: string;
@@ -18,6 +18,7 @@ export interface ExecOptions {
 export interface ExecResult {
     stdout: string;
     stderr: string;
+    /** Nonzero for signal termination, cancellation, timeout, or spawn failure. */
     code: number;
     killed: boolean;
 }

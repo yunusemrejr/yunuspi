@@ -58,12 +58,15 @@ export function waitForChildProcess(child, options = {}) {
             }
         };
         const armIdleTimer = () => {
+            // Once cancellation starts, new descendant output cannot keep
+            // postponing termination of this already-exited invocation.
+            if (postExitTimer && options.isCancelled?.()) return;
             if (postExitTimer)
                 clearTimeout(postExitTimer);
             postExitTimer = setTimeout(() => {
                 // A paused pipe awaiting its consumer is not an idle inherited
                 // handle. Do not destroy unread output while the sink drains.
-                if (options.isOutputBackpressured?.()) armIdleTimer();
+                if (!options.isCancelled?.() && options.isOutputBackpressured?.()) armIdleTimer();
                 else finalize(exitCode);
             }, EXIT_STDIO_GRACE_MS);
         };

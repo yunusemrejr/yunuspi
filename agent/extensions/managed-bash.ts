@@ -33,6 +33,7 @@ import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import {
 	createBashToolDefinition,
 	getShellConfig,
+	waitForChildProcess,
 } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { setTimeout as delay } from "node:timers/promises";
@@ -184,11 +185,13 @@ function spawnWatchdog(job: Job, timeoutSeconds: number): void {
 		`sleep 2; n=$((n+1)); [ $n -ge ${cap} ] && exit 0; done; ` +
 		`kill -0 ${job.pid} 2>/dev/null && kill -9 -${job.pid} 2>/dev/null; exit 0`;
 	try {
-		spawn("/bin/bash", ["-c", script], {
+		const watchdog = spawn("/bin/bash", ["-c", script], {
 			stdio: "ignore",
 			detached: true,
 			windowsHide: true,
-		}).unref();
+		});
+		watchdog.once("error", () => { /* optional crash backstop failed to spawn */ });
+		watchdog.unref();
 	} catch {
 		/* watchdog is best-effort; graceful shutdown and the in-process deadline still apply */
 	}
@@ -297,20 +300,21 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			let deadlineTimer: NodeJS.Timeout | undefined;
 			let graceTimer: NodeJS.Timeout | undefined;
 			let cancelTimer: NodeJS.Timeout | undefined;
-			let pendingOutput = 0;
+			const pendingOutput = new Set<Promise<void>>();
 			let outputError: unknown;
 			const forward = (data: Buffer) => {
 				try {
 					const pending = onData(data);
 					if (!pending || typeof pending.then !== "function") return;
-					pendingOutput++;
 					child.stdout?.pause(); child.stderr?.pause();
-					Promise.resolve(pending).catch(error => {
+					const task = Promise.resolve(pending).catch(error => {
 						outputError ??= error;
 						if (child.pid) killTree(child.pid);
 					}).finally(() => {
-						if (--pendingOutput === 0) { child.stdout?.resume(); child.stderr?.resume(); }
+						pendingOutput.delete(task);
+						if (pendingOutput.size === 0) { child.stdout?.resume(); child.stderr?.resume(); }
 					});
+					pendingOutput.add(task);
 				} catch (error) { outputError ??= error; if (child.pid) killTree(child.pid); }
 			};
 
@@ -340,7 +344,10 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 						} catch {
 							killTree(pid);
 						}
-						cancelTimer = setTimeout(() => killTree(pid), cancelGraceMs);
+						cancelTimer = setTimeout(() => {
+							cancelTimer = undefined;
+							killTree(pid);
+						}, cancelGraceMs);
 						cancelTimer.unref();
 					} else killTree(child.pid);
 				}
@@ -355,7 +362,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					const text = t.text(2048);
 					return `${name} (${t.bytes}B kept): ${text ? `\n${text}` : "(none yet)"}`;
 				};
-					onData(
+					forward(
 					Buffer.from(
 						`[managed bash] Still running — detached to background after ${fmtDuration(graceMs)} grace.\n` +
 							`  job: ${job.id} · pid ${job.pid} · state: running · elapsed ${fmtDuration(Date.now() - job.startedAt)}` +
@@ -423,8 +430,16 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 						}
 					}
 				});
-				child.once("close", onExit);
-				child.once("error", (err) => {
+				const terminationGracePending = () => cancelTimer !== undefined ||
+					(job.state === "killed" && Date.now() - (job.endedAt ?? 0) < KILL_TERM_GRACE_MS);
+				waitForChildProcess(child, {
+					isOutputBackpressured: () => pendingOutput.size > 0 || terminationGracePending(),
+					isCancelled: () => !terminationGracePending() &&
+						(Boolean(signal?.aborted) || job.state === "timed_out" || job.state === "killed" || outputError !== undefined),
+				}).then(async code => {
+					await Promise.all(pendingOutput);
+					onExit(code, child.signalCode);
+				}).catch((err) => {
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
 					// WHY a failed spawn must not leave a live job: reject AND settle the job

@@ -63,7 +63,7 @@ export function executeToolCall(call, gate, onUpdate, toolContext, invocation, c
                 if (acceptingUpdates)
                     onUpdate(partial, options);
             }, toolContext, invocation, admittedContext);
-            return { result, isError: false };
+            return { result, isError: result.isError === true };
         }
         catch (error) {
             return {
