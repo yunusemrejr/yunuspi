@@ -160,7 +160,12 @@ test('only core-provenanced interactive and RPC inputs receive one structured ad
 	assert.match(f.completions[0].requestPrompt, /completionConditions/);
 	assert.doesNotMatch(f.completions[1].requestPrompt, /needsMemory/);
 	assert.equal(lastMicroRequest('owner-1').promptAnalysis.kind, 'followup');
-	assert.equal(microRequestAdvice(promptB, 'owner-1').needsVerification, true);
+	assert.deepEqual(microRequestAdvice(promptB, 'owner-1'), {
+		noFit: false, needsVerification: true, reviewWorthy: true,
+		multiPerspective: true, perspectives: [], ok: true,
+	});
+	assert.equal(microRequestAdvice(promptA, 'owner-1'), undefined, 'advice belongs to the current exact request');
+	assert.equal(f.completions.length, 2, 'derived advice reuses prompt analysis without another classifier call');
 
 	const batch = {
 		messages: [
@@ -249,6 +254,7 @@ test('an unusable route degrades to labelled deterministic analysis without fabr
 	await settleMicroAnalyses();
 	assert.equal(f.completions.length, 0);
 	assert.equal(lastMicroRequest('owner-1').promptAnalysis.source, 'fallback');
+	assert.equal(microRequestAdvice(promptA, 'owner-1'), undefined, 'deterministic fallback never masquerades as semantic advice');
 	assert.equal(lastMicroRequest('owner-1').advisoryPending, false);
 	await f.emit('context', {
 		messages: [{ role: 'user', content: [{ type: 'text', text: promptA }] }],

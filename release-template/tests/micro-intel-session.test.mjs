@@ -58,26 +58,8 @@ test("coding session: every layer does distinct useful work", async () => {
   assert.equal(pass.substantive, true);
   assert.equal(pass.family, "implementation");
 
-  // 2. Advisory batch runs once, asynchronously.
-  const advisory = await new Promise((resolve) => {
-    advisoryMod.runAdvisory(
-      { prompt: "Fix the failing test", family: "implementation", terms: pass.terms, candidates: [] },
-      async () => ({
-        ok: true,
-        answers: {
-          kind: { choice: "implementation" },
-          needsVerification: { noul: 0.1 },
-          reviewWorthy: { noul: 0.8 },
-          multiPerspective: { noul: 0.2 },
-          perspective: { choice: "testing", probabilities: { testing: 0.7 } },
-        },
-        usage: { inputTokens: 200, cached: false },
-      }),
-      resolve,
-    );
-  });
-  assert.equal(advisory.reviewWorthy, true);
-  layers.add("jev");
+  // Mandatory prompt analysis and its derived council advice are exercised
+  // by helper-lifecycle.test.mjs; this helper session sends no second request.
 
   // 3. Tool ranking blends lexical + needle; main LLM would execute.
   const ranked = await retrievalMod.multiStageRetrieve({
@@ -124,6 +106,14 @@ test("coding session: every layer does distinct useful work", async () => {
     { id: "b", text: "the login handler leaks the session token in error responses" },
   ]);
   assert.equal(groups.length, 1);
+  const duplicate = await reviewMod.judgeDuplicatePair(
+    { id: "a", text: "login returns secret credentials in its failure payload" },
+    { id: "b", text: "authentication error exposes the session token" },
+    async () => ({ ok: true, answers: { duplicate: { noul: .9 } }, usage: { inputTokens: 60, cached: false } }),
+  );
+  assert.deepEqual(duplicate, { duplicate: true, ok: true });
+  layers.add("jev");
+
 
   assert.deepEqual([...layers].sort(), ["deterministic", "jev", "kompress", "needle", "smol"]);
   const snapshot = metrics.snapshot();
@@ -134,7 +124,7 @@ test("coding session: every layer does distinct useful work", async () => {
     assert.ok(snapshot.helpers[helper].projectedSavedChars > 1000);
     assert.equal(snapshot.helpers[helper].savedChars, 0, "owner-only test must not claim provider rendering");
   }
-  assert.ok(snapshot.jev.questions >= 5, "one batched advisory call, not many tiny ones");
+  assert.equal(snapshot.jev.questions, 1, "only the unresolved finding pair earns a typed judgment");
 });
 
 test("research session: evidence ranking plus claim validation", async () => {
