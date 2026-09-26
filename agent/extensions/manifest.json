@@ -142,6 +142,7 @@
     "observer-journal.ts",
     "observer-model-evidence.ts",
     "output-distiller.ts",
+    "path-safety.ts",
     "project-identity.ts",
     "project-memory-consolidate.ts",
     "project-memory-context.ts",

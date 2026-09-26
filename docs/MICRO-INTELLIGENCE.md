@@ -18,7 +18,7 @@ SPAN                               soft behavior sensor over session traces (sha
         ↓
 MICRO-WORKER                       bounded cheap-remote helper (no tools, no writes)
         ↓
-REMOTE RERANK                      opt-in precision stage (Needle stays default)
+REMOTE RERANK                      configured precision stage (after Needle)
         ↓
 MAIN / CHILD LLM / COUNCIL         deep reasoning, synthesis, judgment
 ```
@@ -402,19 +402,23 @@ and unknown is never safe for private repository content. "Free" never
 implies safe. Without evidence the worker abstains rather than
 guessing on a random cheap route.
 
-## Remote rerank — opt-in precision stage
+## Remote rerank — configured precision stage
 
-Local Needle3 ranking stays the zero-cost default in every retrieval
-pipeline. `remoteRanker` adds an optional precision stage after
-lexical/vector retrieval and before final context selection for
-project memory, historical/session retrieval, Observer evidence,
-source relevance, skills, and docs. It speaks the Voyage rerank API
+Project memory uses one shared refinement path for main sessions, children,
+Observer and Watchmaker: lexical/vector retrieval, local Needle ranking,
+then a configured remote reranker before final selection. The remote stage
+preserves the local ordering on unavailable, malformed or low-value results;
+cancellation suppresses late rankings. Exact lexical matches still bypass
+inference. It speaks the Voyage rerank API
 shape against a configurable endpoint (`PI_RERANK_URL`, default the
 Voyage API; OpenRouter exposes no `/v1/rerank`), so Voyage rerank
 variants — or any compatible proxy — can be benchmarked without
 hardcoded assumptions. Unconfigured, unreachable, or low-value
 reranking returns undefined and the caller keeps its local order.
-`PI_RERANK=off` is the default; `PI_RERANK_MODEL` selects the model.
+The stage is enabled by default and runs once `PI_RERANK_MODEL` and
+`VOYAGE_API_KEY` are configured. Explicit `PI_RERANK=off` and offline mode
+remain operator controls. No provider or successful inference is inferred
+from enabled status alone.
 
 ## Router shadow and qualification lab
 

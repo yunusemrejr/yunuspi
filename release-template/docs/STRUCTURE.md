@@ -38,6 +38,12 @@ exports preserve the safeguards.
 
 ## Cleanup rules
 
+`agent/scripts/cleanup-harness.mjs` previews conservative housekeeping;
+the scheduled shell wrapper applies it while sharing the launcher's
+installation lease, so an update cannot move state beneath the cleaner.
+Live heartbeat PIDs protect their sessions; validated closed-peer identity
+receipts are not active heartbeats. Unverifiable records still stop cleanup.
+
 - Prefer modifying one existing source of truth over adding a second
   implementation. If two components overlap, migrate callers toward the
   owner instead of moving files around.

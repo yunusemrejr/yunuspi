@@ -12,5 +12,8 @@ fi
   exit 1
 }
 mkdir -p "$HOME/.pi/agent/logs"
-# Cooperates with updates and other cleaners. A held lock means try next time.
-exec flock -n -E 0 "$HOME/.pi/agent/logs/harness-update.lock" "$NODE" "$HOME/.pi/agent/scripts/cleanup-harness.mjs" --apply
+# Share the launcher's installation lease so updates cannot move our state
+# during cleanup. The second lock serializes cleaners; active sessions may run.
+exec flock --shared -n -E 0 "$HOME/.pi/agent/logs/harness-session.lock" \
+  flock -n -E 0 "$HOME/.pi/agent/logs/harness-update.lock" \
+  "$NODE" "$HOME/.pi/agent/scripts/cleanup-harness.mjs" --apply

@@ -63,6 +63,18 @@ async function activeSessions(root) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     const file = path.join(dir, entry.name);
     const record = await smallJson(file, await regular(file));
+    // Siblings leaves immutable retirement receipts beside active heartbeats.
+    // They attest message identity after departure and deliberately have no PID.
+    if (entry.name.endsWith('.closed.json')) {
+      const valid = record?.kind === 'root' && typeof record.sid === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(record.sid)
+        && typeof record.root === 'string' && path.isAbsolute(record.root)
+        && typeof record.bridgeEpoch === 'string' && /^[0-9a-f-]{36}$/.test(record.bridgeEpoch)
+        && Number.isFinite(record.bridgeStartedAt) && Number.isFinite(record.closedAt)
+        && record.closedAt >= record.bridgeStartedAt && record.pid === undefined;
+      const expected = valid && `${createHash('sha1').update(record.root).digest('hex').slice(0, 16)}--${record.sid}--${record.bridgeEpoch}.closed.json`;
+      if (expected !== entry.name) throw new Error(`Unverifiable closed-session record: ${entry.name}; cleanup skipped`);
+      continue;
+    }
     // Unknown heartbeat contents cannot justify deleting anybody's state.
     if (!record || typeof record.sid !== "string" || !Number.isSafeInteger(record.pid))
       throw new Error(`Unverifiable active-session record: ${entry.name}; cleanup skipped`);

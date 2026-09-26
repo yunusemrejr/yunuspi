@@ -20,6 +20,7 @@
  */
 
 import { needleRank } from "./needle-runtime.ts";
+import { remoteRanker } from "./micro-intelligence/rerank.ts";
 import { TYPE_WEIGHTS, type MemoryEmbedder } from "./project-memory-index.ts";
 import { DEFAULT_MEMORY_EMBEDDING_MODEL, embedMemory, type MemoryEmbedding } from "./project-memory-embedder.ts";
 import { type ChunkType, type ProjectVectorStore, type StoredAtom, type StoredChunk, isChunkType } from "./project-vector-store.ts";
@@ -79,7 +80,7 @@ export const SUPERSEDED_PENALTY = 0.25;
 
 export interface Ranker {
   /** Return candidate ids best-first, or undefined when unavailable. Never throws. */
-  rank(query: string, candidates: Array<{ id: string; text: string }>): Promise<string[] | undefined>;
+  rank(query: string, candidates: Array<{ id: string; text: string }>, signal?: AbortSignal): Promise<string[] | undefined>;
 }
 
 /** Local Needle3 ranker over the fused head. Offline-safe. */
@@ -94,6 +95,29 @@ export function needleRanker(topK = 12): Ranker {
       } catch {
         return undefined;
       }
+    },
+  };
+}
+
+/** One refinement path for all memory consumers. A configured remote backend
+ * refines the local head; unavailable stages preserve the last usable order. */
+export function memoryRanker(local: Ranker = needleRanker(), remote: Ranker = remoteRanker()): Ranker {
+  return {
+    async rank(query, candidates, signal) {
+      if (signal?.aborted || candidates.length < 2) return undefined;
+      const head = candidates.slice(0, 24).map(candidate => ({ ...candidate }));
+      const validOrder = (order: string[] | undefined) => Array.isArray(order) && order.length >= 2
+        && new Set(order).size === order.length && order.every(id => head.some(candidate => candidate.id === id));
+      let localOrder: string[] | undefined;
+      try { localOrder = await local.rank(query, head.map(candidate => ({ ...candidate })), signal); } catch { /* retain lexical order */ }
+      if (signal?.aborted) return undefined;
+      if (!validOrder(localOrder)) localOrder = undefined;
+      const positions = new Map(localOrder?.map((id, index) => [id, index]));
+      if (localOrder) head.sort((a, b) => (positions.get(a.id) ?? head.length) - (positions.get(b.id) ?? head.length));
+      let remoteOrder: string[] | undefined;
+      try { remoteOrder = await remote.rank(query, head.map(candidate => ({ ...candidate })), signal); } catch { /* retain local order */ }
+      if (signal?.aborted) return undefined;
+      return validOrder(remoteOrder) ? [...remoteOrder!, ...head.map(candidate => candidate.id).filter(id => !remoteOrder!.includes(id))] : localOrder;
     },
   };
 }
@@ -297,15 +321,15 @@ export async function retrieveProjectMemory(
   const head = scored.slice(0, Math.max(limit, 12));
 
   let reranked = false;
-  const ranker = opts.rerank === undefined ? needleRanker() : opts.rerank;
+  const ranker = opts.rerank === undefined ? memoryRanker() : opts.rerank;
   if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
-      order = await ranker.rank(clean, head.map((hit) => ({ id: hit.chunk.id, text: `${hit.chunk.title}\n${hit.chunk.text}` })));
+      order = await ranker.rank(clean, head.map((hit) => ({ id: hit.chunk.id, text: `${hit.chunk.title}\n${hit.chunk.text}` })), opts.signal);
     } catch {
       order = undefined;
     }
-    if (order?.length) {
+    if (order?.length && !opts.signal?.aborted) {
       const positions = new Map(order.map((id, rank) => [id, rank]));
       for (const hit of head) {
         const rank = positions.get(hit.chunk.id) ?? head.length;
@@ -431,15 +455,15 @@ export async function retrieveFamily(
   if (semantic.skipped === 'exact-lexical') merged.sort((a, b) => Number(containsLiteralTerms(b.chunk, clean)) - Number(containsLiteralTerms(a.chunk, clean)));
   const head = merged.slice(0, Math.max(limit, 12));
   let reranked = false;
-  const ranker = opts.rerank === undefined ? needleRanker() : opts.rerank;
+  const ranker = opts.rerank === undefined ? memoryRanker() : opts.rerank;
   if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
     let order: string[] | undefined;
     try {
-      order = await ranker.rank(clean, head.map((hit) => ({ id: `${hit.projectId}:${hit.chunk.id}`, text: `${hit.chunk.title}\n${hit.chunk.text}` })));
+      order = await ranker.rank(clean, head.map((hit) => ({ id: `${hit.projectId}:${hit.chunk.id}`, text: `${hit.chunk.title}\n${hit.chunk.text}` })), opts.signal);
     } catch {
       order = undefined;
     }
-    if (order?.length) {
+    if (order?.length && !opts.signal?.aborted) {
       const positions = new Map(order.map((id, rank) => [id, rank]));
       for (const hit of head) {
         const rank = positions.get(`${hit.projectId}:${hit.chunk.id}`) ?? head.length;
