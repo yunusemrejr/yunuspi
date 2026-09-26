@@ -11,6 +11,7 @@ import * as _bundledPiAgentCore from "@yunuspi/agent-core";
 import * as _bundledPiAiCompat from "@yunuspi/ai/compat";
 import * as _bundledPiAiOauth from "@yunuspi/ai/oauth";
 import * as _bundledPiAiProviders from "@yunuspi/ai/providers/all";
+import * as _bundledPiAiAbort from "@yunuspi/ai/utils/abort";
 import * as _bundledPiTui from "@yunuspi/tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
@@ -46,6 +47,7 @@ const VIRTUAL_MODULES = {
     "@yunuspi/ai/compat": _bundledPiAiCompat,
     "@yunuspi/ai/oauth": _bundledPiAiOauth,
     "@yunuspi/ai/providers/all": _bundledPiAiProviders,
+    "@yunuspi/ai/utils/abort": _bundledPiAiAbort,
     "@yunuspi/coding-agent": _bundledPiCodingAgent,
     "@mariozechner/pi-agent-core": _bundledPiAgentCore,
     "@earendil-works/pi-agent-core": _bundledPiAgentCore,
@@ -96,11 +98,15 @@ function getAliases() {
     const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@yunuspi/ai/compat");
     const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@yunuspi/ai/oauth");
     const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "@yunuspi/ai/providers/all");
+    const piAiAbortEntry = resolveWorkspaceOrImport("ai/dist/utils/abort.js", "@yunuspi/ai/utils/abort");
     _aliases = {
         "@yunuspi/coding-agent": piCodingAgentEntry,
         "@yunuspi/agent-core": piAgentCoreEntry,
         "@yunuspi/tui": piTuiEntry,
         "@yunuspi/ai/providers/all": piAiProvidersEntry,
+        // Jiti aliases match package prefixes: public subpaths need their own
+        // binding before the compatibility entrypoint replaces the root.
+        "@yunuspi/ai/utils/abort": piAiAbortEntry,
         "@yunuspi/ai/compat": piAiCompatEntry,
         "@yunuspi/ai/oauth": piAiOauthEntry,
         "@yunuspi/ai": piAiCompatEntry,
