@@ -174,19 +174,28 @@ test('watchmaker separates repeated-command span from execution time and carries
   assert.ok(rows.some(row => row.kind === 'tool result' && /branch is synchronized/.test(row.text)));
 });
 
-test('new completed receipts invalidate an in-flight pace diagnosis before memo or delivery', async (t) => {
+test('ordinary progress qualifies an in-flight pace note, consumes its chunk and drops its durable memo', async (t) => {
   let release;
-  const h = harness(t, [() => new Promise(resolve => { release = resolve; })]);
+  const h = harness(t, [() => new Promise(resolve => { release = resolve; }), '']);
   h.fire('session_start', {});
   await h.beginTask('first', 'Synchronize the fixture branch.');
+  for (let index = 0; index < 3; index++) h.fire('tool_result', { toolCallId: `earlier-${index}`, toolName: 'bash', input: { command: `git status fixture-${index}` }, content: [{ type: 'text', text: `Earlier fixture receipt ${index}.` }] });
   await h.time.advance(60000);
   assert.equal(typeof release, 'function');
+  assert.ok(h.packets[0].text.includes('Earlier fixture receipt 0.'));
   h.fire('tool_result', { toolCallId: 'push', toolName: 'bash', input: { command: 'git push origin fixture' }, content: [{ type: 'text', text: 'Fixture branch pushed successfully.' }] });
   release({ note: 'Push the pending fixture change now.', memo: 'The fixture change remains unpushed.', evidence: ['time-pace'] });
-  for (let index = 0; index < 30; index++) await tick();
-  assert.equal(h.completedIds().length, 0);
+  await h.waitForNotes(1);
   assert.equal(h.receipts.filter(row => row.customType === 'watchmaker-memo-v1').length, 0);
-  assert.equal(h.fire('context', { messages: [] }), undefined);
+  const capsule = h.fire('context', { messages: [] }).messages.find(message => message.customType === 'session-watchmaker-context');
+  assert.match(capsule.content, /Tool results arrived after this snapshot, so it may already be addressed; verify against newer work/);
+  assert.match(capsule.content, /Push the pending fixture change now/);
+  await h.time.advance(60000);
+  assert.equal(h.packets.length, 2);
+  assert.ok(!h.packets[1].text.includes('Earlier fixture receipt 0.'), 'the completed review consumed its earlier unread chunk');
+  assert.ok(h.packets[1].text.includes('Fixture branch pushed successfully.'), 'the next review sees new progress');
+  assert.ok(!h.packets[1].text.includes('The fixture change remains unpushed.'), 'the stale conclusion cannot seed the scratchpad');
+  h.fire('session_shutdown', {});
 });
 
 test('a child transition invalidates watchmaker advice before it can seed a memo', async t => {

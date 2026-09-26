@@ -243,13 +243,16 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: currentPacket, reason: 'User free-only restriction prevents watchmaker route' };
       const capturedSequence = sequence;
       const capturedResults = latestResults.map(row => row.id).join(',');
+      const newerResults = () => capturedResults !== latestResults.map(row => row.id).join(',');
       // Counts may grow, but child/plan transitions can invalidate a suggested
       // harvest or redispatch before the note reaches the agent.
       const stillCurrent = (advice?: any) => {
         if (capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
-        if (advice?.note && capturedResults !== latestResults.map(row => row.id).join(',')) return false;
         const current = new Map(timeRows().map(row => [row.id, row.text]));
-        return !timeEvidence.some(row => ['time-children', 'time-todos'].includes(row.id) && advice?.evidence?.includes(row.id) && current.get(row.id) !== row.text);
+        if (timeEvidence.some(row => ['time-children', 'time-todos'].includes(row.id) && advice?.evidence?.includes(row.id) && current.get(row.id) !== row.text)) return false;
+        // Ordinary progress qualifies the completed review instead of leaving
+        // its chunk unread and paying to review it again during active work.
+        return newerResults() ? 'Tool results arrived' : true;
       };
       const capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, ledger: [...ledger.entries()].map(([tool, row]) => [tool, row.calls, row.errors, Math.round(row.ms / 1000)]), model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name) });
@@ -264,6 +267,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
         applied: (advice: any) => {
           if (!owns(ctx)) return undefined;
           const memo = (advice as WatchmakerAdvice)?.memo;
+          if (memo && newerResults()) return 'memo dropped (new tool results arrived)';
           if (memo) {
             scratchpad.add(memo, now());
             try { pi.appendEntry(WATCHMAKER_MEMO_TYPE, { memo, at: now() }); } catch { /* The ring keeps the memo; persistence is best-effort. */ }
