@@ -6,7 +6,7 @@
  * filesystem-safety hook reviews them) in their own process group, and every
  * process dies with its session. */
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
@@ -20,7 +20,14 @@ interface Launched { pid: number; command: string; child: ChildProcess; output: 
 export interface DesktopSession { id: string; display: string; width: number; height: number; xvfb: ChildProcess; processes: Map<number, Launched>; startedAt: number; lastUsed: number; dir: string; shots: number; }
 
 export function desktopAvailability(): { ok: boolean; missing: string[] } {
-  const missing = ["Xvfb", "xdotool", "xwd", "ffmpeg"].filter((binary) => !["/usr/bin", "/usr/local/bin", "/bin"].some((dir) => existsSync(path.join(dir, binary))));
+  const directories = (process.env.PATH ?? "/usr/bin:/bin").split(path.delimiter);
+  const missing = ["Xvfb", "xdotool", "xwd", "ffmpeg"].filter((binary) => !directories.some((dir) => {
+    const executable = path.resolve(dir || ".", binary);
+    try {
+      accessSync(executable, constants.X_OK);
+      return statSync(executable).isFile();
+    } catch { return false; }
+  }));
   return { ok: missing.length === 0, missing };
 }
 
@@ -36,6 +43,10 @@ const number = (value: unknown, min: number, max: number, name: string) => {
 export function createDesktopManager(options: { now?: () => number; artifactRoot?: () => string } = {}) {
   const now = options.now ?? Date.now;
   const sessions = new Map<string, DesktopSession>();
+  const pendingStarts = new Map<AbortController, Promise<void>>();
+  const pendingStops = new Set<Promise<void>>();
+  let shutdownEpoch = 0;
+  let stopAllPromise: Promise<void> | undefined;
   const get = (id: unknown) => {
     const session = typeof id === "string" ? sessions.get(id) : undefined;
     if (!session) throw new Error(`Unknown desktop session${sessions.size ? `; open sessions: ${[...sessions.keys()].join(", ")}` : "; start one first"}`);
@@ -46,29 +57,53 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
   const reap = async () => { for (const session of [...sessions.values()]) if (now() - session.lastUsed > IDLE_MS) await stop(session.id); };
 
   async function start(params: { width?: number; height?: number }) {
+    const epoch = shutdownEpoch;
+    if (stopAllPromise) throw new Error("Desktop sessions are stopping");
     const availability = desktopAvailability();
     if (!availability.ok) throw new Error(`Virtual display tools are missing: ${availability.missing.join(", ")}. On Debian/Ubuntu: sudo apt-get install xvfb xdotool x11-apps ffmpeg`);
     await reap();
-    if (sessions.size >= MAX_SESSIONS) throw new Error(`At most ${MAX_SESSIONS} desktop sessions; stop one first`);
+    if (stopAllPromise || epoch !== shutdownEpoch) throw new Error("Desktop sessions stopped during startup");
+    if (sessions.size + pendingStarts.size >= MAX_SESSIONS) throw new Error(`At most ${MAX_SESSIONS} desktop sessions; stop one first`);
     const width = params.width === undefined ? 1280 : number(params.width, 320, 2560, "width");
     const height = params.height === undefined ? 800 : number(params.height, 240, 1600, "height");
-    let displayNumber = -1;
-    for (let n = 90; n < 140; n++) if (!existsSync(`/tmp/.X11-unix/X${n}`) && !existsSync(`/tmp/.X${n}-lock`)) { displayNumber = n; break; }
-    if (displayNumber < 0) throw new Error("No free virtual display number");
-    const display = `:${displayNumber}`;
-    const xvfb = spawn("Xvfb", [display, "-screen", "0", `${width}x${height}x24`, "-nolisten", "tcp", "-noreset", "-nocursor"], { stdio: "ignore", detached: true });
-    xvfb.unref();
-    const deadline = now() + 6000;
-    let ready = false;
-    while (now() < deadline && xvfb.exitCode === null) {
-      if (existsSync(`/tmp/.X11-unix/X${displayNumber}`)) { ready = true; break; }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    if (!ready) { try { process.kill(-xvfb.pid!, "SIGKILL"); } catch { /* not started */ } throw new Error("The virtual display did not start within 6 seconds"); }
-    const id = `desk-${randomBytes(3).toString("hex")}`;
-    const dir = await fs.mkdtemp(path.join(options.artifactRoot?.() ?? os.tmpdir(), `${id}-`));
-    sessions.set(id, { id, display, width, height, xvfb, processes: new Map(), startedAt: now(), lastUsed: now(), dir, shots: 0 });
-    return { session: id, display, width, height, note: "Private virtual display: nothing here reaches the user's screen. Launch an app, then screenshot, click, type and key against it." };
+    const controller = new AbortController();
+    let finish!: () => void;
+    pendingStarts.set(controller, new Promise<void>((resolve) => { finish = resolve; }));
+    let xvfb: ChildProcess | undefined;
+    let dir: string | undefined;
+    try {
+      // Xvfb allocates its own free display and acknowledges readiness on our pipe.
+      // A socket discovered by scanning /tmp could belong to another process.
+      xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${width}x${height}x24`, "-nolisten", "tcp", "-noreset", "-nocursor"], { stdio: ["ignore", "ignore", "ignore", "pipe"], detached: true, signal: controller.signal });
+      const child = xvfb;
+      child.unref();
+      const display = await new Promise<string>((resolve, reject) => {
+        let receipt = "", settled = false;
+        const timer = setTimeout(() => fail(new Error("The virtual display did not start within 6 seconds")), 6000);
+        const fail = (error: Error) => { if (!settled) { settled = true; clearTimeout(timer); reject(error); } };
+        child.on("error", fail);
+        child.once("exit", () => fail(new Error("The virtual display exited before it was ready")));
+        child.stdio[3]!.on("error", fail);
+        child.stdio[3]!.on("data", (chunk: Buffer) => {
+          if (settled) return;
+          receipt += chunk.toString("ascii");
+          if (receipt.length > 32 || !/^\d*\n?$/.test(receipt)) return fail(new Error("Invalid virtual display readiness receipt"));
+          if (/^\d+\n$/.test(receipt)) {
+            settled = true; clearTimeout(timer); resolve(`:${receipt.trim()}`);
+          }
+        });
+        child.stdio[3]!.once("end", () => fail(new Error("The virtual display closed its readiness pipe")));
+      });
+      const id = `desk-${randomBytes(3).toString("hex")}`;
+      dir = await fs.mkdtemp(path.join(options.artifactRoot?.() ?? os.tmpdir(), `${id}-`));
+      if (controller.signal.aborted || child.exitCode !== null || child.signalCode !== null) throw new Error("The virtual display stopped during startup");
+      sessions.set(id, { id, display, width, height, xvfb: child, processes: new Map(), startedAt: now(), lastUsed: now(), dir, shots: 0 });
+      return { session: id, display, width, height, note: "Private virtual display: nothing here reaches the user's screen. Launch an app, then screenshot, click, type and key against it." };
+    } catch (error) {
+      if (xvfb?.pid) { try { process.kill(-xvfb.pid, "SIGKILL"); } catch { /* already gone */ } }
+      if (dir) await fs.rm(dir, { recursive: true, force: true });
+      throw error;
+    } finally { pendingStarts.delete(controller); finish(); }
   }
 
   async function launch(params: { session: string; command: string; cwd: string }) {
@@ -77,8 +112,11 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
     for (const [pid, proc] of session.processes) if (proc.exited !== undefined && session.processes.size >= MAX_PROCESSES) session.processes.delete(pid);
     if ([...session.processes.values()].filter((p) => p.exited === undefined).length >= MAX_PROCESSES) throw new Error(`At most ${MAX_PROCESSES} running processes per desktop session`);
     const before = new Set((await windows(session).catch(() => [])).map((w) => w.id));
+    if (!sessions.has(session.id) || stopAllPromise) throw new Error("Desktop session stopped during launch");
     const child = spawn("/bin/sh", ["-c", params.command], { cwd: params.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, DISPLAY: session.display, WAYLAND_DISPLAY: "", GDK_BACKEND: "x11", QT_QPA_PLATFORM: "xcb" } });
+    await new Promise<void>((resolve, reject) => { child.on("error", reject); child.once("spawn", resolve); });
+    if (!sessions.has(session.id)) { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already gone */ } throw new Error("Desktop session stopped during launch"); }
     const record: Launched = { pid: child.pid!, command: params.command.slice(0, 300), child, output: "", startedAt: now() };
     const collect = (chunk: Buffer) => { record.output = (record.output + chunk.toString("utf8")).slice(-LOG_BYTES); };
     child.stdout?.on("data", collect); child.stderr?.on("data", collect);
@@ -114,11 +152,21 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
     await new Promise<void>((resolve, reject) => {
       const grab = spawn("xwd", ["-root", "-silent", "-display", session.display], { stdio: ["ignore", "pipe", "ignore"] });
       const encode = spawn("ffmpeg", ["-hide_banner", "-nostdin", "-v", "error", "-protocol_whitelist", "pipe,file", "-f", "xwd_pipe", "-i", "pipe:0", "-frames:v", "1", ...(crop ? ["-vf", crop] : []), "-y", file], { stdio: ["pipe", "ignore", "pipe"] });
-      let stderr = "";
-      encode.stderr?.on("data", (chunk) => { stderr += chunk; });
+      let stderr = "", settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        grab.stdout!.unpipe(encode.stdin!);
+        grab.kill("SIGKILL");
+        if (error) { encode.kill("SIGKILL"); reject(error); } else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error("Screenshot timed out")), 15_000);
+      grab.on("error", finish); encode.on("error", finish);
+      grab.stdout!.on("error", finish); encode.stdin!.on("error", finish);
+      encode.stderr?.on("data", (chunk) => { stderr = (stderr + chunk).slice(-LOG_BYTES); });
       grab.stdout!.pipe(encode.stdin!);
-      const timer = setTimeout(() => { grab.kill("SIGKILL"); encode.kill("SIGKILL"); reject(new Error("Screenshot timed out")); }, 15_000);
-      encode.on("close", (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`Screenshot failed: ${stderr.slice(-300)}`)); });
+      grab.on("close", (code) => { if (code !== 0) finish(new Error(`Screenshot capture failed (${code})`)); });
+      encode.on("close", (code) => finish(code === 0 ? undefined : new Error(`Screenshot failed: ${stderr.slice(-300)}`)));
     });
     return { session: session.id, path: file, windows: await windows(session) };
   }
@@ -183,14 +231,30 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
   async function stop(id: string) {
     const session = sessions.get(id);
     if (!session) return { stopped: false };
-    sessions.delete(id);
-    for (const proc of session.processes.values()) if (proc.exited === undefined) { try { process.kill(-proc.pid, "SIGTERM"); } catch { /* already gone */ } }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    for (const proc of session.processes.values()) if (proc.exited === undefined) { try { process.kill(-proc.pid, "SIGKILL"); } catch { /* already gone */ } }
-    try { process.kill(-session.xvfb.pid!, "SIGKILL"); } catch { try { session.xvfb.kill("SIGKILL"); } catch { /* gone */ } }
-    return { stopped: true, session: id, screenshots: session.dir };
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    pendingStops.add(done);
+    try {
+      sessions.delete(id);
+      for (const proc of session.processes.values()) if (proc.exited === undefined) { try { process.kill(-proc.pid, "SIGTERM"); } catch { /* already gone */ } }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      for (const proc of session.processes.values()) if (proc.exited === undefined) { try { process.kill(-proc.pid, "SIGKILL"); } catch { /* already gone */ } }
+      try { process.kill(-session.xvfb.pid!, "SIGKILL"); } catch { try { session.xvfb.kill("SIGKILL"); } catch { /* gone */ } }
+      return { stopped: true, session: id, screenshots: session.dir };
+    } finally { pendingStops.delete(done); finish(); }
   }
   const list = () => ({ sessions: [...sessions.values()].map((s) => ({ session: s.id, display: s.display, size: `${s.width}x${s.height}`, processes: [...s.processes.values()].filter((p) => p.exited === undefined).length, idleSeconds: Math.round((now() - s.lastUsed) / 1000) })) });
-  const stopAll = async () => { for (const id of [...sessions.keys()]) await stop(id); };
+  const stopAll = () => {
+    if (stopAllPromise) return stopAllPromise;
+    shutdownEpoch++;
+    stopAllPromise = (async () => {
+      const pending = [...pendingStarts];
+      for (const [controller] of pending) controller.abort();
+      await Promise.all(pending.map(([, done]) => done));
+      for (const id of [...sessions.keys()]) await stop(id);
+      await Promise.all(pendingStops);
+    })().finally(() => { stopAllPromise = undefined; });
+    return stopAllPromise;
+  };
   return { start, launch, screenshot, input, wait, logs, stop, list, stopAll, windows: (id: string) => windows(get(id)), sessions };
 }

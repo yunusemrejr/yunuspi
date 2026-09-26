@@ -10,6 +10,8 @@ The usage report explicitly identifies its saved snapshot, capture time and age,
 
 Guarded execution reuses directory-entry metadata while retaining a fresh hard-link inventory for every command. Maintenance guidance keeps temporary exports and dependency trees outside the live protected root, where accumulated historical copies otherwise slow every shell launch. Focused regressions extend existing suites; release tags continue to reuse the exact main-branch CI result.
 
+Virtual desktop dependency checks follow PATH and require executable files, so user-local Xvfb and screenshot tools work without a system installation. Xvfb allocates each private display itself; concurrent starts respect the session limit, and failed or cancelled startup and capture operations clean up their owned processes.
+
 ## 0.12.0 — 2026-09-26
 
 Auxiliary intelligence now has working shared entry points. Project memory applies its configured remote reranker after local Needle ranking, keeps usable local order on failure, and cancels abandoned waits through the core cancellation utility. The bounded micro-worker and routing comparison are exposed through one harness tool with native model dispatch, qualification evidence and explicit cost limits. The unused parallel prompt-advice call is removed; checkpoints and councils reuse mandatory prompt analysis. Qwen judgments and source-line selection share transport and admission rather than issuing independent competing requests. JEV, Needle, Qwen, paragraph compression, Guardian, fuzzy retrieval, skills, councils and reviewers retain their roles and enabled defaults.
