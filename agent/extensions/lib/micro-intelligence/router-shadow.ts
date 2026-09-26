@@ -9,7 +9,8 @@
  * this module never routes, never overrides restrictions, and never
  * bypasses the existing selector.
  */
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
 
 export interface RouterSuggestion {
   model: string;
@@ -31,6 +32,7 @@ export interface RouterComparison {
   costUsd?: number;
   retries?: number;
   reviewOutcome?: string;
+  skipped?: string;
   id: string;
 }
 
@@ -54,57 +56,73 @@ export function routerShadowEnabled(env: Record<string, string | undefined> = pr
     && !["off", "0"].includes((env.PI_ROUTER_SHADOW ?? "on").toLowerCase());
 }
 
-export function createRouterShadow(maxRecords = 256): {
+export function createRouterShadow(maxRecords = 256, options: {
+  timeoutMs?: number;
+  env?: Record<string, string | undefined>;
+} = {}): {
   compare: (task: string, yunuspiChoice: string, suggest: RouterSuggest | undefined, candidates: string[], signal?: AbortSignal) => Promise<RouterComparison>;
   recordOutcome: (id: string, outcome: Pick<RouterComparison, "success" | "latencyMs" | "costUsd" | "retries" | "reviewOutcome">) => void;
   report: () => RouterShadowReport;
   clear: () => void;
 } {
   const records = new Map<string, RouterComparison>();
+  let lifetime = new AbortController();
   const limit = Number.isFinite(maxRecords) ? Math.max(16, Math.min(1024, Math.floor(maxRecords))) : 256;
-  const put = (record: RouterComparison): RouterComparison => {
-    if (records.size >= limit) records.delete(records.keys().next().value!);
-    records.set(record.id, record);
-    return record;
-  };
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, Math.min(60_000, options.timeoutMs!)) : 15_000;
   return {
     async compare(task, yunuspiChoice, suggest, candidates, signal) {
-      const at = Date.now();
-      const id = createHash("sha256").update(`${at}:${task.slice(0, 200)}:${yunuspiChoice}`).digest("hex").slice(0, 16);
-      if (!suggest || signal?.aborted) {
-        return put({ at, task: task.slice(0, 200), yunuspi: yunuspiChoice.slice(0, 160), router: null, agree: false, id });
-      }
-      let suggestion: RouterSuggestion | null = null;
+      const owner = lifetime;
+      const boundedTask = typeof task === "string" ? task.slice(0, 1000) : "";
+      const choice = typeof yunuspiChoice === "string" ? yunuspiChoice : "";
+      const offered = Array.isArray(candidates) ? [...new Set(candidates.filter(candidate =>
+        typeof candidate === "string" && candidate.length > 0 && candidate.length <= 256 && !/[\u0000-\u001f]/.test(candidate)))].slice(0, 32) : [];
+      const record: RouterComparison = { at: Date.now(), task: boundedTask.slice(0, 200), yunuspi: choice.slice(0, 256), router: null, agree: false, id: randomUUID() };
+      const finish = (skipped?: string): RouterComparison => {
+        if (skipped) record.skipped = skipped;
+        if (!owner.signal.aborted && !signal?.aborted) {
+          if (records.size >= limit) records.delete(records.keys().next().value!);
+          records.set(record.id, structuredClone(record));
+        }
+        return structuredClone(record);
+      };
+      if (signal?.aborted) return finish("aborted");
+      if (!routerShadowEnabled(options.env)) return finish("disabled");
+      if (!boundedTask.trim() || !offered.includes(choice)) return finish("invalid-input");
+      if (!suggest) return finish("no-adapter");
+      const controller = new AbortController();
+      const combined = AbortSignal.any([owner.signal, controller.signal, ...(signal ? [signal] : [])]);
+      const timer = setTimeout(() => controller.abort(new DOMException("Router shadow timeout", "TimeoutError")), timeoutMs);
       try {
-        const answer = await suggest(task.slice(0, 1000), { candidates: candidates.slice(0, 32), signal });
-        suggestion = answer.suggestion;
+        const answer = await raceWithAbortSignal(Promise.resolve(suggest(boundedTask, { candidates: [...offered], signal: combined })), combined);
+        combined.throwIfAborted();
+        const suggestion = answer?.suggestion;
+        if (!suggestion || typeof suggestion.model !== "string" || !offered.includes(suggestion.model)
+          || suggestion.effort !== undefined && (typeof suggestion.effort !== "string" || suggestion.effort.length > 32 || /[\u0000-\u001f]/.test(suggestion.effort))) {
+          return finish("invalid-suggestion");
+        }
+        record.router = suggestion.model;
+        if (suggestion.effort) record.routerEffort = suggestion.effort;
+        record.agree = suggestion.model === choice;
+        return finish();
       } catch {
-        suggestion = null;
-      }
-      const router = suggestion?.model?.slice(0, 160) ?? null;
-      return put({
-        at,
-        task: task.slice(0, 200),
-        yunuspi: yunuspiChoice.slice(0, 160),
-        router,
-        routerEffort: suggestion?.effort?.slice(0, 32),
-        agree: router !== null && router === yunuspiChoice.slice(0, 160),
-        id,
-      });
+        return finish(signal?.aborted || owner.signal.aborted ? "aborted" : controller.signal.aborted ? "timeout" : "unavailable");
+      } finally { clearTimeout(timer); }
     },
     recordOutcome(id, outcome) {
       const record = records.get(id);
-      if (!record) return;
-      if (outcome.success !== undefined) record.success = outcome.success;
-      if (outcome.latencyMs !== undefined) record.latencyMs = outcome.latencyMs;
-      if (outcome.costUsd !== undefined) record.costUsd = outcome.costUsd;
-      if (outcome.retries !== undefined) record.retries = outcome.retries;
-      if (outcome.reviewOutcome !== undefined) record.reviewOutcome = String(outcome.reviewOutcome).slice(0, 64);
+      if (!record || !outcome) return;
+      if (typeof outcome.success === "boolean") record.success = outcome.success;
+      if (typeof outcome.latencyMs === "number" && Number.isFinite(outcome.latencyMs) && outcome.latencyMs >= 0) record.latencyMs = outcome.latencyMs;
+      if (typeof outcome.costUsd === "number" && Number.isFinite(outcome.costUsd) && outcome.costUsd >= 0) record.costUsd = outcome.costUsd;
+      if (Number.isSafeInteger(outcome.retries) && outcome.retries! >= 0) record.retries = outcome.retries;
+      if (typeof outcome.reviewOutcome === "string") record.reviewOutcome = outcome.reviewOutcome.slice(0, 64);
     },
     report() {
       return summarizeRouterShadow([...records.values()]);
     },
     clear() {
+      lifetime.abort(new DOMException("Router shadow session changed", "AbortError"));
+      lifetime = new AbortController();
       records.clear();
     },
   };
