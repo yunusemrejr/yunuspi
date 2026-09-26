@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { spawn } from "node:child_process";
 
-for (const stepCount of [1, 2]) test(`background budget receipt preserves reports and completion with ${stepCount} requested step(s)`, async () => {
+for (const [stepCount, parallel] of [[1, false], [2, false], [2, true]]) test(`background budget receipt and recovery persist with ${stepCount} requested step(s), parallel=${parallel}`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-budget-receipt-"));
   const asyncDir = path.join(root, "async");
   const marker = path.join(root, "child-invocations");
@@ -75,21 +75,29 @@ for (const stepCount of [1, 2]) test(`background budget receipt preserves report
     }
     throw new Error(`timed out waiting for the background runner receipt: ${stderr}`);
   };
-  let runnerProcess;
+  let runnerProcess, fanout;
   try {
     const runner = path.join(agentRoot, "extensions/pi-subagents/src/runs/background/subagent-runner.ts");
+    const { createRunFanoutBudget } = await import(new URL("file://" + path.join(agentRoot, "extensions/pi-subagents/src/runs/shared/run-fanout-budget.ts")));
+    fanout = createRunFanoutBudget("budget-receipt", 8);
+    const steps = [
+      { agent: "automatic-free-assistant", task: "emit the first report", model: "openrouter/free/test" },
+      { agent: "automatic-free-assistant", task: parallel ? "emit the second report" : "this step must remain unscheduled", model: "openrouter/free/test" },
+    ].slice(0, stepCount).map((step,index) => {
+      const sessionFile=path.join(root,`session-${index}.jsonl`);fs.writeFileSync(sessionFile,"{}\n");
+      return {...step,sessionFile,runFanoutPath:`tasks[${index}]`,tools:["read"],inheritProjectContext:false,inheritGlobalContext:false,inheritSkills:false};
+    });
     const config = {
       id: "budget-receipt",
-      steps: [
-        { agent: "automatic-free-assistant", task: "emit the first report", model: "openrouter/free/test" },
-        { agent: "automatic-free-assistant", task: "this step must remain unscheduled", model: "openrouter/free/test" },
-      ].slice(0, stepCount),
+      steps: parallel ? [{parallel:steps}] : steps,
+      runFanoutBudget: fanout,
+      resultMode: parallel ? "parallel" : "chain",
       resultPath,
       cwd: root,
       placeholder: "{{previous}}",
       asyncDir,
       artifactConfig: { enabled: false },
-      usageBudget: { tokens: { hard: 1 } },
+      usageBudget: { tokens: { hard: parallel ? 100 : 1 } },
       sessionId: "budget-receipt-session",
     };
     runnerProcess = spawn(process.execPath, [jiti, runner], {
@@ -100,13 +108,25 @@ for (const stepCount of [1, 2]) test(`background budget receipt preserves report
     runnerProcess.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     runnerProcess.stdin.end(JSON.stringify(config));
     const receipt = await readReceipt();
-    assert.equal(receipt.state, stepCount === 1 ? "complete" : "failed");
-    assert.equal(receipt.success, stepCount === 1);
-    assert.equal(receipt.usageBudget?.exhausted, true);
-    if (stepCount === 2) assert.match(receipt.summary, /Usage budget exhausted/);
+    assert.equal(receipt.state, parallel || stepCount === 1 ? "complete" : "failed");
+    assert.equal(receipt.success, parallel || stepCount === 1);
+    assert.equal(receipt.usageBudget?.exhausted, !parallel);
+    if (stepCount === 2 && !parallel) assert.match(receipt.summary, /Usage budget exhausted/);
     assert.match(receipt.summary, /REPORT/);
-    assert.equal(receipt.results?.length, 1);
-    assert.equal(fs.readFileSync(marker, "utf8").trim(), "1");
+    assert.equal(receipt.results?.length, parallel ? 2 : 1);
+    assert.equal(fs.readFileSync(marker, "utf8").trim(), parallel ? "1\n1" : "1");
+    const { readAsyncRecoveryDescriptor, resolveAsyncResumeTarget, asyncReviveRequiresRecoveryDescriptor } = await import(new URL("file://" + path.join(agentRoot, "extensions/pi-subagents/src/runs/background/async-resume.ts")));
+    for(let index=0;index<(parallel?2:1);index++) {
+      const descriptor=readAsyncRecoveryDescriptor(asyncDir,index);
+      assert.equal(descriptor.sourceRunId,"budget-receipt");
+      assert.equal(descriptor.childIndex,index);
+      assert.equal(descriptor.runFanoutBudget.directory,fanout.directory);
+      assert.equal(descriptor.runFanoutBudget.parentPath,`tasks[${index}]`);
+      assert.deepEqual(descriptor.tools,["read"]);
+      const target=resolveAsyncResumeTarget({dir:asyncDir,index},{asyncDirRoot:root,resultsDir:root});
+      assert.equal(target.sessionFile,steps[index].sessionFile);
+      assert.equal(asyncReviveRequiresRecoveryDescriptor(target),false);
+    }
     if (runnerProcess.exitCode === null && runnerProcess.signalCode === null) runnerProcess.kill("SIGTERM");
     if (runnerProcess.exitCode === null && runnerProcess.signalCode === null) await new Promise((resolve) => runnerProcess.once("close", resolve));
     assert.equal(stderr, "", `runner emitted unexpected diagnostics: ${stderr}`);
@@ -120,6 +140,7 @@ for (const stepCount of [1, 2]) test(`background budget receipt preserves report
       else process.env[key] = value;
     }
     if (createdExtensionModules) fs.unlinkSync(extensionModules);
+    if(fanout) fs.rmSync(fanout.directory, {recursive:true,force:true});
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

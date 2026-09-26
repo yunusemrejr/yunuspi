@@ -16,6 +16,8 @@ import { canScanAsyncRunPrefix, MIN_SAFE_ASYNC_RUN_PREFIX_LENGTH } from "./run-i
 import { parallelHandoffPath, resolveRetainedWorktreeCwd } from "../shared/parallel-handoff.ts";
 import { intersectThinkingCeilings, parseThinkingLevel, type ThinkingLevel } from "../../shared/thinking-ceiling.ts";
 import { assertWorkflowGraphHostSteps } from "../shared/host-step-status.ts";
+import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
+import type { RunnerSubagentStep } from "../shared/parallel-utils.ts";
 
 export interface AsyncResumeParams {
 	id?: string;
@@ -34,6 +36,8 @@ export interface AsyncResumeDeps {
 export interface AsyncResumeOptions {
 	requireSessionFile?: boolean;
 	sessionId?: string;
+	/** Only an explicit parent follow-up may revive a deliberately stopped child. */
+	allowStopped?: boolean;
 }
 
 export type AsyncResumeTarget = {
@@ -303,9 +307,39 @@ function resumeTargetMode(status: AsyncStatus | null, result: AsyncResultFile | 
 	return undefined;
 }
 
-export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): SteeringRecoveryDescriptor | undefined {
+export function writeAsyncStepRecoveryDescriptor(asyncDir: string, index: number, step: RunnerSubagentStep,
+	context: Pick<SteeringRecoveryDescriptor, "sourceRunId" | "runFanoutBudget" | "cwd"> & Partial<Pick<SteeringRecoveryDescriptor, "sessionDir" | "artifactsDir" | "artifactConfig" | "maxOutput" | "share" | "capabilityCeiling">>): void {
+	if (!Number.isInteger(index) || index < 0) throw new Error("Recovery child index must be a non-negative integer.");
+	const descriptor: SteeringRecoveryDescriptor = {
+		...context, version: 1, childIndex: index, agent: step.agent, cwd: step.cwd ?? context.cwd,
+		runFanoutBudget: { ...context.runFanoutBudget, ...(step.runFanoutPath ? { parentPath: `${context.runFanoutBudget.parentPath ? `${context.runFanoutBudget.parentPath}/` : ""}${step.runFanoutPath}` } : {}) },
+		launchContractDigest: step.launchContractDigest, extensionBindings: step.extensionBindings,
+		agentContract: step.agentContract, sessionFile: step.sessionFile,
+		model: step.model, modelRouteCandidates: step.modelRouteCandidates, modelOrigin: step.modelOrigin,
+		modelOverrideFromParent: step.skipPrimaryModelVerification, fast: step.fast,
+		thinking: step.thinking, thinkingCeiling: step.thinkingCeiling,
+		tools: step.tools, excludeTools: step.excludeTools, allowNestedSubagents: step.allowNestedSubagents,
+		extensions: step.extensions, subagentOnlyExtensions: step.subagentOnlyExtensions,
+		mcpDirectTools: step.mcpDirectTools, mutationTools: step.mutationTools,
+		systemPrompt: step.recoverySystemPrompt ?? step.systemPrompt ?? undefined, systemPromptMode: step.systemPromptMode ?? "append",
+		inheritProjectContext: step.inheritProjectContext, inheritGlobalContext: step.inheritGlobalContext,
+		inheritSkills: step.inheritSkills, skills: step.skills, completionGuard: step.completionGuard,
+		skillPath: step.skillPath, agentFilePath: step.agentFilePath, memory: step.memory,
+		outputPath: step.outputPath, outputMode: step.outputMode ?? "inline",
+		structuredOutputSchema: step.structuredOutputSchema, acceptance: step.acceptanceInput,
+		context: step.context, initialToolBudget: step.toolBudget, maxSubagentDepth: step.maxSubagentDepth ?? 0,
+		launchResolvedExtensions: step.launchResolvedExtensions,
+		capabilityCeiling: step.capabilityCeiling ?? context.capabilityCeiling, share: context.share ?? false,
+	};
+	writePrivateAtomicJson(path.join(asyncDir, `recovery-descriptor-${index}.json`), descriptor);
+}
+
+export function readAsyncRecoveryDescriptor(asyncDir: string | undefined, index?: number): SteeringRecoveryDescriptor | undefined {
 	if (!asyncDir) return undefined;
-	const descriptorPath = path.join(asyncDir, "recovery-descriptor.json");
+	if (index !== undefined && (!Number.isInteger(index) || index < 0)) throw new Error("Recovery child index must be a non-negative integer.");
+	const indexedPath = index === undefined ? undefined : path.join(asyncDir, `recovery-descriptor-${index}.json`);
+	if (index !== undefined && index > 0 && !fs.existsSync(indexedPath!)) return undefined;
+	const descriptorPath = indexedPath && fs.existsSync(indexedPath) ? indexedPath : path.join(asyncDir, "recovery-descriptor.json");
 	if (!fs.existsSync(descriptorPath)) return undefined;
 	let value: unknown;
 	try {
@@ -317,7 +351,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 	const parsed = value as Record<string, unknown>;
 	const allowedFields = new Set([
 		"version", "launchContractDigest", "sourceRunId", "agentContract", "agent", "sessionFile", "cwd", "model", "modelProvider", "modelOverrideFromParent", "modelOrigin", "fallbackModels", "thinking", "thinkingCeiling", "tools", "allowNestedSubagents", "extensions",
-		"modelRouteCandidates",
+		"modelRouteCandidates", "fast", "childIndex",
 		"subagentOnlyExtensions", "mcpDirectTools", "excludeTools", "mutationTools", "systemPrompt", "systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "skills",
 		"skillPath", "agentFilePath", "completionGuard", "memory", "outputPath", "outputMode", "structuredOutputSchema", "acceptance", "sessionDir", "artifactConfig",
 		"artifactsDir", "maxOutput", "controlConfig", "context", "intercomBridge", "absoluteDeadlineAt", "initialTurnBudget", "initialToolBudget", "maxSubagentDepth", "share", "capabilityCeiling",
@@ -332,6 +366,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 		if (typeof parsed[field] !== "string" || !(parsed[field] as string).trim()) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': ${field} must be a non-empty string.`);
 	}
 	if (parsed.version !== 1) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': version must be 1.`);
+	if (parsed.childIndex !== undefined && (!Number.isInteger(parsed.childIndex) || (parsed.childIndex as number) < 0 || (index !== undefined && parsed.childIndex !== index))) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': childIndex does not match the selected child.`);
 	try {
 		parsed.runFanoutBudget = validateRunFanoutBudgetDescriptor(parsed.runFanoutBudget);
 	} catch (error) {
@@ -358,6 +393,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 	if (parsed.inheritGlobalContext === undefined) parsed.inheritGlobalContext = parsed.inheritProjectContext;
 	else if (typeof parsed.inheritGlobalContext !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': inheritGlobalContext must be a boolean.`);
 	if (parsed.allowNestedSubagents !== undefined && typeof parsed.allowNestedSubagents !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': allowNestedSubagents must be a boolean.`);
+	if (parsed.fast !== undefined && typeof parsed.fast !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': fast must be a boolean.`);
 	if (!Number.isInteger(parsed.maxSubagentDepth) || (parsed.maxSubagentDepth as number) < 0) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': maxSubagentDepth must be a non-negative integer.`);
 	for (const field of ["fallbackModels", "tools", "excludeTools", "extensions", "subagentOnlyExtensions", "mcpDirectTools", "mutationTools", "skills", "skillPath"] as const) {
 		const item = parsed[field];
@@ -471,30 +507,36 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 		: undefined;
 	const status = reconciliation?.status ?? null;
 	validateStatusForResume(status, location.asyncDir ? path.join(location.asyncDir, "status.json") : "status.json");
-	const recoveryDescriptor = readAsyncRecoveryDescriptor(location.asyncDir ?? undefined);
 	const result = location.resultPath ? readResultFile(location.resultPath) : undefined;
 	const runId = status?.runId ?? result?.runId ?? result?.id ?? location.resolvedId ?? (location.asyncDir ? path.basename(location.asyncDir) : "unknown");
 	const mode = resumeTargetMode(status, result);
 	if (options.sessionId && ((status && status.sessionId !== options.sessionId) || (result && result.sessionId !== options.sessionId))) {
 		throw new Error(`Async run '${runId}' was not found in the active session.`);
 	}
-	if (recoveryDescriptor && recoveryDescriptor.sourceRunId !== runId) throw new Error(`Async run '${runId}' has a recovery descriptor for a different source run.`);
+	const recoveryFor = (index: number) => {
+		const descriptor = readAsyncRecoveryDescriptor(location.asyncDir ?? undefined, index);
+		if (descriptor && descriptor.sourceRunId !== runId) throw new Error(`Async run '${runId}' has a recovery descriptor for a different source run.`);
+		const agent = status?.steps?.[index]?.agent ?? result?.results?.[index]?.agent ?? result?.agent;
+		if (descriptor && descriptor.agent !== agent) throw new Error(`Async run '${runId}' has a recovery descriptor for '${descriptor.agent}', not '${agent}'.`);
+		return descriptor;
+	};
 	const state = status?.state ?? (result ? resultState(result) : undefined);
 	if (!state) throw new Error(`Status file not found for async run '${runId}'.`);
-	if (state === "stopped") throw new Error(`Async run '${runId}' was stopped and cannot be resumed. Start a new run instead.`);
+	if (state === "stopped" && !options.allowStopped) throw new Error(`Async run '${runId}' was stopped; automatic recovery is disabled. An explicit parent resume is required.`);
 
 	const statusSteps = status?.steps ?? [];
 	const resultSteps = result?.results ?? [];
 	const stepCount = statusSteps.length || resultSteps.length || (result?.agent ? 1 : 0);
 	const requestedIndex = params.index;
 	if (requestedIndex !== undefined && !Number.isInteger(requestedIndex)) throw new Error(`Async run '${runId}' index must be an integer.`);
-	const terminalStepStatuses = new Set(["complete", "completed", "failed", "paused"]);
+	const terminalStepStatuses = new Set(["complete", "completed", "failed", "paused", ...(options.allowStopped ? ["stopped"] : [])]);
 
 	if (state === "running") {
 		if (requestedIndex !== undefined) {
 			if (requestedIndex < 0 || requestedIndex >= stepCount) throw new Error(`Async run '${runId}' has ${stepCount} children. Index ${requestedIndex} is out of range.`);
 			const selectedStep = statusSteps[requestedIndex];
 			if (selectedStep?.status === "running") {
+				const recoveryDescriptor = recoveryFor(requestedIndex);
 				const capabilityCeiling = intersectSubagentCapabilityCeilings(status?.capabilityCeiling, selectedStep.capabilityCeiling);
 				return {
 					kind: "live",
@@ -528,6 +570,7 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 				throw new Error(`Async run '${runId}' has ${running.length} running children. Provide index to choose one.`);
 			}
 			const capabilityCeiling = intersectSubagentCapabilityCeilings(status?.capabilityCeiling, selected.step.capabilityCeiling);
+			const recoveryDescriptor = recoveryFor(selected.index);
 			return {
 				kind: "live",
 				runId,
@@ -559,7 +602,8 @@ export function resolveAsyncResumeTarget(params: AsyncResumeParams, deps: AsyncR
 	if (index < 0 || index >= stepCount) throw new Error(`Async run '${runId}' has ${stepCount} children. Index ${index} is out of range.`);
 	const agent = statusSteps[index]?.agent ?? resultSteps[index]?.agent ?? result?.agent;
 	if (!agent) throw new Error(`Could not determine child agent for async run '${runId}'.`);
-	if (recoveryDescriptor && recoveryDescriptor.agent !== agent) throw new Error(`Async run '${runId}' has a recovery descriptor for '${recoveryDescriptor.agent}', not '${agent}'.`);
+	if (statusSteps[index]?.status === "stopped" && !options.allowStopped) throw new Error(`Async run '${runId}' child ${index} was stopped; automatic recovery is disabled. An explicit parent resume is required.`);
+	const recoveryDescriptor = recoveryFor(index);
 	const sessionFile = statusSteps[index]?.sessionFile
 		?? resultSteps[index]?.sessionFile
 		?? (stepCount === 1 ? status?.sessionFile ?? result?.sessionFile : undefined);
@@ -603,6 +647,7 @@ export function applySteeringRecoveryAgentConfig(agentConfig: AgentConfig, descr
 		modelProvider: descriptor.modelProvider,
 		fallbackModels: descriptor.fallbackModels ? [...descriptor.fallbackModels] : undefined,
 		thinking: descriptor.thinking,
+		fast: descriptor.fast,
 		maxThinking: intersectThinkingCeilings(descriptor.thinkingCeiling, agentConfig.maxThinking),
 		tools: descriptor.tools ? [...descriptor.tools] : undefined,
 		excludeTools: descriptor.excludeTools ? [...descriptor.excludeTools] : undefined,

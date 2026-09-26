@@ -167,3 +167,73 @@ test("model listings put the cheapest eligible routes first so explicit picks st
 	assert.ok(order.every((index) => index > 0), text);
 	assert.deepEqual([...order].sort((a, b) => a - b), order, "cheapest worst case first, premium last");
 });
+
+
+test("native parallel recovery preserves each child contract, rejects swapped identities and supports explicit stopped follow-up", async () => {
+ const { writeAsyncStepRecoveryDescriptor, readAsyncRecoveryDescriptor, resolveAsyncResumeTarget, asyncReviveRequiresRecoveryDescriptor, applySteeringRecoveryAgentConfig } = await load("runs/background/async-resume.ts");
+ const { createRunFanoutBudget } = await load("runs/shared/run-fanout-budget.ts");
+ const { inspectSubagentStatus } = await load("runs/background/run-status.ts");
+ const asyncDirRoot = path.join(work, "recovery-runs"), resultsDir = path.join(work, "recovery-results");
+ const runId = "parallel-recovery", dir = path.join(asyncDirRoot, runId);
+ fs.mkdirSync(dir, {recursive:true}); fs.mkdirSync(resultsDir, {recursive:true});
+ const runFanoutBudget = createRunFanoutBudget(runId, 12);
+ try {
+  const sessions = [0,1].map(index => {const file=path.join(dir,`child-${index}.jsonl`);fs.writeFileSync(file,"{}\n");return file;});
+  const now=Date.now();
+  const status={runId,sessionId:"recovery-session",mode:"parallel",state:"failed",startedAt:now-20,lastUpdate:now,endedAt:now,
+   steps:[{agent:"worker",status:"complete",sessionFile:sessions[0],exitCode:0},{agent:"worker",status:"stopped",sessionFile:sessions[1],stopped:true}]};
+  fs.writeFileSync(path.join(dir,"status.json"),JSON.stringify(status));
+  const deps={asyncDirRoot,resultsDir};
+  const missing=resolveAsyncResumeTarget({id:runId,index:0},deps);
+  assert.equal(asyncReviveRequiresRecoveryDescriptor(missing),true,"a session alone cannot reconstruct launch authority");
+  assert.match(inspectSubagentStatus({id:runId},deps).content[0].text,/no retained child has a usable recovery contract/);
+  for(let index=0;index<2;index++) writeAsyncStepRecoveryDescriptor(dir,index,{
+   agent:"worker",task:"bounded synthetic inspection",cwd:work,model:`fixture/model-${index}`,fast:true,
+   tools:index===0?["read"]:["read","grep"],excludeTools:["write","edit"],allowNestedSubagents:false,
+   systemPromptMode:"replace",systemPrompt:"Inspect only the specified fixture.",inheritProjectContext:false,inheritGlobalContext:false,inheritSkills:false,
+   sessionFile:sessions[index],maxSubagentDepth:2,runFanoutPath:`tasks[${index}]`,thinking:"low",outputMode:"inline",agentFilePath:path.join(work,"worker.md"),
+  },{sourceRunId:runId,runFanoutBudget,cwd:work});
+  assert.throws(()=>resolveAsyncResumeTarget({id:runId,index:1},deps),/stopped; automatic recovery is disabled/);
+  for(let index=0;index<2;index++) {
+   const target=resolveAsyncResumeTarget({id:runId,index},deps,{allowStopped:true});
+   assert.equal(asyncReviveRequiresRecoveryDescriptor(target),false);
+   assert.equal(target.recoveryDescriptor.childIndex,index);
+   assert.equal(target.recoveryDescriptor.model,`fixture/model-${index}`);
+   assert.equal(target.recoveryDescriptor.runFanoutBudget.directory,runFanoutBudget.directory);
+   assert.equal(target.recoveryDescriptor.runFanoutBudget.parentPath,`tasks[${index}]`);
+   assert.equal(fs.statSync(path.join(dir,`recovery-descriptor-${index}.json`)).mode&0o777,0o600);
+   const recovered=applySteeringRecoveryAgentConfig({tools:["bash","write"],systemPrompt:"changed"},target.recoveryDescriptor);
+   assert.deepEqual(recovered.tools,index===0?["read"]:["read","grep"]);
+   assert.equal(recovered.fast,true);
+  }
+  const inspected=inspectSubagentStatus({id:runId},deps);
+  assert.equal(inspected.details.runId,runId);
+  assert.deepEqual(inspected.details.statusResults.map(x=>x.status),["complete","stopped"]);
+  assert.equal(inspected.details.statusResults[1].exitCode,undefined,"unknown exit is not fabricated");
+  assert.equal(inspected.details.statusResults[0].usage,undefined,"status does not invent usage");
+  assert.match(inspected.content[0].text,/Revive child:/);
+  fs.copyFileSync(path.join(dir,"recovery-descriptor-0.json"),path.join(dir,"recovery-descriptor-1.json"));
+  assert.throws(()=>readAsyncRecoveryDescriptor(dir,1),/childIndex does not match/);
+  const swapped=JSON.parse(fs.readFileSync(path.join(dir,"recovery-descriptor-0.json")));
+  swapped.sourceRunId="other-run";fs.writeFileSync(path.join(dir,"recovery-descriptor-0.json"),JSON.stringify(swapped));
+  assert.throws(()=>resolveAsyncResumeTarget({id:runId,index:0},deps),/different source run/);
+ } finally { fs.rmSync(runFanoutBudget.directory,{recursive:true,force:true}); }
+});
+
+test("get with a run id points directly to status instead of requesting an agent", () => {
+ const result=handleManagementAction("get",{id:"retained-run"},{cwd:work,modelRegistry:{getAvailable:()=>[]}});
+ assert.equal(result.isError,true);
+ assert.match(result.content[0].text,/action: "status", id: "retained-run"/);
+ assert.match(result.content[0].text,/view: "transcript"/);
+});
+
+
+test("async launch notices preserve independent work and native wake without polling", async () => {
+ const {formatAsyncStartedMessage}=await load("runs/background/async-execution.ts");
+ const notice=formatAsyncStartedMessage("Started",true);
+ assert.match(notice,/Continue useful independent work/);
+ assert.match(notice,/only when the remaining work depends on its result/);
+ assert.match(notice,/native completion notification/);
+ assert.match(notice,/Do not run sleep\/polling loops/);
+ assert.doesNotMatch(notice,/Return control to the user now/);
+});

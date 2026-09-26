@@ -16,7 +16,7 @@ import { normalizeExternalCliRunnerStatus } from "../shared/external-cli-contrac
 import { resolveSubagentResultStatus } from "../../intercom/result-intercom.ts";
 import { readProcessTerminal, sanitizeProcessTerminal } from "./process-terminal.ts";
 import { formatWaitSubscriptions } from "./wait-subscriptions.ts";
-import { resolveAsyncRunLocation } from "./async-resume.ts";
+import { asyncReviveRequiresRecoveryDescriptor, resolveAsyncResumeTarget, resolveAsyncRunLocation } from "./async-resume.ts";
 import { resolveSubagentRunId } from "./run-id-resolver.ts";
 import { flatToLogicalStepIndex, normalizeParallelGroups } from "./parallel-groups.ts";
 import { reconcileAsyncRun, reconcileNestedAsyncDescendants } from "./stale-run-reconciler.ts";
@@ -118,11 +118,12 @@ function hasExistingSessionFile(value: unknown): value is string {
 	return typeof value === "string" && fs.existsSync(value);
 }
 
-function formatResumeGuidance(runId: string | undefined, children: Array<{ agent?: unknown; sessionFile?: unknown; runId?: unknown; workflowKey?: unknown; status?: unknown; activityState?: unknown }>, fallbackSessionFile?: unknown, options: { stopped?: boolean } = {}): string {
+function formatResumeGuidance(runId: string | undefined, children: Array<{ agent?: unknown; sessionFile?: unknown; runId?: unknown; workflowKey?: unknown; status?: unknown; activityState?: unknown }>, fallbackSessionFile?: unknown, options: { stopped?: boolean; canResume?: (index: number) => boolean } = {}): string {
 	if (options.stopped) return "Resume: unavailable; stopped runs are not resumable. Start a new run instead.";
 	const knownChildren = children
 		.map((child, index) => ({ child, index }))
-		.filter(({ child }) => typeof child.agent === "string");
+		.filter(({ child, index }) => typeof child.agent === "string" && (!options.canResume || options.canResume(index)));
+	if (options.canResume && !knownChildren.length) return "Resume: unavailable; no retained child has a usable recovery contract and session. Start a new run for further work.";
 	if (!runId || knownChildren.length === 0) return "Resume: unavailable; no child session file was persisted.";
 	const workflowChildren = knownChildren.filter(({ child }) => typeof child.runId === "string" && child.runId.trim() && hasExistingSessionFile(child.sessionFile));
 	const supervisorDetachedWorkflowChildren = workflowChildren.filter(({ child }) => child.status === "paused" && child.activityState === "needs_attention");
@@ -636,14 +637,21 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 			if (status.state !== "running") {
 				lines.push(allExternal
 					? hasExternalJobFollowUpHint ? "Resume: use the external-job follow-up hint above." : "Resume: unavailable; external runners do not persist Pi sessions."
-					: formatResumeGuidance(status.runId, status.steps ?? [], status.sessionFile, { stopped: status.state === "stopped" || status.stopped === true }));
+					: formatResumeGuidance(status.runId, status.steps ?? [], status.sessionFile, { canResume: status.mode === "workflow" ? undefined : (index) => {
+						try {
+							const target = resolveAsyncResumeTarget({ dir: asyncDir, index }, { asyncDirRoot, resultsDir }, { allowStopped: true });
+							return target.kind === "revive" && !asyncReviveRequiresRecoveryDescriptor(target);
+						} catch { return false; }
+					} }));
 			}
 			if (fs.existsSync(logPath)) lines.push(`Log: ${logPath}`);
 			if (fs.existsSync(eventsPath)) lines.push(`Events: ${eventsPath}`);
 
 			const workflowChildren = parseWorkflowChildSummary(status.workflowChildren);
 			if (workflowChildren && workflowChildren.workflowRunId !== status.runId) throw new Error("workflowChildren.workflowRunId does not match async status runId.");
-			return { content: [{ type: "text", text: lines.join("\n") }], details: { mode: "single", results: [], ...(status.preflight ? { preflight: status.preflight } : {}), ...(status.workflow?.preflightWarnings?.length ? { preflightWarnings: status.workflow.preflightWarnings } : {}), ...(workflowChildren ? { workflowChildren } : {}), ...(runFanoutBudget ? { runFanoutBudget } : {}), ...(processTerminal ? { lifecycleStatus: { processTerminal } } : {}) } };
+			const statusResults = (status.steps ?? []).map(({ agent, status, childId, runId, workflowKey, model, exitCode, stopped, timedOut, error, acceptance, effects, progressEvidence, sessionFile, startedAt, endedAt }, index) =>
+				({ index, agent, status, childId, runId, workflowKey, model, exitCode, stopped, timedOut, error, acceptance, effects, progressEvidence, sessionFile, startedAt, endedAt }));
+			return { content: [{ type: "text", text: lines.join("\n") }], details: { mode: status.mode ?? "single", runId: status.runId, results: [], statusResults, ...(status.preflight ? { preflight: status.preflight } : {}), ...(status.workflow?.preflightWarnings?.length ? { preflightWarnings: status.workflow.preflightWarnings } : {}), ...(workflowChildren ? { workflowChildren } : {}), ...(runFanoutBudget ? { runFanoutBudget } : {}), ...(processTerminal ? { lifecycleStatus: { processTerminal } } : {}) } };
 		}
 	}
 

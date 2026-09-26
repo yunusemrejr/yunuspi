@@ -52,6 +52,8 @@ type ManagementContext = Pick<ExtensionContext, "cwd" | "modelRegistry"> & { mod
 
 interface ManagementParams {
 	action?: string;
+	id?: string;
+	runId?: string;
 	agent?: string;
 	agentScope?: unknown;
 	capabilities?: unknown;
@@ -1188,7 +1190,9 @@ function handleModels(params: ManagementParams, ctx: ManagementContext): AgentTo
 }
 
 function handleGet(params: ManagementParams, ctx: ManagementContext): AgentToolResult<Details> {
-	if (!params.agent) return result("Specify 'agent' for get.", true);
+	if (!params.agent) return result(params.id || params.runId
+		? `get reads an agent definition, not a run. Inspect this run with subagent({ action: "status", id: ${JSON.stringify(params.id ?? params.runId)} }); use view: "transcript" for its retained conversation.`
+		: "Specify 'agent' for get. Use action:'status' with id to inspect a run.", true);
 	const scope = normalizeListScope(params.agentScope);
 	if (!scope) return result("agentScope must be 'user', 'project', or 'both' for get.", true);
 	const discovered = discoverAgentsAll(ctx.cwd, ctx.model?.provider);

@@ -54,11 +54,16 @@ export interface RunnerSubagentStep {
 	mutationTools?: string[];
 	completionGuard?: boolean;
 	systemPrompt?: string | null;
+	/** Agent prompt before skill/memory/output overlays, for safe reassembly on resume. */
+	recoverySystemPrompt?: string;
 	systemPromptMode?: "append" | "replace";
 	inheritProjectContext: boolean;
 	inheritGlobalContext: boolean;
 	inheritSkills: boolean;
 	skills?: string[];
+	skillPath?: string[];
+	agentFilePath?: string;
+	memory?: { scope: "project" | "user"; path: string };
 	outputPath?: string;
 	outputClaimPath?: string;
 	/** Defer the authoritative output instruction until a dynamic fanout item is materialized. */

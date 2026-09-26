@@ -514,7 +514,7 @@ test("explicit tool search uses domain words without incidental substring matche
  assert.equal(peers.details.tools[0].name, "session_coordinate");
  assert.equal(f.entries.length, 0, "ranking changes no tool exposure");
 });
-test("resume bounds old discoveries, drops stale receipts and retains unresolved calls", async () => {
+test("resume retains authorized activation receipts and bounds only inferred recent use", async () => {
  const { restoredToolNames } = await import(
   pathToFileURL(path.join(agent, "extensions/lib/tool-discovery.ts"))
  );
@@ -525,12 +525,15 @@ test("resume bounds old discoveries, drops stale receipts and retains unresolved
   customType: "harness-tool-activation-v1",
   data: { names },
  };
- assert.equal(restoredToolNames([receipt], allowed).size, 6);
+ assert.equal(restoredToolNames([receipt], allowed).size, 40);
  const conversation = Array.from({ length: 13 }, () => ({
   type: "message",
   message: { role: "user", content: "Next task" },
  }));
- assert.equal(restoredToolNames([receipt, ...conversation], allowed).size, 0);
+ assert.equal(restoredToolNames([receipt, ...conversation], allowed).size, 40);
+ assert.equal(restoredToolNames([receipt, ...Array(2100).fill(conversation[0])], allowed).size, 40);
+ assert.deepEqual([...restoredToolNames([receipt], new Set([names[0]]))], [names[0]], "revoked names stay unavailable");
+ assert.equal(restoredToolNames(conversation, allowed).size, 0, "a different branch does not inherit the selection");
  const calls = {
   type: "message",
   message: {

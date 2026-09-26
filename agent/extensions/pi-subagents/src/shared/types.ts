@@ -771,6 +771,7 @@ export interface RunFanoutRejection extends RunFanoutBudgetSnapshot {
 
 export interface SteeringRecoveryDescriptor {
 	version: 1;
+	childIndex?: number;
 	launchContractDigest?: string;
 	extensionBindings?: ExtensionBindings;
 	runFanoutBudget: RunFanoutBudgetDescriptor;
@@ -1419,6 +1420,8 @@ export interface Details {
 	/** Run-level context summary. "mixed" when children resolved to different modes. */
 	context?: "fresh" | "fork" | "mixed";
 	results: SingleResult[];
+	/** Read-only persisted child facts; missing usage/exit values stay unknown. */
+	statusResults?: Array<Pick<NonNullable<AsyncStatus["steps"]>[number], "agent" | "status" | "childId" | "runId" | "workflowKey" | "model" | "exitCode" | "stopped" | "timedOut" | "error" | "acceptance" | "effects" | "progressEvidence" | "sessionFile" | "startedAt" | "endedAt"> & { index: number }>;
 	workflowChildren?: WorkflowChildSummaryV1;
 	/**
 	 * Terminal completion payloads for runs this bg_wait call observed

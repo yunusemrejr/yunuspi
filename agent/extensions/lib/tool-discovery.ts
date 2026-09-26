@@ -51,10 +51,15 @@ async function rerankWithJev<T>(
 const RECEIPT = 'harness-tool-activation-v1';
 const RESUME_TOOLS = 6;
 const DISCOVERY_PAGE = 8;
-// Historical discovery is not a permanent schema subscription. Retain a small
-// recent working set and every unresolved call, without rewriting session history.
+// Explicit activation belongs to this branch until the host revokes access.
+// Retain that selection across reloads; only inferred recent use has a soft cap.
 export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
-  const recent = new Set<string>(), pending = new Map<string,string>();
+  const selected = new Set<string>(), recent = new Set<string>(), pending = new Map<string,string>();
+  for (const entry of entries) {
+    if (entry.type === 'custom' && entry.customType === RECEIPT && Array.isArray(entry.data?.names))
+      for (const name of entry.data.names)
+        if (typeof name === 'string' && allowed.has(name) && !CORE_TOOLS.has(name)) selected.add(name);
+  }
   const branch = entries.slice(-2000);
   for (const entry of branch) {
     const message = entry.type === 'message' ? entry.message : undefined;
@@ -70,11 +75,9 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
   for (const entry of branch.toReversed()) {
     if (entry.type === 'message' && ++messages > 12) break;
     if (entry.type === 'message' && entry.message?.role === 'toolResult') remember(entry.message.toolName);
-    if (entry.type === 'custom' && entry.customType === RECEIPT && Array.isArray(entry.data?.names))
-      for (const name of entry.data.names.slice(-128).toReversed()) remember(name);
   }
-  for (const name of pending.values()) recent.add(name);
-  return recent;
+  for (const name of [...recent, ...pending.values()]) selected.add(name);
+  return selected;
 }
 export const CORE_TOOLS = new Set([
   'read','bash','edit','write','grep','find','ls','tool_search',

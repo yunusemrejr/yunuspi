@@ -158,6 +158,7 @@ import { evaluateChildBreakers, resolveChildBreakerPolicy, type ChildBreakerReas
 import { writeGuardedStatus, type RevisionedStatus } from "../shared/status-revision.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writePendingParallelHandoff } from "../shared/parallel-handoff.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
+import { writeAsyncStepRecoveryDescriptor } from "./async-resume.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, PI_AGGREGATE_EVENT_PROJECTOR, projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
 import { buildExternalCliPrompt, runExternalCli } from "../shared/external-cli-runner.ts";
@@ -1897,6 +1898,18 @@ async function runSingleStepInner(
 				...(step.structuredOutputSchema ? { structuredOutputSchema: step.structuredOutputSchema } : {}),
 				...(extensionBindings ? { extensionBindings } : {}),
 			}));
+		}
+		// Preserve each native chain/fan-out child's launch contract before it
+		// executes. Dynamic children use their materialized index and budget path.
+		const recoveryDir = path.dirname(ctx.outputFile);
+		if (!fs.existsSync(path.join(recoveryDir, "recovery-descriptor.json"))) {
+			if (!ctx.runFanoutBudget) throw new Error("Async child is missing its run fan-out budget identity.");
+			writeAsyncStepRecoveryDescriptor(recoveryDir, ctx.flatIndex, {
+				...step, model: candidate, thinking: resolveEffectiveThinking(candidate, step.thinking),
+				launchContractDigest: actualLaunchContractDigest, launchResolvedExtensions, extensionBindings,
+			}, { sourceRunId: ctx.id, runFanoutBudget: ctx.runFanoutBudget, cwd: ctx.cwd,
+				sessionDir: ctx.sessionDir, artifactsDir: ctx.artifactsDir,
+				capabilityCeiling: ctx.capabilityCeiling });
 		}
 		capabilityAudit = attemptCapabilityAudit;
 		try {
