@@ -122,6 +122,39 @@ test('compactions and non-delegation tools count once; delegated tool totals are
  close(collect([...entries,entries[0]]).auxiliary.reported,.3);
 });
 
+test('late native identities replace unknown or priced wrapper evidence without a second charge',()=>{
+ const measured={index:0,runId:'native-fixture',stopped:true,usage:usage(.01,'provider-reported',{turns:1})};
+ for(const initial of [{index:0,stopped:true,exitCode:1}, {index:0,stopped:true,usage:usage(.01,'provider-reported',{turns:1})}]){
+  const cost=collect([receipt('wrapper-fixture',[initial]),receipt('wrapper-fixture',[measured])]);
+  close(cost.total,.01);assert.equal(cost.unknown,false);assert.equal(cost.pending,0);
+ }
+});
+
+test('late wrapper-native linkage merges existing graphs and preserves reported corrections',()=>{
+ const leafA=child('leaf-a',{total:.02,source:'provider-reported'});
+ const leafB=child('leaf-b',{total:.03,source:'provider-reported'});
+ const entries=[
+  receipt('wrapper-fixture',[{index:0,usage:usage(.05,'estimate',{turns:1}),children:[leafA]}]),
+  receipt('native-fixture',[{index:0,usage:usage(.01,'provider-reported',{turns:1}),children:[leafB]}]),
+  receipt('parent-fixture',[{index:0,children:[{runId:'native-fixture',usage:usage(.01,'provider-reported',{turns:1})}]}]),
+  receipt('wrapper-fixture',[{index:0,runId:'native-fixture',stopped:true}]),
+  receipt('wrapper-fixture',[{index:0,runId:'native-fixture',usage:usage(.05,'estimate',{turns:1})}]),
+ ];
+ const cost=collect(entries);
+ close(cost.total,.06);close(cost.reported,.06);close(cost.estimated,0);assert.equal(cost.unknown,false);
+});
+
+test('different native runs and attempts on a reused wrapper row remain separately charged',()=>{
+ const a=child('native-a',{total:.01,source:'provider-reported'});
+ const b=child('native-b',{total:.02,source:'provider-reported'});
+ close(collect([receipt('wrapper',[a]),receipt('wrapper',[b]),receipt('wrapper',[a])]).total,.03);
+ const cost=collect([
+  receipt('wrapper',[{index:0,attempt:1,stopped:true}]),receipt('wrapper',[{...a,index:0,attempt:1}]),
+  receipt('wrapper',[{index:0,attempt:2,stopped:true}]),receipt('wrapper',[{...b,index:0,attempt:2}]),
+ ]);
+ close(cost.total,.03);assert.equal(cost.unknown,false);
+});
+
 test('nested swarm, workflow-step and direct receipts deduplicate the same physical child',()=>{
  const leaf={id:'leaf',totalCost:{costUsd:.3}};
  const nested={id:'nested',children:[leaf],steps:[{children:[leaf]}]};

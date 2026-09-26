@@ -93,12 +93,35 @@ export function collectSessionCost(entries, subscription = false) {
     const previous = rows.get(key) ?? {scope, route, ...empty()};
     rows.set(key, {...previous, ...mergeCostEvidence(previous,evidence)});
   };
+  const mergeNode = (old, next, key = next.key) => {
+    if (!old) return {...next, key};
+    const own = next.own, value = next.value;
+    const correction = own && old.own && next.turns > 0 && next.turns === old.turns &&
+      own.seen && own.estimated === 0 && !own.estimatedUsage && old.own.estimatedUsage && !own.unknown;
+    const staleEstimate = own?.estimatedUsage && old.own?.seen && !old.own.estimatedUsage && !old.own.unknown && next.turns > 0 && next.turns === old.turns;
+    const quality = e => (e?.unknown ? 0 : 1) + (e?.seen && !e.estimatedUsage ? 2 : 0);
+    const chosen = !staleEstimate && (correction || valid(value) && (!valid(old.value) || value > old.value || value === old.value && quality(own) >= quality(old.own))) ? next : old;
+    return {...chosen, key, native:chosen.native ?? next.native ?? old.native, routes:chosen.routes ?? old.routes,
+      nested:new Set([...old.nested, ...next.nested])};
+  };
+  const nativeId = node => typeof node?.runId === 'string' ? `${node.runId}:0` : typeof node?.id === 'string' ? `${node.id}:0` : undefined;
   const idOf = (node, fallback) => {
-    const id = typeof node?.runId === 'string' ? `${node.runId}:0` : typeof node?.id === 'string' ? `${node.id}:0` : fallback;
+    if (Number.isSafeInteger(node?.attempt) && node.attempt > 0) fallback += `:attempt-${node.attempt}`;
+    const native = nativeId(node), id = native ?? fallback;
     const file = typeof node?.sessionFile === 'string' ? `file:${node.sessionFile}` : undefined;
-    const key = aliases.get(id) ?? (file && aliases.get(file)) ?? id;
-    aliases.set(id,key);
-    if (file) aliases.set(file,key);
+    const previous = nodes.get(aliases.get(fallback) ?? fallback);
+    // An exact wrapper row can gain a native identity later. A different
+    // explicit native ID on a reused row is another run, not an alias.
+    const sameRow = !native || !previous?.native || previous.native === native;
+    const ids = [...new Set([id, ...(sameRow ? [fallback] : []), ...(file ? [file] : [])])];
+    const keys = [...new Set(ids.map(value => aliases.get(value) ?? value))];
+    const key = keys.find(value => nodes.has(value)) ?? id;
+    for (const duplicate of keys) if (duplicate !== key && nodes.has(duplicate)) {
+      nodes.set(key, mergeNode(nodes.get(key), nodes.get(duplicate), key));
+      nodes.delete(duplicate);
+      for (const [alias, target] of aliases) if (target === duplicate) aliases.set(alias, key);
+    }
+    for (const value of ids) aliases.set(value, key);
     return key;
   };
   const recordNode = (node, fallback, depth = 0) => {
@@ -116,18 +139,9 @@ export function collectSessionCost(entries, subscription = false) {
     const own = node.usage ? readCostEvidence(node.usage, node.provider ?? node.usage.cost?.provider) : undefined;
     const totalEvidence = node.totalCost?.costDetails ? readCostEvidence({costDetails:node.totalCost.costDetails}) : undefined;
     const value = inclusive ?? (own?.seen ? own.reported + own.estimated : undefined);
-    const next = {key, own, inclusive, totalEvidence, nested, value, turns:node.usage?.turns, routes:node.usage?.costByModel,
+    const next = {key, native:nativeId(node), own, inclusive, totalEvidence, nested, value, turns:node.usage?.turns, routes:node.usage?.costByModel,
       route:node.model ?? node.usage?.cost?.model ?? 'unattributed child', incomplete:node.accountingIncomplete === true};
-    const old = nodes.get(key);
-    const correction = own && old?.own && next.turns > 0 && next.turns === old.turns &&
-      own.seen && own.estimated === 0 && !own.estimatedUsage && old.own.estimatedUsage && !own.unknown;
-    const staleEstimate = own?.estimatedUsage && old?.own?.seen && !old.own.estimatedUsage && !old.own.unknown && next.turns > 0 && next.turns === old.turns;
-    const quality = e => (e?.unknown ? 0 : 1) + (e?.seen && !e.estimatedUsage ? 2 : 0);
-    if (!old || !staleEstimate && (correction || valid(value) && (!valid(old.value) || value > old.value || value === old.value && quality(own) >= quality(old.own)))) {
-      next.routes ??= old?.routes;
-      if (old) for (const child of old.nested) next.nested.add(child);
-      nodes.set(key,next);
-    } else for (const child of nested) old.nested.add(child);
+    nodes.set(key,mergeNode(nodes.get(key),next));
     return key;
   };
   // A bare running placeholder carries lifecycle, not accounting: no usage,
@@ -211,6 +225,7 @@ export function collectSessionCost(entries, subscription = false) {
   }
   // Resolve inclusive tree snapshots into own charges. A shared descendant can
   // appear in both a workflow and a step; it is charged once for the session.
+  for (const node of nodes.values()) node.nested = new Set([...node.nested].map(key => aliases.get(key) ?? key));
   const totals = new Map();
   const totalFor = (key, visiting = new Set()) => {
     if (totals.has(key)) return totals.get(key);
