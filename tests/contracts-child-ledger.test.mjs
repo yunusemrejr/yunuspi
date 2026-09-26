@@ -221,5 +221,7 @@ test('native lifecycle and restored status project observed execution without fa
   const task = reduceChildEvents(projectTranscriptChildren([life('running'), status])).tasks[0];
   assert.equal(task.state, 'completed'); assert.equal(task.execution.status, 'succeeded');
   assert.equal(task.acceptance.status, 'pending'); assert.equal(task.attempts[0].usage, undefined);
+  status.message.details.statusResults[0].acceptance = {status:'rejected'};
+  assert.equal(reduceChildEvents(projectTranscriptChildren([status])).tasks[0].acceptance.status, 'failed');
   for (const type of ['progress','resume']) assert.equal(reduceChildEvents([{type:'launch',taskId:'fixture',attempt:1},{type,taskId:'fixture',attempt:1}]).tasks[0].execution.status, 'running');
 });
