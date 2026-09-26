@@ -112,6 +112,33 @@ test("retrieval keeps lexical order for trivial/single inputs", async () => {
   assert.equal(needleCalls, 0);
 });
 
+test("large retrieval uses one batched judge before local fallbacks and retains every candidate", async () => {
+  const lexical = Array.from({ length: 27 }, (_, i) => ({ id: `item-${i}`, text: `Authorized candidate ${i}` }));
+  for (const mode of ['accepted', 'unavailable', 'uncertain', 'foreign', 'cancelled']) {
+    const calls = [], controller = new AbortController();
+    const result = await retrievalMod.multiStageRetrieve({
+      kind: 'tool', site: 'rank', query: 'choose the browser screenshot capability', lexical,
+      signal: controller.signal,
+      jev: async (_site, state, questions) => {
+        calls.push('jev');
+        assert.equal(Object.keys(questions.rank.criteria).length, 25);
+        assert.deepEqual(state.candidates, lexical.slice(0, 25), 'all typed questions share the actual candidate evidence');
+        if (mode === 'cancelled') { controller.abort(); return { ok: false, skipped: 'cancelled' }; }
+        if (mode === 'unavailable') return { ok: false, skipped: 'unavailable' };
+        const top = mode === 'foreign' ? 'not-authorized' : 'item-2';
+        return { ok: true, answers: { rank: { choice: top, probabilities: { [top]: mode === 'uncertain' ? .2 : .9 } }, exists: { noul: .95 } }, usage: { inputTokens: 100, cached: false } };
+      },
+      needle: async () => { calls.push('needle'); return { ok: true, cached: false, ms: 1, shadow: false, value: { ranked: [{ id: 'item-1', score: .99 }], margin: .1 } }; },
+      local: async () => { calls.push('local'); return { ok: false, reason: 'unavailable' }; },
+    });
+    assert.deepEqual(new Set(result.ordered.map(x => x.id)), new Set(lexical.map(x => x.id)));
+    assert.equal(calls.filter(x => x === 'jev').length, 1);
+    if (mode === 'accepted') { assert.equal(result.applied, 'jev'); assert.equal(result.ordered[0].id, 'item-2'); assert.deepEqual(calls, ['jev']); }
+    else if (mode === 'cancelled') { assert.equal(result.applied, 'lexical'); assert.deepEqual(calls, ['jev']); }
+    else { assert.equal(result.applied, 'needle'); assert.equal(result.ordered[0].id, 'item-1'); assert.deepEqual(calls, ['jev', 'needle', 'local']); }
+  }
+});
+
 test("retrieval applies an accepted needle win", async () => {
   const outcome = await retrievalMod.multiStageRetrieve({
     kind: "tool", site: "rank", query: "take a browser screenshot",

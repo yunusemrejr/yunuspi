@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
+import type { JudgeFn } from './micro-intelligence/review.ts';
+import { microMetrics } from './micro-intelligence/metrics.ts';
 import { isFlatPlanProvider } from '@yunuspi/ai';
 import { HARNESS_CAPABILITIES } from './harness-capabilities.ts';
 import { promptRequestFocus } from './prompt-interpretation.ts';
@@ -471,6 +474,8 @@ export function observerUsage(raw: any, provider?: string) {
 }
 interface ObserverSnapshot {
   packet: ObserverPacket; route?: ObserverRoute; reason?: string; silent?: boolean; registry?: any; reviewKey?: string;
+  /** The caller's current model/cost constraints allow the auxiliary judge. */
+  allowTriage?: boolean;
   current?: (advice?: ObserverAdvice) => boolean | string; reviewed?: () => void;
   /** Unread events left after this packet; a backlog is never quiet. */
   backlog?: number;
@@ -514,6 +519,8 @@ interface ObserverPorts {
   /** The other reviewer's recently delivered notes: a restatement is a repeat. */
   peerNotes?: () => Array<{ note: string; picks: string[] }>;
   dispatch?: typeof observerDispatch;
+  /** Cheap semantic admission; the full reviewer remains the fallback. */
+  judge?: JudgeFn;
 }
 /** One session owner; callbacks never wake the agent or await its tool hooks.
  * A provider that ignores abort retains its transport slot until it settles. The
@@ -529,6 +536,10 @@ export function createSessionObserver(ports: ObserverPorts) {
   let owner = '', generation = 0, active = false, closed = false, timer: ReturnType<typeof setTimeout> | undefined;
   let flight: { controller: AbortController; cancel: () => void; started: number; route: string } | undefined, lastHash = '', lastNotice = '';
   let lastReviewAt = -Infinity, lastCheckAt = 0, check = 0;
+  // One routine opportunity may be deferred, with its evidence still unread.
+  // The next opportunity runs a full review even if the evidence is unchanged.
+  let triageDeferred = false;
+  let lastReviewed: { evidence: ObserverEvidence[]; note: string } | undefined;
   // Cost control. quiet counts consecutive reviews that produced no new advice
   // with nothing left unread; failures counts consecutive unusable responses.
   // Either lengthens the gap before the next review until something salient
@@ -596,11 +607,48 @@ export function createSessionObserver(ports: ObserverPorts) {
     if ((snapshot.reviewKey ?? snapshot.packet.hash) === lastHash) { checkIn('No new evidence to review; no repeated advice sent.'); return; }
     const hold = holdMs();
     let salience = 0; try { salience = ports.salience?.() ?? 0; } catch { /* Salience only shortens a wait. */ }
-    if (hold && now() - lastReviewAt < hold && salience === salienceMark && !(Number(snapshot.backlog) > 0)) {
+    if (!triageDeferred && hold && now() - lastReviewAt < hold && salience === salienceMark && !(Number(snapshot.backlog) > 0)) {
       checkIn(quiet ? `Quiet stretch: ${quiet} review${quiet === 1 ? '' : 's'} without new advice; the next review waits up to ${Math.round(hold / 1000)}s unless errors, results, claims or plan changes arrive.`
         : `Recent observer responses were unusable; the next review waits up to ${Math.round(hold / 1000)}s unless errors, results, claims or plan changes arrive.`);
       return;
     }
+    if (ports.judge && snapshot.allowTriage && lastReviewed && !triageDeferred
+      && !failures && !consults && salience === salienceMark && !(Number(snapshot.backlog) > 0)
+      && !snapshot.packet.evidence.some(row => ['tool error', 'guardian intervention'].includes(row.kind))) {
+      const controller = new AbortController();
+      let release!: () => void;
+      const cancelled = new Promise<undefined>(resolve => { release = () => resolve(undefined); });
+      const triage = { controller, started: now(), route: 'Jev/Kev review triage', cancel() { controller.abort(); release(); } };
+      flight = triage;
+      // This preflight is independent of the main agent and never consumes
+      // the full review deadline. Timeout/unavailability falls through.
+      const deadline = schedule(() => triage.cancel(), 8_000);
+      deadline.unref?.();
+      let verdict: Awaited<ReturnType<typeof askTypedDecision>> | undefined;
+      try {
+        verdict = await Promise.race([askTypedDecision(ports.usageOwner === 'session-watchmaker' ? 'watchmaker-admission' : 'observer-admission',
+          { state: { previous: lastReviewed, current: snapshot.packet.evidence } },
+          { judge: ports.judge, signal: controller.signal, recordAcceptance: false }), cancelled]);
+      } finally { unschedule(deadline); if (flight === triage) flight = undefined; }
+      if (closed || !active || generation !== epoch || owner !== origin) return;
+      let currentSalience = salience;
+      try { currentSalience = ports.salience?.() ?? salience; } catch { /* Unknown salience cannot justify deferral. */ currentSalience++; }
+      // The agent kept working while the judge ran. Reconcile against a fresh
+      // snapshot before applying any decision, including new user restrictions.
+      const priorKey = snapshot.reviewKey ?? snapshot.packet.hash;
+      try { snapshot = ports.snapshot(); } catch { return; }
+      if (!snapshot.route) return;
+      const sameEvidence = (snapshot.reviewKey ?? snapshot.packet.hash) === priorKey;
+      if (sameEvidence && currentSalience === salience && snapshot.allowTriage && !controller.signal.aborted
+        && verdict?.ok && verdict.verdict?.supported === false) {
+        triageDeferred = true; lastReviewAt = now();
+        microMetrics().accept('jev');
+        notice('triaged', 'Jev/Kev found routine progress; one full review deferred. Evidence retained for the next review.');
+        return;
+      }
+      salience = currentSalience;
+    }
+    triageDeferred = false;
     salienceMark = salience;
     const controller = new AbortController();
     const id = `observer-${randomUUID()}`, route = adapted(snapshot.route), started = now();
@@ -672,6 +720,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       // A stale review has not consumed its evidence. Advance the queue only
       // after the cited state is reconciled, so the next review sees that chunk.
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
+      lastReviewed = { evidence: snapshot.packet.evidence.map(row => ({ ...row })), note: advice.note };
       const overlap = typeof freshness === 'string' ? freshness : undefined;
       const backlog = Number(snapshot.backlog) > 0;
       // A quiet, failed or duplicate review says nothing about whether the
@@ -707,13 +756,13 @@ export function createSessionObserver(ports: ObserverPorts) {
     } catch { if (!controller.signal.aborted && generation === epoch && active && owner === origin) notice('unavailable', `${label} evidence could not be reconciled`); } finally { unschedule(deadline); if (!terminal && !cancelled && !timedOut) thisFlight.cancel(); }
   }
   return {
-    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; quiet = failures = consults = 0; topics.clear(); flight?.cancel(); active = false; stopTimer(); },
+    begin(nextOwner: string) { closed = false; generation++; if (owner !== nextOwner) { delivered.clear(); recentAdvice.length = 0; recentPicks.length = 0; } owner = nextOwner; current = undefined; lastHash = ''; lastNotice = ''; lastReviewAt = -Infinity; triageDeferred = false; lastReviewed = undefined; quiet = failures = consults = 0; topics.clear(); flight?.cancel(); active = false; stopTimer(); },
     start() { if (closed || active) return; active = true; lastCheckAt = now(); arm(); },
     stop(reason = 'Current work ended') {
       if (active && flight && !flight.controller.signal.aborted) notice('stopped', `${reason}; cancellation requested`);
       active = false; current = undefined; generation++; stopTimer(); flight?.cancel();
     },
-    close() { closed = true; active = false; current = undefined; generation++; stopTimer(); flight?.cancel(); },
+    close() { closed = true; active = false; current = undefined; lastReviewed = undefined; generation++; stopTimer(); flight?.cancel(); },
     context(consume = true) {
       const note = current; if (consume) current = undefined;
       // No time expiry on an undelivered note: deliverable() already

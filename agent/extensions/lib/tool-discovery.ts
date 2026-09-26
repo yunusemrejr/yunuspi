@@ -10,8 +10,9 @@ import { multiStageRetrieve } from './micro-intelligence/retrieval.ts';
 import { localLm } from './local-lm.ts';
 import { skillActionSegments, skillRoutes } from './skill-routing.ts';
 
-/** Multi-stage re-rank: lexical order -> Needle semantic ranking -> Jev
- * validation when uncertain. Single candidates, trivial queries and
+/** Multi-stage re-rank: large shortlists go straight to batched Jev;
+ * small shortlists try local ranking before uncertain Jev validation.
+ * Single candidates, trivial queries and
  * low-confidence judgments stay on the lexical order. Needle reordering is
  * local (no API spend); a Jev reorder carries its ledger mark. */
 async function rerankWithJev<T>(

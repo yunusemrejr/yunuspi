@@ -34,7 +34,7 @@ for(const mode of ['success','slow-success','pre-dispatch-failure','http-error',
   t.after(()=>{session?.dispose();for(const[key,value]of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;fs.rmSync(cwd,{recursive:true,force:true});});
   const settingsManager=SettingsManager.inMemory({compaction:{enabled:false},retry:{enabled:true,maxRetries:1,baseDelayMs:1},providerRetry:{maxRetries:0}});
   const loader=new DefaultResourceLoader({cwd,agentDir:cwd,settingsManager,noExtensions:true,noSkills:true,noPromptTemplates:true,noThemes:true,noContextFiles:true,
-    extensionFactories:[pi=>observerExtension(pi,{...time,dispatch:async()=>{observerCalls++;if(mode==='slow-success')await new Promise(resolve=>time.setTimeout(resolve,150000));return{stopReason:'stop',content:[{type:'text',text:JSON.stringify({note,evidence:['request'],tools:[],skills:[]})}]};}}),pi=>{
+    extensionFactories:[pi=>observerExtension(pi,{...time,judge:async()=>({ok:false,skipped:'fixture'}),dispatch:async()=>{observerCalls++;if(mode==='slow-success')await new Promise(resolve=>time.setTimeout(resolve,150000));return{stopReason:'stop',content:[{type:'text',text:JSON.stringify({note,evidence:['request'],tools:[],skills:[]})}]};}}),pi=>{
       if(mode==='remove-payload')pi.on('before_provider_request',event=>{
         if(!fault&&JSON.stringify(event.payload).includes('Observer advice receipt=')){fault=true;return{...event.payload,messages:event.payload.messages.filter(message=>!JSON.stringify(message.content).includes('Observer advice receipt='))};}
       });

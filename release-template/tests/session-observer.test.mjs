@@ -254,7 +254,7 @@ function harness(dispatch) {
   const newManager=()=>({getSessionId:()=> 'synthetic-session',getSessionFile:()=>'/synthetic/session.jsonl',getBranch:()=>branch});
   const ctx={cwd:fixtureRoot,sessionManager:newManager(),isIdle:()=>idle,model,modelRegistry:{getAvailable:()=>[model]}};
   const pi={events:{on:(name,fn)=>{listeners.set(name,fn);return()=>listeners.delete(name);}},on:(name,fn)=>handlers.set(name,fn),registerMessageRenderer:()=>{},getActiveTools:()=>['read'],getAllTools:()=>[{name:'read',description:'Read parser source'},{name:'dormant_parser',description:'Read parser source'}],sendMessage:(...args)=>sent.push(args),appendEntry:(...args)=>{receipts.push(args);branch.push({type:'custom',customType:args[0],data:args[1]});}};
-  observerExtension(pi,{...time,dispatch:async(r,p,s)=>{packets.push(p);return dispatch?dispatch(r,p,s):{...reply(),content:[{type:'text',text:JSON.stringify({note:'Consider checking validation against the current parser source.',evidence:['request'],tools:['read'],skills:[]})}]};}});
+  observerExtension(pi,{...time,judge:async()=>({ok:false,skipped:'fixture'}),dispatch:async(r,p,s)=>{packets.push(p);return dispatch?dispatch(r,p,s):{...reply(),content:[{type:'text',text:JSON.stringify({note:'Consider checking validation against the current parser source.',evidence:['request'],tools:['read'],skills:[]})}]};}});
   const emit=(event,data={})=>handlers.get(event)?.(data,ctx);
   emit('session_start');
   function input(text,{accept=true,source='interactive'}={}) {
@@ -674,4 +674,70 @@ test('observer receives role-specific project history once per accepted task and
     h.input('Review current parsing code after switching'); await flush(); finish('Current history'); await flush(); await h.advance(30000);
     assert.ok(h.packets.every(p => !p.text.includes('STALE_HISTORICAL_REPLY')));
   } finally { h.close(); if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; }
+});
+
+test('cheap review admission replaces one routine review and retains evidence for the next full review', async () => {
+  for (const quiet of [false, true]) {
+  const time = clock(), notices = []; let calls = 0, judges = 0, reviewed = 0, revision = 1;
+  const observer = createSessionObserver({ ...time,
+    snapshot: () => ({ packet: packet(), route, allowTriage: true, reviewKey: String(revision), reviewed: () => reviewed++ }),
+    notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => { calls++; return quiet ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] } : reply(); },
+    judge: async (site, state, questions) => {
+      judges++; assert.equal(site, 'observer-admit'); assert.deepEqual(state.current, packet().evidence); assert.deepEqual(state.previous.evidence, packet().evidence);
+      assert.deepEqual(Object.keys(questions), ['worthwhile', 'routine']);
+      return { ok: true, answers: { worthwhile: { noul: .02 }, routine: { noul: .98 } }, usage: { inputTokens: 60, cached: false } };
+    },
+  });
+  observer.begin('owner'); observer.start(); await time.advance(30_000);
+  assert.equal(calls, 1); assert.equal(judges, 0, 'first review always uses the configured reviewer');
+  revision++; await time.advance(quiet ? 60_000 : 30_000);
+  assert.equal(calls, 1); assert.equal(judges, 1); assert.equal(reviewed, 1, 'triage cannot consume evidence');
+  assert.equal(notices.at(-1)[0], 'triaged');
+  await time.advance(30_000);
+  assert.equal(calls, 2); assert.equal(judges, 1, 'a second deferral cannot replace the full review');
+  assert.equal(reviewed, 2); observer.close();
+  }
+});
+
+test('review triage never postpones salient events, failures, backlog, restricted routes or uncertain judgments', async () => {
+  for (const mode of ['salience', 'failure', 'backlog', 'restriction', 'uncertain', 'unavailable']) {
+    const time = clock(); let calls = 0, judges = 0, revision = 1, salience = 0;
+    const observer = createSessionObserver({ ...time, salience: () => salience,
+      snapshot: () => ({ packet: mode === 'failure' && revision > 1
+        ? buildObserverPacket('Fix parser validation.', [{ id: 'event-2', kind: 'tool error', text: 'Required validation failed.' }], [], []) : packet(),
+        route, allowTriage: !(mode === 'restriction' && revision > 1), reviewKey: String(revision), backlog: mode === 'backlog' && revision > 1 ? 1 : 0 }),
+      notice() {}, receipt() {}, dispatch: async () => { calls++; return reply(); },
+      judge: async () => { judges++; return mode === 'unavailable' ? { ok: false, skipped: 'unavailable' }
+        : { ok: true, answers: { worthwhile: { noul: .02 }, routine: { noul: .5 } }, usage: { inputTokens: 60, cached: false } }; },
+    });
+    observer.begin('owner'); observer.start(); await time.advance(30_000);
+    revision++; if (mode === 'salience') salience++;
+    await time.advance(30_000);
+    assert.equal(calls, 2, mode); assert.equal(judges, ['uncertain', 'unavailable'].includes(mode) ? 1 : 0, mode);
+    observer.close();
+  }
+});
+
+test('review triage reconciles fresh evidence and cancels on timeout or owner change', async () => {
+  for (const mode of ['fresh-evidence', 'new-error', 'new-restriction', 'timeout', 'owner']) {
+    const time = clock(), notices = []; let calls = 0, revision = 1, salience = 0, allowed = true, resolveJudge, judgeSignal;
+    const observer = createSessionObserver({ ...time, salience: () => salience,
+      snapshot: () => ({ packet: packet(), route, allowTriage: allowed, reviewKey: String(revision) }),
+      notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => { calls++; return reply(); },
+      judge: async (_site, _state, _questions, options) => { judgeSignal = options.signal; return new Promise(resolve => { resolveJudge = resolve; }); },
+    });
+    observer.begin('owner'); observer.start(); await time.advance(30_000);
+    revision++; await time.advance(30_000); assert.equal(calls, 1);
+    if (mode === 'fresh-evidence') revision++;
+    if (mode === 'new-error') salience++;
+    if (mode === 'new-restriction') allowed = false;
+    if (mode === 'owner') observer.begin('replacement');
+    if (mode === 'timeout') await time.advance(8_000);
+    resolveJudge({ ok: true, answers: { worthwhile: { noul: .01 }, routine: { noul: .99 } }, usage: { inputTokens: 60, cached: false } });
+    await flush();
+    assert.equal(calls, mode === 'owner' ? 1 : 2, mode);
+    assert.equal(notices.some(([status]) => status === 'triaged'), false, mode);
+    if (['timeout', 'owner'].includes(mode)) assert.equal(judgeSignal.aborted, true);
+    observer.close();
+  }
 });

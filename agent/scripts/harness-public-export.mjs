@@ -127,7 +127,9 @@ if (fallback) {
 }
 const allowedExt = new Set([
  ".ts",
+ ".tsx",
  ".js",
+ ".jsx",
  ".mjs",
  ".cjs",
  ".json",
@@ -157,7 +159,10 @@ const allowedExt = new Set([
  * literal author home path rewritten to the /home/example placeholder still
  * ships, but as dead code for every other installation, so the export stops
  * instead. Documentation and example configuration keep the substitution. */
-const portableCodeExt = new Set([".ts", ".js", ".mjs", ".cjs", ".py", ".sh", ".service", ".cpp", ".h"]);
+const portableCodeExt = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".sh", ".service", ".cpp", ".h"]);
+// These source-controlled assessment fixtures are public test inputs. Do not
+// admit arbitrary SVG artwork from an installation's skills or template tree.
+const publicSvgFixture = /^(?:release-template\/)?tests\/fixtures\/expert-svg-(?:good|mediocre)\.svg$/;
 const omitted = new Set([
  "node_modules",
  ".git",
@@ -202,6 +207,7 @@ function copyTree(dir, prefix) {
    ![".gitignore", "pre-push", "pre-commit"].includes(entry.name) &&
    !/^agent\/extensions\/lib\/project-intelligence\/viewer-assets\/(?:index\.html|styles\.css|CYTOSCAPE-LICENSE)$/.test(rel) &&
    !/^core\/coding-agent\/src\/core\/export-html\/template\.(?:html|css)$/.test(rel) &&
+   !publicSvgFixture.test(rel) &&
    rel !== "agent/skills/motion-graphics-production/assets/timeline-starter.html"
   )
    continue;

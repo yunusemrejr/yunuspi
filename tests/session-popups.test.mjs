@@ -460,7 +460,8 @@ test('used summary folds the live telemetry segment into hook counts like the TU
 test('used and error popups stamp their capture time and total window', () => {
   const summary = signals.buildUsedSummary([]);
   assert.match(summary.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.ok(signals.usedSummaryHtml(summary).includes(`Snapshot · ${summary.capturedAt}`));
+  assert.ok(signals.usedSummaryHtml(summary).includes(`datetime="${summary.capturedAt}"`));
+  assert.ok(signals.usedSummaryHtml(summary).includes(summary.capturedAt.replace('T', ' ').replace('Z', ' UTC')));
   const many = Array.from({ length: 2100 }, (_, i) => ({ type: 'message', message: { role: 'toolResult', toolCallId: `c${i}`, toolName: 'read', content: [{ type: 'text', text: 'ok' }] } }));
   const report = errorsLib.collectSessionErrors(many);
   assert.equal(report.totalEntries, 2100);

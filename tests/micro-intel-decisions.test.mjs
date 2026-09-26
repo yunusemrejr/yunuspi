@@ -167,3 +167,27 @@ test("tool-intent reports alignment and risk separately", async () => {
     metricsMod.resetMicroMetrics();
   }
 });
+
+test('review admission needs both novelty and progress evidence; cancelled or unused verdicts are not applied', async () => {
+  metricsMod.resetMicroMetrics();
+  try {
+    for (const id of ['observer-admission', 'watchmaker-admission']) {
+      for (const [worthwhile, routine, deferred] of [[.1, .9, true], [.1, .5, false], [.3, .9, false], [.1, undefined, false], [-1, 1, false]]) {
+        const result = await askTypedDecision(id, { state: { previous: [], current: [] } }, {
+          judge: judgeWith({ worthwhile: { noul: worthwhile }, routine: { noul: routine } }), recordAcceptance: false,
+        });
+        assert.equal(result.ok && result.verdict?.supported === false, deferred);
+      }
+    }
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.jev.accepted, 0);
+    const controller = new AbortController();
+    const result = await askTypedDecision('observer-admission', { state: { previous: [], current: [] } }, {
+      signal: controller.signal, judge: async (_site, _state, _questions, options) => {
+        assert.equal(options.signal, controller.signal); controller.abort();
+        return judgeWith({ worthwhile: { noul: .1 }, routine: { noul: .9 } })('observer-admit', {}, {});
+      },
+    });
+    assert.equal(result.reason, 'aborted');
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.jev.accepted, 0);
+  } finally { metricsMod.resetMicroMetrics(); }
+});

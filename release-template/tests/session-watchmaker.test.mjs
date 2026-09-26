@@ -61,7 +61,7 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
   const sessionManager = { getSessionId: () => 'watchmaker-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
   const statuses = [];
   const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false, ui: { setStatus: (key, text) => statuses.push([key, text]) } };
-  watchmakerExtension(pi, { ...time,
+  watchmakerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }),
     dispatch: async (_route, packet) => {
       packets.push(packet.text);
       const index = calls++;

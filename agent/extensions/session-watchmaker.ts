@@ -1,4 +1,5 @@
 import { recallProjectContext } from "./lib/project-memory-context.ts";
+import { askJev } from './lib/jev-client.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
@@ -169,6 +170,11 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
+    judge: (site, state, questions, options) => {
+      const origin = owner;
+      return askJev(site, state, questions, { signal: options?.signal,
+        pi: { appendEntry(type: string, data: unknown) { if (owns(ctx) && owner === origin) pi.appendEntry(type, data); } } });
+    },
     salience: () => salience,
     position: () => sequence,
     peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()),
@@ -238,6 +244,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       const routeName = entry.route;
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd } : undefined;
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
+        allowTriage: !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly,
         reviewed: () => { recent = recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)).length,
         dispatched: () => {},
@@ -362,7 +369,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
     const memoryOwner = owner, memoryTask = taskEpoch;
-    if (userRequest && !inputBlocked && process.env.PI_WATCHMAKER !== 'off' && !['1', 'true', 'yes'].includes(process.env.PI_OFFLINE ?? '') && !wantsNoObserver(accepted.raw)) void recallProjectContext(context.cwd, accepted.raw, 'watchmaker', accepted.signal).then(text => {
+    if (userRequest && !inputBlocked && process.env.PI_WATCHMAKER !== 'off' && !['1', 'true', 'yes'].includes(process.env.PI_OFFLINE ?? '') && !wantsNoObserver(accepted.raw)) void recallProjectContext(context.cwd, accepted.raw, 'watchmaker', accepted.signal, { background: true }).then(text => {
       if (!text || !owns(context) || owner !== memoryOwner || taskEpoch !== memoryTask) return;
       projectHistory = text;
       journal.add({ id: 'project-history', kind: 'historical project evidence', at: now(), text });

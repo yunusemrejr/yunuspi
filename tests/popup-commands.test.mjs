@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import registerSignals, { popupDir, sysPromptDir, writePopupFile } from '../agent/extensions/session-signals.ts';
 import { openExternal } from '../agent/extensions/lib/project-intelligence/viewer.mjs';
 import { AgentSession } from '../core/coding-agent/src/core/agent-session.js';
+import { createHelperUsageLedger, HELPER_USAGE_ENTRY, HELPER_USAGE_VIEW } from '../agent/extensions/lib/helper-usage.ts';
 
 function fixture(t, hasUI = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-popup-commands-'));
@@ -67,6 +68,36 @@ test('/used launches its popup and reports the file only after the browser accep
   const url = pathToFileURL(path.join(popupDir(), matches[0])).href;
   assert.ok(launches[0].args.some(arg => arg.includes(url)));
   assert.match(f.notices.at(-1)[0], /opened/); assert.deepEqual(f.modelCalls, []);
+});
+
+test('reopening /used captures helper work completed after the earlier snapshot, including an unflushed live segment', async t => {
+  const f = fixture(t), ledger = createHelperUsageLedger();
+  const previous = globalThis[HELPER_USAGE_VIEW];
+  globalThis[HELPER_USAGE_VIEW] = id => id === 'synthetic' ? ledger.snapshot() : undefined;
+  t.after(() => { if (previous === undefined) delete globalThis[HELPER_USAGE_VIEW]; else globalThis[HELPER_USAGE_VIEW] = previous; });
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => ++now);
+  const entries = [{ type: 'custom', customType: HELPER_USAGE_ENTRY, data: ledger.snapshot() }];
+  f.ctx.sessionManager.getEntries = () => entries;
+  await f.dispatch('/used');
+  const firstFile = path.join(popupDir(), fs.readdirSync(popupDir())[0]);
+  const first = fs.readFileSync(firstFile, 'utf8');
+  assert.match(first, /<b>JEV<\/b>.*?No measurement in this snapshot/);
+  ledger.note('ml.jev.used', { durationMs: 200, cached: false });
+  ledger.note('ml.helper.applied', { helper: 'jev' });
+  ledger.note('ml.jev.used', { durationMs: 400, cached: false });
+  ledger.note('ml.helper.applied', { helper: 'jev' });
+  ledger.note('ml.evidence.delivered', { helper: 'jev' });
+  await f.dispatch('/used');
+  const secondFile = fs.readdirSync(popupDir()).map(name => path.join(popupDir(), name)).find(file => file !== firstFile);
+  assert.ok(secondFile, 'reopening creates a fresh file instead of reusing the browser snapshot');
+  const second = fs.readFileSync(secondFile, 'utf8');
+  assert.match(second, /<b>JEV<\/b>.*?2 recorded executions · 2 applied/);
+  assert.match(second, /2 recorded executions · 1 context deliveries/);
+  assert.match(second, /300 ms average · 2 samples · 600 ms total/);
+  assert.equal(fs.readFileSync(firstFile, 'utf8'), first, 'the saved snapshot remains an honest capture of its original point in time');
+  assert.equal(entries.length, 1, 'live measurements do not depend on a turn-end ledger flush');
+  assert.deepEqual(f.modelCalls, []);
 });
 
 test('popup storage failures notify and log once without a model prompt', async t => {

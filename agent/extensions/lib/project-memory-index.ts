@@ -570,6 +570,7 @@ export async function indexEvent(
       concepts: event.concepts ?? extractConcepts(chunk.text, event.path ?? ""),
       importance: event.importance ?? TYPE_DEFAULT_IMPORTANCE[type],
       authority: 0.5,
+      confidence: event.confidence ?? 0.8,
       content_hash: hash,
     }, now);
     if (outcome === "duplicate") {

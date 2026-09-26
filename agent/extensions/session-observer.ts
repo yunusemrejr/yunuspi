@@ -1,4 +1,5 @@
 import { recallProjectContext } from "./lib/project-memory-context.ts";
+import { askJev } from './lib/jev-client.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
@@ -240,6 +241,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
+    judge: (site, state, questions, options) => {
+      const origin = owner;
+      return askJev(site, state, questions, { signal: options?.signal,
+        pi: { appendEntry(type: string, data: unknown) { if (owns(ctx) && owner === origin) pi.appendEntry(type, data); } } });
+    },
     salience: () => salience,
     position: () => sequence,
     peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()),
@@ -426,6 +432,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       } } : undefined;
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd, book: bookReader } : undefined;
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
+        allowTriage: !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly,
         reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)).length,
         bookPassages: section?.passages ?? [],
@@ -619,7 +626,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
     const memoryOwner = owner, memoryTask = taskEpoch;
-    if (userRequest && !inputBlocked && process.env.PI_SESSION_OBSERVER !== 'off' && !['1', 'true', 'yes'].includes(process.env.PI_OFFLINE ?? '') && !wantsNoObserver(accepted.raw)) void recallProjectContext(context.cwd, accepted.raw, 'observer', accepted.signal).then(text => {
+    if (userRequest && !inputBlocked && process.env.PI_SESSION_OBSERVER !== 'off' && !['1', 'true', 'yes'].includes(process.env.PI_OFFLINE ?? '') && !wantsNoObserver(accepted.raw)) void recallProjectContext(context.cwd, accepted.raw, 'observer', accepted.signal, { background: true }).then(text => {
       if (!text || !owns(context) || owner !== memoryOwner || taskEpoch !== memoryTask) return;
       projectHistory = text;
       journal.add({ id: 'project-history', kind: 'historical project evidence', at: now(), text });

@@ -1,7 +1,7 @@
 import { sessionObservability } from '../session-observability.ts';
 /** Multi-stage retrieval: deterministic eligibility (caller-owned) ->
- * lexical/statistical order (caller-provided) -> Needle semantic ranking ->
- * Jev validation when uncertain. Candidates entering this function are
+ * lexical/statistical order (caller-provided) -> batched Jev for large
+ * shortlists, local ranking first for small ones. Candidates entering this function are
  * already authorized/eligible; ranking never grants access.
  *
  * Dependencies are injected so subsystem owners keep their wiring and tests
@@ -82,8 +82,8 @@ async function awaitStage<T>(work: Promise<T>, signal?: AbortSignal): Promise<T 
  * - `lexical` is the caller's deterministic+lexical order (already bounded).
  * - Needle re-ranks the head slice; its order applies when the win is
  *   accepted (score/margin floors); agreement alone cannot reorder the tail.
- * - Jev validates exactly when it adds value: Needle is uncertain, or
- *   Needle-top and lexical-top disagree. One batched call, same bars as the
+ * - Jev first handles large shortlists; for small ones it validates uncertain
+ *   or disagreeing local ranking. At most one batched call, same bars as the
  *   existing tool-discovery rerank (exists >= 0.5, topProb >= 0.4).
  */
 export async function multiStageRetrieve<T extends RetrievalCandidate>(options: {
@@ -124,6 +124,66 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   let needleAccepted = false;
   let needleShadow = false;
   let needleOrder: string[] | undefined;
+
+  let jevAttempted = false;
+  const judge = async (ordered: readonly T[]): Promise<RetrievalOutcome<T> | undefined> => {
+    if (!options.jev || jevAttempted || options.signal?.aborted) return undefined;
+    jevAttempted = true;
+    metrics.offer("jev");
+    try {
+      const pool = ordered.slice(0, MAX_STAGE);
+      const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
+      // Each typed question sees the shared state, not its sibling's criteria.
+      // The existence check needs the candidates too or it judges an empty set.
+      const judged = await awaitStage(options.jev(site, { query: query.slice(0, 256), candidates }, {
+        rank: {
+          type: "choice",
+          instructions: `Which ${kind} entry best serves this need?`,
+          criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.id])),
+        },
+        exists: { type: "noul", instructions: "Does at least one entry in state.candidates provide the capability or evidence requested by state.query? Judge its description, not whether the action has already executed." },
+      }, { signal: options.signal }), options.signal);
+      if (!judged || options.signal?.aborted) return done([...lexical], 'lexical');
+      if (judged.ok) {
+        const order = judged.answers.rank?.probabilities ?? {};
+        const top = judged.answers.rank?.choice;
+        const topProb = top ? (order[top] ?? 0) : 0;
+        metrics.run("jev");
+        metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
+        if (judged.usage.cached) metrics.cacheHit("jev");
+        const allowed = new Set(candidates.map((candidate) => candidate.id));
+        const exists = judged.answers.exists?.noul;
+        if (Number.isFinite(exists) && exists! >= 0.5 && exists! <= 1 && Number.isFinite(topProb) && topProb >= 0.4 && topProb <= 1 && top && allowed.has(top)) {
+          const rankOf = new Map(
+            Object.entries(order).filter(([id, probability]) => allowed.has(id) && Number.isFinite(probability) && probability >= 0 && probability <= 1)
+              .sort((a, b) => a[0] === top ? -1 : b[0] === top ? 1 : b[1] - a[1]).map(([id], index) => [id, index]),
+          );
+          const reordered = [...lexical].sort(
+            (a, b) => (rankOf.get(a.id) ?? 999) - (rankOf.get(b.id) ?? 999),
+          );
+          metrics.accept("jev");
+          return done(reordered, "jev", {
+            needleTop, needleMargin, jevTop: top, jevConfidence: topProb,
+            mark: options.jevMark?.(site, `${top} ${topProb.toFixed(2)}`, judged.usage),
+          });
+        }
+        metrics.skip("jev", "low-confidence");
+      } else {
+        metrics.skip("jev", judged.skipped);
+      }
+    } catch {
+      metrics.skip("jev", "unavailable");
+    }
+  };
+
+  // Large fresh shortlists spent several seconds embedding every candidate,
+  // then usually escalated to the same batched judge. Let the judge settle
+  // these directly; uncertain/unavailable answers retain every local fallback.
+  if (slice.length >= 6) {
+    const judged = await judge(lexical);
+    if (judged) return judged;
+    if (options.signal?.aborted) return done([...lexical], 'lexical');
+  }
 
   if (options.needle) {
     metrics.offer("needle");
@@ -215,50 +275,9 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
 
   // Jev validation: uncertain Needle, stage disagreement, or no Needle.
   const needsJev = needleShadow || needleTop === undefined || !needleAccepted || !agrees;
-  if (options.jev && needsJev) {
-    metrics.offer("jev");
-    try {
-      const pool = (needleOrdered ?? fusedOrdered ?? [...lexical]).slice(0, MAX_STAGE);
-      const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
-      const judged = await awaitStage(options.jev(site, { query: query.slice(0, 256) }, {
-        rank: {
-          type: "choice",
-          instructions: `Which ${kind} entry best serves this need?`,
-          criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.text])),
-        },
-        exists: { type: "noul", instructions: "Does any candidate actually serve the need?" },
-      }, { signal: options.signal }), options.signal);
-      if (!judged || options.signal?.aborted) return done([...lexical], 'lexical');
-      if (judged.ok) {
-        const order = judged.answers.rank?.probabilities ?? {};
-        const top = judged.answers.rank?.choice;
-        const topProb = top ? (order[top] ?? 0) : 0;
-        metrics.run("jev");
-        metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
-        if (judged.usage.cached) metrics.cacheHit("jev");
-        const allowed = new Set(candidates.map((candidate) => candidate.id));
-        const exists = judged.answers.exists?.noul;
-        if (Number.isFinite(exists) && exists! >= 0.5 && exists! <= 1 && Number.isFinite(topProb) && topProb >= 0.4 && topProb <= 1 && top && allowed.has(top)) {
-          const rankOf = new Map(
-            Object.entries(order).filter(([id, probability]) => allowed.has(id) && Number.isFinite(probability) && probability >= 0 && probability <= 1)
-              .sort((a, b) => a[0] === top ? -1 : b[0] === top ? 1 : b[1] - a[1]).map(([id], index) => [id, index]),
-          );
-          const reordered = [...lexical].sort(
-            (a, b) => (rankOf.get(a.id) ?? 999) - (rankOf.get(b.id) ?? 999),
-          );
-          metrics.accept("jev");
-          return done(reordered, "jev", {
-            needleTop, needleMargin, jevTop: top, jevConfidence: topProb,
-            mark: options.jevMark?.(site, `${top} ${topProb.toFixed(2)}`, judged.usage),
-          });
-        }
-        metrics.skip("jev", "low-confidence");
-      } else {
-        metrics.skip("jev", judged.skipped);
-      }
-    } catch {
-      metrics.skip("jev", "unavailable");
-    }
+  if (needsJev) {
+    const judged = await judge(needleOrdered ?? fusedOrdered ?? lexical);
+    if (judged) return judged;
   }
 
   if (needleOrdered && needleTop !== undefined) {

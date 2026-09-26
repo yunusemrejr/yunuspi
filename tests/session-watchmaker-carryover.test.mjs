@@ -52,7 +52,7 @@ function harness(t, notes) {
   };
   const sessionManager = { getSessionId: () => 'watchmaker-carryover-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
   const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false };
-  watchmakerExtension(pi, { ...time,
+  watchmakerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }),
     dispatch: async (_route, packet) => {
       packets.push(packet);
       const result = notes[calls++];

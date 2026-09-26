@@ -49,7 +49,7 @@ function harness(t, notes) {
   };
   const sessionManager = { getSessionId: () => 'carryover-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
   const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false };
-  observerExtension(pi, { ...time, loadBook: () => undefined,
+  observerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }), loadBook: () => undefined,
     dispatch: async () => {
       const note = notes[calls++];
       return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence: ['request'], tools: [], skills: [] }) }] };

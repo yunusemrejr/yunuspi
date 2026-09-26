@@ -200,3 +200,18 @@ test('existing priming consumes semantic project history with main and subagent 
     assert.deepEqual(roles, ['main', 'subagent']);
   } finally { if (prior === undefined) delete globalThis[key]; else globalThis[key] = prior; if (child === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = child; }
 });
+
+
+test('an unrelated new request does not inherit the previous session follow-up checklist',async()=>{
+ const cwd=path.join(root,'new-scope');fs.mkdirSync(cwd,{recursive:true});
+ const project=path.join(cwd,'memory.md'),daily=path.join(cwd,'daily');fs.mkdirSync(daily,{recursive:true});
+ fs.writeFileSync(project,'');
+ fs.writeFileSync(path.join(daily,'2026-09-24.md'),'## Session Summary\n\n### Follow-ups\n- Restart the old deployment server and publish its release.\n');
+ const hooks={},entries=[];
+ registerPriming({on:(name,fn)=>hooks[name]=fn,registerCommand(){},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})},()=>({project,daily,global:project}));
+ const ctx={cwd,sessionManager:{getEntries:()=>entries}};
+ for(const prompt of ['Draw a pink orchard illustration','Devam etme, pembe bir bahçe çiz']) {
+  entries.length=0;hooks.session_start({},ctx);
+  assert.equal(await hooks.before_agent_start({prompt},ctx),undefined);
+ }
+});

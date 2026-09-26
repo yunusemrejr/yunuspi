@@ -1,3 +1,7 @@
+// Keep metadata/routing fixtures independent of remote judge configuration.
+process.env.PI_JEV = "off";
+process.env.PI_NEEDLE = "off";
+process.env.PI_LOCAL_LM = "off";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -17,10 +21,11 @@ const names = [
 ];
 
 function fixture(skillNames = names, systemPromptOptions) {
-  const tools = new Map();
+  const tools = new Map(), hooks = new Map();
   const entries = [];
   const active = ["read", "skill_review"];
   const pi = {
+    on: (name, handler) => hooks.set(name, handler),
     getActiveTools: () => active,
     registerTool: tool => tools.set(tool.name, tool),
     appendEntry: (customType, data) => entries.push({type: "custom", customType, data}),
@@ -31,7 +36,7 @@ function fixture(skillNames = names, systemPromptOptions) {
   const guidance = createRelevantGuidance(pi);
   guidance.restore(ctx);
   guidance.start({prompt: "Explain the available workflows", systemPrompt, systemPromptOptions}, ctx);
-  return {guidance, review: tools.get("skill_review"), entries, ctx};
+  return {guidance, review: tools.get("skill_review"), entries, ctx, hooks};
 }
 
 test("capability grouping is total, deterministic and compact", () => {
@@ -133,4 +138,79 @@ test("explicit discovery keeps short domain names ahead of incidental descriptio
   const api = await f.review.execute('search',{action:'search',query:'API',limit:8});
   assert.deepEqual(api.details.results.map(skill=>skill.name),['api-design']);
   assert.equal(f.entries.length,before,'search does not create review obligations or delivery receipts');
+});
+
+test('skill discovery uses shared Jev with local IDs while preserving exact names, families and fallback', async () => {
+  const {configureJevClient, resetJevClient} = await import(pathToFileURL(path.join(agent, 'extensions/lib/jev-client.ts')));
+  const previousKey = process.env.OPENROUTER_API_KEY, previousOffline = process.env.PI_OFFLINE;
+  delete process.env.PI_OFFLINE;
+  process.env.OPENROUTER_API_KEY = 'TEST_JEV_SKILL_DISCOVERY'; process.env.PI_JEV = 'on';
+  const skills = Array.from({length: 7}, (_, index) => ({name: `layout-check-${index}`, description: 'Browser interface screenshot workflow', filePath: `/fixture/private/skills/layout-${index}/SKILL.md`}));
+  let calls = 0, target = 'layout-check-5', unavailable = false;
+  configureJevClient({fetchImpl: async (_url, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.doesNotMatch(JSON.stringify(body), /\/fixture\/|SKILL\.md/);
+    assert.ok(body.state.candidates.every(candidate => /^skill-\d+$/.test(candidate.id)));
+    if (unavailable) return new Response('', {status: 503});
+    const top = body.state.candidates.find(candidate => candidate.text.startsWith(target + ':')).id;
+    return new Response(JSON.stringify({answers: {rank: {type:'choice', choice:top, probabilities:{[top]:.98}}, exists:{type:'noul',noul:.98}}, usage:{input_tokens:40,cost:.000001}}), {status:200});
+  }});
+  try {
+    resetJevClient();
+    const f = fixture([], {skills}), before = f.entries.length;
+    const result = await f.review.execute('search', {action:'search',query:'browser interface screenshot workflow',limit:8});
+    assert.equal(result.details.results[0].name, target); assert.equal(result.details.ranking, 'jev'); assert.equal(calls, 1);
+    assert.equal(result.details.results.length, skills.length);
+    assert.deepEqual(f.entries.slice(before).map(entry => entry.customType), ['jev-usage-v1'], 'ranking usage does not become a review or read receipt');
+    const exact = await f.review.execute('search', {action:'search',query:'layout-check-2'});
+    assert.equal(exact.details.results[0].name, 'layout-check-2'); assert.equal(calls, 1, 'exact names bypass inference');
+    const family = ['copywriting','resourceful-market-strategy','organic-growth-engineering','community-promotion','natural-editorial-writing','unrelated-layout','unrelated-images'].map(name => ({name,description:'Marketing conversion workflow',filePath:`/fixture/private/skills/${name}/SKILL.md`}));
+    target = 'unrelated-layout';
+    const familyResult = await fixture([], {skills:family}).review.execute('family', {action:'search',query:'marketing conversion workflows',limit:8});
+    assert.deepEqual(new Set(familyResult.details.results.slice(0,5).map(row => row.name)), new Set(family.slice(0,5).map(row => row.name)));
+    resetJevClient(); unavailable = true;
+    const fallback = await f.review.execute('fallback', {action:'search',query:'browser interface screenshot workflow',limit:8});
+    assert.equal(fallback.isError, undefined); assert.equal(fallback.details.results.length, skills.length);
+    assert.notEqual(fallback.details.ranking, 'jev');
+  } finally {
+    process.env.PI_JEV = 'off';
+    if (previousOffline === undefined) delete process.env.PI_OFFLINE; else process.env.PI_OFFLINE = previousOffline;
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previousKey;
+    resetJevClient(); configureJevClient({fetchImpl:(...args)=>globalThis.fetch(...args)});
+  }
+});
+
+test('skill discovery cancels transport and withholds results after caller or session changes', async () => {
+  const {configureJevClient, resetJevClient} = await import(pathToFileURL(path.join(agent, 'extensions/lib/jev-client.ts')));
+  const previousKey = process.env.OPENROUTER_API_KEY, previousOffline = process.env.PI_OFFLINE;
+  delete process.env.PI_OFFLINE;
+  process.env.OPENROUTER_API_KEY = 'TEST_JEV_SKILL_DISCOVERY'; process.env.PI_JEV = 'on';
+  try {
+    for (const mode of ['caller','input','restore','switch']) {
+      resetJevClient(); let entered, transportSignal;
+      const started = new Promise(resolve => { entered = resolve; });
+      configureJevClient({fetchImpl: async (_url, options) => {
+        transportSignal = options.signal; entered();
+        return new Promise((_resolve,reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), {once:true}));
+      }});
+      const skills = Array.from({length:7},(_,index)=>({name:`workflow-${index}`,description:'Browser interface screenshot workflow',filePath:`/fixture/private/${index}/SKILL.md`}));
+      const f = fixture([], {skills}), controller = new AbortController(), before = f.entries.length;
+      const pending = f.review.execute('search',{action:'search',query:'browser interface screenshot workflow'},controller.signal);
+      await started;
+      if (mode === 'caller') controller.abort();
+      if (mode === 'input') f.guidance.userInput();
+      if (mode === 'restore') f.guidance.restore(f.ctx);
+      if (mode === 'switch') f.hooks.get('session_before_switch')();
+      const result = await pending;
+      assert.equal(result.isError,true,mode); assert.equal(result.details,undefined,mode);
+      assert.equal(transportSignal.aborted,true,mode);
+      assert.equal(f.entries.slice(before).some(entry=>entry.customType==='jev-usage-v1'),false,mode);
+    }
+  } finally {
+    process.env.PI_JEV = 'off';
+    if (previousOffline === undefined) delete process.env.PI_OFFLINE; else process.env.PI_OFFLINE = previousOffline;
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previousKey;
+    resetJevClient(); configureJevClient({fetchImpl:(...args)=>globalThis.fetch(...args)});
+  }
 });

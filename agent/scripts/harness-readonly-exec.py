@@ -90,29 +90,38 @@ def check_protected_hardlinks(protected_roots):
         parent != root and os.path.commonpath([parent, root]) == parent
         for parent in roots)}
     linked = {}
-    def scan_error(error):
-        if not isinstance(error, FileNotFoundError):
-            raise error
-    def inspect(candidate):
-        try:
-            info = os.lstat(candidate)
-        except FileNotFoundError:
-            return
+    def inspect(candidate, info):
         if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
             key = (info.st_dev, info.st_ino)
             entry = linked.setdefault(key, {'links': info.st_nlink, 'paths': set()})
             entry['links'] = max(entry['links'], info.st_nlink)
             entry['paths'].add(candidate)
     for root in roots:
-        inspect(root)
         try:
-            if not stat.S_ISDIR(os.lstat(root).st_mode):
-                continue
+            info = os.lstat(root)
         except FileNotFoundError:
             continue
-        for directory, dirs, files in os.walk(root, followlinks=False, onerror=scan_error):
-            for name in files:
-                inspect(os.path.join(directory, name))
+        inspect(root, info)
+        pending = [root] if stat.S_ISDIR(info.st_mode) else []
+        while pending:
+            directory = pending.pop()
+            try:
+                # Reuse DirEntry metadata instead of os.walk's extra name/path
+                # pass. Do not cache this inventory between commands: an outside
+                # alias created since the last launch must still be rejected.
+                if os.path.islink(directory):
+                    continue
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                pending.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                inspect(entry.path, entry.stat(follow_symlinks=False))
+                        except FileNotFoundError:
+                            continue
+            except FileNotFoundError:
+                continue
     if any(len(entry['paths']) < entry['links'] for entry in linked.values()):
         raise RuntimeError('harness has hard-linked files with aliases outside protected roots; a maintenance session must replace them with independent copies before guarded execution')
 

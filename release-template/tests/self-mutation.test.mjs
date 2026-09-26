@@ -192,19 +192,22 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
 guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
 root=sys.argv[2]
-def vanished(*args,**kwargs):
- kwargs['onerror'](FileNotFoundError(2,'vanished lock',os.path.join(root,'lock')))
- yield root, [], ['vanished-file','original']
-with patch.object(guard.os,'walk',vanished): guard.check_hardlinks(root)
-os.link(os.path.join(root,'original'),os.path.join(root,'alias'))
-with patch.object(guard.os,'walk',vanished):
+original_scandir=os.scandir
+lock=os.path.join(root,'vanished-lock');os.mkdir(lock)
+def vanished(directory):
+ if directory==lock: raise FileNotFoundError(2,'vanished lock',lock)
+ return original_scandir(directory)
+with patch.object(guard.os,'scandir',vanished): guard.check_hardlinks(root)
+# An alias introduced after a successful scan must be found on the next call.
+os.link(os.path.join(root,'original'),os.path.join(os.path.dirname(root),'alias'))
+with patch.object(guard.os,'scandir',vanished):
  try: guard.check_hardlinks(root)
  except RuntimeError as error: assert 'hard-linked' in str(error)
  else: raise AssertionError('hardlink was not rejected after transient disappearance')
-def unreadable(*args,**kwargs):
- kwargs['onerror'](PermissionError(13,'denied',root))
- yield root,[],[]
-with patch.object(guard.os,'walk',unreadable):
+def unreadable(directory):
+ if directory==lock: raise PermissionError(13,'denied',lock)
+ return original_scandir(directory)
+with patch.object(guard.os,'scandir',unreadable):
  try: guard.check_hardlinks(root)
  except PermissionError: pass
  else: raise AssertionError('unreadable subtree was accepted')

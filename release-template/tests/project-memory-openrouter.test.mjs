@@ -402,3 +402,118 @@ test('Qwen query instructions are separate from document vectors and empty index
   assert.ok(!inputs[0].startsWith('Instruct:')); assert.match(inputs[1],/^Instruct:.*\nQuery: /);
   const count=inputs.length; await retrieveProjectMemory(store,'Why are we duplicating another architecture layer?',{embedder:e,rerank:false}); assert.equal(inputs.length,count);
 });
+
+
+test('slow automatic query embeddings finish after lexical fallback and serve later role consumers', async t => {
+ const {dir}=storeFor(t), hooks=new Map(), tools=new Map(); let release, querySignal, calls=0;
+ const e=local('fixture',async(texts,opts={})=>{
+  if(opts.inputType!=='query')return texts.map(()=>[1,0]);
+  calls++;querySignal=opts.signal;
+  return new Promise(resolve=>{release=()=>resolve([[1,0]]);opts.signal.addEventListener('abort',()=>resolve(null),{once:true});});
+ });
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'slow-query'}};
+ hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
+ await tools.get('project_memory_remember').execute('r',{text:'The orchard service stores transactions durably.',type:'decision'},undefined,undefined,ctx);
+ const start=Date.now();const first=await recallProjectContext(dir,'How should purchases survive a machine restart?','observer');
+ assert.ok(Date.now()-start<1200);assert.equal(first,'','paraphrase has no lexical overlap');
+ assert.equal(querySignal.aborted,false,'foreground lexical deadline must not cancel reusable semantic work');
+ const background=recallProjectContext(dir,'How should purchases survive a machine restart?','watchmaker',undefined,{background:true});
+ release();await new Promise(r=>setImmediate(r));
+ assert.match(await recallProjectContext(dir,'How should purchases survive a machine restart?','subagent'),/orchard/);
+ assert.match(await background,/orchard/,'background reviewer consumes the completed semantic result');
+ assert.equal(calls,1);
+});
+
+test('one settled hook persists the whole bounded queue and real compaction entries', async t => {
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:null});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'burst'}};
+ hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
+ for(let i=0;i<20;i++)hooks.get('input')({source:'user',text:`Preserve orchard constraint number ${i} for later work`},ctx);
+ hooks.get('agent_settled')({},ctx);
+ await new Promise(r=>setTimeout(r,20));
+ let status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ assert.equal(status.details.counts.chunks,20);assert.equal(status.details.queue,0);
+ hooks.get('session_compact')({compactionEntry:{summary:'The orchard persistence layer now records a durable transaction before sending the delivery receipt.'}},ctx);
+ await new Promise(r=>setTimeout(r,20));
+ status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ assert.equal(status.details.counts.types.session_summary,1);
+});
+
+
+test('settled assistant reports become unverified observations and historical requests cannot override the current task', async t => {
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:local()});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'outcome'}};
+ hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
+ hooks.get('input')({source:'user',text:'Please replace orchard receipts with durable transaction records.'},ctx);
+ hooks.get('agent_end')({messages:[{role:'assistant',stopReason:'error',content:[{type:'text',text:'The orchard persistence changes were completed and fully tested.'}]}]},ctx);
+ hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
+ let status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ assert.equal(status.details.counts.types.observation,undefined);
+ hooks.get('agent_end')({messages:[{role:'assistant',stopReason:'stop',content:[{type:'text',text:'The orchard receipt regression was fixed by reusing durable transaction records.'}]}]},ctx);
+ hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
+ status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ assert.equal(status.details.counts.types.observation,1);
+ const recalled=await recallProjectContext(dir,'Inspect the orchard receipts without changing records.','main');
+ assert.match(recalled,/current user request takes precedence/);assert.match(recalled,/may already be completed or superseded/);
+ assert.match(recalled,/unverified assistant report/);assert.match(recalled,/earlier user request/);
+});
+
+test('a settled turn without new events repairs prior unembedded history', async t => {
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();let online=false;
+ const e=local('fixture',async texts=>online?texts.map(()=>[1,0]):null);
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'backlog'}};
+ hooks.get('session_start')({},ctx);t.after(()=>hooks.get('session_shutdown')({},ctx));
+ await tools.get('project_memory_remember').execute('r',{text:'Reuse durable orchard transactions for receipt retries.',type:'decision'},undefined,undefined,ctx);
+ online=true;hooks.get('agent_settled')({},ctx);await new Promise(r=>setTimeout(r,20));
+ const status=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ assert.equal(status.details.counts.embedded,1);assert.equal(status.details.backfill.remaining,0);
+});
+
+
+test('shutdown fences pending local embeddings, closes the owner, and preserves its lexical queue', async t => {
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();let began,signal;
+ const started=new Promise(resolve=>began=resolve);
+ const e=local('fixture',async(_texts,opts)=>{signal=opts.signal;began();return new Promise(()=>{});});
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
+ const ctx={cwd:dir,sessionManager:{getSessionId:()=> 'closing'}};
+ hooks.get('session_start')({},ctx);
+ hooks.get('input')({source:'user',text:'Preserve the orchard receipt ownership boundary.'},ctx);
+ hooks.get('agent_settled')({},ctx);await started;
+ hooks.get('input')({source:'user',text:'Preserve the remaining orchard delivery requirement.'},ctx);
+ const before=await tools.get('project_memory_status').execute('s',{},undefined,undefined,ctx);
+ await Promise.race([hooks.get('session_shutdown')({},ctx),new Promise((_,reject)=>setTimeout(()=>reject(Error('shutdown waited for abandoned inference')),250))]);
+ assert.equal(signal.aborted,true);
+ assert.equal(globalThis[PROJECT_MEMORY_RECALL],undefined);
+ const saved=openProjectStore(path.join(dir,'projects',before.details.projectId,'memory.sqlite'),{projectId:before.details.projectId});
+ try {assert.equal(saved.counts().chunks,2);assert.equal(saved.counts().embedded,0);}finally{saved.close();}
+});
+
+test('project switches cancel in-flight semantic recall and never return the previous project evidence', async t => {
+ const {dir}=storeFor(t),hooks=new Map(),tools=new Map();let querySignal,begin;
+ const started=new Promise(resolve=>begin=resolve);
+ const e=local('fixture',async(texts,opts={})=>{
+  if(opts.inputType!=='query')return texts.map(()=>[1,0]);querySignal=opts.signal;begin();return new Promise(()=>{});
+ });
+ piVectorMemory({on:(n,f)=>hooks.set(n,f),registerTool:d=>tools.set(d.name,d),registerCommand(){}},{env:{PI_PROJECTS_DIR:path.join(dir,'projects')},embedder:e});
+ const a=path.join(dir,'a'),b=path.join(dir,'b');fs.mkdirSync(a);fs.mkdirSync(b);fs.writeFileSync(path.join(a,'.pi-project-id'),'a');fs.writeFileSync(path.join(b,'.pi-project-id'),'b');
+ const ctx=cwd=>({cwd,sessionManager:{getSessionId:()=>cwd}});
+ hooks.get('session_start')({},ctx(a));
+ await tools.get('project_memory_remember').execute('r',{text:'The orchard transaction boundary belongs only to the first project.',type:'decision'},undefined,undefined,ctx(a));
+ const pending=recallProjectContext(a,'Recall the orchard transaction boundary','main');await started;
+ hooks.get('session_switch')({},ctx(b));
+ assert.equal(await pending,'');assert.equal(querySignal.aborted,true);
+ assert.equal(await recallProjectContext(b,'Recall the orchard transaction boundary','main'),'');
+ await hooks.get('session_shutdown')({},ctx(b));
+});
+
+
+test('a caller deadline reports timeout and cooldown, while an owner abort remains cancellation', async () => {
+ const e=remote(async(_url,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true})));
+ const keepAlive=setTimeout(()=>{},100);
+ try {assert.equal(await e.embed(['Synthetic receipt durability'],{signal:AbortSignal.timeout(10)}),null);}finally{clearTimeout(keepAlive);}
+ assert.equal(e.status().lastError,'timeout');assert.ok(e.status().retryInMs>0);
+});

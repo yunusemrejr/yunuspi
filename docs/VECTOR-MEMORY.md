@@ -116,7 +116,7 @@ is unavailable, retrieval can use existing compatible Needle3 atoms or legacy
 chunk vectors; otherwise FTS5 still serves. It never compares a Qwen query
 against Needle3 document vectors.
 
-Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later ingestion flush adds at most four earlier eligible chunks to its existing batch. Compatible local vectors are reused during cooldown. Explicit `project_memory_reembed` remains an exact-backend operation. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Optional semantic work in automatic context recall stops at 900ms so lexical history can return within the existing 1200ms consumer budget.
+Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later settled turn adds at most four earlier eligible chunks to its bounded batch, even when no new events arrived. Compatible local vectors are reused during cooldown. Explicit `project_memory_reembed` remains an exact-backend operation. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Automatic recall waits at most 900ms for semantics, then returns lexical history within the existing 1200ms consumer budget. The single query embedding may finish in the background (bounded to eight seconds) and supplies later role consumers from the same session cache. Switching or closing the session cancels that work; foreground deadline expiry does not repeatedly cancel otherwise healthy provider requests.
 
 Raw tool-result exhaust and automatic file-edit markers stay lexical. Explicitly
 indexed code and durable decisions, corrections, architecture, observations,
@@ -130,7 +130,7 @@ retrieval text is sent; repositories are not uploaded automatically.
 observed dimension, vector spaces and counts, Qwen3/Needle3/unembedded counts,
 backfill progress, lexical/vector/reranker state and the last embedding error.
 Embedding and recall events also enter the existing health/activity surfaces.
-Status never makes a provider request.
+Deadline expiry is reported as a timeout with provider cooldown; an actual session abort remains cancellation. Status never makes a provider request.
 
 ## Project identity
 
@@ -164,7 +164,8 @@ only new chunks are embedded:
 | tool error (`tool_result`) | `error` | tool + compact input + 800-char excerpt |
 | file edit (`tool_result`) | `code` | path marker; full text via `project_memory_index_path` |
 | `git commit` (`tool_result`) | `commit` | command + output excerpt |
-| compaction (`session_compact`) | `session_summary` | summary text, importance 0.9 |
+| completed assistant response (`agent_end` → `agent_settled`) | `observation` | final report only, labeled unverified; errors/tool calls/aborts excluded |
+| compaction (`session_compact`) | `session_summary` | committed `compactionEntry.summary`, importance 0.9 |
 | `project_memory_remember` | any | curated, authority ≥ 0.8 |
 | `project_memory_index_path` | `code`/`architecture` | hash-changed chunks only |
 
@@ -174,8 +175,7 @@ observation/bug 0.8, commit/error 0.7, user_request/code 0.6, todo 0.5,
 tool_result 0.35. Secrets (tokens, keys, long opaque blobs) are redacted
 before indexing and never stored raw.
 
-The queue (cap 200) flushes in batches of 8 on `agent_settled`, shutdown,
-and switch. Every hook is budgeted and isolated: indexing failures surface
+The queue (cap 200) persists all queued lexical events on `agent_settled`; embedding work is bounded to eight new chunks plus four eligible backlog chunks. Shutdown and switch cancel optional inference and drain the captured lexical tail before closing the old database. Every hook is budgeted and isolated: indexing failures surface
 as health notes, never session errors. `PI_PROJECT_MEMORY=off` disables all.
 
 ## Retrieval
@@ -257,11 +257,11 @@ embedding requests; proposed clusters remain reviewable in dry-run output.
 
 **Main agent and subagents.** The existing once-per-session memory priming
 flow includes cited project-vector history using the `main` or `subagent` policy.
-`/memory-prime` still controls that flow. Search/status tools remain available for
+`/memory-prime` still controls that flow. Previous-session follow-ups are carried only for an explicit continuation or when their terms match the new request; their completion status is unknown until verified. Search/status tools remain available for
 explicit recall; children cannot mutate memory.
 
 **Observer and Watchmaker.** Each accepted task starts one bounded background
-recall using its role policy. Repeated periodic reviews reuse the result. The
+recall using its role policy. These background consumers can await the same query for up to eight seconds without holding the main turn; foreground priming retains its shorter wait. Repeated periodic reviews reuse the result. The
 observer receives previous mistakes, corrections, constraints and rejected
 approaches; Watchmaker receives historical progress evidence. Results pass through
 the existing evidence packets and byte budgets and cannot create requirements.
@@ -269,7 +269,7 @@ Session-owner and task-generation guards reject stale replies.
 
 All consumers call the session-scoped vector-memory owner. Identical task queries
 share one embedding across all four policy views and the project family, without
-extra remote reranking calls. Automatic priming waits at most 1.2 seconds; slow
+extra remote reranking calls. Recall includes timestamps and matched fragments, labels earlier user requests and unverified assistant reports, and explicitly gives the current user request precedence. Historical requests may already be complete or superseded; memory does not make them active tasks again. Automatic priming waits at most 1.2 seconds; slow
 or unavailable helpers leave the session running normally. Structural code questions
 still belong to AST/LSP/project-intelligence tools.
 

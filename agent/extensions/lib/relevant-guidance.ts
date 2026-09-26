@@ -21,6 +21,7 @@ import { lastQualityReviewCompletedAt } from "./quality-review-owner.ts";
 import { failureCategory } from "./session-diagnostics.ts";
 import { multiStageRetrieve } from "./micro-intelligence/retrieval.ts";
 import { needleRank } from "./needle-runtime.ts";
+import { askJev } from "./jev-client.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
@@ -63,6 +64,8 @@ type Hint = { key: string; text: string; tool?: string; requiredTool?: string; s
  * whole match behind off-topic hints: "deployment, history, self, json"). */
 const GENERIC_CONTEXT_TERMS = new Set(["self", "json", "public", "content", "context", "analysis", "history", "based", "adding", "writing", "data", "file", "files", "page", "pages", "site", "system", "simple", "tool", "tools", "app", "code", "text", "help", "make", "list", "update", "check", "work", "project", "general", "using", "user", "users", "new", "build", "create", "support", "time", "info", "type", "types", "service", "services", "local"]);
 export function createRelevantGuidance(pi: any) {
+  let searchController = new AbortController();
+  const cancelSearches = () => { searchController.abort(); searchController = new AbortController(); };
   let anchorContext = createContextAnchor();
   let cwd = "", shown = new Set<string>(), read = new Set<string>();
   let skills: Skill[] = [], pending = new Map<string, Hint>(), used = new Set<string>(), unavailable = new Set<string>();
@@ -274,7 +277,7 @@ export function createRelevantGuidance(pi: any) {
       text:`Async skill discovery (advisory): ${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)} — ${JSON.stringify(reason)} Read if useful; this suggestion is not a read receipt or a new requirement.`}),
   });
   for (const event of ['agent_end','session_shutdown','session_before_switch','session_before_fork','session_before_tree','model_select'])
-    pi.on?.(event, () => discovery.cancel());
+    pi.on?.(event, () => { discovery.cancel(); cancelSearches(); });
   const skillHint = (topic: string, preferred: string[], terms: RegExp, nameOnly = false, priority = 0) => {
     // Exact known skills first; otherwise use a matching *loaded* description.
     // No fabricated paths and no catalogue/skill-body injection.
@@ -631,7 +634,7 @@ export function createRelevantGuidance(pi: any) {
   const FILLER = new Set(['use','using','please','find','get','show','list','skill','skills','workflow','workflows','relevant','appropriate','best','good','right','proper','some','any','help','helpful','needed','need','needs','for','with','about','related']);
   const normalizeSkillQuery = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s+#._-]+/g,' ').split(/\s+/).filter(term => term && !FILLER.has(term)).join(' ').slice(0,256);
   const MARKETING_FAMILY = new Set(['resourceful-market-strategy','community-promotion','organic-growth-engineering','copywriting','natural-editorial-writing']);
-  const searchSkills = async (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown) => {
+  const searchSkills = async (query: unknown, requestedLimit: unknown, requestedOffset: unknown, requestedGroup: unknown, signal: AbortSignal) => {
     const text = typeof query === 'string' ? query.trim().slice(0, 256) : '';
     // Explicit family requests such as "use marketing skills" reliably
     // resolve: filler verbs and the generic skills/workflows token carry no
@@ -674,16 +677,28 @@ export function createRelevantGuidance(pi: any) {
       seen.add(skill.file);
       return true;
     });
-    // Local Needle3 ranking fused with the lexical head (see retrieval.ts):
-    // measured top-5 skill hits 10/18 lexical vs 13/18 fused. Worker caches
-    // keep pagination stable; unavailable Needle keeps the lexical order.
-    if (text && unique.length > 1) {
-      const head = unique.slice(0, 12).map(skill => ({ id: skill.file, text: `${skill.name}: ${skill.description}`, skill }));
+    const identity = (value: string) => value.trim().toLowerCase().replace(/[\s_:/.]+/g, '-').replace(/-+/g, '-');
+    const named = candidates.some(skill => identity(skill.name) === identity(text) || identity(skill.name) === identity(normalizeSkillQuery(text)));
+    let ranking: string | undefined;
+    // The shared owner settles large shortlists with one Jev batch, retaining
+    // local ranking when unavailable. Compact request-local ids keep installed
+    // absolute skill paths out of the remote decision payload.
+    if (text && unique.length > 1 && !named && !signal.aborted) {
+      const head = unique.slice(0, 12).map((skill, index) => ({ id: `skill-${index}`, text: `${skill.name}: ${skill.description}`, skill }));
       const outcome = await multiStageRetrieve({ kind: 'skill', site: 'rank', query: text, lexical: head,
+        signal,
+        jev: (site, state, questions) => askJev(site, state, questions, { signal,
+          pi: { appendEntry(type: string, data: unknown) { if (!signal.aborted) pi.appendEntry?.(type, data); } } }),
         local: (task, candidates, purpose, options) => localLm().choose(task, candidates, purpose, options),
         needle: (needleQuery, candidates, topK) => needleRank({ query: needleQuery, candidates, topK }) }).catch(() => undefined);
-      if (outcome && outcome.applied !== 'lexical') unique = [...outcome.ordered.map(entry => entry.skill), ...unique.slice(12)];
+      if (outcome && !signal.aborted && outcome.applied !== 'lexical') {
+        unique = [...outcome.ordered.map(entry => entry.skill), ...unique.slice(12)];
+        ranking = outcome.applied;
+      }
     }
+    // Semantic ranking may order the explicit family internally, but cannot
+    // replace it with an incidental description match from outside the family.
+    if (/\bmarketing\b/i.test(normalizeSkillQuery(text))) unique.sort((a, b) => Number(MARKETING_FAMILY.has(b.name)) - Number(MARKETING_FAMILY.has(a.name)));
     const selected = unique.slice(offset, offset + limit);
     return {
       results: selected.map((skill) => ({
@@ -694,6 +709,7 @@ export function createRelevantGuidance(pi: any) {
       offset,
       limit,
       remaining: Math.max(0, unique.length - offset - selected.length),
+      ...(ranking ? { ranking } : {}),
     };
   };
   const reviewPage = (requestedLimit: unknown, requestedOffset: unknown) => {
@@ -733,8 +749,11 @@ export function createRelevantGuidance(pi: any) {
       limit: Type.Optional(Type.Integer({minimum:1,maximum:8,default:3,description:'Maximum matching skills to return (default 3).'})),
       offset: Type.Optional(Type.Integer({minimum:0,description:'Page through metadata matches; each response remains bounded.'})),
     }),
-    async execute(_id: any, input: any) {
+    async execute(_id: any, input: any, callerSignal?: AbortSignal) {
       if (input.action === 'browse' || input.action === 'search') {
+        const signal = callerSignal ? AbortSignal.any([callerSignal, searchController.signal]) : searchController.signal;
+        const cancelled = () => ({ isError: true, content: [{ type: 'text', text: 'Skill discovery was cancelled or superseded.' }] });
+        if (signal.aborted) return cancelled();
         const group = typeof input.group === 'string' ? input.group.trim().slice(0,64) : '';
         if (group && !CAPABILITY_GROUPS.some(candidate => candidate.id === group))
           return {isError:true, content:[{type:'text',text:'Unknown skill group. Use skill_review({action:"browse"}) for the available group ids.'}]};
@@ -744,15 +763,14 @@ export function createRelevantGuidance(pi: any) {
           return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
         }
         const query = typeof input.query === 'string' ? input.query.trim().slice(0,256) : '';
-        const page = await searchSkills(query,input.limit,input.offset,group);
+        const page = await searchSkills(query,input.limit,input.offset,group,signal);
+        if (signal.aborted) return cancelled();
         const result = {query, ...(group ? {group} : {}), ...page,
           nextOffset:page.remaining ? page.offset+page.results.length : null,
           next:'Read a chosen result.path with the read tool when useful. To explore tools or local ML/SLM helpers, use tool_search({}).',
           scope:'Installed catalogue metadata only; no skill bodies are read or returned, and search never creates a review obligation.'};
-        // Search stays side-effect-free by contract (see the scope note
-        // above): no per-search ledger rows. Selected/rejected arrive as
-        // read/defer receipts; a considered-set ledger needs a reader and a
-        // bound before it earns per-search writes.
+        // Discovery creates no review obligations or delivery receipts.
+        // The shared judge records only its actual inference usage.
         return {content:[{type:'text',text:JSON.stringify(result)}],details:result};
       }
       if (input.action === 'defer') {
@@ -793,6 +811,7 @@ export function createRelevantGuidance(pi: any) {
       return {block:true,reason:`Before ${event.toolName}${file ? ` on ${JSON.stringify(supplied)}` : ''}, read the matching workflow(s): ${needed.map(({skill,reason}) => `${JSON.stringify(skill.name)} at ${JSON.stringify(skill.file)}: ${reason}`).join(' ')} Read with the native read tool, apply the relevant checks, then retry. If a workflow does not apply, is already covered, or cannot be read, use skill_review({action:"defer",skill:"name",reason:"task-specific reason"}). Source reads and discovery remain available.`};
     },
     userInput() {
+      cancelSearches();
       discovery.cancel();
       const hadDeferrals = deferredSkills.size > 0;
       deferredSkills.clear();
@@ -825,6 +844,7 @@ export function createRelevantGuidance(pi: any) {
       try { return shadowPlane.journal(); } catch { return []; }
     },
     restore(ctx: any) {
+      cancelSearches();
       discovery.cancel(true);
       anchorContext = createContextAnchor();
       reviewTargets.clear(); deferredSkills.clear();
@@ -896,6 +916,7 @@ export function createRelevantGuidance(pi: any) {
       }
     },
     start(event: any, ctx: any) {
+      cancelSearches();
       if ((ctx.cwd ?? "") !== cwd) this.restore(ctx);
       const previousReviews = JSON.stringify([...reviewTargets.values()]);
       lastFailure = ""; failures = urgentCount = 0;

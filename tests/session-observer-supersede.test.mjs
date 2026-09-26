@@ -57,7 +57,7 @@ test('superseded observer notes are carried, ledgered, and never pose as deliver
   };
   const sessionManager = { getSessionId: () => 'supersede-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
   const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false };
-  observerExtension(pi, { ...time, loadBook: () => undefined,
+  observerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }), loadBook: () => undefined,
     dispatch: async (_route, packet) => {
       packets.push(packet.text);
       const note = notes[calls++];

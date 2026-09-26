@@ -205,6 +205,54 @@ test("clean fixture exports without copying private configuration", () => {
   }
 });
 
+test("video JSX/TSX source and named public SVG fixtures survive export without admitting other SVG assets", () => {
+  const f = fixture();
+  const write = (base, relative, text) => {
+    const file = path.join(base, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  };
+  try {
+    const video = 'export const Scene = () => <div>Public video template</div>;\n';
+    const sources = ['skills/remotion-video/assets/template/src/Root.tsx', 'skills/code-first-video/assets/example/scenes/Scene.jsx'];
+    for (const file of sources) write(f.source, file, video);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>\n';
+    for (const quality of ['good', 'mediocre']) write(f.templates, `tests/fixtures/expert-svg-${quality}.svg`, svg);
+    write(f.templates, 'tests/fixtures/private-image.svg', svg);
+    write(f.templates, 'docs/expert-svg-good.svg', svg);
+    write(f.source, 'skills/remotion-video/assets/expert-svg-good.svg', svg);
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    for (const file of sources) assert.equal(fs.readFileSync(path.join(f.output, 'agent', file), 'utf8'), video);
+    for (const prefix of ['', 'release-template/']) {
+      for (const quality of ['good', 'mediocre']) assert.equal(fs.readFileSync(path.join(f.output, `${prefix}tests/fixtures/expert-svg-${quality}.svg`), 'utf8'), svg);
+      for (const file of ['tests/fixtures/private-image.svg', 'docs/expert-svg-good.svg']) assert.equal(fs.existsSync(path.join(f.output, prefix, file)), false);
+    }
+    assert.equal(fs.existsSync(path.join(f.output, 'agent/skills/remotion-video/assets/expert-svg-good.svg')), false);
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("JSX and TSX remain subject to executable home-path and exact credential guards", () => {
+  for (const extension of ['jsx', 'tsx']) {
+    const f = fixture();
+    try {
+      const file = path.join(f.source, `extensions/example.${extension}`);
+      fs.writeFileSync(file, `export const Scene = () => <div>${os.homedir()}/private</div>;`);
+      const home = f.run();
+      assert.notEqual(home.status, 0);
+      assert.match(home.stderr, /Hardcoded home path/);
+      assert.equal(fs.existsSync(f.output), false);
+      const canary = ['private', 'jsx', 'credential', 'fixture', '71954'].join('-');
+      fs.writeFileSync(path.join(f.source, 'auth.json'), JSON.stringify({ fixture: { apiKey: canary } }));
+      fs.writeFileSync(file, `export const Scene = () => <div>${canary}</div>;`);
+      const credential = f.run();
+      assert.notEqual(credential.status, 0);
+      assert.equal(`${credential.stdout}${credential.stderr}`.includes(canary), false);
+      assert.equal(fs.existsSync(f.output), false);
+    } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+  }
+});
+
 test("portable inference service templates ship without private units or model state", () => {
   const f = fixture();
   try {

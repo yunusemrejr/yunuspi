@@ -143,6 +143,13 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
   const summary=buildUsedSummary(browserFixture(),{provider:'fixture',id:'selected'});
   await page.setContent(renderPopupHtml('What this session used',usedSummaryHtml(summary)));
   assert.equal(await page.locator('h1').innerText(),'What this session used');
+  assert.match(await page.locator('.usage-freshness').innerText(),/Run \/used again.*reloading this saved page keeps the same snapshot/);
+  assert.match(await page.locator('#usage-captured-at').innerText(),/UTC$/);
+  await page.evaluate(() => {
+    Date.now = () => Date.parse(document.getElementById('usage-captured-at').dateTime) + 120000;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  assert.equal(await page.locator('#usage-snapshot-age').innerText(),'2 minutes old');
   assert.doesNotMatch(await page.locator('.usage-kpi strong').first().evaluate(node=>getComputedStyle(node).fontFamily),/Emoji/);
   assert.equal(await page.locator('.usage-component').count(),13);
   for (const name of ['Span sensor', 'Micro worker', 'Remote rerank']) {
@@ -153,7 +160,7 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
   const jev=page.locator('.usage-component').filter({has:page.locator('summary b',{hasText:/^JEV$/})});
   await jev.locator('summary').focus();assert.equal(await jev.locator('summary').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
   await page.keyboard.press('Enter');assert.notEqual(await jev.getAttribute('open'),null);assert.match(await jev.innerText(),/240 ms average/);
-  const modelGroup=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:'Models used'})});
+  const modelGroup=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:'Main conversation models'})});
   await modelGroup.locator(':scope > summary').click();await modelGroup.locator('.item summary').click();assert.match(await modelGroup.innerText(),/Token traffic\s+not recorded/);
   if(process.env.YUNUSPI_USED_SCREENSHOT_DIR){await fs.mkdir(process.env.YUNUSPI_USED_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.YUNUSPI_USED_SCREENSHOT_DIR,'used-wide.png'),fullPage:true});}
   await page.locator('#usage-observer > summary').click();assert.match(await page.locator('#usage-observer').innerText(),/1 provider receipts/);

@@ -1,3 +1,5 @@
+// Keep metadata/routing fixtures independent of remote judge configuration.
+process.env.PI_JEV = "off";
 import os from 'node:os';
 import test, {afterEach, beforeEach} from 'node:test';
 import assert from 'node:assert/strict';

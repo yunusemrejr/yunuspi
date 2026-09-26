@@ -1,6 +1,7 @@
 /** Embedding transports for the existing project index. Every batch carries
  * an immutable space identity; availability never changes what its vectors mean. */
 import { createHash, randomUUID } from 'node:crypto';
+import { raceWithAbortSignal } from '@yunuspi/ai/utils/abort';
 import { needleEmbed, needleWarmup } from './needle-runtime.ts';
 import { openRouterKey } from './jev-client.ts';
 import { redactSecrets } from './memory-redaction.ts';
@@ -40,12 +41,14 @@ export async function embedMemory(embedder: MemoryEmbedder, texts: string[], opt
   if (opts.signal?.aborted || !texts.length || texts.length > MEMORY_EMBED_MAX_TEXTS) return null;
   try {
     if (embedder.embedWithMetadata) {
-      const result = await embedder.embedWithMetadata(texts, opts);
+      const pending = embedder.embedWithMetadata(texts, opts);
+      const result = await (opts.signal ? raceWithAbortSignal(pending, opts.signal) : pending);
       return result && !opts.signal?.aborted && validMemoryVectors(result.vectors, texts.length)
         && result.space.dim === result.vectors[0].length && (!opts.compatible || opts.compatible.has(result.space.id)) ? result : null;
     }
     if (opts.compatible && !opts.compatible.has(embedder.id)) return null;
-    const vectors = await embedder.embed(texts, opts);
+    const pending = embedder.embed(texts, opts);
+    const vectors = await (opts.signal ? raceWithAbortSignal(pending, opts.signal) : pending);
     if (opts.signal?.aborted || !validMemoryVectors(vectors, texts.length)) return null;
     return { vectors, space: { id: embedder.id, backend: embedder.backend ?? 'local', model: embedder.model ?? embedder.id, version: embedder.version ?? 1, dim: vectors[0].length } };
   } catch { return null; }
@@ -64,6 +67,7 @@ export function needleMemoryEmbedder(): MemoryEmbedder {
           if (opts.signal?.aborted) return null;
           const batch = texts.slice(i, i + MEMORY_EMBED_BATCH).map(t => redactSecrets(t).slice(0, MEMORY_EMBED_CHARS));
           const result = await needleEmbed(batch);
+          if (opts.signal?.aborted) return null;
           if (!result.ok || !validMemoryVectors(result.value.vectors, batch.length)) { lastError = result.ok ? 'malformed-vectors' : result.reason; return null; }
           if (dimension && dimension !== result.value.vectors[0].length) { lastError = 'dimension-mismatch'; return null; }
           dimension = result.value.vectors[0].length;
@@ -92,7 +96,7 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
     async embed(texts, opts = {}) {
       const started = now();
       const unavailable = (reason: string) => { const changed = lastError !== reason; lastError = reason; if (changed) note('unavailable', texts.length, started); return null; };
-      if (opts.signal?.aborted) { lastError = 'cancelled'; return null; }
+      if (opts.signal?.aborted) { lastError = opts.signal.reason?.name === 'TimeoutError' ? 'timeout' : 'cancelled'; return null; }
       if (['1','true','yes'].includes((env.PI_OFFLINE ?? '').toLowerCase())) return unavailable('offline');
       const key = keyOf();
       if (!key) return unavailable('no-key');
@@ -169,11 +173,12 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
         for (const [k, vector] of staged) { if (cache.size >= 256) cache.delete(cache.keys().next().value!); cache.set(k, vector); }
         lastError = ''; retryAt = 0; note('embedded', texts.length, started); return out;
       } catch (error) {
-        if (receipt) { receipt.status = opts.signal?.aborted ? 'cancelled' : 'failed'; record(); }
+        const cancelled = opts.signal?.aborted && opts.signal.reason?.name !== 'TimeoutError';
+        if (receipt) { receipt.status = cancelled ? 'cancelled' : 'failed'; record(); }
         const code = error instanceof Error ? error.message : '';
-        lastError = opts.signal?.aborted ? 'cancelled' : controller.signal.aborted ? 'timeout'
+        lastError = cancelled ? 'cancelled' : controller.signal.aborted || opts.signal?.aborted ? 'timeout'
           : ['model-mismatch','partial-batch','invalid-index','malformed-vectors','dimension-mismatch','response-budget','empty-response'].includes(code) ? code : 'network-or-json';
-        if (!opts.signal?.aborted) retryAt = now() + 60_000;
+        if (!cancelled) retryAt = now() + 60_000;
         return null;
       } finally { clearTimeout(timer); active = false; if (lastError) note('unavailable', texts.length, started); }
     },

@@ -358,7 +358,7 @@ function harness(options = {}) {
   const pi = { events: { on: (name, fn) => { listeners.set(name, fn); return () => listeners.delete(name); } }, on: (name, fn) => handlers.set(name, fn), registerMessageRenderer() {}, registerCommand: (name, spec) => commands.set(name, spec),
     getActiveTools: () => ['read', 'edit'], getAllTools: () => [{ name: 'read', description: 'Read files' }, { name: 'edit', description: 'Edit files' }, { name: 'render_see', description: 'Render and capture a page' }, { name: 'browser_session', description: 'Drive a browser' }],
     sendMessage: (...args) => sent.push(args), appendEntry: (...args) => { receipts.push(args); branch.push({ type: 'custom', customType: args[0], data: args[1] }); } };
-  observerExtension(pi, { ...time, marginDir: path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
+  observerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }), marginDir: path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
     packets.push(packet); routes.push(route.route);
     if (options.fail?.(route.route)) return { stopReason: 'error', content: [] };
     if (options.hang?.(route.route)) return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));

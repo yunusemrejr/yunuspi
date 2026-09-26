@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.1 — 2026-09-26
+
+Project memory keeps the foreground wait short while one bounded semantic request finishes for background consumers. Indexing drains the whole bounded event queue before network work, recovers embedding backlog on settled turns, reads the actual compaction event, and records final assistant reports as unverified evidence. Historical follow-ups are scoped to the current request and explicitly cannot supersede it. Provider timeouts remain visible, with compatible local vectors and lexical retrieval preserved.
+
+JEV now makes applied scheduling decisions for Observer and Watchmaker: high-confidence routine progress can defer one repeated full review, retaining the evidence and requiring the next full review. New failures, salient events, backlog, uncertainty and helper failure retain full review. Large discovery shortlists go directly to one batched judge before local fallbacks. Every ranking question now receives the candidate evidence; the previous existence question could reject a correct ranking because it only saw the query. A live synthetic eight-candidate check selected the correct tool in 536 ms without the additional local ranking calls, and an unrelated request was rejected.
+
+The usage report explicitly identifies its saved snapshot, capture time and age, and explains how to reopen it for current activity. Missing measurements are scoped to that snapshot; main conversation model counts are labeled separately from auxiliary and child activity. Sanitized exports retain executable video skill templates and public SVG regression fixtures that the extension allowlist previously omitted.
+
+Guarded execution reuses directory-entry metadata while retaining a fresh hard-link inventory for every command. Maintenance guidance keeps temporary exports and dependency trees outside the live protected root, where accumulated historical copies otherwise slow every shell launch. Focused regressions extend existing suites; release tags continue to reuse the exact main-branch CI result.
+
 ## 0.12.0 — 2026-09-26
 
 Auxiliary intelligence now has working shared entry points. Project memory applies its configured remote reranker after local Needle ranking, keeps usable local order on failure, and cancels abandoned waits through the core cancellation utility. The bounded micro-worker and routing comparison are exposed through one harness tool with native model dispatch, qualification evidence and explicit cost limits. The unused parallel prompt-advice call is removed; checkpoints and councils reuse mandatory prompt analysis. Qwen judgments and source-line selection share transport and admission rather than issuing independent competing requests. JEV, Needle, Qwen, paragraph compression, Guardian, fuzzy retrieval, skills, councils and reviewers retain their roles and enabled defaults.
