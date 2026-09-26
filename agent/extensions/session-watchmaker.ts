@@ -13,6 +13,20 @@ import { createObserverJournal } from './lib/observer-journal.ts';
 import { displayText, messageText, renderHarnessNotice } from './lib/harness-notice.ts';
 import { readRemindersState } from './lib/reminders-state.ts';
 import { expertReviewerRows } from './lib/expert-convergence.ts';
+import { currentTaskStateService } from './lib/task-state/service.ts';
+
+/** Shared task-progress projection for the watchmaker packet; empty when the graph is unavailable. */
+function taskStateWatchmakerRows(): ObserverEvidence[] {
+  try {
+    const service = currentTaskStateService();
+    if (!service || !service.available) return [];
+    const text = service.project('watchmaker', 420);
+    if (!text || text === '(task state unavailable)') return [];
+    return [{ id: 'task-progress', kind: 'task progress graph', text }];
+  } catch {
+    return [];
+  }
+}
 
 /** Mr. Watchmaker: an autonomous time-only reviewer beside the session
  * observer. Same scheduler, journal, read-only tools, dispatch guards and
@@ -191,7 +205,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
       scratchpad.seed(ctx?.sessionManager?.getBranch?.() ?? []);
-      const evidence = [...timeRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
+      const evidence = [...timeRows(), ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text) });

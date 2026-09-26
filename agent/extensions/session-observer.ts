@@ -19,6 +19,20 @@ import { createObserverJournal } from './lib/observer-journal.ts';
 import { displayText, messageText, renderHarnessNotice } from './lib/harness-notice.ts';
 import { readRemindersState } from './lib/reminders-state.ts';
 import { expertReviewerRows } from './lib/expert-convergence.ts';
+import { currentTaskStateService } from './lib/task-state/service.ts';
+
+/** Shared task-state projection for the reviewer packet; empty when the graph is unavailable. */
+function taskStateObserverRows(): ObserverEvidence[] {
+  try {
+    const service = currentTaskStateService();
+    if (!service || !service.available) return [];
+    const text = service.project('observer', 1500);
+    if (!text || text === '(task state unavailable)') return [];
+    return [{ id: 'task-state', kind: 'task state graph', text }];
+  } catch {
+    return [];
+  }
+}
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
 export default function sessionObserver(pi: any, testing: any = {}) {
@@ -336,7 +350,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
       else routing = 'Omitted this review to save tokens: model preferences, usage and child outcomes are unchanged since they were last shown for this task. Ask to read "routing" when model or delegation advice needs them.';
       const [stateRows, restRows] = [evidence.filter(row => row.kind === 'current state'), evidence.filter(row => row.kind !== 'current state')];
-      const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills });
+      const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...taskStateObserverRows(), ...restRows], tools, skills, { book: section, preferTools, preferSkills });
       const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);

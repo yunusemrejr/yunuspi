@@ -102,6 +102,7 @@ export function relevant(items: ObserverCapability[], text: string, limit: numbe
 const KIND_LIMITS: Record<string, number> = {
   'current model routing': 2600, 'provider-returned thinking': 360, 'current state': 460, 'session profile': 460,
   'earlier user prompt': 320, 'harness interpretation': 620, 'user reminders': 620, 'design brief': 420, 'event digest': 620,
+  'task state graph': 1500,
 };
 /** Fold a run of observed events into one row: per-tool counts and failures,
  * touched files and the last assistant statement. A backlog is reviewed as a

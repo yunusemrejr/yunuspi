@@ -1,8 +1,9 @@
 # Project Vector Memory
 
 The workdir-level semantic memory spine. Each project owns one SQLite index
-(`<projectsDir>/<project-id>/memory.sqlite`) holding chunk text + metadata,
-an FTS5 lexical index, and compatible Needle3 or OpenRouter embedding vectors. JSONL transcripts and
+(`<projectsDir>/<project-id>/memory.sqlite`) holding parent-span text +
+metadata, an FTS5 lexical index, and compatible Needle3 or OpenRouter
+embedding vectors over semantic atoms. JSONL transcripts and
 Markdown stay the auditable source of truth; this store is a lossy,
 rebuildable **index over project history**, never the authority.
 
@@ -40,13 +41,26 @@ projects/
   <project-id>/memory.sqlite    chunks + FTS5 + vectors (WAL mode)
 ```
 
-One table (`chunks`) carries text plus provenance: source type/path/range,
-session, commit, timestamps, validity bounds, concepts, importance,
-confidence, authority, supersession links, content hash, embedder id, and the
-L2-normalized float32 vector. `chunks_fts` (FTS5, porter stemming) indexes
-title/text/concepts in the same transaction. Vectors scan brute-force cosine
-over normalized BLOBs — no sqlite-vec dependency; project-scale corpora
+Retrieval units and reading units are separate (schema v3). `chunks` are
+parent spans — the reading units — carrying text plus provenance: source
+type/path/range, session, commit, timestamps, validity bounds, concepts,
+importance, confidence, authority, supersession links and content hash.
+`atoms` are semantic atoms — the retrieval units — 200–800 character
+fragments of one parent with char/line spans, each carrying its own
+L2-normalized float32 vector. A query matches an atom; the agent reads the
+parent. `chunks_fts` (FTS5, porter stemming) indexes parent title/text/
+concepts in the same transaction. Vectors scan brute-force cosine over
+normalized BLOBs — no sqlite-vec dependency; project-scale corpora
 (thousands of chunks) answer in milliseconds.
+
+Prose atoms split on paragraph/list boundaries; code atoms split on
+blank lines and definition starts (types and functions at any indent,
+top-level declarations only, so a mid-function statement never splits its
+own function) and pack to the same target. Short parents stay a single atom
+with byte-identical text. Legacy chunk-level vectors from schema v2 stay
+searchable through the original scan; backfill atomizes a touched legacy
+chunk and retires its chunk vector, so databases converge without a bulk
+rewrite. Opening an old database never re-embeds anything.
 
 Concurrent sessions share one DB file: WAL + `busy_timeout=10s` lets writers
 queue instead of failing, and registry updates serialize on an atomic-mkdir
@@ -74,14 +88,18 @@ dimension mismatches fail without breaking lexical memory. Failed transports
 cool down; cancellation does not poison provider health. Usage includes actual
 provider token and cost fields, including paid responses rejected by validation.
 
-Schema v2 migrates existing SQLite databases additively. `embedding_spaces`
-persists backend, full model, representation version, observed dimension and
-creation time. Each chunk records its space and embedding timestamp. Dimensions
-are learned from real responses and pinned; equal dimensions alone never imply
-compatible vectors. Existing Needle3 data remains readable. Each chunk has one
-vector: explicitly migrating it replaces that vector while retaining its text,
-FTS entry, content hash, provenance and temporal history. Different chunks can
-coexist in different spaces, and retrieval only compares compatible ones.
+Embedding inputs are atom texts (title plus fragment), so every embedded
+unit fits the transport whole — no more semantically invisible tail text.
+A single index call embeds at most 96 atoms; the remainder stays lexical
+until backfill. Schema v3 migrates existing SQLite databases additively.
+`embedding_spaces` persists backend, full model, representation version,
+observed dimension and creation time. Each atom records its space and
+embedding timestamp. Dimensions are learned from real responses and pinned;
+equal dimensions alone never imply compatible vectors. Existing Needle3 data
+remains readable. Each atom has one vector: explicitly migrating it replaces
+that vector while retaining its text, content hash and parent provenance.
+Different chunks can coexist in different spaces, and retrieval only compares
+compatible ones.
 
 For a Qwen migration, select OpenRouter in the session configuration and call:
 
@@ -94,8 +112,9 @@ batches are durable, interrupted batches remain eligible, and unchanged compatib
 content is not embedded again. This tool does not change the session's configured
 backend. Unchanged content re-indexed after a model change is also eligible for
 bounded backfill. Queries never implicitly upload the existing corpus. If Qwen
-is unavailable, retrieval can use existing compatible Needle3 chunks; otherwise
-FTS5 still serves. It never compares a Qwen query against Needle3 document vectors.
+is unavailable, retrieval can use existing compatible Needle3 atoms or legacy
+chunk vectors; otherwise FTS5 still serves. It never compares a Qwen query
+against Needle3 document vectors.
 
 Automatic ingestion also embeds failed remote batches with Needle3 when healthy, preserving the distinct local space. Those chunks remain eligible for OpenRouter backfill; each later ingestion flush adds at most four earlier eligible chunks to its existing batch. Compatible local vectors are reused during cooldown. Explicit `project_memory_reembed` remains an exact-backend operation. Status distinguishes remote progress, local fallback embeddings and remaining remote work. Optional semantic work in automatic context recall stops at 900ms so lexical history can return within the existing 1200ms consumer budget.
 
@@ -162,18 +181,28 @@ as health notes, never session errors. `PI_PROJECT_MEMORY=off` disables all.
 ## Retrieval
 
 Hybrid pipeline: FTS5/BM25 lexical candidates (exact identifiers, commit
-shas) plus compatible semantic candidates, fused by reciprocal rank, scored by
-role policy (type weights × recency × authority × importance), then one
-shared Needle re-rank over the merged head. Without embeddings the lexical
-baseline still serves; degradation is reported in `stats.degraded`, never
-silent. The optional re-ranker remains local Needle. Short exact technical
-lookups with strong lexical evidence skip embeddings and reranking. Longer natural
-questions omit common stop words without removing terms from literal queries.
+shas) plus compatible semantic candidates (atom vectors merged with legacy
+chunk vectors, collapsed to the best fragment per parent), fused by
+reciprocal rank, scored by role policy (type weights × recency × authority
+× importance), then one shared Needle re-rank over the merged head. Without
+embeddings the lexical baseline still serves; degradation is reported in
+`stats.degraded`, never silent. The optional re-ranker remains local Needle.
+Short exact technical lookups with strong lexical evidence skip embeddings
+and reranking. Longer natural questions omit common stop words without
+removing terms from literal queries.
 For Qwen3, a conservative cosine floor (0.42), a band within 0.08 of the best
 candidate and at most eight candidates keep weak semantic tails out of fusion.
 Those admitted candidates receive a 1.5 RRF weight; existing role/importance/type
 weights still apply. Needle's compressed cosine scale does not use Qwen's gates. Tombstoned/superseded chunks stay retrievable for provenance at
 ×0.25 score unless `include_superseded`.
+
+Search returns compact candidates — id, type, score, provenance and the
+matched fragment centered on the query terms — not full bodies. Each hit
+carries its matched atom id and fragment in `details` plus an `atoms`
+admission count in `stats` for retrieval tracing. Full parent evidence
+(text, atom map, adjacent source blocks, supersession chain) lives behind
+`project_memory_read`. Automatic priming still inlines bounded slices, so
+background recall pays no extra round trip.
 
 Role policies (`role` param) — same store, different ranking:
 
@@ -198,9 +227,10 @@ Siblings are excluded by design.
 
 | Tool | Purpose |
 |---|---|
-| `project_memory_search` | hybrid retrieval (`query`, `role`, `types`, `limit`, `since`, `include_superseded`, `scope`) |
+| `project_memory_search` | compact hybrid candidates (`query`, `role`, `types`, `limit`, `since`, `include_superseded`, `scope`) |
+| `project_memory_read` | expand one memory id (`id`, `context`, `source`, `history`); chunk or atom ids, family-wide |
 | `project_memory_remember` | record a durable typed fact (`text`, `type`, `title`, `path`, `concepts`, `importance`, `supersedes`) |
-| `project_memory_status` | identity, chain, counts, backend health |
+| `project_memory_status` | identity, chain, chunk/atom counts, backend health |
 | `project_memory_index_path` | index a repo file (regular files ≤ 500 KiB, no symlinks) |
 | `project_memory_forget` | tombstone by id (provenance kept, restorable) |
 | `project_memory_restore` | clear a tombstone |
@@ -208,7 +238,7 @@ Siblings are excluded by design.
 | `project_memory_consolidate` | cluster + ratify canonical facts (dry-run default) |
 
 `/project-memory` prints status plus recent entries. Subagent children get
-search + status only (query and read; the parent session is the sole
+search + read + status (query and read; the parent session is the sole
 writer, mirroring the harness child-mutation policy).
 
 ## Consolidation
@@ -219,7 +249,8 @@ compatible stored vectors and Jaccard ≥ 0.25), picks the canonical survivor (h
 boosts it to authority 1.0, and tombstones members with backlinks. History
 is never deleted. Dry-run by default; agent-authored canonicals via
 `project_memory_remember` with `supersedes=[…]` always outrank engine output
-(the engine ratifies, never invents). It reuses persisted vectors and makes no
+(the engine ratifies, never invents). It reuses persisted vectors — legacy
+chunk vectors, or mean-pooled atom vectors for atom-only chunks — and makes no
 embedding requests; proposed clusters remain reviewable in dry-run output.
 
 ## Consumer integration
@@ -246,7 +277,7 @@ still belong to AST/LSP/project-intelligence tools.
 new dependencies beyond `node:sqlite` + `typebox`). Reuse
 `testEmbedder()` for hermetic tests; never depend on live Needle assets in
 unit tests. Index writes go through `indexEvent`/`indexFile` with content
-hashes; never write `chunks` rows by hand.
+hashes; never write `chunks`/`atoms` rows by hand.
 
 ## Failure behavior
 

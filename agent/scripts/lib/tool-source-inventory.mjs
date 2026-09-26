@@ -466,7 +466,7 @@ function addTargetedNames({ file, source, relativePath, stable, owners }) {
 		});
 	};
 
-	if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") {
+	if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/art-direction.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") {
 		addRows(extractFactoryNames(source, "register"), "factory");
 	}
 
@@ -519,7 +519,7 @@ function addTargetedNames({ file, source, relativePath, stable, owners }) {
 		}
 		const line = lineAt(source, call.index);
 		let signal = "registerTool() receives a computed or indirect definition; the runtime name is not inferred";
-		if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") signal = "registration passes names through a local factory; literal factory call sites are enumerated";
+		if (relativePath === "extensions/lib/small-tools.ts" || relativePath === "extensions/media-tools.ts" || relativePath === "extensions/video-studio.ts" || relativePath === "extensions/art-direction.ts" || relativePath === "extensions/pi-subagents/src/extension/reasoning-aids.ts") signal = "registration passes names through a local factory; literal factory call sites are enumerated";
 		else if (relativePath === "extensions/pi-lens/context-tools.ts") signal = "registration loops over definitions; literal definition names are enumerated";
 		else if (relativePath === "extensions/utility-tools.ts") signal = "registration loops over the static TOOLS catalog; catalog names are enumerated";
 		else if (relativePath === "extensions/pi-web-access/index.ts") signal = "registration uses configurable toolNames; checked-in defaults are enumerated";

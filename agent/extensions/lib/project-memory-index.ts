@@ -14,9 +14,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { redactSecrets, sensitiveMemoryPath } from "./memory-redaction.ts";
 export { redactSecrets } from "./memory-redaction.ts";
-import { embedMemory, MEMORY_EMBED_BATCH, MEMORY_EMBED_CHARS, type MemoryEmbedder, type MemoryEmbedding } from "./project-memory-embedder.ts";
+import { embedMemory, MEMORY_EMBED_BATCH, MEMORY_EMBED_CHARS, MEMORY_EMBED_MAX_TEXTS, type MemoryEmbedder, type MemoryEmbedding } from "./project-memory-embedder.ts";
 export { needleMemoryEmbedder, openRouterMemoryEmbedder, configuredMemoryEmbedder, type MemoryEmbedder } from "./project-memory-embedder.ts";
-import { type ChunkType, type ProjectVectorStore, isChunkType } from "./project-vector-store.ts";
+import { type ChunkType, type ProjectVectorStore, type StoredAtom, type StoredChunk, type UpsertAtomInput, isChunkType } from "./project-vector-store.ts";
 import { sessionObservability } from './session-observability.ts';
 
 /** Retrieval weight per source type. Curated knowledge outranks raw exhaust. */
@@ -199,6 +199,251 @@ export function chunkerForPath(filePath: string): "markdown" | "code" | "text" {
   return "text";
 }
 
+/** Target atom size. Atoms are retrieval units: small enough to embed whole,
+ * so no atom text is ever semantically invisible the way oversized chunks were. */
+export const ATOM_TARGET_CHARS = 800;
+/** Blocks above this size are hard-split on line boundaries; oversized
+ * blocks below it stay whole (a whole function beats a split one). */
+export const ATOM_HARD_SPLIT_CHARS = 1600;
+/** Max atom texts embedded per index call; the remainder backfills later. */
+export const ATOM_EMBED_BUDGET = 96;
+
+export interface MemoryAtom {
+  title: string;
+  text: string;
+  /** 1-based line span within the parent chunk. */
+  start: number;
+  end: number;
+  /** Char span within the parent chunk text (exclusive end). */
+  charStart: number;
+  charEnd: number;
+}
+
+interface TextBlock {
+  text: string;
+  startLine: number;
+  endLine: number;
+  charStart: number;
+  charEnd: number;
+}
+
+// Definition starts force atom boundaries in code. Strong keywords (types,
+// functions) match at any indent; weak keywords only at indent 0 so a
+// mid-function `const x = ...` never splits its own function.
+const CODE_HARD_DEF = /^\s*(?:export\s+|async\s+|declare\s+|abstract\s+|public\s+|private\s+|protected\s+|static\s+|override\s+)*(?:class|interface|enum|function|def|fn|func|struct|impl|trait|mixin|extension)\b|^\s*@/;
+const CODE_SOFT_DEF = /^(?:export\s+|declare\s+|pub\s+|static\s+)*(?:const|let|var|type|pub|static|void|int|long|short|char|string|bool(?:ean)?|float|double|SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|WITH)\b/;
+
+function splitBlocks(text: string, hardDef: RegExp | null, softDef: RegExp | null): TextBlock[] {
+  const lines = text.split("\n");
+  const blocks: TextBlock[] = [];
+  let cur: string[] = [];
+  let startLine = 1;
+  let charStart = 0;
+  let offset = 0;
+  const flush = (endLine: number, endChar: number) => {
+    const body = cur.join("\n");
+    cur = [];
+    if (body.trim().length) blocks.push({ text: body, startLine, endLine, charStart, charEnd: Math.min(endChar, text.length) });
+  };
+  lines.forEach((line, index) => {
+    const lineStart = offset;
+    offset += line.length + 1;
+    const blank = !line.trim();
+    const boundary = !blank && ((hardDef !== null && hardDef.test(line)) || (softDef !== null && softDef.test(line)));
+    if ((blank || boundary) && cur.length) flush(index, lineStart > 0 ? lineStart - 1 : 0);
+    if (blank) return;
+    if (!cur.length) {
+      startLine = index + 1;
+      charStart = lineStart;
+    }
+    cur.push(line);
+  });
+  if (cur.length) flush(lines.length, text.length);
+  return blocks;
+}
+
+function hardSplitBlock(block: TextBlock, maxChars: number): TextBlock[] {
+  if (block.text.length <= ATOM_HARD_SPLIT_CHARS) return [block];
+  const out: TextBlock[] = [];
+  let acc: string[] = [];
+  let accChars = 0;
+  let accStart = block.startLine;
+  let accCharStart = block.charStart;
+  let offset = block.charStart;
+  const flush = (endLine: number) => {
+    if (!acc.length) return;
+    out.push({ text: acc.join("\n"), startLine: accStart, endLine, charStart: accCharStart, charEnd: Math.min(offset - 1, block.charEnd) });
+    acc = [];
+    accChars = 0;
+  };
+  for (const line of block.text.split("\n")) {
+    const lineStart = offset;
+    offset += line.length + 1;
+    if (accChars + line.length + 1 > maxChars && acc.length) {
+      const flushedLines = acc.length;
+      flush(accStart + flushedLines - 1);
+      accStart += flushedLines;
+      accCharStart = lineStart;
+    }
+    if (line.length > maxChars && !acc.length) {
+      // One pathological line: slice it rather than emitting a giant atom.
+      for (let at = 0; at < line.length; at += maxChars) {
+        out.push({ text: line.slice(at, at + maxChars), startLine: accStart, endLine: accStart, charStart: lineStart + at, charEnd: Math.min(lineStart + at + maxChars, block.charEnd) });
+      }
+      accStart += 1;
+      accCharStart = offset;
+      continue;
+    }
+    if (!acc.length) accCharStart = lineStart;
+    acc.push(line);
+    accChars += line.length + 1;
+  }
+  if (acc.length) flush(accStart + acc.length - 1);
+  return out.length ? out : [block];
+}
+
+function packBlocks(blocks: TextBlock[], source: string, maxChars: number): TextBlock[] {
+  const out: TextBlock[] = [];
+  let acc: TextBlock | null = null;
+  const flush = () => {
+    if (acc) out.push(acc);
+    acc = null;
+  };
+  for (const block of blocks.flatMap((b) => hardSplitBlock(b, maxChars))) {
+    if (!acc) {
+      acc = block;
+      continue;
+    }
+    if (acc.text.length + 2 + block.text.length <= maxChars) {
+      // Rejoin with the original separator so the char span stays exact.
+      const gap = source.slice(acc.charEnd, block.charStart);
+      acc = { text: acc.text + gap + block.text, startLine: acc.startLine, endLine: block.endLine, charStart: acc.charStart, charEnd: block.charEnd };
+      continue;
+    }
+    flush();
+    acc = block;
+  }
+  flush();
+  return out;
+}
+
+/** Split one parent chunk into retrieval atoms. Short parents stay a single
+ * atom with byte-identical text, so their vectors match the legacy whole-chunk
+ * embedding input exactly. */
+export function atomizeParent(text: string, kind: "prose" | "code", maxChars = ATOM_TARGET_CHARS): MemoryAtom[] {
+  if (text.length <= maxChars) {
+    return [{ title: "", text, start: 1, end: text.split("\n").length, charStart: 0, charEnd: text.length }];
+  }
+  const blocks = splitBlocks(text, kind === "code" ? CODE_HARD_DEF : null, kind === "code" ? CODE_SOFT_DEF : null);
+  const packed = packBlocks(blocks.length ? blocks : [{ text, startLine: 1, endLine: text.split("\n").length, charStart: 0, charEnd: text.length }], text, maxChars);
+  return packed.map((block) => ({ title: "", text: block.text, start: block.startLine, end: block.endLine, charStart: block.charStart, charEnd: block.charEnd }));
+}
+
+/** Prose atoms: paragraphs, list items and headings packed to target size. */
+export function atomizeProse(text: string, maxChars = ATOM_TARGET_CHARS): MemoryAtom[] {
+  return atomizeParent(text, "prose", maxChars);
+}
+
+/** Code atoms: definition-aware blocks packed to target size. */
+export function atomizeCode(text: string, maxChars = ATOM_TARGET_CHARS): MemoryAtom[] {
+  return atomizeParent(text, "code", maxChars);
+}
+
+export function newAtomId(chunkId: string, ordinal: number): string {
+  return `${chunkId}:a${ordinal}`;
+}
+
+export function atomContentHash(text: string): string {
+  return contentHash("atom", text);
+}
+
+export interface AtomizeParentInput {
+  title: string;
+  text: string;
+  /** 1-based file line where the parent starts (0 when unknown). */
+  start: number;
+}
+
+/** Build the atom rows for one parent chunk. The first atom inherits the
+ * parent title so single-atom parents embed exactly the legacy input. */
+export function buildAtomInputs(
+  chunkId: string,
+  parent: AtomizeParentInput,
+  opts: { kind: "prose" | "code"; path?: string },
+): UpsertAtomInput[] {
+  return atomizeParent(parent.text, opts.kind).map((atom, ordinal) => ({
+    id: newAtomId(chunkId, ordinal),
+    chunk_id: chunkId,
+    ordinal,
+    title: ordinal === 0 ? parent.title : "",
+    text: atom.text,
+    source_start: parent.start > 0 ? parent.start + atom.start - 1 : 0,
+    source_end: parent.start > 0 ? parent.start + atom.end - 1 : 0,
+    char_start: atom.charStart,
+    char_end: atom.charEnd,
+    concepts: extractConcepts(atom.text, opts.path ?? ""),
+    content_hash: atomContentHash(atom.text),
+  }));
+}
+
+/** True when the chunk still needs embedding work in the space: no covering
+ * legacy vector and (no atoms yet, or an atom missing the space). Mirrors
+ * the store's unembeddedIds filter so callers and SQL agree. */
+export function chunkNeedsSpace(store: ProjectVectorStore, chunk: StoredChunk, spaceId: string): boolean {
+  if (chunk.has_embedding && chunk.embedder === spaceId) return false;
+  const atoms = store.getAtoms(chunk.id);
+  if (!atoms.length) return true;
+  return atoms.some((atom) => !atom.has_embedding || atom.embedder !== spaceId);
+}
+
+/** True when every atom of the chunk carries a vector in the space. */
+export function atomsCoveredInSpace(store: ProjectVectorStore, chunkId: string, spaceId: string): boolean {
+  const atoms = store.getAtoms(chunkId);
+  return atoms.length > 0 && atoms.every((atom) => atom.has_embedding && atom.embedder === spaceId);
+}
+
+export interface AtomEmbedJob {
+  chunkId: string;
+  atomId: string;
+  hash: string;
+  text: string;
+}
+
+/** Embed atom texts in bounded sub-batches and attach the vectors. Stops at
+ * the first failed sub-batch; reports the resolved space plus the chunks
+ * that gained at least one vector. */
+export async function embedAtomJobs(
+  store: ProjectVectorStore,
+  embedder: MemoryEmbedder,
+  jobs: AtomEmbedJob[],
+  opts: { signal?: AbortSignal; now: () => string },
+): Promise<{ space: MemoryEmbedding["space"] | null; gained: Set<string> }> {
+  const gained = new Set<string>();
+  let space: MemoryEmbedding["space"] | null = null;
+  for (let i = 0; i < jobs.length && !opts.signal?.aborted; i += MEMORY_EMBED_MAX_TEXTS) {
+    const slice = jobs.slice(i, i + MEMORY_EMBED_MAX_TEXTS);
+    const batch = await embedMemory(embedder, slice.map((job) => job.text), { signal: opts.signal });
+    if (!batch || opts.signal?.aborted) break;
+    space = batch.space;
+    const at = opts.now();
+    slice.forEach((job, k) => {
+      if (store.setAtomEmbedding(job.atomId, batch.space, batch.vectors[k], at, job.hash)) gained.add(job.chunkId);
+    });
+  }
+  return { space, gained };
+}
+
+/** Atomize a parent that predates atoms (legacy backfill path). */
+export function ensureChunkAtoms(store: ProjectVectorStore, chunk: StoredChunk, now: string): StoredAtom[] {
+  const existing = store.getAtoms(chunk.id);
+  if (existing.length) return existing;
+  const detected = chunk.source_path ? chunkerForPath(chunk.source_path) : chunk.source_type === "code" ? "code" : "text";
+  store.setAtoms(chunk.id, buildAtomInputs(chunk.id,
+    { title: chunk.title, text: chunk.text, start: chunk.source_start },
+    { kind: detected === "code" ? "code" : "prose", path: chunk.source_path }), now);
+  return store.getAtoms(chunk.id);
+}
+
 /** Deterministic concept enrichment: tags, links, identifiers, file names. */
 export function extractConcepts(text: string, filePath = ""): string[] {
   const concepts = new Set<string>();
@@ -277,7 +522,9 @@ const EVENT_MAX_CHARS: Record<IndexEventKind, number> = {
   decision: 2000,
 };
 
-/** Index one event as a single chunk (callers pre-trim; long texts chunk). */
+/** Index one event as parent chunks plus retrieval atoms (callers pre-trim;
+ * long texts chunk). Parents upsert first so atoms always have a home;
+ * vectors attach to atoms when the embedder is available. */
 export async function indexEvent(
   store: ProjectVectorStore,
   projectId: string,
@@ -291,7 +538,6 @@ export async function indexEvent(
   const cap = EVENT_MAX_CHARS[event.kind];
   const chunks = text.length > cap ? chunkText(text, cap) : [{ title: "", text, start: 0, end: 0 }];
   const now = (opts.now ?? (() => new Date().toISOString()))();
-  const embedTexts: string[] = [];
   const pending: Array<{ id: string; chunk: TextChunk; hash: string }> = [];
   const backfillIds: string[] = [];
   for (const chunk of chunks.slice(0, 4)) {
@@ -300,18 +546,14 @@ export async function indexEvent(
     if (duplicate) {
       result.skippedDup++;
       const stored = store.getChunk(duplicate);
-      if (opts.embedder && (!stored?.has_embedding || stored.embedder !== opts.embedder.id)) backfillIds.push(duplicate);
+      if (opts.embedder && stored && chunkNeedsSpace(store, stored, opts.embedder.id)) backfillIds.push(duplicate);
       continue;
     }
-    const id = newChunkId();
-    pending.push({ id, chunk, hash });
-    embedTexts.push(memoryEmbeddingText(event.title ?? chunk.title, chunk.text));
+    pending.push({ id: newChunkId(), chunk, hash });
   }
-  let batch: MemoryEmbedding | null = null;
-  if (pending.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit' && !sensitiveMemoryPath(event.path ?? '')) batch = await embedMemory(opts.embedder, embedTexts, { signal: opts.signal });
-  const vectors = batch?.vectors;
-  for (let i = 0; i < pending.length; i++) {
-    const { id, chunk, hash } = pending[i];
+  const jobs: AtomEmbedJob[] = [];
+  for (const { id, chunk, hash } of pending) {
+    const title = redactSecrets(event.title ?? chunk.title).slice(0, 160);
     const outcome = store.upsertChunk({
       id,
       project_id: projectId,
@@ -320,7 +562,7 @@ export async function indexEvent(
       source_path: redactSecrets(event.path ?? ""),
       source_start: chunk.start,
       source_end: chunk.end,
-      title: redactSecrets(event.title ?? chunk.title).slice(0, 160),
+      title,
       text: chunk.text,
       timestamp: event.timestamp ?? now,
       valid_from: now,
@@ -329,9 +571,6 @@ export async function indexEvent(
       importance: event.importance ?? TYPE_DEFAULT_IMPORTANCE[type],
       authority: 0.5,
       content_hash: hash,
-      embedder: batch?.space.id ?? "",
-      embeddingSpace: batch?.space,
-      embedding: vectors?.[i] ?? null,
     }, now);
     if (outcome === "duplicate") {
       result.skippedDup++;
@@ -339,8 +578,15 @@ export async function indexEvent(
     }
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
-    if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
+    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: "prose", path: event.path ?? "" });
+    store.setAtoms(id, inputs, now);
+    for (const atom of inputs) {
+      jobs.push({ chunkId: id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.title, atom.text) });
+    }
+  }
+  if (jobs.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit' && !sensitiveMemoryPath(event.path ?? '')) {
+    result.embedded += (await embedAtomJobs(store, opts.embedder, jobs.slice(0, ATOM_EMBED_BUDGET), { signal: opts.signal, now: () => now })).gained.size;
   }
   if (backfillIds.length && opts.embedder && type !== 'tool_result' && event.kind !== 'file_edit') {
     const report = await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, fallback: true, signal: opts.signal, now: opts.now });
@@ -358,7 +604,8 @@ export interface IndexFileInput {
   timestamp?: string;
 }
 
-/** Index a repository file: only hash-changed chunks are (re-)embedded. */
+/** Index a repository file: only hash-changed chunks are stored, and only a
+ * bounded atom budget is embedded per call; the rest backfills later. */
 export async function indexFile(
   store: ProjectVectorStore,
   projectId: string,
@@ -372,6 +619,7 @@ export async function indexFile(
   const kind = chunkerForPath(input.path);
   const chunks = (kind === "markdown" ? chunkMarkdown(content) : kind === "code" ? chunkCode(content) : chunkText(content)).slice(0, 64);
   const type = input.sourceType ?? (kind === "markdown" ? "architecture" : "code");
+  const atomKind = kind === "code" ? "code" : "prose";
   const now = (opts.now ?? (() => new Date().toISOString()))();
   const pending: Array<{ id: string; chunk: TextChunk; hash: string }> = [];
   const backfillIds: string[] = [];
@@ -381,15 +629,14 @@ export async function indexFile(
     if (duplicate) {
       result.skippedDup++;
       const stored = store.getChunk(duplicate);
-      if (opts.embedder && (!stored?.has_embedding || stored.embedder !== opts.embedder.id)) backfillIds.push(duplicate);
+      if (opts.embedder && stored && chunkNeedsSpace(store, stored, opts.embedder.id)) backfillIds.push(duplicate);
       continue;
     }
     pending.push({ id: newChunkId(), chunk, hash });
   }
-  const batch = pending.length && opts.embedder ? await embedMemory(opts.embedder, pending.map(p => memoryEmbeddingText(p.chunk.title || `${input.path}:${p.chunk.start || 0}`, p.chunk.text)), { signal: opts.signal }) : null;
-  const vectors = batch?.vectors;
-  for (let i = 0; i < pending.length; i++) {
-    const { id, chunk, hash } = pending[i];
+  const jobs: AtomEmbedJob[] = [];
+  for (const { id, chunk, hash } of pending) {
+    const title = (chunk.title || `${input.path}:${chunk.start || 0}`).slice(0, 160);
     const outcome = store.upsertChunk({
       id,
       project_id: projectId,
@@ -398,7 +645,7 @@ export async function indexFile(
       source_path: input.path,
       source_start: chunk.start,
       source_end: chunk.end,
-      title: (chunk.title || `${input.path}:${chunk.start || 0}`).slice(0, 160),
+      title,
       text: chunk.text,
       timestamp: input.timestamp ?? now,
       valid_from: now,
@@ -407,9 +654,6 @@ export async function indexFile(
       importance: TYPE_DEFAULT_IMPORTANCE[type],
       authority: 0.5,
       content_hash: hash,
-      embedder: batch?.space.id ?? "",
-      embeddingSpace: batch?.space,
-      embedding: vectors?.[i] ?? null,
     }, now);
     if (outcome === "duplicate") {
       result.skippedDup++;
@@ -417,8 +661,15 @@ export async function indexFile(
     }
     if (outcome === "inserted") result.inserted++;
     else result.replaced++;
-    if (vectors?.[i] && store.getChunk(id)?.has_embedding) result.embedded++;
     result.ids.push(id);
+    const inputs = buildAtomInputs(id, { title, text: chunk.text, start: chunk.start }, { kind: atomKind, path: input.path });
+    store.setAtoms(id, inputs, now);
+    for (const atom of inputs) {
+      jobs.push({ chunkId: id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.title, atom.text) });
+    }
+  }
+  if (jobs.length && opts.embedder) {
+    result.embedded += (await embedAtomJobs(store, opts.embedder, jobs.slice(0, ATOM_EMBED_BUDGET), { signal: opts.signal, now: () => now })).gained.size;
   }
   if (backfillIds.length && opts.embedder) {
     const report = await reindexEmbeddings(store, opts.embedder, { ids: backfillIds, fallback: true, signal: opts.signal, now: opts.now });
@@ -427,7 +678,9 @@ export async function indexFile(
   return result;
 }
 
-/** Backfill embeddings for chunks stored while the embedder was unavailable. */
+/** Backfill embeddings for chunks stored while the embedder was unavailable.
+ * Legacy parents without atoms are atomized first; once atoms cover a chunk
+ * in the requested space its legacy chunk vector (if any) retires. */
 export async function reindexEmbeddings(
   store: ProjectVectorStore,
   embedder: MemoryEmbedder,
@@ -440,10 +693,20 @@ export async function reindexEmbeddings(
   for (let i = 0; i < ids.length && !opts.signal?.aborted; i += MEMORY_EMBED_BATCH) {
     const chunks = store.getChunks(ids.slice(i, i + MEMORY_EMBED_BATCH)).filter(c => c.valid_until === null && c.source_type !== 'tool_result'
       && !(c.source_type === 'code' && c.text.startsWith('File edited via '))
-      && !sensitiveMemoryPath(c.source_path) && (!c.has_embedding || c.embedder !== embedder.id));
+      && !sensitiveMemoryPath(c.source_path) && chunkNeedsSpace(store, c, embedder.id));
     if (!chunks.length) continue;
-    const batch = await embedMemory(embedder, chunks.map(c => memoryEmbeddingText(c.title, c.text)), { signal: opts.signal });
-    if (!batch || opts.signal?.aborted) {
+    const jobs: AtomEmbedJob[] = [];
+    for (const chunk of chunks) {
+      const atoms = ensureChunkAtoms(store, chunk, now());
+      for (const atom of atoms) {
+        if (!atom.has_embedding || atom.embedder !== embedder.id) {
+          jobs.push({ chunkId: chunk.id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.ordinal === 0 ? chunk.title : atom.title, atom.text) });
+        }
+      }
+    }
+    if (!jobs.length) continue;
+    const primary = await embedAtomJobs(store, embedder, jobs, { signal: opts.signal, now });
+    if (!primary.space || opts.signal?.aborted) {
       failed += chunks.length;
       // Automatic ingestion may retain new history in the local space while
       // the selected remote space is unavailable. Explicit migrations remain
@@ -451,17 +714,30 @@ export async function reindexEmbeddings(
       // or count a local fallback as successful remote backfill.
       const fallback = opts.fallback ? embedder.fallback : undefined;
       if (!fallback || fallback.id === embedder.id || opts.signal?.aborted) break;
-      const pending = chunks.filter(c => !c.has_embedding || c.embedder !== fallback.id);
-      const local = pending.length ? await embedMemory(fallback, pending.map(c => memoryEmbeddingText(c.title, c.text)), { signal: opts.signal }) : null;
-      if (local && !opts.signal?.aborted) for (let j = 0; j < pending.length; j++) {
-        if (store.setEmbedding(pending[j].id, local.space, local.vectors[j], now(), pending[j].content_hash)) fallbackEmbedded++;
+      const pending: AtomEmbedJob[] = [];
+      for (const chunk of chunks) {
+        for (const atom of store.getAtoms(chunk.id)) {
+          if (!atom.has_embedding || atom.embedder !== fallback.id) {
+            pending.push({ chunkId: chunk.id, atomId: atom.id, hash: atom.content_hash, text: memoryEmbeddingText(atom.ordinal === 0 ? chunk.title : atom.title, atom.text) });
+          }
+        }
+      }
+      const local = pending.length ? await embedAtomJobs(store, fallback, pending, { signal: opts.signal, now }) : null;
+      if (local?.space && !opts.signal?.aborted) for (const chunk of chunks) {
+        if (local.gained.has(chunk.id) && atomsCoveredInSpace(store, chunk.id, local.space.id)) fallbackEmbedded++;
       }
       continue;
     }
-    for (let j = 0; j < chunks.length; j++) {
+    for (const chunk of chunks) {
+      if (opts.signal?.aborted) break;
       // An edit in another session during the request invalidates this vector.
-      if (store.setEmbedding(chunks[j].id, batch.space, batch.vectors[j], now(), chunks[j].content_hash)) embedded++;
-      else failed++;
+      if (atomsCoveredInSpace(store, chunk.id, primary.space.id)) {
+        if (primary.gained.has(chunk.id)) embedded++;
+        store.clearChunkVector(chunk.id, now());
+      } else if (!primary.gained.has(chunk.id)) {
+        failed++;
+      }
+      // Partially covered chunks made progress and resume on the next call.
     }
   }
   const remaining = store.unembeddedIds(5000, embedder.id).length;

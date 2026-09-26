@@ -62,7 +62,7 @@ export interface WatchmakerPacketInput {
 }
 
 const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'peer reviewer note']);
-const TIME_KINDS = new Set(['time', 'watchmaker memo']);
+const TIME_KINDS = new Set(['time', 'watchmaker memo', 'task progress graph']);
 
 export function buildWatchmakerPacket(input: WatchmakerPacketInput): ObserverPacket {
   const focused = promptRequestFocus(input.request);

@@ -182,7 +182,7 @@ export async function renderCapture(p, output, signal) {
       path.extname(p.source).toLowerCase() === ".pdf"
     ) {
       requireDesignDocument(false);
-      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined)
+      if (p.colorScheme !== undefined || p.reducedMotion !== undefined || p.animationTimeMs !== undefined || p.animationInventory !== undefined)
         throw Error("Browser media and animation settings are unavailable for PDF");
       if (outputMode !== "image")
         throw Error(
@@ -477,21 +477,63 @@ export async function renderCapture(p, output, signal) {
             timeout: Math.max(1, ms - (Date.now() - start)),
           });
       stage = "animation";
-      if (conditions.animationTimeMs !== null)
+      if (conditions.animationTimeMs !== null || p.animationInventory === true)
         conditions.animationSample = await page.evaluate((timeMs) => {
           const animations = document.getAnimations();
           let sampled = 0, unsupported = 0, failed = 0;
-          for (const animation of animations.slice(0, 200)) {
-            if (animation.timeline !== document.timeline) { unsupported++; continue; }
+          const describe = (animation, index) => {
             try {
-              animation.pause();
-              animation.currentTime = timeMs;
-              sampled++;
-            } catch { failed++; }
+              const timing = typeof animation.effect?.getTiming === "function" ? animation.effect.getTiming() : {};
+              const target = animation.effect?.target;
+              let label = "?";
+              if (target && target.tagName) {
+                label = String(target.tagName).toLowerCase().slice(0, 24);
+                if (target.id) label += `#${String(target.id).slice(0, 40)}`;
+                else if (typeof target.className === "string" && target.className.trim())
+                  label += `.${target.className.trim().split(/\s+/).slice(0, 2).join(".").slice(0, 40)}`;
+              }
+              let properties = [];
+              try {
+                const frames = typeof animation.effect?.getKeyframes === "function" ? animation.effect.getKeyframes() : [];
+                const keys = new Set();
+                for (const frame of frames.slice(0, 4)) {
+                  if (!frame || typeof frame !== "object") continue;
+                  for (const key of Object.keys(frame)) {
+                    if (!["composite", "offset", "easing", "computedOffset"].includes(key)) keys.add(String(key).slice(0, 48));
+                    if (keys.size >= 12) break;
+                  }
+                }
+                properties = [...keys];
+              } catch { /* keyframes unavailable */ }
+              const rawDuration = timing.duration === "auto" ? NaN : Number(timing.duration);
+              return {
+                index, kind: String(animation.constructor?.name ?? "Animation").slice(0, 32),
+                target: label.slice(0, 120),
+                durationMs: Number.isFinite(rawDuration) ? rawDuration : null,
+                delayMs: Number.isFinite(Number(timing.delay)) ? Number(timing.delay) : 0,
+                iterations: timing.iterations === Infinity ? "infinite" : (Number.isFinite(Number(timing.iterations)) ? Number(timing.iterations) : 1),
+                playbackRate: Number.isFinite(Number(animation.playbackRate)) ? Number(animation.playbackRate) : 1,
+                properties,
+              };
+            } catch { return { index, kind: "unknown", target: "?", durationMs: null, delayMs: 0, iterations: 1, playbackRate: 1, properties: [] }; }
+          };
+          const descriptors = animations.slice(0, 40).map(describe);
+          if (timeMs !== null) {
+            for (const animation of animations.slice(0, 200)) {
+              if (animation.timeline !== document.timeline) { unsupported++; continue; }
+              try {
+                animation.pause();
+                animation.currentTime = timeMs;
+                sampled++;
+              } catch { failed++; }
+            }
           }
           return {
             sampled, unsupported, failed, omitted: Math.max(0, animations.length - 200),
-            note: "Each currently discoverable main-frame document-timeline CSS/WAAPI animation paused at its own local time. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
+            total: animations.length, descriptors,
+            note: timeMs === null
+              ? "Inventory only: no animation was paused or moved. Main-frame document-timeline CSS/WAAPI animations; excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed."
+              : "Each currently discoverable main-frame document-timeline CSS/WAAPI animation paused at its own local time. Excludes JS/rAF, scroll timelines, frames and animations not yet created or already removed. A frame is not playback verification.",
           };
         }, conditions.animationTimeMs);
       stage = "inspection";
@@ -606,8 +648,12 @@ export async function renderCapture(p, output, signal) {
         status: errors.length ? "inspected_with_errors" : "inspected",
       });
     const image = await fs.readFile(output);
-    if (image.length > 1100000)
-      throw Error("PNG exceeds 1.1 MB attachment cap; reduce viewport");
+    // Trusted file captures (captureToFile) keep pixels on disk instead of
+    // attaching them, so they use the 20 MB artifact bound; interactive
+    // captures keep the 1.1 MB model-attachment cap.
+    const byteCap = p.rawBytes === true ? 20 * 1024 * 1024 : 1100000;
+    if (image.length > byteCap)
+      throw Error(byteCap === 1100000 ? "PNG exceeds 1.1 MB attachment cap; reduce viewport" : "PNG exceeds the 20 MB capture bound");
     return boundedCaptureResult({
       output,
       ...(pageState ? { pageState } : {}),

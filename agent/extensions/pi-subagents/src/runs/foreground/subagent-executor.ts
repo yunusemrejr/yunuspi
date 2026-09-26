@@ -1,5 +1,6 @@
 import { fileVerificationSummary } from "../shared/file-verification.ts";
-import { expandCommonTask } from "../shared/common-task.ts";
+import { attachTaskStateSliceDeep, expandCommonTask, taskSliceFocus } from "../shared/common-task.ts";
+import { currentTaskStateService } from "../../../../lib/task-state/service.ts";
 import { formatProgressEvidence } from "../../shared/progress-evidence.ts";
 import { persistSubagentActivity } from "../../extension/session-cost.ts";
 import { helperLaunchFailure } from "../../extension/helper-receipt.ts";
@@ -4766,6 +4767,14 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		}
 		try { requestParams = expandCommonTask(requestParams); }
 		catch (error) { return buildRequestedModeError(requestParams, error instanceof Error ? error.message : String(error)); }
+		try {
+			// Advisory task-state slice on every native child brief; children
+			// stay read-only and verify before relying on it.
+			requestParams = attachTaskStateSliceDeep(requestParams, (brief) =>
+				currentTaskStateService()?.subagentSlice(taskSliceFocus(brief)) ?? "");
+		} catch {
+			/* dispatch never fails because of the slice */
+		}
 		const capacityOverrideError = validateWorkflowCapacityOverrides(requestParams);
 		if (capacityOverrideError) return buildRequestedModeError(requestParams, capacityOverrideError);
 		let workflowPreflight: import("../../shared/types.ts").WorkflowPreflightV1 | undefined;

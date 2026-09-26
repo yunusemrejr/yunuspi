@@ -14,7 +14,7 @@ const expected = [
   "logs", "memory-prime", "metrics", "obs", "observer-book", "or-provider", "project-memory", "prompt-workflow", "provider", "provider-health", "reminder", "run", "search", "self",
   "models", "subagent-cost", "subagents", "subagents-check-profile", "subagents-detach", "subagents-doctor", "subagents-fleet", "subagents-generate-profiles", "subagents-inspect-rpc",
   "subagents-load-profile", "subagents-models", "subagents-profiles", "subagents-refine", "subagents-refresh-provider-models", "subagents-steer", "subagents-stop", "subagents-watchdog",
-  "sys-prompt", "tasks", "todos", "used", "watchmaker", "websearch",
+  "sys-prompt", "tasks", "task-state", "todos", "used", "watchmaker", "websearch",
 ].sort();
 
 test("the installed extension graph registers every shipped command without load errors", { timeout: 90000 }, () => {
@@ -49,7 +49,7 @@ test("the installed extension graph registers every shipped command without load
     const result = JSON.parse(child.stdout.trim().split("\n").at(-1));
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.invalid, []);
-    assert.equal(result.extensions, 54);
+    assert.equal(result.extensions, 55);
     assert.deepEqual(result.commands, expected);
     assert.equal(new Set(result.commands).size, expected.length, "no duplicate command registrations hide a plain command name");
   } finally {

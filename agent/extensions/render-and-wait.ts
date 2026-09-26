@@ -54,10 +54,14 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
   });
 }
 const captureQueue = createRenderQueue();
-/** One trusted capture for other bounded tools (visual_diff). The PNG is
- * copied to `destination`, which the caller owns; staging stays outside the
- * workspace and is removed. Returns the renderer's receipt. */
-export async function captureToFile(params: { source: string; width: number; height: number; fullPage: boolean; clip?: { y: number; height: number }; colorScheme?: string; timeoutMs?: number }, destination: string, cwd: string, signal?: AbortSignal): Promise<any> {
+/** One trusted capture for other bounded tools (visual_diff, the art-direction
+ * QA tools). The PNG is copied to `destination`, which the caller owns;
+ * staging stays outside the workspace and is removed. Returns the renderer's
+ * receipt. includeState also returns page DOM facts (and design/noise state
+ * with designAudit); animationTimeMs/animationInventory drive the deterministic
+ * CSS/WAAPI clock inventory. Pixels stay on disk under the 20 MB artifact
+ * bound, never on the model-attachment path. */
+export async function captureToFile(params: { source: string; width: number; height: number; fullPage: boolean; clip?: { y: number; height: number }; colorScheme?: string; reducedMotion?: string; animationTimeMs?: number; animationInventory?: boolean; designAudit?: boolean; includeState?: boolean; timeoutMs?: number }, destination: string, cwd: string, signal?: AbortSignal): Promise<any> {
   const release = await captureQueue(signal);
   let tempRoot: string | undefined;
   try {
@@ -65,7 +69,8 @@ export async function captureToFile(params: { source: string; width: number; hei
     await fs.chmod(tempRoot, 0o700);
     const staged = path.join(tempRoot, "capture.png");
     const source = /^https?:\/\//i.test(params.source) ? params.source : path.resolve(cwd, params.source.replace(/^@/, ""));
-    const details = JSON.parse((await runCapture({ ...params, source, output: "image" }, staged, tempRoot, cwd, signal)).trim());
+    const { includeState, ...rest } = params;
+    const details = JSON.parse((await runCapture({ ...rest, source, output: includeState ? "both" : "image", rawBytes: true }, staged, tempRoot, cwd, signal)).trim());
     if (!details.output) throw new Error("Render produced no image");
     const stat = await fs.lstat(staged);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) throw new Error("Render returned an invalid capture artifact");

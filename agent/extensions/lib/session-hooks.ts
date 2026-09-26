@@ -96,6 +96,21 @@ export const HOOK_RULES: readonly HookRule[] = [
 		when: (args) => typeof args.path === "string" && UI_FILE.test(args.path),
 	},
 	{
+		key: "creative-direction-loop",
+		tools: ["creative_direct"],
+		line: "This direction now steers review: visual_review, ui_explore and motion_inspect check conformance against it and blocking verdicts hold completion. Keep one direction per task; revise it instead of stacking briefs.",
+	},
+	{
+		key: "visual-review-receipt",
+		tools: ["visual_review"],
+		line: "Judge every needsVision section from the attached pixels, then record the verdict: UNKNOWN stays open and FAIL blocks completion until a clean re-review of the same revision lands. Deterministic evidence stands unless the pixels prove otherwise.",
+	},
+	{
+		key: "art-qa-evidence",
+		tools: ["ui_explore", "motion_inspect", "svg_inspect", "creative_compare"],
+		line: "Keep the returned files with the finding: matrix cells, timeline frames, geometry outliers and variant deltas are the evidence. Findings name locations and measurements; re-run after the fix on the same revision instead of asserting it.",
+	},
+	{
 		key: "media-recover", tools: ["media_info", "video_frames", "audio_analyze", "media_edit"], onError: true,
 		line: "Check the failed path, stream and time window; media_info capabilities reports installed support. Narrow a timed-out job or use existing background tools for long renders; keep completed artifacts.",
 	},

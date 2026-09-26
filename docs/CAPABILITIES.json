@@ -2449,6 +2449,83 @@
       "commands": []
     },
     {
+      "id": "art-direction",
+      "group": "web_media",
+      "summary": "Close the creative loop around one shared direction. creative_direct owns the structured brief (intent, focal hierarchy, visual bounds, avoid-list, motion and audio character); visual_review captures real renders and records revision-sensitive rubric verdicts; ui_explore renders the viewport/state matrix with DOM facts; motion_inspect inventories animations and samples temporal frames; svg_inspect measures geometry and set consistency; asset_register keeps provenance, roles and reuse search; image_generate briefs and calls a configured OpenAI-compatible backend with review routing; creative_compare renders direction variants side by side. Blocking verdicts hold the completion gate.",
+      "entrypoints": [
+        "creative_direct",
+        "visual_review",
+        "ui_explore",
+        "motion_inspect",
+        "svg_inspect",
+        "asset_register",
+        "image_generate",
+        "creative_compare"
+      ],
+      "tools": [
+        "creative_direct",
+        "visual_review",
+        "ui_explore",
+        "motion_inspect",
+        "svg_inspect",
+        "asset_register",
+        "image_generate",
+        "creative_compare",
+        "render_see",
+        "design_audit",
+        "image_analyze",
+        "visual_diff"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "summary": "Direction set/get/brief/status/clear; review run/record/status; SVG inspect/matrix; asset register/get/search/usage; image status/brief/generate/edit."
+        },
+        {
+          "name": "direction",
+          "summary": "Structured brief object: intent, hierarchy.primary, visual, avoid, motion, audio, references."
+        },
+        {
+          "name": "source|sources",
+          "summary": "Local HTML/SVG path or http(s) URL; compare takes 2..4 variants at one width."
+        },
+        {
+          "name": "viewports|states",
+          "summary": "Matrix axes: mobile/tablet/desktop widths × default/dark/reduced-motion/full states, capped at 12 captures."
+        },
+        {
+          "name": "verdict",
+          "summary": "Recorded rubric sections with PASS/WARN/FAIL/UNKNOWN plus evidence lines; UNKNOWN stays open, FAIL blocks completion."
+        },
+        {
+          "name": "role",
+          "summary": "Asset purpose: hero-focal, editorial-support, diagram, texture, icon, illustration, background, product-shot, avatar."
+        },
+        {
+          "name": "prompt|negative|aspect|size|seed",
+          "summary": "Generation brief: prompt plus direction/role constraints; configured backend required."
+        }
+      ],
+      "related": [
+        "design-studio",
+        "rendered-design-review",
+        "creative-studio",
+        "video-studio"
+      ],
+      "sourceFiles": [
+        "agent/extensions/art-direction.ts",
+        "agent/extensions/lib/creative-direction.ts",
+        "agent/extensions/lib/creative-qa.ts",
+        "agent/extensions/lib/motion-inspect.ts",
+        "agent/extensions/lib/svg-inspect.ts",
+        "agent/extensions/lib/asset-registry.ts",
+        "agent/extensions/lib/image-generate.ts",
+        "agent/scripts/render-capture.mjs"
+      ],
+      "doc": "docs/ART-DIRECTION.md",
+      "commands": []
+    },
+    {
       "id": "desktop-computer-use",
       "group": "engineering",
       "summary": "Computer use inside private virtual displays: launch desktop applications (Electron, GTK, Qt, X11) into an Xvfb display, drive them with click, drag, scroll, type and key input, and check results with screenshots, window lists and process output. Nothing reaches the user's own screen or input devices; launch commands get the same destructive-command review as bash, and every process dies with its session.",
@@ -3021,7 +3098,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 516
+        "line": 530
       },
       {
         "name": "or-provider",
@@ -3031,7 +3108,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 616
+        "line": 669
       },
       {
         "name": "prompt-workflow",
@@ -3154,6 +3231,11 @@
         "line": 1724
       },
       {
+        "name": "task-state",
+        "source": "agent/extensions/task-state.ts",
+        "line": 166
+      },
+      {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 549
@@ -3166,7 +3248,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 285
+        "line": 299
       },
       {
         "name": "websearch",
@@ -3247,6 +3329,12 @@
         "kind": "factory"
       },
       {
+        "name": "asset_register",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 265,
+        "kind": "factory"
+      },
+      {
         "name": "ast_diff",
         "source": "agent/extensions/pi-lens/context-tools.ts",
         "line": 12,
@@ -3322,7 +3410,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 220,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -3380,6 +3468,18 @@
         "kind": "factory"
       },
       {
+        "name": "creative_compare",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 338,
+        "kind": "factory"
+      },
+      {
+        "name": "creative_direct",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 130,
+        "kind": "factory"
+      },
+      {
         "name": "data_query",
         "source": "agent/extensions/lib/small-tools.ts",
         "line": 127,
@@ -3400,7 +3500,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 245,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -3458,6 +3558,12 @@
         "source": "agent/extensions/http-tools.ts",
         "line": 495,
         "kind": "literal"
+      },
+      {
+        "name": "image_generate",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 309,
+        "kind": "factory"
       },
       {
         "name": "image_ocr",
@@ -3538,6 +3644,12 @@
         "kind": "literal"
       },
       {
+        "name": "motion_inspect",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 219,
+        "kind": "factory"
+      },
+      {
         "name": "music_compose",
         "source": "agent/extensions/media-tools.ts",
         "line": 263,
@@ -3588,49 +3700,55 @@
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 596,
+        "line": 649,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 564,
+        "line": 617,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 526,
+        "line": 579,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_read",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 372,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 446,
+        "line": 499,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 476,
+        "line": 529,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 580,
+        "line": 633,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 294,
+        "line": 297,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 396,
+        "line": 449,
         "kind": "literal"
       },
       {
@@ -3642,7 +3760,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 244,
+        "line": 249,
         "kind": "literal"
       },
       {
@@ -3696,7 +3814,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 375,
+        "line": 377,
         "kind": "literal"
       },
       {
@@ -3749,6 +3867,12 @@
         "kind": "constant"
       },
       {
+        "name": "svg_inspect",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 240,
+        "kind": "factory"
+      },
+      {
         "name": "symbol_expand",
         "source": "agent/extensions/pi-lens/context-tools.ts",
         "line": 11,
@@ -3767,6 +3891,12 @@
         "kind": "literal"
       },
       {
+        "name": "task_state",
+        "source": "agent/extensions/task-state.ts",
+        "line": 121,
+        "kind": "literal"
+      },
+      {
         "name": "todo",
         "source": "agent/extensions/rpiv-todo/tool/types.ts",
         "line": 11,
@@ -3777,6 +3907,12 @@
         "source": "agent/extensions/lib/tool-discovery.ts",
         "line": 279,
         "kind": "literal"
+      },
+      {
+        "name": "ui_explore",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 207,
+        "kind": "factory"
       },
       {
         "name": "value_convert",
@@ -3815,9 +3951,15 @@
         "kind": "factory"
       },
       {
+        "name": "visual_review",
+        "source": "agent/extensions/art-direction.ts",
+        "line": 171,
+        "kind": "factory"
+      },
+      {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 82,
+        "line": 87,
         "kind": "literal"
       },
       {
@@ -3934,7 +4076,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 220,
+        "line": 222,
         "kind": "literal"
       },
       {
@@ -3964,7 +4106,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 245,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -4066,49 +4208,55 @@
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 596,
+        "line": 649,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 564,
+        "line": 617,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 526,
+        "line": 579,
+        "kind": "literal"
+      },
+      {
+        "name": "project_memory_read",
+        "source": "agent/extensions/pi-vector-memory.ts",
+        "line": 372,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 446,
+        "line": 499,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 476,
+        "line": 529,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 580,
+        "line": 633,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 294,
+        "line": 297,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 396,
+        "line": 449,
         "kind": "literal"
       },
       {
@@ -4120,7 +4268,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 244,
+        "line": 249,
         "kind": "literal"
       },
       {
@@ -4162,7 +4310,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 375,
+        "line": 377,
         "kind": "literal"
       },
       {
@@ -4190,6 +4338,12 @@
         "kind": "literal"
       },
       {
+        "name": "task_state",
+        "source": "agent/extensions/task-state.ts",
+        "line": 121,
+        "kind": "literal"
+      },
+      {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
         "line": 279,
@@ -4198,7 +4352,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 82,
+        "line": 87,
         "kind": "literal"
       },
       {
@@ -4221,6 +4375,25 @@
       }
     ],
     "dynamicOwners": [
+      {
+        "source": "agent/extensions/art-direction.ts",
+        "signals": [
+          "registration passes names through a local factory; literal factory call sites are enumerated"
+        ],
+        "lines": [
+          98
+        ],
+        "knownNames": [
+          "asset_register",
+          "creative_compare",
+          "creative_direct",
+          "image_generate",
+          "motion_inspect",
+          "svg_inspect",
+          "ui_explore",
+          "visual_review"
+        ]
+      },
       {
         "source": "agent/extensions/design-studio.ts",
         "signals": [
@@ -4430,12 +4603,12 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 651,
-      "registrationSites": 77,
-      "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 109,
-      "uniqueStableTools": 108,
-      "dynamicOwnerCount": 14,
+      "sourceFiles": 665,
+      "registrationSites": 80,
+      "indirectRegistrationSites": 19,
+      "stableRegistrationRows": 119,
+      "uniqueStableTools": 118,
+      "dynamicOwnerCount": 15,
       "excludedGeneratedDirectories": [
         "dist",
         "build",
@@ -4451,6 +4624,10 @@
       },
       {
         "path": "agent/extensions/agentmail.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/art-direction.ts",
         "exists": true
       },
       {
@@ -4610,6 +4787,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/task-state.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/thinking.ts",
         "exists": true
       },
@@ -4633,6 +4814,10 @@
       },
       {
         "path": "agent/extensions/lib/artifact-checks.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/asset-registry.ts",
         "exists": true
       },
       {
@@ -4725,6 +4910,14 @@
       },
       {
         "path": "agent/extensions/lib/cost-states.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/creative-direction.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/creative-qa.ts",
         "exists": true
       },
       {
@@ -4848,6 +5041,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/image-generate.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/image-synth.ts",
         "exists": true
       },
@@ -4925,6 +5122,10 @@
       },
       {
         "path": "agent/extensions/lib/model-routing-store.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/motion-inspect.ts",
         "exists": true
       },
       {
@@ -5185,6 +5386,10 @@
       },
       {
         "path": "agent/extensions/lib/svg-check.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/svg-inspect.ts",
         "exists": true
       },
       {
@@ -5969,6 +6174,12 @@
         "source": "agent/extensions/lib/harness-capabilities.ts",
         "signals": [
           "MCP"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/image-generate.ts",
+        "signals": [
+          "wrapper/adapter"
         ]
       },
       {
@@ -7048,6 +7259,10 @@
         "path": "docs/ANTI-SLOP-CHECKLIST.md"
       },
       {
+        "name": "ART-DIRECTION.md",
+        "path": "docs/ART-DIRECTION.md"
+      },
+      {
         "name": "ASYNC-AND-STUDIO.md",
         "path": "docs/ASYNC-AND-STUDIO.md"
       },
@@ -7222,6 +7437,10 @@
       {
         "name": "SUBAGENT-CONTRACTS.md",
         "path": "docs/SUBAGENT-CONTRACTS.md"
+      },
+      {
+        "name": "TASK-STATE-GRAPH.md",
+        "path": "docs/TASK-STATE-GRAPH.md"
       },
       {
         "name": "UNREAL-INTEGRATION-REVIEW.md",

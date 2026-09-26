@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   findDescendantProjects,
@@ -22,6 +23,9 @@ import {
   isChunkType,
 } from '../agent/extensions/lib/project-vector-store.ts';
 import {
+  atomizeCode,
+  atomizeProse,
+  buildAtomInputs,
   chunkCode,
   chunkMarkdown,
   chunkText,
@@ -44,6 +48,8 @@ import {
   FAMILY_WEIGHTS,
   formatFamilyHits,
   formatMemoryHits,
+  formatMemoryRead,
+  readMemoryChunk,
   retrieveFamily,
   retrieveProjectMemory,
   ROLE_POLICIES,
@@ -510,7 +516,7 @@ test('extension registers tools, remembers, searches, forgets and restores', asy
   fs.mkdirSync(cwd, { recursive: true });
   const pi = fakePi();
   piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
-  for (const name of ['project_memory_search', 'project_memory_remember', 'project_memory_status', 'project_memory_index_path', 'project_memory_forget', 'project_memory_restore', 'project_memory_consolidate']) {
+  for (const name of ['project_memory_search', 'project_memory_read', 'project_memory_remember', 'project_memory_status', 'project_memory_index_path', 'project_memory_forget', 'project_memory_restore', 'project_memory_consolidate']) {
     assert.ok(pi.tools.has(name), `registers ${name}`);
   }
   assert.ok(pi.commands.has('project-memory'));
@@ -572,7 +578,7 @@ test('children search and read only; PI_PROJECT_MEMORY=off disables all', (t) =>
   cleanup(t, dir);
   const child = fakePi();
   piVectorMemory(child, { env: { ...testEnv(dir), PI_SUBAGENT_CHILD: '1' }, embedder: testEmbedder(8) });
-  assert.deepEqual([...child.tools.keys()].sort(), ['project_memory_search', 'project_memory_status']);
+  assert.deepEqual([...child.tools.keys()].sort(), ['project_memory_read', 'project_memory_search', 'project_memory_status']);
   assert.deepEqual([...child.handlers.keys()].sort(), ['session_shutdown', 'session_start']);
   const off = fakePi();
   piVectorMemory(off, { env: { ...testEnv(dir), PI_PROJECT_MEMORY: 'off' }, embedder: testEmbedder(8) });
@@ -812,4 +818,252 @@ test('parent sees child memories and vice versa; project scope isolates', async 
   await assert.rejects(() => childPi.tools.get('project_memory_search').execute('6', { query: 'teapot regulation', scope: 'nope' }, undefined, undefined, childCtx), /Unknown scope/);
   const status = await childPi.tools.get('project_memory_status').execute('7', {}, undefined, undefined, childCtx);
   assert.ok(status.content[0].text.includes('fam-child < fam-parent') || status.content[0].text.includes('Family:'));
+});
+
+// ---------------------------------------------------------------------------
+// atoms: retrieval units inside parent reading units
+// ---------------------------------------------------------------------------
+
+test('atomizers split prose and code into bounded retrieval units', () => {
+  const short = 'A short decision recorded here.';
+  const single = atomizeProse(short);
+  assert.equal(single.length, 1);
+  assert.equal(single[0].text, short);
+  const prose = Array.from({ length: 12 }, (_, i) => `Paragraph ${i} carries enough distinct wording to fill space comfortably within the packed budget limits.`).join('\n\n');
+  const atoms = atomizeProse(prose);
+  assert.ok(atoms.length >= 2);
+  assert.ok(atoms.every((a) => a.text.length <= 800));
+  for (const atom of atoms) assert.equal(prose.slice(atom.charStart, atom.charEnd), atom.text);
+  const alpha = `export function alpha() {\n${Array.from({ length: 20 }, (_, i) => `  const fillerWorkItemNumber${i} = computeSomethingImportant(${i});`).join('\n')}\n}`;
+  const code = `${alpha}\n\nexport function beta() {\n  return "beta result";\n}\n\nexport class Gamma {\n  run() { return true; }\n}`;
+  const codeAtoms = atomizeCode(code);
+  assert.ok(codeAtoms.length >= 2);
+  assert.ok(codeAtoms[0].text.startsWith('export function alpha'));
+  assert.ok(codeAtoms[0].text.includes('fillerWorkItemNumber19'), 'mid-function statements never force a boundary');
+  assert.ok(codeAtoms.some((a) => a.text.startsWith('export function beta')), 'a definition starts its own atom');
+  for (const atom of codeAtoms) assert.equal(code.slice(atom.charStart, atom.charEnd), atom.text);
+});
+
+test('indexing stores vectors on atoms; parents stay vector-free', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_atoms');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const result = await indexEvent(store, 'prj_atoms', { kind: 'decision', sessionId: 's', title: 'Atom vectors', text: 'The retrieval unit is now the atom; the parent chunk is the reading unit.' }, { embedder });
+  assert.equal(result.inserted, 1);
+  assert.equal(result.embedded, 1);
+  const chunk = store.getChunk(result.ids[0]);
+  assert.equal(chunk.has_embedding, false);
+  const atoms = store.getAtoms(result.ids[0]);
+  assert.equal(atoms.length, 1);
+  assert.equal(atoms[0].has_embedding, true);
+  assert.equal(atoms[0].id, `${result.ids[0]}:a0`);
+  assert.equal(atoms[0].text, chunk.text);
+  assert.deepEqual(store.atomCounts(), { atoms: 1, embedded: 1 });
+  assert.equal(store.counts().embedded, 1);
+});
+
+test('semantic retrieval sees text beyond the old 2000-char embedding bound', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_tail');
+  t.after(() => store.close());
+  const embedder = testEmbedder(32);
+  const head = 'Session summary preamble filler wording for padding purposes. '.repeat(45);
+  const tail = 'quasarflux capacitor banks require cryogenic recalibration every cycle';
+  await indexEvent(store, 'prj_tail', { kind: 'session_summary', sessionId: 's', text: `${head} ${tail}` }, { embedder });
+  const result = await retrieveProjectMemory(store, 'quasarflux cryogenic recalibration', { embedder, rerank: false });
+  assert.ok(result.hits.length >= 1);
+  assert.ok(result.stats.atoms >= 1);
+  const hit = result.hits[0];
+  assert.equal(hit.signals.vectorSource, 'atom');
+  assert.ok(hit.signals.atomId);
+  assert.ok(hit.fragment.includes('quasarflux'));
+});
+
+test('legacy chunk vectors stay retrievable alongside atoms', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_legacy');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const [vec] = await embedder.embed(['Legacy zebrastripe vector memory about routing']);
+  store.upsertChunk({
+    id: 'legacy', project_id: 'prj_legacy', source_type: 'decision',
+    text: 'Legacy zebrastripe vector memory about routing', content_hash: 'h-legacy',
+    embedder: 'test-hash', embedding: vec,
+  });
+  const result = await retrieveProjectMemory(store, 'zebrastripe routing', { embedder, rerank: false });
+  assert.equal(result.hits[0].chunk.id, 'legacy');
+  assert.equal(result.hits[0].signals.vectorSource, 'chunk');
+  assert.equal(result.hits[0].signals.atomId, undefined);
+  assert.ok(result.hits[0].fragment.length > 0);
+});
+
+test('reindex atomizes legacy chunks and retires their chunk vectors', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_conv');
+  t.after(() => store.close());
+  store.upsertChunk({
+    id: 'leg', project_id: 'prj_conv', source_type: 'decision',
+    text: 'Legacy needle memory about cache reuse patterns.', content_hash: 'h-leg',
+    embedder: 'needle3', embedding: [1, 0],
+  });
+  assert.deepEqual(store.getAtoms('leg'), []);
+  const embedder = testEmbedder(16);
+  const report = await reindexEmbeddings(store, embedder, { limit: 4 });
+  assert.equal(report.embedded, 1);
+  const atoms = store.getAtoms('leg');
+  assert.equal(atoms.length, 1);
+  assert.equal(atoms[0].has_embedding, true);
+  assert.equal(store.getChunk('leg').has_embedding, false);
+  assert.equal(store.embeddingSpaces().find((s) => s.id === 'needle3').count, 0);
+  const result = await retrieveProjectMemory(store, 'cache reuse patterns', { embedder, rerank: false });
+  assert.equal(result.hits[0].chunk.id, 'leg');
+  assert.equal(result.hits[0].signals.vectorSource, 'atom');
+});
+
+test('schema v2 upgrades keep legacy vectors searchable without a rewrite', (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const dbPath = path.join(dir, 'projects', 'prj_mig', 'memory.sqlite');
+  const first = openProjectStore(dbPath, { projectId: 'prj_mig' });
+  first.upsertChunk({
+    id: 'old', project_id: 'prj_mig', source_type: 'decision',
+    text: 'Historical architectural evidence for migration', content_hash: 'h-old',
+    embedder: 'needle3', embedding: [1, 0],
+  });
+  first.close();
+  const raw = new DatabaseSync(dbPath);
+  raw.exec("DROP TABLE atoms; UPDATE meta SET value='2' WHERE key='schema_version'");
+  raw.close();
+  const migrated = openProjectStore(dbPath, { projectId: 'prj_mig' });
+  t.after(() => migrated.close());
+  assert.equal(migrated.getMeta('schema_version'), '3');
+  assert.equal(migrated.getChunk('old').text, 'Historical architectural evidence for migration');
+  assert.equal(migrated.getChunk('old').has_embedding, true);
+  assert.deepEqual(migrated.getAtoms('old'), []);
+  assert.equal(migrated.lexicalSearch('architectural')[0].id, 'old');
+  assert.deepEqual(migrated.atomCounts(), { atoms: 0, embedded: 0 });
+});
+
+test('storedVectors pools atom vectors for atom-only chunks', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_pool');
+  t.after(() => store.close());
+  const embedder = testEmbedder(8);
+  const res = await indexEvent(store, 'prj_pool', { kind: 'decision', sessionId: 's', text: 'Pooled vector memory for consolidation checks.' }, { embedder });
+  const pooled = store.storedVectors([res.ids[0]], 'test-hash');
+  assert.equal(pooled.size, 1);
+  assert.equal(pooled.get(res.ids[0]).length, 8);
+  assert.deepEqual(store.storedVectors([res.ids[0]], 'other-space'), new Map());
+});
+
+test('consolidation clusters atom-embedded near-duplicates without endpoint calls', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_ccon');
+  t.after(() => store.close());
+  const embedder = testEmbedder(32);
+  await indexEvent(store, 'prj_ccon', { kind: 'observation', sessionId: 's', concepts: ['widget'], text: 'The widget cache lives in memory and expires after one hour of idle time.' }, { embedder });
+  await indexEvent(store, 'prj_ccon', { kind: 'observation', sessionId: 's', concepts: ['widget'], text: 'The widget cache lives in memory, expiring after one hour of idle time.' }, { embedder });
+  let calls = 0;
+  const counting = { ...embedder, embed: async (...args) => { calls++; return embedder.embed(...args); } };
+  const found = await findClusters(store, { embedder: counting });
+  assert.equal(calls, 0);
+  assert.equal(found.clusters.length, 1);
+  assert.equal(found.clusters[0].ids.length, 2);
+});
+
+test('indexed code gains definition-aware atoms with file positions', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_code');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const alpha = `export function alpha() {\n${Array.from({ length: 20 }, (_, i) => `  const fillerWorkItemNumber${i} = computeSomethingImportant(${i});`).join('\n')}\n}`;
+  const content = `${alpha}\n\nexport function beta() {\n  return "beta result";\n}\n`;
+  const result = await indexFile(store, 'prj_code', { path: 'src/shapes.ts', content }, { embedder });
+  assert.ok(result.inserted >= 1);
+  const atoms = store.getAtoms(result.ids[0]);
+  assert.ok(atoms.length >= 2);
+  assert.ok(atoms.some((a) => a.text.startsWith('export function beta')));
+  assert.equal(atoms[0].source_start, 1);
+  assert.ok(atoms.every((a) => a.has_embedding));
+});
+
+// ---------------------------------------------------------------------------
+// project_memory_read: expanded evidence for one memory
+// ---------------------------------------------------------------------------
+
+test('readMemoryChunk expands one memory with atoms, siblings and history', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_read');
+  t.after(() => store.close());
+  const embedder = testEmbedder(16);
+  const old = await indexEvent(store, 'prj_read', { kind: 'decision', sessionId: 's', text: 'Old routing approach used static tables everywhere.' }, { embedder });
+  const fresh = await indexEvent(store, 'prj_read', { kind: 'decision', sessionId: 's', text: 'New routing approach uses dynamic confidence scoring.' }, { embedder });
+  store.addSupersedes(fresh.ids[0], [old.ids[0]]);
+  store.markSuperseded(old.ids[0], fresh.ids[0]);
+  const detail = readMemoryChunk(store, fresh.ids[0]);
+  assert.ok(detail);
+  assert.equal(detail.status, 'current');
+  assert.equal(detail.atoms.length, 1);
+  assert.equal(detail.chain.supersedes[0].id, old.ids[0]);
+  const oldDetail = readMemoryChunk(store, old.ids[0]);
+  assert.equal(oldDetail.status, 'superseded');
+  assert.equal(oldDetail.chain.supersededBy[0].id, fresh.ids[0]);
+  const viaAtom = readMemoryChunk(store, `${fresh.ids[0]}:a0`);
+  assert.equal(viaAtom.chunk.id, fresh.ids[0]);
+  assert.equal(viaAtom.matchedAtom.id, `${fresh.ids[0]}:a0`);
+  assert.equal(readMemoryChunk(store, 'mem_missing'), undefined);
+  const rendered = formatMemoryRead(detail, 'prj_read');
+  assert.ok(rendered.includes('dynamic confidence scoring'));
+  assert.ok(rendered.includes('Atoms (1 retrieval units)'));
+  assert.ok(rendered.includes(`supersedes [${old.ids[0]}]`));
+});
+
+test('read expansion shows adjacent source blocks', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const store = openTestStore(dir, 'prj_sib');
+  t.after(() => store.close());
+  const content = ['# Alpha', '', 'Alpha section with enough words to form a chunk.', '', '# Beta', '', 'Beta section with enough words to form a chunk.', '', '# Gamma', '', 'Gamma section with enough words to form a chunk.'].join('\n');
+  await indexFile(store, 'prj_sib', { path: 'docs/guide.md', content }, { embedder: testEmbedder(16) });
+  const along = store.getChunksByPath('docs/guide.md');
+  assert.equal(along.length, 3);
+  const detail = readMemoryChunk(store, along[1].id, { context: 1 });
+  assert.equal(detail.siblings.length, 2);
+  assert.equal(detail.siblings[0].id, along[0].id);
+  assert.equal(detail.siblings[1].id, along[2].id);
+  assert.equal(readMemoryChunk(store, along[1].id, { context: 0 }).siblings.length, 0);
+});
+
+test('extension reads memories in full after compact search', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const cwd = path.join(dir, 'proj');
+  fs.mkdirSync(cwd, { recursive: true });
+  const pi = fakePi();
+  piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
+  const ctx = fakeCtx(cwd);
+  const longText = `Quasar lattice calibration decision. ${'Supporting analysis paragraph with filler wording. '.repeat(30)} Final verdict: recalibrate nightly.`;
+  const remember = await pi.tools.get('project_memory_remember').execute('1', { text: longText, type: 'decision' }, undefined, undefined, ctx);
+  const id = remember.details.id;
+  const search = await pi.tools.get('project_memory_search').execute('2', { query: 'Quasar lattice calibration verdict' }, undefined, undefined, ctx);
+  const body = search.content[0].text;
+  assert.ok(body.includes('project_memory_read'));
+  assert.ok(body.includes(id));
+  assert.ok(search.details.hits[0].fragment.length > 0);
+  assert.ok(body.length < longText.length, 'search returns a bounded excerpt, not the body');
+  const read = await pi.tools.get('project_memory_read').execute('3', { id }, undefined, undefined, ctx);
+  assert.ok(read.content[0].text.includes('Final verdict: recalibrate nightly.'));
+  assert.ok(read.content[0].text.includes('Quasar lattice calibration decision.'));
+  assert.equal(read.details.status, 'current');
+  assert.ok(read.details.atoms.length >= 2);
+  await assert.rejects(() => pi.tools.get('project_memory_read').execute('4', { id: 'mem_missing' }, undefined, undefined, ctx), /Unknown project memory id/);
 });

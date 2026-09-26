@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { collectSessionMetrics } from './session-metrics.ts';
 import { collectSessionDiagnostics } from './session-diagnostics.ts';
 import { activityView } from './activity-indicators.ts';
+import { currentTaskStateService } from './task-state/service.ts';
 
 const number = (value: number) => value.toLocaleString('en-US');
 // Excerpts are private UI text, never terminal instructions or persisted telemetry.
@@ -115,6 +116,14 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
     const lastVerdict = verdicts[verdicts.length - 1];
     lines.push(`Expert Director: ${expertRuns.length} run${expertRuns.length === 1 ? '' : 's'} on this branch${lastBrief?.domains?.length ? `; latest brief ${lastBrief.domains.join('+')} · ${lastBrief.taskType ?? 'unknown task'}${lastBrief.openEnded ? ' · open' : ''}` : ''}${lastVerdict ? `; latest verdict ${lastVerdict.converged ? 'converged' : String(lastVerdict.reason ?? 'open')}` : '; no convergence verdict yet'}.`);
   } else lines.push('Expert Director: no brief or verdict on this branch; domain excellence ran nowhere here.');
+  try {
+    const taskState = currentTaskStateService()?.stats();
+    lines.push(taskState && taskState.entities
+      ? `Task State Graph: ${taskState.requirements} requirements (${taskState.verified} verified) · ${taskState.entities} entities · ${taskState.links} links · ${taskState.staleEvidence} stale evidence · ${taskState.failures} failures${taskState.degraded ? ' · DEGRADED' : ''}${taskState.quarantined ? ' · rebuilt from events' : ''}. Inspect with /task-state.`
+      : 'Task State Graph: no graph state in this process yet; /task-state stays empty until the first user input.');
+  } catch {
+    lines.push('Task State Graph: unavailable in this process.');
+  }
   lines.push('', 'Local intelligence & activity · this process');
   {
     const activity = activityView();

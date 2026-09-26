@@ -52,6 +52,8 @@ import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
 import { completesPlan, completionGate } from "./lib/completion-gate.ts";
+import { currentTaskStateService } from "./lib/task-state/service.ts";
+import { completionClaimEvents } from "./lib/task-state/ingest.ts";
 import { collectVerificationLines } from "./lib/continuation-notice.ts";
 import { isDeployCommand } from "./lib/session-hooks.ts";
 import {
@@ -889,7 +891,34 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			if (!moment) return undefined;
 			// A previous deploy's own live-verification receipt never blocks the next deploy.
 			const lines = collectVerificationLines(8, ctx.sessionManager).filter((line) => !line.startsWith("deploy:"));
+			try {
+				// The Task State Graph contributes requirement-level blockers
+				// (implemented-but-unverified); the receipts above stay primary.
+				const blockers = currentTaskStateService()?.completionBlockers() ?? [];
+				for (const blocker of blockers.slice(0, 6)) {
+					const line = `task state: ${blocker}`.slice(0, 280);
+					if (!lines.includes(line)) lines.push(line);
+				}
+			} catch {
+				/* the gate never depends on the graph */
+			}
 			const decision = completionGate(moment, lines, refusedGates);
+			try {
+				const service = currentTaskStateService();
+				if (service) {
+					const graph = service.graph();
+					service.apply(completionClaimEvents(
+						{ sessionId: graph.sessionId, taskId: graph.taskId, ts: Date.now() },
+						{
+							claimId: `${moment}-${decision.key.slice(0, 48)}`,
+							blocked: decision.block,
+							reason: decision.block ? (decision.reason ?? "refused") : `completion ${moment} ${decision.waived ? "waived" : "allowed"}; unresolved: ${lines.join("; ").slice(0, 600) || "none"}`,
+						},
+					));
+				}
+			} catch {
+				/* claim recording is advisory */
+			}
 			if (decision.waived) {
 				refusedGates.delete(decision.key);
 				pi.appendEntry("completion-gate-v1", { moment, decision: "waived", unresolved: lines });

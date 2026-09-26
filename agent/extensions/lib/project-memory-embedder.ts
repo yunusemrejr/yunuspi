@@ -12,6 +12,7 @@ export const DEFAULT_MEMORY_EMBEDDER = 'openrouter';
 export const MEMORY_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
 export const MEMORY_EMBED_BATCH = 16;
 export const MEMORY_EMBED_CHARS = 2000;
+export const MEMORY_EMBED_MAX_TEXTS = 64;
 export interface EmbeddingOptions { inputType?: 'query' | 'document'; signal?: AbortSignal; compatible?: ReadonlySet<string> }
 export interface MemoryEmbedding { space: EmbeddingSpace; vectors: number[][] }
 export type EmbeddingReceipt = { id: string; owner: 'project-memory'; provider: 'openrouter'; model: string; status: 'pending' | 'completed' | 'failed' | 'cancelled'; usage?: Record<string, unknown> };
@@ -36,7 +37,7 @@ export function validMemoryVectors(vectors: unknown, count: number): vectors is 
     && v.some(x => x !== 0));
 }
 export async function embedMemory(embedder: MemoryEmbedder, texts: string[], opts: EmbeddingOptions = {}): Promise<MemoryEmbedding | null> {
-  if (opts.signal?.aborted || !texts.length || texts.length > 64) return null;
+  if (opts.signal?.aborted || !texts.length || texts.length > MEMORY_EMBED_MAX_TEXTS) return null;
   try {
     if (embedder.embedWithMetadata) {
       const result = await embedder.embedWithMetadata(texts, opts);
