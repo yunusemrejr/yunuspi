@@ -14,6 +14,7 @@
  * gate through the "creative" continuation source. */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import {
   directionSummary, normalizeDirection, parseDirectionFile, renderDirectionBrief,
@@ -27,9 +28,10 @@ import {
 import { motionInspectRun } from "./lib/motion-inspect.ts";
 import { svgInspectRun, svgMatrixRun } from "./lib/svg-inspect.ts";
 import { normalizeAssetInput, readRegistry, recordAssetUsage, registerAsset, searchAssets } from "./lib/asset-registry.ts";
-import { buildGenerationBrief, imageEditRun, imageGenerateRun, resolveImageBackend } from "./lib/image-generate.ts";
+import { buildGenerationBrief, imageEditRun, imageGenerateRun, imageBackendStatus, imageBackendEnvironment } from "./lib/image-generate.ts";
 import { registerContinuationSource } from "./lib/continuation-notice.ts";
 import { captureToFile } from "./render-and-wait.ts";
+import { sniffImage } from "./lib/design-studio.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const choices = (values: string[]) => Type.Union(values.map((value) => Type.Literal(value)));
@@ -85,7 +87,9 @@ async function maybePixels(pngPath: string, cwd: string, ctx: any) {
     const resolved = path.resolve(cwd, pngPath);
     const stat = await fs.stat(resolved);
     if (!stat.isFile() || stat.size > IMAGE_ATTACH_CAP) return undefined;
-    return { type: "image", mimeType: "image/png", data: (await fs.readFile(resolved)).toString("base64") };
+    const bytes = await fs.readFile(resolved), format = sniffImage(bytes);
+    if (!format || !["png", "jpeg", "webp", "gif"].includes(format)) return undefined;
+    return { type: "image", mimeType: `image/${format}`, data: bytes.toString("base64") };
   } catch {
     return undefined;
   }
@@ -307,9 +311,10 @@ export default function artDirection(pi: any) {
 
   // ── image_generate ──
   register("image_generate",
-    "Provider-agnostic generative imagery inside the creative loop. brief merges prompt with direction avoid-list and asset-role constraints without calling any backend; status reports backend configuration (never secrets); generate/edit call the configured OpenAI-compatible backend (PI_IMAGE_BACKEND/API_URL/API_KEY/MODEL), validate bytes, write receipted artifacts, auto-register provenance, and route back to visual_review. Unconfigured backends fail honestly; deterministic plates stay on image_create.",
+    "Generative imagery inside the creative loop. status lists configured backend and available OpenRouter image models; generate/edit accept an explicit model from that catalog. Existing OpenRouter credentials enable that route when no backend is configured; PI_IMAGE_BACKEND/MODEL keep precedence. brief merges prompt, direction and role constraints without inference. Outputs are decode-verified and registered, with pixels returned for review. OpenRouter edit supplies a reference image; masks require openai-compatible. PI_IMAGE_API_URL/API_KEY optionally override configuration. Deterministic plates stay on image_create.",
     Type.Object({
       action: choices(["status", "brief", "generate", "edit"]),
+      model: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Exact image model id; status lists the native OpenRouter catalog. PI_IMAGE_MODEL takes precedence when configured." })),
       prompt: Type.Optional(Type.String({ maxLength: 4000 })),
       path: Type.Optional(localPath),
       mask: Type.Optional(localPath),
@@ -322,15 +327,26 @@ export default function artDirection(pi: any) {
       quality: Type.Optional(Type.String({ maxLength: 32 })),
     }),
     async (params, ctx, signal) => {
-      if (params.action === "status") return { result: resolveImageBackend() };
+      const ownerSession = ctx.sessionManager?.getSessionId?.();
+      const backendName = process.env.PI_IMAGE_BACKEND?.trim().toLowerCase();
+      const providerKey = params.action !== "brief" && (!backendName || backendName === "openrouter") && !process.env.PI_IMAGE_API_KEY && !process.env.OPENROUTER_API_KEY
+        ? await ctx.modelRegistry?.getApiKeyForProvider?.("openrouter") : undefined;
+      signal.throwIfAborted();
+      if (params.action === "status") return { result: await imageBackendStatus(process.env, !!providerKey) };
       const { state } = sessionOf(ctx);
       const direction = state.direction ?? (await readProjectDirection(ctx.cwd as string).catch(() => undefined));
       if (params.action === "brief") return { result: buildGenerationBrief(direction, params) };
+      const imageEnv = imageBackendEnvironment(process.env, !!providerKey, params.model);
+      const usageId = randomUUID();
+      const runtime = { providerKey, onUsage: (usage: unknown, status: string) => {
+        if (ctx.sessionManager?.getSessionId?.() !== ownerSession) return;
+        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: "openrouter", model: imageEnv.PI_IMAGE_MODEL?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
+      } };
       if (params.action === "generate") {
-        const run = await imageGenerateRun(params, ctx.cwd as string, signal, direction);
+        const run = await imageGenerateRun(params, ctx.cwd as string, signal, direction, imageEnv, runtime);
         return { result: run, pixels: run.file };
       }
-      const run = await imageEditRun(params as any, ctx.cwd as string, signal, direction);
+      const run = await imageEditRun(params as any, ctx.cwd as string, signal, direction, imageEnv, runtime);
       return { result: run, pixels: run.file };
     }, 300_000);
 
