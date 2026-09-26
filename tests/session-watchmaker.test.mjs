@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import watchmakerExtension from '../agent/extensions/session-watchmaker.ts';
-import { buildWatchmakerPacket, createWatchmakerScratchpad, validateWatchmakerAdvice, WATCHMAKER_MEMO_TYPE } from '../agent/extensions/lib/session-watchmaker.ts';
+import { buildWatchmakerPacket, createWatchmakerScratchpad, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_MEMO_TYPE } from '../agent/extensions/lib/session-watchmaker.ts';
 
 const GUARDIAN_META = Symbol.for('yunuspi.guardian.request-meta.v1');
 const model = { provider: 'deepseek', id: 'deepseek-flash', name: 'Synthetic watchmaker route', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, input: ['text'], cost: { input: .1, output: .2 } };
@@ -25,7 +25,7 @@ function clock() {
     } };
 }
 
-test('watchmaker tracks time, memos conclusions, and skips output bodies', async (t) => {
+test('watchmaker tracks time and keeps bounded latest receipts for progress judgments', async (t) => {
   const memoryKey = Symbol.for('yunus-pi.project-memory-recall.v1'), oldMemory = globalThis[memoryKey], memoryRoles = [];
   globalThis[memoryKey] = async (_cwd, _query, role) => { memoryRoles.push(role); return '[mem_fixture] Historical stall: repeated source reads delayed the last fix.'; };
   t.after(() => { if (oldMemory === undefined) delete globalThis[memoryKey]; else globalThis[memoryKey] = oldMemory; });
@@ -84,13 +84,20 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
     await time.advance(1000);
     fire('tool_result', { toolCallId: `read-${i}`, toolName: 'read', input: { path: `src/file-${i}.ts` }, isError: false, content: [{ type: 'text', text: marker }], details: {} });
   }
+  for (const [command, output] of [['git push origin fixture', 'Fixture branch pushed successfully.'], ['git status --porcelain && git rev-parse HEAD origin/fixture', 'fixture-sha\nfixture-sha']]) {
+    fire('tool_execution_start', { toolCallId: command, toolName: 'bash', args: { command } });
+    await time.advance(1000);
+    fire('tool_result', { toolCallId: command, toolName: 'bash', input: { command }, isError: false, content: [{ type: 'text', text: output }] });
+  }
   fire('message_end', { message: { role: 'custom', customType: 'guardian_intervention', content: 'Check the latest tool failure before retrying.' } });
   await time.advance(60000);
   await waitForNotes(1);
   assert.match(packets[0], /Guardian already told/);
   assert.match(packets[0], /Historical stall/); assert.deepEqual(memoryRoles, ['watchmaker']);
-  assert.ok(packets[0].includes('STALL: 0 edits'), 'pace row names the stall from counts');
-  assert.ok(!packets[0].includes(marker), 'tool output bodies never enter the packet');
+  assert.doesNotMatch(packets[0], /STALL:|0 edits/, 'tool names cannot establish that no work happened');
+  assert.match(packets[0], /Fixture branch pushed successfully/);
+  assert.match(packets[0], /fixture-sha/);
+  assert.ok(!packets[0].includes(marker), 'full tool bodies do not enter the bounded packet');
   assert.ok(Buffer.byteLength(packets[0], 'utf8') < 7000, 'packet stays small');
   const memoEntry = receipts.find((r) => r.customType === WATCHMAKER_MEMO_TYPE);
   assert.ok(memoEntry, `memo is persisted, got ${JSON.stringify(receipts)}`);
@@ -123,6 +130,14 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
   await time.advance(120000);
   assert.equal(calls, 2, 'kill switch stops reviews without human init changes');
   delete process.env.PI_WATCHMAKER;
+});
+
+test('pace counts neither declare a stall nor mislabel subagent status calls as dispatches', () => {
+  const pace = formatWatchmakerPace({ elapsed: 120000, calls: 15, edits: 0, reads: 0, delegated: 3, activeChildren: 1 });
+  assert.match(pace, /15 completed calls/);
+  assert.match(pace, /3 subagent calls/);
+  assert.match(pace, /Bash, scripts and children/);
+  assert.doesNotMatch(pace, /STALL|0 edits|0 reads|dispatches/);
 });
 
 test('scratchpad reseeds from persisted memo entries and dedupes', () => {

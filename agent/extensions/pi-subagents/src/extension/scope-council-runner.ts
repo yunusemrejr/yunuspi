@@ -125,8 +125,8 @@ export interface ScopeCouncilRunnerDeps {
 	available: (ctx: ExtensionContext) => readonly Model[];
 	constraints: (ctx: ExtensionContext, task: string, primary: Model) => ScopeCouncilConstraints;
 	/** Capture the parent generation/session at dispatch. A later input, model
-	 * choice or session switch must suppress this invocation's telemetry and
-	 * result even when a native child ignores cancellation. */
+	 * choice or session switch must suppress this invocation's advice even
+	 * when a native child ignores cancellation. Settlement remains session-owned. */
 	captureCurrent?: (ctx: ExtensionContext) => () => boolean;
 	/** Called before each stage and before publishing the result. A stale parent
 	 * generation must make the council advisory result disappear. */
@@ -445,6 +445,9 @@ function launchParams(member: AssistanceMember, limits: NormalizedLimits, phase:
  * The service is intentionally not a Pi tool and cannot be called by a child. */
 export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
+	let sessionEpoch = 0;
+	for (const event of ["session_start", "session_switch", "session_tree", "session_fork"])
+		pi.on?.(event, () => { sessionEpoch++; });
 	pi.registerMessageRenderer?.(SCOPE_COUNCIL_PROGRESS, renderScopeCouncilProgress);
 	const previous = (globalThis as any)[SCOPE_COUNCIL_RUNNER];
 	previous?.dispose?.();
@@ -509,6 +512,15 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			return unavailable("The current session identity could not be read safely for scope deliberation.");
 		}
 		const controller = new AbortController();
+		const capturedSessionEpoch = sessionEpoch;
+		// Follow-up input supersedes advice, not receipts for work already run.
+		// The append sink may target another session after a switch, so retain a
+		// separate session lifetime guard for terminal lifecycle and cost records.
+		const ownsSession = () => {
+			try { return capturedSessionEpoch === sessionEpoch
+				&& JSON.stringify([ctx.cwd, ctx.sessionManager?.getSessionId?.(), ctx.sessionManager?.getSessionFile?.()]) === identity; }
+			catch { return false; }
+		};
 		let capturedCurrent: () => boolean = () => true;
 		try {
 			capturedCurrent = deps.captureCurrent?.(ctx) ?? (() => deps.isCurrent?.(ctx) ?? true);
@@ -519,7 +531,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 			try {
 				return (globalThis as any)[SCOPE_COUNCIL_RUNNER] === runner && (deps.isCurrent?.(ctx) ?? true)
 					&& capturedCurrent()
-					&& JSON.stringify([ctx.cwd, ctx.sessionManager?.getSessionId?.(), ctx.sessionManager?.getSessionFile?.()]) === identity;
+					&& ownsSession();
 			} catch { return false; }
 		};
 		const current = () => !signal.aborted && ownsContext();
@@ -534,7 +546,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		const statusToken = {};
 		const clearStatus = () => {
 			if (statusOwner !== statusToken) return;
-			if (ownsContext()) { try { ctx.ui?.setStatus?.("scope-council", undefined); } catch {} }
+			if (ownsSession()) { try { ctx.ui?.setStatus?.("scope-council", undefined); } catch {} }
 			statusOwner = undefined;
 			stopOwnedProgress = undefined;
 			if (clearOwnedStatus === clearStatus) clearOwnedStatus = undefined;
@@ -549,7 +561,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 		const mode = councilMode(request.task);
 		const councilName = mode === "direction" ? "Design council" : "Scope council";
 		const progress = (phase: string, status: string, member?: AssistanceMember, elapsedMs?: number, advice?: string) => {
-			if (!ownsContext() || statusOwner !== statusToken || (signal.aborted && !expired() && status !== "stopped")) return;
+			if (!(status === "stopped" ? ownsSession() : ownsContext()) || statusOwner !== statusToken || (signal.aborted && !expired() && status !== "stopped")) return;
 			const detail = [phase, status, member ? formatModelThinking(member.route) : "", elapsedMs === undefined ? "" : `${Math.round(elapsedMs / 1000)}s`].filter(Boolean).join(" · ");
 			try {
 				const delivery = pi.sendMessage?.({ customType: SCOPE_COUNCIL_PROGRESS, content: `${councilName}: ${visibleText(detail, 420)}`,
@@ -596,13 +608,14 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				const text = row ? cleanBody(row, phase === "peer-critique" ? limits.discussionChars : limits.proposalChars) : "";
 				if (!row || !text) {
 					if (!signal.aborted) progress(phaseLabel, "unavailable", member, now() - startedAt);
-					if (current()) {
-						appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", rawRow);
-						appendCost(pi, sessionFile, runId, rawRow ?? row, signal.aborted ? "stopped" : "failed");
+					if (ownsSession()) {
+						const state = signal.aborted || !ownsContext() ? "stopped" : "failed";
+						appendLifecycle(pi, runId, state, rawRow);
+						appendCost(pi, sessionFile, runId, rawRow ?? row, state);
 					}
 					return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `This council peer failed or returned no usable advisory text.${failureSuffix(result, rawRow)}` };
 				}
-				if (current()) {
+				if (ownsSession()) {
 					appendLifecycle(pi, runId, "completed", row);
 					appendCost(pi, sessionFile, runId, row, "completed");
 				}
@@ -614,14 +627,17 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				// billed: settle its record now, and add the child's measured usage
 				// and native run link when the launch itself settles. Skipping this
 				// left the footer total permanently partial ("+?").
-				if (ownsContext()) {
+				if (ownsSession()) {
 					const failed = { ...identity, ...row, exitCode: 1, error: error instanceof Error ? error.message : "Council peer launch failed" };
-					appendLifecycle(pi, runId, signal.aborted ? "stopped" : "failed", failed);
-					appendCost(pi, sessionFile, runId, failed, signal.aborted ? "stopped" : "failed");
+					const state = signal.aborted || !ownsContext() ? "stopped" : "failed";
+					appendLifecycle(pi, runId, state, failed);
+					appendCost(pi, sessionFile, runId, failed, state);
 					if (signal.aborted && work) void work.then(late => {
 						const lateRow = rawResultRow(late);
-						if (!lateRow || !ownsContext()) return;
-						appendCost(pi, sessionFile, runId, { ...identity, ...lateRow, ...(typeof late?.details?.runId === "string" ? { runId: late.details.runId } : {}), stopped: true }, "stopped");
+						if (!ownsSession()) return;
+						const settled = { ...identity, ...lateRow, ...(typeof late?.details?.runId === "string" ? { runId: late.details.runId } : {}), stopped: true };
+						appendLifecycle(pi, runId, "stopped", settled);
+						appendCost(pi, sessionFile, runId, settled, "stopped");
 					}, () => { /* no usage to add */ });
 				}
 				return { text: "", row, gap: signal.aborted ? "This council peer was cancelled before returning usable advice." : `Council peer unavailable: ${error instanceof Error ? error.message.slice(0, 180) : "launch failed"}.` };
@@ -715,6 +731,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 	(runner as any).dispose = () => { stopOwnedProgress?.(); clearOwnedStatus?.(); lifetime.abort(); };
 	(globalThis as any)[SCOPE_COUNCIL_RUNNER] = runner;
 	pi.on?.("session_shutdown", () => {
+		sessionEpoch++;
 		(runner as any).dispose();
 		if ((globalThis as any)[SCOPE_COUNCIL_RUNNER] === runner) delete (globalThis as any)[SCOPE_COUNCIL_RUNNER];
 	});

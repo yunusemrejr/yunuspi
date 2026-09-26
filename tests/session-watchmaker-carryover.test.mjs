@@ -155,6 +155,40 @@ test('undelivered watchmaker notes do not expire on a wall clock', async (t) => 
 });
 
 
+test('watchmaker separates repeated-command span from execution time and carries latest result evidence', async (t) => {
+  const h = harness(t, ['']);
+  h.fire('session_start', {});
+  await h.beginTask('first', 'Synchronize the fixture branch.');
+  for (let index = 0; index < 3; index++) {
+    h.fire('tool_execution_start', { toolCallId: `call-${index}`, toolName: 'bash', args: { command: `git status fixture-${index}` } });
+    await h.time.advance(1000);
+    h.fire('tool_result', { toolCallId: `call-${index}`, toolName: 'bash', input: { command: `git status fixture-${index}` }, content: [{ type: 'text', text: index === 2 ? 'Fixture branch is synchronized.' : 'Fixture status recorded.' }] });
+    if (index < 2) await h.time.advance(10000);
+  }
+  await h.time.advance(60000);
+  assert.ok(h.packets.length);
+  const rows = h.packets[0].evidence;
+  assert.match(rows.find(row => row.id === 'time-repeats').text, /3s measured tool time; observations span 22s/);
+  assert.match(rows.find(row => row.id === 'time-ledger').text, /3 calls, 3s summed tool time/);
+  assert.doesNotMatch(rows.find(row => row.id === 'time-pace').text, /STALL|0 edits|0 reads/);
+  assert.ok(rows.some(row => row.kind === 'tool result' && /branch is synchronized/.test(row.text)));
+});
+
+test('new completed receipts invalidate an in-flight pace diagnosis before memo or delivery', async (t) => {
+  let release;
+  const h = harness(t, [() => new Promise(resolve => { release = resolve; })]);
+  h.fire('session_start', {});
+  await h.beginTask('first', 'Synchronize the fixture branch.');
+  await h.time.advance(60000);
+  assert.equal(typeof release, 'function');
+  h.fire('tool_result', { toolCallId: 'push', toolName: 'bash', input: { command: 'git push origin fixture' }, content: [{ type: 'text', text: 'Fixture branch pushed successfully.' }] });
+  release({ note: 'Push the pending fixture change now.', memo: 'The fixture change remains unpushed.', evidence: ['time-pace'] });
+  for (let index = 0; index < 30; index++) await tick();
+  assert.equal(h.completedIds().length, 0);
+  assert.equal(h.receipts.filter(row => row.customType === 'watchmaker-memo-v1').length, 0);
+  assert.equal(h.fire('context', { messages: [] }), undefined);
+});
+
 test('a child transition invalidates watchmaker advice before it can seed a memo', async t => {
   let finish;
   const h = harness(t, [() => new Promise(resolve => { finish = resolve; })]);

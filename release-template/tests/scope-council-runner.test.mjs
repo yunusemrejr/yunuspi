@@ -272,6 +272,50 @@ test('current route restrictions and cancellation fail closed without late publi
   }
 });
 
+test('follow-up cancellation settles council wrappers while session switches reject late receipts', async () => {
+  for (const switchSession of [false, true]) {
+    resetSharedControl();
+    const entries = [], messages = [], pendingPeers = [], hooks = new Map(), controller = new AbortController();
+    let generation = 0, publications = 0;
+    const ctx = context();
+    const pi = { getActiveTools: () => ['subagent'], appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }),
+      sendMessage: message => messages.push(message), on: (event, fn) => { const fns = hooks.get(event) ?? []; fns.push(fn); hooks.set(event, fns); } };
+    registerScopeCouncilRunner(pi, { available: () => models, constraints: () => ({}), rankPerspectives: null,
+      captureCurrent: () => { const captured = generation; return () => captured === generation; },
+      launch: (id, _params, signal) => new Promise(resolve => pendingPeers.push({ id, resolve, signal })) });
+    const work = globalThis[SCOPE_COUNCIL_RUNNER]({ task, onResult: () => { publications++; } }, ctx, controller.signal);
+    assert.equal(pendingPeers.length, 2);
+    const before = entries.length;
+    generation++;
+    if (switchSession) for (const hook of hooks.get('session_switch') ?? []) hook({}, { ...ctx, sessionManager: { getSessionId: () => 'replacement' } });
+    controller.abort();
+    assert.equal((await work).status, 'unavailable');
+    assert.equal(publications, 0);
+    assert.ok(pendingPeers.every(peer => peer.signal.aborted));
+    if (!switchSession) {
+      for (const peer of pendingPeers) {
+        assert.equal(entries.findLast(entry => entry.customType === 'subagent-cost-v1' && entry.data.runId === peer.id).data.state, 'stopped');
+        assert.equal(entries.findLast(entry => entry.customType === 'subagent-lifecycle-v1' && entry.data.runId === peer.id).data.state, 'stopped');
+      }
+      assert.equal(messages.at(-1).details.status, 'stopped');
+    }
+    pendingPeers.forEach((peer, index) => peer.resolve({ details: { runId: `native-fixture-${index}`, results: [{ exitCode: 1, stopped: true, usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 } }] } }));
+    await new Promise(resolve => setImmediate(resolve));
+    if (switchSession) assert.equal(entries.length, before, 'the current session append sink must receive no old-session settlement');
+    else {
+      pendingPeers.forEach((peer, index) => {
+        const terminal = entries.findLast(entry => entry.customType === 'subagent-cost-v1' && entry.data.runId === peer.id).data;
+        assert.equal(terminal.state, 'stopped');
+        assert.equal(terminal.results[0].runId, `native-fixture-${index}`);
+        assert.equal(terminal.results[0].usage.input, 10);
+      });
+      const ledger = reduceChildEvents(projectTranscriptChildren(entries));
+      assert.ok(ledger.tasks.every(task => task.state !== 'running' && task.state !== 'queued'));
+    }
+    assert.equal(publications, 0, 'late accounting never publishes obsolete advice');
+  }
+});
+
 test('scope council stays bounded to the shared public limits',()=>{
   assert.equal(SCOPE_COUNCIL_LIMITS.deadlineMs,240000);
   assert.equal(SCOPE_COUNCIL_LIMITS.costUsd,0.03);

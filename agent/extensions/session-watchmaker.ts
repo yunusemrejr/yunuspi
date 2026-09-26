@@ -33,7 +33,7 @@ function taskStateWatchmakerRows(): ObserverEvidence[] {
 /** Mr. Watchmaker: an autonomous time-only reviewer beside the session
  * observer. Same scheduler, journal, read-only tools, dispatch guards and
  * delivery receipts; no book. It judges time versus progress from
- * timestamps, durations and counts — never from tool output bodies — and
+ * timestamps, durations, counts and bounded completed-result excerpts, and
  * keeps durable conclusions in a small session scratchpad. */
 export default function sessionWatchmaker(pi: any, testing: any = {}) {
   if (process.env.PI_SUBAGENT_CHILD === '1') return;
@@ -63,7 +63,8 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   };
   const timings = new Map<string, { name: string; input: string; startedAt: number }>();
   const ledger = new Map<string, { calls: number; errors: number; ms: number }>();
-  const repeats = new Map<string, { count: number; firstAt: number; lastAt: number; sample: string }>();
+  const repeats = new Map<string, { count: number; firstAt: number; lastAt: number; ms: number; sample: string }>();
+  let latestResults: ObserverEvidence[] = [];
   const now = testing.now ?? Date.now;
   let inputRestrictions: any = {}, inputBlocked = false, taskStartAt = 0, agentStartAt = 0, sessionStartAt = 0, watchOff = false;
   const scratchpad = createWatchmakerScratchpad();
@@ -100,13 +101,15 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     if (!text || !request) return;
     const id = `event-${++sequence}`;
     journal.add({ id, kind, at: now(), text, ...(tool ? { tool } : {}) });
-    recent.push({ id, kind, text: boundedObserverText(text, 220), ...(tool ? { tool } : {}) });
+    const row = { id, kind, text: boundedObserverText(text, 420), ...(tool ? { tool } : {}) };
+    recent.push(row);
+    if (kind === 'tool result' || kind === 'tool error') latestResults = [...latestResults, row].slice(-2);
     if (recent.length > 96) recent = recent.slice(-96);
     return id;
   };
   const repeatKey = (tool: string, input: string) => `${tool} ${(input.match(/(?:path|file_path|query|pattern|command)=([^\s]+)/)?.[1] ?? '').slice(0, 80)}`.trim();
-  /** Time rows: elapsed, ledger, repeats, stall/flow, children, todos. Counts
-   * and durations only; output bodies and thinking never enter the packet. */
+  /** Time rows remain measurements; results below provide bounded progress
+   * evidence without inferring effects from a tool name or shell grammar. */
   const timeRows = (): ObserverEvidence[] => {
     const rows: ObserverEvidence[] = [];
     const elapsed = now() - taskStartAt;
@@ -117,9 +120,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     const entries = [...ledger.entries()].sort((a, b) => b[1].ms - a[1].ms);
     const calls = entries.reduce((sum, [, row]) => sum + row.calls, 0);
     const wall = entries.reduce((sum, [, row]) => sum + row.ms, 0);
-    rows.push({ id: 'time-ledger', kind: 'time', text: entries.length ? `${calls} calls in ${formatWatchmakerDuration(wall)} tool wall: ${entries.slice(0, 8).map(([tool, row]) => `${tool}×${row.calls}/${formatWatchmakerDuration(row.ms)}${row.errors ? `/${row.errors} failed` : ''}`).join(' · ')}` : 'no tool calls recorded this task' });
+    rows.push({ id: 'time-ledger', kind: 'time', text: entries.length ? `${calls} calls, ${formatWatchmakerDuration(wall)} summed tool time: ${entries.slice(0, 8).map(([tool, row]) => `${tool}×${row.calls}/${formatWatchmakerDuration(row.ms)}${row.errors ? `/${row.errors} failed` : ''}`).join(' · ')}` : 'no tool calls recorded this task' });
     const dupes = [...repeats.entries()].filter(([, row]) => row.count >= 3).sort((a, b) => b[1].count - a[1].count).slice(0, 4);
-    rows.push({ id: 'time-repeats', kind: 'time', text: dupes.length ? dupes.map(([key, row]) => `${key} ×${row.count} in ${formatWatchmakerDuration(row.lastAt - row.firstAt)}`).join(' · ') : 'no 3x+ repeated tool+target this task' });
+    rows.push({ id: 'time-repeats', kind: 'time', text: dupes.length ? dupes.map(([key, row]) => `${key} ×${row.count}: ${formatWatchmakerDuration(row.ms)} measured tool time; observations span ${formatWatchmakerDuration(row.lastAt - row.firstAt)} (includes intervening work)`).join(' · ') : 'no 3x+ repeated tool+target this task' });
     let reduced: ReturnType<typeof reduceChildEvents> | undefined, childrenUnavailable = false;
     try { reduced = reducedChildren(512); } catch { childrenUnavailable = true; }
     const ownTasks = reduced ? reduced.tasks.filter(task => !isHarnessOwnedChild(task)) : [];
@@ -164,7 +167,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; scratchpad.clear();
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; latestResults = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; scratchpad.clear();
     try { scratchpad.seed(context?.sessionManager?.getBranch?.() ?? []); } catch { /* No persisted memos available. */ }
     runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
@@ -218,7 +221,8 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
       const timeEvidence = timeRows();
       for (const row of timeEvidence) journal.add({ ...row, at: now() });
-      const evidence = [...timeEvidence, ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
+      const resultIds = new Set(latestResults.map(row => row.id));
+      const evidence = [...timeEvidence, ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.filter(row => !resultIds.has(row.id)).slice(0, 8), ...latestResults];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text), requirements: brief() || undefined });
@@ -238,10 +242,12 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if ((constraints.fixedRoute || constraints.sameModel) && `${ctx.model?.provider}/${ctx.model?.id}` !== entry.route) return { packet: currentPacket, reason: 'User model restriction prevents watchmaker route' };
       if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: currentPacket, reason: 'User free-only restriction prevents watchmaker route' };
       const capturedSequence = sequence;
+      const capturedResults = latestResults.map(row => row.id).join(',');
       // Counts may grow, but child/plan transitions can invalidate a suggested
       // harvest or redispatch before the note reaches the agent.
       const stillCurrent = (advice?: any) => {
         if (capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
+        if (advice?.note && capturedResults !== latestResults.map(row => row.id).join(',')) return false;
         const current = new Map(timeRows().map(row => [row.id, row.text]));
         return !timeEvidence.some(row => ['time-children', 'time-todos'].includes(row.id) && advice?.evidence?.includes(row.id) && current.get(row.id) !== row.text);
       };
@@ -372,7 +378,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       journal.add({ id: promptId, kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; revision++; taskEpoch++; taskStartAt = now(); agentStartAt = 0; ledger.clear(); repeats.clear();
+    recent = []; latestResults = []; revision++; taskEpoch++; taskStartAt = now(); agentStartAt = 0; ledger.clear(); repeats.clear();
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
     const memoryOwner = owner, memoryTask = taskEpoch;
@@ -437,18 +443,18 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     ledger.set(event.toolName, row);
     const key = repeatKey(event.toolName, input);
     if (key) {
-      const seen = repeats.get(key) ?? { count: 0, firstAt: now(), lastAt: 0, sample: input.slice(0, 80) };
-      seen.count++; seen.lastAt = now();
+      const seen = repeats.get(key) ?? { count: 0, firstAt: now(), lastAt: 0, ms: 0, sample: input.slice(0, 80) };
+      seen.count++; seen.lastAt = now(); seen.ms += ms;
       repeats.set(key, seen);
       if (repeats.size > 64) repeats.delete(repeats.keys().next().value!);
     }
     if (event.isError) salience++;
-    // One line per result: outcome plus duration. Output bodies are never
-    // stored; the journal head exists only for session_detail spot checks.
-    const head = Array.isArray(event.content) ? event.content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n').slice(0, 200) : '';
+    // Actual receipts are needed to tell useful Bash work from a stall. Bound
+    // the excerpt; the journal exposes the same evidence for spot checks.
+    const output = Array.isArray(event.content) ? event.content.filter((part: any) => part?.type === 'text' && typeof part.text === 'string').map((part: any) => part.text).join('\n') : '';
+    const excerpt = boundedObserverText(output.replace(/\s+/g, ' ').trim(), 260);
     const summary = `${event.toolName} ${input}: ${event.isError ? 'failed' : 'completed'} in ${formatWatchmakerDuration(ms)}`;
-    if (head) journal.add({ id: `event-${sequence + 1}-head`, kind: 'tool result head', at: now(), text: `${summary}\n${head}`, tool: event.toolName });
-    add(event.isError ? 'tool error' : 'tool result', summary, event.toolName);
+    add(event.isError ? 'tool error' : 'tool result', `${summary}${excerpt ? `\nResult excerpt: ${excerpt}` : '\nNo text output.'}`, event.toolName);
     revision++;
   });
   pi.on('tool_execution_end', (event: any, context: any) => {
