@@ -82,7 +82,8 @@ test('reopening /used captures helper work completed after the earlier snapshot,
   await f.dispatch('/used');
   const firstFile = path.join(popupDir(), fs.readdirSync(popupDir())[0]);
   const first = fs.readFileSync(firstFile, 'utf8');
-  assert.match(first, /<b>JEV<\/b>.*?No measurement in this snapshot/);
+  assert.match(first, /class="usage-history usage-unmeasured"><summary>No measurement in this snapshot[^]*?\bJEV\b/);
+  assert.doesNotMatch(first, /<b>JEV<\/b>/, 'unmeasured helpers stay in the shared coverage disclosure');
   ledger.note('ml.jev.used', { durationMs: 200, cached: false });
   ledger.note('ml.helper.applied', { helper: 'jev' });
   ledger.note('ml.jev.used', { durationMs: 400, cached: false });
@@ -92,8 +93,8 @@ test('reopening /used captures helper work completed after the earlier snapshot,
   const secondFile = fs.readdirSync(popupDir()).map(name => path.join(popupDir(), name)).find(file => file !== firstFile);
   assert.ok(secondFile, 'reopening creates a fresh file instead of reusing the browser snapshot');
   const second = fs.readFileSync(secondFile, 'utf8');
-  assert.match(second, /<b>JEV<\/b>.*?2 recorded executions · 2 applied/);
-  assert.match(second, /2 recorded executions · 1 context deliveries/);
+  assert.match(second, /<b>JEV<\/b>.*?2 executions · 2 recorded applications/);
+  assert.match(second, /Context \/ excerpt receipts<\/dt><dd>1 \/ 0<\/dd>/);
   assert.match(second, /300 ms average · 2 samples · 600 ms total/);
   assert.equal(fs.readFileSync(firstFile, 'utf8'), first, 'the saved snapshot remains an honest capture of its original point in time');
   assert.equal(entries.length, 1, 'live measurements do not depend on a turn-end ledger flush');
