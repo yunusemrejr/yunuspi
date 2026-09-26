@@ -37,6 +37,7 @@ import type {
 } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
+import { sessionObservability } from "./lib/session-observability.ts";
 import { readRemindersRestore } from "./lib/reminders-state.ts";
 import {
 	checkpointPath,
@@ -45,6 +46,9 @@ import {
 } from "./lib/checkpoint-files.ts";
 import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
+import { needleRank } from "./lib/needle-runtime.ts";
+import { askJev } from "./lib/jev-client.ts";
+import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
 import { completesPlan, completionGate } from "./lib/completion-gate.ts";
@@ -671,7 +675,16 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	if (DISABLED) return;
 	// One workspace revision for tests and reviews of the same tree.
 	const revision = createWorkspaceRevision();
-	const quality = createQualityReviewLifecycle(pi, { shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot(), revision });
+	const quality = createQualityReviewLifecycle(pi, {
+		shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot(), revision,
+		// Provenance-preserving duplicate consolidation over multi-aspect
+		// blocking findings. Deterministic Jaccard always runs inside the
+		// lifecycle; these deps add the bounded Needle/Jev semantic passes.
+		dedup: {
+			rank: (query, candidates, topK) => needleRank({ query, candidates, topK }),
+			ask: (site, state, questions) => askJev(site, state, questions, { pi }),
+		},
+	});
 	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe, token) => quality.observe(facts, observe, token), revision });
 	registerRequirementLedger(pi);
 	let st: CheckpointState | null = null;
@@ -975,6 +988,30 @@ function registerRequirementLedger(pi: ExtensionAPI): void {
 			: message.content.map((part: any) => (part?.type === "text" ? part.text : "")).join("\n");
 		const settled = settleRequirements(ledger, answer);
 		if (settled.ledger.items.length !== ledger.items.length || settled.ledger.unbounded !== ledger.unbounded) {
+			// Shadow calibration for requirement-to-evidence closure: the
+			// deterministic settle above stays authoritative; the typed
+			// judgment only measures whether cited evidence supports each
+			// settled requirement. Bounded to two settled items per answer.
+			const openIds = new Set(settled.open.map((item) => item.id));
+			const settledItems = ledger.items.filter((item) => !openIds.has(item.id)).slice(0, 2);
+			if (settledItems.length) {
+				const evidence = answer.slice(0, 3000);
+				void (async () => {
+					for (const item of settledItems) {
+						try {
+							const shadow = await askTypedDecision("requirement-closure", {
+								state: { requirement: item.text.slice(0, 500), evidence },
+							}, { judge: (site, state, questions) => askJev(site, state, questions, { pi }), shadow: true });
+							try {
+								sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.jev.shadow", {
+									site: "requirement-closure", count: 1,
+									supported: (shadow.verdict as any)?.supported === true,
+								});
+							} catch { /* shadow telemetry is optional */ }
+						} catch { /* shadow never affects the ledger */ }
+					}
+				})();
+			}
 			ledger = settled.ledger;
 			save();
 		}

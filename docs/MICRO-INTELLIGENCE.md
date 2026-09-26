@@ -14,8 +14,18 @@ KOMPRESS                           extractive prose paragraph selection
         ↓
 JEV                                cheap remote typed semantic judgment
         ↓
+SPAN                               soft behavior sensor over session traces (shadow-first)
+        ↓
+MICRO-WORKER                       bounded cheap-remote helper (no tools, no writes)
+        ↓
+REMOTE RERANK                      opt-in precision stage (Needle stays default)
+        ↓
 MAIN / CHILD LLM / COUNCIL         deep reasoning, synthesis, judgment
 ```
+
+Typed Jev decisions, finding consolidation, the router shadow and the
+model qualification lab are coordination around these layers: registries,
+evidence stores and benchmarks, not additional inference authorities.
 
 This is not a serial pipeline. Every job invokes the combination its
 content shape and uncertainty warrant, usually in parallel with the main
@@ -235,9 +245,15 @@ in council judgment quality has not been established.
 
 Recovery skill ranking checks that subagents and multiple applicable installed
 skills exist before asking Jev. Missing catalog entries never consume ranking
-slots. The separate finding-clustering and duplicate-judgment primitives remain
-unconnected to production review flows; their tests are not evidence of live
-review deduplication.
+slots. Finding clustering and duplicate judgment are now connected to
+production review flows through provenance-preserving consolidation (see
+"Finding consolidation" below): multi-aspect quality-review blockers merge
+with per-id method/source provenance, and Observer margin notes fold
+paraphrase duplicates into the confirmed note. Guardian intervention
+deduplication stays in the owned core (existing suppression windows);
+agent-side Guardian changes would cross the core ownership boundary, so
+repeated-behavior coverage there rides the Span advisories plus those
+windows rather than a new dedup call.
 
 Project graph retrieval retains its literal identity, lexical and statistical
 ranking. Markdown memory search retains its existing qmd owner. The project SQLite
@@ -257,8 +273,10 @@ and health exposes both routes. `PI_JEV=off` disables both.
 
 The pair validates what local layers cannot decide: ranking disagreements,
 uncertain classifications, advisory batches (request kind, verification
-need, review worth, council perspectives), and error-cause refinement. A
-finding-duplicate helper is available but has no production caller. Related judgments batch into one call;
+need, review worth, council perspectives), and error-cause refinement.
+The finding-duplicate judgment now serves bounded disambiguation inside
+finding consolidation (ambiguous mid-overlap pairs only, at most a few
+per consolidation). Related judgments batch into one call;
 identical judgments reuse the bounded process cache; simultaneous uncancelled
 identical requests share one paid call. Caller mutation cannot alter cached
 answers. The circuit breaker preserves heuristic fallback. New sites: `rank` (validation),
@@ -287,15 +305,159 @@ earlier version waited up to 2 s on every pass; its removal left paid
 selections unused). A raw first exposure remains sealed. A clipped Needle prefix cannot rescue a mutation request as read-only;
 Jev receives the complete bounded task before that judgment.
 
+## Span — soft behavior sensor (shadow-first)
+
+Span scores a fixed twelve-signal behavior catalog (repeated-failure
+loops, scope drift, ignored requirements, premature completion,
+verification gaps, stale evidence, redundant verification,
+capability/tool misuse, unnecessary delegation, review churn,
+unproductive progress, unsafe assumptions) against a bounded trace of
+recent session events. Each signal resolves to
+present/absent/not-observable probabilities. Span is strictly a soft
+semantic sensor: it never mutates, blocks, settles, or grants anything.
+
+The session bridge records tool names and outcomes only — never tool
+arguments, result content, prompts, or file bytes — so no secrets can
+reach the remote scorer through the trace. Scoring runs at most once
+per turn end and at most every 30 seconds; unchanged traces reuse the
+fingerprint-cached score instead of rescoring.
+
+Scores reach Guardian, Observer, Watchmaker, quality and recovery logic
+only through `spanAdvisory`, which requires P(present) ≥ 0.80 AND
+deterministic corroborating evidence per signal. Anything weaker, and
+everything while `PI_SPAN_SHADOW=1` (the default), is record-only:
+measured in metrics, ledgered for cost, and benchmarked, but never
+acted on. Intervention requires shadow benchmarks on real and synthetic
+traces first.
+
+Transport is OpenRouter chat completions, default route
+`respan/span-01-lite` with paid `respan/span-01` fallback when the Lite
+route itself is missing (never on auth, quota, timeout, or malformed
+answers). Slugs are configuration resolved against the live registry;
+an unlisted slug degrades to `route-unavailable`, never to an invented
+model. Every paid call is ledgered as `span-usage-v1` (same contract
+as `jev-usage-v1`) and surfaces in `micro_status`, `/metrics`,
+`/used`, export analytics, and concise TUI activity. `PI_SPAN=off`
+disables the sensor.
+
+## Typed Jev decisions
+
+`agent/extensions/lib/micro-intelligence/jev-decisions.ts` names every
+production Jev/Kev decision type, its question builder, and its
+calibrated acceptance bars in one registry so call sites cannot drift
+into ad-hoc thresholds: requirement-to-evidence closure, final-answer
+claim/evidence verification, high-blast-radius tool-intent alignment,
+Observer/Watchmaker admission and focus, quality-review aspect
+selection (add-only: Jev may suggest aspects, never remove the
+deterministic set), memory classification/admission, delegation
+topology, recovery strategy, verification method, evidence relevance,
+and shortlist-based tool/skill routing.
+
+Deterministic code still owns permissions, safety, completion, and
+final decisions; a typed decision only refines an ambiguous choice the
+owner framed, and every verdict degrades to unknown (caller keeps its
+heuristic). New production uses start in shadow mode — judged,
+measured, and agreement-recorded via `ml.jev.shadow` health events, but
+never applied — until calibration evidence justifies influence.
+Currently shadow-wired: requirement closure at ledger settle time,
+review aspects per review round, and recovery strategy per recovery
+episode. The remaining registry entries are defined, barred, and
+tested, with production call sites staged behind the same shadow
+evidence bar.
+
+## Finding consolidation
+
+`consolidateFindings` merges semantically duplicate findings with
+provenance instead of generating repeated repair churn. Deterministic
+Jaccard (≥ 0.6) and Needle clustering merge first; ambiguous
+mid-overlap pairs (0.3–0.6) earn a bounded number of Jev duplicate
+judgments. Nothing is dropped, only grouped: each group names its kept
+representative, merged ids with the per-id method
+(jaccard/needle/jev), and reviewer/aspect sources.
+
+Production wiring: quality-review consolidates multi-aspect blocking
+findings after each round (deterministic pass always; Needle/Jev
+passes via injected deps), exposes groups in the review summary, and
+lets one evidence-based dismissal of a group representative cover its
+merged duplicates. Observer margin notes keep their deterministic
+match at add time plus a Needle-only paraphrase pass that folds a new
+lookalike into the confirmed note (failure keeps both).
+
+## Micro-worker — bounded cheap-remote helper
+
+The micro-worker role sits between Jev and a full subagent for tasks
+too generative for typed judgments but too small for delegation:
+error-hypothesis generation, finding consolidation, handoff briefs,
+structured extraction, inspection-target proposals, patch comparison,
+and small source glances. Hard bounds: no recursive delegation, zero
+tools, no writes, validated JSON outputs, ≤ 8,000 input characters,
+≤ 1,000 output tokens, per-call cost cap, and result caching.
+
+Routes are never hardcoded as available. Candidates come from
+`PI_MICRO_WORKER_ROUTES`, and eligibility gates price, quality
+evidence, health/cooldowns, AND provider privacy tier: `route-privacy`
+classifies loopback providers as local, operator-allowlisted routes
+(`PI_PRIVATE_ROUTES`) as allowed, and everything else as unknown —
+and unknown is never safe for private repository content. "Free" never
+implies safe. Without evidence the worker abstains rather than
+guessing on a random cheap route.
+
+## Remote rerank — opt-in precision stage
+
+Local Needle3 ranking stays the zero-cost default in every retrieval
+pipeline. `remoteRanker` adds an optional precision stage after
+lexical/vector retrieval and before final context selection for
+project memory, historical/session retrieval, Observer evidence,
+source relevance, skills, and docs. It speaks the Voyage rerank API
+shape against a configurable endpoint (`PI_RERANK_URL`, default the
+Voyage API; OpenRouter exposes no `/v1/rerank`), so Voyage rerank
+variants — or any compatible proxy — can be benchmarked without
+hardcoded assumptions. Unconfigured, unreachable, or low-value
+reranking returns undefined and the caller keeps its local order.
+`PI_RERANK=off` is the default; `PI_RERANK_MODEL` selects the model.
+
+## Router shadow and qualification lab
+
+The TypeSafe Jev Router integration is shadow advisory only: the
+router suggests a model/reasoning-effort pair, YunusPi records that
+suggestion alongside its own capability-, benchmark-, health-,
+privacy-, cost-, restriction-, reliability- and cache-aware choice
+plus the actual outcome (success, latency, cost, retries, review
+outcome). The suggestion never influences routing and never bypasses
+restrictions; promotion into routing influence requires accumulated
+shadow evidence plus an explicit operator change. Router slugs are
+discovered from live model ids (configurable), never assumed.
+
+The model qualification lab (`model-qual-lab.ts`,
+`agent/scripts/run-model-qual-lab.mjs --live --route p/m`) runs a
+bounded fixed battery over newly discovered routes — tool selection,
+structured output, small coding/debugging, repository navigation,
+instruction fidelity, requirement extraction, review quality,
+long-context retrieval, tool-call validity, plus measured
+latency/tokens/cost/reliability and privacy metadata — and records
+expiring (7-day) role-specific eligibility (`micro-worker`,
+`skill-router`, `coding-child`, `observer`, `quality-reviewer`,
+`main-fallback`) in a private store. The lab records evidence; it
+never promotes a route by itself.
+
+Whether code-specific embeddings (e.g. Voyage Code) beat Qwen3 plus
+project intelligence for issue→file retrieval is an open measurement,
+not an assumption: `agent/scripts/benchmark-code-embeddings.mjs`
+compares lexical, Qwen3, and a configured code candidate on the
+synthetic fixture. A separate code embedding space ships only if
+measured gains justify the extra index and complexity.
+
 ## Coordination, metrics, health
 
 `agent/extensions/lib/micro-intelligence/` holds routing, evidence preparation
-and unified metrics. Needle, the local LM, Kompress and Jev retain their own bounded
+and unified metrics. Needle, the local LM, Kompress, Jev, Span, the
+micro-worker and remote rerank retain their own bounded
 caches and lifecycle controls. The unused duplicate coordinator and its
 always-empty ledger were removed; production helper metrics remain authoritative.
 
 - `micro_status` (read-only tool) reports request classification, the
-  advisory verdict, per-layer health and utilization.
+  advisory verdict, per-layer health and utilization, including the
+  Span, micro-worker, and rerank layers and the live Span trace state.
 - Health vocabulary: `ready / warming / unavailable / disabled / busy /
   breaker-open / no-key`.
 - Metrics count actual offers, runs, accepts, cache hits, skip reasons, and
@@ -305,8 +467,13 @@ always-empty ledger were removed; production helper metrics remain authoritative
   savings remain distinct from newly sealed provider reductions; replaying a
   seal does not manufacture another reduction. A typed skill selection counts
   one avoided dispatch, with no invented token estimate.
+- Span ledgering (`span-usage-v1`) feeds `/metrics` (scored traces,
+  shadow/cached splits, above-bar readings, tokens, reported cost) and
+  export analytics (`microIntel.span`); `/used` tracks the Span sensor,
+  Micro worker, and Remote rerank components like any other helper.
 - Skip reasons (`too-small`, `busy`, `low-confidence`, `cooldown`,
-  `deterministic-won`, …) explain dormancy instead of hiding it.
+  `deterministic-won`, `shadow`, `route-unavailable`, `no-scorer`,
+  `private-input-unsafe-route`, …) explain dormancy instead of hiding it.
 
 ## Request lifecycle
 
@@ -326,7 +493,12 @@ skill hints        → lexical rank → generic-term filter → local LM relevan
 
 Controls: `PI_NEEDLE=off`, `PI_NEEDLE_SHADOW=1`,
 `PI_MICRO_ADVISORY=off`, `PI_INTENT_PRESCREEN=off`,
-`PI_MICRO_INTELLIGENCE=off`, plus the existing `PI_MINI_PREPROCESSOR`,
+`PI_MICRO_INTELLIGENCE=off`, `PI_SPAN=off`, `PI_SPAN_SHADOW=0` (leaves
+shadow record-only mode; benchmarks must justify this first),
+`PI_SPAN_MODEL` / `PI_SPAN_FALLBACK`, `PI_MICRO_WORKER=off`,
+`PI_MICRO_WORKER_ROUTES`, `PI_PRIVATE_ROUTES`, `PI_RERANK=on`,
+`PI_RERANK_MODEL` / `PI_RERANK_URL`, `PI_OBSERVER_SEMANTIC_MARGINS=off`,
+plus the existing `PI_MINI_PREPROCESSOR`,
 `PI_SMOL_PREPROCESSOR` (line selection), `PI_LOCAL_LM` (the whole local
 model), `PI_SKILL_GATE`, `PI_JEV`, and `PI_OUTPUT_DISTILLER` scopes.
 
@@ -340,7 +512,22 @@ caller site is now recorded with each skip.
 
 Committed fixtures live in `tests/fixtures/micro-intel/`; run
 `node --test tests/micro-intel-bench.test.mjs` (Needle sections need
-installed assets, otherwise they skip with a note).
+installed assets, otherwise they skip with a note). New-layer fixtures
+(`traces.json`, `code-retrieval.json`) back the offline benchmark
+scripts: `agent/scripts/benchmark-span-sensor.mjs` (pipeline and
+keyword baseline; `--live` for the real Span route),
+`agent/scripts/benchmark-code-embeddings.mjs` (`--live` for Qwen3 and
+an optional `PI_CODE_EMBED_MODEL` candidate),
+`agent/scripts/benchmark-rerank.mjs` (lexical vs Needle vs a
+`PI_RERANK_MODEL` remote variant), and
+`agent/scripts/run-model-qual-lab.mjs --live --route p/m` for role
+eligibility. New-layer unit coverage lives in
+`tests/micro-intel-span.test.mjs`,
+`tests/micro-intel-decisions.test.mjs`,
+`tests/micro-intel-microworker.test.mjs`,
+`tests/micro-intel-rerank-router-lab.test.mjs`,
+`tests/micro-intel-consolidation.test.mjs`, and
+`tests/micro-intel-observability.test.mjs`.
 
 | Benchmark | Result |
 | --- | --- |

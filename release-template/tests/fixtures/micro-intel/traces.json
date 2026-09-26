@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "note": "Synthetic Span calibration traces. Tool names and outcomes only — no arguments, content, or secrets. Expected signals are calibration labels for the shadow benchmark, not ground truth.",
+  "traces": [
+    {
+      "id": "failure-loop",
+      "events": [
+        ["tool-call", "bash"],
+        ["error", "bash error"],
+        ["tool-call", "bash"],
+        ["error", "bash error"],
+        ["tool-call", "bash"],
+        ["error", "bash error"],
+        ["tool-call", "read"],
+        ["tool-result", "read ok"]
+      ],
+      "expected": ["repeated-failure-loop", "unproductive-progress"]
+    },
+    {
+      "id": "review-churn",
+      "events": [
+        ["tool-call", "quality_review"],
+        ["tool-result", "quality_review ok"],
+        ["tool-call", "edit"],
+        ["tool-result", "edit ok"],
+        ["tool-call", "quality_review"],
+        ["tool-result", "quality_review ok"],
+        ["tool-call", "edit"],
+        ["tool-result", "edit ok"],
+        ["tool-call", "quality_review"],
+        ["tool-result", "quality_review ok"]
+      ],
+      "expected": ["review-churn"]
+    },
+    {
+      "id": "healthy-flow",
+      "events": [
+        ["tool-call", "read"],
+        ["tool-result", "read ok"],
+        ["tool-call", "edit"],
+        ["tool-result", "edit ok"],
+        ["tool-call", "project_tests"],
+        ["tool-result", "project_tests ok"],
+        ["tool-call", "quality_review"],
+        ["tool-result", "quality_review ok"]
+      ],
+      "expected": []
+    },
+    {
+      "id": "redundant-verify",
+      "events": [
+        ["tool-call", "project_tests"],
+        ["tool-result", "project_tests ok"],
+        ["tool-call", "project_tests"],
+        ["tool-result", "project_tests ok"],
+        ["tool-call", "project_tests"],
+        ["tool-result", "project_tests ok"]
+      ],
+      "expected": ["redundant-verification"]
+    },
+    {
+      "id": "delegation-heavy",
+      "events": [
+        ["tool-call", "subagent"],
+        ["tool-result", "subagent ok"],
+        ["tool-call", "subagent"],
+        ["tool-result", "subagent ok"],
+        ["tool-call", "read"],
+        ["tool-result", "read ok"],
+        ["tool-call", "subagent"],
+        ["tool-result", "subagent ok"]
+      ],
+      "expected": ["unnecessary-delegation"]
+    }
+  ]
+}

@@ -166,6 +166,113 @@ export async function clusterFindings(
   return [...groups.values()].filter((group) => group.length > 1);
 }
 
+export interface ConsolidatedGroup {
+  /** Representative finding id (first in stable order). */
+  kept: string;
+  /** Ids merged into the representative, with the method per id. */
+  merged: Array<{ id: string; method: "jaccard" | "needle" | "jev" }>;
+  /** Reviewer/aspect provenance supplied by the caller per finding. */
+  sources: string[];
+}
+
+/** Merge semantically duplicate findings with provenance instead of
+ * repeating the same repair across reviewers. Deterministic Jaccard and
+ * Needle clustering merge first (clusterFindings); ambiguous mid-overlap
+ * pairs get a bounded number of Jev duplicate judgments. Singletons are
+ * returned separately; nothing is dropped, only grouped. */
+export async function consolidateFindings(
+  findings: Finding[],
+  deps: { rank?: RankFn; ask?: JudgeFn; maxJudgePairs?: number; sourceOf?: (id: string) => string | undefined } = {},
+): Promise<{ groups: ConsolidatedGroup[]; singletons: string[] }> {
+  const empty = { groups: [] as ConsolidatedGroup[], singletons: findings.map((finding) => finding.id) };
+  if (!Array.isArray(findings) || findings.length < 2 || findings.length > 64) return empty;
+  const groups = await clusterFindings(findings, deps.rank);
+  // Ambiguous band: mid-overlap pairs across different groups earn one
+  // Jev judgment each (bounded), merging only on confident duplicates.
+  const termsOf = (text: string): Set<string> =>
+    new Set(text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+  const termSets = new Map(findings.map((finding) => [finding.id, termsOf(finding.text)]));
+  const jaccard = (a: Set<string>, b: Set<string>): number => {
+    if (!a.size || !b.size) return 0;
+    let common = 0;
+    for (const term of a) if (b.has(term)) common++;
+    return common / (a.size + b.size - common);
+  };
+  const parent = new Map<string, string>();
+  for (const finding of findings) parent.set(finding.id, finding.id);
+  const find = (id: string): string => {
+    let root = parent.get(id)!, next: string;
+    while ((next = parent.get(root)!) !== root) {
+      parent.set(id, next);
+      root = next;
+    }
+    return root;
+  };
+  const union = (a: string, b: string): void => {
+    parent.set(find(a), find(b));
+  };
+  for (const group of groups) for (const id of group.slice(1)) union(group[0], id);
+  let judgedPairs = 0;
+  const jevMerged = new Set<string>();
+  const maxPairs = Number.isFinite(deps.maxJudgePairs) ? Math.max(0, Math.min(8, Math.floor(deps.maxJudgePairs!))) : 4;
+  if (deps.ask && maxPairs > 0) {
+    const repOf = new Map<string, Finding>();
+    for (const finding of findings) {
+      const root = find(finding.id);
+      if (!repOf.has(root)) repOf.set(root, finding);
+    }
+    const reps = [...repOf.entries()];
+    for (let i = 0; i < reps.length && judgedPairs < maxPairs; i++) {
+      for (let j = i + 1; j < reps.length && judgedPairs < maxPairs; j++) {
+        const [rootA, a] = reps[i];
+        const [rootB, b] = reps[j];
+        if (find(rootA) === find(rootB)) continue;
+        const overlap = jaccard(termSets.get(a.id)!, termSets.get(b.id)!);
+        if (overlap < 0.3 || overlap >= 0.6) continue;
+        judgedPairs++;
+        try {
+          const verdict = await judgeDuplicatePair(a, b, deps.ask);
+          if (verdict.ok && verdict.duplicate) {
+            const settledA = find(rootA), settledB = find(rootB);
+            for (const finding of findings) {
+              const root = find(finding.id);
+              if (root === settledA || root === settledB) jevMerged.add(finding.id);
+            }
+            union(rootA, rootB);
+          }
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+  const merged = new Map<string, string[]>();
+  for (const finding of findings) {
+    const root = find(finding.id);
+    if (!merged.has(root)) merged.set(root, []);
+    merged.get(root)!.push(finding.id);
+  }
+  const out: ConsolidatedGroup[] = [];
+  const singletons: string[] = [];
+  for (const ids of merged.values()) {
+    if (ids.length < 2) {
+      singletons.push(ids[0]);
+      continue;
+    }
+    const [kept, ...rest] = ids;
+    const keptTerms = termSets.get(kept)!;
+    out.push({
+      kept,
+      merged: rest.map((id) => ({
+        id,
+        method: (jaccard(keptTerms, termSets.get(id)!) >= 0.6 ? "jaccard" : jevMerged.has(id) ? "jev" : deps.rank ? "needle" : "jaccard") as ConsolidatedGroup["merged"][number]["method"],
+      })),
+      sources: [...new Set(ids.map((id) => deps.sourceOf?.(id)).filter((source): source is string => typeof source === "string" && !!source))],
+    });
+  }
+  return { groups: out, singletons };
+}
+
 /** Judge whether two findings are semantic duplicates (one batched call). */
 export async function judgeDuplicatePair(
   a: Finding,

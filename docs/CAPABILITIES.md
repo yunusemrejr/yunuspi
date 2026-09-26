@@ -1017,11 +1017,11 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 #### design-studio
 
-Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
+Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
 
-**Entrypoints:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`
+**Entrypoints:** `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`
 
-**Catalog tool pointers:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`, `render_see`, `design_audit`
+**Catalog tool pointers:** `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`, `render_see`, `design_audit`
 
 **Options:**
 
@@ -1031,11 +1031,12 @@ Turn design references into code. image_analyze maps a mockup, screenshot or ima
 - `map|blocks|kinds`: Target assets by design-map block ids or kinds.
 - `key|trim|format`: Edge-connected background keying with de-fringing, trimming, and PNG/JPEG/WebP selection.
 - `source|candidate|region`: Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region.
+- `op`: Procedural plate to synthesize: solid, linear-gradient, checker, noise or grid. Values: `solid`, `linear-gradient`, `checker`, `noise`, `grid`.
 - `outputDir`: Artifacts default to the git-ignored .pi/design folder in the workspace.
 
 **Related records:** `rendered-design-review`, `web-and-media`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
 
 **Documentation:** [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
 
@@ -1090,7 +1091,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 136; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
-- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 216; literal)
+- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 220; literal)
 - `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
 - `code_quality` — [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts) (line 9; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
@@ -1103,7 +1104,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `data_query` — [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) (line 127; factory)
 - `decision_frontier` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 20; factory)
 - `dependency_plan` — [`agent/extensions/pi-subagents/src/extension/reasoning-aids.ts`](../agent/extensions/pi-subagents/src/extension/reasoning-aids.ts) (line 19; factory)
-- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 249; literal)
+- `design_audit` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 241; literal)
 - `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
@@ -1124,7 +1125,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2809; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2964; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 438; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 484; literal)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 263; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 34; factory)
 - `net_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 36; catalog)
@@ -1141,8 +1142,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 580; literal)
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 294; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 396; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 618; literal)
-- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 248; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 659; literal)
+- `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 240; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scene_create` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 273; factory)
@@ -1151,7 +1152,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1882; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 802; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1819; literal)
-- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 371; literal)
+- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 375; literal)
 - `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 722; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
@@ -1171,7 +1172,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `video_project` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 22; factory)
 - `video_qa` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 30; factory)
 - `video_render` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 26; factory)
-- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 90; literal)
+- `wait_for` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 82; literal)
 - `web_asset_check` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 22; catalog)
 - `web_probe` — [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) (line 120; literal)
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 69; literal)
@@ -1182,7 +1183,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
-- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 18)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 20)
 - [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 75)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 579)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 246)
@@ -1193,7 +1194,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) — registration receives source-owned supervisor tool definitions; known tools: `contact_supervisor`, `subagent_supervisor` (lines 313, 658)
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 42)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1659, 2247, 2401, 2800)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 104)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 96)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `archive_probe`, `contract_diff`, `coverage_probe`, `env_audit`, `local_mail_read`, `local_mail_search`, `net_probe`, `openapi_probe`, `package_probe`, `sqlite_probe`, `ssh_plan`, `web_asset_check`, `workflow_probe`, `workspace_search` (lines 23)
 - [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_synth`, `narration_tts`, `video_project`, `video_qa`, `video_render` (lines 11)
 
@@ -1233,7 +1234,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 427)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 462)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 487)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 616)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
@@ -1268,17 +1269,19 @@ Tool names come from literal registrations and source-owned factory definitions,
 ### Dynamic command owners
 
 - [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 153)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 145)
 
 ## MCP and wrapper service owners
 
 This section reports source owners with explicit MCP or wrapper/adapter/client evidence. It names files and evidence only; it does not claim that a service is running or that every dynamically exposed tool is available.
 
+- [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) — `wrapper/adapter`
 - [`agent/extensions/context-profile.ts`](../agent/extensions/context-profile.ts) — `wrapper/adapter`
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts) — `wrapper/adapter`
 - [`agent/extensions/http-tools.ts`](../agent/extensions/http-tools.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) — `MCP`
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts) — `MCP`, `wrapper/adapter`
@@ -1447,6 +1450,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts)
 - [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts)
 - [`agent/extensions/lib/image-compaction.ts`](../agent/extensions/lib/image-compaction.ts)
+- [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts)
 - [`agent/extensions/lib/intent-context.ts`](../agent/extensions/lib/intent-context.ts)
 - [`agent/extensions/lib/intervention-control.ts`](../agent/extensions/lib/intervention-control.ts)
 - [`agent/extensions/lib/intervention-intents.ts`](../agent/extensions/lib/intervention-intents.ts)
@@ -1555,9 +1559,16 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/micro-intelligence/evidence.ts`](../agent/extensions/lib/micro-intelligence/evidence.ts)
 - [`agent/extensions/lib/micro-intelligence/health.ts`](../agent/extensions/lib/micro-intelligence/health.ts)
 - [`agent/extensions/lib/micro-intelligence/intent.ts`](../agent/extensions/lib/micro-intelligence/intent.ts)
+- [`agent/extensions/lib/micro-intelligence/jev-decisions.ts`](../agent/extensions/lib/micro-intelligence/jev-decisions.ts)
 - [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+- [`agent/extensions/lib/micro-intelligence/micro-worker.ts`](../agent/extensions/lib/micro-intelligence/micro-worker.ts)
+- [`agent/extensions/lib/micro-intelligence/model-qual-lab.ts`](../agent/extensions/lib/micro-intelligence/model-qual-lab.ts)
+- [`agent/extensions/lib/micro-intelligence/rerank.ts`](../agent/extensions/lib/micro-intelligence/rerank.ts)
 - [`agent/extensions/lib/micro-intelligence/retrieval.ts`](../agent/extensions/lib/micro-intelligence/retrieval.ts)
 - [`agent/extensions/lib/micro-intelligence/review.ts`](../agent/extensions/lib/micro-intelligence/review.ts)
+- [`agent/extensions/lib/micro-intelligence/route-privacy.ts`](../agent/extensions/lib/micro-intelligence/route-privacy.ts)
+- [`agent/extensions/lib/micro-intelligence/router-shadow.ts`](../agent/extensions/lib/micro-intelligence/router-shadow.ts)
+- [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts)
 - [`agent/extensions/lib/micro-intelligence/status.ts`](../agent/extensions/lib/micro-intelligence/status.ts)
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs)
 - [`agent/extensions/lib/project-intelligence/continuity.mjs`](../agent/extensions/lib/project-intelligence/continuity.mjs)

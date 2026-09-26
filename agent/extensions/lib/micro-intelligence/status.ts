@@ -7,6 +7,9 @@ import { needleHealth, needleHandle } from "../needle-runtime.ts";
 import { jevHealth, jevEnabled, JEV_INPUT_POLICY, JEV_MAX_INPUT_CHARS, JEV_REMOTE_PROVIDER, openRouterKey } from "../jev-client.ts";
 import { microMetrics } from "./metrics.ts";
 import { microHealthSnapshot, needleStatus, jevStatus, type LayerHealth } from "./health.ts";
+import { spanStatus } from "./span-sensor.ts";
+import { microWorkerStatus } from "./micro-worker.ts";
+import { rerankStatus } from "./rerank.ts";
 
 const INSPECT_KEY = Symbol.for("yunus-pi.micro.inspect.v1");
 
@@ -82,6 +85,10 @@ export function microStatusSnapshot(request?: {
   const hasKey = openRouterKey() !== undefined;
   const smol = safeInspect("smol");
   const kompress = safeInspect("mini");
+  const spanLive = safeInspect("span");
+  const span = spanStatus();
+  const worker = microWorkerStatus();
+  const rerank = rerankStatus();
   const layers: LayerHealth[] = [
     { layer: "deterministic", status: "ready", detail: "local reflexes" },
     {
@@ -97,6 +104,21 @@ export function microStatusSnapshot(request?: {
       layer: "jev",
       status: jevStatus(jev.state === "open", hasKey),
       detail: jev.routes.map(route => `${route.family}: ${route.state}`).join(", "),
+    },
+    {
+      layer: "span",
+      status: !span.enabled ? "disabled" : !hasKey ? "no-key" : "ready",
+      detail: span.shadow ? `shadow record-only · ${span.model}` : span.model,
+    },
+    {
+      layer: "microworker",
+      status: !worker.enabled ? "disabled" : worker.candidates.length ? "ready" : "unavailable",
+      detail: worker.candidates.length ? `${worker.candidates.length} candidate routes` : "no candidate routes configured",
+    },
+    {
+      layer: "rerank",
+      status: !rerank.enabled ? "disabled" : rerank.model ? "ready" : "unavailable",
+      detail: rerank.model ?? "unconfigured; Needle stays the default",
     },
   ];
   return {
@@ -142,6 +164,9 @@ export function microStatusSnapshot(request?: {
     },
     smol,
     kompress,
+    span: { ...span, live: spanLive },
+    microworker: worker,
+    rerank,
     metrics: microMetrics().summaryLines(),
   };
 }

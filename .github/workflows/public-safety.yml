@@ -1,26 +1,70 @@
 name: Public safety and distribution checks
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+# A new push supersedes older runs on the same branch: cancel them instead of
+# queueing full suites behind each other. Main and release tags never cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  safety:
+  gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
       - run: node scripts/check-public.mjs
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Install execution isolation prerequisite
+      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
+      - run: npm run build:core
+
+  tests:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SHARD_INDEX: ${{ matrix.shard }}
+      SHARD_TOTAL: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - name: Install execution isolation prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap python3 apparmor ffmpeg xvfb xdotool x11-apps x11-utils
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bubblewrap python3 apparmor ffmpeg xvfb xdotool x11-apps x11-utils
           sudo apparmor_parser -r config/bwrap.apparmor
       - name: Start disposable sandbox resource manager
         run: |
@@ -31,15 +75,28 @@ jobs:
         run: |
           npx --no-install playwright install --with-deps chromium
           sudo apparmor_parser -r config/playwright-chromium.apparmor
-      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
       - run: npm run build:core
-      - run: npm test
+      - name: Run test shard ${{ matrix.shard }} of 4
         env:
           PI_REQUIRE_ISOLATION_TEST: '1'
           PI_SANDBOX_REQUIRE: '1'
           PI_REQUIRE_MEDIA_TEST: '1'
           PI_BROWSER_REQUIRE: '1'
           PI_RENDER_BROWSER_CHANNEL: chromium
+        run: |
+          mapfile -t files < <(find tests -maxdepth 1 -name '*.test.mjs' | sort | awk "NR % ${SHARD_TOTAL} == ${SHARD_INDEX}")
+          echo "Shard ${SHARD_INDEX}/${SHARD_TOTAL}: ${#files[@]} test files"
+          PI_LOCAL_LM=off node --test --test-concurrency="${PI_PUBLIC_TEST_CONCURRENCY:-1}" "${files[@]}"
+
+  safety:
+    if: always()
+    needs: [gate, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "gate=${{ needs.gate.result }} tests=${{ needs.tests.result }}"
+          [ "${{ needs.gate.result }}" = success ] && [ "${{ needs.tests.result }}" = success ]
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -49,11 +106,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
       - name: Publish the tested version tag

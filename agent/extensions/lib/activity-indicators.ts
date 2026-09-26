@@ -108,6 +108,9 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
   if (data.isError === true || data.disabled === true || data.shadow === true) return undefined;
   switch (kind) {
     case "ml.jev.used": return "JEV";
+    case "ml.span.used": return "Span sensor";
+    case "ml.microworker.used": return "Micro worker";
+    case "ml.rerank.used": return "Remote rerank";
     case "ml.needle.call": return data.count === undefined || (typeof data.count === "number" && data.count > 0) ? "Needle3" : undefined;
     case "ml.smol.used": return "Local LM";
     case "ml.mini.used": return "Kompress";
@@ -122,17 +125,21 @@ export function intelligenceUseForEvent(kind: string, data: Record<string, unkno
 /** Fixed labels and bounded numeric evidence only: no prompt, selected text,
  * model output, file path or arbitrary payload enters the transcript. A
  * completed call is not proof that its result reached the main model. */
+/** micro-intelligence helper id → display/ledger component label. */
+export const HELPER_LABELS: Readonly<Record<string, string>> = { needle: "Needle3", smol: "Local LM", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection", span: "Span sensor", microworker: "Micro worker", rerank: "Remote rerank" };
 export function describeIntelligenceActivity(kind: string, data: Record<string, unknown>): DescribedActivity | undefined {
   const ms = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? Math.round(data.durationMs) : undefined;
-  const helpers: Record<string, string> = { needle: "Needle3", smol: "Local LM", kompress: "Kompress", jev: "JEV", deterministic: "Deterministic selection" };
+  const helpers = HELPER_LABELS;
   const amount = (key: string) => Number.isSafeInteger(data[key]) && Number(data[key]) >= 0 ? Number(data[key]) : undefined;
   const decision = typeof data.decision === "string" ? data.decision : "";
   const reason = typeof data.reason === "string" && /^[a-z0-9-]{1,48}$/.test(data.reason) ? data.reason.replaceAll("-", " ") : undefined;
   const status: ActivityStatus = data.isError === true ? "error" : "ok";
   if (data.disabled === true || data.shadow === true || data.isError === true) return;
-  if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped") {
-    const failed = ["unavailable", "unhealthy", "timeout", "no-key", "invalid-input"].includes(String(data.reason));
-    return { label: kind === "ml.jev.skipped" ? "JEV" : "Needle3", status: failed ? "error" : "skip", ms,
+  if (kind === "ml.jev.skipped" || kind === "ml.needle.skipped" || kind === "ml.span.skipped" || kind === "ml.microworker.skipped" || kind === "ml.rerank.skipped") {
+    const failed = ["unavailable", "unhealthy", "timeout", "no-key", "invalid-input", "route-unavailable"].includes(String(data.reason));
+    const skipLabel = kind === "ml.jev.skipped" ? "JEV" : kind === "ml.needle.skipped" ? "Needle3"
+      : kind === "ml.span.skipped" ? "Span sensor" : kind === "ml.microworker.skipped" ? "Micro worker" : "Remote rerank";
+    return { label: skipLabel, status: failed ? "error" : "skip", ms,
       detail: `${failed ? "unavailable; fallback retained" : "skipped"}${reason ? ` · ${reason}` : ""}` };
   }
   if ((kind === "ml.evidence.delivered" || kind === "ml.evidence.returned") && typeof data.helper === "string" && Object.hasOwn(helpers, data.helper)) {
@@ -155,6 +162,17 @@ export function describeIntelligenceActivity(kind: string, data: Record<string, 
   if (kind === "ml.jev.used") {
     const questions = amount("questions");
     return { label: "JEV", status, ms, detail: `${data.route === "jaredpalmer/kev-4b" ? "Kev" : "Jev"} · ${data.cached === true ? "cached answer reused" : "remote judge answered"}${questions === undefined ? "" : ` · ${questions} ${questions === 1 ? "question" : "questions"}`}` };
+  }
+  if (kind === "ml.span.used") {
+    const present = amount("present");
+    return { label: "Span sensor", status, ms, detail: `${data.cached === true ? "cached scores reused" : "trace scored"}${present === undefined ? "" : ` · ${present} signals above bar`}` };
+  }
+  if (kind === "ml.microworker.used") {
+    return { label: "Micro worker", status, ms, detail: `${data.cached === true ? "cached answer reused" : "bounded helper answered"}${typeof data.op === "string" ? ` · ${data.op}` : ""}` };
+  }
+  if (kind === "ml.rerank.used") {
+    const count = amount("count");
+    return { label: "Remote rerank", status, ms, detail: `${data.cached === true ? "cached order reused" : "remote order ready"}${count === undefined ? "" : ` · ${count} candidates`}` };
   }
   if (kind === "ml.smol.inference" || kind === "ml.mini.select") return {
     label: kind === "ml.smol.inference" ? "Local LM" : "Kompress", status: decision === "selected" || decision === "cache-hit" ? status

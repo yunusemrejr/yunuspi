@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as nodeModule from "node:module";
 import { activePiProcesses } from "./core-update.mjs";
 import { resolveOwnedCore } from "./lib/owned-core.mjs";
 
@@ -69,6 +70,16 @@ async function checkSourceSyntax(file) {
         return "systemd user bus unavailable; only static shape checked";
       throw e;
     }
+  }
+  else if (/\.[cm]?ts$/.test(file) && typeof nodeModule.stripTypeScriptTypes === "function") {
+    // Node 24's --check parses .ts as JavaScript even with the strip-types
+    // flags, so every extension reported a false syntax error. Strip types
+    // in-process (positions preserved) and syntax-check the module source.
+    const source = nodeModule.stripTypeScriptTypes(fs.readFileSync(file, "utf8"), { mode: "strip" });
+    const pending = execFileP(process.execPath, ["--input-type=module", "--check"], options);
+    pending.child.stdin.end(source);
+    try { await pending; }
+    catch (e) { throw Object.assign(e, { stderr: String(e.stderr ?? "").replaceAll("[stdin]", file) }); }
   }
   else if (/\.(?:[cm]?[jt]s|tsx|jsx)$/.test(file))
     await execFileP(

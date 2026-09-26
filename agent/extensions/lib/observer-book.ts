@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import type { RankFn } from './micro-intelligence/review.ts';
 
 export const BOOK_SECTION_BYTES = 3_400;
 export const BOOK_DEEP_READ_CHARS = 1_900;
@@ -843,6 +844,36 @@ export function createMarginStore(options: { dir: string; project: string; label
   };
 }
 export type MarginStore = ReturnType<typeof createMarginStore>;
+
+/** Semantic duplicate probe for a margin candidate against live notes.
+ * The store's deterministic similar() already ran at add time; this
+ * Needle-only pass catches paraphrase duplicates (same meaning, different
+ * words) so repeated observations confirm one note instead of spawning
+ * lookalikes. Returns the duplicated note id, or undefined to keep the
+ * candidate. Never throws; unavailable ranking abstains. */
+export async function findSemanticMarginDuplicate(
+  text: string,
+  notes: MarginNote[],
+  rank: RankFn | undefined,
+  threshold = 0.93,
+): Promise<string | undefined> {
+  try {
+    if (!rank || typeof text !== 'string' || text.trim().length < 12) return undefined;
+    const live = notes.filter((note) => !note.struckAt && typeof note.text === 'string' && note.text.trim().length >= 12).slice(0, 24);
+    if (live.length < 1) return undefined;
+    const result = await rank(
+      text.slice(0, 512),
+      live.map((note) => ({ id: note.id, text: note.text.slice(0, 512) })),
+      1,
+    );
+    if (!result.ok || result.shadow) return undefined;
+    const top = result.value?.ranked?.[0];
+    if (!top || typeof top.score !== 'number' || top.score < threshold || top.score > 1) return undefined;
+    return live.some((note) => note.id === top.id) ? top.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Rank margin notes for the current focus: relevance first, then how often
  * the observer re-confirmed them, then recency. Unrelated notes stay out. */

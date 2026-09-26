@@ -7,7 +7,7 @@ import { sessionObservability } from '../session-observability.ts';
  */
 const RING_MAX = 128;
 
-export type MicroHelper = "deterministic" | "needle" | "smol" | "kompress" | "jev" | "llm";
+export type MicroHelper = "deterministic" | "needle" | "smol" | "kompress" | "jev" | "llm" | "span" | "microworker" | "rerank";
 
 export interface HelperCounters {
   offers: number;
@@ -72,6 +72,9 @@ export function createMicroMetrics() {
     kompress: freshHelper(),
     jev: freshHelper(),
     llm: freshHelper(),
+    span: freshHelper(),
+    microworker: freshHelper(),
+    rerank: freshHelper(),
   };
   const jevExtra = { questions: 0, tokens: 0, costUsd: 0, bySite: {} as JevCounters["bySite"] };
   const llmExtra: LlmCounters = { helperCalls: 0, avoided: 0, estimatedTokensAvoided: 0 };
@@ -94,6 +97,9 @@ export function createMicroMetrics() {
     },
     accept(helper: MicroHelper, savedChars = 0, projected = false): void {
       helpers[helper].accepted++;
+      // Acceptance is the consumer's statement that a helper result changed
+      // what the harness did; the session ledger (/used) counts it as applied.
+      try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.helper.applied", { helper }); } catch { /* telemetry is optional */ }
       if (projected) helpers[helper].projectedSavedChars += Math.max(0, Math.floor(savedChars));
       else helpers[helper].savedChars += Math.max(0, Math.floor(savedChars));
     },

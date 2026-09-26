@@ -2320,17 +2320,19 @@
     {
       "id": "design-studio",
       "group": "web_media",
-      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
+      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
       "entrypoints": [
         "image_analyze",
         "image_crop",
         "image_trace",
+        "image_create",
         "visual_diff"
       ],
       "tools": [
         "image_analyze",
         "image_crop",
         "image_trace",
+        "image_create",
         "visual_diff",
         "render_see",
         "design_audit"
@@ -2361,6 +2363,17 @@
           "summary": "Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region."
         },
         {
+          "name": "op",
+          "values": [
+            "solid",
+            "linear-gradient",
+            "checker",
+            "noise",
+            "grid"
+          ],
+          "summary": "Procedural plate to synthesize: solid, linear-gradient, checker, noise or grid."
+        },
+        {
           "name": "outputDir",
           "summary": "Artifacts default to the git-ignored .pi/design folder in the workspace."
         }
@@ -2374,6 +2387,7 @@
         "agent/extensions/design-studio.ts",
         "agent/extensions/lib/design-studio.ts",
         "agent/extensions/lib/image-analysis.ts",
+        "agent/extensions/lib/image-synth.ts",
         "agent/scripts/render-capture.mjs",
         "agent/skills/mockup-to-code/SKILL.md"
       ],
@@ -2953,7 +2967,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 462
+        "line": 487
       },
       {
         "name": "or-provider",
@@ -3122,7 +3136,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          153
+          145
         ]
       }
     ],
@@ -3254,7 +3268,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 216,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3332,7 +3346,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 241,
         "kind": "literal"
       },
       {
@@ -3460,7 +3474,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 438,
+        "line": 484,
         "kind": "literal"
       },
       {
@@ -3562,13 +3576,13 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 618,
+        "line": 659,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 248,
+        "line": 240,
         "kind": "literal"
       },
       {
@@ -3622,7 +3636,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 371,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -3743,7 +3757,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 90,
+        "line": 82,
         "kind": "literal"
       },
       {
@@ -3860,7 +3874,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 216,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3890,7 +3904,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 241,
         "kind": "literal"
       },
       {
@@ -3962,7 +3976,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 438,
+        "line": 484,
         "kind": "literal"
       },
       {
@@ -4034,13 +4048,13 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 618,
+        "line": 659,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 248,
+        "line": 240,
         "kind": "literal"
       },
       {
@@ -4082,7 +4096,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 371,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -4118,7 +4132,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 90,
+        "line": 82,
         "kind": "literal"
       },
       {
@@ -4147,7 +4161,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          18
+          20
         ]
       },
       {
@@ -4301,7 +4315,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          104
+          96
         ],
         "knownNames": [
           "todo"
@@ -4350,7 +4364,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 636,
+      "sourceFiles": 644,
       "registrationSites": 76,
       "indirectRegistrationSites": 18,
       "stableRegistrationRows": 108,
@@ -4737,6 +4751,10 @@
       },
       {
         "path": "agent/extensions/lib/image-compaction.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/image-synth.ts",
         "exists": true
       },
       {
@@ -5158,7 +5176,23 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/micro-intelligence/jev-decisions.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/micro-intelligence/metrics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/micro-worker.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/model-qual-lab.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/rerank.ts",
         "exists": true
       },
       {
@@ -5167,6 +5201,18 @@
       },
       {
         "path": "agent/extensions/lib/micro-intelligence/review.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/route-privacy.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/router-shadow.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/micro-intelligence/span-sensor.ts",
         "exists": true
       },
       {
@@ -5802,6 +5848,12 @@
     ],
     "serviceOwners": [
       {
+        "source": "agent/extensions/checkpoints.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
         "source": "agent/extensions/context-profile.ts",
         "signals": [
           "wrapper/adapter"
@@ -5827,6 +5879,12 @@
       },
       {
         "source": "agent/extensions/lib/jev-client.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/micro-intelligence/span-sensor.ts",
         "signals": [
           "wrapper/adapter"
         ]

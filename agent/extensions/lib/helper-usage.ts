@@ -5,7 +5,7 @@ import { collectAuxiliaryModelUsage } from './cost-evidence.ts';
 
 export const HELPER_USAGE_VIEW = Symbol.for('yunuspi.helper-usage-view.v1');
 export const HELPER_USAGE_ENTRY = 'helper-usage-v1';
-const names = ['JEV', 'Needle3', 'Local LM', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection'];
+const names = ['JEV', 'Needle3', 'Local LM', 'Kompress', 'Fuzzy matching', 'Retrieval intelligence', 'Neural ranker', 'Intent classifier', 'WASM source check', 'Deterministic selection', 'Span sensor', 'Micro worker', 'Remote rerank'];
 const fields = ['events','executions','cached','results','applied','delivered','returned','skipped','failed','timingSamples','durationMs','matches'];
 const numeric = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const clean = (value: unknown, max=200) => typeof value === 'string' ? value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,'').slice(0,max) : '';
@@ -42,7 +42,7 @@ export function createHelperUsageLedger() {
       row.events++;
       const cached=data.cached===true||data.coalesced===true||data.decision==='cache-hit';
       if(cached)row.cached++;
-      if(['ml.needle.call','ml.jev.used','ml.smol.inference','ml.mini.select','ml.wasm.completed'].includes(kind)) {
+      if(['ml.needle.call','ml.jev.used','ml.smol.inference','ml.mini.select','ml.wasm.completed','ml.span.used','ml.microworker.used','ml.rerank.used'].includes(kind)) {
         if(!cached)row.executions++;
         if(described.status==='ok')row.results++;
       }

@@ -3,7 +3,7 @@
  * Getters are injected so this module stays dependency-free and testable.
  */
 export interface LayerHealth {
-  layer: "deterministic" | "needle" | "smol" | "kompress" | "jev";
+  layer: "deterministic" | "needle" | "smol" | "kompress" | "jev" | "span" | "microworker" | "rerank";
   /** One of: ready, warming, unavailable, disabled, busy, breaker-open, no-key. */
   status: string;
   detail: string;

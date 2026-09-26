@@ -564,6 +564,7 @@ export function buildSessionJsonExport(input: SessionJsonExportInput): any {
     skills: skillLedger,
     microIntel: {
       jev: (metrics as any)?.jev ?? null,
+      span: (metrics as any)?.span ?? null,
       note: "per-helper usefulness lives in the micro-intelligence ledger when present",
     },
     hooks: (metrics as any)?.hooks ?? {},

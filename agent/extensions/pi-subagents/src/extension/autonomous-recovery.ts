@@ -33,6 +33,7 @@ import { extractJsonEnvelope } from "../shared/reviewer-envelope.ts";
 import { helperIntentEvidence } from "../../../lib/intent-context.ts";
 import { askJev, tooShort } from "../../../lib/jev-client.ts";
 import { microMetrics } from "../../../lib/micro-intelligence/metrics.ts";
+import { askTypedDecision } from "../../../lib/micro-intelligence/jev-decisions.ts";
 import { scopeRequest } from "../../../lib/scope-deliberation.ts";
 import { registerScopeCouncilRunner } from "./scope-council-runner.ts";
 
@@ -862,6 +863,21 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 			// failures with no success between. Transient blips and gate
 			// denials wait out the cooldown and retry the same route below;
 			// the main session never flips to another model on a first failure.
+			// Shadow calibration for the typed recovery-strategy decision: the
+			// deterministic switch/wait logic below stays authoritative; the
+			// judgment only measures agreement with the taken strategy.
+			const shadowRecoveryStrategy = (taken: string) => (async () => {
+				try {
+					const shadow = await askTypedDecision("recovery-strategy", {
+						state: {
+							failure: `${failure?.kind ?? "unknown"}: ${errorText.slice(0, 800)}`,
+							attempts: `consecutive attempts: ${attempts}; alternate available: ${alternate ? route(alternate) : "none"}`,
+						},
+					}, { judge: deps.judge ?? ((site, state, questions) => askJev(site, state, questions, { pi })), shadow: true });
+					const suggested = (shadow.verdict as any)?.strategy;
+					try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.jev.shadow", { site: "recovery-strategy", count: 1, agreed: suggested === taken }); } catch { /* shadow telemetry is optional */ }
+				} catch { /* shadow never affects recovery */ }
+			})();
 			const switchAllowed = !gateDenial && (failure?.kind === "provider-auth" || attempts >= 3);
 			const gatedAlternate = alternate && !switchAllowed ? alternate : undefined;
 			if (alternate && switchAllowed) {
@@ -881,7 +897,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				let switched = false;
 				try { switched = await setModel(target, ctx); }
 				catch (error) { automaticRoute = undefined; throw error; }
-				if (switched) { if (epoch !== generation || signal.aborted) return; notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${alternateNote}; retained session and completed tool results.`); event.decision = "retry"; return; }
+				if (switched) { if (epoch !== generation || signal.aborted) return; notice(ctx, `${alternate.id === primary.id ? "Provider" : "Model"} recovery: ${route(primary)} → ${route(alternate)}; ${alternateNote}; retained session and completed tool results.`); event.decision = "retry"; void shadowRecoveryStrategy("switch-route"); return; }
 				automaticRoute = undefined;
 				restorePrimary = false;
 			}
@@ -906,6 +922,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 			// just the fixed fallback): the store is fleet-visible, so the recheck
 			// cannot fire into a provider another session just saw fail. Bounded by
 			// the recovery deadline via the signal.
+			void shadowRecoveryStrategy("cooldown-wait");
 			await sleep(Math.min(retryDelayMs, RECOVERY_DEADLINE_MS - (now() - recoveryStart!)), signal);
 			if (epoch !== generation || signal.aborted || now() - recoveryStart! >= RECOVERY_DEADLINE_MS) return;
 			// Already on the primary route: resuming needs no switch. Calling

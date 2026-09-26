@@ -12,7 +12,7 @@ import { isProvenFreeRoute } from './pi-subagents/src/runs/shared/free-route-evi
 import { projectMemoryKey } from './pi-memory/project-identity.ts';
 import { needleHealth, needleRank } from './lib/needle-runtime.ts';
 import { needlePolicy } from './lib/needle-policy.ts';
-import { createBookSelectionState, createMarginStore, createSessionProfile, loadObserverBook, marginStoreDir, noteBookCitations, noteBookmarks, noteBookReview, profileRow, renderBookSection,
+import { createBookSelectionState, createMarginStore, createSessionProfile, findSemanticMarginDuplicate, loadObserverBook, marginStoreDir, noteBookCitations, noteBookmarks, noteBookReview, profileRow, renderBookSection,
   selectBookPassages, selectMargins, type BookSection, type BookSelection, type MarginStore, type ObserverBook } from './lib/observer-book.ts';
 import path from 'node:path';
 import { createObserverJournal } from './lib/observer-journal.ts';
@@ -400,7 +400,32 @@ export default function sessionObserver(pi: any, testing: any = {}) {
           if (advice.read?.length) { noteBookmarks(bookState, advice.read); parts.push(`reading ${advice.read.join(', ')}`); }
           if (advice.strike?.length && store) { try { if (store.strike(advice.strike)) parts.push(`struck margin ${advice.strike.join(', ')}`); } catch { /* A read-only store keeps its notes. */ } }
           if (advice.margin && store) {
-            try { const kept = store.add(advice.margin, { passage: advice.book?.[0], model: routeName }); sessionMargins.add(kept.id); parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`); }
+            try {
+              const kept = store.add(advice.margin, { passage: advice.book?.[0], model: routeName });
+              sessionMargins.add(kept.id);
+              parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`);
+              // Paraphrase duplicates slip past the store's deterministic
+              // match. A Needle-only semantic pass folds the new note into
+              // the existing one (strike + confirm); failure keeps both.
+              if (kept.status === 'added' && (process.env.PI_OBSERVER_SEMANTIC_MARGINS ?? 'on').toLowerCase() !== 'off' && needleUsable()) {
+                const noteId = kept.id, noteText = advice.margin, passage = advice.book?.[0];
+                const rank = (query: string, candidates: Array<{ id: string; text: string }>, topK: number) =>
+                  (testing.needleRank ?? needleRank)({ query, candidates, topK });
+                void (async () => {
+                  try {
+                    const notes = store.list().filter((note: any) => note.id !== noteId);
+                    const dup = await findSemanticMarginDuplicate(noteText, notes, rank);
+                    if (!dup || !owns(ctx)) return;
+                    const existing = notes.find((note: any) => note.id === dup);
+                    if (!existing) return;
+                    try { store.strike([noteId]); } catch { return; }
+                    try { store.add(existing.text, { passage, model: routeName }); } catch { /* the strike already removed the duplicate */ }
+                    sessionMargins.delete(noteId);
+                    sessionMargins.add(dup);
+                  } catch { /* both notes survive */ }
+                })();
+              }
+            }
             catch { parts.push('margin note not saved'); }
           } else if (advice.marginRejected) parts.push(`margin note dropped (${advice.marginRejected})`);
           return parts.join(' · ') || undefined;

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "note": "Synthetic issue->file retrieval fixture for the code-embedding benchmark. File paths are fake; contents are tiny synthetic excerpts.",
+  "files": [
+    {"path": "src/auth/session.ts", "text": "export function rotateRefreshToken(session) { revoke(session.refresh); return issue(session.user); }"},
+    {"path": "src/auth/login.ts", "text": "export async function login(req) { const user = await findByEmail(req.email); return startSession(user); }"},
+    {"path": "src/billing/invoice.ts", "text": "export function renderInvoice(order) { return { total: order.lines.reduce((s, l) => s + l.price, 0) }; }"},
+    {"path": "src/cache/lru.ts", "text": "export class Lru { constructor(n) { this.n = n; this.m = new Map(); } get(k) { return this.m.get(k); } }"},
+    {"path": "src/net/retry.ts", "text": "export async function withRetry(fn, tries) { for (let i = 0; i < tries; i++) { try { return await fn(); } catch {} } throw Error('retry exhausted'); }"}
+  ],
+  "queries": [
+    {"id": "q1", "text": "where does refresh token rotation happen", "relevant": ["src/auth/session.ts"]},
+    {"id": "q2", "text": "login by email starts a session", "relevant": ["src/auth/login.ts"]},
+    {"id": "q3", "text": "invoice total over order lines", "relevant": ["src/billing/invoice.ts"]},
+    {"id": "q4", "text": "least recently used cache get", "relevant": ["src/cache/lru.ts"]},
+    {"id": "q5", "text": "retry a failing async function", "relevant": ["src/net/retry.ts"]},
+    {"id": "q6-paraphrase", "text": "summing up what the customer owes", "relevant": ["src/billing/invoice.ts"]},
+    {"id": "q7-paraphrase", "text": "evicting stale entries when storage is full", "relevant": ["src/cache/lru.ts"]}
+  ]
+}

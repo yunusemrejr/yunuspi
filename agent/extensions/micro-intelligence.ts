@@ -14,6 +14,13 @@ import {
 } from "./lib/micro-intelligence/advisory.ts";
 import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
+import {
+  createSpanTrace,
+  openRouterSpanScorer,
+  scoreSpanTrace,
+  spanEnabled,
+  type SpanScoreResult,
+} from "./lib/micro-intelligence/span-sensor.ts";
 import { needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
 import { runPromptAnalysis } from "./lib/prompt-analysis-runtime.ts";
 import { detectDesignBrief, designDirectionGuidance, designDirectionSummary } from "./lib/design-direction.ts";
@@ -425,6 +432,45 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
   let knownPendingRequestIds = new Set<string>();
   let retainedAnalysisChars = 0;
   let clearAnalysisProgress: (() => void) | undefined;
+  // Span behavior-sensor bridge: a bounded tool-sequence trace (tool names
+  // and outcomes only — never arguments, result content, or prompts, so no
+  // secrets or file bytes can reach the remote scorer). Scored at most once
+  // per turn end and at most every SPAN_MIN_INTERVAL_MS; identical traces
+  // reuse the cached score. Shadow-gated advice stays record-only until
+  // benchmarks justify intervention.
+  const spanCollector = createSpanTrace();
+  const SPAN_MIN_INTERVAL_MS = 30_000;
+  let spanFlight: Promise<void> | undefined;
+  let spanLastAt = 0;
+  let lastSpan: SpanScoreResult | undefined;
+  try {
+    const inspectKey = Symbol.for("yunus-pi.micro.inspect.v1");
+    const inspectRegistry = (((globalThis as Record<symbol, unknown>)[inspectKey] ?? {}) as Record<string, unknown>);
+    inspectRegistry.span = () => {
+      try {
+        return {
+          status: spanEnabled() ? "ready" : "disabled",
+          events: spanCollector.trace.events.length,
+          last: !lastSpan ? null : {
+            ok: lastSpan.ok,
+            cached: lastSpan.cached,
+            shadow: lastSpan.shadow,
+            ms: lastSpan.ms,
+            model: lastSpan.model ?? null,
+            skipped: lastSpan.skipped ?? null,
+            present: lastSpan.scores
+              ? Object.entries(lastSpan.scores).filter(([, scores]) => scores.present >= 0.8).map(([id]) => id)
+              : [],
+          },
+        };
+      } catch {
+        return { status: "unavailable" };
+      }
+    };
+    (globalThis as Record<symbol, unknown>)[inspectKey] = inspectRegistry;
+  } catch {
+    /* Inspection is optional. */
+  }
 
   pi.registerMessageRenderer?.("prompt-analysis", (message: any, { expanded }: { expanded: boolean }) => {
     const summary = typeof message.content === "string" ? message.content : "Intent analysis";
@@ -477,6 +523,8 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     activeAdvisoryRequestIds = new Set();
     knownPendingRequestIds = new Set();
     lastRequest = undefined;
+    try { spanCollector.clear(); } catch { /* hygiene only */ }
+    lastSpan = undefined;
     const resumed = reason === "new" ? { seen: false } : priorPromptAnalysisState(ctx);
     initialPromptSeen = resumed.seen;
     resumedAnalysisContext = resumed.previous;
@@ -500,6 +548,41 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
   pi.on("agent_end", () => {
     for (const controller of unconsumed.values()) controller.abort(new Error("The request ended before any model turn carried it"));
     unconsumed.clear();
+  });
+  pi.on("tool_call", (event: any) => {
+    try {
+      if (!spanEnabled() || typeof event?.toolName !== "string" || !event.toolName) return;
+      spanCollector.record("tool-call", event.toolName.slice(0, 80));
+    } catch {
+      /* Trace recording never affects the tool. */
+    }
+  });
+  pi.on("tool_result", (event: any) => {
+    try {
+      if (!spanEnabled() || typeof event?.toolName !== "string" || !event.toolName) return;
+      spanCollector.record(event.isError ? "error" : "tool-result", `${event.toolName.slice(0, 80)} ${event.isError ? "error" : "ok"}`);
+    } catch {
+      /* Trace recording never affects the tool. */
+    }
+  });
+  pi.on("agent_end", () => {
+    try {
+      if (!spanEnabled() || spanFlight || Date.now() - spanLastAt < SPAN_MIN_INTERVAL_MS) return;
+      if (spanCollector.trace.events.length < 3) return;
+      const trace = { events: [...spanCollector.trace.events] };
+      spanLastAt = Date.now();
+      spanFlight = (async () => {
+        try {
+          lastSpan = await scoreSpanTrace(trace, openRouterSpanScorer(), { pi });
+        } catch {
+          /* Scoring failures degrade to no signal. */
+        } finally {
+          spanFlight = undefined;
+        }
+      })();
+    } catch {
+      /* Scoring never affects the turn. */
+    }
   });
   pi.on("session_shutdown", () => {
     reset();

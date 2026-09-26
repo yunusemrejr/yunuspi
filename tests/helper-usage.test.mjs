@@ -127,7 +127,10 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
   await page.setContent(renderPopupHtml('What this session used',usedSummaryHtml(summary)));
   assert.equal(await page.locator('h1').innerText(),'What this session used');
   assert.doesNotMatch(await page.locator('.usage-kpi strong').first().evaluate(node=>getComputedStyle(node).fontFamily),/Emoji/);
-  assert.equal(await page.locator('.usage-component').count(),10);
+  assert.equal(await page.locator('.usage-component').count(),13);
+  for (const name of ['Span sensor', 'Micro worker', 'Remote rerank']) {
+    assert.equal(await page.locator('.usage-component').filter({ has: page.locator('summary b', { hasText: new RegExp(`^${name}$`) }) }).count(), 1);
+  }
   assert.equal(await page.locator('.usage-component[open]').count(),0);
   assert.equal(await page.locator('#usage-observer').getAttribute('open'),null);
   const jev=page.locator('.usage-component').filter({has:page.locator('summary b',{hasText:/^JEV$/})});
