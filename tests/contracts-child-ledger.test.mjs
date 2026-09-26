@@ -207,3 +207,19 @@ test('legacy helper path linkage requires an unambiguous observed single run', (
   const other='33333333-3333-4333-8333-333333333333';
   assert.equal(reduceChildEvents(projectTranscriptChildren([life,helper('auto-assist-one',file,{runId:other})])).tasks.length,2,'explicit child ID is never replaced by path inference');
 });
+
+
+test('native lifecycle and restored status project observed execution without fabricated usage or acceptance', () => {
+  const life = state => ({type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'native-run',mode:'parallel',results:[{index:0,status:state}]}});
+  for (const [state, execution] of [['queued','none'],['running','running'],['completed','succeeded'],['failed','failed'],['stopped','failed'],['paused','failed']]) {
+    const task = reduceChildEvents(projectTranscriptChildren([life(state)])).tasks[0];
+    assert.equal(task.execution.status, execution, state);
+    assert.equal(task.attempts[0].usage, undefined);
+    assert.equal(task.acceptance.status, 'none');
+  }
+  const status = {type:'message',message:{role:'toolResult',toolName:'subagent',details:{runId:'native-run',results:[],statusResults:[{index:0,status:'completed',exitCode:0,acceptance:{status:'review-required'}}]}}};
+  const task = reduceChildEvents(projectTranscriptChildren([life('running'), status])).tasks[0];
+  assert.equal(task.state, 'completed'); assert.equal(task.execution.status, 'succeeded');
+  assert.equal(task.acceptance.status, 'pending'); assert.equal(task.attempts[0].usage, undefined);
+  for (const type of ['progress','resume']) assert.equal(reduceChildEvents([{type:'launch',taskId:'fixture',attempt:1},{type,taskId:'fixture',attempt:1}]).tasks[0].execution.status, 'running');
+});

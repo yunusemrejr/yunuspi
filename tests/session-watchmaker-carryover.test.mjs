@@ -55,9 +55,10 @@ function harness(t, notes) {
   watchmakerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }),
     dispatch: async (_route, packet) => {
       packets.push(packet);
-      const result = notes[calls++];
-      const { note, memo = '' } = typeof result === 'string' ? { note: result } : result;
-      return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence: ['request'], tools: [], skills: [], memo }) }] };
+      const supplied = notes[calls++];
+      const result = await (typeof supplied === 'function' ? supplied(packet) : supplied);
+      const { note, memo = '', evidence = ['request'] } = typeof result === 'string' ? { note: result } : result;
+      return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence, tools: [], skills: [], memo }) }] };
     } });
   const fire = (event, payload) => handlers.get(event)?.(payload, ctx);
   const completedIds = () => notices.filter((n) => n.details?.status === 'completed').map((n) => n.details.adviceId);
@@ -151,4 +152,21 @@ test('undelivered watchmaker notes do not expire on a wall clock', async (t) => 
   const capsules = built.messages.filter((m) => m.customType === 'session-watchmaker-context');
   assert.equal(capsules.length, 1, 'aged note still delivers on the next context build');
   assert.ok(capsules[0].content.includes('Reads keep repeating'), 'aged capsule holds the note text');
+});
+
+
+test('a child transition invalidates watchmaker advice before it can seed a memo', async t => {
+  let finish;
+  const h = harness(t, [() => new Promise(resolve => { finish = resolve; })]);
+  let branch = [{type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'fixture-child',mode:'single',state:'running'}}];
+  h.ctx.sessionManager.getBranch = () => branch;
+  h.fire('session_start', {}); await h.beginTask('first','Fix the parser.'); await h.time.advance(60000);
+  assert.ok(finish);
+  branch = [...branch,{type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'fixture-child',mode:'single',state:'completed'}}];
+  finish({note:'Wait for the running child before collecting its result.',memo:'Child is still running; wait for its result.',evidence:['time-children']});
+  await tick();
+  assert.equal(h.completedIds().length,0);
+  assert.equal(h.receipts.some(row => row.customType === 'watchmaker-memo-v1'),false);
+  assert.equal((h.fire('context',{messages:[]})?.messages??[]).length,0);
+  h.fire('session_shutdown',{});
 });

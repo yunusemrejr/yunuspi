@@ -254,7 +254,7 @@ function harness(dispatch) {
   const newManager=()=>({getSessionId:()=> 'synthetic-session',getSessionFile:()=>'/synthetic/session.jsonl',getBranch:()=>branch});
   const ctx={cwd:fixtureRoot,sessionManager:newManager(),isIdle:()=>idle,model,modelRegistry:{getAvailable:()=>[model]}};
   const pi={events:{on:(name,fn)=>{listeners.set(name,fn);return()=>listeners.delete(name);}},on:(name,fn)=>handlers.set(name,fn),registerMessageRenderer:()=>{},getActiveTools:()=>['read'],getAllTools:()=>[{name:'read',description:'Read parser source'},{name:'dormant_parser',description:'Read parser source'}],sendMessage:(...args)=>sent.push(args),appendEntry:(...args)=>{receipts.push(args);branch.push({type:'custom',customType:args[0],data:args[1]});}};
-  observerExtension(pi,{...time,judge:async()=>({ok:false,skipped:'fixture'}),dispatch:async(r,p,s)=>{packets.push(p);return dispatch?dispatch(r,p,s):{...reply(),content:[{type:'text',text:JSON.stringify({note:'Consider checking validation against the current parser source.',evidence:['request'],tools:['read'],skills:[]})}]};}});
+  observerExtension(pi,{...time,judge:async()=>({ok:false,skipped:'fixture'}),dispatch:async(r,p,s,_registry,host)=>{packets.push(p);return dispatch?dispatch(r,p,s,host):{...reply(),content:[{type:'text',text:JSON.stringify({note:'Consider checking validation against the current parser source.',evidence:['request'],tools:['read'],skills:[]})}]};}});
   const emit=(event,data={})=>handlers.get(event)?.(data,ctx);
   emit('session_start');
   function input(text,{accept=true,source='interactive'}={}) {
@@ -502,6 +502,7 @@ test('packet budget preserves current work and latest advice before static harne
   assert.match(p.evidence.find(row=>row.id==='completed-tools').text,/src\/parser.ts/);
   assert.match(p.evidence.find(row=>row.id==='child-state').text,/acceptance=failed/);
   const reduced=JSON.parse(p.evidence.find(row=>row.id==='model-routing').text);assert.equal(reduced.cost.unknown,true);assert.equal(reduced.restrictions.sameModel,true);
+  assert.ok(p.evidence.some(row => row.id === 'event-18'), 'newest included outcome survives catalog pressure');
   assert.ok(Buffer.byteLength(p.text,'utf8')<=10000);
 });
 
@@ -546,7 +547,7 @@ test('unrelated tool progress permits snapshot advice while cited running work c
   active.emit('tool_execution_start',{toolCallId:'build',toolName:'bash',args:{command:'npm test',timeout:120}});await active.advance(30000);
   active.emit('tool_result',{toolCallId:'build',toolName:'bash',input:{command:'npm test',timeout:120},content:[{type:'text',text:'Tests passed.'}]});
   finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'Could useful independent work continue while that check runs?',evidence:['running-tools'],tools:[],skills:[]})}]});await flush();
-  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/Cited running work finished/);active.close();
+  assert.ok(!active.sent.some(([message])=>message.content.includes('returned a note')));assert.match(active.sent.at(-1)[0].content,/Cited evidence was superseded/);active.close();
   // Advice that also rests on other evidence keeps its paid value, with a caveat.
   const mixed=harness(async()=>new Promise(resolve=>{finish=resolve;}));mixed.input('Fix parser validation.');
   mixed.emit('tool_result',{toolName:'read',input:{path:'src/parser.ts'},content:[{type:'text',text:'Required input checks are absent.'}]});
@@ -585,7 +586,7 @@ test('a review whose cited running work finished retains its chronological event
   h.emit('tool_result', { toolCallId: 'build', toolName: 'bash', input: { command: 'npm test' }, content: [{ type: 'text', text: 'Tests passed.' }] });
   finish({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: 'Could independent work continue while the test run finishes?', evidence: ['running-tools'], tools: [], skills: [] }) }] });
   await flush();
-  assert.match(h.sent.at(-1)[0].content, /Cited running work finished/);
+  assert.match(h.sent.at(-1)[0].content, /Cited evidence was superseded/);
   await h.advance(30000);
   assert.equal(calls, 2);
   assert.ok(h.packets[1].evidence.some(row => row.id === 'event-1'), 'stale advice must not consume the unread tool outcome');
@@ -678,9 +679,10 @@ test('observer receives role-specific project history once per accepted task and
 
 test('cheap review admission replaces one routine review and retains evidence for the next full review', async () => {
   for (const quiet of [false, true]) {
-  const time = clock(), notices = []; let calls = 0, judges = 0, reviewed = 0, revision = 1;
+  const time = clock(), notices = []; let calls = 0, judges = 0, reviewed = 0, revision = 1, salience = 0;
   const observer = createSessionObserver({ ...time,
-    snapshot: () => ({ packet: packet(), route, allowTriage: true, reviewKey: String(revision), reviewed: () => reviewed++ }),
+    salience: () => salience,
+    snapshot: () => ({ packet: packet(), route, allowTriage: true, reviewKey: String(revision), backlog: revision > 1 ? 4 : 0, reviewed: () => reviewed++ }),
     notice: (...args) => notices.push(args), receipt() {}, dispatch: async () => { calls++; return quiet ? { ...reply(), content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] } : reply(); },
     judge: async (site, state, questions) => {
       judges++; assert.equal(site, 'observer-admit'); assert.deepEqual(state.current, packet().evidence); assert.deepEqual(state.previous.evidence, packet().evidence);
@@ -690,7 +692,7 @@ test('cheap review admission replaces one routine review and retains evidence fo
   });
   observer.begin('owner'); observer.start(); await time.advance(30_000);
   assert.equal(calls, 1); assert.equal(judges, 0, 'first review always uses the configured reviewer');
-  revision++; await time.advance(quiet ? 60_000 : 30_000);
+  revision++; salience++; await time.advance(30_000);
   assert.equal(calls, 1); assert.equal(judges, 1); assert.equal(reviewed, 1, 'triage cannot consume evidence');
   assert.equal(notices.at(-1)[0], 'triaged');
   await time.advance(30_000);
@@ -699,19 +701,19 @@ test('cheap review admission replaces one routine review and retains evidence fo
   }
 });
 
-test('review triage never postpones salient events, failures, backlog, restricted routes or uncertain judgments', async () => {
-  for (const mode of ['salience', 'failure', 'backlog', 'restriction', 'uncertain', 'unavailable']) {
+test('review triage never postpones urgent events, failures, restricted routes or uncertain judgments', async () => {
+  for (const mode of ['urgent', 'failure', 'restriction', 'uncertain', 'unavailable']) {
     const time = clock(); let calls = 0, judges = 0, revision = 1, salience = 0;
     const observer = createSessionObserver({ ...time, salience: () => salience,
       snapshot: () => ({ packet: mode === 'failure' && revision > 1
         ? buildObserverPacket('Fix parser validation.', [{ id: 'event-2', kind: 'tool error', text: 'Required validation failed.' }], [], []) : packet(),
-        route, allowTriage: !(mode === 'restriction' && revision > 1), reviewKey: String(revision), backlog: mode === 'backlog' && revision > 1 ? 1 : 0 }),
+        route, allowTriage: !(mode === 'restriction' && revision > 1), reviewKey: String(revision), requiresFullReview: mode === 'urgent' && revision > 1 }),
       notice() {}, receipt() {}, dispatch: async () => { calls++; return reply(); },
       judge: async () => { judges++; return mode === 'unavailable' ? { ok: false, skipped: 'unavailable' }
         : { ok: true, answers: { worthwhile: { noul: .02 }, routine: { noul: .5 } }, usage: { inputTokens: 60, cached: false } }; },
     });
     observer.begin('owner'); observer.start(); await time.advance(30_000);
-    revision++; if (mode === 'salience') salience++;
+    revision++; if (mode === 'urgent') salience++;
     await time.advance(30_000);
     assert.equal(calls, 2, mode); assert.equal(judges, ['uncertain', 'unavailable'].includes(mode) ? 1 : 0, mode);
     observer.close();
@@ -740,4 +742,39 @@ test('review triage reconciles fresh evidence and cancels on timeout or owner ch
     if (['timeout', 'owner'].includes(mode)) assert.equal(judgeSignal.aborted, true);
     observer.close();
   }
+});
+
+
+test('superseded plan advice cannot deliver or persist effects, and current state is readable', async () => {
+  let finish, host;
+  const h = harness(async (_route, _packet, _signal, toolHost) => new Promise(resolve => { finish = resolve; host = toolHost; }));
+  h.input('Fix the parser validation.');
+  h.emit('message_end', {message:{role:'custom',customType:'todo-plan',content:'Plan: 0/2 completed. Inspect then verify parser.'}});
+  h.publish('todo-plan-changed', {sessionId:'synthetic-session',cwd:fixtureRoot,tasks:[{id:1,title:'Inspect parser',status:'completed'},{id:2,title:'Verify parser',status:'in_progress'}]});
+  await h.advance(30000);
+  assert.equal(h.packets[0].evidence.some(row => row.kind === 'plan snapshot'), false);
+  assert.match(h.packets[0].evidence.find(row => row.id === 'todo-state').text, /1 completed/);
+  assert.match(host.journal.get('todo-state').text, /1 completed/);
+  finish({stopReason:'stop',content:[{type:'text',text:JSON.stringify({note:'No work has been completed; repeat the inspection.',evidence:['event-1','request'],margin:'Repeat the inspection before verification.'})}]});
+  await flush();
+  assert.equal(h.sent.some(([message]) => message.details?.status === 'completed'), false);
+  assert.equal(h.emit('context', {messages:[]}), undefined);
+  h.close();
+
+  const time = clock(); let effects = 0, reviewed = 0;
+  const observer = createSessionObserver({...time,snapshot:()=>({packet:packet(),route,current:()=>false,applied:()=>{effects++;},reviewed:()=>reviewed++}),notice(){},receipt(){},dispatch:async()=>reply()});
+  observer.begin('fixture'); observer.start(); await time.advance(30000);
+  assert.equal(effects, 0); assert.equal(reviewed, 0); observer.close();
+});
+
+test('changed child state invalidates undelivered and carried orchestration advice', async () => {
+  const life = state => ({type:'custom',customType:'subagent-lifecycle-v1',data:{runId:'fixture-worker',mode:'single',state}});
+  const h = harness(async () => ({...reply(),content:[{type:'text',text:JSON.stringify({note:'Wait for the running worker before collecting its outcome.',evidence:['child-state','request'],tools:[],skills:[]})}]}));
+  h.input('Fix the parser validation.'); h.setBranch([life('running')]); await h.advance(30000);
+  h.input('Continue the same requested fix.');
+  h.setBranch([life('completed')]);
+  const messages = h.emit('context', {messages:[]})?.messages ?? [];
+  assert.equal(messages.some(message => message.customType === 'session-observer-context'), false);
+  assert.ok(h.receipts.some(([type,data]) => type === 'session-observer-delivery-v1' && data.status === 'dropped:stale'));
+  h.close();
 });

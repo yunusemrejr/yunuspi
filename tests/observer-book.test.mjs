@@ -358,7 +358,7 @@ function harness(options = {}) {
   const pi = { events: { on: (name, fn) => { listeners.set(name, fn); return () => listeners.delete(name); } }, on: (name, fn) => handlers.set(name, fn), registerMessageRenderer() {}, registerCommand: (name, spec) => commands.set(name, spec),
     getActiveTools: () => ['read', 'edit'], getAllTools: () => [{ name: 'read', description: 'Read files' }, { name: 'edit', description: 'Edit files' }, { name: 'render_see', description: 'Render and capture a page' }, { name: 'browser_session', description: 'Drive a browser' }],
     sendMessage: (...args) => sent.push(args), appendEntry: (...args) => { receipts.push(args); branch.push({ type: 'custom', customType: args[0], data: args[1] }); } };
-  observerExtension(pi, { ...time, judge: async () => ({ ok: false, skipped: 'fixture' }), marginDir: path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
+  observerExtension(pi, { ...time, judge: options.judge ?? (async () => ({ ok: false, skipped: 'fixture' })), marginDir: options.marginDir ?? path.join(fixtureRoot, 'harness-margins'), dispatch: async (route, packet, signal) => {
     packets.push(packet); routes.push(route.route);
     if (options.fail?.(route.route)) return { stopReason: 'error', content: [] };
     if (options.hang?.(route.route)) return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
@@ -481,4 +481,31 @@ test('a failing observer route cools down while the next configured route serves
     assert.ok(h.sent.some(([message]) => /failed repeatedly; using configured fallback zai\/glm-flash/.test(message.content)));
     h.close();
   } finally { fs.rmSync(prefs, { force: true }); }
+});
+
+
+test('margin duplicate decisions apply only while their task owns the result', async () => {
+  const { projectMemoryKey } = await import('../agent/extensions/pi-memory/project-identity.ts');
+  const { microMetrics } = await import('../agent/extensions/lib/micro-intelligence/metrics.ts');
+  for (const cancelled of [false, true]) {
+    const dir = fs.mkdtempSync(path.join(fixtureRoot, 'margin-owner-'));
+    const store = B.createMarginStore({dir, project:projectMemoryKey(fixtureRoot), label:'fixture',now:()=>30000});
+    store.add('Check delimiter boundaries before a document is parsed.');
+    let resolveJudge, signal, questions;
+    const before = microMetrics().snapshot().helpers.jev.accepted;
+    const h = harness({marginDir:dir,judge:async(site,_state,asks,options)=>{
+      assert.equal(site,'finding-duplicate'); signal=options.signal; questions=asks;
+      return new Promise(resolve=>{resolveJudge=resolve;});
+    }});
+    h.input('Fix parser validation.');
+    h.emit('tool_result',{toolCallId:'fixture-read',toolName:'read',input:{path:'src/parser.ts'},content:[{type:'text',text:'Schema validation is required.'}]});
+    h.setReply(packet=>({note:'',evidence:[packet.evidence.find(row=>row.kind==='tool result').id],margin:'Validate incoming content against its schema at the parser boundary.'}));
+    await h.advance(30000); assert.ok(signal); assert.equal(signal.aborted,false);
+    if(cancelled) { h.input('Continue after the changed validation requirement.'); assert.equal(signal.aborted,true); }
+    resolveJudge({ok:true,answers:Object.fromEntries(Object.keys(questions).map(key=>[key,{noul:.99}])),usage:{inputTokens:40,cached:false}});
+    await flush();
+    assert.equal(store.list().length,cancelled?2:1);
+    assert.equal(microMetrics().snapshot().helpers.jev.accepted-before,cancelled?0:1);
+    h.close();
+  }
 });

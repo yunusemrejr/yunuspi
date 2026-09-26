@@ -44,7 +44,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   // The last persisted start line; identical starts ride the footer status.
   let lastStartedDetail: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
-  let pendingAdvice: { text: string; note: string; picks: string[] } | undefined;
+  let pendingAdvice: { text: string; note: string; picks: string[]; current?: () => boolean | string | undefined } | undefined;
   // The newest completed note that never reached a provider request. The next
   // context build delivers it as its own capsule alongside the current note.
   let carriedAdvice: CarriedReviewerNote | undefined;
@@ -53,7 +53,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
    * Prepared notes keep their prepared-context signal; only unprepared notes
    * (never in any request) are carried. One deep; a replacement is ledgered. */
   const stashCarried = (via: string) => {
-    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdvice) return false;
+    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdvice || pendingAdvice.current?.() === false) return false;
     if (carriedAdvice && carriedAdvice.id !== latestAdviceId) {
       try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: carriedAdvice.id, status: 'dropped:replaced', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
     }
@@ -216,7 +216,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
         }
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
-      const evidence = [...timeRows(), ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
+      const timeEvidence = timeRows();
+      for (const row of timeEvidence) journal.add({ ...row, at: now() });
+      const evidence = [...timeEvidence, ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text), requirements: brief() || undefined });
@@ -236,15 +238,20 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if ((constraints.fixedRoute || constraints.sameModel) && `${ctx.model?.provider}/${ctx.model?.id}` !== entry.route) return { packet: currentPacket, reason: 'User model restriction prevents watchmaker route' };
       if (constraints.freeOnly && !isProvenFreeRoute(model)) return { packet: currentPacket, reason: 'User free-only restriction prevents watchmaker route' };
       const capturedSequence = sequence;
-      // Time rows only grow: a note goes stale only when the model changed
-      // under it. Overlap is named in the delivery caveat by the scheduler.
-      const stillCurrent = () => capturedModel === `${ctx.model?.provider}/${ctx.model?.id}` ? true : false;
+      // Counts may grow, but child/plan transitions can invalidate a suggested
+      // harvest or redispatch before the note reaches the agent.
+      const stillCurrent = (advice?: any) => {
+        if (capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
+        const current = new Map(timeRows().map(row => [row.id, row.text]));
+        return !timeEvidence.some(row => ['time-children', 'time-todos'].includes(row.id) && advice?.evidence?.includes(row.id) && current.get(row.id) !== row.text);
+      };
       const capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewKey = JSON.stringify({ taskEpoch, revision, sequence, unread: recent[0]?.id ?? null, ledger: [...ledger.entries()].map(([tool, row]) => [tool, row.calls, row.errors, Math.round(row.ms / 1000)]), model: capturedModel, route: entry.route, tools: tools.map(tool => [tool.name, tool.availability]), skills: skills.map(skill => skill.name) });
       const routeName = entry.route;
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd } : undefined;
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
         allowTriage: !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly,
+        requiresFullReview: recent.some(row => ['tool error', 'guardian intervention'].includes(row.kind)),
         reviewed: () => { recent = recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !new Set(currentPacket.evidence.map(item => item.id)).has(row.id)).length,
         dispatched: () => {},
@@ -259,7 +266,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
           return (advice as WatchmakerAdvice)?.memoRejected ? `memo dropped (${(advice as WatchmakerAdvice).memoRejected})` : undefined;
         } };
     },
-    notice(status: string, detail: string, advice: any) {
+    notice(status: string, detail: string, advice: any, current?: () => boolean | string | undefined) {
       if (!owns(ctx)) return;
       // A review starts every interval with the same route and settings. Keep
       // the in-flight state in the footer and persist a start line only when
@@ -274,7 +281,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
         if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('supersede')) {
           try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
         }
-        latestAdviceId = `watchmaker-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdvice = { text: observerAdviceText(advice), note: advice.note, picks: [...(advice.tools ?? []), ...(advice.skills ?? [])] };
+        latestAdviceId = `watchmaker-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdvice = { current, text: observerAdviceText(advice), note: advice.note, picks: [...(advice.tools ?? []), ...(advice.skills ?? [])] };
       }
       const content = advice ? `Watchmaker returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Watchmaker ${status}: ${detail}`;
       const delivery = pi.sendMessage({ customType: WATCHMAKER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: displayText(detail, 240),
@@ -455,6 +462,10 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== WATCHMAKER_CONTEXT && message.customType !== WATCHMAKER_MESSAGE);
     const note = owns(context) ? runtime.context(false) : undefined;
+    if (owns(context) && carriedAdvice?.current?.() === false) {
+      try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: carriedAdvice.id, status: 'dropped:stale', at: now() }); } catch { /* Accounting only. */ }
+      carriedAdvice = undefined; preparedCarried = undefined;
+    }
     const carried = owns(context) ? carriedAdvice : undefined;
     if (!note && !carried) return messages.length !== event.messages.length ? { messages } : undefined;
     let prepared = messages;

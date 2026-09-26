@@ -1,5 +1,6 @@
 import { recallProjectContext } from "./lib/project-memory-context.ts";
 import { askJev } from './lib/jev-client.ts';
+import { microMetrics } from './lib/micro-intelligence/metrics.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
@@ -48,7 +49,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   // Note text awaiting provider confirmation. Only confirmed-delivered notes
   // join adviceHistory; unconfirmed notes must not pose as "already delivered".
-  let pendingAdvice: { text: string; note: string; picks: string[] } | undefined;
+  let pendingAdvice: { text: string; note: string; picks: string[]; current?: () => boolean | string | undefined } | undefined;
   // The newest completed note that never reached a provider request. The next
   // context build delivers it as its own capsule alongside the current note.
   let carriedAdvice: CarriedReviewerNote | undefined;
@@ -57,7 +58,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
    * Prepared notes keep their prepared-context signal; only unprepared notes
    * (never in any request) are carried. One deep; a replacement is ledgered. */
   const stashCarried = (via: string) => {
-    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdvice) return false;
+    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdvice || pendingAdvice.current?.() === false) return false;
     if (carriedAdvice && carriedAdvice.id !== latestAdviceId) {
       try { pi.appendEntry('session-observer-delivery-v1', { adviceId: carriedAdvice.id, status: 'dropped:replaced', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
     }
@@ -66,7 +67,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     return true;
   };
   // Task-level momentum for repeat escalation: completed notes vs parent edits.
-  let notesThisTask = 0, parentEditsThisTask = 0;
+  let parentEditsThisTask = 0;
+  let urgent = 0, reviewedUrgent = 0;
+  let planEvidenceId: string | undefined;
+  const supersededEvidence = new Set<string>();
   /** Set at the agent's first assistant message of the task: before it, only
    * harness preparation runs and there is no agent work to review. */
   let agentResponded = false;
@@ -79,7 +83,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // margin notes belong to the project and persist across sessions.
   const profile = createSessionProfile(now);
   let bookState = createBookSelectionState(), bookOff = false, salience = 0, childSummary = { total: 0, failed: 0 };
-  let marginStore: MarginStore | undefined, marginKey = '', needleFlight = false;
+  let marginStore: MarginStore | undefined, marginKey = '', needleFlight = false, marginFlight = false, appliedNeedleSignature = '';
+  let helperController = new AbortController();
+  const cancelHelpers = () => { helperController.abort(); helperController = new AbortController(); appliedNeedleSignature = ''; };
   /** Margin notes written or raised this session (see the book selection). */
   const sessionMargins = new Set<string>();
   /** Parent edit count when the wrap-up note on finished work was delivered;
@@ -128,10 +134,10 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   async function refineWithNeedle(selection: BookSelection, query: string) {
     if (needleFlight || selection.candidates.length < 3 || bookState.needle?.signature === selection.signature || !needleUsable()) return;
     needleFlight = true;
-    const state = bookState;
+    const state = bookState, signal = helperController.signal, origin = owner, task = taskEpoch, context = ctx;
     try {
       const result = await (testing.needleRank ?? needleRank)({ query: query.slice(0, 160), candidates: selection.candidates, topK: selection.candidates.length });
-      if (result?.ok && state === bookState && Array.isArray(result.value?.ranked)) state.needle = { signature: selection.signature, order: result.value.ranked.map((row: any) => String(row.id)) };
+      if (!signal.aborted && owns(context) && origin === owner && task === taskEpoch && result?.ok && state === bookState && Array.isArray(result.value?.ranked)) state.needle = { signature: selection.signature, order: result.value.ranked.map((row: any) => String(row.id)) };
     } catch { /* Lexical order remains authoritative. */ } finally { needleFlight = false; }
   }
   const anchor = createContextAnchor();
@@ -236,7 +242,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { cancelHelpers(); clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; urgent = reviewedUrgent = 0; planEvidenceId = undefined; supersededEvidence.clear(); adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
@@ -362,17 +368,21 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
       else routing = 'Omitted this review to save tokens: model preferences, usage and child outcomes are unchanged since they were last shown for this task. Ask to read "routing" when model or delegation advice needs them.';
       const [stateRows, restRows] = [evidence.filter(row => row.kind === 'current state'), evidence.filter(row => row.kind !== 'current state')];
+      for (const row of evidence.filter(row => row.kind === 'current state')) journal.add({ ...row, at: now() });
       const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...taskStateObserverRows(), ...restRows], tools, skills, { book: section, preferTools, preferSkills, requirements: brief() || undefined });
-      const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
+      const capturedUrgent = urgent, capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);
       const relevantWords = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9_]{4,}/g) ?? []).filter(word => !commonWords.has(word)));
       const resources = (text: string) => new Set(text.toLowerCase().match(/(?:[a-z0-9_.-]+\/)*[a-z0-9_.-]+\.[a-z0-9]{1,8}\b/g) ?? []);
       const stillCurrent = (advice?: any) => {
         if (capturedModel !== `${ctx.model?.provider}/${ctx.model?.id}`) return false;
+        if (advice?.evidence?.some((id: string) => supersededEvidence.has(id))) return false;
         const currentStates = new Map(currentState(false).map(row => [row.id, row.text]));
         const cited = currentPacket.evidence.filter(row => advice?.evidence?.includes(row.id));
         const changed = cited.filter(row => row.kind === 'current state' && capturedStates.get(row.id) !== currentStates.get(row.id)).map(row => row.id);
+        const concrete = (advice?.evidence ?? []).some((id: string) => ['tool result', 'tool error'].includes(currentPacket.evidence.find(row => row.id === id)?.kind ?? journal.get(id)?.kind ?? ''));
+        if (!concrete && changed.some(id => ['todo-state', 'child-state', 'harness-runs'].includes(id))) return false;
         // Discard only when the premise is gone: advice about running work
         // whose every cited command has finished, or routing advice after the
         // child state it weighed changed. Todo/child/completed-tool rows change
@@ -433,10 +443,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       const toolHost = toolsEnabled() && typeof ctx.cwd === 'string' ? { journal, cwd: ctx.cwd, book: bookReader } : undefined;
       return { packet: currentPacket, registry: ctx.modelRegistry, reviewKey, current: stillCurrent, toolHost, knownIds: () => journal.list().map(entry => entry.id), position: capturedSequence,
         allowTriage: !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly,
-        reviewed: () => { recent = recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
+        requiresFullReview: capturedUrgent !== reviewedUrgent,
+        reviewed: () => { reviewedUrgent = capturedUrgent; recent = recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)); }, route: { ...entry, model, officialDefault: selection.source === 'default', requireFree: constraints.freeOnly },
         backlog: recent.filter(row => !reviewedIds.has(row.id) && !queue.folded.has(row.id)).length,
         bookPassages: section?.passages ?? [],
         dispatched: () => {
+          if (bookSelection && bookState.needle?.signature === bookSelection.signature && appliedNeedleSignature !== bookSelection.signature) { microMetrics().accept('needle'); appliedNeedleSignature = bookSelection.signature; }
           noteBookReview(bookState, section?.passages ?? []);
           if (includeRouting) { routingEpoch = taskEpoch; routingChildState = childState; }
           if (bookSelection) void refineWithNeedle(bookSelection, `${promptRequestFocus(request).slice(0, 100)} ${focusText.slice(-120)}`);
@@ -454,24 +466,31 @@ export default function sessionObserver(pi: any, testing: any = {}) {
               sessionMargins.add(kept.id);
               parts.push(`${kept.status === 'added' ? 'kept' : 're-confirmed'} margin note ${kept.id}`);
               // Paraphrase duplicates slip past the store's deterministic
-              // match. A Needle-only semantic pass folds the new note into
+              // match. A bounded shared judge pass folds the new note into
               // the existing one (strike + confirm); failure keeps both.
-              if (kept.status === 'added' && (process.env.PI_OBSERVER_SEMANTIC_MARGINS ?? 'on').toLowerCase() !== 'off' && needleUsable()) {
+              const allowJudge = !constraints.fixedRoute && !constraints.sameModel && !constraints.freeOnly;
+              if (kept.status === 'added' && !marginFlight && (process.env.PI_OBSERVER_SEMANTIC_MARGINS ?? 'on').toLowerCase() !== 'off' && (allowJudge || needleUsable())) {
+                marginFlight = true;
+                const signal = helperController.signal, origin = owner, task = taskEpoch, context = ctx;
+                const current = () => !signal.aborted && owns(context) && origin === owner && task === taskEpoch;
                 const noteId = kept.id, noteText = advice.margin, passage = advice.book?.[0];
-                const rank = (query: string, candidates: Array<{ id: string; text: string }>, topK: number) =>
-                  (testing.needleRank ?? needleRank)({ query, candidates, topK });
+                const rank = needleUsable() ? (query: string, candidates: Array<{ id: string; text: string }>, topK: number) =>
+                  (testing.needleRank ?? needleRank)({ query, candidates, topK }) : undefined;
+                const ask = allowJudge ? (site: any, state: any, questions: any, options: any) => (testing.judge ?? askJev)(site, state, questions, { ...options, signal: options?.signal ?? signal,
+                  pi: { appendEntry(type: string, data: unknown) { if (current()) pi.appendEntry(type, data); } } }) : undefined;
                 void (async () => {
                   try {
                     const notes = store.list().filter((note: any) => note.id !== noteId);
-                    const dup = await findSemanticMarginDuplicate(noteText, notes, rank);
-                    if (!dup || !owns(ctx)) return;
+                    let helper: 'jev' | 'needle' | undefined;
+                    const dup = await findSemanticMarginDuplicate(noteText, notes, rank, .93, { ask, signal, onMatch: value => { helper = value; } });
+                    if (!dup || !current()) return;
                     const existing = notes.find((note: any) => note.id === dup);
                     if (!existing) return;
-                    try { store.strike([noteId]); } catch { return; }
-                    try { store.add(existing.text, { passage, model: routeName }); } catch { /* the strike already removed the duplicate */ }
+                    try { store.add(existing.text, { passage, model: routeName }); if (!store.strike([noteId])) return; } catch { return; }
+                    if (helper) microMetrics().accept(helper);
                     sessionMargins.delete(noteId);
                     sessionMargins.add(dup);
-                  } catch { /* both notes survive */ }
+                  } catch { /* both notes survive */ } finally { marginFlight = false; }
                 })();
               }
             }
@@ -480,7 +499,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
           return parts.join(' · ') || undefined;
         } };
     },
-    notice(status: string, detail: string, advice: any) {
+    notice(status: string, detail: string, advice: any, current?: () => boolean | string | undefined) {
       if (!owns(ctx)) return;
       // A review starts every interval with the same route and settings. Keep
       // the in-flight state in the footer and persist a start line only when
@@ -499,7 +518,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('supersede')) {
           try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
         }
-        latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdvice = { text: observerAdviceText(advice), note: advice.note, picks: [...(advice.tools ?? []), ...(advice.skills ?? [])] }; notesThisTask++;
+        latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdvice = { current, text: observerAdviceText(advice), note: advice.note, picks: [...(advice.tools ?? []), ...(advice.skills ?? [])] };
       }
       const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
       const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: displayText(detail, 240),
@@ -582,6 +601,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     },
   });
   pi.on('session_start', (_event: any, context: any) => { closed = false; reset(context); });
+  pi.on('model_select', () => cancelHelpers());
   for (const event of ['session_switch', 'session_tree', 'session_fork']) pi.on(event, (_: any, context: any) => reset(context));
   pi.on('input', (event: any, context: any) => {
     if (!['interactive', 'rpc'].includes(event.source) || typeof event.requestId !== 'string') return;
@@ -592,6 +612,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     // New input stops the scheduler and clears its undelivered note; carry the
     // text into the next task instead of losing advice the agent never saw.
     stashCarried('input');
+    cancelHelpers();
     runtime.stop('New user input');
     latestAdviceId = undefined; preparedAdvice = undefined; pendingAdvice = undefined;
     const id = event.requestId;
@@ -621,7 +642,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       journal.add({ id: 'request', kind: 'user prompt', at: now(), text: accepted.raw });
       interpretation = '';
     }
-    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; notesThisTask = 0; parentEditsThisTask = 0; closeNoteEdits = -1; agentResponded = false;
+    recent = []; streaming = []; revision++; dropped = 0; reportedDropped = 0; taskEpoch++; parentEditsThisTask = 0; closeNoteEdits = -1; agentResponded = false;
     profile.reset(request); if (todos.length) profile.todos(todos); bookState = createBookSelectionState(); lastFired = '';
     runtime.begin(owner); if (userRequest) runtime.start();
     projectHistory = '';
@@ -653,7 +674,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const said = textParts(event.message);
     add('assistant text', said, undefined, textParts(event.message, 'text', 64_000));
     add('provider-returned thinking', textParts(event.message, 'thinking', 450), undefined, textParts(event.message, 'thinking', 64_000)); streaming = []; revision++;
-    if (said && profile.assistant(said)) salience++;
+    if (said && profile.assistant(said)) { salience++; urgent++; }
   });
   // Harness messages the agent receives (reminders, interpretation, Guardian,
   // guidance) are part of what the observer must see, labelled by source.
@@ -674,8 +695,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (guidance.length) add('harness guidance to agent', guidance.join(' | '), undefined, text);
       revision++; return;
     }
-    if (message.customType === 'guardian_intervention' && !message.excludeFromContext) { publishReviewerNote(reviewerSessionKey(ctx), 'guardian', text, [], now()); add('guardian intervention', text, undefined, text); salience++; revision++; return; }
-    if (['memory-prime', 'todo-plan', 'relevant-guidance'].includes(message.customType)) { add('harness guidance to agent', text, undefined, text); revision++; }
+    if (message.customType === 'guardian_intervention' && !message.excludeFromContext) { publishReviewerNote(reviewerSessionKey(ctx), 'guardian', text, [], now()); add('guardian intervention', text, undefined, text); salience++; urgent++; revision++; return; }
+    if (message.customType === 'todo-plan') { planEvidenceId = add('plan snapshot', text, undefined, text); revision++; return; }
+    if (['memory-prime', 'relevant-guidance'].includes(message.customType)) { add('harness guidance to agent', text, undefined, text); revision++; }
   };
   pi.on('tool_execution_start', (event: any, context: any) => {
     if (!owns(context)) return;
@@ -691,6 +713,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (!owns(context)) return;
     if (userRequest && true) agentResponded = true;
     if (!event.isError && ['edit', 'write', 'bulk_edit'].includes(event.toolName)) parentEditsThisTask++;
+    if (event.isError) urgent++;
     const input = compactInput(event.input) || toolInputs.get(event.toolCallId) || '';
     toolInputs.delete(event.toolCallId); runningTools.delete(event.toolCallId);
     // The result row repeats the input, so an unread start row only doubles
@@ -713,6 +736,13 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   const removePlanListener = pi.events?.on('todo-plan-changed', (event: any) => {
     if (!owns(ctx) || event?.sessionId !== ctx.sessionManager?.getSessionId?.() || event.cwd !== ctx.cwd || !Array.isArray(event.tasks)) return;
     todos = event.tasks.map((task: any) => ({ id: task.id, title: task.subject ?? task.title ?? task.text, status: task.status })); revision++;
+    if (planEvidenceId) {
+      supersededEvidence.add(planEvidenceId);
+      if (supersededEvidence.size > 32) supersededEvidence.delete(supersededEvidence.values().next().value!);
+      recent = recent.filter(row => row.id !== planEvidenceId);
+      journal.add({ id: planEvidenceId, kind: 'superseded plan snapshot', at: now(), text: 'This earlier plan snapshot was superseded. Read todo-state for the current plan.' });
+      planEvidenceId = undefined;
+    }
     profile.todos(todos); salience++;
   });
   const removePeerListener = pi.events?.on('session-peer-message', (event: any) => {
@@ -730,17 +760,17 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== OBSERVER_CONTEXT && message.customType !== OBSERVER_MESSAGE);
     const note = owns(context) ? runtime.context(false) : undefined;
+    if (owns(context) && carriedAdvice?.current?.() === false) {
+      try { pi.appendEntry('session-observer-delivery-v1', { adviceId: carriedAdvice.id, status: 'dropped:stale', at: now() }); } catch { /* Accounting only. */ }
+      carriedAdvice = undefined; preparedCarried = undefined;
+    }
     const carried = owns(context) ? carriedAdvice : undefined;
     if (!note && !carried) return messages.length !== event.messages.length ? { messages } : undefined;
     let prepared = messages;
-    // Repeated advice with no parent edit is restated as required reading:
-    // the observer has measured the stall, not guessed it. The receipt line
-    // stays first: core matches advice capsules anchored at the text start.
+    // Advice remains optional regardless of how many notes were returned.
+    // Tool names cannot establish whether bash or delegated work made progress.
     if (note) {
-      const repeat = notesThisTask >= 3 && parentEditsThisTask === 0
-        ? `\n[Observer context: note #${notesThisTask} this task with 0 parent edits recorded. Address this note before further reads or dispatches.]`
-        : '';
-      const content = `[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]${repeat}\n${note}`;
+      const content = `[Observer advice receipt=${latestAdviceId} — optional, based on a recent evidence snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
       prepared = anchor(prepared, { role: 'custom', customType: OBSERVER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
       // This attests context preparation, not provider acceptance or action by the
       // main agent. A later context hook or cancelled request can still omit it.
@@ -790,7 +820,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   // Only agent_settled closes the current active run and its observer cadence.
   pi.on('agent_settled', (_: any, context: any) => {
     if (!owns(context)) return;
-    runtime.stop('Active work settled'); streaming = [];
+    runtime.stop('Active work settled'); cancelHelpers(); streaming = [];
     // A note the settling turn never delivered is carried into the next task
     // (e.g. an objection to premature completion) rather than dropped.
     if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('settle')) {
@@ -798,5 +828,5 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     }
     latestAdviceId = undefined; preparedAdvice = undefined; pendingAdvice = undefined;
   });
-  pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); removeHookListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
+  pi.on('session_shutdown', () => { cancelHelpers(); runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); removeHookListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
 }

@@ -38,9 +38,11 @@ test('read-only tools expand excerpts, search the session and read project files
   const host = { journal, cwd: project, book: { read: id => id === 'craft.claims' ? 'Completion claims require fresh evidence.' : undefined } };
   const detail = J.runObserverTool(host, 'session_detail', { ids: ['event-7'], offset: 2300 });
   assert.match(detail.text, /FAILED test_required_field/);
+  assert.match(detail.text, /1970-01-01T00:00:00.001Z/);
   assert.deepEqual(detail.ids, ['event-7']);
   const search = J.runObserverTool(host, 'session_search', { query: 'llms.txt' });
   assert.deepEqual(search.ids, ['prompt-2']);
+  assert.match(search.text, /1970-01-01T00:00:00.002Z/);
   assert.match(J.runObserverTool(host, 'session_search', { query: 'kubernetes' }).text, /Absence here does not prove/);
   const read = J.runObserverTool(host, 'read_file', { path: 'src/parser.ts', offset: 10, limit: 5 });
   assert.match(read.text, /12: line 12 requiredField check/);

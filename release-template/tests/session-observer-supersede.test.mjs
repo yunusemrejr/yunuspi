@@ -145,11 +145,12 @@ test('superseded observer notes are carried, ledgered, and never pose as deliver
   assert.equal(found.length, 2, 'current + carried capsules');
   const capsule = found[0];
   assert.ok(capsule, 'fourth note prepares a context capsule');
-  assert.match(capsule.content, /note #4 this task with 0 parent edits recorded/);
+  assert.match(capsule.content, /optional/);
+  assert.doesNotMatch(capsule.content, /Address this note before|0 parent edits recorded/);
   assert.ok(capsule.content.includes(notes[3]), 'first capsule is still the current note');
   assert.ok(found[1].content.includes(notes[2]), 'second capsule is the carried settled note');
 
-  // One recorded parent edit lifts the escalation; prepared notes are never
+  // Prepared notes are never
   // marked dropped when the next review supersedes them.
   const fourthId = completedIds()[3];
   fire('tool_result', { toolName: 'edit', input: { path: 'fixture.ts' }, isError: false, content: [{ type: 'text', text: 'edited' }], toolCallId: 'edit-1' });

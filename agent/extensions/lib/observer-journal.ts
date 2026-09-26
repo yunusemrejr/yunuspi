@@ -26,6 +26,7 @@ export const OBSERVER_TOOL_ROUNDS = 3;
 const PROTECTED_KINDS = new Set(["user prompt", "user reminder", "harness interpretation"]);
 
 const clean = (value: string) => value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
+const timestamp = (entry: JournalEntry) => Number.isFinite(entry.at) && Math.abs(entry.at) <= 8.64e15 ? ` · ${new Date(entry.at).toISOString()}` : "";
 
 export function createObserverJournal(limits: { maxChars?: number } = {}) {
 	const maxChars = limits.maxChars ?? JOURNAL_MAX_CHARS;
@@ -128,7 +129,7 @@ export function runObserverTool(host: ObserverToolHost, name: string, args: any)
 				found.push(id);
 				const slice = entry.text.slice(offset, offset + per);
 				const more = offset + per < entry.text.length ? ` [chars ${offset}-${offset + slice.length} of ${entry.text.length}; use offset to continue]` : "";
-				return `${id} (${entry.kind}${entry.tool ? ` · ${entry.tool}` : ""}):${more}\n${slice}`;
+				return `${id} (${entry.kind}${entry.tool ? ` · ${entry.tool}` : ""}${timestamp(entry)}):${more}\n${slice}`;
 			});
 			return { text: truncate(parts.join("\n---\n")), ids: found };
 		}
@@ -148,7 +149,7 @@ export function runObserverTool(host: ObserverToolHost, name: string, args: any)
 				.sort((a, b) => b.score - a.score || b.entry.at - a.entry.at)
 				.slice(0, limit);
 			if (!rows.length) return { text: `No journal entries match ${JSON.stringify(query)}. Absence here does not prove the work was not done (children, earlier sessions and evicted entries are not searched).` };
-			return { text: truncate(rows.map(({ entry, at }) => `${entry.id} (${entry.kind}${entry.tool ? ` · ${entry.tool}` : ""}): …${entry.text.slice(Math.max(0, at - 80), at + 160).replace(/\s+/g, " ")}…`).join("\n")), ids: rows.map((row) => row.entry.id) };
+			return { text: truncate(rows.map(({ entry, at }) => `${entry.id} (${entry.kind}${entry.tool ? ` · ${entry.tool}` : ""}${timestamp(entry)}): …${entry.text.slice(Math.max(0, at - 80), at + 160).replace(/\s+/g, " ")}…`).join("\n")), ids: rows.map((row) => row.entry.id) };
 		}
 		if (name === "read_file") {
 			const real = resolveInside(host.cwd, args?.path);

@@ -193,7 +193,7 @@ export function deriveAttemptOutcome(row: Record<string, unknown>): {
 			? { status: "passed", ...(asString(acceptanceRow.reason ?? row.acceptanceReason, 160) ? { reason: asString(acceptanceRow.reason ?? row.acceptanceReason, 160) } : {}) }
 			: acceptanceStatus === "failed" || acceptanceStatus === "rejected"
 				? { status: "failed", ...(asString(acceptanceRow.reason ?? row.acceptanceReason, 160) ? { reason: asString(acceptanceRow.reason ?? row.acceptanceReason, 160) } : {}) }
-				: acceptanceStatus === "pending"
+				: ["pending", "review-required", "claimed", "attested", "checked", "verified"].includes(String(acceptanceStatus))
 					? { status: "pending" }
 					: { status: "none" };
 
@@ -410,7 +410,20 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 				const state = normalizeState(event.state);
 				if (state && stateRank(state) >= stateRank(attempt.state)) {
 					// Terminal states never move backwards; explicit stop wins.
-					if (!TERMINAL.has(attempt.state) || state === "stopped") attempt.state = state;
+					if (!TERMINAL.has(attempt.state) || state === "stopped") {
+						attempt.state = state;
+						// A native lifecycle receipt is execution evidence even when
+						// no final cost/result row survived a reload. Do not turn an
+						// absent receipt into "none" for a running or finished child,
+						// or erase a more specific completed execution outcome.
+						if (attempt.execution.status === "none" || attempt.execution.status === "running") {
+							if (state === "running") attempt.execution = { status: "running" };
+							else if (state === "completed") attempt.execution = { status: "succeeded" };
+							else if (["failed", "stopped", "paused"].includes(state)) attempt.execution = {
+								status: "failed", cause: classifyFailure({ status: state, ...(state === "stopped" ? { stopped: true } : state === "paused" ? { interrupted: true } : {}) }),
+							};
+						}
+					}
 				}
 				if (event.at !== undefined) {
 					if (state === "running" && attempt.startedAt === undefined) attempt.startedAt = event.at;
@@ -423,7 +436,10 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 				if (!draft) break;
 				const attempt = ensureAttempt(draft, event);
 				if (!attempt) break;
-				if (!TERMINAL.has(attempt.state)) attempt.state = "running";
+				if (!TERMINAL.has(attempt.state)) {
+					attempt.state = "running";
+					if (attempt.execution.status === "none") attempt.execution = { status: "running" };
+				}
 				break;
 			}
 			case "completion":
@@ -508,7 +524,10 @@ export function reduceChildEvents(events: readonly ChildLedgerEvent[]): ChildLed
 					}
 				} else {
 					const attempt = ensureAttempt(draft, event);
-					if (attempt && !TERMINAL.has(attempt.state)) attempt.state = "running";
+					if (attempt && !TERMINAL.has(attempt.state)) {
+						attempt.state = "running";
+						if (attempt.execution.status === "none") attempt.execution = { status: "running" };
+					}
 				}
 				if (event.ref) draft.task.attempts[draft.task.attempts.length - 1]!.diagnosticRef = event.ref.slice(0, 256);
 				break;
@@ -668,7 +687,7 @@ export function projectTranscriptChildren(entries: readonly unknown[]): ChildLed
 			if (message.role !== "toolResult" || message.toolName !== "subagent") continue;
 			const details = asRecord(message.details);
 			const runId = asString(details.runId ?? details.asyncId ?? details.id, 160);
-			const rows = Array.isArray(details.results) ? details.results : [];
+			const rows = Array.isArray(details.statusResults) ? details.statusResults : Array.isArray(details.results) ? details.results : [];
 			// Legacy parity (session-metrics record()): a detached single launch
 			// has no completed results yet. Count its accepted child
 			// immediately as queued (or its stated lifecycle state) instead

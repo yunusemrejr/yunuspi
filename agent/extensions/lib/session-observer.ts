@@ -67,7 +67,7 @@ export const wantsNoObserver = (text: unknown) => {
 const instructions = `You are the session observer: a senior engineer and design-minded mentor beside the main agent. You care that the user gets exactly what they imagined without having to correct anyone. You see a bounded evidence packet and may use read-only tools; you cannot edit, execute, delegate, change requirements or authorize anything, and your advice is optional for the agent.
 How to review:
 1. Reconstruct the user's whole intent from ALL user prompts (later ones refine earlier ones) and the user's reminders, which are standing instructions. The harness interpretation is a helper's reading, never authority. Is anything the user asked for forgotten, contradicted or silently narrowed?
-2. Compare what the agent claims or plans with what the evidence shows (tool results, verification after the last edit, files). Excerpts are truncated: when a detail decides your note, look first with session_detail, session_search, read_file or grep_files (a few calls at most; none when the packet suffices).
+2. Compare what the agent claims or plans with what the evidence shows (tool results, verification after the last edit, files). Current results and state supersede earlier guidance and project memories. Recheck historical numbers or failures against current direct evidence before repeating them. Excerpts are truncated: when a detail decides your note, look first with session_detail, session_search, read_file or grep_files (a few calls at most; none when the packet suffices).
 3. Look for waste: loops, repeated failing calls, re-reading, redundant work, the wrong tool or skill for this phase, costly delegation where a direct step suffices, or missing delegation where parallel work would clearly help.
 4. Judge quality as a demanding expert would: correctness, edge cases, verification, and for visual or creative work originality and craft. Sites mentioned for links, credit or deployment must not become the design; an open brief deserves explored directions, not the easiest path.
 5. Write ONE note: the single most valuable question, warning or reminder now, specific and actionable, citing the evidence ids you relied on. Briefly recognize solid progress when it matters. If nothing adds value, return an empty note: silence beats noise. Never repeat prior advice. A "peer reviewer note" row is what another reviewer or Guardian already told the agent: never restate it; stay on quality and intent, and contradict it only with specific newer evidence, saying so.
@@ -166,7 +166,8 @@ export function buildObserverPacket(request: string, recent: ObserverEvidence[],
   // large packet still advances its chronological cursor.
   const nextUnread = evidence.find(row => /^event-/.test(row.id))?.id;
   const latestAdvice = evidence.findLast(row => row.kind === 'previous advice already delivered')?.id;
-  const protectedIds = new Set(['request', 'model-routing', 'session-profile', ...evidence.filter(row => row.kind === 'current state' || INTENT_KINDS.has(row.kind)).map(row => row.id), ...(nextUnread ? [nextUnread] : []), ...(latestAdvice ? [latestAdvice] : [])]);
+  const latestResults = evidence.filter(row => row.kind === 'tool result' || row.kind === 'tool error').slice(-2).map(row => row.id);
+  const protectedIds = new Set(['request', 'model-routing', 'session-profile', ...evidence.filter(row => row.kind === 'current state' || INTENT_KINDS.has(row.kind)).map(row => row.id), ...latestResults, ...(nextUnread ? [nextUnread] : []), ...(latestAdvice ? [latestAdvice] : [])]);
   while (encode() && selectedSkills.length > 2) selectedSkills.pop();
   while (encode() && selectedTools.length > 4) selectedTools.pop();
   while (encode() && harness.some(row => !core.has(row.id))) harness.splice(harness.findLastIndex(row => !core.has(row.id)), 1);
@@ -293,7 +294,7 @@ export function validateObserverAdvice(text: string, packet: ObserverPacket, ext
  * instead of) the current note; provider confirmation joins it to advice
  * history like any delivered note. One deep: a newer carried note replaces an
  * older one, ledgered as replaced. */
-export interface CarriedReviewerNote { id: string; text: string; at: number; note?: string; picks?: string[] }
+export interface CarriedReviewerNote { id: string; text: string; at: number; note?: string; picks?: string[]; current?: () => boolean | string | undefined }
 /** Capsule text for a carried note. It starts with the receipt line so core
  * emits an independent delivery receipt for it (see sdk advice capsules). */
 export function carriedReviewerNoteText(label: 'Observer' | 'Watchmaker', note: CarriedReviewerNote, now: number): string {
@@ -476,12 +477,14 @@ interface ObserverSnapshot {
   packet: ObserverPacket; route?: ObserverRoute; reason?: string; silent?: boolean; registry?: any; reviewKey?: string;
   /** The caller's current model/cost constraints allow the auxiliary judge. */
   allowTriage?: boolean;
+  /** An unread failure, intervention or completion claim needs the full reviewer. */
+  requiresFullReview?: boolean;
   current?: (advice?: ObserverAdvice) => boolean | string; reviewed?: () => void;
   /** Unread events left after this packet; a backlog is never quiet. */
   backlog?: number;
   /** Called once when the review is actually dispatched. */
   dispatched?: () => void;
-  /** Book and margin effects of any valid response; returns a short summary. */
+  /** Book and margin effects of a valid, current response; returns a short summary. */
   applied?: (advice: ObserverAdvice) => string | undefined;
   /** Passage ids included in this packet, for the visible start notice. */
   bookPassages?: string[];
@@ -495,7 +498,7 @@ interface ObserverSnapshot {
 }
 interface ObserverPorts {
   snapshot: () => ObserverSnapshot;
-  notice: (status: string, detail: string, advice?: ObserverAdvice) => void;
+  notice: (status: string, detail: string, advice?: ObserverAdvice, current?: () => boolean | string | undefined) => void;
   receipt: (data: any, owner: string) => void;
   /** Response validation (default validateObserverAdvice). Reviewers with
    * extra fields (Watchmaker memos) screen them here. */
@@ -585,7 +588,7 @@ export function createSessionObserver(ports: ObserverPorts) {
   // Topic counts for this task (see ObserverPorts.repeatKey).
   const topics = new Map<string, number>();
   const normalize = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}_]+/gu, ' ').trim();
-  const notice = (status: string, detail: string, advice?: ObserverAdvice) => { const key = `${status}:${detail}:${advice?.note ?? ''}`; if (lastNotice === key) return; lastNotice = key; lastCheckAt = now(); try { ports.notice(status, detail, advice); } catch {} };
+  const notice = (status: string, detail: string, advice?: ObserverAdvice, current?: () => boolean | string | undefined) => { const key = `${status}:${detail}:${advice?.note ?? ''}`; if (lastNotice === key) return; lastNotice = key; lastCheckAt = now(); try { ports.notice(status, detail, advice, current); } catch {} };
   // A check-in is not a review: no counter, so an unchanged idle state is
   // deduplicated by notice() instead of producing a new line every 90 seconds.
   const checkIn = (detail: string) => { if (now() - lastCheckAt >= OBSERVER_MAX_GAP_MS - interval) notice('checked', detail); };
@@ -613,7 +616,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       return;
     }
     if (ports.judge && snapshot.allowTriage && lastReviewed && !triageDeferred
-      && !failures && !consults && salience === salienceMark && !(Number(snapshot.backlog) > 0)
+      && !failures && !consults && !snapshot.requiresFullReview
       && !snapshot.packet.evidence.some(row => ['tool error', 'guardian intervention'].includes(row.kind))) {
       const controller = new AbortController();
       let release!: () => void;
@@ -639,7 +642,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       try { snapshot = ports.snapshot(); } catch { return; }
       if (!snapshot.route) return;
       const sameEvidence = (snapshot.reviewKey ?? snapshot.packet.hash) === priorKey;
-      if (sameEvidence && currentSalience === salience && snapshot.allowTriage && !controller.signal.aborted
+      if (sameEvidence && currentSalience === salience && snapshot.allowTriage && !snapshot.requiresFullReview && !controller.signal.aborted
         && verdict?.ok && verdict.verdict?.supported === false) {
         triageDeferred = true; lastReviewAt = now();
         microMetrics().accept('jev');
@@ -696,9 +699,10 @@ export function createSessionObserver(ports: ObserverPorts) {
       if (advice && Array.isArray(response.investigated) && response.investigated.length) advice.investigated = response.investigated.slice(0, 8);
       if (!advice) { failures++; notice('unavailable', `${label} response rejected: ${validation.reason}; evidence retained for the next review.`); return; }
       failures = 0; raiseThinking(route.route);
-      // Book effects (citations, bookmarks, margin notes) belong to any valid
-      // response, including advice later withheld as stale: a durable lesson
-      // does not depend on the freshness of this particular note.
+      // Reconcile before saving a memo or margin: otherwise a rejected stale
+      // premise returns in later reviews as a durable lesson.
+      const freshness = snapshot.current?.(advice);
+      if (freshness === false) { notice('reviewed', 'Cited evidence was superseded before this review returned; advice and memory effects not applied.'); return; }
       let effects: string | undefined;
       try { effects = snapshot.applied?.(advice); } catch { effects = undefined; }
       const looked = advice.investigated?.length ? ` · looked at ${advice.investigated.slice(0, 4).join('; ')}${advice.investigated.length > 4 ? ` +${advice.investigated.length - 4}` : ''}` : '';
@@ -715,8 +719,6 @@ export function createSessionObserver(ports: ObserverPorts) {
       // false: the premise is gone (cited running work finished or the model
       // changed). A string names changed state or overlapping later work; the
       // paid review keeps its value and is delivered with that caveat.
-      const freshness = snapshot.current?.(advice);
-      if (freshness === false) { notice('reviewed', `Cited running work finished or the model changed before this review returned; advice not delivered${suffix}.`); return; }
       // A stale review has not consumed its evidence. Advance the queue only
       // after the cited state is reconciled, so the next review sees that chunk.
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
@@ -752,7 +754,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       recentAdvice.push(tokens); if (recentAdvice.length > 256) recentAdvice.shift();
       recentPicks.push(picks); if (recentPicks.length > 8) recentPicks.shift();
       current = { evidence: advice.evidence.join(', '), body, at: now(), generation: epoch, position: snapshot.position, freshness: () => snapshot.current?.(advice) };
-      notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s${overlap ? ` · ${overlap} meanwhile` : ''}${suffix}`, advice);
+      notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s${overlap ? ` · ${overlap} meanwhile` : ''}${suffix}`, advice, current.freshness);
     } catch { if (!controller.signal.aborted && generation === epoch && active && owner === origin) notice('unavailable', `${label} evidence could not be reconciled`); } finally { unschedule(deadline); if (!terminal && !cancelled && !timedOut) thisFlight.cancel(); }
   }
   return {
