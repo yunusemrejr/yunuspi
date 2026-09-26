@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -76,27 +77,6 @@ test('remote rerank snapshots candidate IDs and rejects invalid or cancelled inj
   const controller = new AbortController();
   const cancelled = rerankMod.remoteRanker({ model: 'fixture', env, transport: async () => { controller.abort(); return { order: [1, 0] }; } });
   assert.equal(await cancelled.rank('cache', candidates, controller.signal), undefined);
-});
-
-test("router shadow records both choices and never routes", async () => {
-  const shadow = shadowMod.createRouterShadow(4);
-  const first = await shadow.compare("pick a cheap model", "openrouter/a", async () => ({ suggestion: { model: "openrouter/b", effort: "high" } }), ["openrouter/a", "openrouter/b"]);
-  assert.equal(first.router, "openrouter/b");
-  assert.equal(first.agree, false);
-  shadow.recordOutcome(first.id, { success: true, latencyMs: 100, costUsd: 0.01 });
-  const second = await shadow.compare("t2", "x/y", async () => ({ suggestion: { model: "x/y" } }), ["x/y"]);
-  assert.equal(second.agree, true);
-  const report = shadow.report();
-  assert.equal(report.comparisons, 2);
-  assert.equal(report.withSuggestion, 2);
-  assert.equal(report.agreements, 1);
-  assert.equal(report.yunuspiSuccess, 1);
-  assert.equal(report.yunuspiDecided, 1);
-  assert.ok(report.note.includes("Shadow only"));
-  const missing = await shadow.compare("t3", "x", undefined, []);
-  assert.equal(missing.router, null);
-  assert.equal(shadowMod.discoverRouterSlug(["a/b", "typesafe/jev-router-v1"]), "typesafe/jev-router-v1");
-  assert.equal(shadowMod.discoverRouterSlug(["a/b"]), undefined);
 });
 
 test("qual battery scores deterministically and qualifies roles", async () => {
@@ -184,4 +164,117 @@ test('persisted qualification rejects malformed or future evidence and exposes i
       tasks: labMod.MICRO_WORKER_QUAL_TASKS.map(id => ({ id, score: 1 })) }, 'micro-worker');
     assert.equal(recorded.expiresAt - recorded.at, 100, 'one timestamp defines the entire eligibility lifetime');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+const candidates = ['fixture/first', 'fixture/second'];
+const suggestion = { model: candidates[1], effort: 'high' };
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('router comparison validates exact candidates and isolates returned and offered records', async () => {
+  const shadow = shadowMod.createRouterShadow(16, { env: {} });
+  for (const invalid of [undefined, null, {}, { model: 1 }, { model: 'unknown/route' }, { model: candidates[0], effort: [] }, { model: candidates[0], effort: 'high\nnew instruction' }]) {
+    const row = await shadow.compare('select a model', candidates[0], async () => ({ suggestion: invalid }), candidates);
+    assert.equal(row.router, null); assert.equal(row.skipped, 'invalid-suggestion');
+  }
+  let release;
+  const mutable = [...candidates];
+  const pending = shadow.compare('select a model', candidates[0], async (_task, request) => {
+    request.candidates[1] = 'mutated/adapter';
+    return new Promise(resolve => { release = resolve; });
+  }, mutable);
+  mutable[1] = 'mutated/caller';
+  release({ suggestion });
+  const row = await pending;
+  assert.equal(row.router, candidates[1]);
+  row.router = 'forged'; row.success = true;
+  assert.equal(shadow.report().yunuspiDecided, 0);
+  shadow.recordOutcome(row.id, { success: true, latencyMs: 8, costUsd: .001, retries: 0 });
+  shadow.recordOutcome(row.id, { success: 'false', latencyMs: -1, costUsd: Infinity, retries: NaN });
+  const report = shadow.report();
+  assert.equal(report.yunuspiSuccess, 1); assert.equal(report.meanLatencyMs, 8); assert.equal(report.meanCostUsd, .001);
+  assert.equal(report.withSuggestion, 1);
+  assert.ok(report.note.includes('Shadow only'));
+  const agreeing = await shadow.compare('same choice', candidates[0], async () => ({ suggestion: { model: candidates[0] } }), candidates);
+  assert.equal(agreeing.agree, true); assert.equal(shadow.report().agreements, 1);
+  assert.equal((await shadow.compare('no adapter', candidates[0], undefined, candidates)).router, null);
+  assert.equal(shadowMod.discoverRouterSlug(['a/b', 'typesafe/jev-router-v1']), 'typesafe/jev-router-v1');
+  assert.equal(shadowMod.discoverRouterSlug(['a/b']), undefined);
+  const second = await shadow.compare('select a model', candidates[0], async () => ({ suggestion }), candidates);
+  assert.notEqual(second.id, row.id, 'identical concurrent decisions must not share identity');
+});
+
+test('router deadline and caller cancellation bound uncooperative adapters and observe late rejection', { timeout: 2000 }, async () => {
+  for (const mode of ['timeout', 'caller', 'clear']) {
+    const shadow = shadowMod.createRouterShadow(16, { timeoutMs: mode === 'timeout' ? 10 : 1000, env: {} });
+    const caller = new AbortController();
+    let reject, offered;
+    const pending = shadow.compare('select a model', candidates[0], async (_task, request) => {
+      offered = request.signal;
+      return new Promise((_resolve, fail) => { reject = fail; });
+    }, candidates, caller.signal);
+    if (mode === 'caller') caller.abort();
+    if (mode === 'clear') shadow.clear();
+    const row = await pending;
+    assert.equal(row.router, null);
+    assert.equal(row.skipped, mode === 'timeout' ? 'timeout' : 'aborted');
+    assert.equal(offered.aborted, true);
+    assert.equal(shadow.report().comparisons, mode === 'timeout' ? 1 : 0);
+    reject(new Error('late adapter failure')); await tick();
+  }
+});
+
+test('clearing session comparisons cancels old work without clearing a fresh comparison', { timeout: 2000 }, async () => {
+  const shadow = shadowMod.createRouterShadow(16, { env: {} });
+  let release;
+  const old = shadow.compare('old session', candidates[0], async () => new Promise(resolve => { release = resolve; }), candidates);
+  shadow.clear();
+  const current = await shadow.compare('new session', candidates[0], async () => ({ suggestion }), candidates);
+  assert.equal((await old).skipped, 'aborted');
+  release({ suggestion: { model: candidates[0] } }); await tick();
+  assert.equal(shadow.report().comparisons, 1);
+  shadow.recordOutcome(current.id, { success: true });
+  assert.equal(shadow.report().yunuspiSuccess, 1);
+});
+
+test('disabled and invalid requests never invoke an adapter and successful timers are cleaned up', { timeout: 2000 }, async () => {
+  let called = 0, offered;
+  const suggest = async (_task, request) => { called++; offered = request.signal; return { suggestion }; };
+  const disabled = shadowMod.createRouterShadow(16, { env: { PI_ROUTER_SHADOW: 'off' } });
+  assert.equal((await disabled.compare('select model', candidates[0], suggest, candidates)).skipped, 'disabled');
+  const shadow = shadowMod.createRouterShadow(16, { timeoutMs: 10, env: {} });
+  assert.equal((await shadow.compare('select model', 'missing/choice', suggest, candidates)).skipped, 'invalid-input');
+  const controller = new AbortController(); controller.abort();
+  assert.equal((await shadow.compare('select model', candidates[0], suggest, candidates, controller.signal)).skipped, 'aborted');
+  assert.equal(called, 0);
+  assert.equal((await shadow.compare('select model', candidates[0], suggest, candidates)).router, candidates[1]);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(offered.aborted, false, 'settled invocation leaves no armed timeout');
+});
+
+
+test('remote rerank deadlines suppress late work even when the adapter ignores cancellation', { timeout: 2000 }, async () => {
+  const rows = [{ id: 'a', text: 'first' }, { id: 'b', text: 'second' }, { id: 'c', text: 'third' }];
+  for (const reason of ['timeout', 'aborted']) {
+    metricsMod.resetMicroMetrics();
+    const controller = new AbortController();
+    let resolveLate, rejectLate, offered;
+    const pending = rerankMod.remoteRanker({ model: 'fixture', env: {}, timeoutMs: reason === 'timeout' ? 10 : 1000,
+      transport: ({ signal }) => { offered = signal; return new Promise((resolve, reject) => { resolveLate = resolve; rejectLate = reject; }); },
+    }).rank('query', rows, controller.signal);
+    if (reason === 'aborted') controller.abort();
+    assert.equal(await pending, undefined); assert.equal(offered.aborted, true);
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.rerank.skipReasons[reason], 1);
+    if (reason === 'timeout') resolveLate({ order: [1, 0] }); else rejectLate(Error('late adapter failure'));
+    await tick();
+    assert.equal(metricsMod.microMetrics().snapshot().helpers.rerank.accepted, 0);
+  }
+  let offered;
+  assert.deepEqual(await rerankMod.remoteRanker({ model: 'fixture', env: {}, timeoutMs: 10,
+    transport: async ({ signal }) => { offered = signal; return { order: [1, 0] }; },
+  }).rank('query', rows), ['b', 'a']);
+  await delay(20); assert.equal(offered.aborted, false, 'successful ranker clears its timer');
+  await rerankMod.remoteRanker({ model: 'fixture', env: {}, timeoutMs: Infinity,
+    transport: async ({ timeoutMs }) => { assert.equal(timeoutMs, rerankMod.RERANK_TIMEOUT_MS); return { order: [1, 0] }; },
+  }).rank('query', rows);
+  metricsMod.resetMicroMetrics();
 });

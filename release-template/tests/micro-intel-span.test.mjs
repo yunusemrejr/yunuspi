@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -233,4 +234,39 @@ test('span rejects an aborted scorer result and does not preserve it in the cach
     assert.equal(result.ok, false); assert.equal(result.skipped, 'aborted');
     assert.equal((await scoreSpanTrace(trace, async () => answer)).cached, false);
   } finally { clearSpanCache(); }
+});
+
+
+test('Span deadlines suppress late cache publication even when the scorer ignores cancellation', { timeout: 2000 }, async () => {
+  const trace = traceFrom(fixtures.traces[0].events);
+  const answer = () => ({ text: JSON.stringify(scoresFor(['repeated-failure-loop'])), model: 'fixture', inputTokens: 1, costUsd: .001, ms: 1 });
+  try {
+    for (const reason of ['timeout', 'aborted']) {
+      clearSpanCache(); metricsMod.resetMicroMetrics();
+      const controller = new AbortController();
+      let resolveLate, rejectLate, offered;
+      const pending = scoreSpanTrace(trace, (_prompt, { signal }) => {
+        offered = signal; return new Promise((resolve, reject) => { resolveLate = resolve; rejectLate = reject; });
+      }, { env: {}, timeoutMs: reason === 'timeout' ? 10 : 1000, signal: controller.signal });
+      if (reason === 'aborted') controller.abort();
+      const result = await pending;
+      assert.equal(result.ok, false); assert.equal(result.skipped, reason); assert.equal(offered.aborted, true);
+      assert.equal(metricsMod.microMetrics().snapshot().helpers.span.skipReasons[reason], 1);
+      if (reason === 'timeout') resolveLate(answer()); else rejectLate(Error('late scorer failure'));
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(metricsMod.microMetrics().snapshot().helpers.span.accepted, 0);
+      let calls = 0;
+      const retry = await scoreSpanTrace(trace, async () => { calls++; return answer(); }, { env: {} });
+      assert.equal(calls, 1, 'late score was not cached'); assert.equal(retry.cached, false);
+    }
+    clearSpanCache();
+    let offered;
+    const result = await scoreSpanTrace(trace, async (_prompt, { signal }) => { offered = signal; return answer(); }, { env: {}, timeoutMs: 10 });
+    assert.equal(result.ok, true);
+    await delay(20); assert.equal(offered.aborted, false, 'successful scorer clears its timer');
+    clearSpanCache();
+    await scoreSpanTrace(trace, async (_prompt, { timeoutMs }) => {
+      assert.equal(timeoutMs, spanMod.SPAN_REQUEST_TIMEOUT_MS); return answer();
+    }, { env: {}, timeoutMs: NaN });
+  } finally { clearSpanCache(); metricsMod.resetMicroMetrics(); }
 });

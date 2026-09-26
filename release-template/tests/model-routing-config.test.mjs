@@ -56,10 +56,15 @@ async function post(url, token, endpoint, body, extraHeaders = {}) {
     method: "POST", headers: { ...headers(url, token), ...extraHeaders }, body: JSON.stringify(body),
   });
 }
+// Browser startup is shared; each test still owns its server, configuration,
+// cookies, storage and page through a fresh context.
+let browserPromise;
+after(async () => { if (browserPromise) await (await browserPromise).close(); });
 async function openPage(t, url, viewport = { width: 1280, height: 900 }) {
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-  t.after(async () => { await browser.close(); });
-  const page = await browser.newPage({ viewport });
+  const browser = await (browserPromise ??= chromium.launch({ executablePath: process.env.CHROME_BIN || "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] }));
+  const context = await browser.newContext({ viewport });
+  t.after(() => context.close());
+  const page = await context.newPage();
   await page.goto(url);
   return page;
 }
@@ -267,10 +272,7 @@ test("production server renders the routing GUI and serves verified, persistent 
   const noCapability = await fetch(`${new URL(handle.url).origin}/${token}/api/snapshot`, { method: "POST", headers: { origin: new URL(handle.url).origin, "content-type": "application/json" }, body: "{}" });
   assert.equal(noCapability.status, 403);
 
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-  t.after(async () => { await browser.close(); });
-  const pageView = await browser.newPage();
-  await pageView.goto(handle.url);
+  const pageView = await openPage(t, handle.url, { width: 1280, height: 720 });
   await pageView.locator(".route-row").waitFor();
   assert.match(await pageView.locator(".diagnostics:not(#routing-diagnostics)").innerText(), /Priority 1 skipped/);
   await pageView.locator("#routing-diagnostics summary").click();
