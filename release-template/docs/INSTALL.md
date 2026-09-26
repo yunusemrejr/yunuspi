@@ -8,7 +8,7 @@ In Ubuntu:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y git curl ca-certificates bash tar gzip util-linux ripgrep python3 build-essential bubblewrap
+sudo apt-get install -y git curl ca-certificates bash tar gzip util-linux ripgrep python3 build-essential bubblewrap findutils
 ```
 
 Install Node.js 22.19 or later and its matching npm from a trusted Node distribution or version manager. Node.js 24 or later is recommended and is the version used by public CI. Check `node --version` and `npm --version`. Use a user-writable npm installation; avoid running the harness or installer with sudo.

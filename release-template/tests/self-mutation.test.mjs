@@ -184,33 +184,37 @@ test("unsupported namespace platform fails closed before launching a command", (
   f.close();
  }
 });
-test("disappearing runtime locks do not hide hardlinks or unreadable subtrees", () => {
+test("fresh native inventory detects outside aliases and unreadable subtrees", () => {
  const f = fixture();
  try {
   const script = `import importlib.util, os, sys
-from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
 guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
 root=sys.argv[2]
-original_scandir=os.scandir
-lock=os.path.join(root,'vanished-lock');os.mkdir(lock)
-def vanished(directory):
- if directory==lock: raise FileNotFoundError(2,'vanished lock',lock)
- return original_scandir(directory)
-with patch.object(guard.os,'scandir',vanished): guard.check_hardlinks(root)
+# NUL-delimited native records preserve whitespace/newlines in real paths.
+inside=os.path.join(root,'inside linked'+chr(10)+'file'+chr(92)+'0 suffix')
+os.link(os.path.join(root,'original'),inside)
+guard.check_protected_hardlinks([root, inside, os.path.join(root,'missing')])
 # An alias introduced after a successful scan must be found on the next call.
-os.link(os.path.join(root,'original'),os.path.join(os.path.dirname(root),'alias'))
-with patch.object(guard.os,'scandir',vanished):
- try: guard.check_hardlinks(root)
- except RuntimeError as error: assert 'hard-linked' in str(error)
- else: raise AssertionError('hardlink was not rejected after transient disappearance')
-def unreadable(directory):
- if directory==lock: raise PermissionError(13,'denied',lock)
- return original_scandir(directory)
-with patch.object(guard.os,'scandir',unreadable):
- try: guard.check_hardlinks(root)
- except PermissionError: pass
- else: raise AssertionError('unreadable subtree was accepted')
+alias=os.path.join(os.path.dirname(root),'outside alias')
+os.link(os.path.join(root,'original'),alias)
+try: guard.check_hardlinks(root)
+except RuntimeError as error: assert 'hard-linked' in str(error)
+else: raise AssertionError('fresh outside alias was not rejected')
+# The protected union may legitimately contain every alias.
+guard.check_protected_hardlinks([root, alias])
+os.unlink(alias)
+# Broken symlinks are not followed and do not hide other entries.
+os.symlink(os.path.join(root,'missing'),os.path.join(root,'vanished-lock'))
+guard.check_hardlinks(root)
+locked=os.path.join(root,'unreadable');os.mkdir(locked);os.chmod(locked,0)
+try:
+ if os.geteuid()!=0:
+  try: guard.check_hardlinks(root)
+  except RuntimeError as error: assert 'inventory failed' in str(error)
+  else: raise AssertionError('unreadable subtree was accepted')
+finally: os.chmod(locked,0o700)
+
 `;
   const result = spawnSync(
    "python3",

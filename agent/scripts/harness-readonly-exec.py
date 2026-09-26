@@ -7,6 +7,7 @@ import os
 import glob
 import platform
 import stat
+import subprocess
 import sys
 
 
@@ -89,39 +90,46 @@ def check_protected_hardlinks(protected_roots):
     roots = {root for root in roots if not any(
         parent != root and os.path.commonpath([parent, root]) == parent
         for parent in roots)}
-    linked = {}
-    def inspect(candidate, info):
-        if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
-            key = (info.st_dev, info.st_ino)
-            entry = linked.setdefault(key, {'links': info.st_nlink, 'paths': set()})
-            entry['links'] = max(entry['links'], info.st_nlink)
-            entry['paths'].add(candidate)
-    for root in roots:
+    existing = []
+    for root in sorted(roots):
         try:
-            info = os.lstat(root)
+            os.lstat(root)
+            existing.append(root)
         except FileNotFoundError:
             continue
-        inspect(root, info)
-        pending = [root] if stat.S_ISDIR(info.st_mode) else []
-        while pending:
-            directory = pending.pop()
-            try:
-                # Reuse DirEntry metadata instead of os.walk's extra name/path
-                # pass. Do not cache this inventory between commands: an outside
-                # alias created since the last launch must still be rejected.
-                if os.path.islink(directory):
-                    continue
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        try:
-                            if entry.is_dir(follow_symlinks=False):
-                                pending.append(entry.path)
-                            elif entry.is_file(follow_symlinks=False):
-                                inspect(entry.path, entry.stat(follow_symlinks=False))
-                        except FileNotFoundError:
-                            continue
-            except FileNotFoundError:
-                continue
+    if not existing:
+        return
+    # GNU find performs the same fresh lstat traversal in native code. Emit
+    # only multiply-linked regular files; Python need not materialize metadata
+    # for hundreds of thousands of ordinary dependencies on every shell call.
+    # -P never follows symlinks. Vanishing directory entries are benign, but
+    # permission/traversal errors must still fail the complete inventory.
+    command = ['/usr/bin/find', '-P', *existing, '-ignore_readdir_race',
+               '-type', 'f', '-links', '+1', '-printf', r'%D %i %n %p\0']
+    linked = {}
+    with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL) as scan:
+        try:
+            pending = b''
+            while True:
+                chunk = scan.stdout.read(65536)
+                if not chunk:
+                    break
+                records = (pending + chunk).split(b'\0')
+                pending = records.pop()
+                for record in records:
+                    device, inode, links, candidate = record.split(b' ', 3)
+                    key = (int(device), int(inode))
+                    entry = linked.setdefault(key, {'links': int(links), 'paths': set()})
+                    entry['links'] = max(entry['links'], int(links))
+                    entry['paths'].add(candidate)
+            if pending or scan.wait() != 0:
+                raise RuntimeError('protected hard-link inventory failed; check unreadable or changing protected paths')
+        finally:
+            if scan.poll() is None:
+                scan.kill()
+                scan.wait()
+
     if any(len(entry['paths']) < entry['links'] for entry in linked.values()):
         raise RuntimeError('harness has hard-linked files with aliases outside protected roots; a maintenance session must replace them with independent copies before guarded execution')
 
