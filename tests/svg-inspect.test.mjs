@@ -57,7 +57,10 @@ test("measureSvg reports geometry, hygiene and accessibility", () => {
   assert.deepEqual(measured.unionBounds, { x: 4, y: 4, width: 16, height: 16 });
   assert.equal(measured.padding, 4);
   assert.deepEqual(measured.centerOffset, { dx: 0, dy: 0 });
-  assert.equal(measured.boundsApproximate, false);
+  assert.equal(measured.boundsApproximate, true, 'stroke, filter and unresolved use geometry require rendered verification');
+  for (const cause of ['stroke extents', 'filter regions', '<use> instances']) {
+    assert.ok(measured.approximationCauses.some((value) => value.includes(cause)), cause);
+  }
   assert.equal(measured.activeContent.length, 0);
 });
 
@@ -86,12 +89,26 @@ test("compareSvgSet flags the sibling that drifted", () => {
     svg.measureSvg(base(`<rect x="4" y="4" width="16" height="16" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>`), "b.svg"),
     svg.measureSvg(base(`<rect x="0.5" y="0.5" width="23" height="23" fill="#111" stroke="#111" stroke-width="1.5" stroke-linejoin="miter"/>`), "c.svg"),
   ];
-  const { summary, outliers } = svg.compareSvgSet(measures);
+  const { summary, outliers, approximate } = svg.compareSvgSet(measures);
   assert.ok(summary.some((s) => /stroke widths: 2/));
   assert.ok(outliers.some((o) => o.file === "c.svg" && o.check === "stroke"), JSON.stringify(outliers));
+  assert.deepEqual(approximate, ['a.svg', 'b.svg', 'c.svg']);
+  assert.ok(!outliers.some((o) => ['mass', 'padding', 'center'].includes(o.check)), 'stroke estimates cannot become exact geometry verdicts');
+  assert.ok(summary.some((line) => /geometry unknown.*render matrix/.test(line)));
+  assert.ok(!outliers.some((o) => o.file === "a.svg" || o.file === "b.svg"), JSON.stringify(outliers));
+});
+
+test("compareSvgSet retains mass, padding and center checks for exact fill geometry", () => {
+  const base = (inner) => `<svg viewBox="0 0 24 24">${inner}</svg>`;
+  const measures = [
+    svg.measureSvg(base(`<rect x="4" y="4" width="16" height="16" fill="#111"/>`), "a.svg"),
+    svg.measureSvg(base(`<rect x="4" y="4" width="16" height="16" fill="#111"/>`), "b.svg"),
+    svg.measureSvg(base(`<rect x="0.5" y="0.5" width="23" height="23" fill="#111"/>`), "c.svg"),
+  ];
+  const { outliers, approximate } = svg.compareSvgSet(measures);
+  assert.deepEqual(approximate, []);
   assert.ok(outliers.some((o) => o.file === "c.svg" && o.check === "mass"), JSON.stringify(outliers));
   assert.ok(outliers.some((o) => o.file === "c.svg" && o.check === "padding"), JSON.stringify(outliers));
-  assert.ok(!outliers.some((o) => o.file === "a.svg" || o.file === "b.svg"), JSON.stringify(outliers));
   const offset = svg.measureSvg(base(`<rect x="8" y="4" width="12" height="12" fill="#111"/>`), "d.svg");
   const centered = svg.compareSvgSet([measures[0], offset]);
   assert.ok(centered.outliers.some((o) => o.file === "d.svg" && o.check === "center"), JSON.stringify(centered.outliers));
