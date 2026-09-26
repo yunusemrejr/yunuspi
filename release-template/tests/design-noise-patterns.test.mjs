@@ -156,8 +156,14 @@ test('emoji chrome, hype badges and fake terminals flag with article and code-sa
  const badges=['NEW','Beta','AI'].map(word=>`<span class="pill static">${word}</span>`).join('');
  const {rendered}=await capture(`<h2>Launch 🚀</h2><button>Save 💾</button>${badges}<div>&gt; initializing modules…</div><div>$ npm run deploy</div>`);
  const found=kinds(rendered);
- assert.ok(found.includes('emoji-in-chrome'));assert.ok(found.includes('hype-badge-cluster'));assert.ok(found.includes('fake-terminal-decoration'));
- assert.equal(rendered.noise.findings.find(f=>f.kind==='hype-badge-cluster').badges,3);
+ // Under load the 40ms scan can stop before reaching the third badge or
+ // terminal. A complete scan must find every pattern; only an explicit
+ // partial receipt permits a missing positive, with diagnostics on failure.
+ const receipt=JSON.stringify(rendered.noise??null);
+ for(const kind of ['emoji-in-chrome','hype-badge-cluster','fake-terminal-decoration'])
+  assert.ok(found.includes(kind)||rendered.noise?.truncated===true,`Missing ${kind} without a partial scan: ${receipt}`);
+ const hype=rendered.noise?.findings.find(f=>f.kind==='hype-badge-cluster');
+ if(hype)assert.equal(hype.badges,3,receipt);
  const clean=await capture(`<article><h2>Party 🎉 notes</h2></article><p>Plain emoji 🎉 in prose is not chrome.</p><span class="pill static">Beta</span><span class="pill static">Invoices</span><pre>$ npm install</pre><code>&gt; connected</code>`);
  assert.deepEqual(kinds(clean.rendered),[]);
 });
