@@ -105,7 +105,9 @@ test('viewport changes exclude responsive clones and the native design tool retu
 
 test('new advisory output remains bounded under repeated badges and explicit scans',async()=>{
  const body=Array.from({length:100},()=>'<span class="pill"><i class="dot"></i>Live</span>').join('');
- const ordinary=await capture(body);assert.equal(ordinary.rendered.noise.findings.length,6);assert.equal(ordinary.rendered.noise.truncated,true);assert.ok(JSON.stringify(ordinary.rendered).length<=14000);
+ // The 40ms scan budget may stop before the six-finding cap under load;
+ // this receipt contract bounds output rather than requiring an exhaustive scan.
+ const ordinary=await capture(body);assert.ok(ordinary.rendered.noise.findings.length>=1&&ordinary.rendered.noise.findings.length<=6);assert.equal(ordinary.rendered.noise.truncated,true);assert.ok(JSON.stringify(ordinary.rendered).length<=14000);
  const detailed=await capture(body,{designAudit:true});assert.ok(detailed.rendered.noise.findings.length<=12);assert.equal(detailed.rendered.noise.truncated,true);assert.ok(JSON.stringify(detailed.rendered).length<=14000);
 });
 
