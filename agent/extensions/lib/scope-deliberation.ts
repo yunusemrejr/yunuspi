@@ -142,7 +142,7 @@ function councilBrief(result: any): string {
  * graph. Every new user input invalidates the prior council; only one ephemeral
  * brief is kept, with no extra memory database or transcript injection. */
 export function createScopeDeliberation(pi: any, options: { history: (request:any)=>Promise<any>; workflow?: (ctx:any,signal:AbortSignal)=>Promise<any>; runner?: any; deadlineMs?: number }) {
-  let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined;
+  let generation=0, inputSerial=0, controller:AbortController|undefined, pending:Promise<void>|undefined, contextWaited:Promise<void>|undefined;
   let inputText='';
   let key='', brief='', review='', owner='', councilStatus='', seen=false, stopped=false, pausedSerial=-1, turnSerial=-1, wakeOnly=false, evaluated=false, statusContext:any, workflow:any;
   const enabled=()=>scopeCouncilEnabled();
@@ -156,7 +156,7 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
   // next start() builds a fresh one, and a cancelled run can never hand the
   // following turn a stale aborted controller.
   const cancel=(pause=false)=>{generation++;const live=controller;controller=undefined;live?.abort();pending=undefined;key='';brief='';review='';councilStatus='';seen=false;workflow=undefined;stopped=pause;pausedSerial=pause?turnSerial:-1;evaluated=false;clearStatus();};
-  return {
+  const lifecycle = {
     input(event:any) {
       // The SDK emits injected wakes with source 'extension' and every other
       // input (interactive, CLI, programmatic) as 'interactive'. Only the
@@ -177,6 +177,15 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
     reviewContext(ctx:any) { return enabled() && !stopped && identity(ctx)===owner ? review:''; },
     receipt(ctx:any) { return enabled() && !stopped && identity(ctx)===owner && key ? {requestHash:key,workflow}:undefined; },
     pending(ctx:any) { return identity(ctx)===owner ? pending:undefined; },
+    /** The first context build of a council waits up to maxWaitMs; later
+     * builds render at once. Re-paying the wait on every build stalled each
+     * turn up to 15s for as long as a slow council ran. The first mutation
+     * still waits for the brief (see the tool_call gate). */
+    contextWait(ctx:any, maxWaitMs:number):Promise<void>|undefined {
+      if(identity(ctx)!==owner || !pending || contextWaited===pending)return undefined;
+      contextWaited=pending;
+      return lifecycle.settle(ctx,maxWaitMs);
+    },
     async settle(ctx:any, maxWaitMs?:number) {
       if(identity(ctx)!==owner || !pending)return;
       // before_agent_start precedes the SDK's AbortController. Wait at the
@@ -281,4 +290,5 @@ export function createScopeDeliberation(pi: any, options: { history: (request:an
       try{await operation;}finally{own.abort();if(ticket===generation){controller=undefined;pending=undefined;clearStatus();}}
     },
   };
+  return lifecycle;
 }

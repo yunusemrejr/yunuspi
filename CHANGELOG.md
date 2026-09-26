@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.11 — 2026-09-26
+
+A slow change-scope council no longer taxes every turn. The context hook waited up to fifteen seconds for a running council on every context build, so each turn of a long deliberation paid the full wait again; per-session hook ledgers showed project-intelligence context averaging over a second a call with multi-second spikes. The first build of a council still waits for a quick brief, later builds render at once, and the first file mutation still waits for the brief before it is chosen. A lifecycle test pins the spend-once wait against a hanging council.
+
+Session ends no longer stall on reworded verdicts. The completion gate keyed its refusal on the full verification lines, so recording the blocked assessment its own refusal asked for changed the receipt set and refused the repeated completion call afresh; the live validation session died on timeout one step from done after exactly this sequence. The gate now keys on the receipt head (source plus verdict): rewording never resets a refusal, while genuinely new verdicts, sources and counts still refuse afresh.
+
+Safety confirms now leave accounted waits. One overnight session attributed 9.8 hours to 609 filesystem-safety hook records with zero blocks: user time at confirm dialogs, amplified when parallel calls share one dialog, misread as handler cost. Each confirm records its dialog, wait and decision, so hook-health diagnostics can separate user latency from handler cost. The visual pixel audit was verified correct against the live validation transcript rather than changed: the one unknown interface verdict came from a reviewer that read two of three required screenshots and passed anyway, which the harness rightly downgraded.
+
 ## 0.10.10 — 2026-09-26
 
 `verify-harness.mjs` no longer reports every extension as a syntax error on Node 24. Node 24's `--check` parses TypeScript as JavaScript even with the strip-types flags, so running the documented `node ~/.pi/agent/scripts/verify-harness.mjs` with the system Node reported 183 false failures after the 0.10.9 deployment while the pinned Node 22 passed. The verifier now strips types in-process (positions preserved) and syntax-checks the module source on either runtime; a behavioral test runs the check on valid and broken TypeScript under the CI runtime.

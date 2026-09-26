@@ -253,6 +253,33 @@ test("foreground and background hooks share policy; review approvals never overr
   ctx.hasUI = false;
   assert.equal((await call("rm -rf ."))?.block, true);
 });
+test("safety confirms record accounted waits for hook-health attribution", async () => {
+  const hooks = new Map();
+  const entries = [];
+  safety.default({
+    on: (name, fn) => hooks.set(name, [...(hooks.get(name) ?? []), fn]),
+    appendEntry: (type, data) => entries.push({ type, data }),
+  });
+  const ctx = {
+    cwd,
+    hasUI: true,
+    ui: {
+      notify() {},
+      async confirm() {
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        return true;
+      },
+    },
+  };
+  for (const hook of hooks.get("tool_call")) {
+    await hook({ toolName: "bash", input: { command: "rm -rf ." } }, ctx);
+  }
+  const waits = entries.filter((entry) => entry.type === "fs-confirm-wait-v1");
+  assert.equal(waits.length, 1);
+  assert.equal(waits[0].data.allowed, true);
+  assert.equal(waits[0].data.title, "Review destructive operation");
+  assert.ok(waits[0].data.waitMs >= 10, `wait spans the dialog (${waits[0].data.waitMs}ms)`);
+});
 
 // Only schema construction is stubbed; explicit file lists use the actual
 // collector, planner, preview registry, path checks and filesystem apply code.

@@ -6,9 +6,10 @@
  * final answers. This pure module decides when a tool call is a "done" moment
  * (a production deploy, or the call that closes the last open todo) and turns
  * unresolved verification receipts into a refusal. The refusal is issued once
- * per distinct receipt set: repeating the same call records an explicit waiver
- * instead, so a user who asked to ship anyway is never deadlocked, and the
- * waiver stays visible in the session. Sources stay owned by their subsystems.
+ * per distinct receipt-head set (see gateHead): repeating the completion call
+ * records an explicit waiver instead, so a user who asked to ship anyway is
+ * never deadlocked, and the waiver stays visible in the session. Sources stay
+ * owned by their subsystems.
  */
 
 export interface PlanTask {
@@ -45,9 +46,23 @@ export interface GateDecision {
 	reason?: string;
 }
 
-/** Refuse once per receipt set and moment; the identical retry is a waiver. */
+/** Key a line by its source and receipt head. Producers append free-text
+ * detail after a second ': ' (a reworded verdict, a fresh assessment
+ * reason); that detail must not reset a refusal the agent already answered,
+ * or the waiver is unreachable: following the refusal's own advice to assess
+ * rewords the line and refuses afresh, stalling the session end. Lines with
+ * fewer segments key whole, so new counts and new states still refuse afresh.
+ * Display keeps the full lines; only the key is headed. */
+const gateHead = (line: string): string => {
+	const first = line.indexOf(": ");
+	if (first < 0) return line;
+	const second = line.indexOf(": ", first + 2);
+	return second < 0 ? line : line.slice(0, second);
+};
+
+/** Refuse once per receipt-head set and moment; a retry with no new receipt head is a waiver. */
 export function completionGate(moment: "deploy" | "plan-complete", lines: readonly string[], refused: ReadonlySet<string>): GateDecision {
-	const key = `${moment}\0${lines.join("\n")}`;
+	const key = `${moment}\0${lines.map(gateHead).join("\n")}`;
 	if (!lines.length) return { block: false, waived: false, key };
 	if (refused.has(key)) return { block: false, waived: true, key };
 	const what = moment === "deploy" ? "Deploy" : "Completing the last open task";

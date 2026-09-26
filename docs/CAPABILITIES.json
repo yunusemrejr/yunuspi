@@ -2867,7 +2867,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 874
+        "line": 878
       },
       {
         "name": "harness-backup",
@@ -3522,7 +3522,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 750,
+        "line": 754,
         "kind": "literal"
       },
       {
@@ -3994,7 +3994,7 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 750,
+        "line": 754,
         "kind": "literal"
       },
       {

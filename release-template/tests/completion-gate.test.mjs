@@ -31,3 +31,22 @@ test('unresolved receipts refuse once; the identical retry is a recorded waiver'
   assert.equal(completionGate('plan-complete', lines, refused).block, true, 'a different moment is its own refusal');
   assert.equal(completionGate('deploy', [lines[0]], refused).block, true, 'a changed receipt set is refused afresh');
 });
+
+test('rewording the same verdict does not reset the waiver; new heads refuse afresh', () => {
+  const refused = new Set();
+  const first = completionGate('plan-complete', ['quality review: Independent review blocked: Precise verification gap: no pixel-reading capability'], refused);
+  assert.equal(first.block, true);
+  assert.match(first.reason, /Precise verification gap/, 'display keeps the full line');
+  refused.add(first.key);
+  const reworded = completionGate('plan-complete', ['quality review: Independent review blocked: Recorded waiver per harness path: no pixel-reading capability'], refused);
+  assert.deepEqual([reworded.block, reworded.waived], [false, true], 'same verdict, new wording still waives');
+  assert.equal(completionGate('plan-complete', ['quality review: Independent review unavailable: reviewers down'], refused).block, true, 'a new disposition refuses afresh');
+  const tests = new Set();
+  const blocked = completionGate('plan-complete', ['project tests: Blocked: harness cannot run the suite'], tests);
+  tests.add(blocked.key);
+  assert.deepEqual(completionGate('plan-complete', ['project tests: Blocked: suite needs a device farm'], tests), { block: false, waived: true, key: blocked.key });
+  const runs = new Set();
+  const two = completionGate('plan-complete', ['subagents: 2 delegated runs have not finished. Pending results cannot support a completed or verified claim.'], runs);
+  runs.add(two.key);
+  assert.equal(completionGate('plan-complete', ['subagents: 1 delegated run has not finished. Pending results cannot support a completed or verified claim.'], runs).block, true, 'changed single-segment lines still refuse afresh');
+});
