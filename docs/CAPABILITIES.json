@@ -2963,12 +2963,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1809
+        "line": 1810
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1390
+        "line": 1391
       },
       {
         "name": "curator",
@@ -2983,7 +2983,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1775
+        "line": 1776
       },
       {
         "name": "export-json",
@@ -2998,7 +2998,7 @@
       {
         "name": "graph",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 878
+        "line": 894
       },
       {
         "name": "harness-backup",
@@ -3098,7 +3098,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 530
+        "line": 536
       },
       {
         "name": "or-provider",
@@ -3108,7 +3108,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 669
+        "line": 756
       },
       {
         "name": "prompt-workflow",
@@ -3143,7 +3143,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1719
+        "line": 1720
       },
       {
         "name": "subagent-cost",
@@ -3228,7 +3228,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1724
+        "line": 1725
       },
       {
         "name": "task-state",
@@ -3243,12 +3243,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1743
+        "line": 1744
       },
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 299
+        "line": 302
       },
       {
         "name": "websearch",
@@ -3640,7 +3640,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 488,
+        "line": 491,
         "kind": "literal"
       },
       {
@@ -3694,67 +3694,67 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 754,
+        "line": 770,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 649,
+        "line": 736,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 617,
+        "line": 704,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 579,
+        "line": 666,
         "kind": "literal"
       },
       {
         "name": "project_memory_read",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 372,
+        "line": 456,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 499,
+        "line": 586,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 529,
+        "line": 616,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 633,
+        "line": 720,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 297,
+        "line": 381,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 449,
+        "line": 533,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 669,
+        "line": 697,
         "kind": "literal"
       },
       {
@@ -3796,7 +3796,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1901,
+        "line": 1902,
         "kind": "literal"
       },
       {
@@ -3808,7 +3808,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1838,
+        "line": 1839,
         "kind": "literal"
       },
       {
@@ -4184,7 +4184,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 488,
+        "line": 491,
         "kind": "literal"
       },
       {
@@ -4202,67 +4202,67 @@
       {
         "name": "project_intel",
         "source": "agent/extensions/project-intelligence.ts",
-        "line": 754,
+        "line": 770,
         "kind": "literal"
       },
       {
         "name": "project_memory_consolidate",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 649,
+        "line": 736,
         "kind": "literal"
       },
       {
         "name": "project_memory_forget",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 617,
+        "line": 704,
         "kind": "literal"
       },
       {
         "name": "project_memory_index_path",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 579,
+        "line": 666,
         "kind": "literal"
       },
       {
         "name": "project_memory_read",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 372,
+        "line": 456,
         "kind": "literal"
       },
       {
         "name": "project_memory_reembed",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 499,
+        "line": 586,
         "kind": "literal"
       },
       {
         "name": "project_memory_remember",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 529,
+        "line": 616,
         "kind": "literal"
       },
       {
         "name": "project_memory_restore",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 633,
+        "line": 720,
         "kind": "literal"
       },
       {
         "name": "project_memory_search",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 297,
+        "line": 381,
         "kind": "literal"
       },
       {
         "name": "project_memory_status",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 449,
+        "line": 533,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 669,
+        "line": 697,
         "kind": "literal"
       },
       {
@@ -4292,7 +4292,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1901,
+        "line": 1902,
         "kind": "literal"
       },
       {
@@ -4304,7 +4304,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1838,
+        "line": 1839,
         "kind": "literal"
       },
       {

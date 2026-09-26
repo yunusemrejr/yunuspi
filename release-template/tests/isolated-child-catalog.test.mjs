@@ -57,6 +57,15 @@ test('isolated provider restoration reads only the selected cached route without
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('isolated child providers preserve LongCat authentication without touching other providers', () => {
+  const providers = new Map();
+  const pi = { registerProvider: (id, config) => providers.set(id, config) };
+  assert.equal(registerCachedChildModelProvider(pi, 'longcat/LongCat-2.0'), true);
+  assert.equal(providers.get('longcat').apiKey, '${LONGCAT_API_KEY}');
+  assert.equal(registerCachedChildModelProvider(pi, 'orcarouter/fixture/advisor'), true);
+  assert.equal(providers.get('orcarouter').apiKey, undefined, 'only LongCat carries a child auth template');
+});
+
 test('managed launches enable cached provider restoration only when ambient extensions are disabled', async () => {
   const isolated = launch();
   const ordinary = buildPiArgs({ baseArgs: [], task: 'Fixture', model: route, modelRouteCandidate: { route }, sessionEnabled: false });

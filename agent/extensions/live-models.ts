@@ -1469,6 +1469,7 @@ type Fetcher = (
 // Raw cache rows do not embed expiring snapshot overrides. Apply current
 // registry facts at publication so an old cache cannot extend their lifetime.
 const idOnlyFacts = (provider: string): Record<string, IdOnlyFacts> => currentModelFacts(provider)?.models ?? {};
+const PROVIDER_AUTH: Record<string, {apiKey:string}> = {longcat:{apiKey:'${LONGCAT_API_KEY}'}};
 const PROVIDER_COMPAT: Record<string, Record<string, unknown>> = {
 	// Applies to fresh and cached catalogs; explicit model/provider overrides win.
 	openrouter: { sendSessionAffinityHeaders: true },
@@ -1645,6 +1646,7 @@ export function registerCachedChildModelProvider(pi: Pick<ExtensionAPI, "registe
 	const wire = wireFor(provider);
 	const refresh = refreshFor(provider);
 	pi.registerProvider(provider, {
+		...PROVIDER_AUTH[provider],
 		baseUrl: wire.baseUrl,
 		api: wire.api,
 		refreshModels: async context => (await refresh({ ...context, allowNetwork: false }))
@@ -1684,7 +1686,7 @@ export default async function registerLiveModels(
 		const wire = wireFor(providerId);
 		pi.registerProvider(providerId, {
 			name: meta,
-			...(providerId === 'longcat' ? {apiKey:'${LONGCAT_API_KEY}'} : {}),
+			...PROVIDER_AUTH[providerId],
 			baseUrl: wire.baseUrl,
 			api: wire.api,
 			refreshModels: refreshFor(providerId),
