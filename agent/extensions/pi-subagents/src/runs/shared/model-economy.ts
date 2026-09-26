@@ -5,7 +5,7 @@ import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "./pi-spawn.
 import { readHealth, economyRateIdentity, type ProviderHealthState } from "./provider-health.ts";
 import { splitKnownThinkingSuffix, toModelInfo, type ModelInfo } from "../../shared/model-info.ts";
 import { getAgentDir, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
-import { isProvenFreeRoute, capFreeRequest, FREE_BASE_URL } from "./free-route-evidence.ts";
+import { isProvenFreeRoute, capFreeRequest, FREE_BASE_URL, type FreeEvidence } from "./free-route-evidence.ts";
 import { DEFAULT_FILE_SYSTEM_RETRY_DELAYS_MS, waitForFileSystemRetry } from "../../shared/file-system-retry.ts";
 import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 import { sessionObservability } from "../../../../lib/session-observability.ts";
@@ -433,8 +433,8 @@ export function classifyModelEconomy(
  * placeholders and absurd above-cap rates. Unknown/unproven price is allowed
  * (circuit breakers own runaway spend). Authorization does NOT widen the
  * autonomous pool — allowlisted routes only pass explicit use. */
-export function isAutonomousMeteredEligible(model: ModelInfo | undefined, cfg: ModelEconomyConfig): boolean {
-	if (isProvenFreeRoute(model)) return true;
+export function isAutonomousMeteredEligible(model: ModelInfo | undefined, cfg: ModelEconomyConfig, evidence?: FreeEvidence | null, now = Date.now()): boolean {
+	if (isProvenFreeRoute(model, evidence, now)) return true;
 	if (!model?.cost || !Number.isFinite(model.cost.input) || !Number.isFinite(model.cost.output)) return true;
 	if (model.cost.input === 0 && model.cost.output === 0 && !(Array.isArray(model.cost.tiers) && model.cost.tiers.length > 0)) return false;
 	const rates = worstCaseRates(model.cost as RateSet);
@@ -450,19 +450,19 @@ export interface EconomyWorkload {
  cacheReadTokens?: number;
  cacheWriteTokens?: number;
 }
-export function estimateEconomyCost(model: ModelInfo, workload: EconomyWorkload): number | undefined {
+export function estimateEconomyCost(model: ModelInfo, workload: EconomyWorkload, evidence?: FreeEvidence | null, now = Date.now()): number | undefined {
  const counts = [workload.inputTokens, workload.outputTokens, workload.cacheReadTokens ?? 0, workload.cacheWriteTokens ?? 0];
  if (counts.some(n => !Number.isSafeInteger(n) || n < 0 || n > 100_000_000)) return;
  const rates = worstCaseRates(model.cost as RateSet | undefined);
- if (!rates || (rates.input === 0 && rates.output === 0 && !isProvenFreeRoute(model))) return;
+ if (!rates || (rates.input === 0 && rates.output === 0 && !isProvenFreeRoute(model, evidence, now))) return;
  // Worst-case tiers prevent an incomplete context estimate understating price.
  const total = (counts[0] * rates.input + counts[1] * rates.output + counts[2] * rates.cacheRead + counts[3] * rates.cacheWrite) / 1_000_000;
  return Number.isFinite(total) ? total : undefined;
 }
 
 /** No guessed hit rate: default comparison prices one input and one output token. */
-export function economyComparisonCost(model: ModelInfo, workload?: EconomyWorkload): number {
- return estimateEconomyCost(model, workload ?? {inputTokens:1, outputTokens:1}) ?? Infinity;
+export function economyComparisonCost(model: ModelInfo, workload?: EconomyWorkload, evidence?: FreeEvidence | null, now = Date.now()): number {
+ return estimateEconomyCost(model, workload ?? {inputTokens:1, outputTokens:1}, evidence, now) ?? Infinity;
 }
 
 /** Affordable metered alternatives (sorted cheapest-first) for error messages. */

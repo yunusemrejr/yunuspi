@@ -288,14 +288,14 @@ export function proveFreeRoute(
 	};
 }
 
-export function isProvenFreeRoute(model: Route | undefined, evidence = readFreeEvidence(), now = Date.now()): boolean {
-	return proveFreeRoute(model, evidence, now).proven;
+export function isProvenFreeRoute(model: Route | undefined, evidence: FreeEvidence | null | undefined = readFreeEvidence(), now = Date.now()): boolean {
+	return proveFreeRoute(model, evidence ?? null, now).proven;
 }
 
 /** Capability facts share the existing catalog evidence, including paid rows.
  * Unlike billing-safe stale free evidence, automatic model replacement requires
  * fresh facts, an exact unambiguous route, and the official wire origin. */
-export function catalogRouteCapabilities(model: Route, evidence = readFreeEvidence(), now = Date.now()): FreeRouteCapabilities | undefined {
+export function catalogRouteCapabilities(model: Route, evidence: FreeEvidence | null | undefined = readFreeEvidence(), now = Date.now()): FreeRouteCapabilities | undefined {
 	const baseUrl = model.provider === "openrouter" ? FREE_BASE_URL : model.provider === "orcarouter" ? ORCA_BASE_URL : undefined;
 	if (!baseUrl || model.api !== "openai-completions" || model.baseUrl?.replace(/\/$/, "") !== baseUrl) return undefined;
 	const section = evidence?.providers?.[model.provider];
@@ -385,10 +385,10 @@ const PROOF_RANK: Record<FreeProof, number> = { fresh: 0, "stale-bounded": 1, no
  */
 export function describeFreeRoutes(
 	models: Array<Route & { contextWindow?: number; maxTokens?: number }>,
-	opts: { requirements?: FreeRouteRequirements; evidence?: FreeEvidence; now?: number } = {},
+	opts: { requirements?: FreeRouteRequirements; evidence?: FreeEvidence | null; now?: number } = {},
 ): FreeRouteReport {
 	const now = opts.now ?? Date.now();
-	const evidence = opts.evidence ?? readFreeEvidence() ?? null;
+	const evidence = (opts.evidence === undefined ? readFreeEvidence() : opts.evidence) ?? null;
 	const candidates: FreeRouteCandidate[] = models.map((model) => {
 		const verdict = proveFreeRoute(model, evidence, now);
 		const reasons: string[] = [];

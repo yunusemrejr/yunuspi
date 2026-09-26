@@ -270,9 +270,17 @@ export function isExcluded(modelId: string, provider: string): boolean {
  * continue to use {@link filterFallbackCandidates}.
  */
 export function findModelExclusion(fullId: string, now = Date.now()): Readonly<ModelExclusion> | undefined {
+	return createModelExclusionLookup(now)(fullId);
+}
+
+/** One fresh durable snapshot for a synchronous routing decision. */
+export function createModelExclusionLookup(now = Date.now()): (fullId: string) => Readonly<ModelExclusion> | undefined {
 	ensureLoaded();
-	const { provider, modelId } = parseModelKey(fullId);
-	return exclusions.find((entry) => entryMatches(entry, modelId, provider, now));
+	const snapshot = exclusions;
+	return (fullId) => {
+		const { provider, modelId } = parseModelKey(fullId);
+		return snapshot.find((entry) => entryMatches(entry, modelId, provider, now));
+	};
 }
 
 /**

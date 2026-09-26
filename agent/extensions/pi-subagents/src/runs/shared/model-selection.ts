@@ -3,7 +3,7 @@ import { readHealth, recoveryPerformance, evaluateRoute, type ProviderHealthStat
 import * as path from "node:path";
 import { splitKnownThinkingSuffix, type ModelInfo } from "../../shared/model-info.ts";
 import { getAgentDir } from "../../shared/utils.ts";
-import { findModelExclusion } from "./model-exclusions.ts";
+import { findModelExclusion, createModelExclusionLookup } from "./model-exclusions.ts";
 import { describeFreeRoutes, catalogRouteCapabilities, readFreeEvidence } from "./free-route-evidence.ts";
 import { writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 import { assessModelQuality, compareModelVersions, validBenchmark, taskQuality, type BenchmarkEvidence, type ModelDiscovery, type QualityTask } from "./model-quality.ts";
@@ -136,7 +136,8 @@ function subscriptionEligible(model: ModelInfo, cfg: ModelEconomyConfig): boolea
 export interface SelectionGateContext {
 	timestamp: number;
 	health: ProviderHealthState;
-	evidence: ReturnType<typeof readFreeEvidence>;
+	evidence: ReturnType<typeof readFreeEvidence> | null;
+	exclusionFor?: ReturnType<typeof createModelExclusionLookup>;
 	histories: Map<string, ReturnType<typeof recoveryPerformance>>;
 	reference?: ModelInfo;
 	effectiveRequirements?: { minContextWindow?: number; minOutputTokens?: number; reasoning?: boolean; inputModalities?: string[]; toolCalling?: boolean };
@@ -166,7 +167,8 @@ export function buildSelectionGateContext(
 	return {
 		timestamp,
 		health,
-		evidence: readFreeEvidence(),
+		evidence: readFreeEvidence() ?? null,
+		exclusionFor: createModelExclusionLookup(timestamp),
 		histories: new Map((models ?? []).map(m => [m.fullId, recoveryPerformance(health.providers[m.provider]?.models[m.id], m, timestamp)])),
 		reference,
 		effectiveRequirements,
@@ -203,7 +205,7 @@ export function evaluateCandidateGates(model: ModelInfo, ctx: SelectionGateConte
 	if (required?.inputModalities?.some(input => !model.input?.includes(input))) {
 		dimensions.push("modality"); detail.modality = `missing ${required.inputModalities.filter(input => !model.input?.includes(input)).join(",")}`;
 	}
-	if (required?.toolCalling && catalogRouteCapabilities(model, ctx.evidence)?.toolCalling !== true) {
+	if (required?.toolCalling && catalogRouteCapabilities(model, ctx.evidence, ctx.timestamp)?.toolCalling !== true) {
 		dimensions.push("tool-schema"); detail["tool-schema"] = "tool calling not advertised";
 	}
 	if (ctx.options?.toolWire?.compatible) {
@@ -239,9 +241,25 @@ export function evaluateCandidateGates(model: ModelInfo, ctx: SelectionGateConte
 		dimensions.push("reliability-history"); detail["reliability-history"] = `${Math.round(history.failureRate * 100)}% recent failures`;
 	}
 	if (ctx.options?.exclude?.includes(model.fullId)) { dimensions.push("excluded"); detail.excluded = "excluded by caller"; }
-	if (findModelExclusion(model.fullId)) { dimensions.push("excluded"); detail.excluded = "model exclusion"; }
+	if ((ctx.exclusionFor ?? findModelExclusion)(model.fullId, ctx.timestamp)) { dimensions.push("excluded"); detail.excluded = "model exclusion"; }
 	if (ctx.options?.exhaustedProviders?.includes(model.provider)) { dimensions.push("quota"); detail.quota = "provider quota exhausted"; }
 	return { route: model.fullId, dimensions: [...new Set(dimensions)], detail };
+}
+
+/** Reuse immutable evidence and calculations throughout one decision, never across calls. */
+function selectionEconomy(cfg: ModelEconomyConfig, gate: SelectionGateContext, workload?: EconomyWorkload) {
+	const eligibility = new Map<ModelInfo, boolean>();
+	const costs = new Map<ModelInfo, number>();
+	return {
+		eligible(model: ModelInfo): boolean {
+			if (!eligibility.has(model)) eligibility.set(model, isAutonomousMeteredEligible(model, cfg, gate.evidence, gate.timestamp));
+			return eligibility.get(model)!;
+		},
+		cost(model: ModelInfo): number {
+			if (!costs.has(model)) costs.set(model, economyComparisonCost(model, workload, gate.evidence, gate.timestamp));
+			return costs.get(model)!;
+		},
+	};
 }
 
 /**
@@ -254,6 +272,7 @@ export function selectAffordableModel(
 	options?: AffordableSelectionOptions,
 ): AffordableSelection | undefined {
 	const gate = buildSelectionGateContext(models, options);
+	const economy = selectionEconomy(cfg, gate, options?.workload);
 	const reference = gate.reference;
 	const evidence = gate.evidence;
 	const timestamp = gate.timestamp;
@@ -281,9 +300,9 @@ export function selectAffordableModel(
 		return gates.dimensions.length === 0;
 	});
 	// One evidence snapshot for the whole selection, rather than disk I/O per model.
-	const freeReport = describeFreeRoutes(pool, {evidence,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:gate.effectiveRequirements?.toolCalling !== false}});
+	const freeReport = describeFreeRoutes(pool, {evidence,now:timestamp,requirements:{minContextWindow:MIN_AUTONOMOUS_CONTEXT_TOKENS, toolCalling:gate.effectiveRequirements?.toolCalling !== false}});
  const freeIds = new Set(freeReport.candidates.filter(c=>c.eligible).map(c=>c.route));
- const qualityPool = pool.filter(m=>freeIds.has(m.fullId) || !options?.freeOnly && (isAutonomousMeteredEligible(m,cfg) || subscriptionEligible(m,cfg)));
+ const qualityPool = pool.filter(m=>freeIds.has(m.fullId) || !options?.freeOnly && (economy.eligible(m) || subscriptionEligible(m,cfg)));
  const quality = qualityTask ? assessModelQuality(qualityPool,cache?.observations ?? [],qualityTask,reference,timestamp) : undefined;
  const freeByRoute = new Map(freeReport.candidates.map(candidate => [candidate.route, candidate]));
  if (quality) {
@@ -314,7 +333,7 @@ export function selectAffordableModel(
 			route: model.fullId,
 			free: freeByRoute.get(model.fullId)?.eligible === true,
 			...(freeByRoute.get(model.fullId) && !freeByRoute.get(model.fullId)!.eligible ? { freeProof: freeByRoute.get(model.fullId)!.reasons.slice(0, 2).join(", ") } : {}),
-			paidEligible: isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg),
+			paidEligible: economy.eligible(model) || subscriptionEligible(model, cfg),
 			...(quality?.get(model.fullId) ? { qualityEvidence: quality.get(model.fullId)!.reason } : {}),
 			...(options?.toolWire?.backend ? { backend: options.toolWire.backend } : {}),
 			...(options?.toolWire?.compatible ? { toolCompatible: options.toolWire.compatible(model.fullId).ok } : {}),
@@ -328,10 +347,10 @@ export function selectAffordableModel(
 	const preferred = reference;
 	const preferredId = preferred?.id ?? options?.preferredModel?.slice((options.preferredModel.indexOf("/") ?? -1)+1);
  const qualityRank = (id:string) => quality?.get(id)?.confidence === "measured" ? 0 : quality?.get(id)?.confidence === "reference" ? 1 : 2;
- const versionRank = new Map(pool.map(model => [model.fullId,pool.filter(other => {
-  const a=quality?.get(model.fullId), b=quality?.get(other.fullId);
-  return a?.confidence === "measured" && b?.confidence === "measured" && a.relative! >= b.relative! && compareModelVersions(model.id,other.id)>0;
- }).length]));
+ const measured = pool.filter(model => quality?.get(model.fullId)?.confidence === "measured");
+ const versionRank = new Map(measured.map(model => [model.fullId,measured.filter(other =>
+  quality!.get(model.fullId)!.relative! >= quality!.get(other.fullId)!.relative! && compareModelVersions(model.id,other.id)>0
+ ).length]));
  const bestRelative = Math.max(0,...[...(quality?.values() ?? [])].map(q=>q.relative??0));
  const qualityBand = (id:string) => Math.floor(Math.max(0,bestRelative-(quality?.get(id)?.relative??0))/.03);
  const qualityCompare = (a:string,b:string) => qualityRank(a)-qualityRank(b) || qualityBand(a)-qualityBand(b) || (versionRank.get(b)??0)-(versionRank.get(a)??0);
@@ -350,8 +369,8 @@ export function selectAffordableModel(
 			noteRejection({ route: model.fullId, dimensions: ["context"], detail: { context: `below autonomous floor ${MIN_AUTONOMOUS_CONTEXT_TOKENS}` } });
 			return false;
 		}
-		if (isAutonomousMeteredEligible(model, cfg)) {
-			const comparable = Number.isFinite(economyComparisonCost(model, options?.workload));
+		if (economy.eligible(model)) {
+			const comparable = Number.isFinite(economy.cost(model));
 			if (!comparable) noteRejection({ route: model.fullId, dimensions: ["price"], detail: { price: "no finite comparison cost" } });
 			return comparable;
 		}
@@ -365,25 +384,25 @@ export function selectAffordableModel(
 	} else {
 		explanation.push("no usable local ranking cache: offline cheapest-member rule applies");
 	}
-    const priceReference=eligible.filter(model=>isAutonomousMeteredEligible(model,cfg)).slice().sort((a,b)=>economyComparisonCost(a,options?.workload)-economyComparisonCost(b,options?.workload)||a.fullId.localeCompare(b.fullId))[0];
-    const cheapestCost=priceReference?economyComparisonCost(priceReference,options?.workload):Infinity;
+    const priceReference=eligible.filter(model=>economy.eligible(model)).slice().sort((a,b)=>economy.cost(a)-economy.cost(b)||a.fullId.localeCompare(b.fullId))[0];
+    const cheapestCost=priceReference?economy.cost(priceReference):Infinity;
     // Fixed cheapest-route anchor avoids non-transitive pairwise cost/latency tradeoffs.
-    const speedScores=new Map(eligible.map(model=>[model.fullId,priceReference && economyComparisonCost(model,options?.workload)<=cheapestCost*1.1 ? Math.min(0,compareObservedEconomySpeed(model,priceReference)):0]));
-    const forecastReady=eligible.filter(model=>isAutonomousMeteredEligible(model,cfg)).every(model=>histories.get(model.fullId)!.effectiveSamples>=6);
+    const speedScores=new Map(eligible.map(model=>[model.fullId,priceReference && economy.cost(model)<=cheapestCost*1.1 ? Math.min(0,compareObservedEconomySpeed(model,priceReference)):0]));
+    const forecastReady=eligible.filter(model=>economy.eligible(model)).every(model=>histories.get(model.fullId)!.effectiveSamples>=6);
     const retryCost=(model:ModelInfo)=>{
         const history=histories.get(model.fullId)!;
         // Observed failures can increase a forecast, never widen price or quality
         // admission. Weak/stale history stays neutral; no exploratory live calls.
-        return process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? economyComparisonCost(model,options?.workload)/Math.max(.2,1-history.failureRate) : economyComparisonCost(model,options?.workload);
+        return process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? economy.cost(model)/Math.max(.2,1-history.failureRate) : economy.cost(model);
     };
     const compareCost=(a:ModelInfo,b:ModelInfo)=>{
-        const left=economyComparisonCost(a,options?.workload),right=economyComparisonCost(b,options?.workload);
+        const left=economy.cost(a),right=economy.cost(b);
         const group=Number(left>cheapestCost*1.1)-Number(right>cheapestCost*1.1);
         return qualityCompare(a.fullId,b.fullId) || group || (process.env.PI_LOCAL_INTELLIGENCE!=='off' && forecastReady ? retryCost(a)-retryCost(b) : 0) || (speedScores.get(a.fullId)??0)-(speedScores.get(b.fullId)??0) || left-right;
     };
 
 	const metered = eligible
-		.filter((model) => isAutonomousMeteredEligible(model, cfg))
+		.filter((model) => economy.eligible(model))
 		.sort((a, b) => {
 			const priceDelta = compareCost(a,b);
 			return priceDelta !== 0 ? priceDelta : a.fullId.localeCompare(b.fullId);
@@ -435,6 +454,7 @@ export function describeSelectionRejections(
 	options: AffordableSelectionOptions = {},
 ): { rejections: CandidateRejection[]; decision: RouteDecisionRecord } {
 	const gate = buildSelectionGateContext(models, options);
+	const economy = selectionEconomy(cfg, gate, options?.workload);
 	const candidates = models ?? [];
 	const rejectionMap = new Map<string, CandidateRejection>();
 	const note = (rejection: CandidateRejection) => {
@@ -457,7 +477,7 @@ export function describeSelectionRejections(
 	const freeIds = new Set(freeReport.candidates.filter(candidate => candidate.eligible).map(candidate => candidate.route));
 	const { cache } = readRankCache();
 	const qualityTask = options.quality ?? (options.task ? taskQuality(options.task) : undefined);
-	const qualityPool = hardPool.filter(model => freeIds.has(model.fullId) || !options.freeOnly && (isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg)));
+	const qualityPool = hardPool.filter(model => freeIds.has(model.fullId) || !options.freeOnly && (economy.eligible(model) || subscriptionEligible(model, cfg)));
 	const quality = qualityTask ? assessModelQuality(qualityPool, cache?.observations ?? [], qualityTask, gate.reference, gate.timestamp) : undefined;
 	for (const model of hardPool) {
 		const verdict = quality?.get(model.fullId);
@@ -468,7 +488,7 @@ export function describeSelectionRejections(
 		if (free?.free && !free.eligible) {
 			note({ route: model.fullId, dimensions: ["price"], detail: { price: `free proof failed: ${free.reasons.slice(0, 2).join(", ")}` } });
 		}
-		if (!options.freeOnly && !contextTooSmall(model) && !isAutonomousMeteredEligible(model, cfg) && !subscriptionEligible(model, cfg) && !free?.eligible) {
+		if (!options.freeOnly && !contextTooSmall(model) && !economy.eligible(model) && !subscriptionEligible(model, cfg) && !free?.eligible) {
 			note({ route: model.fullId, dimensions: ["price"], detail: { price: "no known-affordable price" } });
 		}
 		if (options.freeOnly && free && !free.eligible) {
@@ -482,7 +502,7 @@ export function describeSelectionRejections(
 		candidates: candidates.slice(0, 64).map(model => ({
 			route: model.fullId,
 			free: freeIds.has(model.fullId),
-			paidEligible: isAutonomousMeteredEligible(model, cfg) || subscriptionEligible(model, cfg),
+			paidEligible: economy.eligible(model) || subscriptionEligible(model, cfg),
 			...(quality?.get(model.fullId) ? { qualityEvidence: quality.get(model.fullId)!.reason } : {}),
 			healthy: evaluateRoute({ provider: model.provider, model: model.id, now: gate.timestamp }, gate.health).allowed,
 		})),
