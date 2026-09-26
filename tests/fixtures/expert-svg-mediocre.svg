@@ -1,0 +1,1 @@
+<svg viewBox="0 0 24 24"><defs><filter id="f"><feGaussianBlur stdDeviation="2"/></filter></defs><g id="f"/><use href="#absent"/><path onclick="work()" d="M0 0h24" filter="url(#f)"/><script>alert(1)</script></svg>

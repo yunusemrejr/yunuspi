@@ -52,6 +52,17 @@ function smolStatus(inspect: unknown): string {
   return "ready";
 }
 
+function expertRunsDetail(inspect: unknown): string {
+  if (!inspect || typeof inspect !== "object") return "";
+  const value = inspect as Record<string, unknown>;
+  if (typeof value.runs !== "number") return "";
+  const last = value.last as Record<string, unknown> | undefined;
+  const what = last && typeof last.action === "string"
+    ? `, last ${last.action}${Array.isArray(last.domains) && last.domains.length ? ` ${last.domains.join("+")}` : ""}${typeof last.reason === "string" ? ` ${last.reason}` : ""}`
+    : "";
+  return `${value.runs} run${value.runs === 1 ? "" : "s"}${what}`.slice(0, 160);
+}
+
 export interface MicroStatusRequest {
   family: string;
   substantive: boolean;
@@ -82,6 +93,7 @@ export function microStatusSnapshot(request?: {
   const hasKey = openRouterKey() !== undefined;
   const smol = safeInspect("smol");
   const kompress = safeInspect("mini");
+  const expert = safeInspect("expert");
   const layers: LayerHealth[] = [
     { layer: "deterministic", status: "ready", detail: "local reflexes" },
     {
@@ -93,6 +105,7 @@ export function microStatusSnapshot(request?: {
     },
     { layer: "smol", status: smolStatus(smol), detail: "" },
     { layer: "kompress", status: smolStatus(kompress), detail: "" },
+    { layer: "expert", status: smolStatus(expert), detail: expertRunsDetail(expert) },
     {
       layer: "jev",
       status: jevStatus(jev.state === "open", hasKey),
@@ -142,6 +155,7 @@ export function microStatusSnapshot(request?: {
     },
     smol,
     kompress,
+    expert,
     metrics: microMetrics().summaryLines(),
   };
 }

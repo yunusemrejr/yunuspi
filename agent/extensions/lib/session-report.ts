@@ -107,6 +107,14 @@ export function buildSessionReport(entries: any[], branch: any[], live?: any, ac
     const reports = current && Array.isArray(review.reports) ? review.reports : [];
     lines.push(`Latest quality review: revision ${review.revision}; disposition ${review.disposition || 'unassessed'}; ${current ? 'current' : 'stale or missing'} reports; ${reports.filter((r: any) => r.outcome === 'unknown' || r.gap?.trim()).length} evidence gaps; ${reports.flatMap((r: any) => r.findings ?? []).filter((f: any) => f.severity === 'blocking').length} blocking findings. Inspect quality_review status before deciding completion.`);
   } else lines.push('Quality review: no lifecycle record on this branch; this is unavailable evidence, not a pass.');
+  const expertRuns = branch.filter(entry => entry?.type === 'custom' && entry.customType === 'expert-director-v1').map(entry => entry.data);
+  if (expertRuns.length) {
+    const briefs = expertRuns.filter((d: any) => d?.action === 'brief');
+    const verdicts = expertRuns.filter((d: any) => d?.action === 'assess');
+    const lastBrief = briefs[briefs.length - 1];
+    const lastVerdict = verdicts[verdicts.length - 1];
+    lines.push(`Expert Director: ${expertRuns.length} run${expertRuns.length === 1 ? '' : 's'} on this branch${lastBrief?.domains?.length ? `; latest brief ${lastBrief.domains.join('+')} · ${lastBrief.taskType ?? 'unknown task'}${lastBrief.openEnded ? ' · open' : ''}` : ''}${lastVerdict ? `; latest verdict ${lastVerdict.converged ? 'converged' : String(lastVerdict.reason ?? 'open')}` : '; no convergence verdict yet'}.`);
+  } else lines.push('Expert Director: no brief or verdict on this branch; domain excellence ran nowhere here.');
   lines.push('', 'Local intelligence & activity · this process');
   {
     const activity = activityView();

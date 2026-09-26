@@ -12,6 +12,7 @@ import { isProvenFreeRoute } from './pi-subagents/src/runs/shared/free-route-evi
 import { createObserverJournal } from './lib/observer-journal.ts';
 import { displayText, messageText, renderHarnessNotice } from './lib/harness-notice.ts';
 import { readRemindersState } from './lib/reminders-state.ts';
+import { expertReviewerRows } from './lib/expert-convergence.ts';
 
 /** Mr. Watchmaker: an autonomous time-only reviewer beside the session
  * observer. Same scheduler, journal, read-only tools, dispatch guards and
@@ -128,6 +129,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       rows.push({ id: 'time-todos', kind: 'time', text: `${visible.length - open}/${visible.length} todos done · oldest open: ${visible.filter(task => task.status !== 'completed').slice(0, 4).map(task => String(task.title ?? task.subject ?? task.id).slice(0, 50)).join('; ') || 'none'}` });
     }
     if (timings.size) rows.push({ id: 'time-running', kind: 'time', text: [...timings.values()].slice(-3).map(tool => `${tool.name} running ${formatWatchmakerDuration(now() - tool.startedAt)} ${tool.input}`).join('; ') });
+    try {
+      for (const row of expertReviewerRows(ctx?.sessionManager?.getBranch?.() ?? [])) rows.push(row);
+    } catch { /* Reviewer rows are advisory; never break state assembly. */ }
     return rows;
   };
   const intentRows = (): ObserverEvidence[] => {

@@ -968,6 +968,60 @@
       "commands": []
     },
     {
+      "id": "expert-director",
+      "group": "review",
+      "summary": "Domain-excellence coordination: infer excellence domains from a request, load bounded expert doctrine with quality priors, assemble read-only critic lenses, and evaluate improvement-loop convergence. Advisory; the main agent stays the invoker.",
+      "entrypoints": [
+        "expert_director"
+      ],
+      "tools": [
+        "expert_director"
+      ],
+      "options": [
+        {
+          "name": "action",
+          "values": [
+            "brief",
+            "critics",
+            "assess",
+            "taste",
+            "status"
+          ],
+          "summary": "Director operation."
+        },
+        {
+          "name": "taste.op",
+          "values": [
+            "record",
+            "list",
+            "forget"
+          ],
+          "summary": "Quality-preference operation (main session only)."
+        },
+        {
+          "name": "PI_EXPERT",
+          "summary": "Set to off to disable the Director tool and prompt-time briefs."
+        }
+      ],
+      "related": [
+        "quality-review",
+        "review-coordination",
+        "session-observer",
+        "micro-intelligence"
+      ],
+      "sourceFiles": [
+        "agent/extensions/expert-director.ts",
+        "agent/extensions/lib/expert-brief.ts",
+        "agent/extensions/lib/expert-domains.ts",
+        "agent/extensions/lib/expert-doctrine.ts",
+        "agent/extensions/lib/expert-critics.ts",
+        "agent/extensions/lib/expert-convergence.ts",
+        "agent/extensions/lib/expert-taste.ts"
+      ],
+      "doc": "docs/EXPERT-DIRECTOR.md",
+      "commands": []
+    },
+    {
       "id": "session-observer",
       "group": "review",
       "summary": "Periodic independent reviewer that talks to the main agent about the live session, grounded in the Observer Book: 58 doctrine chapters (engineering, design, color, typography, web, media, operations, science, marketing, communication and more) selected by deterministic session triggers, plus per-project margin notes it keeps; advisory only, never authority.",
@@ -2832,12 +2886,12 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1790
+        "line": 1809
       },
       {
         "name": "cost",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1371
+        "line": 1390
       },
       {
         "name": "curator",
@@ -2852,7 +2906,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1756
+        "line": 1775
       },
       {
         "name": "export-json",
@@ -2967,7 +3021,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 487
+        "line": 491
       },
       {
         "name": "or-provider",
@@ -3012,7 +3066,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1700
+        "line": 1719
       },
       {
         "name": "subagent-cost",
@@ -3097,7 +3151,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1705
+        "line": 1724
       },
       {
         "name": "tasks",
@@ -3107,12 +3161,12 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1724
+        "line": 1743
       },
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 281
+        "line": 285
       },
       {
         "name": "websearch",
@@ -3368,6 +3422,12 @@
         "kind": "literal"
       },
       {
+        "name": "expert_director",
+        "source": "agent/extensions/expert-director.ts",
+        "line": 64,
+        "kind": "literal"
+      },
+      {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
         "line": 196,
@@ -3474,7 +3534,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 438,
+        "line": 442,
         "kind": "literal"
       },
       {
@@ -3618,7 +3678,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1882,
+        "line": 1901,
         "kind": "literal"
       },
       {
@@ -3630,7 +3690,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1819,
+        "line": 1838,
         "kind": "literal"
       },
       {
@@ -3920,6 +3980,12 @@
         "kind": "literal"
       },
       {
+        "name": "expert_director",
+        "source": "agent/extensions/expert-director.ts",
+        "line": 64,
+        "kind": "literal"
+      },
+      {
         "name": "git_info",
         "source": "agent/extensions/git-tools.ts",
         "line": 367,
@@ -3976,7 +4042,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 438,
+        "line": 442,
         "kind": "literal"
       },
       {
@@ -4078,7 +4144,7 @@
       {
         "name": "session_audit",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1882,
+        "line": 1901,
         "kind": "literal"
       },
       {
@@ -4090,7 +4156,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1819,
+        "line": 1838,
         "kind": "literal"
       },
       {
@@ -4364,11 +4430,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 637,
-      "registrationSites": 76,
+      "sourceFiles": 644,
+      "registrationSites": 77,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 108,
-      "uniqueStableTools": 107,
+      "stableRegistrationRows": 109,
+      "uniqueStableTools": 108,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4417,6 +4483,10 @@
       },
       {
         "path": "agent/extensions/desktop-session.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/expert-director.ts",
         "exists": true
       },
       {
@@ -4683,6 +4753,30 @@
       },
       {
         "path": "agent/extensions/lib/execution-evidence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-brief.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-convergence.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-critics.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-doctrine.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-domains.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/expert-taste.ts",
         "exists": true
       },
       {
@@ -6960,6 +7054,10 @@
       {
         "name": "EMAIL.md",
         "path": "docs/EMAIL.md"
+      },
+      {
+        "name": "EXPERT-DIRECTOR.md",
+        "path": "docs/EXPERT-DIRECTOR.md"
       },
       {
         "name": "GUARDIAN-IMPLEMENTATION-AUDIT.md",
