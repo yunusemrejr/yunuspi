@@ -7,7 +7,7 @@ import {
   reportText,
 } from "./lib/session-report.ts";
 import { collectSessionMetrics } from "./lib/session-metrics.ts";
-import { readCostEvidence, hasRecordedTokenUsage } from "./lib/cost-evidence.ts";
+import { readCostEvidence, hasRecordedTokenUsage, collectAuxiliaryModelUsage } from "./lib/cost-evidence.ts";
 import { collectSessionCost } from "./lib/session-cost.ts";
 import { collectHarnessUsage, harnessUsageHtml, helperUsageView, collectSkillEvidence } from "./lib/helper-usage.ts";
 import {
@@ -112,7 +112,7 @@ const POPUP_CSS = [
   "table.facts td{padding:2px 10px 2px 0;vertical-align:top}",
   "table.facts td:first-child{color:#9aa0a8;white-space:nowrap}",
   "@media(max-width:640px){main{padding:18px 12px 30px}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.group-meta{white-space:normal}.item-meta{display:none}}",
-  "main:has(.used-report){max-width:1120px}.used-report{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Liberation Sans',Arial,sans-serif;letter-spacing:normal;word-spacing:normal;text-align:left;font-variant-numeric:tabular-nums}.usage-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px}.usage-eyebrow{display:block;font-size:11px;color:#9aa0a8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}.used-report h1{font-size:26px}.usage-snapshot{font-size:11px;color:#9aa0a8}.used-report .overview{margin:12px 0}.used-report .stat strong{font-size:26px}.used-report .group-title{white-space:normal}.usage-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0 14px}.usage-kpi{min-width:0;padding:8px 10px;border-left:2px solid #353b44}.usage-kpi strong{display:block;font-size:22px;line-height:1.2;font-weight:650;color:#f7f4ed}.usage-kpi span,.usage-kpi small{display:block;font-size:11px;line-height:1.4;color:#aeb3ba;margin-top:3px}.usage-components{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.usage-component{border-top:1px solid #30343b;min-width:0}.usage-component>summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;min-height:54px;padding:8px 2px}.usage-component>summary::before{content:'›';color:#ffd479;font-size:18px}.usage-component[open]>summary::before{transform:rotate(90deg)}.usage-component summary b{font-size:13px;font-weight:600}.usage-component summary small{display:block;font-size:11px;color:#9aa0a8}.usage-component-value{margin-left:auto;text-align:right;font-size:11px;color:#b4b8bf}.usage-component .usage-mini-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.usage-component .usage-kpi strong{font-size:18px}.usage-component .facts-grid{padding-left:0;grid-template-columns:100px minmax(0,1fr)}.usage-component:focus-within{outline-color:#8fd0ff}.usage-component>summary:focus-visible,.usage-history>summary:focus-visible{outline:2px solid #8fd0ff;outline-offset:-2px}.usage-note{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-width:80ch;margin:8px 24px 14px}.used-report time{color:#9aa0a8;font-size:11px;white-space:nowrap}.usage-history{border-top:1px solid #30343b;margin-top:14px}.usage-history summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:12px}.usage-history ol{list-style:none;padding:0;margin:0}.usage-history li{display:grid;grid-template-columns:150px minmax(0,1fr);font-size:12px;padding:7px 0}.used-report details.item>summary{min-height:38px}.used-report .facts-grid dd{white-space:pre-wrap}.skill-evidence{list-style:none;padding:0 24px 12px;margin:0}.skill-evidence li{display:block;padding:8px 0;border-top:1px solid #30343b;font-size:12px}.skill-evidence small{display:block;color:#9aa0a8;margin:3px 0}.skill-evidence code{display:block;overflow-wrap:anywhere;color:#c8ccd2;font-size:11px}",
+  "main:has(.used-report){max-width:1120px}.used-report{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI','Liberation Sans',Arial,sans-serif;letter-spacing:normal;word-spacing:normal;text-align:left;font-variant-numeric:tabular-nums}.usage-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px}.usage-eyebrow{display:block;font-size:11px;color:#9aa0a8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}.used-report h1{font-size:26px}.usage-snapshot{font-size:11px;color:#9aa0a8}.used-report .overview{margin:12px 0}.used-report .stat strong{font-size:26px}.used-report .group-title{white-space:normal}.usage-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0 14px}.usage-kpi{min-width:0;padding:8px 10px;border-left:2px solid #353b44}.usage-kpi strong{display:block;font-size:22px;line-height:1.2;font-weight:650;color:#f7f4ed}.usage-kpi span,.usage-kpi small{display:block;font-size:11px;line-height:1.4;color:#aeb3ba;margin-top:3px}.usage-components{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.usage-component{border-top:1px solid #30343b;min-width:0}.usage-component>summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;min-height:54px;padding:8px 2px}.usage-component>summary::before{content:'›';color:#ffd479;font-size:18px}.usage-component[open]>summary::before{transform:rotate(90deg)}.usage-component summary b{font-size:13px;font-weight:600}.usage-component summary small{display:block;font-size:11px;color:#9aa0a8}.usage-component-value{margin-left:auto;text-align:right;font-size:11px;color:#b4b8bf}.usage-component .usage-mini-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.usage-component .usage-kpi strong{font-size:18px}.usage-component .facts-grid{padding-left:0;grid-template-columns:145px minmax(0,1fr)}.usage-component:focus-within{outline-color:#8fd0ff}.usage-component>summary:focus-visible,.usage-history>summary:focus-visible{outline:2px solid #8fd0ff;outline-offset:-2px}.usage-note{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;max-width:80ch;margin:8px 24px 14px}.used-report time{color:#9aa0a8;font-size:11px;white-space:nowrap}.usage-history{border-top:1px solid #30343b;margin-top:14px}.usage-history summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-size:12px}.usage-history ol{list-style:none;padding:0;margin:0}.usage-history li{display:grid;grid-template-columns:150px minmax(0,1fr);font-size:12px;padding:7px 0}.used-report details.item>summary{min-height:38px}.used-report .facts-grid dd{white-space:pre-wrap}.skill-evidence{list-style:none;padding:0 24px 12px;margin:0}.skill-evidence li{display:block;padding:8px 0;border-top:1px solid #30343b;font-size:12px}.skill-evidence small{display:block;color:#9aa0a8;margin:3px 0}.skill-evidence code{display:block;overflow-wrap:anywhere;color:#c8ccd2;font-size:11px}",
   "@media(max-width:700px){.usage-components{grid-template-columns:1fr}.usage-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.used-report .group-meta{max-width:45%;font-size:11px}.usage-heading{align-items:flex-start;flex-direction:column;gap:8px}.used-report h1{font-size:22px}.usage-history li{grid-template-columns:1fr;gap:3px}.usage-note{margin-left:8px;margin-right:8px}.used-report .facts-grid{grid-template-columns:100px minmax(0,1fr);padding-left:0}.used-report details.item>summary{flex-wrap:wrap}.used-report .item-name{min-width:120px}.used-report time{white-space:normal}}",
   "@media(prefers-reduced-motion:reduce){details.group>summary::before,details.item>summary::before{transition:none}}",
 ].join("\n");
@@ -324,6 +324,8 @@ export type UsedSummary = {
     sources: string[];
   }[];
   modelsOmitted: number;
+  /** Distinct identities with observed usage, before bounded detail rendering. */
+  modelUsage: { total: number; rows: { route: string; scopes: string[] }[]; omitted: number };
   runs: {
     runId: string;
     childRunId?: string;
@@ -404,7 +406,7 @@ const SKILL_READ = /(?:^|[\\/])SKILL\.md$/i;
 const skillName = (p: string) =>
   String(p).replace(/\\/g, "/").split("/").filter(Boolean).slice(-2, -1)[0] || String(p);
 
-/** Session usage from retained branch entries: tool counts, skill reads,
+/** Session usage from retained session entries: tool counts, skill reads,
  * selection-boundary routes, child runs, council deliberations and review
  * state. Unknown provider/thinking/nested values stay absent — the renderer
  * shows a dash rather than a guess. */
@@ -681,6 +683,26 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
   const ledgerSummary = summarizeLedger(ledger);
   const logicalTasks = ledger.tasks.slice(-CHILD_ROW_LIMIT);
   const totalAgents = ledger.tasks.length > 0 ? ledger.tasks.length : metrics.agents > 0 ? metrics.agents : allRuns.length;
+  // Selections and pending launches are configuration, not observed model use.
+  // Reuse accounting collectors so repeated cumulative receipts do not add models.
+  const usedIdentities = new Map<string, Set<string>>();
+  const observedModel = (route: string, scope: string) => {
+    const scopes = usedIdentities.get(route) ?? new Set<string>();
+    scopes.add(scope); usedIdentities.set(route, scopes);
+  };
+  for (const model of allModels) if (model.turns > 0) observedModel(model.route, "Main conversation");
+  for (const request of collectAuxiliaryModelUsage(list).rows) {
+    if (request.usageRecorded || request.status === "completed") observedModel(request.route, `Auxiliary: ${request.owner}`);
+  }
+  for (const run of allRuns) {
+    if (run.usageRecorded && run.model) observedModel(run.provider ? `${run.provider}/${run.model}` : run.model, "Child tasks");
+  }
+  for (const entry of list) {
+    const receipt = (entry as any)?.type === "custom" && (entry as any).customType === "jev-usage-v1" ? (entry as any).data : undefined;
+    if (receipt?.cached === false && typeof receipt.model === "string" && receipt.model.length <= 256 && receipt.model.trim())
+      observedModel(receipt.model, "JEV / KEV judge");
+  }
+  const modelUsageRows = [...usedIdentities].map(([route, scopes]) => ({ route, scopes: [...scopes].sort() })).sort((a, b) => a.route.localeCompare(b.route));
   return {
     tools,
     toolDistinctTotal: metrics.distinctTools ?? tools.length,
@@ -699,6 +721,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
     routes,
     models,
     modelsOmitted: Math.max(0, allModels.length - models.length),
+    modelUsage: { total: modelUsageRows.length, rows: modelUsageRows.slice(0, 80), omitted: Math.max(0, modelUsageRows.length - 80) },
     runs,
     agents: {
       total: totalAgents,
@@ -802,12 +825,12 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const capturedAt = typeof summary.capturedAt === "string" ? summary.capturedAt : "";
   const capturedTime = Date.parse(capturedAt);
   const capturedLabel = Number.isFinite(capturedTime) ? new Date(capturedTime).toISOString().replace('T', ' ').replace('Z', ' UTC') : "time not recorded";
+  const modelUsage = summary.modelUsage ?? { total: models.filter(model => model.turns > 0).length, rows: models.filter(model => model.turns > 0).map(model => ({ route: model.route, scopes: ["Main conversation"] })), omitted: 0 };
   const sections: string[] = [
     `<div class="used-report"><div class="usage-heading"><div><span class="usage-eyebrow">Session evidence</span><h1>What this session used</h1><p class="sub">${formatCount(summary.inspected)} retained session entries · open a section for the evidence behind each count.</p></div><div class="usage-snapshot">Snapshot · <time id="usage-captured-at" datetime="${escapeHtml(capturedAt)}">${escapeHtml(capturedLabel)}</time><br><span id="usage-snapshot-age"></span></div></div>`,
     `<p class="note usage-freshness"><strong>Saved snapshot.</strong> Activity after the capture time is not included. Run <code>/used</code> again in the terminal for current measurements; reloading this saved page keeps the same snapshot.</p>`,
-    `<div class="overview"><div class="stat"><strong>${formatCount(models.length + (summary.modelsOmitted ?? 0))}</strong><span>main model routes recorded</span></div><div class="stat"><strong>${formatCount(summary.toolDistinctTotal ?? tools.length)}</strong><span>distinct tools used</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child agents observed</span></div></div>`,
-    `<p class="note">Counts describe recorded session activity. “Suggested” is not the same as opened or applied; missing model or usage data stays explicitly unknown.</p>`,
-    harnessUsageHtml(summary.harnessUsage??collectHarnessUsage([])),
+    `<div class="overview"><div class="stat"><strong>${formatCount(modelUsage.total)}</strong><span>Models used</span></div><div class="stat"><strong>${formatCount(session.toolCalls)}</strong><span>Tool calls</span></div><div class="stat"><strong>${formatCount(skillTotals.read)}</strong><span>skills fully opened</span></div><div class="stat"><strong>${formatCount(agents.total)}</strong><span>child tasks · ${formatCount(agents.active)} active</span></div></div>`,
+    `<p class="note">Tool calls cover the main conversation. Counts describe recorded session activity. “Suggested” is not the same as opened or applied; missing model or usage data stays explicitly unknown.</p>`,
   ];
 
   const modelTurns = models.reduce((sum, model) => sum + model.turns, 0);
@@ -815,7 +838,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     const traffic = model.input + model.cacheRead + model.cacheWrite + model.output;
     const badges = [
       ...(model.current ? [`<span class="badge current">● current</span>`] : []),
-      `<span class="badge info">${plural(model.turns, "turn")}</span>`,
+      `<span class="badge info">${model.turns ? plural(model.turns, "response") : "selected only"}</span>`,
       ...(model.errors ? [`<span class="badge failed">${plural(model.errors, "error")}</span>`] : []),
     ].join(" ");
     return `<details class="item"><summary><span class="item-name">${escapeHtml(model.route)}</span><span class="item-meta">${badges}</span></summary>${factGrid([
@@ -831,7 +854,8 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       ["Selection sources", model.sources.length ? model.sources.join(", ") : "not recorded"],
     ])}</details>`;
   }).join("") + ((summary.modelsOmitted ?? 0) ? `<p class="note">${plural(summary.modelsOmitted, "older model route")} omitted from this bounded view.</p>` : "") : `<div class="empty">No model route was recorded.</div>`;
-  sections.push(group("🧠 Main conversation models", `${plural(models.length + (summary.modelsOmitted ?? 0), "route")} · ${plural(modelTurns, "turn")}`, `<p class="note">A selected route can appear before it produces a response. Token totals come only from recorded usage. Helper, review and child activity appear in their own sections.</p>${modelBody}`));
+  const modelEvidence = modelUsage.rows.length ? `<ul id="usage-model-identities">${modelUsage.rows.map(model => usedRow(model.route, undefined, model.scopes.join(" · "))).join("")}</ul>` : `<div class="empty">No model use with a recorded identity.</div>`;
+  sections.push(group("Models", `${plural(modelUsage.total, "identity", "identities")} used · ${plural(modelTurns, "main response")}`, `${modelEvidence}${modelUsage.omitted ? `<p class="note">${modelUsage.omitted} more identities omitted from this bounded detail list.</p>` : ""}<p class="note">Distinct recorded identities across main responses, auxiliary requests, child usage and uncached judge receipts. A model used in several scopes is counted once. Selected routes, pending calls, cached-only judge reuse and local helpers without a model identity are excluded.</p><h3>Main conversation models</h3>${modelBody}`));
 
   const skillDetail = (name: string, label: string, tone: string) => {
     const evidence = summary.skillEvidence?.[name];
@@ -861,7 +885,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
   const runBody = runs.length ? runs.map((run, index) => {
     const route = run.provider && run.model ? `${run.provider}/${run.model}` : run.model ?? "model not recorded";
     const who = agentDisplayName(run.agent) ?? `Agent ${index + 1}`;
-    return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span><span class="badge ${statusTone(run.status)}">${escapeHtml(childStateLabel(run.status, run.failureCategory))}</span></summary>${factGrid([
+    return `<details class="item"><summary><span class="item-name">${escapeHtml(who)} · ${escapeHtml(route)}</span></summary>${factGrid([
       ["Parent run", run.runId],
       ["Child run", run.childRunId ?? "not recorded"],
       ["Attempt", run.attempt ?? "not recorded"],
@@ -871,8 +895,6 @@ export function usedSummaryHtml(summary: UsedSummary): string {
       ["Provider", run.provider ?? "not recorded"],
       ["Model", run.model ?? "not recorded"],
       ["Thinking", run.thinking ?? "not recorded"],
-      ["Last status", childStateLabel(run.status, run.failureCategory)],
-      ["Failure stage", run.failureStage],
       ["Token traffic", run.usageRecorded ? formatCount(run.tokens) : "not recorded"],
       ["Turns", run.turns === undefined ? "not recorded" : formatCount(run.turns)],
       ["Cost", run.costUsd === undefined ? "not recorded" : `$${run.costUsd.toFixed(6)}`],
@@ -893,7 +915,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
         ["Diagnostic", cause?.diagnosticRef ?? "not recorded"],
         ["Execution", cause ? `${attempt.execution.status} (${cause.category}${cause.truncation !== "none" ? `, ${cause.truncation}` : ""})` : attempt.execution.status],
         ["Acceptance", attempt.acceptance.status + (attempt.acceptance.reason ? ` · ${attempt.acceptance.reason}` : "")],
-        ["Usage", attempt.usage ? `${formatCount(attempt.usage.input ?? 0)} in · ${formatCount(attempt.usage.output ?? 0)} out` : "not recorded"],
+        ["Usage", attempt.usage ? `${attempt.usage.input === undefined ? "unknown" : formatCount(attempt.usage.input)} in · ${attempt.usage.output === undefined ? "unknown" : formatCount(attempt.usage.output)} out` : "not recorded"],
         ["Exit code", attempt.exitCode === undefined ? "not recorded" : String(attempt.exitCode)],
       ])}</details>`;
     }).join("");
@@ -908,11 +930,11 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     ])}${attemptRows}</details>`;
   }).join("") : `<div class="empty">No logical child task was recorded.</div>`;
   const linkageNote = unresolvedLinkage ? `<p class="note">${plural(unresolvedLinkage, "evidence item")} with unresolved linkage (missing lifecycle evidence) — not omitted rows. ${linkageNotes.length ? escapeHtml(linkageNotes.slice(0, 3).join(" · ")) : ""}</p>` : "";
-  sections.push(group("🧩 Logical child tasks", `${agents.total} tasks · ${attemptsTotal} attempts`, `<p class="note">One logical task per delegated scope; retries are attempts under it, never anonymous new runs.</p>${taskBody}${linkageNote}`));
-  sections.push(group("🤖 Child agent runs", `${agents.total} observed · ${agents.active} active · ${agents.failed} failed`, `<div class="status-line">${agentBadges}</div><p class="note">Forensic run rows (launch-level detail). Canonical state lives in Logical child tasks above.</p>${runBody}${agents.omitted ? `<p class="note">${plural(agents.omitted, "agent detail row")} omitted from this bounded view.</p>` : ""}${linkageNote}`));
+  sections.push(group("Child tasks", `${agents.total} tasks · ${attemptsTotal} attempts`, `<div class="status-line">${agentBadges}</div><p class="note">One task per delegated scope; retries appear as attempts. Status follows the shared task ledger.</p>${taskBody}${linkageNote}${agents.omitted ? `<p class="note">${plural(agents.omitted, "child detail row")} omitted from this bounded view.</p>` : ""}${runs.length ? `<details class="usage-history"><summary>Launch and accounting receipts · ${runs.length} rows</summary><p class="note">Historical configuration and usage evidence. Current outcomes are shown on the tasks above.</p>${runBody}</details>` : ""}`));
 
   const toolErrorsTotal = tools.reduce((sum, tool) => sum + (tool.errors ?? 0), 0);
-  sections.push(group("🔧 Tools", `${summary.toolDistinctTotal ?? tools.length} distinct · ${session.toolResults} results · ${toolErrorsTotal} failed`, tools.length ? `<p class="note">Counts are returned tool-result records, not a quality score.</p><ul>${tools.map((tool) => usedRow(tool.name, plural(tool.count, "result"), tool.errors ? `${plural(tool.errors, "failed result")}` : "no recorded failures", tool.errors ? "failed" : "info")).join("")}</ul>${summary.toolsOmitted ? `<p class="note">${plural(summary.toolsOmitted, "lower-volume tool")} omitted from this bounded list; the distinct total includes them.</p>` : ""}` : `<div class="empty">No tool result was recorded.</div>`));
+  sections.push(group("Tools", `${session.toolCalls} calls · ${session.toolResults} results · ${toolErrorsTotal} failed results`, tools.length ? `<p class="note">Main conversation tools only; child tool calls are not included. Results can lag calls while tools are running.</p><ul>${tools.map((tool) => usedRow(tool.name, plural(tool.count, "result"), tool.errors ? `${plural(tool.errors, "failed result")}` : "no recorded failures", tool.errors ? "failed" : "info")).join("")}</ul>${summary.toolsOmitted ? `<p class="note">${plural(summary.toolsOmitted, "lower-volume tool")} omitted from this bounded list; the distinct total includes them.</p>` : ""}` : `<div class="empty">No tool result was recorded.</div>`));
+  sections.push(harnessUsageHtml(summary.harnessUsage??collectHarnessUsage([])));
 
   const review = summary.reviews;
   const coordinationBody = `<ul>${usedRow("🐝 Parallel agent groups (swarms)", plural(summary.swarms, "group"), "verified parallel child groups")}${usedRow("🌀 Multi-answer syntheses (fusions)", plural(summary.fusions, "fusion"), "recorded answer-combination operations")}${usedRow("🛟 Recovery plans", plural(summary.recoveries, "plan"), "recorded provider-recovery activity")}</ul>` +
@@ -944,9 +966,9 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     ["Child failures", formatCount(agents.failed)],
     ["Recovery plans", formatCount(summary.recoveries)],
     ["Unresolved linkage", unresolvedLinkage ? `${formatCount(unresolvedLinkage)} (missing lifecycle evidence)` : "none"],
-  ]) + `<p class="note">Recovery is cause-specific; see Logical child tasks for per-attempt causes.</p>`));
+  ]) + `<p class="note">Recovery is cause-specific; see Child tasks for per-attempt causes.</p>`));
   const sessionFactsHtml = factGrid([
-    ["Retained branch entries", formatCount(summary.inspected)],
+    ["Retained session entries", formatCount(summary.inspected)],
     ["Main responses", formatCount(session.responses)],
     ["Tool traffic", `${formatCount(session.toolCalls)} calls · ${formatCount(session.toolResults)} results`],
     ["Compactions", formatCount(session.compactions)],

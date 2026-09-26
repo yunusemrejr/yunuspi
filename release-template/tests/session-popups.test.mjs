@@ -198,6 +198,43 @@ test('used summary shows actual main-model usage and token detail', () => {
   assert.ok(html.includes('3 tokens (included in output)'));
 });
 
+test('used model identities join measured scopes while excluding selection and pending-only activity', () => {
+  const custom = (customType, data) => ({ type: 'custom', customType, data });
+  const branch = [
+    { type: 'message', message: { role: 'assistant', provider: 'fixture', model: 'shared', content: [], usage: { input: 10, output: 2 } } },
+    custom('model-config-v1', { route: 'fixture/selected-only' }),
+    custom('auxiliary-model-usage-v1', { id: 'review', owner: 'session-observer', provider: 'fixture', model: 'shared', status: 'pending' }),
+    custom('auxiliary-model-usage-v1', { id: 'review', owner: 'session-observer', provider: 'fixture', model: 'shared', status: 'completed', usage: { input: 5, output: 1 } }),
+    custom('auxiliary-model-usage-v1', { id: 'pending', owner: 'session-watchmaker', provider: 'fixture', model: 'pending-only', status: 'pending' }),
+    custom('auxiliary-model-usage-v1', { id: 'embedding', owner: 'project-memory', provider: 'fixture', model: 'embedding', status: 'completed', usage: { input: 4 } }),
+    custom('subagent-cost-v1', { runId: 'child', results: [{ index: 0, model: 'fixture/child', status: 'completed', usage: { input: 4, output: 1 } }] }),
+    custom('subagent-cost-v1', { runId: 'child', results: [{ index: 0, model: 'fixture/child', status: 'completed', usage: { input: 4, output: 1 } }] }),
+    custom('jev-usage-v1', { model: 'fixture/judge', inputTokens: 5, cached: false }),
+    custom('jev-usage-v1', { model: 'fixture/cached-only', inputTokens: 0, cached: true }),
+  ];
+  const summary = signals.buildUsedSummary(branch);
+  assert.equal(summary.modelUsage.total, 4);
+  assert.deepEqual(summary.modelUsage.rows.find(row => row.route === 'fixture/shared').scopes, ['Auxiliary: session-observer', 'Main conversation']);
+  assert.deepEqual(summary.modelUsage.rows.map(row => row.route), ['fixture/child', 'fixture/embedding', 'fixture/judge', 'fixture/shared']);
+  const html = signals.usedSummaryHtml(summary);
+  assert.match(html, /<strong>4<\/strong><span>Models used/);
+  assert.match(html, /selected only/);
+});
+
+test('used child outcomes come from the ledger while stale launch receipts carry no state badge', () => {
+  const branch = [
+    toolCall('launch', 'subagent', { agent: 'worker' }),
+    toolResult('launch', 'subagent', { asyncId: 'child-run' }),
+    { type: 'custom', customType: 'subagent-lifecycle-v1', data: { runId: 'child-run', mode: 'single', results: [{ index: 0, status: 'running' }] } },
+  ];
+  const summary = signals.buildUsedSummary(branch), html = signals.usedSummaryHtml(summary);
+  assert.equal(summary.logicalTasks[0].state, 'running');
+  assert.equal(summary.runs[0].status, 'queued', 'historical launch receipt is retained as evidence');
+  assert.doesNotMatch(html, /Child agent runs|>queued<|Last status/);
+  assert.match(html, /Launch and accounting receipts/);
+  assert.match(html, />running<\/span>/);
+});
+
 test('used summary deduplicates child snapshots and keeps final model usage', () => {
   const branch = [
     toolCall('s1', 'subagent', { agent: 'worker', model: 'openrouter/child-model', thinking: 'high' }),
