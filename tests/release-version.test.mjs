@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { releasePlan, publishRelease } from '../scripts/publish-github-release.mjs';
+import { releasePlan, publishRelease, verifiedMainRun } from '../scripts/publish-github-release.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 test('release metadata check detects lock drift and repairs only owned versions', () => {
@@ -48,6 +48,37 @@ test('release metadata check detects lock drift and repairs only owned versions'
 
 const releaseInput = { version: '0.2.0', ref: 'refs/tags/v0.2.0', sha: 'a'.repeat(40), repository: 'example/project', changelog: '# Changelog\n\n## 0.2.0 — 2026-09-23\n\nRead [details](docs/ASYNC-AND-STUDIO.md) and [changelog](CHANGELOG.md).\n\n## 0.1.0 — old\nOld notes.' };
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
+test('release reuse requires the latest exact main push and its successful safety job', async () => {
+  const valid = { id: 20, workflow_id: 10, path: '.github/workflows/public-safety.yml', head_sha: releaseInput.sha,
+    head_branch: 'main', event: 'push', status: 'completed', conclusion: 'success',
+    repository: { full_name: releaseInput.repository }, head_repository: { full_name: releaseInput.repository } };
+  const service = ({ rows = [valid], job = { name: 'safety', status: 'completed', conclusion: 'success' }, status = 200 } = {}) => async (url, options) => {
+    assert.equal(new URL(url).origin, 'https://api.github.com'); assert.equal(options.redirect, 'error');
+    assert.ok(options.signal instanceof AbortSignal); assert.equal(options.headers.Authorization, 'Bearer fixture');
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/workflows/public-safety.yml')) return response({ id: 10, path: valid.path }, status);
+    if (parsed.pathname.endsWith('/workflows/10/runs')) {
+      assert.equal(parsed.searchParams.get('head_sha'), releaseInput.sha);
+      assert.equal(parsed.searchParams.get('branch'), 'main'); assert.equal(parsed.searchParams.get('event'), 'push');
+      assert.equal(parsed.searchParams.has('status'), false, 'a newer failed attempt must not be hidden');
+      return response({ total_count: rows.length, workflow_runs: rows });
+    }
+    assert.equal(parsed.pathname, '/repos/example/project/actions/runs/20/jobs');
+    assert.equal(parsed.searchParams.get('filter'), 'latest');
+    return response({ jobs: [job] });
+  };
+  const verify = options => verifiedMainRun(releaseInput.repository, releaseInput.sha, 'fixture', service(options));
+  assert.deepEqual(await verify(), { id: 20, url: 'https://github.com/example/project/actions/runs/20' });
+  for (const patch of [{ head_sha: 'b'.repeat(40) }, { head_branch: 'v0.2.0' }, { event: 'pull_request' }, { workflow_id: 11 },
+    { path: '.github/workflows/other.yml' }, { repository: { full_name: 'other/project' } }, { head_repository: { full_name: 'fork/project' } },
+    { status: 'in_progress', conclusion: null }, { conclusion: 'failure' }, { conclusion: 'skipped' }, { conclusion: 'cancelled' }])
+    await assert.rejects(verify({ rows: [{ ...valid, ...patch }] }), /no successful main safety run/);
+  await assert.rejects(verify({ rows: [] }), /no successful main safety run/);
+  await assert.rejects(verify({ rows: [valid, { ...valid, id: 21, conclusion: 'failure' }] }), /no successful main safety run/);
+  await assert.rejects(verify({ job: { name: 'safety', status: 'completed', conclusion: 'skipped' } }), /required safety job/);
+  await assert.rejects(verify({ status: 403 }), /lookup failed/);
+});
+
 function releaseService(plan, { annotated = false, existing, moveDuringLookup = false, moveAfterCreate = false } = {}) {
   let release = existing;
   let target = plan.target_commitish;

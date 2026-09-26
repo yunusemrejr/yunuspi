@@ -17,7 +17,7 @@
   },
   "scripts": {
     "pretest": "npm run build:core",
-    "test": "PI_LOCAL_LM=off node --test --test-concurrency=${PI_PUBLIC_TEST_CONCURRENCY:-1} tests/*.test.mjs",
+    "test": "PI_LOCAL_LM=off node --test --test-concurrency=${PI_PUBLIC_TEST_CONCURRENCY:-$(node -p 'Math.min(4, require(\"node:os\").availableParallelism())')} tests/*.test.mjs",
     "check:public": "node scripts/check-public.mjs",
     "prepare:hooks": "git config core.hooksPath .githooks",
     "build:core": "node scripts/build-core.mjs",
