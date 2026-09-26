@@ -336,7 +336,7 @@ test("perspective cues reject shadow, weak and unrecognized model choices", asyn
 test("status snapshot reports health without running inference", async () => {
   const key = Symbol.for("yunus-pi.micro.inspect.v1");
   const prior = globalThis[key];
-  globalThis[key] = { smol: () => ({ busy: false, accepted: 3 }), mini: () => { throw new Error("x"); } };
+  globalThis[key] = { smol: () => ({ busy: false, accepted: 3 }), mini: () => { throw new Error("x"); }, expert: () => ({ status: "ready", runs: 2, last: { action: "assess", domains: ["ml"], reason: "converged" } }) };
   try {
     const snapshot = statusMod.microStatusSnapshot({
       family: "implementation", substantive: true, terms: ["auth"],
@@ -344,7 +344,11 @@ test("status snapshot reports health without running inference", async () => {
       advisory: { ok: true, needsVerification: false, reviewWorthy: true, multiPerspective: false, perspectives: ["security"] },
       advisoryFamily: "lookup",
     });
-    assert.equal(snapshot.health.layers.length, 5);
+    assert.equal(snapshot.health.layers.length, 6);
+    const expertLayer = snapshot.health.layers.find((layer) => layer.layer === "expert");
+    assert.equal(expertLayer.status, "ready");
+    assert.match(expertLayer.detail, /2 runs, last assess ml converged/);
+    assert.deepEqual(snapshot.expert, { status: "ready", runs: 2, last: { action: "assess", domains: ["ml"], reason: "converged" } });
     assert.equal(snapshot.request.family, "implementation");
     assert.equal(snapshot.request.advisoryFamily, "lookup");
     const unstarted = statusMod.microStatusSnapshot({ family: "lookup", substantive: true, terms: ["show"] });

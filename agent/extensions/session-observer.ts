@@ -18,6 +18,7 @@ import path from 'node:path';
 import { createObserverJournal } from './lib/observer-journal.ts';
 import { displayText, messageText, renderHarnessNotice } from './lib/harness-notice.ts';
 import { readRemindersState } from './lib/reminders-state.ts';
+import { expertReviewerRows } from './lib/expert-convergence.ts';
 
 /** Opt-in/default-configured direct observer; it owns no tools or child agents. */
 export default function sessionObserver(pi: any, testing: any = {}) {
@@ -178,6 +179,9 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       if (ledger.unresolved.length) rows.push({ id: 'child-uncertainty', kind: 'current state', text: `${ledger.unresolved.length} child identity/accounting links are unresolved; task coverage and attribution may be incomplete.` });
     } catch { rows.push({ id: 'children-unavailable', kind: 'current state', text: 'Child-agent lifecycle evidence is unavailable; do not infer that there are no children.' }); }
     if (dropped) rows.push({ id: `overflow-${dropped}`, kind: 'current state', text: `${dropped} early events were folded into digest rows; their details are summarized, not shown. Full text is searchable with session_search. Do not infer omitted work was not done.` });
+    try {
+      for (const row of expertReviewerRows(ctx?.sessionManager?.getBranch?.() ?? [])) rows.push(row);
+    } catch { /* Reviewer rows are advisory; never break state assembly. */ }
     return rows;
   };
   /** Unread events for one review. Within the window they are shown as they
