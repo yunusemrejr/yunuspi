@@ -1065,14 +1065,14 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "micro-intelligence",
 		group: "models",
-		summary: "Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus qualified bounded micro tasks; deterministic owners retain safety and completion authority.",
+		summary: "Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
 		entrypoints: ["micro_status", "micro_task"],
 		tools: ["micro_status", "micro_task"],
 		options: [
 			option("PI_MICRO_INTELLIGENCE", "Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners."),
 			option("PI_NEEDLE", "Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying."),
 			option("PI_JEV", "Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter."),
-			option("micro_task.action", "Inspect routes, refresh synthetic qualification evidence, compare a routing suggestion, or run one task without tools or writes.", ["status", "qualify", "route", "run"]),
+			option("micro_task.action", "Batch semantic analysis, inspect routes, refresh qualification, compare routing or run one bounded task.", ["analyze", "status", "qualify", "route", "run"]),
 			option("PI_MICRO_WORKER_ROUTES", "Optional exact provider/model candidates; the current session route and existing economy selector are available when omitted."),
 			option("PI_RERANK_MODEL|VOYAGE_API_KEY", "Configure remote memory refinement after Needle; unavailable remote inference retains local order."),
 		],

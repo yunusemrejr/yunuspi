@@ -368,19 +368,22 @@ evidence bar.
 
 ## Finding consolidation
 
-`consolidateFindings` merges semantically duplicate findings with
-provenance instead of generating repeated repair churn. Deterministic
-Jaccard (≥ 0.6) and Needle clustering merge first; ambiguous
-mid-overlap pairs (0.3–0.6) earn a bounded number of Jev duplicate
-judgments. Nothing is dropped, only grouped: each group names its kept
+`consolidateFindings` groups duplicate findings with provenance. Exact
+full-text duplicates in the same file can fold locally. Paraphrases require
+a bounded Jev judgment batch over complete finding details; lexical or
+Needle similarity alone cannot authorize compaction or a grouped dismissal. Nothing is dropped, only grouped: each group names its kept
 representative, merged ids with the per-id method
-(jaccard/needle/jev), and reviewer/aspect sources.
+(exact/jev), and reviewer/aspect sources.
 
 Production wiring: quality-review consolidates multi-aspect blocking
-findings after each round (deterministic pass always; Needle/Jev
-passes via injected deps), exposes groups in the review summary, and
+findings after each round (exact-text pass always; semantic
+confirmation through the existing Jev owner), exposes groups in the review summary, and
 lets one evidence-based dismissal of a group representative cover its
-merged duplicates. Observer margin notes keep their deterministic
+merged duplicates. Up to twelve semantic comparisons share one request;
+same-file paraphrases can be considered even with little lexical overlap.
+Repeated finding prose is compacted in parent-facing summaries while IDs,
+severity, file and reviewer citations remain. `quality_review` action `inspect`
+retains the complete original reports. Observer margin notes keep their deterministic
 match at add time plus a Needle-only paraphrase pass that folds a new
 lookalike into the confirmed note (failure keeps both).
 
@@ -394,14 +397,37 @@ and small source glances. Hard bounds: no recursive delegation, zero
 tools, no writes, validated JSON outputs, ≤ 8,000 input characters,
 ≤ 1,000 output tokens, per-call cost cap, and result caching.
 
+`micro_task` is available from the first model turn. For ranking and grouping,
+`action:"analyze"` sends one bounded packet to the existing Jev/Kev judge:
+`input` gives the criterion, `items` contains 2–16 unique `{id,text,source}`
+records, and optional `categories` supplies 2–8 labels. Results contain ranked
+IDs, category groups, confidence and source references; original evidence
+stays with its existing owner. Use native `run` kinds when the task needs a
+short generative analysis. Relevant guidance points tasks toward this shared
+helper before full child delegation when no tools are needed.
+
+The analysis packet is capped at 16,000 characters and uses the judge's
+existing bounded remote-input policy, caching, accounting and cancellation.
+A manually supplied packet offloads reasoning; it does not by itself prove
+that fewer input tokens reached the main model. Automatic finding consolidation
+reduces repeated parent-facing prose while retaining access to originals.
+
+A six-item synthetic ranking/categorization probe on 2026-09-26 used one
+twelve-question request: 646 ms, 1,274 judge input tokens and $0.000053508.
+It ranked the explicit authentication defects first, categorized clear
+evidence and left vague evidence unclassified. The repeated packet hit
+cache in 2 ms with no new provider tokens. This is a bounded fixture, not a
+production accuracy or session-wide savings measurement.
+
 `micro_task` exposes these operations through the existing tool registry.
 Use `action:"status"` to inspect eligibility without inference, `qualify` to
 refresh measured evidence, `route` to compare a bounded candidate choice,
 or `run` with a `kind` and bounded `input`.
-Unmeasured routes first run three synthetic qualification checks, without
+Unmeasured native worker routes first run three synthetic qualification checks, without
 receiving the task input. Failed qualification cannot produce task advice.
 
-Routes come from optional `PI_MICRO_WORKER_ROUTES`, the current session
+For native `run`, `qualify` and `route` actions, routes come from optional
+`PI_MICRO_WORKER_ROUTES`, the current session
 model, and the existing economy selector. Native registry dispatch preserves
 provider authentication; the shared auxiliary ledger records each completion.
 Admission checks current
@@ -409,7 +435,8 @@ price, workload, health and expiring quality evidence; one inference is
 capped at an estimated $0.005 and a complete invocation, including
 qualification, at $0.01. Missing price evidence is not zero cost.
 
-Private input stays with the exact current session model and endpoint, a
+For those native actions, private input stays with the exact session model
+and endpoint, a
 literal loopback endpoint, or an operator-allowlisted route
 (`PI_PRIVATE_ROUTES`). A provider name such as "local" is not evidence that
 its transport stays on this machine. Public/synthetic input can explicitly

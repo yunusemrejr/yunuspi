@@ -12,6 +12,10 @@ Model selection reads pricing and exclusion evidence once per decision and reuse
 
 Housekeeping recognizes closed peer receipts, preserves live-session protection, and shares the installation lease with the updater. The verifier targets the selected installed launcher. The library manifest, generated capability inventory, release templates and SVG certainty regressions are synchronized. Behavioral regressions cover the repaired cancellation, cache, review, routing, cleanup and integration boundaries.
 
+Jev handles larger decision packets through `micro_task` analysis: ranking, relevance and categorization share one call with compact IDs and source references. Review consolidation batches up to twelve comparisons and retains complete originals behind inspection while compacting repeated issue prose. The helper is available from the first turn, with task-specific guidance toward bounded analysis before a full child.
+
+CI installs and builds once per branch run. Release tags verify that the exact commit passed the main workflow and reuse that evidence rather than repeating the suite. Local tests use bounded adaptive concurrency; UI checks share one browser with isolated contexts. Small duplicate test files are folded into existing suites. The extension loader resolves the shared cancellation subpath correctly in both source and bundled runtimes.
+
 ## 0.11.0 — 2026-09-26
 
 The harness now coordinates domain excellence instead of leaving "make it great" to unguided inference. A new Expert Director infers the relevant excellence domain(s) from each request — web/UI design, visual art, SVG/iconography, motion, video, audio, frontend, backend, API, database, algorithms, distributed systems, security, ML, writing, or research — and loads bounded expert doctrine for exactly those domains: what excellent work looks like, the characteristic failure modes, the invariants, the deterministic checks, and the evidence required before claiming quality. Sixteen data-driven doctrine packs carry the knowledge, so new specialties arrive as data rather than orchestration changes, and retrieval exposes at most two packs and a bounded passage per brief.

@@ -603,7 +603,7 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 #### micro-intelligence
 
-Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus qualified bounded micro tasks; deterministic owners retain safety and completion authority.
+Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.
 
 **Entrypoints:** `micro_status`, `micro_task`
 
@@ -614,7 +614,7 @@ Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source sel
 - `PI_MICRO_INTELLIGENCE`: Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners.
 - `PI_NEEDLE`: Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying.
 - `PI_JEV`: Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter.
-- `micro_task.action`: Inspect routes, refresh synthetic qualification evidence, compare a routing suggestion, or run one task without tools or writes. Values: `status`, `qualify`, `route`, `run`.
+- `micro_task.action`: Batch semantic analysis, inspect routes, refresh qualification, compare routing or run one bounded task. Values: `analyze`, `status`, `qualify`, `route`, `run`.
 - `PI_MICRO_WORKER_ROUTES`: Optional exact provider/model candidates; the current session route and existing economy selector are available when omitted.
 - `PI_RERANK_MODEL|VOYAGE_API_KEY`: Configure remote memory refinement after Needle; unavailable remote inference retains local order.
 
@@ -1138,7 +1138,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `bg_wait` — [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) (line 36; definition)
 - `browser_session` — [`agent/extensions/lib/browser-session.ts`](../agent/extensions/lib/browser-session.ts) (line 136; literal)
 - `bulk_edit` — [`agent/extensions/bulk-edit.ts`](../agent/extensions/bulk-edit.ts) (line 217; literal)
-- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 222; literal)
+- `checkpoint_read` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 221; literal)
 - `claim_check` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 9; literal)
 - `code_quality` — [`agent/extensions/code-quality.ts`](../agent/extensions/code-quality.ts) (line 9; literal)
 - `contact_supervisor` — [`agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts`](../agent/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts) (line 305; definition)
@@ -1177,7 +1177,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2964; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
 - `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 494; literal)
-- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 41; literal)
+- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 44; literal)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 219; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 263; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 34; factory)
@@ -1196,7 +1196,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `project_memory_restore` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 720; literal)
 - `project_memory_search` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 381; literal)
 - `project_memory_status` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 533; literal)
-- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 697; literal)
+- `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 713; literal)
 - `render_see` — [`agent/extensions/render-and-wait.ts`](../agent/extensions/render-and-wait.ts) (line 249; literal)
 - `research_toolkit` — [`agent/extensions/research-toolkit.ts`](../agent/extensions/research-toolkit.ts) (line 57; literal)
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
@@ -1206,8 +1206,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `session_audit` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1902; literal)
 - `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 815; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1839; literal)
-- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 377; literal)
-- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 722; literal)
+- `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 376; literal)
+- `skill_review` — [`agent/extensions/lib/relevant-guidance.ts`](../agent/extensions/lib/relevant-guidance.ts) (line 724; literal)
 - `source_check` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `sqlite_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 24; catalog)
 - `ssh_plan` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 18; catalog)
@@ -1342,6 +1342,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/lib/harness-capabilities.ts`](../agent/extensions/lib/harness-capabilities.ts) — `MCP`
 - [`agent/extensions/lib/image-generate.ts`](../agent/extensions/lib/image-generate.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts) — `wrapper/adapter`
+- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/micro-intelligence/span-sensor.ts`](../agent/extensions/lib/micro-intelligence/span-sensor.ts) — `wrapper/adapter`
 - [`agent/extensions/lib/project-intelligence/client.mjs`](../agent/extensions/lib/project-intelligence/client.mjs) — `wrapper/adapter`
 - [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) — `wrapper/adapter`

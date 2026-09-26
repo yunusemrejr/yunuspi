@@ -2882,7 +2882,7 @@
     {
       "id": "micro-intelligence",
       "group": "models",
-      "summary": "Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus qualified bounded micro tasks; deterministic owners retain safety and completion authority.",
+      "summary": "Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus batched ranking, categorization and qualified micro tasks; deterministic owners retain safety and completion authority.",
       "entrypoints": [
         "micro_status",
         "micro_task"
@@ -2907,12 +2907,13 @@
         {
           "name": "micro_task.action",
           "values": [
+            "analyze",
             "status",
             "qualify",
             "route",
             "run"
           ],
-          "summary": "Inspect routes, refresh synthetic qualification evidence, compare a routing suggestion, or run one task without tools or writes."
+          "summary": "Batch semantic analysis, inspect routes, refresh qualification, compare routing or run one bounded task."
         },
         {
           "name": "PI_MICRO_WORKER_ROUTES",
@@ -3427,7 +3428,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 221,
         "kind": "literal"
       },
       {
@@ -3663,7 +3664,7 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 41,
+        "line": 44,
         "kind": "literal"
       },
       {
@@ -3777,7 +3778,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 697,
+        "line": 713,
         "kind": "literal"
       },
       {
@@ -3837,13 +3838,13 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 376,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 722,
+        "line": 724,
         "kind": "literal"
       },
       {
@@ -4099,7 +4100,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 221,
         "kind": "literal"
       },
       {
@@ -4213,7 +4214,7 @@
       {
         "name": "micro_task",
         "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
-        "line": 41,
+        "line": 44,
         "kind": "literal"
       },
       {
@@ -4291,7 +4292,7 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 697,
+        "line": 713,
         "kind": "literal"
       },
       {
@@ -4339,13 +4340,13 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 376,
         "kind": "literal"
       },
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/relevant-guidance.ts",
-        "line": 722,
+        "line": 724,
         "kind": "literal"
       },
       {
@@ -6221,6 +6222,12 @@
       },
       {
         "source": "agent/extensions/lib/jev-client.ts",
+        "signals": [
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/lib/micro-intelligence/micro-task.ts",
         "signals": [
           "wrapper/adapter"
         ]
