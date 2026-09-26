@@ -134,6 +134,23 @@ export interface ExpertPassLedger {
 export const emptyExpertPassLedger = (maxPasses = 3): ExpertPassLedger =>
   ({ pass: 0, maxPasses: Math.max(1, Math.min(8, maxPasses)), fixedBlocking: 0, fixedImprovements: 0, recentReasons: [] });
 
+/** The retained branch owns the loop: reloads resume it, while a new user
+ * request or a branch without those assessments starts fresh. */
+export function retainedExpertPassLedger(entries: any[]): ExpertPassLedger | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry?.type === 'message' && entry.message?.role === 'user') return undefined;
+    if (entry?.type !== 'custom' || entry.customType !== 'expert-director-v1' || entry.data?.action !== 'assess') continue;
+    const ledger = entry.data.ledger;
+    if (!ledger || !Number.isSafeInteger(ledger.pass) || ledger.pass < 1) continue;
+    return {
+      pass: Math.min(8, ledger.pass), maxPasses: Math.max(1, Math.min(8, count(ledger.maxPasses) || 3)),
+      fixedBlocking: count(ledger.fixedBlocking), fixedImprovements: count(ledger.fixedImprovements),
+      recentReasons: Array.isArray(ledger.recentReasons) ? ledger.recentReasons.filter((value: unknown) => typeof value === 'string').slice(-3) : [],
+    };
+  }
+}
+
 export function foldExpertPass(ledger: ExpertPassLedger, verdict: ExpertVerdict, evidence: ExpertPassEvidence): ExpertPassLedger {
   return {
     pass: Math.max(ledger.pass, count(evidence.pass)),

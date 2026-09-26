@@ -36,6 +36,7 @@ function harness(t, notes) {
   const handlers = new Map();
   const notices = [];
   const receipts = [];
+  const packets = [];
   let calls = 0;
   const pi = {
     on: (event, fn) => { handlers.set(event, fn); },
@@ -50,9 +51,11 @@ function harness(t, notes) {
   const sessionManager = { getSessionId: () => 'watchmaker-carryover-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
   const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false };
   watchmakerExtension(pi, { ...time,
-    dispatch: async () => {
-      const note = notes[calls++];
-      return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence: ['request'], tools: [], skills: [], memo: '' }) }] };
+    dispatch: async (_route, packet) => {
+      packets.push(packet);
+      const result = notes[calls++];
+      const { note, memo = '' } = typeof result === 'string' ? { note: result } : result;
+      return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note, evidence: ['request'], tools: [], skills: [], memo }) }] };
     } });
   const fire = (event, payload) => handlers.get(event)?.(payload, ctx);
   const completedIds = () => notices.filter((n) => n.details?.status === 'completed').map((n) => n.details.adviceId);
@@ -70,8 +73,30 @@ function harness(t, notes) {
     await time.advance(1000);
     fire('message_start', { message: { role: 'assistant', content: [] } });
   };
-  return { time, handlers, notices, receipts, ctx, fire, completedIds, waitForNotes, beginTask };
+  return { time, handlers, notices, receipts, packets, ctx, fire, completedIds, waitForNotes, beginTask };
 }
+
+test('watchmaker switches scratchpad ownership and records its own usage owner', async (t) => {
+  const memo = 'The initial fixture repeatedly rebuilt unchanged dependencies';
+  const h = harness(t, [
+    { note: 'Measure the slow dependency rebuild before repeating it.', memo },
+    'Inspect the remaining parser failure and make the targeted fix.',
+  ]);
+  h.fire('session_start', {});
+  await h.beginTask('first', 'Fix the initial fixture.');
+  await h.time.advance(60000);
+  await h.waitForNotes(1);
+  assert.ok(h.receipts.some(row => row.customType === 'watchmaker-memo-v1' && row.data.memo === memo));
+  const usage = h.receipts.filter(row => row.customType === 'auxiliary-model-usage-v1');
+  assert.ok(usage.length);
+  assert.ok(usage.every(row => row.data.owner === 'session-watchmaker'));
+  h.ctx.sessionManager = { ...h.ctx.sessionManager, getSessionId: () => 'another-session' };
+  h.fire('session_switch', {});
+  await h.beginTask('second', 'Repair the parser in a different fixture.');
+  await h.time.advance(60000);
+  await h.waitForNotes(2);
+  assert.ok(!h.packets[1].text.includes(memo), 'the replacement session cannot inherit another session scratchpad');
+});
 
 test('undelivered watchmaker notes survive new user input into the next task', async (t) => {
   const h = harness(t, ['Eight minutes without edits while reads repeat: batch one fix and verify it renders.']);

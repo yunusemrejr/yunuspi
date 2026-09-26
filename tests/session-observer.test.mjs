@@ -110,6 +110,27 @@ test('periodic observer is async, one call per changed snapshot, idle-silent and
   observer.stop(); assert.equal(observer.context(),undefined); await time.advance(60000); assert.equal(calls,2); observer.close(); assert.equal(time.jobs.size,0);
 });
 
+for (const outcome of ['quiet', 'repeated', 'invalid', 'failed', 'timeout']) test(`pending advice survives a later ${outcome} review until consumed`, async () => {
+  const time = clock(); let calls = 0, revision = 0;
+  const observer = createSessionObserver({ ...time, deadlineMs: 1000,
+    snapshot: () => ({ packet: packet(), route, reviewKey: String(revision) }), notice() {}, receipt() {},
+    dispatch: async (_route, _packet, signal) => {
+      if (++calls === 1 || outcome === 'repeated') return reply();
+      if (outcome === 'failed') throw Error('Synthetic transport error');
+      if (outcome === 'timeout') return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      if (outcome === 'invalid') return { stopReason: 'stop', content: [{ type: 'text', text: '{}' }] };
+      return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify({ note: '', evidence: [], tools: [], skills: [] }) }] };
+    },
+  });
+  observer.begin('owner'); observer.start(); await time.advance(30000);
+  assert.match(observer.context(false), /required field/);
+  revision++; await time.advance(31000);
+  assert.equal(calls, 2);
+  assert.match(observer.context(), /required field/, 'later review outcomes do not erase an unseen valid note');
+  assert.equal(observer.context(), undefined);
+  observer.close();
+});
+
 test('deadline aborts without overlap; cancelled old-owner completions never publish advice', async () => {
   const time = clock(), notices = [], receipts = []; let finish, signal, calls = 0;
   const observer = createSessionObserver({ ...time, snapshot: () => ({ packet: packet(), route }), notice: (...x) => notices.push(x), receipt: (...x) => receipts.push(x), dispatch: async (_r,_p,s) => { calls++; signal=s; return new Promise(resolve=>{finish=resolve;}); } });

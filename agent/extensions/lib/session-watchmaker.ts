@@ -162,10 +162,17 @@ export function createWatchmakerScratchpad(limit = WATCHMAKER_MEMO_KEEP) {
   };
   return {
     add,
+    clear: () => { memos.length = 0; },
     list: () => [...memos],
     seed(entries: unknown) {
-      for (const entry of (Array.isArray(entries) ? entries.slice(-64) : [])) {
-        if ((entry as any)?.type !== 'custom' || (entry as any)?.customType !== WATCHMAKER_MEMO_TYPE) continue;
+      // Tool traffic must not evict persisted conclusions from a reload.
+      // Bound matching memos, rather than the surrounding transcript rows.
+      const retained = [];
+      if (Array.isArray(entries)) for (let index = entries.length - 1; index >= 0 && retained.length < 64; index--) {
+        const entry = entries[index];
+        if (entry?.type === 'custom' && entry?.customType === WATCHMAKER_MEMO_TYPE) retained.push(entry);
+      }
+      for (const entry of retained.reverse()) {
         add((entry as any)?.data?.memo, (entry as any)?.data?.at);
       }
     },

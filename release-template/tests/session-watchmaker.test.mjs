@@ -139,6 +139,15 @@ test('scratchpad reseeds from persisted memo entries and dedupes', () => {
   assert.deepEqual(pad.list().map((memo) => memo.text), ['second conclusion', 'third conclusion', 'fourth conclusion']);
 });
 
+test('scratchpad restores retained memos beyond recent tool traffic and can reset ownership', () => {
+  const pad = createWatchmakerScratchpad(3);
+  const entry = { type: 'custom', customType: WATCHMAKER_MEMO_TYPE, data: { memo: 'A retained branch conclusion', at: 20 } };
+  pad.seed([entry, ...Array.from({ length: 100 }, () => ({ type: 'message', message: { role: 'assistant' } }))]);
+  assert.equal(pad.list().length, 1, 'non-memo entries cannot age a retained memo out of reload');
+  pad.clear();
+  assert.deepEqual(pad.list(), [], 'changing sessions clears the previous scratchpad');
+});
+
 test('watchmaker packets stay within budget and validate memos', () => {
   const rows = Array.from({ length: 40 }, (_, i) => ({ id: `event-${i}`, kind: 'tool result', text: `read file-${i}.ts: completed in 1s · ${'padded '.repeat(40)}` }));
   const packet = buildWatchmakerPacket({ request: 'Fix everything', rows, tools: [], skills: [], memos: ['a durable conclusion'] });

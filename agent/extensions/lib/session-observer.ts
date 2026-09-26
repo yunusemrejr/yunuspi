@@ -509,6 +509,8 @@ interface ObserverPorts {
   intervalMs?: number; deadlineMs?: number;
   /** Reviewer name in visible notices (default "Observer"). */
   label?: string;
+  /** Billing attribution for callers sharing this scheduler. */
+  usageOwner?: string;
   /** The other reviewer's recently delivered notes: a restatement is a repeat. */
   peerNotes?: () => Array<{ note: string; picks: string[] }>;
   dispatch?: typeof observerDispatch;
@@ -602,7 +604,7 @@ export function createSessionObserver(ports: ObserverPorts) {
     salienceMark = salience;
     const controller = new AbortController();
     const id = `observer-${randomUUID()}`, route = adapted(snapshot.route), started = now();
-    const base = { id, owner: 'session-observer', provider: route.model.provider, model: route.model.id };
+    const base = { id, owner: ports.usageOwner ?? 'session-observer', provider: route.model.provider, model: route.model.id };
     const account = (status: string, usage?: any) => { try { ports.receipt({ ...base, status, ...(usage ? { usage: observerUsage(usage, route.model.provider) } : {}) }, origin); } catch {} };
     let timedOut = false, cancelled = false, terminal = false;
     let release!: () => void;
@@ -615,7 +617,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       // A timed-out review paid for nothing: the next one on this route drops
       // two thinking levels at once (high -> low) instead of timing out again.
       timedOut = true; failures++; lowerThinking(route.route); lowerThinking(route.route); controller.abort(Error('Observer deadline exceeded')); account('timeout'); release();
-      if (generation === epoch && active && owner === origin) { current = undefined; notice('unavailable', `${label} timed out after ${Math.ceil(deadlineMs / 1000)}s; cancellation requested. Evidence retained for the next review.`); }
+      if (generation === epoch && active && owner === origin) notice('unavailable', `${label} timed out after ${Math.ceil(deadlineMs / 1000)}s; cancellation requested. Evidence retained for the next review.`);
     }, deadlineMs);
     deadline.unref?.();
     // Attach both handlers immediately: a rejection after the deadline is still
@@ -630,7 +632,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       if (controller.signal.aborted || closed || !active || generation !== epoch || owner !== origin) return;
       lastReviewAt = now();
       if (!response || response.stopReason !== 'stop' || response.content?.some((p: any) => p.type === 'toolCall')) {
-        failures++; current = undefined;
+        failures++;
         if (response?.stopReason === 'length') {
           const before = adapted(snapshot.route).thinking;
           lowerThinking(route.route);
@@ -644,7 +646,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       try { known = snapshot.knownIds?.() ?? []; } catch { /* Journal ids only widen citations. */ }
       const validation = (ports.validate ?? validateObserverAdvice)(text, snapshot.packet, new Set([...(response.fetched ?? []), ...known])), advice = validation.advice;
       if (advice && Array.isArray(response.investigated) && response.investigated.length) advice.investigated = response.investigated.slice(0, 8);
-      if (!advice) { failures++; current = undefined; notice('unavailable', `${label} response rejected: ${validation.reason}; evidence retained for the next review.`); return; }
+      if (!advice) { failures++; notice('unavailable', `${label} response rejected: ${validation.reason}; evidence retained for the next review.`); return; }
       failures = 0; raiseThinking(route.route);
       // Book effects (citations, bookmarks, margin notes) belong to any valid
       // response, including advice later withheld as stale: a durable lesson
@@ -657,7 +659,7 @@ export function createSessionObserver(ports: ObserverPorts) {
       // this chunk unread so the next review sees the same evidence with the
       // requested pages, at most once in a row.
       if (!advice.note && advice.read?.length && consults < 1) {
-        consults++; current = undefined; lastHash = '';
+        consults++; lastHash = '';
         notice('reviewed', `Consulting the book (${advice.read.join(', ')}) before advising; this chunk stays unread${suffix}.`);
         return;
       }
@@ -666,13 +668,16 @@ export function createSessionObserver(ports: ObserverPorts) {
       // changed). A string names changed state or overlapping later work; the
       // paid review keeps its value and is delivered with that caveat.
       const freshness = snapshot.current?.(advice);
-      if (freshness === false) { current = undefined; notice('reviewed', `Cited running work finished or the model changed before this review returned; advice not delivered${suffix}.`); return; }
+      if (freshness === false) { notice('reviewed', `Cited running work finished or the model changed before this review returned; advice not delivered${suffix}.`); return; }
       // A stale review has not consumed its evidence. Advance the queue only
       // after the cited state is reconciled, so the next review sees that chunk.
       snapshot.reviewed?.(); lastHash = snapshot.reviewKey ?? snapshot.packet.hash;
       const overlap = typeof freshness === 'string' ? freshness : undefined;
       const backlog = Number(snapshot.backlog) > 0;
-      if (!advice.note) { quiet = backlog ? 0 : quiet + 1; current = undefined; notice('reviewed', `Chunk ${++check}: no useful new reminder${suffix}.`); return; }
+      // A quiet, failed or duplicate review says nothing about whether the
+      // previous note reached the main agent. Retain that one bounded pending
+      // note until a receipt consumes it; its own freshness guard still runs.
+      if (!advice.note) { quiet = backlog ? 0 : quiet + 1; notice('reviewed', `Chunk ${++check}: no useful new reminder${suffix}.`); return; }
       const body = (ports.adviceText ?? observerAdviceText)(advice), key = normalize(body), tokens = new Set(normalize(advice.note).split(' '));
       const similarity = (previous: Set<string>) => [...tokens].filter(token => previous.has(token)).length / new Set([...tokens, ...previous]).size;
       // A paraphrase that recommends only tools/skills the last notes already
@@ -691,10 +696,11 @@ export function createSessionObserver(ports: ObserverPorts) {
       let topic: string | undefined; try { topic = ports.repeatKey?.(advice); } catch { topic = undefined; }
       const topicRepeat = Boolean(topic) && (topics.get(topic!) ?? 0) >= 2;
       const repeated = delivered.has(key) || sameMove || peerRepeat || topicRepeat || recentAdvice.some(previous => tokens.size >= 6 && similarity(previous) >= .8);
-      if (repeated) { quiet = backlog ? 0 : quiet + 1; current = undefined; notice('reviewed', `Chunk ${++check}: repeated advice suppressed${suffix}.`); return; }
+      if (repeated) { quiet = backlog ? 0 : quiet + 1; notice('reviewed', `Chunk ${++check}: repeated advice suppressed${suffix}.`); return; }
       quiet = 0;
       if (topic) topics.set(topic, (topics.get(topic) ?? 0) + 1);
-      delivered.add(key); recentAdvice.push(tokens); if (recentAdvice.length > 256) recentAdvice.shift();
+      delivered.add(key); if (delivered.size > 256) delivered.delete(delivered.values().next().value!);
+      recentAdvice.push(tokens); if (recentAdvice.length > 256) recentAdvice.shift();
       recentPicks.push(picks); if (recentPicks.length > 8) recentPicks.shift();
       current = { evidence: advice.evidence.join(', '), body, at: now(), generation: epoch, position: snapshot.position, freshness: () => snapshot.current?.(advice) };
       notice('completed', `Returned advice in ${Math.round((now() - started) / 1000)}s${overlap ? ` · ${overlap} meanwhile` : ''}${suffix}`, advice);

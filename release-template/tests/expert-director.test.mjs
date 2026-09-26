@@ -265,3 +265,24 @@ test('expert_director tool registers five actions with bounded outputs',async t=
   await assert.rejects(()=>call('nope'),/Unknown expert_director action/);
   assert.ok(entries.some(e=>e.type==='expert-director-v1'),'session entries recorded');
 });
+
+test('expert assessments advance the retained task ledger and retain its configured budget',async()=>{
+  const {default:register}=await loadExt('expert-director.ts');
+  const entries=[]; let tool;
+  register({registerTool:value=>{tool=value;},appendEntry:(customType,data)=>entries.push({type:'custom',customType,data})});
+  const ctx={cwd:root,sessionManager:{getSessionId:()=>'budget-session',getBranch:()=>entries}};
+  const assess=(pass)=>tool.execute('assess',{action:'assess',pass},undefined,undefined,ctx);
+  const first=await assess({openImprovements:2,maxPasses:2});
+  assert.equal(first.details.ledger.pass,1);
+  const second=await assess({openImprovements:1,fixedImprovements:1});
+  assert.equal(second.details.reason,'pass-budget-spent');
+  assert.equal(second.details.ledger.pass,2);
+  assert.equal(second.details.ledger.maxPasses,2);
+  entries.push({type:'message',message:{role:'user',content:'Begin the next task'}});
+  const fresh=await assess({openImprovements:1});
+  assert.equal(fresh.details.ledger.pass,1,'a new user task starts a new loop');
+  assert.equal(fresh.details.ledger.maxPasses,3);
+  const freshManager={...ctx,sessionManager:{getSessionId:()=>'budget-session',getBranch:()=>[]}};
+  const isolated=await tool.execute('assess',{action:'assess',pass:{openImprovements:1}},undefined,undefined,freshManager);
+  assert.equal(isolated.details.ledger.fixedImprovements,0,'another live manager never inherits same-id state');
+});

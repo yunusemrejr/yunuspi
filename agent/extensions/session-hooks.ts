@@ -32,11 +32,12 @@ export default function (pi: any) {
 	const shown = new Set<string>();
 	/** A successful deploy stays unverified until live bytes are compared. */
 	let unverifiedDeployAt: number | undefined;
+	let deployRevision = 0;
 	/** One unverified-deploy text shared by the warning line and the gate receipt. */
 	const deployVerificationText = (at: number): string =>
 		`deploy at ${new Date(at).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`;
 	let disposeDeployNotice: (() => void) | undefined;
-	const deployCalls = new Map<string, { deploy: boolean; verify: boolean }>();
+	const deployCalls = new Map<string, { deploy: boolean; verify: boolean; revision: number }>();
 
 	const enabled = (): boolean =>
 		(process.env.PI_SESSION_HOOKS ?? "on").toLowerCase() !== "off";
@@ -46,12 +47,15 @@ export default function (pi: any) {
 		shown.clear();
 		deployCalls.clear();
 		unverifiedDeployAt = undefined;
+		deployRevision = 0;
 		disposeDeployNotice?.();
 		disposeDeployNotice = undefined;
 	};
 
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
+	pi.on("session_tree", reset);
+	pi.on("session_fork", reset);
 	pi.on("session_shutdown", reset);
 	pi.on("agent_end", () => { pending.clear(); deployCalls.clear(); });
 
@@ -62,7 +66,10 @@ export default function (pi: any) {
 		const deploy = isDeployCommand(event.toolName, input);
 		// "git push prod && curl -s URL | sha256sum" deploys and verifies in one call.
 		const verify = (deploy || unverifiedDeployAt !== undefined) && isLiveByteVerification(event.toolName, input);
-		if (deploy || verify) deployCalls.set(event.toolCallId, { deploy, verify });
+		if (deploy || verify) {
+			if (deployCalls.size >= 256) deployCalls.delete(deployCalls.keys().next().value!);
+			deployCalls.set(event.toolCallId, { deploy, verify, revision: deployRevision });
+		}
 		const success = matchHook(event.toolName, event.input ?? {});
 		const failure = matchHook(event.toolName, event.input ?? {}, true);
 		// Browser recovery is selected from the actual outcome at result time.
@@ -78,7 +85,9 @@ export default function (pi: any) {
 		const deployRole = deployCalls.get(event.toolCallId);
 		deployCalls.delete(event.toolCallId);
 		if (deployRole && !event.isError) {
+			const verifiesCurrent = deployRole.revision === deployRevision;
 			if (deployRole.deploy) {
+				deployRevision++;
 				unverifiedDeployAt = Date.now();
 				// Final answers carry this receipt until a live byte comparison runs:
 				// a successful push is not the state visitors receive.
@@ -90,13 +99,15 @@ export default function (pi: any) {
 						pending: () => [],
 						verification: () => unverifiedDeployAt === undefined ? [] : [deployVerificationText(unverifiedDeployAt)],
 						verificationReceipts: () => unverifiedDeployAt === undefined ? [] : [{
-							source: "deploy", id: `deploy:${unverifiedDeployAt}`, revision: String(unverifiedDeployAt),
+							source: "deploy", id: `deploy:${unverifiedDeployAt}:${deployRevision}`, revision: String(deployRevision),
 							state: "unverified", line: `deploy: ${deployVerificationText(unverifiedDeployAt)}`,
 						}],
 					});
 				}
 			}
-			if (deployRole.verify) unverifiedDeployAt = undefined;
+			// A concurrent deployment can finish after a verification starts.
+			// That older fetch is not evidence for the newly published revision.
+			if (deployRole.verify && verifiesCurrent) unverifiedDeployAt = undefined;
 		}
 		const queued = pending.get(event.toolCallId);
 		pending.delete(event.toolCallId);

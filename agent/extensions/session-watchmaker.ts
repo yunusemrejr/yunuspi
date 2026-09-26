@@ -163,7 +163,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; scratchpad.clear();
+    try { scratchpad.seed(context?.sessionManager?.getBranch?.() ?? []); } catch { /* No persisted memos available. */ }
+    runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
@@ -172,6 +174,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     peerNotes: () => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()),
     ...testing,
     label: 'Watchmaker',
+    usageOwner: 'session-watchmaker',
     // The time sink a note names is its topic: twelve notes re-diagnosed shell
     // recon in one session with no effect. Twice per task is the ceiling.
     repeatKey: (advice: any) => watchmakerSink(String(advice?.note ?? ''), [...ledger.keys()]),
@@ -207,7 +210,6 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
         }
       } catch { return { packet: idlePacket(), reason: 'User constraints unavailable' }; }
       if (blocked) return { packet: idlePacket(), reason: 'User requested no background observer or network' };
-      scratchpad.seed(ctx?.sessionManager?.getBranch?.() ?? []);
       const evidence = [...timeRows(), ...taskStateWatchmakerRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));

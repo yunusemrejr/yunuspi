@@ -44,3 +44,22 @@ test('a successful deploy keeps a verification receipt until live bytes are comp
   assert.deepEqual(collectVerificationLines(undefined, sessionManager), [], 'deploy and verify in one call');
   handlers.get('session_shutdown')();
 });
+
+test('an older verification cannot acknowledge a deployment completed while it was running', () => {
+  const handlers = new Map();
+  registerHooks({ on: (name, handler) => handlers.set(name, handler) });
+  const sessionManager = {}, ctx = { sessionManager };
+  const deploy = (id) => {
+    const event = { toolCallId: id, toolName: 'bash', input: { command: 'git push prod main' }, content: [], isError: false };
+    handlers.get('tool_call')(event);
+    handlers.get('tool_result')(event, ctx);
+  };
+  handlers.get('session_start')();
+  deploy('first');
+  const verify = { toolCallId: 'verify-first', toolName: 'bash', input: { command: 'curl -s https://example.com/app.js | sha256sum' }, content: [], isError: false };
+  handlers.get('tool_call')(verify);
+  deploy('second');
+  handlers.get('tool_result')(verify, ctx);
+  assert.equal(collectVerificationLines(undefined, sessionManager).length, 1, 'the second deployment still needs its own live verification');
+  handlers.get('session_shutdown')();
+});

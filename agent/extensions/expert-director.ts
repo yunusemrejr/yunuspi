@@ -10,7 +10,7 @@ import { buildExpertBrief, expertEnabled, expertTasteWritable } from "./lib/expe
 import { EXPERT_DOMAIN_IDS, type ExpertDomainId } from "./lib/expert-domains.ts";
 import { getDoctrinePack } from "./lib/expert-doctrine.ts";
 import { buildCriticPlan } from "./lib/expert-critics.ts";
-import { evaluateExpertConvergence, emptyExpertPassLedger, foldExpertPass, expertVerdictSummary } from "./lib/expert-convergence.ts";
+import { evaluateExpertConvergence, emptyExpertPassLedger, foldExpertPass, expertVerdictSummary, retainedExpertPassLedger } from "./lib/expert-convergence.ts";
 import {
   readTasteStore, writeTasteStore, foldTastePreference, recallTaste, forgetTastePreference,
   type TasteProvenance, type TasteScope,
@@ -30,7 +30,6 @@ const strList = (maxItems: number, maxLength: number) =>
 
 export default function expertDirector(pi: any) {
   const runs: Array<{ at: number; action: string; domains: string[]; converged?: boolean; reason?: string }> = [];
-  const ledgerBySession = new Map<string, ReturnType<typeof emptyExpertPassLedger>>();
   const record = (entry: (typeof runs)[number]) => {
     runs.push(entry);
     if (runs.length > 32) runs.splice(0, runs.length - 32);
@@ -129,20 +128,21 @@ export default function expertDirector(pi: any) {
       }
       if (action === "assess") {
         const p = params.pass ?? {};
+        const prior = p.pass === 1 ? undefined : retainedExpertPassLedger(ctx?.sessionManager?.getBranch?.() ?? []);
+        const previous = prior ?? emptyExpertPassLedger(p.maxPasses);
+        const maxPasses = p.maxPasses ?? previous.maxPasses;
         const evidence = {
           openRequirements: Array.isArray(p.openRequirements) ? p.openRequirements.filter((s: unknown) => typeof s === "string") : [],
           invariantViolations: Array.isArray(p.invariantViolations) ? p.invariantViolations.filter((s: unknown) => typeof s === "string") : [],
           failingChecks: Array.isArray(p.failingChecks) ? p.failingChecks.filter((s: unknown) => typeof s === "string") : [],
           openBlocking: p.openBlocking ?? 0, openImprovements: p.openImprovements ?? 0, openPolish: p.openPolish ?? 0,
           fixedBlocking: p.fixedBlocking ?? 0, fixedImprovements: p.fixedImprovements ?? 0, newSubstantive: p.newSubstantive ?? 0,
-          pass: p.pass ?? 1, maxPasses: p.maxPasses ?? 3, evidenceCurrent: p.evidenceCurrent !== false,
+          pass: p.pass ?? Math.min(8, previous.pass + 1), maxPasses, evidenceCurrent: p.evidenceCurrent !== false,
           unavailable: Array.isArray(p.unavailable) ? p.unavailable.filter((s: unknown) => typeof s === "string") : [],
         };
         const verdict = evaluateExpertConvergence(evidence);
         const sid = ctx?.sessionManager?.getSessionId?.() ?? "";
-        const key = `${sid}`;
-        const ledger = foldExpertPass(ledgerBySession.get(key) ?? emptyExpertPassLedger(evidence.maxPasses), verdict, evidence);
-        ledgerBySession.set(key, ledger);
+        const ledger = foldExpertPass({ ...previous, maxPasses }, verdict, evidence);
         try { pi.appendEntry?.(ENTRY, { at: Date.now(), session: sid, action: "assess", converged: verdict.converged, reason: verdict.reason, ledger }); } catch { /* optional */ }
         record({ at: Date.now(), action: "assess", domains: [], converged: verdict.converged, reason: verdict.reason });
         noteHealth("expert.assess", { converged: verdict.converged, reason: verdict.reason, count: 1 });
