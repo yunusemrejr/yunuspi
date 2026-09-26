@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.10 — 2026-09-26
+
+`verify-harness.mjs` no longer reports every extension as a syntax error on Node 24. Node 24's `--check` parses TypeScript as JavaScript even with the strip-types flags, so running the documented `node ~/.pi/agent/scripts/verify-harness.mjs` with the system Node reported 183 false failures after the 0.10.9 deployment while the pinned Node 22 passed. The verifier now strips types in-process (positions preserved) and syntax-checks the module source on either runtime; a behavioral test runs the check on valid and broken TypeScript under the CI runtime.
+
 ## 0.10.9 — 2026-09-26
 
 Port of the remaining session-evidenced live hotfixes. Observer and Watchmaker notes that never reached a provider request are now carried into the next delivery as receipted capsules instead of expiring on a wall clock; the edit-time status-ornament family generalizes live pills to any status word, adds glow-dot, eyebrow-pill and invented-label cues plus work-thought-leak, leak-vocabulary and vague-nav prose cues, with nested markup and one-cue-per-badge refinements so reminders and review keep sharing the same signals. Prose rules flag eyebrow-style and adjective-stacked label headings, bare vanity metrics and leaked making-of narration; `video_compose` offers all sixteen transitions from one exported list; `image_create` synthesizes deterministic procedural plates; the SVG audit flags default filter regions; rendered-noise checks catch eyebrow pills, literal status dots and sibling-layout dots; and routing hears fake-badge, invented-label and glow-dot complaints. Regression tests cover each port.

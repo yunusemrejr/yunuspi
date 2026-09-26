@@ -57,3 +57,19 @@ test('a hypothetical newer upstream release has no effect on idle update or time
 test('verification does not apply runtime core patches or find a global npm core', () => {
  const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');assert.doesNotMatch(source,/checkPatch\(|launcherSpec\(|npm root -g|core-update-transaction/);assert.match(source,/resolveOwnedCore/);
 });
+
+test('TypeScript syntax checks strip types first, so Node 24 --check cannot report false errors', async () => {
+ // Recorded 2026-09-26: Node 24's --check parsed .ts as JavaScript and the
+ // verifier reported every extension as a syntax error.
+ const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
+ const declaration=source.match(/async function checkSourceSyntax\(file\) \{[\s\S]*?\n\}/)?.[0];assert.ok(declaration);
+ const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');const nodeModule=await import('node:module');
+ const check=vm.runInNewContext(`(${declaration})`,{execFileP:promisify(execFile),fs,path,nodeModule,process,Error,Object,String});
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ts-syntax-'));
+ try{
+  const good=path.join(dir,'good.ts');fs.writeFileSync(good,"import { readFileSync, type PathLike } from 'node:fs';\nexport const read = (p: PathLike): string => readFileSync(p, 'utf8');\n");
+  const bad=path.join(dir,'bad.ts');fs.writeFileSync(bad,"export const broken = (value: string => value;\n");
+  assert.equal(await check(good),undefined,'type-only imports and annotations are valid source');
+  await assert.rejects(check(bad),'a genuine syntax error is still reported');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
