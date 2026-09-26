@@ -17,10 +17,12 @@ const shadowMod = await load("extensions/lib/micro-intelligence/router-shadow.ts
 const labMod = await load("extensions/lib/micro-intelligence/model-qual-lab.ts");
 const metricsMod = await load("extensions/lib/micro-intelligence/metrics.ts");
 
-test("remote rerank is off by default and degrades to local order", async () => {
+test("remote rerank is available by default and degrades to local order when disabled or unconfigured", async () => {
   metricsMod.resetMicroMetrics();
   try {
-    const ranker = rerankMod.remoteRanker({ model: "voyage-rerank-3", transport: async () => ({ order: [1, 0] }) });
+    assert.equal(rerankMod.rerankEnabled({}), true);
+    assert.equal(rerankMod.rerankEnabled({ PI_OFFLINE: '1' }), false);
+    const ranker = rerankMod.remoteRanker({ env: { PI_RERANK: 'off' }, model: "voyage-rerank-3", transport: async () => ({ order: [1, 0] }) });
     const cands = [{ id: "a", text: "first" }, { id: "b", text: "second" }, { id: "c", text: "third" }];
     assert.equal(await ranker.rank("q", cands), undefined);
     assert.equal(metricsMod.microMetrics().snapshot().helpers.rerank.skipReasons.disabled, 1);
@@ -45,6 +47,35 @@ test("remote rerank is off by default and degrades to local order", async () => 
   } finally {
     metricsMod.resetMicroMetrics();
   }
+});
+
+test('remote rerank rejects malformed provider indices and scores', async () => {
+  const request = { url: 'https://fixture.invalid/rerank', model: 'fixture', query: 'cache', documents: ['a', 'b', 'c'], topK: 3, timeoutMs: 100 };
+  for (const data of [
+    [{ index: 1, relevance_score: .8 }, { index: 1, relevance_score: .7 }],
+    [{ index: 7, relevance_score: .8 }], [{ index: 0, relevance_score: 'high' }],
+    [{ index: 0, relevance_score: Infinity }], [null],
+  ]) {
+    const transport = rerankMod.voyageRerankTransport({ key: () => 'synthetic', fetchImpl: async () => ({ ok: true, json: async () => ({ data }) }) });
+    await assert.rejects(transport(request), /malformed answers/);
+  }
+});
+
+test('remote rerank snapshots candidate IDs and rejects invalid or cancelled injected results', async () => {
+  const candidates = [{ id: 'a', text: 'first' }, { id: 'b', text: 'second' }, { id: 'c', text: 'third' }];
+  const env = { PI_RERANK: 'on' };
+  for (const order of [[0, 0], [0, 8], [0, 1.5], ['0', 1]]) {
+    assert.equal(await rerankMod.remoteRanker({ model: 'fixture', env, transport: async () => ({ order }) }).rank('cache', candidates), undefined);
+  }
+  let release;
+  const mutable = structuredClone(candidates);
+  const ranker = rerankMod.remoteRanker({ model: 'fixture', env, transport: async () => new Promise(resolve => { release = () => resolve({ order: [1, 0] }); }) });
+  const pending = ranker.rank('cache', mutable);
+  mutable[1].id = 'changed'; release();
+  assert.deepEqual(await pending, ['b', 'a']);
+  const controller = new AbortController();
+  const cancelled = rerankMod.remoteRanker({ model: 'fixture', env, transport: async () => { controller.abort(); return { order: [1, 0] }; } });
+  assert.equal(await cancelled.rank('cache', candidates, controller.signal), undefined);
 });
 
 test("router shadow records both choices and never routes", async () => {

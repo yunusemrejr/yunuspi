@@ -33,6 +33,7 @@ export type RetrievalJev = (
   site: string,
   state: unknown,
   questions: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
 ) => Promise<
   | { ok: true; answers: Record<string, { choice?: string; noul?: number; probabilities?: Record<string, number>; confidence?: number }>; usage: { inputTokens: number; cached: boolean; costUsd?: number } }
   | { ok: false; skipped: string }
@@ -61,6 +62,18 @@ const RRF_K = 60;
 
 export function trivialQuery(query: unknown): boolean {
   return typeof query !== "string" || query.trim().length < 3;
+}
+
+/** A cancelled consumer leaves a shared local inference running for its
+ * remaining consumers, but must not wait for it or start another stage. */
+async function awaitStage<T>(work: Promise<T>, signal?: AbortSignal): Promise<T | undefined> {
+  if (!signal) return work;
+  if (signal.aborted) { void work.catch(() => {}); return undefined; }
+  let abort!: () => void;
+  const cancelled = new Promise<undefined>(resolve => { abort = () => resolve(undefined); });
+  signal.addEventListener('abort', abort, { once: true });
+  try { return await Promise.race([work, cancelled]); }
+  finally { signal.removeEventListener('abort', abort); }
 }
 
 /**
@@ -92,10 +105,12 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   const bit = (id: string | undefined): string | undefined => id;
   const lexicalTop = bit(lexical[0]?.id);
   const done = (ordered: T[], applied: RetrievalOutcome<T>["applied"], extra: Partial<RetrievalOutcome<T>> = {}): RetrievalOutcome<T> => {
+    if (options.signal?.aborted) return { ordered: [...lexical], applied: 'lexical', lexicalTop };
     if(applied !== "lexical")try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.retrieval.used",{count:1,decision:applied});}catch{/* optional visibility */}
     return { ordered, applied, lexicalTop, ...extra };
   };
 
+  if (options.signal?.aborted) return done([...lexical], 'lexical');
   if (lexical.length < 2 || trivialQuery(query)) {
     metrics.skip("needle", lexical.length < 2 ? "no-candidates" : "trivial");
     return done([...lexical], "lexical");
@@ -113,11 +128,12 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
   if (options.needle) {
     metrics.offer("needle");
     try {
-      const ranked = await options.needle(
+      const ranked = await awaitStage(options.needle(
         query.slice(0, EMBED_CHARS),
         needleSlice.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, EMBED_CHARS) })),
         needleSlice.length,
-      );
+      ), options.signal);
+      if (!ranked || options.signal?.aborted) return done([...lexical], 'lexical');
       if (ranked.ok) {
         metrics.run("needle", ranked.ms);
         if (ranked.cached) metrics.cacheHit("needle");
@@ -145,6 +161,8 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
       metrics.skip("needle", "unavailable");
     }
   }
+
+  if (options.signal?.aborted) return done([...lexical], 'lexical');
 
   const agrees = needleTop !== undefined && needleTop === lexicalTop;
   // Shadow may measure agreement but must preserve baseline Jev eligibility.
@@ -184,13 +202,16 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
     try {
       const pool = needleOrdered ?? fusedOrdered ?? [...lexical];
       const candidates = pool.slice(0, 3).map(entry => ({ id: entry.id, text: entry.text.slice(0, 300) }));
-      const picked = await options.local(query, candidates, `${kind}-discovery`, { signal: options.signal });
+      const picked = await awaitStage(options.local(query, candidates, `${kind}-discovery`, { signal: options.signal }), options.signal);
+      if (!picked || options.signal?.aborted) return done([...lexical], 'lexical');
       if (picked.ok && !options.signal?.aborted && Number.isFinite(picked.p) && picked.p >= LOCAL_CHOICE_MIN_P && picked.p <= 1
         && Number.isFinite(picked.margin) && picked.margin >= LOCAL_CHOICE_MIN_MARGIN && picked.margin <= 1 && candidates.some(entry => entry.id === picked.id)) {
         return done([...pool.filter(entry => entry.id === picked.id), ...pool.filter(entry => entry.id !== picked.id)], 'local', { needleTop, needleMargin });
       }
     } catch { /* Unavailable/uncertain local advice retains the remote/lexical path. */ }
   }
+
+  if (options.signal?.aborted) return done([...lexical], 'lexical');
 
   // Jev validation: uncertain Needle, stage disagreement, or no Needle.
   const needsJev = needleShadow || needleTop === undefined || !needleAccepted || !agrees;
@@ -199,14 +220,15 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
     try {
       const pool = (needleOrdered ?? fusedOrdered ?? [...lexical]).slice(0, MAX_STAGE);
       const candidates = pool.map((item) => ({ id: String(item.id), text: String(item.text).slice(0, 300) }));
-      const judged = await options.jev(site, { query: query.slice(0, 256) }, {
+      const judged = await awaitStage(options.jev(site, { query: query.slice(0, 256) }, {
         rank: {
           type: "choice",
           instructions: `Which ${kind} entry best serves this need?`,
           criteria: Object.fromEntries(candidates.map((entry) => [entry.id, entry.text])),
         },
         exists: { type: "noul", instructions: "Does any candidate actually serve the need?" },
-      });
+      }, { signal: options.signal }), options.signal);
+      if (!judged || options.signal?.aborted) return done([...lexical], 'lexical');
       if (judged.ok) {
         const order = judged.answers.rank?.probabilities ?? {};
         const top = judged.answers.rank?.choice;

@@ -158,6 +158,38 @@ test('local choice accepts only confident exact option tokens and memoizes bound
   } finally { if (prev === undefined) delete process.env.PI_LOCAL_LM; else process.env.PI_LOCAL_LM = prev; }
 });
 
+test('local choice keeps the candidate IDs represented by its submitted prompt', async () => {
+  const prev = process.env.PI_LOCAL_LM; delete process.env.PI_LOCAL_LM;
+  let release, started;
+  const begun = new Promise(resolve => { started = resolve; });
+  try {
+    const candidates = structuredClone(choiceCandidates);
+    const lm = L.createLocalLm({ runtime, fetch: async (_url, { body }) => {
+      if (JSON.parse(body).n_predict === 0) return new Response('{}');
+      started(); await new Promise(resolve => { release = resolve; });
+      return choiceResponse([[' B', .95], [' A', .03]]);
+    } });
+    const pending = lm.choose('Take a screenshot of this website', candidates, 'tool-discover');
+    await begun;
+    candidates[1].id = 'different-tool'; candidates.reverse();
+    release();
+    assert.equal((await pending).id, 'browser');
+    assert.equal((await lm.choose('Take a screenshot of this website', choiceCandidates, 'tool-discover')).id, 'browser');
+  } finally { if (prev === undefined) delete process.env.PI_LOCAL_LM; else process.env.PI_LOCAL_LM = prev; }
+});
+
+test('local HTTP response limits stop streaming before an oversized body is buffered', async () => {
+  let pulls = 0, cancelled = false;
+  const stream = new ReadableStream({
+    pull(controller) { pulls++; controller.enqueue(new Uint8Array(32768)); },
+    cancel() { cancelled = true; },
+  });
+  const post = L.localLmPost(runtime, async () => new Response(stream), new AbortController().signal);
+  await assert.rejects(post({ prompt: 'bounded response', n_predict: 1 }), /oversized response/);
+  assert.equal(cancelled, true);
+  assert.ok(pulls <= 4, `stop pulling after crossing the byte budget; got ${pulls}`);
+});
+
 test('uncertain, irrelevant, malformed and oversized local choices abstain without deleting options', async () => {
   const prev = process.env.PI_LOCAL_LM; delete process.env.PI_LOCAL_LM;
   try {

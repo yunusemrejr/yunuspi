@@ -209,3 +209,28 @@ test("paid calls are ledgered for cost/metrics", async () => {
     clearSpanCache();
   }
 });
+
+test('span cached results cannot be changed by consumers or bill the original usage again', async () => {
+  clearSpanCache();
+  try {
+    const trace = traceFrom(fixtures.traces[0].events), expected = scoresFor(['verification-gap']);
+    const scorer = async () => ({ text: JSON.stringify(expected), model: 'fixture', inputTokens: 12, costUsd: .001, ms: 1 });
+    const first = await scoreSpanTrace(trace, scorer);
+    first.scores['verification-gap'].present = 0;
+    const second = await scoreSpanTrace(trace, scorer);
+    assert.deepEqual(second.scores, expected); assert.equal(second.inputTokens, 0); assert.equal(second.costUsd, 0);
+    second.scores['verification-gap'].present = 0;
+    assert.deepEqual((await scoreSpanTrace(trace, scorer)).scores, expected);
+  } finally { clearSpanCache(); }
+});
+
+test('span rejects an aborted scorer result and does not preserve it in the cache', async () => {
+  clearSpanCache();
+  try {
+    const controller = new AbortController(), trace = traceFrom(fixtures.traces[0].events);
+    const answer = { text: JSON.stringify(scoresFor([])), model: 'fixture', ms: 1 };
+    const result = await scoreSpanTrace(trace, async () => { controller.abort(); return answer; }, { signal: controller.signal });
+    assert.equal(result.ok, false); assert.equal(result.skipped, 'aborted');
+    assert.equal((await scoreSpanTrace(trace, async () => answer)).cached, false);
+  } finally { clearSpanCache(); }
+});

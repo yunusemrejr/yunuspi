@@ -146,6 +146,33 @@ test("identical judgments at different sites reuse the paid answer", async () =>
   assert.deepEqual(ledger.map(row => [row.data.site, row.data.cached]), [["screen", false], ["rank", true]]);
 });
 
+test("an in-flight judgment snapshots state and questions for validation and caching", async () => {
+  let release, started;
+  const begun = new Promise(resolve => { started = resolve; });
+  const sent = [];
+  harness(async (_url, opts) => {
+    sent.push(JSON.parse(opts.body));
+    if (sent.length === 1) { started(); await new Promise(resolve => { release = resolve; }); }
+    return decisionsOk();
+  });
+  const state = { task: 'Inspect the first request', nested: { revision: 1 } };
+  const questions = { ping: { type: 'noul', instructions: 'Affirmative?' } };
+  const originalState = structuredClone(state), originalQuestions = structuredClone(questions);
+  const first = jev.askJev('snapshot', state, questions);
+  await begun;
+  state.task = 'Inspect the changed request'; state.nested.revision = 2;
+  questions.ping.type = 'score';
+  release();
+  assert.equal((await first).ok, true, 'validate the type sent to the provider');
+  const reused = await jev.askJev('snapshot', originalState, originalQuestions);
+  assert.equal(reused.ok, true); assert.equal(reused.usage.cached, true);
+  assert.equal(sent.length, 1, 'store the paid answer under the submitted state');
+  const changed = await jev.askJev('snapshot', state, originalQuestions);
+  assert.equal(changed.ok, true); assert.equal(changed.usage.cached, false);
+  assert.equal(sent.length, 2, 'mutated state cannot inherit the old answer');
+  assert.deepEqual(sent[0].state, originalState);
+});
+
 test("a cancelled leader does not own a surviving caller's paid judgment", async () => {
   let respond, started, fetches = 0;
   const begun = new Promise(resolve => { started = resolve; });

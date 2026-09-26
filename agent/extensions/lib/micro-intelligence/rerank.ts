@@ -1,7 +1,7 @@
 /** Optional remote rerank stage for retrieval pipelines.
  *
  * Local Needle3 ranking stays the zero-cost default everywhere. This module
- * adds an opt-in precision stage AFTER lexical/vector retrieval and BEFORE
+ * adds a configured precision stage AFTER lexical/vector retrieval and BEFORE
  * final context selection, for project memory, historical/session
  * retrieval, Observer evidence, source relevance, skills and docs.
  *
@@ -41,7 +41,7 @@ export interface RerankTransport {
 
 export function rerankEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
-    && ["on", "1", "true", "yes"].includes((env.PI_RERANK ?? "off").toLowerCase());
+    && !["off", "0", "false", "no"].includes((env.PI_RERANK ?? "on").toLowerCase());
 }
 
 function noteHealth(kind: string, data: Record<string, unknown>): void {
@@ -79,10 +79,13 @@ export function voyageRerankTransport(opts: {
       });
       if (!response.ok) throw Error(`rerank ${response.status}`);
       const body = (await response.json()) as { data?: Array<{ index?: number; relevance_score?: number }> };
-      if (!Array.isArray(body.data) || !body.data.length) throw Error("rerank: malformed answers");
+      controller.signal.throwIfAborted();
+      if (!Array.isArray(body.data) || !body.data.length || body.data.length > documents.length
+        || new Set(body.data.map(row => row?.index)).size !== body.data.length
+        || body.data.some(row => !row || !Number.isInteger(row.index) || row.index! < 0 || row.index! >= documents.length
+          || typeof row.relevance_score !== 'number' || !Number.isFinite(row.relevance_score))) throw Error("rerank: malformed answers");
       const order = body.data
-        .filter((row) => Number.isInteger(row.index) && (row.index as number) >= 0 && (row.index as number) < documents.length)
-        .sort((a, b) => (Number(b.relevance_score) || 0) - (Number(a.relevance_score) || 0))
+        .sort((a, b) => b.relevance_score! - a.relevance_score!)
         .map((row) => row.index as number);
       if (!order.length) throw Error("rerank: malformed answers");
       return { order };
@@ -134,8 +137,10 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
       }
       metrics.offer("rerank");
       const transport = opts.transport ?? voyageRerankTransport({ env });
-      const docs = candidates.slice(0, RERANK_MAX_DOCUMENTS);
       try {
+        const docs = candidates.slice(0, RERANK_MAX_DOCUMENTS).map(candidate => ({ id: candidate?.id, text: candidate?.text }));
+        if (docs.some(candidate => typeof candidate.id !== 'string' || !candidate.id || typeof candidate.text !== 'string')
+          || new Set(docs.map(candidate => candidate.id)).size !== docs.length) throw Error('rerank: invalid candidates');
         const { order } = await transport({
           url,
           model,
@@ -145,8 +150,11 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
           signal,
           timeoutMs: opts.timeoutMs ?? RERANK_TIMEOUT_MS,
         });
+        signal?.throwIfAborted();
         const ms = Date.now() - started;
-        const ids = order.map((index) => docs[index]?.id).filter((id): id is string => typeof id === "string");
+        if (!Array.isArray(order) || order.length > docs.length || new Set(order).size !== order.length
+          || order.some(index => !Number.isInteger(index) || index < 0 || index >= docs.length)) throw Error('rerank: malformed order');
+        const ids = order.map(index => docs[index].id);
         if (ids.length < 2) {
           metrics.skip("rerank", "low-value");
           return undefined;
@@ -158,7 +166,7 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
       } catch (error) {
         const ms = Date.now() - started;
         const message = error instanceof Error ? error.message : String(error);
-        const reason = /no API key/i.test(message) ? "no-key" : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
+        const reason = signal?.aborted ? 'aborted' : /no API key/i.test(message) ? "no-key" : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
         metrics.skip("rerank", reason);
         noteHealth("ml.rerank.skipped", { count: 1, reason, durationMs: ms });
         return undefined;

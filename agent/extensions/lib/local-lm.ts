@@ -82,9 +82,24 @@ export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, sign
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.apiKey}` },
 			body: JSON.stringify({ temperature: 0, cache_prompt: true, ...body }) });
 		if (!response.ok) throw new Error(`http ${response.status}`);
-		const text = await response.text();
-		if (text.length > 65_536) throw new Error("oversized response");
-		return JSON.parse(text);
+		if (!response.body) throw new Error("empty response");
+		const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+		let bytes = 0, complete = false;
+		try {
+			while (true) {
+				signal.throwIfAborted();
+				const part = await reader.read();
+				if (part.done) { complete = true; break; }
+				bytes += part.value.byteLength;
+				if (bytes > 65_536) throw new Error("oversized response");
+				chunks.push(part.value);
+			}
+			signal.throwIfAborted();
+			return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)));
+		} finally {
+			if (!complete) await reader.cancel().catch(() => {});
+			reader.releaseLock();
+		}
 	};
 }
 
@@ -241,7 +256,9 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			if (process.env.PI_LOCAL_LM === "off") return { ok: false, reason: "unavailable" };
 			const prompt = localChoicePrompt(task, candidates);
 			if (!prompt) return { ok: false, reason: "input-budget" };
-			const key = createHash("sha256").update(JSON.stringify([purpose, task, candidates])).digest("hex");
+			// Preserve the exact IDs described by the prompt across queued inference.
+			const candidateIds = candidates.map(candidate => candidate.id);
+			const key = createHash("sha256").update(JSON.stringify([purpose, prompt, candidateIds])).digest("hex");
 			const hit = choices.get(key);
 			if (hit && now() - hit.at < 300_000) {
 				stats.cached++; note({ decision: "cached", purpose, count: 1 });
@@ -252,8 +269,8 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			const ranked = [...result.value].sort((a, b) => b[1] - a[1]);
 			const [letter, p] = ranked[0] ?? ["N", 0];
 			const index = letter.length === 1 ? letter.charCodeAt(0) - 65 : -1, margin = p - (ranked[1]?.[1] ?? 0);
-			const choice: LocalChoice = index >= 0 && index < candidates.length && p >= LOCAL_CHOICE_MIN_P && margin >= LOCAL_CHOICE_MIN_MARGIN
-				? { ok: true, id: candidates[index].id, p, margin, ms: result.ms, cached: false } : { ok: false, reason: "low-confidence" };
+			const choice: LocalChoice = index >= 0 && index < candidateIds.length && p >= LOCAL_CHOICE_MIN_P && margin >= LOCAL_CHOICE_MIN_MARGIN
+				? { ok: true, id: candidateIds[index], p, margin, ms: result.ms, cached: false } : { ok: false, reason: "low-confidence" };
 			if (choices.size >= 128) choices.delete(choices.keys().next().value!);
 			choices.set(key, { at: now(), result: choice });
 			return choice;

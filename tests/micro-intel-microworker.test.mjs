@@ -18,7 +18,7 @@ const metricsMod = await load("extensions/lib/micro-intelligence/metrics.ts");
 const { microWorkerEligibility, runMicroWorker, clearMicroWorkerCache, microWorkerCandidates } = workerMod;
 const { routePrivacyTier, routeSafeForPrivateRepo } = privacyMod;
 
-const facts = (over = {}) => ({ provider: "openrouter", model: "cheap/free", healthy: true, privateInput: false, ...over });
+const facts = (over = {}) => ({ provider: "openrouter", model: "cheap/free", healthy: true, privateInput: false, pricePerM: .05, quality: .85, ...over });
 
 test("privacy tiers: unknown is never safe for private input", () => {
   assert.equal(routePrivacyTier("ollama", "qwen").tier, "local");
@@ -36,7 +36,10 @@ test("eligibility gates health, cooldown, price, quality and privacy", () => {
   assert.equal(microWorkerEligibility(facts({ healthy: false })).reason, "unhealthy");
   assert.equal(microWorkerEligibility(facts({ cooldownUntil: Date.now() + 60_000 })).reason, "cooldown");
   assert.equal(microWorkerEligibility(facts({ pricePerM: 5 })).reason, "over-price-cap");
-  assert.equal(microWorkerEligibility(facts({ pricePerM: undefined })).eligible, true);
+  assert.equal(microWorkerEligibility(facts({ pricePerM: undefined })).reason, 'unknown-price');
+  assert.equal(microWorkerEligibility(facts({ quality: undefined })).reason, 'unknown-quality');
+  for (const pricePerM of [NaN, Infinity, -1]) assert.equal(microWorkerEligibility(facts({ pricePerM })).reason, 'invalid-price');
+  for (const quality of [NaN, Infinity, -1, 1.1]) assert.equal(microWorkerEligibility(facts({ quality })).reason, 'invalid-quality');
   assert.equal(microWorkerEligibility(facts({ quality: 0.2 })).reason, "quality-floor");
   assert.equal(microWorkerEligibility(facts({ privateInput: true })).reason, "private-input-unsafe-route");
   assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q" })).eligible, true);
@@ -97,4 +100,57 @@ test("private input is refused on unknown-privacy routes", async () => {
 test("candidates parse from env only", () => {
   assert.deepEqual(microWorkerCandidates({}), []);
   assert.deepEqual(microWorkerCandidates({ PI_MICRO_WORKER_ROUTES: "a/b, c/d, junk" }), ["a/b", "c/d"]);
+});
+
+test('micro-worker enforces each output schema and isolates cached structured results', async () => {
+  clearMicroWorkerCache();
+  const examples = {
+    'error-hypothesis': { hypotheses: [{ cause: 'missing key', check: 'inspect configuration', confidence: .5 }] },
+    'finding-consolidation': { groups: [{ kept: 'one', merged: ['two'], reason: 'same finding' }], singletons: [] },
+    'handoff-brief': { goal: 'fix cache', done: [], open: ['test'], next: 'test cache' },
+    'structured-extraction': { fields: { file: 'cache.ts', missing: null } },
+    'inspection-targets': { targets: [{ target: 'cache.ts', why: 'cache owner' }] },
+    'patch-compare': { verdict: 'changed', decisive: 'cache key', notes: 'preserves identity' },
+    'source-glance': { summary: 'Caches results', flags: ['mutable reference'] },
+  };
+  try {
+    for (const [kind, output] of Object.entries(examples)) {
+      const opts = { facts: facts(), complete: async () => ({ text: JSON.stringify(output), costUsd: .001, ms: 1 }) };
+      const first = await runMicroWorker(kind, 'inspect this bounded source example', opts);
+      assert.equal(first.ok, true, kind);
+      Object.assign(first.output, { ...Object.fromEntries(Object.keys(output).map(key => [key, null])) });
+      const reused = await runMicroWorker(kind, 'inspect this bounded source example', opts);
+      assert.deepEqual(reused.output, output); assert.equal(reused.costUsd, 0);
+      Object.assign(reused.output, { ...Object.fromEntries(Object.keys(output).map(key => [key, null])) });
+      assert.deepEqual((await runMicroWorker(kind, 'inspect this bounded source example', opts)).output, output);
+      assert.equal((await runMicroWorker(kind, 'a different bounded source example', { ...opts, complete: async () => ({ text: '{}', ms: 1 }) })).skipped, 'malformed');
+    }
+    for (const kind of ['constructor', 'toString', '__proto__']) assert.equal((await runMicroWorker(kind, 'source example text', { facts: facts() })).skipped, 'unknown-kind');
+    const invalid = await runMicroWorker('error-hypothesis', 'invalid confidence example', {
+      facts: facts(), complete: async () => ({ text: '{"hypotheses":[{"cause":"x","check":"y","confidence":2}]}', ms: 1 }),
+    });
+    assert.equal(invalid.skipped, 'malformed');
+  } finally { clearMicroWorkerCache(); }
+});
+
+test('micro-worker deadlines and cancellation reject late completions without caching them', async () => {
+  clearMicroWorkerCache();
+  const valid = { text: '{"summary":"cache owner","flags":[]}', ms: 1 };
+  try {
+    for (const cancelled of [false, true]) {
+      const controller = new AbortController();
+      let release, offeredSignal;
+      const pending = runMicroWorker('source-glance', `bounded source example ${cancelled}`, {
+        facts: facts(), signal: controller.signal, timeoutMs: 15,
+        complete: async ({ signal }) => { offeredSignal = signal; return new Promise(resolve => { release = resolve; }); },
+      });
+      if (cancelled) controller.abort();
+      const result = await pending;
+      assert.equal(result.skipped, cancelled ? 'aborted' : 'timeout');
+      assert.equal(offeredSignal.aborted, true);
+      release(valid); await new Promise(resolve => setImmediate(resolve));
+      const retry = await runMicroWorker('source-glance', `bounded source example ${cancelled}`, { facts: facts(), complete: async () => valid });
+      assert.equal(retry.ok, true); assert.equal(retry.cached, false);
+    }
+  } finally { clearMicroWorkerCache(); }
 });

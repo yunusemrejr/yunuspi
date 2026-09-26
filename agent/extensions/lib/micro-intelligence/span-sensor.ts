@@ -262,7 +262,7 @@ export async function scoreSpanTrace(
       present: Object.values(cached.scores).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length,
       shadow,
     });
-    return { ok: true, ...base, scores: cached.scores, model: cached.model, inputTokens: cached.inputTokens, costUsd: cached.costUsd, ms: 0, cached: true };
+    return { ok: true, ...base, scores: structuredClone(cached.scores), model: cached.model, inputTokens: 0, costUsd: 0, ms: 0, cached: true };
   }
   if (!scorer) {
     metrics.skip("span", "no-scorer");
@@ -270,9 +270,11 @@ export async function scoreSpanTrace(
     return { ok: false, ...base, ms: 0, cached: false, skipped: "no-scorer" };
   }
   const finish = beginHarnessActivity("span");
+  let succeeded = false;
   try {
     const prompt = spanPrompt({ events });
     const answer = await scorer(prompt, { signal: opts.signal, timeoutMs: opts.timeoutMs ?? SPAN_REQUEST_TIMEOUT_MS });
+    opts.signal?.throwIfAborted();
     const ms = Math.max(0, now() - started);
     let parsed: Record<string, SpanSignalScores> | undefined;
     try {
@@ -287,7 +289,7 @@ export async function scoreSpanTrace(
     }
     metrics.run("span", ms, prompt.length);
     if (spanCache.size >= SPAN_CACHE_MAX) spanCache.delete(spanCache.keys().next().value!);
-    spanCache.set(fingerprint, { scores: parsed, model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, at: now() });
+    spanCache.set(fingerprint, { scores: structuredClone(parsed), model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, at: now() });
     const presentCount = Object.values(parsed).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length;
     ledger(opts.pi, { model: answer.model, inputTokens: answer.inputTokens ?? 0, costUsd: answer.costUsd ?? 0, ms, cached: false, signals: Object.keys(parsed).length, present: presentCount, shadow });
     const present = Object.entries(parsed).filter(([, scores]) => scores.present >= SPAN_ADVISE_THRESHOLD).map(([id]) => id);
@@ -300,17 +302,18 @@ export async function scoreSpanTrace(
     });
     if (!shadow && present.length) metrics.accept("span");
     else metrics.skip("span", shadow ? "shadow" : "absent");
+    succeeded = true;
     return { ok: true, ...base, scores: parsed, model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, ms, cached: false };
   } catch (error) {
     const ms = Math.max(0, now() - started);
     const message = error instanceof Error ? error.message : String(error);
-    const reason = /invalid model|model not found|404/i.test(message) ? "route-unavailable"
+    const reason = opts.signal?.aborted ? 'aborted' : /invalid model|model not found|404/i.test(message) ? "route-unavailable"
       : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
     metrics.skip("span", reason);
     noteHealth("ml.span.skipped", { count: 1, reason, durationMs: ms });
     return { ok: false, ...base, ms, cached: false, skipped: reason };
   } finally {
-    try { finish("ok"); } catch { /* display only */ }
+    try { finish(succeeded ? 'ok' : opts.signal?.aborted ? 'cancelled' : 'error'); } catch { /* display only */ }
   }
 }
 
@@ -392,6 +395,7 @@ export function openRouterSpanScorer(opts: OpenRouterSpanScorerOptions = {}): Sp
         choices?: Array<{ message?: { content?: string } }>;
         usage?: { prompt_tokens?: number; cost?: number };
       };
+      controller.signal.throwIfAborted();
       const text = body.choices?.[0]?.message?.content;
       if (typeof text !== "string" || !text.trim()) throw Error("span: malformed answers");
       return {

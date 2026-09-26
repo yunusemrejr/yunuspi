@@ -90,6 +90,22 @@ const KIND_PROMPTS: Record<MicroWorkerKind, { instruction: string; schema: strin
   },
 };
 
+function validOutput(kind: MicroWorkerKind, output: Record<string, unknown>): boolean {
+  const text = (value: unknown) => typeof value === 'string' && value.length <= 8000;
+  const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  const list = (value: unknown, valid: (entry: any) => boolean, max = 32) => Array.isArray(value) && value.length <= max && value.every(valid);
+  switch (kind) {
+    case 'error-hypothesis': return list(output.hypotheses, entry => object(entry) && text(entry.cause) && text(entry.check)
+      && typeof entry.confidence === 'number' && Number.isFinite(entry.confidence) && entry.confidence >= 0 && entry.confidence <= 1, 3);
+    case 'finding-consolidation': return list(output.groups, entry => object(entry) && text(entry.kept) && list(entry.merged, text) && text(entry.reason)) && list(output.singletons, text);
+    case 'handoff-brief': return text(output.goal) && list(output.done, text) && list(output.open, text) && text(output.next);
+    case 'structured-extraction': return object(output.fields) && Object.keys(output.fields).length <= 64 && Object.values(output.fields).every(value => value === null || text(value));
+    case 'inspection-targets': return list(output.targets, entry => object(entry) && text(entry.target) && text(entry.why), 5);
+    case 'patch-compare': return ['same', 'changed', 'unrelated'].includes(String(output.verdict)) && text(output.decisive) && text(output.notes);
+    case 'source-glance': return text(output.summary) && list(output.flags, text);
+  }
+}
+
 export function microWorkerEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
     && !["off", "0"].includes((env.PI_MICRO_WORKER ?? "on").toLowerCase());
@@ -125,10 +141,14 @@ export function microWorkerEligibility(
   if (facts.privateInput && routePrivacyTier(facts.provider, facts.model, env).tier === "unknown") {
     return { eligible: false, reason: "private-input-unsafe-route" };
   }
-  if (facts.pricePerM !== undefined && facts.pricePerM > MICRO_WORKER_PRICE_CAP_PER_M_USD) {
+  if (facts.pricePerM === undefined) return { eligible: false, reason: 'unknown-price' };
+  if (!Number.isFinite(facts.pricePerM) || facts.pricePerM < 0) return { eligible: false, reason: 'invalid-price' };
+  if (facts.pricePerM > MICRO_WORKER_PRICE_CAP_PER_M_USD) {
     return { eligible: false, reason: "over-price-cap" };
   }
-  if (facts.quality !== undefined && facts.quality < 0.5) return { eligible: false, reason: "quality-floor" };
+  if (facts.quality === undefined) return { eligible: false, reason: 'unknown-quality' };
+  if (!Number.isFinite(facts.quality) || facts.quality < 0 || facts.quality > 1) return { eligible: false, reason: 'invalid-quality' };
+  if (facts.quality < 0.5) return { eligible: false, reason: "quality-floor" };
   return { eligible: true, reason: "eligible" };
 }
 
@@ -182,7 +202,7 @@ export async function runMicroWorker(
     metrics.skip("microworker", "disabled");
     return { ok: false, ms: 0, cached: false, skipped: "disabled" };
   }
-  if (!KIND_PROMPTS[kind]) {
+  if (!Object.hasOwn(KIND_PROMPTS, kind)) {
     metrics.skip("microworker", "unknown-kind");
     return { ok: false, ms: 0, cached: false, skipped: "unknown-kind" };
   }
@@ -214,18 +234,26 @@ export async function runMicroWorker(
     metrics.run("microworker", 0, bounded.length);
     metrics.cacheHit("microworker");
     noteHealth("ml.microworker.used", { count: 1, cached: true, op: kind });
-    return { ok: true, output: cached.output, route: cached.route, costUsd: cached.costUsd, ms: 0, cached: true };
+    return { ok: true, output: structuredClone(cached.output), route: cached.route, costUsd: 0, ms: 0, cached: true };
   }
   const finish = beginHarnessActivity("microworker");
+  const controller = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.min(MICRO_WORKER_TIMEOUT_MS, opts.timeoutMs!)) : MICRO_WORKER_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(new DOMException('Micro-worker timeout', 'TimeoutError')), timeoutMs);
+  let onAbort!: () => void, succeeded = false;
+  const interrupted = new Promise<never>((_, reject) => { onAbort = () => reject(signal.reason); });
+  signal.addEventListener('abort', onAbort, { once: true });
   try {
     const spec = KIND_PROMPTS[kind];
-    const answer = await opts.complete({
+    const answer = await Promise.race([opts.complete({
       route,
       system: `${spec.instruction} Reply with JSON only matching ${spec.schema}. No tools, no delegation, no file writes.`,
       user: bounded,
       maxTokens: MICRO_WORKER_MAX_OUTPUT_TOKENS,
-      signal: opts.signal,
-    });
+      signal,
+    }), interrupted]);
+    signal.throwIfAborted();
     const ms = Math.max(0, now() - started);
     if ((answer.costUsd ?? 0) > MICRO_WORKER_COST_CAP_USD) {
       metrics.skip("microworker", "over-cost-cap");
@@ -234,9 +262,11 @@ export async function runMicroWorker(
     }
     let output: Record<string, unknown>;
     try {
+      if (typeof answer.text !== 'string' || answer.text.length > 16_384) throw Error('oversized output');
       const parsed: unknown = JSON.parse(answer.text);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw Error("not an object");
       output = parsed as Record<string, unknown>;
+      if (!validOutput(kind, output)) throw Error('invalid output shape');
     } catch {
       metrics.skip("microworker", "malformed");
       noteHealth("ml.microworker.skipped", { count: 1, reason: "malformed", op: kind, durationMs: ms });
@@ -245,18 +275,20 @@ export async function runMicroWorker(
     metrics.run("microworker", ms, bounded.length);
     metrics.accept("microworker");
     if (workerCache.size >= MICRO_WORKER_CACHE_MAX) workerCache.delete(workerCache.keys().next().value!);
-    workerCache.set(key, { output, route, costUsd: answer.costUsd, at: now() });
+    workerCache.set(key, { output: structuredClone(output), route, costUsd: answer.costUsd, at: now() });
     noteHealth("ml.microworker.used", { count: 1, cached: false, op: kind, durationMs: ms, route });
+    succeeded = true;
     return { ok: true, output, route, costUsd: answer.costUsd, ms, cached: false };
   } catch (error) {
     const ms = Math.max(0, now() - started);
     const message = error instanceof Error ? error.message : String(error);
-    const reason = /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
+    const reason = opts.signal?.aborted ? 'aborted' : controller.signal.aborted || /timeout/i.test(message) ? "timeout" : "unavailable";
     metrics.skip("microworker", reason);
     noteHealth("ml.microworker.skipped", { count: 1, reason, op: kind, durationMs: ms });
     return { ok: false, ms, cached: false, skipped: reason };
   } finally {
-    try { finish("ok"); } catch { /* display only */ }
+    clearTimeout(timer); signal.removeEventListener('abort', onAbort);
+    try { finish(succeeded ? 'ok' : opts.signal?.aborted ? 'cancelled' : 'error'); } catch { /* display only */ }
   }
 }
 

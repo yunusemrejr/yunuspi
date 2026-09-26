@@ -516,3 +516,28 @@ test('local discovery uncertainty, invalid choices, exact names and cancellation
     assert.equal(calls, 0);
   }
 });
+
+test('cancelled retrieval starts no stages and leaves pending shared inference promptly', async () => {
+  for (const stage of ['before', 'needle', 'local', 'jev']) {
+    const controller = new AbortController(), calls = [];
+    let release, started;
+    const begun = new Promise(resolve => { started = resolve; });
+    const wait = () => { started(); return new Promise(resolve => { release = resolve; }); };
+    if (stage === 'before') controller.abort();
+    const pending = retrievalMod.multiStageRetrieve({
+      kind: 'tool', site: 'rank', query: 'capture a screenshot of the site', lexical: lexicalTools, signal: controller.signal,
+      needle: async () => { calls.push('needle'); return stage === 'needle' ? wait() : { ok: false, reason: 'unavailable' }; },
+      local: async () => { calls.push('local'); return stage === 'local' ? wait() : { ok: false, reason: 'unavailable' }; },
+      jev: async (_site, _state, _questions, options) => {
+        calls.push('jev'); assert.equal(options.signal, controller.signal); return wait();
+      },
+    });
+    if (stage !== 'before') { await begun; controller.abort(); }
+    let deadline;
+    try {
+      const result = await Promise.race([pending, new Promise((_, reject) => { deadline = setTimeout(() => reject(Error('retrieval waited for cancelled inference')), 500); })]);
+      assert.equal(result.applied, 'lexical'); assert.deepEqual(result.ordered, lexicalTools);
+      assert.deepEqual(calls, ['needle', 'local', 'jev'].slice(0, stage === 'before' ? 0 : ['needle', 'local', 'jev'].indexOf(stage) + 1));
+    } finally { clearTimeout(deadline); release?.({ ok: false, reason: 'unavailable', skipped: 'aborted' }); }
+  }
+});

@@ -476,7 +476,13 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
   if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
   let identity: string;
-  try { identity=cacheKey('inflight',state,questions); } catch { return {ok:false,skipped:'invalid-input'}; }
+  try {
+    // The transport, validation and cache must refer to one immutable request.
+    // Callers may update their task/candidate objects while inference awaits.
+    const serialized = JSON.stringify([state, questions]);
+    [state, questions] = JSON.parse(serialized);
+    identity = createHash('sha256').update(serialized).digest('hex');
+  } catch { return {ok:false,skipped:'invalid-input'}; }
   let entry=inflight.get(identity);
   if (!entry) {
     if(inflight.size>=64)return {ok:false,skipped:'busy'};
