@@ -156,6 +156,24 @@ test('local service retains prefix reuse inside its process memory budget',()=>{
 const choiceCandidates = [{ id: 'read', text: 'Read file contents' }, { id: 'browser', text: 'Browse websites and take screenshots' }, { id: 'sql', text: 'Run database queries' }];
 const choiceResponse = (pairs) => new Response(JSON.stringify({ tokens_evaluated: 100, completion_probabilities: [{ top_probs: pairs.map(([token, prob]) => ({ token, prob })) }] }));
 
+test('choices use the configured shared deadline instead of a shorter hidden timeout', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const prev=process.env.PI_LOCAL_LM;delete process.env.PI_LOCAL_LM;
+  let entered,resolveResponse,requestSignal;
+  const started=new Promise(resolve=>{entered=resolve;});
+  const lm=L.createLocalLm({runtime:{...runtime,timeoutMs:5000},fetch:async(_url,init)=>{
+    if(JSON.parse(init.body).n_predict===0)return new Response('{}');
+    requestSignal=init.signal;entered();return new Promise(resolve=>{resolveResponse=resolve;});
+  }});
+  try{
+    const result=lm.choose('Capture a screenshot of the website',choiceCandidates,'configured-deadline');
+    await started;t.mock.timers.tick(2600);
+    assert.equal(requestSignal.aborted,false,'the configured five-second budget still has time');
+    resolveResponse(choiceResponse([[' B',.95],[' A',.03]]));
+    assert.equal((await result).id,'browser');
+  }finally{if(prev===undefined)delete process.env.PI_LOCAL_LM;else process.env.PI_LOCAL_LM=prev;t.mock.timers.reset();}
+});
+
 test('local choice accepts only confident exact option tokens and memoizes bounded decisions', async () => {
   const prev = process.env.PI_LOCAL_LM; delete process.env.PI_LOCAL_LM;
   try {

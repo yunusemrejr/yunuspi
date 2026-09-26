@@ -222,7 +222,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
-	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; timeoutMs?: number; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
+	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
 			const { signal, prefix } = options;
 			if (signal?.aborted) return { ok: false, reason: "cancelled" };
 			if (!prompt || prompt.length > 12_000) return { ok: false, reason: "input-budget" };
@@ -233,7 +233,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			const controller = new AbortController();
 			const abort = () => controller.abort();
 			signal?.addEventListener("abort", abort, { once: true });
-			const timer = setTimeout(() => controller.abort(), Math.min(runtime.timeoutMs, options.timeoutMs ?? runtime.timeoutMs));
+			const timer = setTimeout(() => controller.abort(), runtime.timeoutMs);
 			let release: (() => void) | undefined;
 			try {
 				if (signal?.aborted) controller.abort();
@@ -288,7 +288,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				stats.cached++; note({ decision: "cached", purpose, count: 1 });
 				return hit.result.ok ? { ...hit.result, cached: true, ms: 0 } : { ...hit.result };
 			}
-			const result = await infer(prompt, purpose, tokenProbabilities, { ...options, prefix: LOCAL_CHOICE_EXAMPLES, nProbs: 20, timeoutMs: 2500 });
+			const result = await infer(prompt, purpose, tokenProbabilities, { ...options, prefix: LOCAL_CHOICE_EXAMPLES, nProbs: 20 });
 			if (!result.ok) return result;
 			const ranked = [...result.value].sort((a, b) => b[1] - a[1]);
 			const [letter, p] = ranked[0] ?? ["N", 0];
