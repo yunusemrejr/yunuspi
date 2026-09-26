@@ -75,9 +75,42 @@ function note(data: Record<string, unknown>) {
 }
 
 type Post = (body: Record<string, unknown>) => Promise<any>;
+type LocalLmQueue = { active: boolean; waiting: Array<() => void> };
+// Injected transports have independent lifetimes; production clients share
+// the native fetch identity and pinned loopback endpoint.
+const localLmQueues = new WeakMap<typeof fetch, Map<string, LocalLmQueue>>();
+export class LocalLmBusyError extends Error {}
+
+/** One FIFO owns judges, choices and line selection, including prefix warmup.
+ * The caller releases only after its actual transport has settled. */
+export function acquireLocalLmSlot(request: typeof fetch, endpoint: string, signal: AbortSignal, queueLimit = 8): Promise<() => void> {
+	let endpoints = localLmQueues.get(request);
+	if (!endpoints) { endpoints = new Map(); localLmQueues.set(request, endpoints); }
+	let state = endpoints.get(endpoint);
+	if (!state) { state = { active: false, waiting: [] }; endpoints.set(endpoint, state); }
+	const queue = state;
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) { reject(signal.reason); return; }
+		if (queue.active && queue.waiting.length >= queueLimit) { reject(new LocalLmBusyError('Local model queue is full')); return; }
+		const cancel = () => { const index = queue.waiting.indexOf(enter); if (index >= 0) queue.waiting.splice(index, 1); reject(signal.reason); };
+		const enter = () => {
+			signal.removeEventListener('abort', cancel);
+			queue.active = true;
+			let released = false;
+			resolve(() => {
+				if (released) return;
+				released = true; queue.active = false; queue.waiting.shift()?.();
+			});
+		};
+		if (!queue.active) enter();
+		else { queue.waiting.push(enter); signal.addEventListener('abort', cancel, { once: true }); }
+	});
+}
+
 /** Bounded JSON POST to the local server, shared by judgements and line selection. */
-export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, signal: AbortSignal): Post {
+export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, signal: AbortSignal, maxBytes = 65_536): Post {
 	return async (body) => {
+		signal.throwIfAborted();
 		const response = await request(runtime.endpoint, { method: "POST", redirect: "error", signal,
 			headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.apiKey}` },
 			body: JSON.stringify({ temperature: 0, cache_prompt: true, ...body }) });
@@ -91,7 +124,7 @@ export function localLmPost(runtime: LocalLmRuntime, request: typeof fetch, sign
 				const part = await reader.read();
 				if (part.done) { complete = true; break; }
 				bytes += part.value.byteLength;
-				if (bytes > 65_536) throw new Error("oversized response");
+				if (bytes > maxBytes) throw new Error("oversized response");
 				chunks.push(part.value);
 			}
 			signal.throwIfAborted();
@@ -179,8 +212,7 @@ export function localChoicePrompt(task: string, candidates: readonly { id: strin
 export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeof fetch; now?: () => number; queueLimit?: number } = {}) {
 	let runtime = options.runtime, loaded = Boolean(options.runtime), loading: Promise<void> | undefined, loadedAt = 0;
 	const request = options.fetch ?? fetch, now = options.now ?? Date.now, queueLimit = options.queueLimit ?? 8;
-	let active = false, failures = 0, pausedUntil = 0;
-	const queue: Array<() => void> = [];
+	let failures = 0, pausedUntil = 0;
 	const stats = { answered: 0, failed: 0, busy: 0, cached: 0, totalMs: 0 };
 	const choices = new Map<string, { at: number; result: LocalChoice }>();
 	const ensure = async () => {
@@ -190,14 +222,6 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
-	const slot = (signal: AbortSignal) => new Promise<boolean>((resolve) => {
-		if (signal.aborted) { resolve(false); return; }
-		if (!active) { active = true; resolve(true); return; }
-		const enter = () => { signal.removeEventListener("abort", cancel); active = true; resolve(true); };
-		const cancel = () => { const i = queue.indexOf(enter); if (i >= 0) queue.splice(i, 1); resolve(false); };
-		queue.push(enter); signal.addEventListener("abort", cancel, { once: true });
-	});
-	const release = () => { active = false; queue.shift()?.(); };
 	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; timeoutMs?: number; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
 			const { signal, prefix } = options;
 			if (signal?.aborted) return { ok: false, reason: "cancelled" };
@@ -205,17 +229,15 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 			await ensure();
 			if (!runtime) return { ok: false, reason: "unavailable" };
 			if (now() < pausedUntil) return { ok: false, reason: "paused" };
-			if (active && queue.length >= queueLimit) { stats.busy++; return { ok: false, reason: "busy" }; }
 			const started = now();
 			const controller = new AbortController();
 			const abort = () => controller.abort();
 			signal?.addEventListener("abort", abort, { once: true });
 			const timer = setTimeout(() => controller.abort(), Math.min(runtime.timeoutMs, options.timeoutMs ?? runtime.timeoutMs));
-			let acquired = false;
+			let release: (() => void) | undefined;
 			try {
 				if (signal?.aborted) controller.abort();
-				acquired = await slot(controller.signal);
-				if (!acquired) return { ok: false, reason: signal?.aborted ? "cancelled" : "timeout" };
+				release = await acquireLocalLmSlot(request, runtime.endpoint, controller.signal, queueLimit);
 				// Requests admitted before an outage must respect the newly opened breaker.
 				if (now() < pausedUntil) return { ok: false, reason: "paused" };
 				const post = localLmPost(runtime, request, controller.signal);
@@ -230,14 +252,16 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				failures = 0; stats.answered++; stats.totalMs += ms;
 				note({ decision: "answered", purpose, durationMs: ms, count: 1 });
 				return { ok: true, value, ms };
-			} catch {
+			} catch (error) {
+				if (error instanceof LocalLmBusyError) { stats.busy++; return { ok: false, reason: "busy" }; }
+				if (!release && controller.signal.aborted) return { ok: false, reason: signal?.aborted ? "cancelled" : "timeout" };
 				const cancelled = signal?.aborted === true, timedOut = !cancelled && controller.signal.aborted;
 				if (!cancelled && ++failures >= 3) { pausedUntil = now() + 60_000; failures = 0; }
 				stats.failed++;
 				note({ decision: cancelled ? "cancelled" : timedOut ? "timeout" : "failed", purpose, durationMs: now() - started, count: 1 });
 				return { ok: false, reason: cancelled ? "cancelled" : timedOut ? "timeout" : "failed" };
 			} finally {
-				clearTimeout(timer); signal?.removeEventListener("abort", abort); if (acquired) release();
+				clearTimeout(timer); signal?.removeEventListener("abort", abort); release?.();
 			}
 	}
 	return {

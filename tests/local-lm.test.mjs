@@ -250,3 +250,63 @@ test('queued local requests cancel promptly and pending work respects newly open
   const results = await Promise.all(Array.from({ length: 7 }, () => failing.judge('queued before outage', 'test')));
   assert.equal(failures, 3); assert.equal(results.filter(r => r.reason === 'paused').length, 4);
 });
+
+const selectionFixture = () => ['listing header', ...Array.from({ length: 80 }, (_, i) =>
+  `entry-${String(i).padStart(3, '0')}.log bytes=${10000 + i * 137}`.padEnd(42, '.')), 'listing complete'].join('\n');
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('Smol prefix warmup and selection share the local judgement FIFO', async () => {
+  const { createSmolPreprocessor } = await load('extensions/lib/smol-preprocessor.ts');
+  const calls = []; let release, active = 0, peak = 0;
+  const request = async (_url, init) => {
+    const body = JSON.parse(init.body); calls.push(body.n_predict); active++; peak = Math.max(peak, active);
+    if (body.n_predict === 1) { await new Promise(resolve => { release = resolve; }); active--; return probs(.9, .1); }
+    active--; return new Response(JSON.stringify({ content: '{"status":"UNKNOWN","lineIds":[]}' }));
+  };
+  const lm = L.createLocalLm({ runtime, fetch: request });
+  const judge = lm.judge('active judgement', 'unit');
+  while (!release) await settle();
+  const selector = createSmolPreprocessor({ runtime, fetch: request, acquireLease: async () => true });
+  const raw = selectionFixture(); selector.offer('selection', raw, 1);
+  await settle();
+  assert.deepEqual(calls, [1], 'Smol cannot prefill over an active judgement');
+  release(); assert.equal((await judge).ok, true);
+  await selector.takeAsync('selection', raw, 1000);
+  assert.ok(calls.includes(64), 'line selection still executes after the judge');
+  assert.equal(peak, 1);
+});
+
+test('Smol cancellation keeps its transport slot until ignored abort settles', async () => {
+  const { createSmolPreprocessor } = await load('extensions/lib/smol-preprocessor.ts');
+  const calls = []; let finishSelection;
+  const request = async (_url, init) => {
+    const body = JSON.parse(init.body); calls.push(body.n_predict);
+    if (body.n_predict === 64) await new Promise(resolve => { finishSelection = resolve; });
+    return body.n_predict === 1 ? probs(.9, .1) : new Response('{"content":"{\\"status\\":\\"UNKNOWN\\",\\"lineIds\\":[]}"}');
+  };
+  const selector = createSmolPreprocessor({ runtime, fetch: request, acquireLease: async () => true });
+  selector.offer('selection', selectionFixture(), 1);
+  while (!finishSelection) await settle();
+  selector.reset(); await settle();
+  const lm = L.createLocalLm({ runtime, fetch: request });
+  const cancelled = new AbortController(), waiting = lm.judge('cancelled queued judge', 'unit', { signal: cancelled.signal });
+  await settle(); cancelled.abort();
+  assert.equal((await waiting).reason, 'cancelled');
+  const next = lm.judge('next judgement', 'unit'); await settle();
+  assert.ok(!calls.includes(1), 'abort cannot permit overlap while the old HTTP request remains active');
+  finishSelection(); assert.equal((await next).ok, true);
+  assert.equal(calls.filter(value => value === 1).length, 1, 'cancelled queue entries never execute');
+});
+
+test('resetting a Smol selection while queued launches no local request', async () => {
+  const { createSmolPreprocessor } = await load('extensions/lib/smol-preprocessor.ts');
+  let release, calls = 0;
+  const request = async () => { calls++; await new Promise(resolve => { release = resolve; }); return probs(.9, .1); };
+  const lm = L.createLocalLm({ runtime, fetch: request }), judge = lm.judge('active', 'unit');
+  while (!release) await settle();
+  const selector = createSmolPreprocessor({ runtime, fetch: request, acquireLease: async () => true });
+  selector.offer('queued', selectionFixture(), 1); await settle(); selector.reset(); await settle();
+  assert.equal(selector.inspect().requests, 0);
+  release(); assert.equal((await judge).ok, true); await settle();
+  assert.equal(calls, 1);
+});

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { hiddenText, relevanceScores, taskTerms } from './local-intelligence.mjs';
 import { beginHarnessActivity, type FinishActivity } from './harness-activity.ts';
 import { microMetrics } from './micro-intelligence/metrics.ts';
-import { loadLocalLmRuntime, localLmPost, localLmRuntimePath, noteLocalLmPrefixReuse, validLocalLmRuntime, warmLocalLmPrefix, type LocalLmRuntime } from './local-lm.ts';
+import { acquireLocalLmSlot, LocalLmBusyError, loadLocalLmRuntime, localLmPost, localLmRuntimePath, noteLocalLmPrefixReuse, validLocalLmRuntime, warmLocalLmPrefix, type LocalLmRuntime } from './local-lm.ts';
 
 /** Best-effort capability telemetry. Failures here never affect selection. */
 function noteHealth(kind: string, data: Record<string, unknown>): void {
@@ -270,6 +270,7 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
       let expired = false;
       let finishActivity: FinishActivity | undefined;
       let outcome = "unavailable";
+      let release: (() => void) | undefined, inference: Promise<any> | undefined;
       const deadline = new Promise<never>((_,reject)=>abort.signal.addEventListener('abort',()=>reject(new Error('local selection cancelled')),{once:true}));
       // Attach a rejection observer while lease acquisition is pending.
       void deadline.catch(()=>{});
@@ -280,32 +281,20 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
           const leased = await Promise.race([acquireLease(),deadline]);
           if (!leased) { noteHealth('ml.smol.offer', {decision:'no-lease'}); return; }
           if (abort.signal.aborted || epoch !== generation) return;
+          release = await acquireLocalLmSlot(request, config.endpoint, abort.signal);
+          if (abort.signal.aborted || epoch !== generation) return;
           stats.requests++;
           requested = true;
           finishActivity = beginHarnessActivity('smol');
-          await Promise.race([warmLocalLmPrefix(localLmPost(config, request, abort.signal), SMOL_SYSTEM), deadline]);
-          const response = await Promise.race([deadline, request(config.endpoint, {
-            method: 'POST', redirect:'error', signal: abort.signal,
-            headers: {'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}`},
-            body: JSON.stringify({prompt: modelInput.prompt, json_schema: modelInput.schema, temperature: 0, top_k: 1, top_p: 1,
-              min_p: 0, seed: 0, n_predict: 64, stream: false, cache_prompt: true}),
-          })]);
-          if (!response.ok || !response.body) { outcome = `http-${response.status}`; return; }
+          const post = localLmPost(config, request, abort.signal, 16384);
+          inference = (async () => {
+            await warmLocalLmPrefix(post, SMOL_SYSTEM);
+            return post({ prompt: modelInput.prompt, json_schema: modelInput.schema, temperature: 0, top_k: 1, top_p: 1,
+              min_p: 0, seed: 0, n_predict: 64, stream: false, cache_prompt: true });
+          })();
           outcome = 'malformed-response';
-          const reader = response.body.getReader();
-          let bytes = 0;
-          const chunks: Uint8Array[] = [];
-          try {
-            while (true) {
-              const part = await Promise.race([reader.read(),deadline]);
-              if (part.done) break;
-              bytes += part.value.byteLength;
-              if (bytes > 16384) { await reader.cancel(); return; }
-              chunks.push(part.value);
-            }
-          } finally { reader.releaseLock(); }
+          const envelope = await Promise.race([inference, deadline]);
           if (abort.signal.aborted || epoch !== generation) return;
-          const envelope = JSON.parse(Buffer.concat(chunks).toString('utf8'));
           noteLocalLmPrefixReuse(SMOL_SYSTEM, envelope);
           if (typeof envelope.content !== 'string' || envelope.content.length > 2048 || envelope.truncated === true) return;
           // Model-selected IDs are only a proposal. Validate their domain first,
@@ -332,8 +321,16 @@ export function createSmolPreprocessor(options: { runtime?: SmolRuntime; fetch?:
           stats.accepted++; accepted = true; outcome = 'selected';
           microMetrics().accept('smol',raw.length-projected.length,true);
           if (slot.state === 'raw') microMetrics().late('smol');
-        } catch { /* Unsupported/malformed/cancelled results preserve the exact original. */ }
+        } catch (error) {
+          if (error instanceof LocalLmBusyError) { outcome = 'busy'; noteHealth('ml.smol.offer', { decision: 'busy', reason: 'latency-budget-exceeded' }); }
+          else if (error instanceof Error && /^http \d+$/.test(error.message)) outcome = error.message.replace(' ', '-');
+          // Unsupported/malformed/cancelled results preserve the exact original.
+        }
         finally {
+          // A timed-out or reset selector may stop waiting while a transport
+          // ignores abort. Keep its shared slot until that transport settles.
+          if (inference) void inference.then(() => release?.(), () => release?.());
+          else release?.();
           clearTimeout(timer);
           stats.lastOutcome = expired ? 'timeout' : abort.signal.aborted ? 'cancelled' : outcome;
           finishActivity?.(epoch !== generation || abort.signal.aborted && !expired ? 'cancelled' : accepted ? 'ok' : !expired && (outcome === 'insufficient-savings' || outcome === 'unknown') ? 'skipped' : 'error');
