@@ -1603,6 +1603,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		approved.clear();
 		denied.clear();
 		pending.clear();
+		pendingWaiters.clear();
 	};
 	pi.on("session_start", reset);
 	pi.on("session_shutdown", reset);
@@ -1613,17 +1614,23 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	// session attributed 9.8h to 609 tool_call records with zero blocks: all
 	// user latency, amplified when parallel calls share one dialog). Record
 	// each wait so hook-health diagnostics can separate user latency from
-	// handler cost. One receipt per dialog; shared waiters share it.
-	const confirmAccounted = async (ctx: any, title: string, body: string): Promise<boolean> => {
+	// handler cost. One receipt per dialog; shared waiters share it, and the
+	// receipt counts them so reconciliation subtracts the wait once per
+	// hook record it inflated instead of once per dialog.
+	const confirmAccounted = async (ctx: any, title: string, body: string, waiters?: () => number): Promise<boolean> => {
 		const started = Date.now();
 		let allowed = false;
 		try {
 			allowed = await ctx.ui.confirm(title, body, { signal: ctx.signal }).catch(() => false);
 			return allowed;
 		} finally {
-			try { pi.appendEntry?.("fs-confirm-wait-v1", { title, waitMs: Date.now() - started, allowed }); } catch { /* diagnostics never block safety */ }
+			let shared = 1;
+			try { shared = waiters?.() ?? 1; } catch { shared = 1; }
+			if (!Number.isSafeInteger(shared) || shared < 1) shared = 1;
+			try { pi.appendEntry?.("fs-confirm-wait-v1", { title, waitMs: Date.now() - started, allowed, waiters: shared }); } catch { /* diagnostics never block safety */ }
 		}
 	};
+	const pendingWaiters = new Map<string, number>();
 	pi.on("tool_call", async (event, ctx) => {
 		// Only intercept shell commands: bash, background runs and commands
 		// launched into a desktop_session virtual display.
@@ -1780,11 +1787,13 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 						ctx,
 						"Additional write scope",
 						`Allow write/edit ${kind === "file" ? "of this file" : "under this directory"}: ${scope} for this session? This does not permit shell deletion, system paths or credentials.`,
+						() => pendingWaiters.get(scope) ?? 1,
 					);
 					pending.set(scope, decision);
 				}
+				pendingWaiters.set(scope, (pendingWaiters.get(scope) ?? 0) + 1);
 				const allowed = await decision.catch(() => false);
-				if (pending.get(scope) === decision) pending.delete(scope);
+				if (pending.get(scope) === decision) { pending.delete(scope); pendingWaiters.delete(scope); }
 				if (
 					epoch === generation &&
 					!ctx.signal?.aborted &&

@@ -69,6 +69,14 @@ export const estimateJevTokens = (chars: number): number =>
 export const jevCostUsd = (inputTokens: number): number =>
   (Math.max(0, inputTokens) / 1_000_000) * JEV_PRICE_PER_M_INPUT;
 
+/** Input price evidence ($/M) for a judge slug. Only the documented Jev
+ * family price is presumed; Kev and discovered aliases report unknown cost
+ * unless the decisions response carries provider-reported usage. Assigning
+ * Jev's price to another model manufactures auxiliary-cost accounting. */
+export function resolveJevInputPricePerM(slug: string): number | undefined {
+  return (JEV_PREFERRED_SLUGS as readonly string[]).includes(slug) ? JEV_PRICE_PER_M_INPUT : undefined;
+}
+
 const fmtTokens = (n: number): string =>
   n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
 
@@ -99,7 +107,9 @@ export type JevAskResult =
       usage: {
         model: string;
         inputTokens: number;
-        costUsd: number;
+        /** Undefined when neither the provider nor route price evidence
+         * establishes a cost; consumers must treat it as unknown, not zero. */
+        costUsd: number | undefined;
         ms: number;
         cached: boolean;
       };
@@ -256,7 +266,7 @@ function ledger(
     site: string;
     model: string;
     inputTokens: number;
-    costUsd: number;
+    costUsd: number | undefined;
     ms: number;
     cached: boolean;
   },
@@ -383,6 +393,8 @@ async function recoverProbe(): Promise<void> {
 export type JevAskOpts = {
   pi?: unknown;
   signal?: AbortSignal;
+  /** Top-level state fields the input fitter must never trim. */
+  protect?: readonly string[];
 };
 
 function knownSlugs(): string[] {
@@ -407,18 +419,24 @@ async function discoverForCaller(signal?: AbortSignal): Promise<string[]> {
 /** Oversized evidence is trimmed instead of refused: the longest string
  * fields of an object state lose their middle (with an explicit marker) until
  * the request fits. Health logs showed every Jev refusal was input-budget,
- * which silently dropped the judgement. Question text is never altered. */
-export function fitJevState(state: unknown, questions: Record<string, unknown>): unknown {
+ * which silently dropped the judgement. Question text is never altered.
+ * Fields named in `protect` are never trimmed: decisive constraints cannot
+ * disappear merely because they sit in the middle of a long string. When the
+ * state still exceeds the budget after trimming the unprotected fields, it is
+ * returned oversized and the transport abstains with input-budget instead of
+ * judging semantically damaged evidence. */
+export function fitJevState(state: unknown, questions: Record<string, unknown>, opts: { protect?: readonly string[] } = {}): unknown {
   let size: number;
   try { size = JSON.stringify([state, questions]).length; } catch { return state; }
   if (size <= JEV_MAX_INPUT_CHARS) return state;
   if (typeof state === "string") return trimMiddle(state, Math.max(1000, state.length - (size - JEV_MAX_INPUT_CHARS) - 200));
   if (!state || typeof state !== "object" || Array.isArray(state)) return state;
+  const guarded = new Set(opts.protect ?? []);
   const next: Record<string, unknown> = { ...(state as Record<string, unknown>) };
   for (let guard = 0; guard < 8; guard++) {
     const over = JSON.stringify([next, questions]).length - JEV_MAX_INPUT_CHARS;
     if (over <= 0) break;
-    const [key, value] = Object.entries(next).filter(([, v]) => typeof v === "string").sort((a, b) => (b[1] as string).length - (a[1] as string).length)[0] ?? [];
+    const [key, value] = Object.entries(next).filter(([k, v]) => typeof v === "string" && !guarded.has(k)).sort((a, b) => (b[1] as string).length - (a[1] as string).length)[0] ?? [];
     if (!key || (value as string).length < 2000) break;
     next[key] = trimMiddle(value as string, Math.max(1000, (value as string).length - over - 200));
   }
@@ -437,7 +455,7 @@ export async function askJev(
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
   const started = deps.now();
-  const result = await askJevShared(site, fitJevState(state, questions), questions, opts);
+  const result = await askJevShared(site, fitJevState(state, questions, { protect: opts.protect }), questions, opts);
   // Report every caller's result in its session scope, including admission
   // failures which never reached the transient transport/footer indicator.
   // Only the controlled reason is emitted: state and provider errors stay out.
@@ -605,7 +623,8 @@ async function askJevOnce(
           if (family === "jev") stickySlug = slug;
           lastError = "";
           const tokens = response.inputTokens ?? inputTokens;
-          const costUsd = response.costUsd ?? jevCostUsd(tokens);
+          const routePrice = resolveJevInputPricePerM(slug);
+          const costUsd = response.costUsd ?? (routePrice === undefined ? undefined : (Math.max(0, tokens) / 1_000_000) * routePrice);
           cacheSet(cacheKey(slug, state, questions), { answers: response.answers, inputTokens: tokens, model: slug });
           return { ok: true, answers: response.answers, usage: { model: slug, inputTokens: tokens, costUsd, ms: deps.now() - started, cached: false } };
         } catch (error) {
@@ -677,6 +696,7 @@ export async function selectDistillChunks(
     site: string,
     state: unknown,
     questions: Record<string, unknown>,
+    opts?: { protect?: readonly string[] },
   ) => Promise<JevAskResult>,
   keepAt = 0.6,
   task = "",
@@ -698,6 +718,7 @@ export async function selectDistillChunks(
     "distill",
     { ...(task ? { task: task.slice(0, 600) } : {}), tool, chunks: chunks.map((chunk, index) => `[chunk ${index}]\n${chunk}`).join("\n\n") },
     questions,
+    { protect: ["task", "tool"] },
   );
   if (!judged.ok) {metrics.skip('jev',judged.skipped);return undefined;}
   metrics.run('jev',judged.usage.ms,text.length);

@@ -281,6 +281,42 @@ test("safety confirms record accounted waits for hook-health attribution", async
   assert.ok(waits[0].data.waitMs >= 10, `wait spans the dialog (${waits[0].data.waitMs}ms)`);
 });
 
+test("parallel calls sharing one scope dialog emit one receipt counting every waiter", async () => {
+  const hooks = new Map();
+  const entries = [];
+  safety.default({
+    on: (name, fn) => hooks.set(name, [...(hooks.get(name) ?? []), fn]),
+    appendEntry: (type, data) => entries.push({ type, data }),
+  });
+  let dialogs = 0;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    ui: {
+      notify() {},
+      async confirm() {
+        dialogs++;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return true;
+      },
+    },
+  };
+  const scopeFile = path.join(home, `.yunuspi-shared-scope-${process.pid}.txt`);
+  const call = { toolName: "write", input: { path: scopeFile, content: "shared scope probe\n" } };
+  const handlers = hooks.get("tool_call");
+  const [first, second] = await Promise.all([
+    (async () => { for (const hook of handlers) { const r = await hook(call, ctx); if (r) return r; } })(),
+    (async () => { for (const hook of handlers) { const r = await hook(call, ctx); if (r) return r; } })(),
+  ]);
+  assert.equal(first, undefined, "the shared approval admits the first call");
+  assert.equal(second, undefined, "the shared approval admits the second call");
+  assert.equal(dialogs, 1, "parallel calls share one dialog");
+  const waits = entries.filter((entry) => entry.type === "fs-confirm-wait-v1");
+  assert.equal(waits.length, 1);
+  assert.equal(waits[0].data.title, "Additional write scope");
+  assert.equal(waits[0].data.waiters, 2, "the receipt counts both hook records the dialog held");
+});
+
 // Only schema construction is stubbed; explicit file lists use the actual
 // collector, planner, preview registry, path checks and filesystem apply code.
 const bulk = await load("bulk-edit.ts", [

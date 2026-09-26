@@ -28,7 +28,8 @@ export interface JevCounters extends HelperCounters {
   questions: number;
   tokens: number;
   costUsd: number;
-  bySite: Record<string, { calls: number; questions: number; tokens: number; costUsd: number }>;
+  unknownCost: number;
+  bySite: Record<string, { calls: number; questions: number; tokens: number; costUsd: number; unknownCost: number }>;
 }
 
 export interface LlmCounters {
@@ -49,7 +50,7 @@ const freshHelper = (): HelperCounters => ({
 export interface MicroSnapshot {
   at: number;
   helpers: Record<MicroHelper, HelperCounters>;
-  jev: { questions: number; tokens: number; costUsd: number; bySite: JevCounters["bySite"] };
+  jev: { questions: number; tokens: number; costUsd: number; unknownCost: number; bySite: JevCounters["bySite"] };
   llm: LlmCounters;
   shadow: { needleAgreed: number; needleDisagreed: number };
 }
@@ -73,7 +74,7 @@ export function createMicroMetrics() {
     jev: freshHelper(),
     llm: freshHelper(),
   };
-  const jevExtra = { questions: 0, tokens: 0, costUsd: 0, bySite: {} as JevCounters["bySite"] };
+  const jevExtra = { questions: 0, tokens: 0, costUsd: 0, unknownCost: 0, bySite: {} as JevCounters["bySite"] };
   const llmExtra: LlmCounters = { helperCalls: 0, avoided: 0, estimatedTokensAvoided: 0 };
   const shadow = { needleAgreed: 0, needleDisagreed: 0 };
 
@@ -112,19 +113,22 @@ export function createMicroMetrics() {
     late(helper: MicroHelper): void {
       helpers[helper].lateCompletions++;
     },
-    jevUsage(site: string, questions: number, tokens: number, costUsd: number, cached: boolean): void {
+    jevUsage(site: string, questions: number, tokens: number, costUsd: number | undefined, cached: boolean): void {
       jevExtra.questions += questions;
+      const known = typeof costUsd === "number" && costUsd >= 0;
       if (!cached) {
         jevExtra.tokens += Math.max(0, tokens);
-        if (costUsd >= 0) jevExtra.costUsd += costUsd;
+        if (known) jevExtra.costUsd += costUsd;
+        else jevExtra.unknownCost++;
       }
       const key = String(site).slice(0, 48);
-      const row = jevExtra.bySite[key] ?? { calls: 0, questions: 0, tokens: 0, costUsd: 0 };
+      const row = jevExtra.bySite[key] ?? { calls: 0, questions: 0, tokens: 0, costUsd: 0, unknownCost: 0 };
       row.calls++;
       row.questions += questions;
       if (!cached) {
         row.tokens += Math.max(0, tokens);
-        if (costUsd >= 0) row.costUsd += costUsd;
+        if (known) row.costUsd += costUsd;
+        else row.unknownCost++;
       }
       if (!jevExtra.bySite[key] && Object.keys(jevExtra.bySite).length < 64) jevExtra.bySite[key] = row;
       else if (jevExtra.bySite[key]) jevExtra.bySite[key] = row;
@@ -157,6 +161,7 @@ export function createMicroMetrics() {
           questions: jevExtra.questions,
           tokens: jevExtra.tokens,
           costUsd: jevExtra.costUsd,
+          unknownCost: jevExtra.unknownCost,
           bySite: Object.fromEntries(Object.entries(jevExtra.bySite).map(([key, row]) => [key, { ...row }])),
         },
         llm: { ...llmExtra },
@@ -177,7 +182,7 @@ export function createMicroMetrics() {
       if (jevExtra.questions) {
         lines.push(
           `jev: questions=${jevExtra.questions} tokens=${jevExtra.tokens} ` +
-          `cost=$${jevExtra.costUsd.toFixed(4)} (estimated Jev spend; main-model spend lives in /cost)`,
+          `cost=$${jevExtra.costUsd.toFixed(4)}${jevExtra.unknownCost ? ` +${jevExtra.unknownCost} calls with unknown cost` : ""} (estimates where priced; main-model spend lives in /cost)`,
         );
       }
       if (llmExtra.helperCalls || llmExtra.avoided) {

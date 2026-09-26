@@ -581,15 +581,31 @@ export default function projectIntelligence(pi: any) {
     // slow one deliberates while the agent reads (see SCOPE_LIMITS). The wait
     // is spent once per council (see contextWait): later context builds of a
     // slow council had paid it again, stalling each turn up to 15s for as
-    // long as the council ran. The first mutation still waits (tool_call).
+    // long as the council ran. The first mutation still waits (tool_call),
+    // bounded by SCOPE_LIMITS.mutationWaitMs.
     const waited = scope.contextWait(ctx, SCOPE_LIMITS.contextWaitMs);
     return waited ? waited.then(render) : render();
   });
   pi.on("tool_call", async (event: any, ctx: any) => {
     // The first file mutation of a scoped request waits for the council and is
     // re-decided once with its brief in context, so no edit is chosen blind.
+    // The wait is bounded: a slow council must not freeze the first write for
+    // its whole deadline after reads worked normally. When the bound exhausts
+    // with the council still pending, the edit proceeds and the completed
+    // brief gates the next mutation instead; the receipt keeps that visible.
     if (MUTATING.has(event.toolName) && ownsContext(ctx)) {
-      if (scope.pending(ctx)) await scope.settle(ctx);
+      if (scope.pending(ctx)) {
+        const waitedAt = Date.now();
+        await scope.settle(ctx, SCOPE_LIMITS.mutationWaitMs);
+        if (scope.pending(ctx)) {
+          try {
+            pi.appendEntry?.("scope-mutation-gate-v1", {
+              tool: event.toolName, waitedMs: Date.now() - waitedAt, boundMs: SCOPE_LIMITS.mutationWaitMs,
+              decision: "proceeded-council-pending",
+            });
+          } catch { /* the gate receipt never blocks the mutation it describes */ }
+        }
+      }
       if (scope.unseen(ctx)) {
         // The gate carries the brief itself: a context render can be refused
         // by the injection budget, and an edit must never be blocked on advice

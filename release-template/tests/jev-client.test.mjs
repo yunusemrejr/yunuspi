@@ -341,6 +341,14 @@ test("cost and metrics ledgers treat Jev like any route", async () => {
   const cost = collectSessionCost(entries);
   assert.ok(Math.abs(cost.total - 0.000084) < 1e-12);
   assert.ok(cost.rows.some((row) => row.route === "openrouter/typesafe/jev-1.13"));
+  assert.equal(cost.unknown, false);
+  const unknown = collectSessionCost([
+    ...entries,
+    { type: "custom", customType: "jev-usage-v1", data: { site: "rank", model: "jaredpalmer/kev-4b", inputTokens: 1903, ms: 779, cached: false } },
+  ]);
+  assert.ok(Math.abs(unknown.total - 0.000084) < 1e-12, "unknown spend adds no invented dollars");
+  assert.equal(unknown.unknown, true, "a priced-less judgment marks the total unknown");
+  assert.match(unknown.formatted, /\+[?]/);
   const metrics = collectSessionMetrics(entries);
   assert.equal(metrics.jev.hits, 2);
   assert.equal(metrics.jev.cached, 1);
@@ -496,4 +504,40 @@ test('a slow Jev route leaves deadline budget for Kev; caller cancellation poiso
   assert.equal((await pending).skipped, 'aborted');
   assert.equal(jev.jevHealth().state, 'closed');
   assert.ok(jev.jevHealth().routes.every(route => route.state !== 'cooling'));
+});
+
+test('unpriced routes report unknown cost instead of borrowing Jev’s price', async () => {
+  assert.equal(jev.resolveJevInputPricePerM('~typesafe/jev-latest'), 0.042);
+  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-1.13'), 0.042);
+  assert.equal(jev.resolveJevInputPricePerM(jev.KEV_SLUG), undefined);
+  assert.equal(jev.resolveJevInputPricePerM('typesafe/jev-9.9'), undefined, 'discovered aliases carry no presumed price');
+  const { ledger, pi } = harness(async (url, { body }) => {
+    if (String(url).includes('/api/v1/models')) return emptyModels();
+    return JSON.parse(body).model === jev.KEV_SLUG ? decisionsOk() : httpFail(404, 'model not found');
+  });
+  const q = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  const kev = await jev.askJev('priced', 'kev without provider cost', q, { pi });
+  assert.equal(kev.ok, true);
+  assert.equal(kev.usage.model, jev.KEV_SLUG);
+  assert.equal(kev.usage.costUsd, undefined, 'no provider cost and no route price is unknown, not Jev-priced');
+  assert.equal(ledger[0].data.costUsd, undefined);
+  const priced = harness(async () => jsonOk({ answers: ANSWERS, usage: { input_tokens: 100, cost: 0.5 } }));
+  const reported = await jev.askJev('priced', 'kev with provider cost', q, { pi: priced.pi });
+  assert.equal(reported.usage.costUsd, 0.5, 'provider-reported cost always wins');
+});
+
+test('protected fit fields survive; unprotectable oversize abstains instead of judging damage', async () => {
+  const q = { ping: { type: 'noul', instructions: 'Relevant?' } };
+  const claim = 'C'.repeat(30000), evidence = 'E'.repeat(30000);
+  const fitted = jev.fitJevState({ claim, evidence }, q, { protect: ['claim'] });
+  assert.equal(fitted.claim, claim, 'the decisive claim is never middle-trimmed');
+  assert.match(fitted.evidence, /characters omitted to fit/);
+  assert.ok(JSON.stringify([fitted, q]).length <= 32768);
+  const stuck = jev.fitJevState({ claim }, q, { protect: ['claim'] });
+  assert.equal(stuck.claim, claim);
+  assert.ok(JSON.stringify([stuck, q]).length <= 32768, 'a fitting protected state passes through');
+  harness(async () => decisionsOk());
+  const huge = 'H'.repeat(40000);
+  const skipped = await jev.askJev('bounded', { only: huge }, q, { protect: ['only'] });
+  assert.equal(skipped.skipped, 'input-budget', 'oversize with nothing trimmable abstains');
 });

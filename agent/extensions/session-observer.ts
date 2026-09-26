@@ -2,6 +2,7 @@ import { recallProjectContext } from "./lib/project-memory-context.ts";
 import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { observerModelEvidence } from './lib/observer-model-evidence.ts';
+import { packetRequirements } from './lib/requirement-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
 import { buildObserverPacket, boundedObserverText, carriedReviewerNoteText, createSessionObserver, digestObserverEvents, observerAdviceText, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, OBSERVER_CONTEXT, OBSERVER_MESSAGE, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
@@ -233,7 +234,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       // Cheap guards run before any evidence or packet work; the scheduler
       // never reads the packet of a routeless snapshot, so cold paths build a
       // minimal one and the dispatch path builds exactly once below.
-      const idlePacket = () => buildObserverPacket(request, [], [], []);
+      // Tracked requirements ride every packet: the request row is a
+      // head/tail excerpt and the reviewed criterion can sit in the omitted
+      // middle. Computed once per snapshot; cold paths share it.
+      let briefCache: string | undefined;
+      const brief = () => briefCache ??= packetRequirements(request, ctx.sessionManager.getBranch?.() ?? [], 1200);
+      const idlePacket = () => buildObserverPacket(request, [], [], [], { requirements: brief() || undefined });
       if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet: idlePacket(), reason: 'No active user work', silent: true };
       if (!agentResponded) return { packet: idlePacket(), reason: 'Waiting for the main agent\'s first response', silent: true };
       if (['1', 'true'].includes(process.env.PI_OFFLINE ?? '') || process.env.PI_SESSION_OBSERVER === 'off') return { packet: idlePacket(), reason: 'Observer disabled or offline', silent: true };
@@ -267,7 +273,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
       // Route-selection failures are cold paths: one minimal packet each. The
       // dispatch path below builds the full packet exactly once.
-      const routePacket = () => buildObserverPacket(request, evidence, tools, skills);
+      const routePacket = () => buildObserverPacket(request, evidence, tools, skills, { requirements: brief() || undefined });
       let available = ctx.modelRegistry.getAvailable();
       if (ctx.scopedModels?.length) { const scope = new Set(ctx.scopedModels.map((row: any) => `${row.model?.provider}/${row.model?.id}`)); available = available.filter((model: any) => scope.has(`${model.provider}/${model.id}`)); }
       const selection = resolveSessionObserverPreferenceChain(available.map(toModelInfo));
@@ -336,7 +342,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       catch { routing = 'Current model preference, usage and performance evidence unavailable; do not infer route cost or quality.'; }
       else routing = 'Omitted this review to save tokens: model preferences, usage and child outcomes are unchanged since they were last shown for this task. Ask to read "routing" when model or delegation advice needs them.';
       const [stateRows, restRows] = [evidence.filter(row => row.kind === 'current state'), evidence.filter(row => row.kind !== 'current state')];
-      const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills });
+      const currentPacket = buildObserverPacket(request, [{ id: 'model-routing', kind: 'current model routing', text: routing }, ...stateRows, profileEvidence, ...restRows], tools, skills, { book: section, preferTools, preferSkills, requirements: brief() || undefined });
       const capturedSequence = sequence, capturedRunning = new Set(runningTools.keys()), capturedModel = `${ctx.model?.provider}/${ctx.model?.id}`;
       const reviewedIds = new Set(currentPacket.evidence.map(row => row.id));
       const commonWords = new Set(['have', 'this', 'that', 'with', 'from', 'before', 'after', 'could', 'would', 'should', 'source', 'current', 'check', 'read', 'inspect', 'consider', 'required', 'field', 'completed', 'started', 'result', 'event', 'tool', 'file', 'path', 'limit', 'offset']);

@@ -98,11 +98,13 @@ export function collectSessionCost(entries, subscription = false) {
       if (typeof data?.runId === 'string' && !helperNative && !settled.has(data.runId) && data.results?.some(r=>r.status !== 'queued')) pending.add(data.runId);
     }
     // Jev judgments bill input-only through OpenRouter; cost is estimated
-    // from measured payload characters like any other estimated route.
+    // from measured payload characters where route price evidence exists.
+    // A non-cached judgment without a cost is unknown spend, never zero.
     if (entry.type === 'custom' && entry.customType === 'jev-usage-v1') {
       const data = entry.data;
-      const cost = typeof data?.costUsd === 'number' && data.costUsd >= 0 ? data.costUsd : 0;
-      const evidence = {reported:0, estimated:cost, unknown:false, subscription:false, seen:true, estimatedUsage:data?.cached !== true};
+      const known = typeof data?.costUsd === 'number' && Number.isFinite(data.costUsd) && data.costUsd >= 0;
+      const cost = known ? data.costUsd : 0;
+      const evidence = {reported:0, estimated:cost, unknown:!known && data?.cached !== true, subscription:false, seen:true, estimatedUsage:data?.cached !== true};
       auxiliary = mergeCostEvidence(auxiliary, evidence);
       addRow('auxiliary', typeof data?.model === 'string' && data.model ? `openrouter/${data.model.slice(0,128)}` : 'openrouter/jev', evidence);
     }

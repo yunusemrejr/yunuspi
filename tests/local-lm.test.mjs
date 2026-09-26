@@ -172,6 +172,39 @@ test('uncertain, irrelevant, malformed and oversized local choices abstain witho
   } finally { if (prev === undefined) delete process.env.PI_LOCAL_LM; else process.env.PI_LOCAL_LM = prev; }
 });
 
+test('disabling line preprocessing does not disable unrelated local-LM consumers', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-local-lm-'));
+  fs.writeFileSync(path.join(dir, 'runtime.json'), JSON.stringify(runtime));
+  const prev = { PI_LOCAL_LM: process.env.PI_LOCAL_LM, PI_SMOL_PREPROCESSOR: process.env.PI_SMOL_PREPROCESSOR, PI_LOCAL_LM_ASSETS: process.env.PI_LOCAL_LM_ASSETS };
+  delete process.env.PI_LOCAL_LM;
+  process.env.PI_SMOL_PREPROCESSOR = 'off';
+  process.env.PI_LOCAL_LM_ASSETS = dir;
+  try {
+    assert.deepEqual(await L.loadLocalLmRuntime(), runtime);
+    const lm = L.createLocalLm({ fetch: async () => probs(0.9, 0.1) });
+    assert.equal((await lm.judge('Does this task help the agent?', 'skill-relevance')).ok, true);
+    assert.equal(lm.ready(), true);
+    process.env.PI_LOCAL_LM = 'off';
+    assert.equal(await L.loadLocalLmRuntime(), undefined);
+    assert.equal((await L.createLocalLm({ fetch: async () => probs(0.9, 0.1) }).judge('Does this task help?', 'skill-relevance')).reason, 'unavailable');
+  } finally {
+    for (const [key, value] of Object.entries(prev)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Smol preprocessor still honors its own disable flag without the runtime coupling', async () => {
+  const smol = await load('extensions/lib/smol-preprocessor.ts');
+  const prev = process.env.PI_SMOL_PREPROCESSOR;
+  process.env.PI_SMOL_PREPROCESSOR = 'off';
+  try {
+    const api = smol.createSmolPreprocessor({ runtime });
+    assert.equal(api.inspect().status, 'disabled');
+    api.offer('key', 'line one\nline two\nline three', 0, 'some task', 'bash');
+    assert.equal(api.inspect().cached, 0);
+  } finally { if (prev === undefined) delete process.env.PI_SMOL_PREPROCESSOR; else process.env.PI_SMOL_PREPROCESSOR = prev; }
+});
+
 test('queued local requests cancel promptly and pending work respects newly opened breaker', async () => {
   let release, calls = 0;
   const lm = L.createLocalLm({ runtime, fetch: async () => { calls++; return new Promise(resolve => { release = () => resolve(probs(.9, .1)); }); } });

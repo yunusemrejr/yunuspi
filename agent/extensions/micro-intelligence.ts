@@ -29,6 +29,7 @@ import {
   type PromptAnalysisPrevious,
 } from "./lib/prompt-interpretation.ts";
 import type { PromptAnalysisAttempt, PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
+import { packetRequirements } from "./lib/requirement-ledger.ts";
 import { resolvePromptAnalysisPreferenceChain } from "./pi-subagents/src/runs/shared/model-fallback.ts";
 import { loadModelEconomyConfig } from "./pi-subagents/src/runs/shared/model-economy.ts";
 import { selectAffordableModel } from "./pi-subagents/src/runs/shared/model-selection.ts";
@@ -202,6 +203,7 @@ function promptAnalysisAdvice(analysis: PromptAnalysis): AdvisoryResult | undefi
 interface AnalysisSelection {
   source: PendingPromptAnalysis["preferenceSource"];
   routes: PromptAnalysisCandidate[];
+  requirements: string;
 }
 
 function toText(response: any): string {
@@ -242,7 +244,8 @@ function analysisCandidates(
     const models = available.filter((model: any) => !scope || scope.has(`${model.provider}/${model.id}`));
     const modelInfos = models.map(toModelInfo);
     const maxOutputTokens = kind === "initial" ? 768 : 320;
-    const request = buildPromptAnalysisRequest(prompt, kind);
+    const requirements = packetRequirements(prompt, ctx.sessionManager?.getBranch?.() ?? [], 1200);
+    const request = buildPromptAnalysisRequest(prompt, kind, undefined, requirements);
     const minContextWindow = Math.max(8192, Math.ceil(request.length / 4) + maxOutputTokens + 1024);
     const options = {
       requirements: { inputModalities: ["text"], minContextWindow, minOutputTokens: maxOutputTokens },
@@ -265,7 +268,7 @@ function analysisCandidates(
       add(preferred.route, preferred.thinking, preferred.providerRouting);
     }
     if (resolved.length) {
-      return { source: preference.source, routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)) };
+      return { source: preference.source, routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)), requirements };
     }
 
     // With no usable configured route, use the existing offline economy
@@ -296,9 +299,9 @@ function analysisCandidates(
       add(selected.model);
       excluded.push(selected.model);
     }
-    return { source: "autonomous", routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)) };
+    return { source: "autonomous", routes: resolved.map((entry) => makeCandidate(entry, ctx, metrics, completePromptAnalysis)), requirements };
   } catch {
-    return { source: "autonomous", routes: [] };
+    return { source: "autonomous", routes: [], requirements: "" };
   }
 }
 
@@ -616,6 +619,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       const result = await runPromptAnalysis({
         prompt,
         kind,
+        requirements: selected.requirements || undefined,
         previous: priorAnalysis ? {
           taskLabel: priorAnalysis.taskLabel,
           explicitConstraints: priorAnalysis.explicitConstraints,

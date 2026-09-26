@@ -44,16 +44,29 @@ const RUBRICS: Record<string, string> = {
 export function reviewAspects(files: string[], task = '', history: any[] = [], patterns: Array<{key?: string}> = []) {
   const names = files.join('\n'), prose = task.slice(0, 6000);
   const selected = new Set<string>();
-  if (files.some(f => /\.(?:[cm]?[jt]sx?|py|php|go|rs|java|c|cc|cpp|cs|sh|sql|ya?ml|toml|json|vue|svelte)$/i.test(f))) selected.add('correctness');
-  if (/auth|permission|security|migration|schema|\.sql\b/i.test(names) || /\b(?:security|authentication|authorization)\b/i.test(prose)) selected.add('security');
-  if (/\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names) || /\b(?:UI|GUI|interface|accessibility|responsive|desktop app|game|gameplay|windowed|pixel art)\b/i.test(prose)) selected.add('interface');
+  const codeFile = files.some(f => /\.(?:[cm]?[jt]sx?|py|php|go|rs|java|c|cc|cpp|cs|sh|sql|ya?ml|toml|json|vue|svelte)$/i.test(f));
+  if (codeFile) selected.add('correctness');
+  const signal = (...wanted: string[]): boolean => patterns.some(p => typeof p?.key === 'string' && wanted.includes(p.key));
+  // Filenames miss semantics (auth logic in service.ts), so changed-content
+  // signals promote aspects too. Prose-only cues stay gated on corroborating
+  // file shape: "redesign the API" must not buy an interface review.
+  const authProse = /\b(?:login|logout|sign-?in|sign-?up|signup|password|passkey|oauth|sso)\b/i.test(prose);
+  if (/auth|permission|security|migration|schema|\.sql\b/i.test(names) || /\b(?:security|authentication|authorization)\b/i.test(prose) ||
+    signal('quality-trust-boundary', 'quality-auth-content', 'quality-html-boundary', 'quality-data-change') ||
+    (authProse && codeFile)) selected.add('security');
+  const uiFile = /\.(?:html?|css|scss|sass|less|tsx|jsx|vue|svelte)\b/i.test(names);
+  const uiSignal = patterns.some(p => typeof p?.key === 'string' && p.key.startsWith('ui-'));
+  if (uiFile || /\b(?:UI|GUI|interface|accessibility|responsive|desktop app|game|gameplay|windowed|pixel art)\b/i.test(prose)) selected.add('interface');
   // DOM-generating scripts (vanilla JS/TS builders) touch no UI-file
   // extension yet render interface. Their markup-shape cues promote the
   // interface aspect so rendered verification is demanded there too.
-  if (patterns.some(p => typeof p?.key === 'string' && p.key.startsWith('ui-'))) selected.add('interface');
+  if (uiSignal) selected.add('interface');
+  if ((uiFile || uiSignal) && /\bredesign\b|\brestyle\b|styling|stylesheet|\btheme\b|dark mode|\blayout\b/i.test(prose)) selected.add('interface');
   if (/\.(?:mdx?|rst|txt|html?)\b/i.test(names) || /\b(?:SEO|marketing|copywriting|landing page)\b/i.test(prose)) selected.add('content');
-  if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose)) selected.add('runtime');
-  if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
+  if (/\.(?:wasm|wat|c|cc|cpp|rs|py|php)\b/i.test(names) || /\b(?:performance|WebAssembly|memory leak)\b/i.test(prose) ||
+    signal('quality-fanout') ||
+    (codeFile && /\b(?:deadlock|race condition|backpressure|latency|throughput|timeouts?|slow query|n\+1)\b/i.test(prose))) selected.add('runtime');
+  if (/deploy|docker|containerfile|procfile|makefile|jenkinsfile|justfile|(?:^|\/)compose\.ya?ml\b|pipeline|terraform|\.tf\b|release|publish|artifact/i.test(names) || /\b(?:deploy|deployment|production|release)\b/i.test(prose)) selected.add('delivery');
   if (!selected.size && files.length) selected.add('correctness');
   // History sets attention order, never correctness standards or an extra round.
   const recent = history.slice(-20);
@@ -214,6 +227,21 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     return true;
   };
   const unavailableReason = () => dispatchGap || reason || (reviewUnavailable ? 'Independent review unavailable: ' + [...new Set(reports.map(r => r.gap))].join(' ').slice(0, 1000) : '');
+  /** One unresolved-verification item shared by the rendered warning line and
+   * the structured gate receipt, so prose and identity cannot diverge. */
+  const qualityVerification = (): { id: string; state: string; text: string } | undefined => {
+    if (!(enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted')) return undefined;
+    const current = status();
+    return { id: `status:${current}`, state: disposition === 'blocked' ? 'blocked' : 'unresolved', text: `Independent review ${current}: ${unavailableReason() || 'current changes have not been accepted; inspect the review evidence and remaining gaps.'}` };
+  };
+  const qualityVerificationLine = (): string[] => {
+    const item = qualityVerification();
+    return item ? [item.text] : [];
+  };
+  const qualityVerificationReceipt = () => {
+    const item = qualityVerification();
+    return item ? [{ source: 'quality-review', id: item.id, revision: String(revision), state: item.state, count: changed.length, line: `quality review: ${item.text}` }] : [];
+  };
   const status = () => !changed.length ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
     .sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,12);
@@ -463,7 +491,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     },
     restore(ctx: any) {
       disposeContinuationNotice();
-      disposeContinuationNotice = registerContinuationSource({session:ctx.sessionManager,name:'quality review',verification:() => enabled() && capable() && active && !paused && changed.length && disposition !== 'accepted' ? [`Independent review ${status()}: ${unavailableReason() || 'current changes have not been accepted; inspect the review evidence and remaining gaps.'}`] : [],pending:() => enabled() && capable() && active && !paused && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
+      disposeContinuationNotice = registerContinuationSource({session:ctx.sessionManager,name:'quality review',verification:() => qualityVerificationLine(),verificationReceipts:() => qualityVerificationReceipt(),pending:() => enabled() && capable() && active && !paused && followups < 3 && automaticAdvice() ? ['complete bounded quality review and assess remaining evidence gaps'] : []});
       releaseShared();
       hashes = {}; reviewedHashes = {};
       releaseShared = registerSharedQualityReview(ctx,{owner:api,available:()=>enabled() && capable() && active,settle:(context,signal)=>api.settled({},context,signal),snapshot:summary});

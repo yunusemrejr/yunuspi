@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
+import { packetRequirements } from './lib/requirement-ledger.ts';
 import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { buildWatchmakerPacket, createWatchmakerScratchpad, watchmakerSink, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
@@ -168,7 +169,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       // Cheap guards run before any evidence or packet work; the scheduler
       // never reads the packet of a routeless snapshot, so cold paths build a
       // minimal one and the dispatch path builds exactly once below.
-      const idlePacket = () => buildWatchmakerPacket({ request, rows: [], tools: [], skills: [], memos: [] });
+      let briefCache: string | undefined;
+      const brief = () => briefCache ??= packetRequirements(request, ctx.sessionManager.getBranch?.() ?? [], 1200);
+      const idlePacket = () => buildWatchmakerPacket({ request, rows: [], tools: [], skills: [], memos: [], requirements: brief() || undefined });
       if (!owns(ctx) || !userRequest || ctx.isIdle?.() === true) return { packet: idlePacket(), reason: 'No active user work', silent: true };
       // Nothing of the agent's to time before its first response this task.
       if (!agentStartAt) return { packet: idlePacket(), reason: 'Waiting for the main agent\'s first response', silent: true };
@@ -194,7 +197,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       const evidence = [...timeRows(), ...intentRows(), ...(projectHistory ? [{ id: 'project-history', kind: 'historical project evidence', text: projectHistory }] : []), ...peerRows(), ...adviceHistory.slice(-3).map((text, index) => ({ id: `prior-advice-${index}`, kind: 'previous advice already delivered', text })), ...recent.slice(0, 10)];
       const active = new Set<string>(pi.getActiveTools?.() ?? []);
       const tools = (pi.getAllTools?.() ?? []).map((tool: any) => ({ name: tool.name, description: tool.description ?? '', availability: active.has(tool.name) ? 'active' as const : 'discoverable' as const }));
-      const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text) });
+      const currentPacket = buildWatchmakerPacket({ request, rows: evidence, tools, skills, memos: scratchpad.list().map(memo => memo.text), requirements: brief() || undefined });
       let available = ctx.modelRegistry.getAvailable();
       if (ctx.scopedModels?.length) { const scope = new Set(ctx.scopedModels.map((row: any) => `${row.model?.provider}/${row.model?.id}`)); available = available.filter((model: any) => scope.has(`${model.provider}/${model.id}`)); }
       const selection = resolveWatchmakerPreferenceChain(available.map(toModelInfo));

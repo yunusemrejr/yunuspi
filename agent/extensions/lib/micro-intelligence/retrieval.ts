@@ -212,7 +212,7 @@ export async function multiStageRetrieve<T extends RetrievalCandidate>(options: 
         const top = judged.answers.rank?.choice;
         const topProb = top ? (order[top] ?? 0) : 0;
         metrics.run("jev");
-        metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd ?? 0, judged.usage.cached);
+        metrics.jevUsage(site, 2, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
         if (judged.usage.cached) metrics.cacheHit("jev");
         const allowed = new Set(candidates.map((candidate) => candidate.id));
         const exists = judged.answers.exists?.noul;

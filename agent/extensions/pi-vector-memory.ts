@@ -44,6 +44,7 @@ import {
   reindexEmbeddings,
   TYPE_WEIGHTS,
   type IndexEvent,
+  type IndexEventKind,
   type MemoryEmbedder,
 } from "./lib/project-memory-index.ts";
 import {
@@ -152,27 +153,58 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       ? ((cwd: string): ProjectChainLink[] => [{ identity: resolveIdentity(cwd), root: cwd }])
       : ((cwd: string) => resolveProjectChain(cwd, {}, env)));
 
-  let current: { controller: AbortController; cwd: string; chain: ProjectChainLink[]; store: ProjectVectorStore; family: FamilyStore[] } | undefined;
+  type OwnerState = { controller: AbortController; cwd: string; chain: ProjectChainLink[]; store: ProjectVectorStore; family: FamilyStore[] };
+  let current: OwnerState | undefined;
   let unavailable = "";
   const queue: IndexEvent[] = [];
   let flushing = false;
   let dropped = 0;
+  let droppedTotal = 0;
+  const droppedKinds: Partial<Record<IndexEventKind, number>> = {};
   const toolInputs = new Map<string, { toolName: string; input: unknown }>();
 
-  const closeCurrent = (): void => {
-    if (!current) return;
-    current.controller.abort();
-    recallCache.clear();
-    queue.length = 0;
-    toolInputs.clear();
-    for (const member of [current.store, ...current.family.map((m) => m.store)]) {
+  /** High-value continuity evidence must survive bursty sessions; routine
+   * file-edit markers are the first to go when the queue fills. */
+  const EVENT_PRIORITY: Record<IndexEventKind, number> = {
+    session_summary: 8,
+    decision: 7,
+    user_prompt: 6,
+    error: 5,
+    git_commit: 4,
+    observation: 3,
+    agent_outcome: 2,
+    tool_result: 2,
+    file_edit: 1,
+  };
+
+  const closeOwner = (owner: OwnerState): void => {
+    owner.controller.abort();
+    for (const member of [owner.store, ...owner.family.map((m) => m.store)]) {
       try {
         member.close();
       } catch {
         /* best effort */
       }
     }
+  };
+
+  /** Detach the live owner without destroying its queued events: the caller
+   * drains them into the old owner's own store before closing it. Aborting
+   * first and clearing the queue (the old closeCurrent on this path) raced
+   * the asynchronous flush and lost old-project events on every switch. */
+  const detachCurrent = (): { owner: OwnerState; pending: IndexEvent[] } | undefined => {
+    if (!current) return undefined;
+    const owner = current;
+    const pending = queue.splice(0, queue.length);
+    recallCache.clear();
+    toolInputs.clear();
     current = undefined;
+    return { owner, pending };
+  };
+
+  const closeCurrent = (): void => {
+    const detached = detachCurrent();
+    if (detached) closeOwner(detached.owner);
   };
 
   const primaryIdentity = (): ProjectIdentity => (current as { chain: ProjectChainLink[] }).chain[0].identity;
@@ -218,7 +250,12 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
 
   const ensureChain = (cwd: string): ProjectVectorStore => {
     if (current && current.cwd === cwd) return current.store;
-    if (current && current.cwd !== cwd) closeCurrent();
+    if (current && current.cwd !== cwd) {
+      // A cwd move is a project switch: drain the old owner's queue into
+      // its own store instead of dropping it.
+      const detached = detachCurrent();
+      if (detached) void drainOwner(detached, "");
+    }
     try {
       const chain = resolveChain(cwd || process.cwd());
       const primary = chain[0].identity;
@@ -234,12 +271,59 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
 
   const ensureStore = ensureChain;
 
+  const countDropped = (kind: IndexEventKind): void => {
+    dropped++;
+    droppedTotal++;
+    droppedKinds[kind] = (droppedKinds[kind] ?? 0) + 1;
+  };
+
   const enqueue = (event: IndexEvent): void => {
-    if (queue.length >= QUEUE_CAP) {
+    if (queue.length < QUEUE_CAP) {
+      queue.push(event);
+      return;
+    }
+    // Full queue: a higher-priority arrival displaces the oldest
+    // lowest-priority event; within a tier the oldest goes first (FIFO).
+    const incoming = EVENT_PRIORITY[event.kind] ?? 0;
+    let victim = 0;
+    for (let i = 1; i < queue.length; i++) {
+      if ((EVENT_PRIORITY[queue[i].kind] ?? 0) < (EVENT_PRIORITY[queue[victim].kind] ?? 0)) victim = i;
+    }
+    if (incoming > (EVENT_PRIORITY[queue[victim].kind] ?? 0)) {
+      countDropped(queue[victim].kind);
+      queue.splice(victim, 1);
+    } else {
+      countDropped(queue[0].kind);
       queue.shift();
-      dropped++;
     }
     queue.push(event);
+  };
+
+  /** Persist lexical evidence first, then embed the settled batch together.
+   * An outage cannot lose events or cause one call per event. */
+  const indexOne = async (owner: OwnerState, event: IndexEvent, sessionId: string): Promise<string[]> => {
+    event.sessionId = event.sessionId || sessionId;
+    try {
+      const indexed = await indexEvent(owner.store, owner.chain[0].identity.id, event, { now: isoNow });
+      recallCache.clear();
+      return indexed.ids;
+    } catch (error) {
+      noteHealth("ml.project-memory.index-error", { count: 1, kind: event.kind });
+      return [];
+    }
+  };
+
+  const embedBatch = async (owner: OwnerState, ids: string[]): Promise<void> => {
+    if (!ids.length || !embedder || owner.controller.signal.aborted) return;
+    try {
+      // Small resumable recovery of earlier remote failures, shared with
+      // the current batch. No timers or per-chunk remote requests.
+      const backlog = owner.store.unembeddedIds(ids.length + 4, embedder.id).filter(id => !ids.includes(id)).slice(0, 4);
+      const pending = [...new Set([...ids, ...backlog])];
+      const report = await reindexEmbeddings(owner.store, embedder, { ids: pending, fallback: true, signal: owner.controller.signal, now: isoNow });
+      if (!owner.controller.signal.aborted && (report.embedded || report.fallbackEmbedded)) recallCache.clear();
+    }
+    catch { noteHealth('ml.project-memory.index-error', { count: 1, kind: 'embedding-batch' }); }
   };
 
   const flush = async (sessionId: string): Promise<void> => {
@@ -250,34 +334,34 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
     try {
       for (let i = 0; i < FLUSH_BATCH && queue.length && current === owner && !owner.controller.signal.aborted; i++) {
         const event = queue.shift() as IndexEvent;
-        event.sessionId = event.sessionId || sessionId;
-        try {
-          // Persist lexical evidence first, then embed the settled event batch
-          // together. An outage cannot lose events or cause one call per event.
-          const indexed = await indexEvent(owner.store, owner.chain[0].identity.id, event, { now: isoNow });
-          ids.push(...indexed.ids);
-          recallCache.clear();
-        } catch (error) {
-          noteHealth("ml.project-memory.index-error", { count: 1, kind: event.kind });
-        }
+        ids.push(...await indexOne(owner, event, sessionId));
       }
-      if (ids.length && embedder && current === owner && !owner.controller.signal.aborted) {
-        try {
-          // Small resumable recovery of earlier remote failures, shared with
-          // the current batch. No timers or per-chunk remote requests.
-          const backlog = owner.store.unembeddedIds(ids.length + 4, embedder.id).filter(id => !ids.includes(id)).slice(0,4);
-          const pending = [...new Set([...ids, ...backlog])];
-          const report = await reindexEmbeddings(owner.store, embedder, { ids: pending, fallback: true, signal: owner.controller.signal, now: isoNow });
-          if (current === owner && !owner.controller.signal.aborted && (report.embedded || report.fallbackEmbedded)) recallCache.clear();
-        }
-        catch { noteHealth('ml.project-memory.index-error', { count: 1, kind: 'embedding-batch' }); }
-      }
+      if (current === owner) await embedBatch(owner, ids);
       if (dropped) {
         noteHealth("ml.project-memory.queue-dropped", { count: dropped });
         dropped = 0;
       }
     } finally {
       flushing = false;
+    }
+  };
+
+  /** Drain a detached owner's captured queue into its own store, then close
+   * it. Bounded by the queue cap; never blocks the switch that detached it
+   * (callers void this) and never files old-project rows into the new
+   * project. The embedder self-serializes, so a concurrent live flush is a
+   * busy-fallback, not corruption. */
+  const drainOwner = async (detached: { owner: OwnerState; pending: IndexEvent[] }, sessionId: string): Promise<void> => {
+    const { owner, pending } = detached;
+    const ids: string[] = [];
+    try {
+      for (const event of pending.slice(0, QUEUE_CAP)) {
+        if (owner.controller.signal.aborted) break;
+        ids.push(...await indexOne(owner, event, sessionId));
+      }
+      await embedBatch(owner, ids);
+    } finally {
+      closeOwner(owner);
     }
   };
 
@@ -388,10 +472,10 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       `Fallback: ${health.fallback ?? 'compatible Needle3 / lexical'} · dimension: ${dimension || 'not yet observed'}`,
       `Chunks: ${counts.chunks} · Qwen3 embedded: ${qwen} · Needle3 embedded: ${local} · unembedded: ${counts.chunks - counts.embedded}`,
       `Vector retrieval: ${lastError ? 'degraded' : selected?.count ? 'ready' : 'awaiting compatible vectors'} · lexical retrieval: ${store ? 'healthy' : 'unavailable'} · reranker: ${needle.state}`,
-      `Backfill: ${backfill ? JSON.stringify(backfill) : 'not run'} · queue: ${queue.length}`,
+      `Backfill: ${backfill ? JSON.stringify(backfill) : 'not run'} · queue: ${queue.length} · dropped: ${droppedTotal}`,
       `Last embedding error: ${lastError || 'none'}${unavailable ? `\nStore error: ${unavailable}` : ''}`,
     ].join('\n');
-    return { text, details: { projectId: identity?.id, counts, spaces, dimension, health, backfill, dims: store?.embeddingDims() ?? [], needle: needle.state, queue: queue.length, unavailable: unavailable || undefined } };
+    return { text, details: { projectId: identity?.id, counts, spaces, dimension, health, backfill, dims: store?.embeddingDims() ?? [], needle: needle.state, queue: queue.length, dropped: droppedTotal, droppedByKind: { ...droppedKinds }, unavailable: unavailable || undefined } };
   };
   pi.registerTool({
     name: "project_memory_status", label: "Project Memory Status",
@@ -438,7 +522,10 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   });
 
   if (isChild) {
-    pi.on('session_shutdown', () => { if (sessionObservability()[PROJECT_MEMORY_RECALL] === recall) delete sessionObservability()[PROJECT_MEMORY_RECALL]; closeCurrent(); });
+    // This handler only unpublishes recall: the shutdown handler below owns
+    // the final flush-then-close, and closing here first would destroy the
+    // queued events it is about to persist.
+    pi.on('session_shutdown', () => { if (sessionObservability()[PROJECT_MEMORY_RECALL] === recall) delete sessionObservability()[PROJECT_MEMORY_RECALL]; });
     return; // Children query and read; only the parent writes.
   }
 
@@ -635,9 +722,12 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
 
   pi.on("session_switch", (_event: any, ctx: any) => {
     try {
-      void flush(sidOf(ctx));
-      closeCurrent();
+      // Serialize a bounded drain of the old owner's captured queue into its
+      // own store before closing it: the old void-flush-then-clear raced and
+      // destroyed queued old-project events on every switch.
+      const detached = detachCurrent();
       ensureStore(ctx?.cwd ?? "");
+      if (detached) void drainOwner(detached, sidOf(ctx));
     } catch {
       /* best effort */
     }
@@ -646,8 +736,10 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   pi.on("session_shutdown", (_event: any, ctx: any) => {
     try {
       if (sessionObservability()[PROJECT_MEMORY_RECALL] === recall) delete sessionObservability()[PROJECT_MEMORY_RECALL];
-      const owner = current;
-      void flush(sidOf(ctx)).finally(() => { if (current === owner) closeCurrent(); });
+      // Full bounded drain, not one 8-event flush batch: a bursty session's
+      // tail must still reach its own store before the owner closes.
+      const detached = detachCurrent();
+      if (detached) void drainOwner(detached, sidOf(ctx));
     } catch {
       /* shutdown must not fail */
     }

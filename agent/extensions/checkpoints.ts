@@ -47,8 +47,8 @@ import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/proje
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
-import { completesPlan, completionGate } from "./lib/completion-gate.ts";
-import { collectVerificationLines } from "./lib/continuation-notice.ts";
+import { completesPlan, completionGateReceipts } from "./lib/completion-gate.ts";
+import { collectVerificationReceipts } from "./lib/continuation-notice.ts";
 import { isDeployCommand } from "./lib/session-hooks.ts";
 import {
 	emptyRequirementLedger,
@@ -875,16 +875,17 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 				: undefined;
 			if (!moment) return undefined;
 			// A previous deploy's own live-verification receipt never blocks the next deploy.
-			const lines = collectVerificationLines(8, ctx.sessionManager).filter((line) => !line.startsWith("deploy:"));
-			const decision = completionGate(moment, lines, refusedGates);
+			const receipts = collectVerificationReceipts(8, ctx.sessionManager).filter((receipt) => receipt.source !== "deploy");
+			const lines = receipts.map((receipt) => receipt.line);
+			const decision = completionGateReceipts(moment, receipts, refusedGates);
 			if (decision.waived) {
 				refusedGates.delete(decision.key);
-				pi.appendEntry("completion-gate-v1", { moment, decision: "waived", unresolved: lines });
+				pi.appendEntry("completion-gate-v1", { moment, decision: "waived", unresolved: lines, receipts: receipts.map((receipt) => `${receipt.source}:${receipt.id}:${receipt.revision ?? ""}:${receipt.state}:${receipt.count ?? ""}`) });
 				return undefined;
 			}
 			if (!decision.block) return undefined;
 			refusedGates.add(decision.key);
-			pi.appendEntry("completion-gate-v1", { moment, decision: "refused", unresolved: lines });
+			pi.appendEntry("completion-gate-v1", { moment, decision: "refused", unresolved: lines, receipts: receipts.map((receipt) => `${receipt.source}:${receipt.id}:${receipt.revision ?? ""}:${receipt.state}:${receipt.count ?? ""}`) });
 			return { block: true, reason: decision.reason! };
 		} catch {
 			return undefined; /* the gate never breaks a tool call it cannot evaluate */
@@ -895,10 +896,19 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		try {
 			const sid = sidOf(ctx);
 			if (!sid) return;
-			const snap = await checkpointWorktree(ctx.cwd, sid, reason);
-			if (!snap || snap.reused) return;
-			pi.appendEntry("worktree-checkpoint-v1", { reason, ref: snap.ref, commit: snap.commit, changedCount: snap.changedCount });
-			if (ctx.hasUI) ctx.ui.setStatus("worktree-checkpoint", `💾 checkpoint ${snap.changedCount} file${snap.changedCount === 1 ? "" : "s"}`);
+			const outcome = await checkpointWorktree(ctx.cwd, sid, reason);
+			if (outcome.status === "clean" || outcome.status === "not-git") return;
+			if (outcome.status === "snapshotted") {
+				if (outcome.reused) return;
+				pi.appendEntry("worktree-checkpoint-v1", { reason, status: outcome.status, ref: outcome.ref, commit: outcome.commit, changedCount: outcome.changedCount });
+				if (ctx.hasUI) ctx.ui.setStatus("worktree-checkpoint", `💾 checkpoint ${outcome.changedCount} file${outcome.changedCount === 1 ? "" : "s"}`);
+				return;
+			}
+			// A skipped or failed snapshot is degraded safety-net state, not a
+			// clean tree: keep it visible in history and the TUI instead of
+			// silently reporting nothing.
+			pi.appendEntry("worktree-checkpoint-v1", { reason, status: outcome.status, reasonDetail: outcome.reason });
+			if (ctx.hasUI) ctx.ui.setStatus("worktree-checkpoint", `⚠️ checkpoint ${outcome.status}: ${(outcome.reason ?? "").slice(0, 80)}`);
 		} catch {
 			/* a snapshot is a safety net; it must never break the run or shutdown */
 		}

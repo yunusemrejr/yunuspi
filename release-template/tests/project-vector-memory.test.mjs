@@ -567,6 +567,62 @@ test('extension indexes files and session events incrementally', async (t) => {
   assert.match(command, /chunks/i);
 });
 
+test('a session switch drains the old queue into the old project, not the void', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const cwdA = path.join(dir, 'projA');
+  const cwdB = path.join(dir, 'projB');
+  fs.mkdirSync(cwdA, { recursive: true });
+  fs.mkdirSync(cwdB, { recursive: true });
+  const pi = fakePi();
+  piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
+  const ctxA = fakeCtx(cwdA);
+  const ctxB = fakeCtx(cwdB);
+  pi.handlers.get('session_start')({}, ctxA);
+  pi.handlers.get('input')({ source: 'user', text: 'Please fix the nebula calibration drift today' }, ctxA);
+  pi.handlers.get('tool_call')({ toolCallId: 'e1', toolName: 'bash', input: { command: 'npm test' } });
+  pi.handlers.get('tool_result')({ toolCallId: 'e1', toolName: 'bash', isError: true, content: [{ type: 'text', text: 'nebula calibration failed: 3 tests red' }] }, ctxA);
+  // Switch before any flush: the old code void-flushed and then cleared the
+  // queue, destroying both events.
+  pi.handlers.get('session_switch')({}, ctxB);
+  const search = (ctx, query) => pi.tools.get('project_memory_search').execute('x', { query, limit: 10 }, undefined, undefined, ctx);
+  await waitFor(async () => (await search(ctxA, 'nebula calibration drift')).content[0].text.includes('drift'));
+  const hitsA = (await search(ctxA, 'nebula')).details.hits;
+  assert.ok(hitsA.length >= 2, `expected both old-project events to survive the switch, got ${hitsA.length}`);
+  const hitsB = (await search(ctxB, 'nebula')).details.hits;
+  assert.equal(hitsB.length, 0, 'old-project events must not be misfiled into the new project');
+});
+
+test('a full queue sheds file-edit markers before continuity evidence and reports drops', async (t) => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const cwd = path.join(dir, 'proj');
+  fs.mkdirSync(cwd, { recursive: true });
+  const pi = fakePi();
+  piVectorMemory(pi, { env: testEnv(dir), embedder: testEmbedder(24), isoNow: () => '2026-09-25T12:00:00.000Z' });
+  const ctx = fakeCtx(cwd);
+  pi.handlers.get('session_start')({}, ctx);
+  for (let i = 0; i < 201; i++) {
+    pi.handlers.get('tool_call')({ toolCallId: `f${i}`, toolName: 'edit', input: { path: `file-${i}.ts` } });
+    pi.handlers.get('tool_result')({ toolCallId: `f${i}`, toolName: 'edit', content: [{ type: 'text', text: 'ok' }] }, ctx);
+  }
+  pi.handlers.get('session_compact')({ summary: 'Session summary: quasar routing work finished with the nebula ledger verified end to end.' }, ctx);
+  const status = () => pi.tools.get('project_memory_status').execute('s', {}, undefined, undefined, ctx);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  for (let i = 0; i < 60; i++) {
+    if ((await status()).details.queue === 0) break;
+    await pi.handlers.get('agent_settled')({}, ctx);
+    await sleep(25);
+  }
+  const final = await status();
+  assert.equal(final.details.queue, 0);
+  assert.equal(final.details.dropped, 2, 'one edit at fill plus one edit displaced by the summary');
+  assert.deepEqual(final.details.droppedByKind, { file_edit: 2 });
+  assert.match(final.content[0].text, /dropped: 2/);
+  const search = await pi.tools.get('project_memory_search').execute('x', { query: 'quasar routing nebula ledger', limit: 10 }, undefined, undefined, ctx);
+  assert.ok(search.content[0].text.includes('quasar routing'), 'the high-priority summary survives the burst');
+});
+
 test('children search and read only; PI_PROJECT_MEMORY=off disables all', (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);

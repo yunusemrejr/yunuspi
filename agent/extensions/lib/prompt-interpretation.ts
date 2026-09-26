@@ -333,7 +333,7 @@ export function fallbackPromptAnalysis(prompt: string, kind: PromptAnalysisKind)
 
 /** Minimal low-cost auxiliary prompt. Prompt data is JSON-quoted evidence,
  * never instructions. The original user text is not modified by this layer. */
-export function buildPromptAnalysisRequest(prompt: string, kind: PromptAnalysisKind, previous?: PromptAnalysisPrevious): string {
+export function buildPromptAnalysisRequest(prompt: string, kind: PromptAnalysisKind, previous?: PromptAnalysisPrevious, requirements?: string): string {
   const initial = kind === "initial";
   const fields = initial
     ? PROMPT_ANALYSIS_FIELDS.filter((field) => field !== "relation").join(", ")
@@ -364,6 +364,7 @@ export function buildPromptAnalysisRequest(prompt: string, kind: PromptAnalysisK
     `Set confidence from 0 to 1. Keep the entire answer under ${initial ? 350 : 150} words. At most 3 short entries per list, at most 100 characters per entry. Prefer the few most relevant fields; do not fill every optional field. Do not copy long prompt passages.`,
     JSON.stringify({ currentPrompt: boundedPrompt,
       ...(promptRequestFocus(prompt) !== prompt.trim() ? { requestFocus: requestExcerpt(promptRequestFocus(prompt), initial ? 4_000 : 2_000) } : {}),
+      ...(typeof requirements === "string" && requirements ? { sessionRequirements: requirements.slice(0, 1_200) } : {}),
       ...(prior ? { priorTask: prior } : {}), ...(history ? { priorHistory: history } : {}) }),
   ].join("\n");
 }

@@ -59,15 +59,17 @@ export interface WatchmakerPacketInput {
   tools: ObserverCapability[];
   skills: ObserverCapability[];
   memos: string[];
+  requirements?: string;
 }
 
-const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'peer reviewer note']);
+const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'peer reviewer note', 'tracked requirements']);
 const TIME_KINDS = new Set(['time', 'watchmaker memo']);
 
 export function buildWatchmakerPacket(input: WatchmakerPacketInput): ObserverPacket {
   const focused = promptRequestFocus(input.request);
   const requestText = focused.length <= 600 ? focused : `${focused.slice(0, 360)}\n[Request excerpt]\n${focused.slice(-200)}`;
   const evidence = [{ id: 'request', kind: 'user request', text: boundedObserverText(requestText, 600) },
+    ...(input.requirements ? [{ id: 'requirements', kind: 'tracked requirements', text: boundedObserverText(input.requirements, 1200) }] : []),
     ...input.rows.slice(0, 30).map(row => ({ ...row, text: boundedObserverText(row.text, TIME_KINDS.has(row.kind) || INTENT_KINDS.has(row.kind) ? 420 : 220) })),
     ...input.memos.slice(0, WATCHMAKER_MEMO_KEEP).map((memo, index) => ({ id: `memo-${index}`, kind: 'watchmaker memo', text: boundedObserverText(memo, WATCHMAKER_MEMO_CHARS) }))];
   const textForRanking = `${focused.slice(0, 800)} ${input.rows.map(x => `${x.tool ?? ''} ${x.text.slice(-120)}`).join(' ')}`;

@@ -185,7 +185,7 @@ export default function piObservationsExtension(
 		if (jevDistillPending.size >= 200) jevDistillPending.delete(jevDistillPending.keys().next().value!);
 		const slot: {value?:string; settled?:Promise<void>} = {};
 		jevDistillPending.set(key,slot);
-		slot.settled = selectDistillChunks(tool,text,(site,state,questions)=>askJev(site,state,questions,{pi}),undefined,taskSignal)
+		slot.settled = selectDistillChunks(tool,text,(site,state,questions,opts)=>askJev(site,state,questions,{pi,...opts}),undefined,taskSignal)
 			.then(value=>{if(jevDistillPending.get(key)===slot)slot.value=value;})
 			.catch(()=>{});
 	};

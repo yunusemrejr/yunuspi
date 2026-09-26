@@ -177,7 +177,7 @@ export function runAdvisory(
         return;
       }
       metrics.run("jev");
-      metrics.jevUsage("request-advisory", questionCount, judged.usage.inputTokens, judged.usage.costUsd ?? 0, judged.usage.cached);
+      metrics.jevUsage("request-advisory", questionCount, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
       if (judged.usage.cached) metrics.cacheHit("jev");
       metrics.accept("jev");
       const fit = judged.answers.fit?.choice;
