@@ -17,6 +17,7 @@ import path from "node:path";
 import { decodeImage, encodeImage } from "./design-studio.ts";
 import { compareImages, composeRow, type Rgba } from "./image-analysis.ts";
 import { qaFolder, sourceRevision, type QACapture } from "./creative-qa.ts";
+import { relativeOrAbsolute } from "./path-safety.ts";
 import type { CreativeDirection } from "./creative-direction.ts";
 
 export interface AnimationDescriptor {
@@ -163,7 +164,7 @@ export interface MotionSample {
   flag: "ok" | "dead" | "jump";
 }
 
-const relative = (cwd: string, file: string) => { const r = path.relative(cwd, file); return r.startsWith("..") ? file : r; };
+const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
 
 export async function motionInspectRun(
   params: { source: string; width?: unknown; height?: unknown; durationMs?: unknown; samples?: unknown; reducedMotion?: unknown },

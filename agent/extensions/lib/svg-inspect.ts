@@ -17,6 +17,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { decodeImage, encodeImage } from "./design-studio.ts";
 import { qaFolder, type QACapture } from "./creative-qa.ts";
+import { containsPath, realRoot, relativeOrAbsolute } from "./path-safety.ts";
 
 export interface SvgBounds { x: number; y: number; width: number; height: number }
 export interface SvgPathStat { commands: number; nodes: number; closed: boolean; arcs: boolean; curves: number; bounds: SvgBounds | null }
@@ -58,6 +59,8 @@ export interface SvgMeasure {
   inkShare: number | null;
   cornerLanguage: string;
   boundsApproximate: boolean;
+  /** Machine-readable reasons geometry is approximate; empty means exact. */
+  approximationCauses: string[];
   warnings: string[];
 }
 
@@ -175,7 +178,11 @@ export function flattenPath(d: string, curveSamples = 12, arcSamples = 24): { po
   let prevCubicX = 0, prevCubicY = 0, prevQuadX = 0, prevQuadY = 0, prevCommand = "";
   while (i < tokens.length && guard++ < 100_000) {
     const token = tokens[i];
-    if (/[A-Za-z]/.test(token)) { command = token.toUpperCase(); i++; stat.commands++; prevCommand = command; }
+    // NOTE: prevCommand tracks the last EXECUTED segment (updated at the end
+    // of each iteration), never the letter just read: S/T reflection depends
+    // on what ran before, so assigning it here would make every S behave as
+    // if it followed S, and every T as if it followed T.
+    if (/[A-Za-z]/.test(token)) { command = token.toUpperCase(); i++; stat.commands++; }
     else if (!command) { i++; continue; }
     const relativeCmd = tokens[i - 1] ? /[a-z]/.test(tokens[command === tokens[i - 1].toUpperCase() ? i - 1 : i - 1] ?? "") : false;
     const rel = (tokens[Math.max(0, i - 1)] && /[a-z]/.test(tokens[i - 1]) && COMMAND_ARGS[tokens[i - 1].toUpperCase()] !== undefined) ? true : /[a-z]/.test(command === command.toUpperCase() ? "" : command);
@@ -188,7 +195,7 @@ export function flattenPath(d: string, curveSamples = 12, arcSamples = 24): { po
     })();
     void relativeCmd; void rel;
     const need = COMMAND_ARGS[command] ?? 0;
-    if (command === "Z") { stat.closed = true; x = startX; y = startY; push(x, y); command = ""; continue; }
+    if (command === "Z") { stat.closed = true; x = startX; y = startY; push(x, y); command = ""; prevCommand = "Z"; continue; }
     if (i + need > tokens.length || tokens.slice(i, i + need).some((t) => /[A-Za-z]/.test(t))) break;
     const args = tokens.slice(i, i + need).map(Number);
     i += need;
@@ -301,7 +308,7 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     activeContent: [], externalRefs: [],
     transforms: { count: 0, maxDepth: 0, nonTrivial: [] },
     unionBounds: null, padding: null, centerOffset: null, inkShare: null,
-    cornerLanguage: "unknown", boundsApproximate: false, warnings,
+    cornerLanguage: "unknown", boundsApproximate: false, approximationCauses: [], warnings,
   };
   if (!tags.some((t) => t.name === "svg" && !t.closing)) {
     warnings.push("no <svg> root element found");
@@ -317,6 +324,9 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
   let inkArea = 0, inkCx = 0, inkCy = 0;
   const matrixStack: Matrix[] = [{ ...IDENTITY }];
   let depth = 0, maxTransformDepth = 0, nonTrivialPresent = false;
+  // Certainty tracking: every static-analysis gap that moves a measurement
+  // from exact to approximate is recorded here (see approximationCauses).
+  let sawClass = false, sawStyleElement = false, sawStrokedShape = false, sawInheritedPaint = false;
 
   const shapeBounds = (name: string, attrs: Record<string, string>): { bounds: SvgBounds | null; filled: boolean; stroked: boolean; strokeWidth: number } => {
     const style = parseStyleAttr(attrs.style);
@@ -380,6 +390,13 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     }
     measure.elements[tag.name] = (measure.elements[tag.name] ?? 0) + 1;
     const { attrs } = tag;
+    if (attrs.class) sawClass = true;
+    if (tag.name === "style") sawStyleElement = true;
+    if (!SHAPE_TAGS.has(tag.name) && (attrs.fill !== undefined || attrs.stroke !== undefined || attrs["stroke-width"] !== undefined)) {
+      // Paint carried on a container is inherited by shapes that lack their
+      // own attributes; the per-shape reader below does not propagate it.
+      sawInheritedPaint = true;
+    }
     if (tag.name === "svg" && measure.viewBox === null && measure.width === null) {
       measure.viewBox = parseViewBox(attrs.viewBox ?? attrs.viewbox);
       measure.width = num(attrs.width);
@@ -431,6 +448,7 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
     }
     if (SHAPE_TAGS.has(tag.name)) {
       const { bounds, filled, stroked, strokeWidth } = shapeBounds(tag.name, attrs);
+      if (stroked) sawStrokedShape = true;
       if (bounds && bounds.width >= 0 && bounds.height >= 0) {
         measure.unionBounds = unionBounds(measure.unionBounds, bounds);
         const area = Math.max(0, bounds.width * bounds.height);
@@ -478,8 +496,20 @@ export function measureSvg(xml: string, file = "<input>"): SvgMeasure {
   const sharp = measure.linejoins.includes("miter") || measure.linejoins.includes("bevel");
   const curvy = curveCommands > lineCommands * 2;
   measure.cornerLanguage = rounded ? (sharp ? "mixed round/sharp" : "round") : sharp ? "sharp" : curvy ? "curved" : lineCommands ? "angular" : "unknown";
-  measure.boundsApproximate = nonTrivialPresent;
-  if (nonTrivialPresent) warnings.push("rotate/skew/matrix transforms present: bounds ignore rotation, so padding/center are approximate");
+  const causes: string[] = [];
+  if (nonTrivialPresent) causes.push("rotate/skew/matrix transforms are reported but not applied: bounds ignore rotation");
+  if (measure.uses > 0) causes.push("<use> instances are counted, not expanded: referenced geometry is missing from bounds");
+  if (sawClass || sawStyleElement) causes.push("CSS class/<style> styling is not applied: fill/stroke/visibility may differ");
+  if (sawStrokedShape) causes.push("stroke extents are excluded: bounds cover fill geometry only");
+  if (measure.filters > 0) causes.push("filter regions/effects are excluded from bounds");
+  if (measure.masks > 0 || measure.clipPaths > 0) causes.push("mask/clip effects are counted, not applied to bounds");
+  if (sawInheritedPaint) causes.push("inherited presentation attributes on containers are not propagated to shapes");
+  measure.approximationCauses = causes;
+  measure.boundsApproximate = causes.length > 0;
+  if (causes.length) {
+    warnings.push(`approximate geometry (${causes.length} cause${causes.length === 1 ? "" : "s"}): padding/center/mass are estimates — confirm against the render matrix`);
+    for (const cause of causes.slice(0, 7)) warnings.push(`approx: ${cause}`);
+  }
   if (!vb) warnings.push("no viewBox: scaling behavior is undefined");
   if (measure.unresolvedRefs.length) warnings.push(`${measure.unresolvedRefs.length} fragment reference(s) resolve to no id`);
   if (measure.idCollisions.length) warnings.push(`${measure.idCollisions.length} duplicate id(s)`);
@@ -499,11 +529,18 @@ const median = (values: number[]): number => {
 };
 
 /** Compare sibling icon measures: stroke language, mass, centering,
- * padding and canvas consistency. Pure. */
-export function compareSvgSet(measures: readonly SvgMeasure[]): { summary: string[]; outliers: SetOutlier[] } {
+ * padding and canvas consistency. Pure. Geometry checks (mass, center,
+ * padding) run only on exact measures: approximate geometry is reported as
+ * unknown and routed to raster evidence instead of feeding QA as numbers. */
+export function compareSvgSet(measures: readonly SvgMeasure[]): { summary: string[]; outliers: SetOutlier[]; approximate: string[] } {
   const summary: string[] = [];
   const outliers: SetOutlier[] = [];
-  if (!measures.length) return { summary, outliers };
+  if (!measures.length) return { summary, outliers, approximate: [] };
+  const approximate = measures.filter((m) => m.boundsApproximate).map((m) => m.file);
+  const exact = measures.filter((m) => !m.boundsApproximate);
+  if (approximate.length) {
+    summary.push(`geometry unknown for ${approximate.length} file(s) (approximate static analysis): ${approximate.slice(0, 6).join(", ")}${approximate.length > 6 ? ` +${approximate.length - 6} more` : ""} — judge these from the render matrix, not the numbers below`);
+  }
   const modes = <T>(values: T[]): T | undefined => {
     const counts = new Map<T, number>();
     for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
@@ -520,28 +557,30 @@ export function compareSvgSet(measures: readonly SvgMeasure[]): { summary: strin
   measures.forEach((m) => {
     if (m.cornerLanguage !== modes(corners)) outliers.push({ file: m.file, check: "corners", detail: `corner language "${m.cornerLanguage}" differs from set mode "${modes(corners)}"` });
   });
-  const masses = measures.map((m) => m.inkShare ?? 0).filter((v) => v > 0);
+  const masses = exact.map((m) => m.inkShare ?? 0).filter((v) => v > 0);
   const massMedian = median(masses);
   if (massMedian > 0) {
-    summary.push(`visual mass (ink share): median ${(massMedian * 100).toFixed(1)}%`);
-    measures.forEach((m) => {
+    summary.push(`visual mass (ink share): median ${(massMedian * 100).toFixed(1)}% across ${exact.length} exact measure(s)`);
+    exact.forEach((m) => {
       if (m.inkShare === null || m.inkShare === 0) return;
       const delta = (m.inkShare - massMedian) / massMedian;
       if (Math.abs(delta) >= 0.35) outliers.push({ file: m.file, check: "mass", detail: `ink share ${(m.inkShare * 100).toFixed(1)}% is ${Math.abs(Math.round(delta * 100))}% ${delta > 0 ? "heavier" : "lighter"} than median` });
     });
+  } else if (exact.length) {
+    summary.push("visual mass: no measurable ink in exact measures");
   }
-  measures.forEach((m) => {
+  exact.forEach((m) => {
     if (!m.centerOffset) return;
     if (Math.abs(m.centerOffset.dx) > 1.5 || Math.abs(m.centerOffset.dy) > 1.5) {
       const axis = Math.abs(m.centerOffset.dy) >= Math.abs(m.centerOffset.dx) ? `${m.centerOffset.dy > 0 ? "+" : ""}${m.centerOffset.dy}px vertical` : `${m.centerOffset.dx > 0 ? "+" : ""}${m.centerOffset.dx}px horizontal`;
       outliers.push({ file: m.file, check: "center", detail: `optical center offset ${axis} from canvas center` });
     }
   });
-  const paddings = measures.map((m) => m.padding).filter((v): v is number => v !== null && Number.isFinite(v));
+  const paddings = exact.map((m) => m.padding).filter((v): v is number => v !== null && Number.isFinite(v));
   const padMedian = median(paddings);
   if (paddings.length) {
-    summary.push(`padding: median ${Math.round(padMedian * 100) / 100} units`);
-    measures.forEach((m) => {
+    summary.push(`padding: median ${Math.round(padMedian * 100) / 100} units across ${exact.length} exact measure(s)`);
+    exact.forEach((m) => {
       if (m.padding === null) return;
       if (m.padding < 0) outliers.push({ file: m.file, check: "padding", detail: `artwork overflows the viewBox by ${Math.abs(Math.round(m.padding * 100) / 100)} units` });
       else if (padMedian > 0 && m.padding < padMedian * 0.4) outliers.push({ file: m.file, check: "padding", detail: `padding ${m.padding} is under half the set median ${Math.round(padMedian * 100) / 100} — edge crowding` });
@@ -552,17 +591,20 @@ export function compareSvgSet(measures: readonly SvgMeasure[]): { summary: strin
   measures.forEach((m, i) => {
     if (canvases[i] !== modes(canvases)) outliers.push({ file: m.file, check: "canvas", detail: `canvas ${canvases[i]} differs from set mode ${modes(canvases)}` });
   });
-  return { summary, outliers: outliers.slice(0, 48) };
+  return { summary, outliers: outliers.slice(0, 48), approximate };
 }
 
 // ─────────────────────────── runners ─────────────────────────────────────
 
-const relative = (cwd: string, file: string) => { const r = path.relative(cwd, file); return r.startsWith("..") ? file : r; };
+const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
 
 async function readSvg(file: string, cwd: string): Promise<{ xml: string; resolved: string }> {
-  const resolved = path.resolve(cwd, file.replace(/^@/, ""));
-  const root = await fs.realpath(cwd);
-  if (!resolved.startsWith(root)) throw new Error("SVG path must stay inside the workspace");
+  const root = realRoot(cwd);
+  const candidate = path.resolve(cwd, file.replace(/^@/, ""));
+  const resolved = await fs.realpath(candidate).catch(() => {
+    throw new Error("SVG path must stay inside the workspace");
+  });
+  if (!containsPath(root, resolved)) throw new Error("SVG path must stay inside the workspace");
   const stat = await fs.stat(resolved);
   if (!stat.isFile() || stat.size > 2 * 1024 * 1024) throw new Error("SVG must be a regular file under 2 MiB");
   return { xml: await fs.readFile(resolved, "utf8"), resolved };
@@ -580,13 +622,17 @@ export async function svgInspectRun(params: { path?: unknown; paths?: unknown; f
   const single = measures.length === 1 ? measures[0] : undefined;
   const set = measures.length > 1 ? compareSvgSet(measures) : undefined;
   const blocking = measures.filter((m) => m.activeContent.length > 0 || m.unresolvedRefs.length > 0 || m.idCollisions.length > 0).length;
+  const approximateFiles = measures.filter((m) => m.boundsApproximate).map((m) => m.file);
   return {
     files: measures.map((m) => m.file),
     measures: measures.map((m) => ({ ...m, elements: m.elements })),
     ...(single ? { single } : {}),
     ...(set ? { set } : {}),
     blocking,
-    note: "Geometry from source, not taste: stroke/mass/center/padding outliers flag the icon that drifted from its siblings. Bounds apply translate/scale only (see boundsApproximate). Small-size legibility needs the render matrix plus vision judgment.",
+    ...(approximateFiles.length ? { approximateGeometry: approximateFiles } : {}),
+    note: approximateFiles.length
+      ? `Static geometry is APPROXIMATE for ${approximateFiles.length} file(s) (see approximationCauses per measure): final visual verification must use the render matrix plus vision judgment, not the padding/center/mass estimates.`
+      : "Geometry from source, not taste: stroke/mass/center/padding outliers flag the icon that drifted from its siblings. Bounds apply translate/scale only (see boundsApproximate). Small-size legibility needs the render matrix plus vision judgment.",
   };
 }
 

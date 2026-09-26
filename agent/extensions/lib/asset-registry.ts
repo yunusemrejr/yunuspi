@@ -17,6 +17,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { containsPath, realRoot } from "./path-safety.ts";
 
 export const ASSET_REGISTRY_VERSION = 1;
 const MAX_ASSETS = 500;
@@ -223,9 +224,14 @@ export async function registerAsset(
   params: { path: string } & Record<string, unknown>, cwd: string,
 ): Promise<{ record: AssetRecord; duplicateOf: string | null }> {
   if (typeof params.path !== "string" || !params.path) throw new Error("asset_register needs a workspace-relative path");
-  const root = await fs.realpath(cwd);
-  const resolved = path.resolve(root, params.path.replace(/^@/, ""));
-  if (!resolved.startsWith(root)) throw new Error("Asset path must stay inside the workspace");
+  const root = realRoot(cwd);
+  const candidate = path.resolve(root, params.path.replace(/^@/, ""));
+  // The leaf itself must resolve inside the root: a symlink inside the
+  // workspace pointing outside is an escape, not a registration.
+  const resolved = await fs.realpath(candidate).catch(() => {
+    throw new Error("Asset path must stay inside the workspace");
+  });
+  if (!containsPath(root, resolved)) throw new Error("Asset path must stay inside the workspace");
   const stat = await fs.stat(resolved);
   if (!stat.isFile() || stat.size > 40 * 1024 * 1024) throw new Error("Asset must be a regular file under 40 MiB");
   const bytes = await fs.readFile(resolved);

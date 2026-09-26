@@ -24,6 +24,7 @@ import { redactSecrets } from "./memory-redaction.ts";
 import { sniffImage } from "./design-studio.ts";
 import { qaFolder } from "./creative-qa.ts";
 import { ASSET_ROLES, registerAsset, roleConstraints, type AssetRole } from "./asset-registry.ts";
+import { containsPath, realRoot, relativeOrAbsolute } from "./path-safety.ts";
 import { directionSummary, type CreativeDirection } from "./creative-direction.ts";
 
 export interface ImageBackend {
@@ -134,7 +135,7 @@ export function buildImageRequest(brief: GenerationBrief, params: { seed?: unkno
   return body;
 }
 
-const relative = (cwd: string, file: string) => { const r = path.relative(cwd, file); return r.startsWith("..") ? file : r; };
+const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
 
 async function postJson(apiUrl: string, key: string, endpoint: string, body: unknown, signal: AbortSignal | undefined, timeoutMs: number): Promise<any> {
   const deadline = AbortSignal.timeout(timeoutMs);
@@ -224,10 +225,13 @@ export async function imageEditRun(
   const backend = resolveImageBackend(env);
   if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
   if (typeof params.path !== "string" || !params.path) throw new Error("image_edit needs path (source image in the workspace)");
-  const root = await fs.realpath(cwd);
+  const root = realRoot(cwd);
   const resolveIn = async (value: string): Promise<string> => {
-    const resolved = path.resolve(root, value.replace(/^@/, ""));
-    if (!resolved.startsWith(root)) throw new Error("Edit inputs must stay inside the workspace");
+    const candidate = path.resolve(root, value.replace(/^@/, ""));
+    const resolved = await fs.realpath(candidate).catch(() => {
+      throw new Error("Edit inputs must stay inside the workspace");
+    });
+    if (!containsPath(root, resolved)) throw new Error("Edit inputs must stay inside the workspace");
     const stat = await fs.stat(resolved);
     if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error("Edit inputs must be regular files under 20 MiB");
     return resolved;

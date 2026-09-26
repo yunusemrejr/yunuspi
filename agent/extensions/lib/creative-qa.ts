@@ -26,6 +26,7 @@ import {
   type Rgba,
 } from "./image-analysis.ts";
 import { directionSummary, matchAvoidSignals, type CreativeDirection } from "./creative-direction.ts";
+import { relativeOrAbsolute } from "./path-safety.ts";
 
 export type QAVerdict = "PASS" | "WARN" | "FAIL" | "UNKNOWN";
 
@@ -51,7 +52,7 @@ export const VIEWPORT_PRESETS: Record<string, { width: number; height: number }>
   desktop: { width: 1440, height: 900 },
 };
 
-const relative = (cwd: string, file: string) => { const r = path.relative(cwd, file); return r.startsWith("..") ? file : r; };
+const relative = (cwd: string, file: string): string => relativeOrAbsolute(cwd, file);
 
 /** Fresh artifact folder under .pi/<area> (git-ignored), else a caller-owned
  * workspace folder. Mirrors the studioFolder contract. */
