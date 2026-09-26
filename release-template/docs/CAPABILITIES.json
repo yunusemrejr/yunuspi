@@ -3021,7 +3021,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 530
+        "line": 516
       },
       {
         "name": "or-provider",
@@ -3154,11 +3154,6 @@
         "line": 1724
       },
       {
-        "name": "task-state",
-        "source": "agent/extensions/task-state.ts",
-        "line": 166
-      },
-      {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
         "line": 549
@@ -3171,7 +3166,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 299
+        "line": 285
       },
       {
         "name": "websearch",
@@ -3327,7 +3322,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -3701,7 +3696,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -3769,12 +3764,6 @@
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
         "line": 254,
-        "kind": "literal"
-      },
-      {
-        "name": "task_state",
-        "source": "agent/extensions/task-state.ts",
-        "line": 121,
         "kind": "literal"
       },
       {
@@ -3945,7 +3934,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 222,
+        "line": 220,
         "kind": "literal"
       },
       {
@@ -4173,7 +4162,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 377,
+        "line": 375,
         "kind": "literal"
       },
       {
@@ -4198,12 +4187,6 @@
         "name": "sys_probe",
         "source": "agent/extensions/sys-probe.ts",
         "line": 254,
-        "kind": "literal"
-      },
-      {
-        "name": "task_state",
-        "source": "agent/extensions/task-state.ts",
-        "line": 121,
         "kind": "literal"
       },
       {
@@ -4447,11 +4430,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 658,
-      "registrationSites": 78,
+      "sourceFiles": 651,
+      "registrationSites": 77,
       "indirectRegistrationSites": 18,
-      "stableRegistrationRows": 110,
-      "uniqueStableTools": 109,
+      "stableRegistrationRows": 109,
+      "uniqueStableTools": 108,
       "dynamicOwnerCount": 14,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4624,10 +4607,6 @@
       },
       {
         "path": "agent/extensions/sys-probe.ts",
-        "exists": true
-      },
-      {
-        "path": "agent/extensions/task-state.ts",
         "exists": true
       },
       {
