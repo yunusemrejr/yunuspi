@@ -1200,7 +1200,7 @@ export class BackgroundTaskRegistry {
     const byName = running[0] ?? named.sort((a, b) => b.startTime - a.startTime)[0];
     if (byName) return byName;
     const known = [...this.tasks.values()].slice(-6).map((task) => `${task.id}${task.name ? ` (${task.name})` : ""}`);
-    throw new Error(`Unknown background task ID or name: ${id}${known.length ? `. Known: ${known.join(", ")}` : ""}`);
+    throw new Error(`Unknown background task ID or name: ${id}${known.length ? `. Known: ${known.join(", ")}` : ". No bg_run tasks are registered."} Only bg_run task receipts belong here. Managed Bash helper handles use process; native subagent run IDs use subagent status. Automatic councils and reviewers deliver their own results and are not bg_run tasks.`);
   }
 
   async stopTask(

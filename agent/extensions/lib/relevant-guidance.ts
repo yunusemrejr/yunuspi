@@ -25,6 +25,7 @@ import { askJev } from "./jev-client.ts";
 import { createInterventionSession } from "./intervention-session.ts";
 import { guidanceHintIntent } from "./intervention-intents.ts";
 import { registerShadowSource } from "./intervention-registry.ts";
+import { classifyBashCommand } from "./bash-routing.ts";
 
 const ENTRY = "relevant-guidance";
 const LIMIT = 96; // bounded recent delivery receipts, not a lifetime usage quota
@@ -33,12 +34,16 @@ const MAX_RUN_HINTS = 20;
 const MAX_RESTORE_ENTRIES = 2000; // restore is metadata recovery, not a history scan
 // A finite line limit can still return the entire file (for example 40 lines
 // requested from a 21-line skill). Verify returned bytes, not the limit flag.
-function returnedWholeSkill(file: string, content: any): boolean {
+function returnedSkillText(file: string, content: any, range?: { offset?: number; limit?: number }): boolean {
   try {
     const stat = fs.statSync(file);
     if (!stat.isFile() || stat.size > 128 * 1024) return false;
-    const expected = fs.readFileSync(file, 'utf8');
-    return Array.isArray(content) && content.some(part => part?.type === 'text' && part.text === expected);
+    const body = fs.readFileSync(file, 'utf8');
+    const expected = range?.offset ? body.split('\n').slice(range.offset - 1, range.limit === undefined ? undefined : range.offset - 1 + range.limit).join('\n') : body;
+    // Native full reads retain their exact-byte contract. Bash may append a
+    // router hint; require the actual requested text, not a path in stdout.
+    return Array.isArray(content) && content.some(part => part?.type === 'text' && typeof part.text === 'string'
+      && (range ? Boolean(expected.trim()) && part.text.includes(expected.trimEnd()) : part.text === expected));
   } catch { return false; }
 }
 const REVIEW_CONTEXT = 'skill-review-context';
@@ -788,6 +793,8 @@ export function createRelevantGuidance(pi: any) {
   return {
     beforeToolCall(event: any) {
       if (!reviewEnabled()) return;
+      const shellRead = event.toolName === 'bash' && typeof event.input?.command === 'string' ? classifyBashCommand(event.input.command)?.readTarget : undefined;
+      if (shellRead && skills.some(skill => skill.file === checkpointPath(shellRead.path, cwd))) return;
       const supplied = event.input?.path ?? event.input?.file_path;
       const mutation = ['edit','write'].includes(event.toolName) || event.toolName === 'bulk_edit' && event.input?.action === 'apply';
       const file = typeof supplied === 'string' && supplied.length <= 4096 ? checkpointPath(supplied,cwd) : '';
@@ -1157,15 +1164,19 @@ export function createRelevantGuidance(pi: any) {
       // Discovery/status is not execution: listing agents must not suppress
       // subsequent workflow guidance for the actual delegated work.
       if ((name !== "project_report" || input.view === "workspace") && (name !== "subagent" || !input.action)) used.add(name);
-      const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : "";
+      const shellRead = name === 'bash' && typeof input.command === 'string' ? classifyBashCommand(input.command)?.readTarget : undefined;
+      const file = typeof input.path === "string" ? checkpointPath(input.path, cwd) : shellRead ? checkpointPath(shellRead.path, cwd) : "";
       const knownSkillRead = name === "read" && file && skills.some(s => s.file === file);
+      const shellSkillRead = shellRead && skills.some(skill => skill.file === file)
+        && event.details?.execution?.exitCode === 0 && event.details?.deduplicated !== true
+        && returnedSkillText(file, event.content, shellRead);
       const completeRead = (input.offset === undefined || input.offset === 1)
         && event.details?.truncation?.truncated !== true && event.details?.deduplicated !== true
-        && (input.limit === undefined || knownSkillRead && returnedWholeSkill(file, event.content));
+        && (input.limit === undefined || knownSkillRead && returnedSkillText(file, event.content));
       // The harness points agents at one section ("Start at ... line N"), so a
       // successful ranged read of a skill is consumption too, not a miss.
       const sectionRead = knownSkillRead && !completeRead && event.isError !== true && typeof input.offset === "number";
-      if (knownSkillRead && (completeRead || sectionRead) && !read.has(file)) {
+      if ((knownSkillRead && (completeRead || sectionRead) || shellSkillRead) && !read.has(file)) {
         add({ key: "apply:skill-workflow", text: 'Apply the skill to this task: identify the relevant inputs, next action and observable success check. Use the smallest applicable workflow; skip unrelated sections. Missing evidence stays unknown. Verify the artifact or postcondition before claiming success; reading instructions alone is not completion.' + referencePointer(file) });
         read.add(file); if (read.size > 48) read.delete(read.values().next().value!);
         contextSkill(52);

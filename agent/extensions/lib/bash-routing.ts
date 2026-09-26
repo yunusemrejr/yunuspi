@@ -30,6 +30,9 @@ export type BashRoute = {
   hint: string;
   /** Literal replacement tool call shown in a block reason. */
   replacement?: string;
+  /** Literal single-file view, for consumers that verify the returned text.
+   * Absent for expansions, pipelines and commands with peeled cwd wrappers. */
+  readTarget?: { path: string; offset?: number; limit?: number };
 };
 
 const METACHARS = "|&;<>()`$";
@@ -150,7 +153,7 @@ export function classifyBashCommand(command: string): BashRoute | null {
   if (!match || !peeled) return match;
   // A peeled prefix means the command line carried cwd/timeout context the
   // replacement cannot reproduce: hint only, never a blockable replacement.
-  const { replacement: _dropped, ...advisory } = match;
+  const { replacement: _dropped, readTarget: _readTarget, ...advisory } = match;
   return { ...advisory, severity: "annotate" as const };
 }
 
@@ -252,6 +255,7 @@ function classifySimple(raw: string): BashRoute | null {
       severity: "escalate",
       hint: "Use the read tool instead of `cat`: bounded, paginated output with line numbers.",
       replacement: call("read", { path: args[0] }),
+      ...(!/[$`*?\[\]{}~]/.test(args[0]) ? { readTarget: { path: args[0] } } : {}),
     };
   }
 
@@ -280,6 +284,7 @@ function classifySimple(raw: string): BashRoute | null {
           severity: "escalate",
           hint: "Use the read tool with offset/limit instead of `sed -n`.",
           replacement: call("read", { path: file, offset: from, limit: to - from + 1 }),
+          ...(from >= 1 && !/[$`*?\[\]{}~]/.test(file) ? { readTarget: { path: file, offset: from, limit: to - from + 1 } } : {}),
         };
       }
     }

@@ -307,6 +307,41 @@ test('a bounded read that returns the entire skill satisfies review after compac
     assert.equal(f.edit('index.php'),undefined,'reading beyond EOF returned all instructions');
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('successful Bash skill views consume verified text and suppress repeated workflow hints', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-shell-read-'));
+  const name = 'python-software-engineering', file = path.join(dir, name, 'SKILL.md');
+  const lines = ['# Python workflow', 'Inspect the current parser inputs.', 'Fix the smallest confirmed defect.', 'Run the focused behavior checks.', 'Report the measured result.'];
+  const body = lines.join('\n') + '\n';
+  fs.mkdirSync(path.dirname(file)); fs.writeFileSync(file, body);
+  try {
+    for (const [command, output] of [[`cat '${file}'`, body], [`sed -n '2,4p' '${file}'`, lines.slice(1, 4).join('\n') + '\n']]) {
+      const f = fixture([name], dir); f.start('Implement Python');
+      assert.equal(f.g.beforeToolCall({ toolName: 'bash', input: { command } }), undefined, 'a known workflow read must not be blocked by its own required review');
+      const record = (text, exitCode = 0) => f.g.record({ toolName: 'bash', input: { command }, details: { execution: { exitCode } }, content: [{ type: 'text', text }] });
+      record(`Read ${file}`);
+      assert.equal(f.edit('parser.py')?.block, true, 'mentioning a path cannot establish consumption');
+      record(output, 1);
+      assert.equal(f.edit('parser.py')?.block, true, 'a failed shell command is not a read receipt');
+      record(output + '\n[bash-router] Use a bounded read when useful.');
+      assert.equal(f.edit('parser.py'), undefined);
+      assert.equal((await f.decide({ action: 'inspect' })).details.skills.find(skill => skill.name === name).status, 'read');
+      const receipts = f.entries.length;
+      record(output);
+      assert.equal(f.entries.length, receipts, 're-reading cannot duplicate the consumption snapshot');
+      for (let index = 0; index < 4; index++) {
+        f.start('Continue to implement the Python parser');
+        assert.ok(!f.g.candidates().some(hint => hint.skill === file));
+      }
+    }
+    for (const command of [`echo '${file}'`, `cat '${file}' > /dev/null`, `cat '${dir}/$WORKFLOW/SKILL.md'`, `cd '${dir}' && cat '${name}/SKILL.md'`]) {
+      const f = fixture([name], dir); f.start('Implement Python');
+      f.g.record({ toolName: 'bash', input: { command }, details: { execution: { exitCode: 0 } }, content: [{ type: 'text', text: body }] });
+      assert.equal(f.edit('parser.py')?.block, true, 'ambiguous commands cannot establish which workflow was viewed');
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('unchanged skill guidance keeps its position across tool continuations', () => {
   const f=fixture();f.start('Implement Python');
   const user={role:'user',content:'Implement Python'};

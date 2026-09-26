@@ -22,6 +22,7 @@ test('real finished tasks resolve by name and notify with their output tail', as
   assert.match(sent[0].content,/<output-tail>[\s\S]*Missing symbol Foo at Bar\.java:12/,'a failure carries its cause, not only the exit code');
   assert.match(sent[0].content,/Do not call bg_status or bg_logs to reconfirm/);
   assert.throws(()=>registry.resolveTask('unknown-server'),/Known: .*targeted compile/);
+  assert.throws(()=>registry.resolveTask('unknown-server'),/Only bg_run task receipts belong here.*helper handles use process.*subagent run IDs use subagent status.*councils and reviewers deliver their own results/);
  } finally { await registry.stopAllRunning?.('shutdown'); fs.rmSync(root,{recursive:true,force:true}); }
 });
 
