@@ -345,7 +345,7 @@ disables the sensor.
 
 `agent/extensions/lib/micro-intelligence/jev-decisions.ts` defines typed
 Jev/Kev decisions, each with a question builder and
-calibrated acceptance bars in one registry so call sites cannot drift
+heuristic acceptance bars in one registry so call sites cannot drift
 into ad-hoc thresholds: requirement-to-evidence closure, final-answer
 claim/evidence verification, high-blast-radius tool-intent alignment,
 Observer/Watchmaker admission and focus, quality-review aspect
@@ -399,18 +399,36 @@ tools, no writes, validated JSON outputs, ≤ 8,000 input characters,
 
 `micro_task` is available from the first model turn. For ranking and grouping,
 `action:"analyze"` sends one bounded packet to the existing Jev/Kev judge:
-`input` gives the criterion, `items` contains 2–16 unique `{id,text,source}`
-records, and optional `categories` supplies 2–8 labels. Results contain ranked
-IDs, category groups, confidence and source references; original evidence
-stays with its existing owner. Use native `run` kinds when the task needs a
+`input` gives the task, `items` contains 2–16 unique `{id,text,source}`
+records, and optional `categories` supplies 2–8 labels. Optional `reference`
+holds the requirements or expected behavior that define a comparison;
+`criteria` supplies up to four `{id,question}` yes/no dimensions. Every question
+sees the same intact evidence and reference, supplied once as data. Results retain
+ranked IDs, independent criterion scores/rankings, the complete category
+distribution (including unknown), winner margin and source references. No
+automatic weighting or threshold fitting combines the dimensions. Original
+evidence stays with its existing owner. Use native `run` kinds when the task needs a
 short generative analysis. Relevant guidance points tasks toward this shared
 helper before full child delegation when no tools are needed.
 
-The analysis packet is capped at 16,000 characters and uses the judge's
+The analysis state is capped at 16,000 characters, the serialized state plus
+questions at the judge's 32,768-character limit, and each batch at 64 questions.
+Incomplete or inconsistent distributions violate the [Choice contract](https://docs.typesafe.ai/primitives/choice) and cannot become confident winners;
+uncertain category results remain ungrouped, with their valid soft alternatives
+available for inspection. Analysis uses the judge's
 existing bounded remote-input policy, caching, accounting and cancellation.
 A manually supplied packet offloads reasoning; it does not by itself prove
 that fewer input tokens reached the main model. Automatic finding consolidation
 reduces repeated parent-facing prose while retaining access to originals.
+
+The adaptation follows [Just Ask Jev, sections 4.2–4.4](https://arxiv.org/pdf/2609.29429v1):
+preserve probability evidence and the reference defining a judgment rather than
+elaborating prompts or reducing every answer to its winning label. The paper's
+ranking results do not establish calibration on YunusPi tasks; fitted thresholds
+also hurt some evaluated cases. Existing grouping/uncertainty bars remain
+heuristics, and uncertain cases retain the caller's fallback. Structural fixture
+tests establish packet capacity, validation and evidence preservation, not live
+model accuracy or measured provider-token savings.
 
 A six-item synthetic ranking/categorization probe on 2026-09-26 used one
 twelve-question request: 646 ms, 1,274 judge input tokens and $0.000053508.

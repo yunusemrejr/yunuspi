@@ -71,6 +71,20 @@ test("choice decisions validate the winner and its distribution", async () => {
       { judge: judgeWith({ topology: { choice: "swarm", probabilities: { single: 0.1, swarm: 0.7, fusion: 0.2 } } }) });
     assert.equal(good.ok, true);
     assert.deepEqual(good.verdict, { topology: "swarm" });
+    assert.deepEqual(good.probabilities,{single:.1,swarm:.7,fusion:.2});
+    assert.equal(good.margin,.7-.2);
+
+    for(const probabilities of [{swarm:.99},{single:.8,swarm:.9,fusion:.1},{single:.8,swarm:.1,fusion:.1}]){
+      const malformed=await askTypedDecision('delegation-topology',{state:{task:'t'}},
+        {judge:judgeWith({topology:{choice:'swarm',probabilities}})});
+      assert.equal(malformed.ok,false);
+      assert.equal(malformed.reason,'invalid-distribution');
+    }
+    const tied=await askTypedDecision('delegation-topology',{state:{task:'t'}},
+      {judge:judgeWith({topology:{choice:'swarm',probabilities:{single:.5,swarm:.5,fusion:0}}})});
+    assert.equal(tied.ok,false,'an exact tie does not justify replacing the existing choice');
+    assert.equal(tied.margin,0);
+    assert.deepEqual(tied.probabilities,{single:.5,swarm:.5,fusion:0},'abstention retains soft evidence');
 
     const weak = await askTypedDecision("recovery-strategy",
       { state: { failure: "f" } },

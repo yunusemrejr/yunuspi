@@ -406,6 +406,17 @@ test('malformed typed judgments never reach the cache or report success', async 
     harness(async () => jsonOk({ answers }));
     assert.equal((await jev.askJev('invalid', 'synthetic evidence', { ping: { type: 'noul' } })).ok, false);
   }
+  const question={pick:{type:'choice',criteria:{a:'First',b:'Second',unknown:'Unclear'}}};
+  for(const probabilities of [{a:.99},{a:.7,b:.6,unknown:.1},{a:.1,b:.8,unknown:.1},{a:.9,b:.1,outside:0}]){
+    harness(async()=>jsonOk({answers:{pick:{type:'choice',choice:'a',probabilities}}}));
+    assert.equal((await jev.askJev('invalid-choice','synthetic evidence',question)).ok,false);
+  }
+  harness(async()=>jsonOk({answers:{pick:{type:'choice',choice:'a',probabilities:{a:.7,b:.2,unknown:.1},confidence:.4}}}));
+  const valid=await jev.askJev('valid-choice','synthetic evidence',question);
+  assert.equal(valid.ok,true);
+  assert.deepEqual(jev.readJevChoice(valid.answers.pick,['a','b','unknown']),{
+    choice:'a',probability:.7,probabilities:{a:.7,b:.2,unknown:.1},margin:.7-.2,modelConfidence:.4,
+  });
 });
 
 test('one deadline bounds the entire alias cascade and reports an error-colored helper outcome', async () => {

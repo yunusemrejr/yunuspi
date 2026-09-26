@@ -210,14 +210,17 @@ test('micro_task analyzes a whole evidence packet once with stable IDs, categori
   let calls = 0;
   const f = fixture(t, { judge: async (site, state, questions, options) => {
     calls++; assert.equal(site, 'item-analysis'); assert.equal(Object.keys(questions).length, 6);
-    assert.ok(questions.relevance_0.instructions.includes('The session cookie is exposed to scripts.'));
-    assert.ok(questions.category_0.instructions.includes('The session cookie is exposed to scripts.'), 'each typed judgment is grounded in its actual evidence, not an ambiguous array index');
+    assert.equal(state.items[0].text,'The session cookie is exposed to scripts.');
+    assert.match(questions.relevance_0.instructions,/state\.items\[0\].*id "auth"/);
+    assert.match(questions.category_0.instructions,/state\.items\[0\].*id "auth"/);
+    assert.ok(!JSON.stringify(questions).includes(state.items[0].text),'all independent questions share the original evidence once');
+    assert.ok(options.protect.includes('items'));
     assert.deepEqual(state.categories, ['security', 'performance']); assert.ok(options.signal instanceof AbortSignal);
     return { ok: true, answers: {
       relevance_0: { noul: .95 }, relevance_1: { noul: .1 }, relevance_2: { noul: .5 },
       category_0: { choice: 'c0', probabilities: { c0: .9, c1: .05, unknown: .05 } },
       category_1: { choice: 'c1', probabilities: { c0: .05, c1: .9, unknown: .05 } },
-      category_2: { choice: 'c0', probabilities: { c0: .52, c1: .48 } },
+      category_2: { choice: 'c0', probabilities: { c0: .52, c1: .48, unknown: 0 } },
     }, usage: { model: 'fixture/judge', inputTokens: 100, costUsd: .0000042, ms: 2, cached: false } };
   } });
   const args = { action: 'analyze', input: 'Prioritize authentication correctness issues', categories: ['security', 'performance'], items: [
@@ -231,12 +234,64 @@ test('micro_task analyzes a whole evidence packet once with stable IDs, categori
   assert.equal(result.ranked[0].source, args.items[0].source);
   assert.deepEqual(result.groups, [{ category: 'security', ids: ['auth'] }, { category: 'performance', ids: ['cache'] }]);
   assert.deepEqual(result.uncertain, ['unknown']);
+  assert.deepEqual(result.ranked[1].categoryDistribution,[{category:'security',probability:.52},{category:'performance',probability:.48},{category:null,probability:0}]);
+  assert.equal(result.ranked[1].categoryMargin,.52-.48);
   assert.ok(!JSON.stringify(result).includes(args.items[0].text), 'the main session receives references, not repeated source text');
   for (const patch of [{ model: 'fixture/small' }, { privateInput: false }])
     assert.equal((await f.run({ ...args, ...patch })).skipped, 'incompatible-analysis-options');
   assert.equal((await f.run({ ...args, items: [args.items[0], args.items[0]] })).skipped, 'invalid-analysis');
   assert.equal((await f.run({ ...args, items: Array.from({ length: 16 }, (_, i) => ({ id: String(i), text: 'a'.repeat(1200) })) })).skipped, 'input-budget');
   assert.equal(calls, 1, 'invalid packets never reach the remote judge');
+});
+
+test('micro_task batches caller criteria against an intact reference and preserves independent soft rankings',async t=>{
+  let calls=0;
+  const f=fixture(t,{judge:async(site,state,questions,options)=>{
+    calls++;assert.equal(Object.keys(questions).length,8);
+    assert.equal(state.reference,'Only changes to authentication meet the current requirement.');
+    assert.equal(state.items.length,2);assert.ok(options.protect.includes('reference'));
+    assert.match(questions.criterion_0_0.instructions,/Does the item demonstrate the required behavior\?/);
+    return {ok:true,answers:{
+      relevance_0:{noul:.9},relevance_1:{noul:.3},
+      category_0:{choice:'c0',probabilities:{c0:.8,c1:.1,unknown:.1},confidence:.6},
+      category_1:{choice:'unknown',probabilities:{c0:.2,c1:.25,unknown:.55}},
+      criterion_0_0:{noul:.9},criterion_0_1:{noul:.2},criterion_1_0:{noul:.3},criterion_1_1:{noul:.8},
+    },usage:{model:'fixture/judge',inputTokens:120,ms:3,cached:false}};
+  }});
+  const args={action:'analyze',input:'Compare these candidate changes',reference:'Only changes to authentication meet the current requirement.',
+    categories:['correctness','performance'],criteria:[{id:'requirement',question:'Does the item demonstrate the required behavior?'},{id:'risk',question:'Does the item leave a concrete regression risk?'}],
+    items:[{id:'auth',text:'The authentication test passes.'},{id:'cache',text:'Only dashboard queries changed.'}]};
+  const result=await f.run(args);
+  assert.equal(result.ok,true);assert.equal(calls,1);
+  assert.deepEqual(result.rankings,{requirement:['auth','cache'],risk:['cache','auth']});
+  assert.deepEqual(result.ranked[0].scores,{requirement:.9,risk:.3});
+  assert.equal(result.ranked[0].categoryModelConfidence,.6);
+  assert.equal(result.ranked[1].category,null);assert.equal(result.ranked[1].categoryDistribution.at(-1).probability,.55);
+  assert.deepEqual(result.uncertain,['auth','cache']);
+  assert.match(result.evidence,/calibration on this task is unmeasured/);
+  assert.ok(!JSON.stringify(result).includes(args.reference));
+  const criteria=Array.from({length:4},(_,i)=>({id:`c${i}`,question:'Does this match the reference?'}));
+  assert.equal((await f.run({...args,criteria,items:Array.from({length:16},(_,i)=>({id:`i${i}`,text:'Evidence'}))})).skipped,'question-budget');
+  const largeCriteria=criteria.map(criterion=>({...criterion,question:'criterion '.repeat(30)}));
+  assert.equal((await f.run({...args,categories:undefined,reference:undefined,criteria:largeCriteria,
+    items:Array.from({length:10},(_,i)=>({id:`i${i}`,text:'x'.repeat(1200)}))})).skipped,'input-budget','count serialized questions as well as the shared state');
+  assert.equal((await f.run({...args,criteria:[args.criteria[0],args.criteria[0]]})).skipped,'invalid-analysis');
+  assert.equal(calls,1,'invalid and oversized question sets never call the judge');
+});
+
+test('micro_task shared evidence fits a packet that duplicated question text exceeded',async t=>{
+  let calls=0;
+  const f=fixture(t,{judge:async(site,state,questions)=>{
+    calls++;assert.equal(state.items.length,12);assert.equal(Object.keys(questions).length,24);
+    assert.ok(JSON.stringify([state,questions]).length<32768);
+    return {ok:true,answers:Object.fromEntries(state.items.flatMap((item,index)=>[
+      [`relevance_${index}`,{noul:.9}],
+      [`category_${index}`,{choice:'c0',probabilities:{c0:.8,c1:.1,unknown:.1}}],
+    ])),usage:{model:'fixture/judge',inputTokens:100,ms:2,cached:false}};
+  }});
+  const items=Array.from({length:12},(_,i)=>({id:`item-${i}`,text:'x'.repeat(1200)}));
+  const result=await f.run({action:'analyze',input:'Rank defects against the supplied task',categories:['security','performance'],items});
+  assert.equal(result.ok,true);assert.equal(result.ranked.length,12);assert.equal(calls,1);
 });
 
 test('micro_task analyze cancellation keeps admission until the owned judge promise settles', async t => {

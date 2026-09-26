@@ -100,6 +100,24 @@ export type JevAnswer = {
   legend?: Record<string, string>;
 };
 
+/** Choice returns every option and a unit-sum distribution (TypeSafe's wire
+ * contract). Do not turn absent alternatives into zero-probability evidence. */
+export function readJevChoice(answer: { choice?: unknown; probabilities?: unknown; confidence?: unknown } | undefined, candidates: readonly string[]) {
+  const probabilities=answer?.probabilities;
+  const unit=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1;
+  if(!candidates.length||new Set(candidates).size!==candidates.length||!probabilities||typeof probabilities!=='object'||Array.isArray(probabilities))return;
+  const values=probabilities as Record<string,unknown>,selected=answer?.choice;
+  if(typeof selected!=='string'||!candidates.includes(selected)||Object.keys(values).length!==candidates.length
+    ||candidates.some(id=>!Object.hasOwn(values,id)||!unit(values[id])))return;
+  const entries=candidates.map(id=>[id,values[id] as number] as const);
+  // Numerical tolerance only; this does not calibrate or renormalize scores.
+  if(Math.abs(entries.reduce((sum,[,value])=>sum+value,0)-1)>1e-6)return;
+  const probability=values[selected] as number,runnerUp=Math.max(0,...entries.filter(([id])=>id!==selected).map(([,value])=>value));
+  if(probability<runnerUp)return;
+  return {choice:selected,probabilities:Object.fromEntries(entries),probability,margin:probability-runnerUp,
+    ...(unit(answer?.confidence)?{modelConfidence:answer.confidence}:{})};
+}
+
 export type JevAskResult =
   | {
       ok: true;
@@ -329,10 +347,7 @@ async function postDecisions(
       if (!Object.hasOwn(body.answers, name) || !answer || answer.type !== q.type
         || q.type === 'noul' && !unit(answer.noul)
         || q.type === 'score' && !Number.isFinite(answer.score)
-        || q.type === 'choice' && (typeof answer.choice !== 'string' || !q.criteria || !Object.hasOwn(q.criteria, answer.choice)
-          || !answer.probabilities || typeof answer.probabilities !== 'object' || Array.isArray(answer.probabilities)
-          || !Object.hasOwn(answer.probabilities, answer.choice)
-          || Object.entries(answer.probabilities).some(([id, value]) => !Object.hasOwn(q.criteria!, id) || !unit(value)))) {
+        || q.type === 'choice' && (!q.criteria || !readJevChoice(answer,Object.keys(q.criteria)))) {
         throw Error('decisions: malformed answers');
       }
     }

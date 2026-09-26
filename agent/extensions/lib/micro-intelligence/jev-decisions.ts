@@ -2,7 +2,7 @@
  *
  * Jev answers narrow typed questions (noul/choice/score) over a bounded
  * state — no prose, no authority. This registry names every production
- * decision type, its question builder, and its calibrated acceptance bars
+ * decision type, its question builder, and its heuristic acceptance bars
  * in one place so call sites cannot drift into ad-hoc thresholds.
  *
  * Contract (unchanged from jev-client): deterministic code owns
@@ -12,6 +12,7 @@
  */
 import { microMetrics } from "./metrics.ts";
 import type { JudgeFn } from "./review.ts";
+import { readJevChoice } from "../jev-client.ts";
 
 export type TypedDecisionId =
   | "requirement-closure"
@@ -39,8 +40,12 @@ export interface TypedVerdict {
   ok: boolean;
   /** Accepted verdict payload (shape depends on the decision id). */
   verdict?: Record<string, unknown>;
-  /** Confidence of the accepted verdict (0..1). */
+  /** Model probability of the verdict, not a task-calibrated accuracy claim. */
   confidence?: number;
+  /** Preserve soft alternatives even when the existing policy abstains. */
+  probabilities?: Record<string, number>;
+  margin?: number;
+  modelConfidence?: number;
   /** Machine-readable reason when !ok (low-confidence, skipped:<reason>). */
   reason?: string;
   cached?: boolean;
@@ -57,18 +62,11 @@ const choice = (instructions: string, candidates: string[]) => ({
   criteria: Object.fromEntries(candidates.map((name) => [name, null])),
 });
 
-const validProbs = (probs: unknown, candidates: readonly string[]): probs is Record<string, number> => {
-  if (!probs || typeof probs !== "object") return false;
-  return candidates.every((name) => {
-    const value = (probs as Record<string, unknown>)[name];
-    return value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1);
-  });
-};
-
 export interface TypedAnswer {
   choice?: string;
   noul?: number;
   probabilities?: Record<string, number>;
+  confidence?: number;
 }
 
 interface DecisionSpec {
@@ -91,17 +89,16 @@ const NOUL_PAIR = (yes: string, no: string) => ({
 });
 
 const acceptChoice = (
-  answer: { choice?: string; probabilities?: Record<string, number> } | undefined,
+  answer: TypedAnswer | undefined,
   candidates: readonly string[],
   key: string,
 ): TypedVerdict => {
-  const top = answer?.choice;
-  const probs = answer?.probabilities ?? {};
-  if (top && (candidates as readonly string[]).includes(top) && validProbs(probs, candidates)
-    && Number.isFinite(probs[top]) && (probs[top] as number) >= CHOICE_MIN && (probs[top] as number) <= 1) {
-    return { ok: true, verdict: { [key]: top }, confidence: probs[top] as number };
-  }
-  return { ok: false, reason: "low-confidence" };
+  const choice=readJevChoice(answer,candidates);
+  if(!choice)return {ok:false,reason:'invalid-distribution'};
+  const evidence={confidence:choice.probability,probabilities:choice.probabilities,margin:choice.margin,
+    ...(choice.modelConfidence!==undefined?{modelConfidence:choice.modelConfidence}:{})};
+  if(choice.probability>=CHOICE_MIN&&choice.margin>0)return {ok:true,verdict:{[key]:choice.choice},...evidence};
+  return {ok:false,reason:'low-confidence',...evidence};
 };
 
 const acceptNoul = (score: number | undefined, pair: ReturnType<typeof NOUL_PAIR>): TypedVerdict => {
@@ -326,7 +323,7 @@ export async function askTypedDecision(
     // Shadow callers keep their heuristic but still receive the interpreted
     // verdict for agreement calibration (ok stays false: never applied).
     metrics.skip("jev", "shadow");
-    return { ok: false, reason: "shadow", cached: judged.usage.cached, verdict: verdict.verdict, confidence: verdict.confidence };
+    return { ...verdict, ok: false, reason: "shadow", cached: judged.usage.cached };
   }
   if (verdict.ok) {
     if (opts.recordAcceptance !== false) metrics.accept("jev");
