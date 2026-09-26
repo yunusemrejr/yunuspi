@@ -187,7 +187,7 @@ export function recallTaste(
   user: TasteStore, project: TasteStore, projectId: string, domains: readonly ExpertDomainId[], limit = 6,
 ): TastePreference[] {
   const matches = (p: TastePreference) =>
-    (!p.domains.length || p.domains.some((d) => domains.includes(d))) && p.confidence >= 0.3;
+    (!domains.length || !p.domains.length || p.domains.some((d) => domains.includes(d))) && p.confidence >= 0.3;
   const scoped = project.preferences.filter((p) => p.project === projectId && matches(p));
   const global = user.preferences.filter(matches);
   const seen = new Set<string>();
