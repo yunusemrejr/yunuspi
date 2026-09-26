@@ -110,7 +110,7 @@ export function buildExpertBrief(input: ExpertDetectionInput & { projectId?: str
   if (detail.exploration) summaryParts.push("explore alternatives before building");
   if (tastePrefs.length) summaryParts.push(`${tastePrefs.length} prior${tastePrefs.length === 1 ? "" : "s"}`);
   const planSummary = criticPlanSummary(plan);
-  if (planSummary) summaryParts.push(planSummary.replace(/^Critics: /, ""));
+  if (planSummary) summaryParts.push(planSummary.replace(/^Critics: /, "").replace(/\.$/, ""));
   return {
     qualified: true, domains, taskType: detection.taskType, openEnded: detection.openEnded,
     text, summary: `Expert brief: ${summaryParts.join(" · ")}.`,

@@ -186,6 +186,11 @@ test('taste memory folds explicit direction fast and outcomes slowly',()=>{
   const scoped=foldTastePreference(store,{scope:'project',project:'acme-web',domains:['web-design'],text:'Minimal cardification',provenance:'explicit'});
   const recalled=recallTaste(scoped.store,scoped.store,'acme-web',['web-design']);
   assert.equal(recalled[0].text,'Minimal cardification','project scope wins');
+  const unfiltered=recallTaste(scoped.store,emptyTasteStore(),'',['no-such-domain']);
+  assert.ok(!unfiltered.some(p=>p.text==='Minimal cardification'),'unrelated filter hides domain-scoped priors');
+  assert.ok(unfiltered.some(p=>p.text==='Prefer restrained visual design with strong typography'),'global priors still apply');
+  const listed=recallTaste(scoped.store,emptyTasteStore(),'',[]);
+  assert.ok(listed.some(p=>p.text==='Minimal cardification'),'empty filter lists everything');
   assert.match(renderTasteContext(recalled),/priors/);
   assert.equal(renderTasteContext([]),'');
   const forgotten=forgetTastePreference(scoped.store,'Minimal cardification');
