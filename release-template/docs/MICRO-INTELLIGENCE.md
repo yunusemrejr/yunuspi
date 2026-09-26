@@ -1,7 +1,7 @@
 # Micro-intelligence architecture
 
-YunusPi layers five kinds of intelligence so the main model spends its
-reasoning on work that actually requires it:
+YunusPi combines specialized helpers so the main model can concentrate on
+the reasoning each task requires:
 
 ```text
 DETERMINISTIC HARNESS LOGIC        cheap, auditable, authoritative
@@ -153,9 +153,13 @@ test's lines. These are small fixtures, not production accuracy.
 
 The model never writes prose that reaches the main agent. It answers bounded
 yes/no questions with a calibrated probability (P(yes) from the first token of
-a few-shot prompt) and proposes source line ids. One request runs at a time;
-bursts beyond a small queue are refused as busy and three failures pause use
-for a minute. `PI_LOCAL_LM=off` disables it; the tests run with it off.
+a few-shot prompt) and proposes source line ids. Judgements, shortlist choices
+and Smol selection share one bounded FIFO and HTTP reader per process, including
+prefix warmup. Queued cancellation removes the waiting request; a transport that
+ignores cancellation retains its slot until it settles. Smol also retains its
+cross-process rate lease. Bursts beyond the queue are refused as busy and three
+judgement failures pause that client for a minute. `PI_LOCAL_LM=off` disables it;
+the tests run with it off.
 
 - **Skill-hint gate.** "Session context" skill hints come from lexical overlap
   with the whole session. They must now contain a non-generic term and, when
@@ -251,9 +255,8 @@ production review flows through provenance-preserving consolidation (see
 with per-id method/source provenance, and Observer margin notes fold
 paraphrase duplicates into the confirmed note. Guardian intervention
 deduplication stays in the owned core (existing suppression windows);
-agent-side Guardian changes would cross the core ownership boundary, so
-repeated-behavior coverage there rides the Span advisories plus those
-windows rather than a new dedup call.
+the Span sensor separately records behavior measurements without adding
+another intervention or deduplication owner.
 
 Project graph retrieval retains its literal identity, lexical and statistical
 ranking. Markdown memory search retains its existing qmd owner. The project SQLite
@@ -272,15 +275,15 @@ errors stop further paid attempts. Cache hits retain their actual model attribut
 and health exposes both routes. `PI_JEV=off` disables both.
 
 The pair validates what local layers cannot decide: ranking disagreements,
-uncertain classifications, advisory batches (request kind, verification
-need, review worth, council perspectives), and error-cause refinement.
+uncertain classifications and error-cause refinement. Prompt-kind, verification
+and review advice comes from the shared mandatory prompt analysis.
 The finding-duplicate judgment now serves bounded disambiguation inside
 finding consolidation (ambiguous mid-overlap pairs only, at most a few
 per consolidation). Related judgments batch into one call;
 identical judgments reuse the bounded process cache; simultaneous uncancelled
 identical requests share one paid call. Caller mutation cannot alter cached
-answers. The circuit breaker preserves heuristic fallback. New sites: `rank` (validation),
-`request-advisory`, `intent`, `finding-duplicate`, `classify`, and
+answers. The circuit breaker preserves heuristic fallback. Call sites include `rank` (validation),
+`intent`, `finding-duplicate`, `classify`, and
 `skill-discovery`. Skill discovery asks one typed choice/existence batch before
 launching a general-model advisor. It sends the evidence section of the brief,
 not its embedded catalog copy; a catalog over the 32 KiB budget is shortlisted
@@ -322,13 +325,11 @@ reach the remote scorer through the trace. Scoring runs at most once
 per turn end and at most every 30 seconds; unchanged traces reuse the
 fingerprint-cached score instead of rescoring.
 
-Scores reach Guardian, Observer, Watchmaker, quality and recovery logic
-only through `spanAdvisory`, which requires P(present) ≥ 0.80 AND
-deterministic corroborating evidence per signal. Anything weaker, and
-everything while `PI_SPAN_SHADOW=1` (the default), is record-only:
-measured in metrics, ledgered for cost, and benchmarked, but never
-acted on. Intervention requires shadow benchmarks on real and synthetic
-traces first.
+Production scores are record-only: measured in metrics, ledgered for cost,
+and available for comparison with deterministic outcomes. The benchmark
+helper `spanAdvisory` tests P(present) ≥ 0.80 with deterministic corroboration;
+it is not a production intervention path. Changing the shadow flag alone
+does not connect scores to Guardian, Observer or Watchmaker.
 
 Transport is OpenRouter chat completions, default route
 `respan/span-01-lite` with paid `respan/span-01` fallback when the Lite
@@ -342,8 +343,8 @@ disables the sensor.
 
 ## Typed Jev decisions
 
-`agent/extensions/lib/micro-intelligence/jev-decisions.ts` names every
-production Jev/Kev decision type, its question builder, and its
+`agent/extensions/lib/micro-intelligence/jev-decisions.ts` defines typed
+Jev/Kev decisions, each with a question builder and
 calibrated acceptance bars in one registry so call sites cannot drift
 into ad-hoc thresholds: requirement-to-evidence closure, final-answer
 claim/evidence verification, high-blast-radius tool-intent alignment,
@@ -393,14 +394,27 @@ and small source glances. Hard bounds: no recursive delegation, zero
 tools, no writes, validated JSON outputs, ≤ 8,000 input characters,
 ≤ 1,000 output tokens, per-call cost cap, and result caching.
 
-Routes are never hardcoded as available. Candidates come from
-`PI_MICRO_WORKER_ROUTES`, and eligibility gates price, quality
-evidence, health/cooldowns, AND provider privacy tier: `route-privacy`
-classifies loopback providers as local, operator-allowlisted routes
-(`PI_PRIVATE_ROUTES`) as allowed, and everything else as unknown —
-and unknown is never safe for private repository content. "Free" never
-implies safe. Without evidence the worker abstains rather than
-guessing on a random cheap route.
+`micro_task` exposes these operations through the existing tool registry.
+Use `action:"status"` to inspect eligibility without inference, `qualify` to
+refresh measured evidence, `route` to compare a bounded candidate choice,
+or `run` with a `kind` and bounded `input`.
+Unmeasured routes first run three synthetic qualification checks, without
+receiving the task input. Failed qualification cannot produce task advice.
+
+Routes come from optional `PI_MICRO_WORKER_ROUTES`, the current session
+model, and the existing economy selector. Native registry dispatch preserves
+provider authentication; the shared auxiliary ledger records each completion.
+Admission checks current
+price, workload, health and expiring quality evidence; one inference is
+capped at an estimated $0.005 and a complete invocation, including
+qualification, at $0.01. Missing price evidence is not zero cost.
+
+Private input stays with the exact current session model and endpoint, a
+literal loopback endpoint, or an operator-allowlisted route
+(`PI_PRIVATE_ROUTES`). A provider name such as "local" is not evidence that
+its transport stays on this machine. Public/synthetic input can explicitly
+set `privateInput:false`. All outputs remain advisory JSON; the worker
+cannot execute tools, edit files, or establish completion.
 
 ## Remote rerank — configured precision stage
 
@@ -422,15 +436,20 @@ from enabled status alone.
 
 ## Router shadow and qualification lab
 
-The TypeSafe Jev Router integration is shadow advisory only: the
-router suggests a model/reasoning-effort pair, YunusPi records that
-suggestion alongside its own capability-, benchmark-, health-,
-privacy-, cost-, restriction-, reliability- and cache-aware choice
-plus the actual outcome (success, latency, cost, retries, review
-outcome). The suggestion never influences routing and never bypasses
-restrictions; promotion into routing influence requires accumulated
-shadow evidence plus an explicit operator change. Router slugs are
-discovered from live model ids (configurable), never assumed.
+`micro_task({action:"route", input, candidates, currentChoice})` compares a
+qualified model's suggested route with the current YunusPi choice. Supply
+2–32 exact authenticated, scoped routes; `currentChoice` defaults to the
+session route. Optional `model` selects the judge, including a TypeSafe
+router when its route has verified pricing and passes the same admission
+checks. Unknown price never means free.
+
+Comparisons validate the returned model against the offered candidates,
+share the helper's privacy and cost limits, and remain advisory. They never
+change the selected model or run a candidate. `micro_task({action:"status"})`
+reports per-session comparison counts and agreement; session replacement
+clears the records and cancels pending comparisons. Outcome metrics remain
+unknown until a caller supplies measured outcomes through the comparison
+library; an advisory suggestion is not evidence of a successful task.
 
 The model qualification lab (`model-qual-lab.ts`,
 `agent/scripts/run-model-qual-lab.mjs --live --route p/m`) runs a
@@ -482,8 +501,8 @@ always-empty ledger were removed; production helper metrics remain authoritative
 ## Request lifecycle
 
 ```text
-before_agent_start → deterministic pass (terms, intent cues, request family)
-                   → ONE Jev advisory batch (async)
+user prompt        → mandatory prompt analysis + deterministic intent cues
+                   → one shared advisory for checkpoints and councils
 tool_search and    → deterministic eligibility → lexical order
 skill_review search → Needle head-slice rank (accepted, else fused with
                      lexical) → Jev on uncertainty/disagreement
@@ -496,9 +515,9 @@ skill hints        → lexical rank → generic-term filter → local LM relevan
 ```
 
 Controls: `PI_NEEDLE=off`, `PI_NEEDLE_SHADOW=1`,
-`PI_MICRO_ADVISORY=off`, `PI_INTENT_PRESCREEN=off`,
-`PI_MICRO_INTELLIGENCE=off`, `PI_SPAN=off`, `PI_SPAN_SHADOW=0` (leaves
-shadow record-only mode; benchmarks must justify this first),
+`PI_INTENT_PRESCREEN=off`,
+`PI_MICRO_INTELLIGENCE=off`, `PI_SPAN=off`, `PI_SPAN_SHADOW=0`
+(benchmark control; production remains record-only),
 `PI_SPAN_MODEL` / `PI_SPAN_FALLBACK`, `PI_MICRO_WORKER=off`,
 `PI_MICRO_WORKER_ROUTES`, `PI_PRIVATE_ROUTES`, `PI_RERANK=on`,
 `PI_RERANK_MODEL` / `PI_RERANK_URL`, `PI_OBSERVER_SEMANTIC_MARGINS=off`,

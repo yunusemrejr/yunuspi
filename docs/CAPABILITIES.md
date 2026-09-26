@@ -603,22 +603,24 @@ Local ML/statistical evidence ranking, context scoring and extractive handoffs; 
 
 #### micro-intelligence
 
-Deterministic/Needle3/Smol/Kompress/Jev helper stack for discovery re-ranking, evidence triage, intent pre-screening and request advisories; Jev is a bounded remote OpenRouter advisory and deterministic owners keep authority when helpers are unavailable.
+Shared Needle3, Qwen, Kompress and Jev helpers for discovery ranking, source selection, prompt analysis and evidence triage, plus qualified bounded micro tasks; deterministic owners retain safety and completion authority.
 
-**Entrypoints:** `micro_status`
+**Entrypoints:** `micro_status`, `micro_task`
 
-**Catalog tool pointers:** `micro_status`
+**Catalog tool pointers:** `micro_status`, `micro_task`
 
 **Options:**
 
 - `PI_MICRO_INTELLIGENCE`: Set to off to disable the lifecycle extension; routing, eligibility, safety and truth stay with existing owners.
 - `PI_NEEDLE`: Set to off to disable Needle re-ranking, or PI_NEEDLE_SHADOW=1 to measure without applying.
-- `PI_MICRO_ADVISORY`: Set to off to skip the per-request Jev advisory batch.
 - `PI_JEV`: Set to off to disable remote Jev calls. When enabled, bounded task/request excerpts (maximum 32768 characters) may be sent to OpenRouter.
+- `micro_task.action`: Inspect routes, refresh synthetic qualification evidence, compare a routing suggestion, or run one task without tools or writes. Values: `status`, `qualify`, `route`, `run`.
+- `PI_MICRO_WORKER_ROUTES`: Optional exact provider/model candidates; the current session route and existing economy selector are available when omitted.
+- `PI_RERANK_MODEL|VOYAGE_API_KEY`: Configure remote memory refinement after Needle; unavailable remote inference retains local order.
 
 **Related records:** `local-intelligence`, `tool-catalog`, `skill-catalog`, `context-diagnostics`
 
-**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+**Source:** [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts), [`agent/extensions/lib/needle-runtime.ts`](../agent/extensions/lib/needle-runtime.ts), [`agent/extensions/lib/jev-client.ts`](../agent/extensions/lib/jev-client.ts), [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts), [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
 
 **Documentation:** [`docs/MICRO-INTELLIGENCE.md`](MICRO-INTELLIGENCE.md)
 
@@ -1128,7 +1130,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 259; factory)
 - `audio_mix` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 277; factory)
 - `audio_synth` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 38; factory)
-- `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 576; sdk-factory)
+- `bash` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 591; sdk-factory)
 - `bg_kill` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 822; literal)
 - `bg_logs` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 776; literal)
 - `bg_run` — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 686; literal)
@@ -1155,7 +1157,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `desktop_session` — [`agent/extensions/desktop-session.ts`](../agent/extensions/desktop-session.ts) (line 15; literal)
 - `env_audit` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 34; catalog)
 - `evidence_cache` — [`agent/extensions/pi-memory/context-tools.ts`](../agent/extensions/pi-memory/context-tools.ts) (line 16; literal)
-- `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 64; literal)
+- `expert_director` — [`agent/extensions/expert-director.ts`](../agent/extensions/expert-director.ts) (line 63; literal)
 - `fetch_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 196; configured-default)
 - `get_search_content` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 197; configured-default)
 - `git_info` — [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts) (line 367; literal)
@@ -1174,7 +1176,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `memory_search` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2809; literal)
 - `memory_status` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2964; literal)
 - `memory_write` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2079; literal)
-- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 491; literal)
+- `micro_status` — [`agent/extensions/micro-intelligence.ts`](../agent/extensions/micro-intelligence.ts) (line 494; literal)
+- `micro_task` — [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts) (line 41; literal)
 - `motion_inspect` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 219; factory)
 - `music_compose` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 263; factory)
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 34; factory)
@@ -1182,7 +1185,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 821; literal)
 - `openapi_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 28; catalog)
 - `package_probe` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 26; catalog)
-- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 604; literal)
+- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 619; literal)
 - `project_intel` — [`agent/extensions/project-intelligence.ts`](../agent/extensions/project-intelligence.ts) (line 770; literal)
 - `project_memory_consolidate` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 736; literal)
 - `project_memory_forget` — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 704; literal)
@@ -1241,7 +1244,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `asset_register`, `creative_compare`, `creative_direct`, `image_generate`, `motion_inspect`, `svg_inspect`, `ui_explore`, `visual_review` (lines 98)
 - [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 20)
 - [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 75)
-- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 579)
+- [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 594)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 246)
 - [`agent/extensions/pi-lens/context-tools.ts`](../agent/extensions/pi-lens/context-tools.ts) — registration loops over definitions; literal definition names are enumerated; known tools: `ast_diff`, `context_slice`, `symbol_expand` (lines 14)
 - [`agent/extensions/pi-subagents/src/extension/fanout-child.ts`](../agent/extensions/pi-subagents/src/extension/fanout-child.ts) — registration receives the source-owned subagent definition; known tools: `subagent` (lines 192)
@@ -1290,7 +1293,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 427)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 536)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 535)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 756)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
@@ -1320,7 +1323,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 166)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 549)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1744)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 302)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 303)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3134)
 
 ### Dynamic command owners
@@ -1554,6 +1557,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/observer-journal.ts`](../agent/extensions/lib/observer-journal.ts)
 - [`agent/extensions/lib/observer-model-evidence.ts`](../agent/extensions/lib/observer-model-evidence.ts)
 - [`agent/extensions/lib/output-distiller.ts`](../agent/extensions/lib/output-distiller.ts)
+- [`agent/extensions/lib/path-safety.ts`](../agent/extensions/lib/path-safety.ts)
 - [`agent/extensions/lib/project-identity.ts`](../agent/extensions/lib/project-identity.ts)
 - [`agent/extensions/lib/project-memory-consolidate.ts`](../agent/extensions/lib/project-memory-consolidate.ts)
 - [`agent/extensions/lib/project-memory-context.ts`](../agent/extensions/lib/project-memory-context.ts)
@@ -1634,6 +1638,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/micro-intelligence/intent.ts`](../agent/extensions/lib/micro-intelligence/intent.ts)
 - [`agent/extensions/lib/micro-intelligence/jev-decisions.ts`](../agent/extensions/lib/micro-intelligence/jev-decisions.ts)
 - [`agent/extensions/lib/micro-intelligence/metrics.ts`](../agent/extensions/lib/micro-intelligence/metrics.ts)
+- [`agent/extensions/lib/micro-intelligence/micro-task.ts`](../agent/extensions/lib/micro-intelligence/micro-task.ts)
 - [`agent/extensions/lib/micro-intelligence/micro-worker.ts`](../agent/extensions/lib/micro-intelligence/micro-worker.ts)
 - [`agent/extensions/lib/micro-intelligence/model-qual-lab.ts`](../agent/extensions/lib/micro-intelligence/model-qual-lab.ts)
 - [`agent/extensions/lib/micro-intelligence/rerank.ts`](../agent/extensions/lib/micro-intelligence/rerank.ts)

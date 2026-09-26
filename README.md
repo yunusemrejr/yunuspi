@@ -14,7 +14,7 @@ The aim is practical: help the agent reuse what the harness already provides, sp
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Version 0.7.0 gives the session observer a book of working doctrine it reads, cites and annotates. It adds a design-to-code studio (analyze a mockup, cut and trace its assets, compare the build), code-quality and pre-commit review tools, desktop app control in a private virtual display, synced video captions and working transitions, and memory search that works without qmd. Matching tools are staged for the first model turn, so the agent uses them without reminders. Version 0.6.6 gave sessions continuity: the previous session's follow-ups and the project's current CI result are carried into the next session. [What changed](CHANGELOG.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Sessions combine an independent observer, timing reviewer, expert-domain guidance, project memory, local inference and bounded remote helpers. Design, browser, desktop, media and coding tools share evidence and lifecycle controls; the capability index exposes their entry points when needed. [What changed](CHANGELOG.md) · [Intelligence architecture](docs/MICRO-INTELLIGENCE.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 

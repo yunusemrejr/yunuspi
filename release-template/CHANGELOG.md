@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 — 2026-09-26
+
+Auxiliary intelligence now has working shared entry points. Project memory applies its configured remote reranker after local Needle ranking, keeps usable local order on failure, and cancels abandoned waits through the core cancellation utility. The bounded micro-worker and routing comparison are exposed through one harness tool with native model dispatch, qualification evidence and explicit cost limits. The unused parallel prompt-advice call is removed; checkpoints and councils reuse mandatory prompt analysis. Qwen judgments and source-line selection share transport and admission rather than issuing independent competing requests. JEV, Needle, Qwen, paragraph compression, Guardian, fuzzy retrieval, skills, councils and reviewers retain their roles and enabled defaults.
+
+Cancellation and failures reach their owners. Extension commands no longer launch after cancellation, signal termination is a failure, cancelled calls cannot remain stuck waiting on descendants or inherited pipes, and split UTF-8 output stays intact. Managed shell execution reuses the owned core process waiter. The maintained execution loop preserves tools' structured error flags. Intelligence clients snapshot mutable inputs, bound streamed response bytes, reject malformed rankings and worker schemas, enforce deadlines, and keep cancelled or caller-mutated results out of caches.
+
+Reviewers retain one fresh undelivered note across later quiet, duplicate or failed reviews. Observer and Watchmaker share deduplication receipts only after delivery; Watchmaker resets on session replacement, restores older persisted memos, and records its own usage. Expert Director derives the pass budget from the existing branch ledger, so omitted arguments cannot restart the review loop. A late deployment check cannot clear a newer receipt.
+
+Model selection reads pricing and exclusion evidence once per decision and reuses per-decision economy calculations. A 500-route synthetic fixture fell from 5,130 evidence-file stat calls to one; median selection time on the audit host fell from about 46 ms to 13 ms. The next decision still reads fresh evidence. This measures selector overhead, not provider latency or billed-token savings.
+
+Housekeeping recognizes closed peer receipts, preserves live-session protection, and shares the installation lease with the updater. The verifier targets the selected installed launcher. The library manifest, generated capability inventory, release templates and SVG certainty regressions are synchronized. Behavioral regressions cover the repaired cancellation, cache, review, routing, cleanup and integration boundaries.
+
 ## 0.11.0 — 2026-09-26
 
 The harness now coordinates domain excellence instead of leaving "make it great" to unguided inference. A new Expert Director infers the relevant excellence domain(s) from each request — web/UI design, visual art, SVG/iconography, motion, video, audio, frontend, backend, API, database, algorithms, distributed systems, security, ML, writing, or research — and loads bounded expert doctrine for exactly those domains: what excellent work looks like, the characteristic failure modes, the invariants, the deterministic checks, and the evidence required before claiming quality. Sixteen data-driven doctrine packs carry the knowledge, so new specialties arrive as data rather than orchestration changes, and retrieval exposes at most two packs and a bounded passage per brief.

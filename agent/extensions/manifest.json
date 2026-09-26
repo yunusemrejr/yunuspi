@@ -581,6 +581,7 @@
     "extensions/lib/micro-intelligence/jev-decisions.ts",
     "extensions/lib/micro-intelligence/route-privacy.ts",
     "extensions/lib/micro-intelligence/micro-worker.ts",
+    "extensions/lib/micro-intelligence/micro-task.ts",
     "extensions/lib/micro-intelligence/rerank.ts",
     "extensions/lib/micro-intelligence/router-shadow.ts",
     "extensions/lib/micro-intelligence/model-qual-lab.ts",

@@ -49,7 +49,7 @@ The `micro_status` tool and `/export-json` `analytics.micro` section expose
 the cheap-layer ledger: Needle head-slice re-rank counts by stage
 (tool/skill/command/intent), acceptance outcomes, shadow vs applied mode,
 embedding latency buckets, per-engine evidence outcomes (retained,
-offered, skipped, abstain reasons), advisory batches by family, pre-screen
+offered, skipped, abstain reasons), shared prompt-analysis outcomes, pre-screen
 verdicts by label, and token-window allocations for Smol and Kompress.
 The `projectedCharsSaved` and `projectedTokensAvoided` fields estimate
 characters not forwarded plus sandbox outcome categories; they use the

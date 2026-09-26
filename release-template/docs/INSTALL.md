@@ -90,7 +90,7 @@ Model weights are not bundled. A normal `--apply` attempts to install pinned, ch
 
 Direct semantic retrieval uses the `needle-query.mjs` helper. See
 `docs/MICRO-INTELLIGENCE.md` for the full pipeline, budgets, and
-observer controls (`PI_NEEDLE`, `PI_NEEDLE_SHADOW`, `PI_MICRO_ADVISORY`,
+observer controls (`PI_NEEDLE`, `PI_NEEDLE_SHADOW`,
 `PI_MICRO_INTELLIGENCE`).
 
 ## Updates and recovery
