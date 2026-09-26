@@ -67,6 +67,8 @@ Worker cache capacity zero now disables caching. Same-size asset corruption is
 repaired; executable assets are verified before load; resumable downloads validate
 ranges and discard poisoned partials under bounded attempts and deadlines.
 
+An operation timeout still terminates its wedged worker. The exact timed-out payload then waits through the existing cooldown interval before retrying; unrelated and smaller operations remain eligible. This bounded history prevents one known over-budget request from repeatedly restarting the shared worker. Failed-operation timing is recorded alongside successful calls. Observer margin comparison uses a shared JEV batch first and small local ranking jobs when the judge is unavailable, rather than sending every note through one eight-second WASM operation.
+
 Shadow results cannot reorder retrieval, suppress baseline Jev eligibility,
 change observation cues or reach council critique. Accepted semantic disagreement
 can still be checked by the configured Jev judge; weak top-result agreement does

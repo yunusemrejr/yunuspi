@@ -364,6 +364,26 @@ test("op timeout fails open and a wedged worker restarts", async () => {
   await handle.shutdown();
 });
 
+test('an exact timed-out payload backs off while smaller jobs and later retries remain available', async () => {
+  let now = 0, allow = false;
+  const factory = fakeWorkerFactory({ onPost(message, _worker, reply) {
+    if (message.op === 'init') return reply({ id: message.id, ok: true, result: { dim: 4 }, ms: 0 });
+    if (message.query === 'slow payload' && !allow) return;
+    reply({ id: message.id, ok: true, result: { ranked: [{ id: 'a', score: .99 }], margin: 0 }, ms: 1 });
+  } });
+  const handle = runtime.createNeedleRuntime({ policy: { ...policy.needlePolicy({}), maxOpTimeoutMs: 30, cooldownMs: 1000 }, now: () => now, workerFactory: factory, assetDir: fixtureAssets() });
+  const input = { query: 'slow payload', candidates: [{ id: 'a', text: 'candidate evidence' }] };
+  try {
+    assert.equal((await handle.rank(input)).reason, 'timeout');
+    assert.equal(handle.health().workerRestarts, 1);
+    assert.equal((await handle.rank(input)).reason, 'cooldown');
+    assert.equal((await handle.rank({ ...input, query: 'small useful job' })).ok, true);
+    assert.equal(handle.health().workerRestarts, 1, 'repeating known over-budget work cannot restart the worker again');
+    now = 1001; allow = true;
+    assert.equal((await handle.rank(input)).ok, true, 'same work may recover after bounded backoff');
+  } finally { await handle.shutdown(); }
+});
+
 test("crash recovery cools down after the restart budget", async () => {
   const factory = canned();
   const handle = runtime.createNeedleRuntime({

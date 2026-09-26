@@ -125,6 +125,9 @@ export function createNeedleRuntime(options: {
   // cache. Identical callers share inference while retaining their own result
   // objects and async session scope when finished() publishes telemetry.
   const inflight = new Map<string, Promise<NeedleResult<never>>>();
+  // A timeout proves this exact payload exceeded its operation budget. Do not
+  // immediately repeat it on a fresh worker; unrelated work remains available.
+  const timedOut = new Map<string, number>();
   const stats: NeedleStats = {
     calls: 0, embedCalls: 0, rankCalls: 0, classifyCalls: 0, extractCalls: 0,
     cacheHits: 0, coalescedCalls: 0, accepted: 0, shadow: 0, escalatedToJev: 0, escalatedToLlm: 0,
@@ -132,9 +135,9 @@ export function createNeedleRuntime(options: {
   };
   let shadowAgreed = 0, shadowDisagreed = 0;
 
-  const skip = (reason: NeedleSkipReason, detail?: string): NeedleResult<never> => {
+  const skip = (reason: NeedleSkipReason, detail?: string, durationMs?: number): NeedleResult<never> => {
     stats.skipReasons[reason] = (stats.skipReasons[reason] ?? 0) + 1;
-    noteHealth("ml.needle.skipped", { reason, count: 1 });
+    noteHealth("ml.needle.skipped", { reason, count: 1, ...(durationMs === undefined ? {} : { durationMs }) });
     return { ok: false, reason, ...(detail ? { detail } : {}) };
   };
 
@@ -416,7 +419,7 @@ export function createNeedleRuntime(options: {
     if (!response.ok) {
       const error = typeof response.error === "string" ? response.error : "malformed worker response";
       const reason: NeedleSkipReason = error === "timeout" ? "timeout" : "unavailable";
-      return skip(reason, error.slice(0, 160));
+      return skip(reason, error.slice(0, 160), ms);
     }
     stats.calls++;
     if (policy.shadow) stats.shadow++;
@@ -443,12 +446,24 @@ export function createNeedleRuntime(options: {
       snapshot = JSON.parse(serialized);
       identity = needleHash(serialized);
     } catch { return Promise.resolve(skip("unsupported-shape")); }
+    const retryAt = timedOut.get(identity);
+    if (retryAt !== undefined) {
+      if (retryAt > now()) return Promise.resolve(skip("cooldown", "payload exceeded its operation budget"));
+      timedOut.delete(identity);
+    }
     const existing = inflight.get(identity);
     if (existing) return existing.then(result => {
       if (!result.ok) return { ...result };
       return { ...structuredClone(result), cached: true, coalesced: true };
     });
-    const work = enqueue(snapshot, op).finally(() => {
+    const work = enqueue(snapshot, op).then(result => {
+      if (!result.ok && result.reason === 'timeout') {
+        timedOut.delete(identity);
+        timedOut.set(identity, now() + policy.cooldownMs);
+        if (timedOut.size > RING_MAX) timedOut.delete(timedOut.keys().next().value!);
+      }
+      return result;
+    }).finally(() => {
       if (inflight.get(identity) === work) inflight.delete(identity);
     });
     inflight.set(identity, work);
@@ -641,6 +656,7 @@ export function createNeedleRuntime(options: {
       if (processState[SHARED_RUNTIME] === handle) delete processState[SHARED_RUNTIME];
       embedCache.clear();
       inflight.clear();
+      timedOut.clear();
       if (reprobeTimer) clearTimeout(reprobeTimer);
       reprobeTimer = undefined;
       failAll("unavailable", "shutdown");

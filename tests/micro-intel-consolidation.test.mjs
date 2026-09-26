@@ -93,6 +93,55 @@ test("semantic margin probe confirms paraphrases above bar", async () => {
   assert.equal(await findSemanticMarginDuplicate("A long enough candidate text here.", notes, async () => { throw Error("down"); }), undefined);
 });
 
+test('margin comparisons use one judge batch and preserve distinct or uncertain notes', async () => {
+  const notes = Array.from({ length: 24 }, (_, i) => ({ id: `m${i}`, text: `The durable project lesson number ${i} has an independent condition and action.` }));
+  let asks = 0, ranks = 0, matched;
+  const rank = async () => { ranks++; throw Error('the judge already compared these notes'); };
+  const ask = async (site, state, questions, options) => {
+    asks++; assert.equal(site, 'finding-duplicate'); assert.equal(Object.keys(questions).length, 24);
+    assert.ok(options.signal); assert.ok(JSON.stringify(questions).includes(notes[23].text));
+    assert.ok(Object.values(questions).every(question => question.instructions.includes('Different causes, negations or obligations are distinct')));
+    return { ok: true, answers: Object.fromEntries(Object.keys(questions).map((id, i) => [id, { noul: i === 23 ? .95 : .1 }])), usage: { inputTokens: 300, cached: false } };
+  };
+  assert.equal(await findSemanticMarginDuplicate('A paraphrased durable lesson about a specific project condition.', notes, rank, .93, { ask, onMatch: helper => { matched = helper; } }), 'm23');
+  assert.equal(matched, 'jev'); assert.equal(asks, 1); assert.equal(ranks, 0);
+  for (const score of [.1, .5]) {
+    const answered = async (_site, _state, questions) => ({ ok: true, answers: Object.fromEntries(Object.keys(questions).map(id => [id, { noul: score }])), usage: { inputTokens: 100, cached: false } });
+    assert.equal(await findSemanticMarginDuplicate('A distinct durable condition must remain independently recorded.', notes, rank, .93, { ask: answered }), undefined);
+  }
+  assert.equal(ranks, 0, 'cosine similarity cannot override a negative or uncertain semantic comparison');
+});
+
+test('unavailable margin judge falls back to bounded local batches without dropping later notes', async () => {
+  const text = 'A durable project observation about bounded scheduling and independent evidence. '.repeat(3).slice(0, 240);
+  const notes = Array.from({ length: 24 }, (_, i) => ({ id: `m${i}`, text: `${String(i).padStart(2, '0')} ${text}`.slice(0, 240) }));
+  const seen = [], calls = [];
+  const rank = async (query, candidates) => {
+    calls.push(query.length + candidates.reduce((n, row) => n + row.text.length, 0));
+    if (calls.at(-1) > 1200) return { ok: false, reason: 'timeout' };
+    seen.push(...candidates.map(row => row.id));
+    const found = candidates.find(row => row.id === 'm23') ?? candidates[0];
+    return { ok: true, cached: false, shadow: false, ms: 1, value: { ranked: [{ id: found.id, score: found.id === 'm23' ? .98 : .4 }], margin: .1 } };
+  };
+  assert.equal(await findSemanticMarginDuplicate(text, notes, rank, .93, { ask: async () => ({ ok: false, skipped: 'unavailable' }) }), 'm23');
+  assert.deepEqual(seen, notes.map(note => note.id)); assert.ok(calls.length > 1); assert.ok(calls.every(chars => chars <= 1200));
+});
+
+test('margin comparison cancellation stops local chaining and ignores late judge matches', async () => {
+  const controller = new AbortController();
+  const notes = Array.from({ length: 24 }, (_, i) => ({ id: `m${i}`, text: 'Independent durable lesson with enough detail to fill a candidate batch. '.repeat(4).slice(0, 240) }));
+  let calls = 0, release;
+  const pending = findSemanticMarginDuplicate(notes[0].text, notes, async () => { calls++; return new Promise(resolve => { release = resolve; }); }, .93, { signal: controller.signal });
+  controller.abort();
+  assert.equal(await pending, undefined); assert.equal(calls, 1);
+  release({ ok: true, shadow: false, value: { ranked: [{ id: 'm0', score: .99 }] } });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(calls, 1);
+  const next = new AbortController(); let judged;
+  const judgeWork = findSemanticMarginDuplicate(notes[0].text, notes, undefined, .93, { signal: next.signal, ask: async () => new Promise(resolve => { judged = resolve; }) });
+  next.abort(); assert.equal(await judgeWork, undefined);
+  judged({ ok: true, answers: { duplicate_0: { noul: .99 } }, usage: { inputTokens: 1, cached: false } });
+});
+
 
 test('review grouping batches paraphrases, preserves file boundaries and avoids duplicate ranking work', async () => {
   let calls = 0, questionsSeen = 0;

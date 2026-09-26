@@ -19,7 +19,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import type { RankFn } from './micro-intelligence/review.ts';
+import { judgeDuplicateCandidates, type JudgeFn, type RankFn } from './micro-intelligence/review.ts';
+import { raceWithAbortSignal } from '@yunuspi/ai/utils/abort';
 
 export const BOOK_SECTION_BYTES = 3_400;
 export const BOOK_DEEP_READ_CHARS = 1_900;
@@ -847,7 +848,7 @@ export type MarginStore = ReturnType<typeof createMarginStore>;
 
 /** Semantic duplicate probe for a margin candidate against live notes.
  * The store's deterministic similar() already ran at add time; this
- * Needle-only pass catches paraphrase duplicates (same meaning, different
+ * Shared batch judgment catches paraphrase duplicates (same meaning, different
  * words) so repeated observations confirm one note instead of spawning
  * lookalikes. Returns the duplicated note id, or undefined to keep the
  * candidate. Never throws; unavailable ranking abstains. */
@@ -856,20 +857,40 @@ export async function findSemanticMarginDuplicate(
   notes: MarginNote[],
   rank: RankFn | undefined,
   threshold = 0.93,
+  options: { ask?: JudgeFn; signal?: AbortSignal; onMatch?: (helper: 'jev' | 'needle') => void } = {},
 ): Promise<string | undefined> {
   try {
-    if (!rank || typeof text !== 'string' || text.trim().length < 12) return undefined;
+    if (typeof text !== 'string' || text.trim().length < 12 || options.signal?.aborted) return undefined;
     const live = notes.filter((note) => !note.struckAt && typeof note.text === 'string' && note.text.trim().length >= 12).slice(0, 24);
     if (live.length < 1) return undefined;
-    const result = await rank(
-      text.slice(0, 512),
-      live.map((note) => ({ id: note.id, text: note.text.slice(0, 512) })),
-      1,
-    );
-    if (!result.ok || result.shadow) return undefined;
-    const top = result.value?.ranked?.[0];
-    if (!top || typeof top.score !== 'number' || top.score < threshold || top.score > 1) return undefined;
-    return live.some((note) => note.id === top.id) ? top.id : undefined;
+    if (options.ask) {
+      const judged = await judgeDuplicateCandidates({ id: 'candidate', text }, live, options.ask, { signal: options.signal });
+      if (options.signal?.aborted) return undefined;
+      // Distinct or uncertain judgments keep both notes. Similarity cannot
+      // overturn a completed comparison of their conditions and negations.
+      if (judged.answered) { if (judged.duplicate) options.onMatch?.('jev'); return judged.duplicate; }
+    }
+    if (!rank) return undefined;
+    const query = text.slice(0, 512);
+    let offset = 0;
+    while (offset < live.length && !options.signal?.aborted) {
+      const candidates: Array<{ id: string; text: string }> = [];
+      let chars = query.length;
+      while (offset < live.length) {
+        const note = live[offset], value = note.text.slice(0, 512);
+        if (candidates.length && chars + value.length > 1200) break;
+        candidates.push({ id: note.id, text: value }); chars += value.length; offset++;
+      }
+      // Small jobs fit the existing worker budget and let queued foreground
+      // work run between batches. Candidate embeddings remain reusable.
+      const work = rank(query, candidates, 1);
+      const result = await (options.signal ? raceWithAbortSignal(work, options.signal) : work);
+      if (options.signal?.aborted || !result.ok || result.shadow) return undefined;
+      const top = result.value?.ranked?.[0];
+      if (top && typeof top.score === 'number' && top.score >= threshold && top.score <= 1
+        && candidates.some(note => note.id === top.id)) { options.onMatch?.('needle'); return top.id; }
+    }
+    return undefined;
   } catch {
     return undefined;
   }

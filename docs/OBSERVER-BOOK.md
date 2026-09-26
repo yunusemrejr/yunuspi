@@ -73,6 +73,8 @@ Margin notes are the observer's own words, so they are treated as untrusted:
 
 `/observer-book margins` lists them; `/observer-book margins clear` strikes them all.
 
+Semantic duplicate checks compare a new note with the existing notes in one bounded JEV batch when the current model restrictions allow it. Different conditions, negations and obligations remain separate; an uncertain judgment keeps both notes. If the judge is unavailable, Needle checks the same bounded candidate set in small jobs of at most 1,200 input characters, reusing candidate embeddings and allowing other queued work between jobs. Session/task cancellation stops the comparison and later store writes. A saved note does not start overlapping comparison jobs.
+
 ## Cost and caching
 
 The packet places static text first: instructions, then the book rules and contents (identical every review), then the sticky passages, then the evidence that changes every review. Providers with prefix caching (DeepSeek's is automatic; cached input is billed at a small fraction of the normal price) reuse that prefix. The book has its own 3,400-byte budget and never evicts evidence, which keeps its 10,000-byte bound. Under pressure it drops extra margin notes, the third passage, deep reading, reasoning lines, then the long contents list.
