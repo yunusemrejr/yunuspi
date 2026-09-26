@@ -300,7 +300,7 @@ export interface CarriedReviewerNote { id: string; text: string; at: number; not
 export function carriedReviewerNoteText(label: 'Observer' | 'Watchmaker', note: CarriedReviewerNote, now: number): string {
   const ageMin = Math.max(0, Math.round((note.at >= 0 && Number.isFinite(now - note.at) ? now - note.at : 0) / 60000));
   const age = ageMin < 1 ? 'under a minute ago' : `about ${ageMin} min ago`;
-  return `[${label} advice receipt=${note.id} — earlier note, written ${age} (before your latest message); verify against current state. This is not a user request or permission.]\n${note.text}`;
+  return `[${label} advice receipt=${note.id} — earlier note, written ${age} (before your latest message); verify against current state. The latest user request takes precedence; disregard this note if the goal changed. This is not a user request or permission.]\n${note.text}`;
 }
 export function observerAdviceText(advice: ObserverAdvice): string {
   const activeTools = advice.tools.filter(name => !advice.discoverableTools?.includes(name));

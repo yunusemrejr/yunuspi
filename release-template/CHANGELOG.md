@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.2 — 2026-09-27
+
+Resumed sessions retain explicitly activated tools within their existing authority. Native chain and parallel children now save each executed child's exact recovery contract, including its model and tool ceiling. Explicit parent follow-ups can resume stopped children; automatic recovery still respects cancellation. Status reports distinguish recoverable children from legacy runs whose contracts were never saved, and asynchronous dispatch allows independent work to continue.
+
+Observer and Watchmaker use current task, TODO and child execution evidence. New prompts and changed premises invalidate stale advice before it changes durable notes or reaches the main agent. Recent tool outcomes survive packet pressure, and advisory notes no longer impose an artificial read/dispatch gate. JEV can assess routine progress even when new evidence is waiting, while urgent events retain a full review and a deferred review must run next.
+
+Margin-note comparisons share one bounded JEV batch before smaller local Needle fallback jobs. Distinct or uncertain notes remain separate; cancellation prevents obsolete judgments from changing memory. Repeated identical Needle timeouts back off without disabling unrelated work or repeatedly destroying a warmed worker. A synthetic 24-note native fallback probe completed with no timeouts or restarts.
+
+Guarded shell startup uses native traversal for its fresh hard-link inventory, preserving alias detection and failure on unreadable paths. Three paired local launches reduced median guard startup from 2.90 to 1.75 seconds; this measures guard overhead, not command or model latency. Existing regression suites cover the repaired transitions; release tags continue to reuse the exact commit's successful main CI run.
+
 ## 0.12.1 — 2026-09-26
 
 Project memory keeps the foreground wait short while one bounded semantic request finishes for background consumers. Indexing drains the whole bounded event queue before network work, recovers embedding backlog on settled turns, reads the actual compaction event, and records final assistant reports as unverified evidence. Historical follow-ups are scoped to the current request and explicitly cannot supersede it. Provider timeouts remain visible, with compatible local vectors and lexical retrieval preserved.

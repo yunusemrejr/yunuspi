@@ -3116,7 +3116,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 542
+        "line": 561
       },
       {
         "name": "or-provider",
@@ -3266,7 +3266,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 310
+        "line": 317
       },
       {
         "name": "websearch",
@@ -3929,7 +3929,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 280,
+        "line": 283,
         "kind": "literal"
       },
       {
@@ -4376,7 +4376,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 280,
+        "line": 283,
         "kind": "literal"
       },
       {
