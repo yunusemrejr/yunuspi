@@ -44,7 +44,8 @@
     "pi-vector-memory.ts",
     "design-studio.ts",
     "desktop-session.ts",
-    "video-studio.ts"
+    "video-studio.ts",
+    "expert-director.ts"
   ],
   "lib": [
     "activity-indicators.ts",
@@ -79,6 +80,12 @@
     "diagnostic-provenance.ts",
     "effort-policy.mjs",
     "execution-evidence.ts",
+    "expert-brief.ts",
+    "expert-convergence.ts",
+    "expert-critics.ts",
+    "expert-doctrine.ts",
+    "expert-domains.ts",
+    "expert-taste.ts",
     "fail-policy.ts",
     "git-authority.ts",
     "guidance-topics-domains.ts",

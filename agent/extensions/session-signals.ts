@@ -376,6 +376,7 @@ export type UsedSummary = {
   recoveries: number;
   councils: { status: string; evidence: number; incomplete: boolean }[];
   reviews: { rounds: number; disposition: string; aspects: { aspect: string; outcome: string }[] } | null;
+  expert: { runs: number; domains: string[]; taskType?: string; openEnded?: boolean; verdict?: string } | null;
   inspected: number;
   /** Wall-clock capture time; the popup is a snapshot, not a live view. */
   capturedAt: string;
@@ -636,10 +637,19 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
   const runs = allRuns.slice(-CHILD_ROW_LIMIT);
   const councils: UsedSummary["councils"] = [];
   let reviews: UsedSummary["reviews"] = null;
+  let expertRuns = 0;
+  let expertBrief: any = null;
+  let expertVerdict: any = null;
   for (const entry of list) {
     if ((entry as any)?.type !== "custom") continue;
     const data = (entry as any)?.data;
     if (!data || typeof data !== "object") continue;
+    if ((entry as any).customType === "expert-director-v1") {
+      expertRuns++;
+      if (data.action === "brief") expertBrief = data;
+      if (data.action === "assess") expertVerdict = data;
+      continue;
+    }
     if ((entry as any).customType === "scope-deliberation-v1") {
       councils.push({
         status: String(data.status ?? "?").slice(0, 32),
@@ -728,6 +738,13 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
     recoveries: metrics.recoveries ?? 0,
     councils,
     reviews,
+    expert: expertRuns ? {
+      runs: expertRuns,
+      domains: Array.isArray(expertBrief?.domains) ? expertBrief.domains.map((d: unknown) => String(d).slice(0, 32)).slice(0, 3) : [],
+      ...(typeof expertBrief?.taskType === "string" ? { taskType: expertBrief.taskType.slice(0, 24) } : {}),
+      ...(typeof expertBrief?.openEnded === "boolean" ? { openEnded: expertBrief.openEnded } : {}),
+      ...(expertVerdict ? { verdict: expertVerdict.converged ? "converged" : String(expertVerdict.reason ?? "open").slice(0, 32) } : {}),
+    } : null,
     inspected: list.length,
     capturedAt: new Date().toISOString(),
     logicalTasks,
@@ -893,7 +910,9 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     `<h3>Scope decisions (${summary.councils.length})</h3><ul>${summary.councils.length ? summary.councils.map((council, index) => usedRow(`🏛️ Decision ${index + 1}`, council.status, `${plural(council.evidence, "evidence item")}${council.incomplete ? " · incomplete" : ""}`, statusTone(council.status))).join("") : `<li><span class="empty">None recorded</span></li>`}</ul>`;
   sections.push(group("⚡ Coordination", `${summary.swarms} parallel groups · ${summary.fusions} fusions · ${summary.recoveries} recoveries`, coordinationBody));
   const reviewBody = `<ul>${review ? usedRow(`🔍 ${plural(review.rounds, "round")}`, review.disposition, review.aspects.length ? review.aspects.map((aspect) => `${aspect.aspect}: ${aspect.outcome}`).join(" · ") : "no aspect reports", statusTone(review.disposition)) : `<li><span class="empty">No review recorded</span></li>`}</ul>`;
-  sections.push(group("🔍 Reviews", review ? `${plural(review.rounds, "round")} · ${review.disposition}` : "none recorded", `<p class="note">Reviews consume evidence; a review count is never a quality signal.</p>${reviewBody}`));
+  const expert = summary.expert;
+  const expertBody = `<ul>${expert ? usedRow(`🎯 ${plural(expert.runs, "run")}`, expert.verdict ?? "no verdict", `${expert.domains.join("+") || "no brief"}${expert.taskType ? ` · ${expert.taskType}` : ""}${expert.openEnded ? " · open" : ""}`, expert.verdict === "converged" ? "complete" : "info") : `<li><span class="empty">No Expert Director run recorded</span></li>`}</ul>`;
+  sections.push(group("🔍 Reviews", review ? `${plural(review.rounds, "round")} · ${review.disposition}` : "none recorded", `<p class="note">Reviews consume evidence; a review count is never a quality signal.</p>${reviewBody}${expertBody}`));
 
   const promptTokens = session.input + session.cacheRead + session.cacheWrite;
   sections.push(group("💰 Cost", session.cost, factGrid([

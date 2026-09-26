@@ -4,6 +4,7 @@ import { catalogRouteCapabilities, isProvenFreeRoute } from "./free-route-eviden
 import { modelIdentity, taskQuality } from "./model-quality.ts";
 import { selectAffordableModel } from "./model-selection.ts";
 import { resolveLlmPreferenceChain, withLlmThinkingSuffix } from "./model-fallback.ts";
+import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import type { ModelEconomyConfig } from "./model-economy.ts";
 import type { ModelRouteCandidate } from "../../shared/model-route.ts";
 
@@ -40,7 +41,7 @@ export function assistanceMemberRouteCandidate(member: AssistanceMember): ModelR
 /** Every team member passes the same quality/cost gate as an ordinary child.
  * Different model identities avoid presenting duplicate routes as consensus.
  * At most one paid helper; no subscription is silently used for a swarm. */
-export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean} = {}): AssistanceMember[] {
+export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyConfig, plan: AssistancePlan, options: {freeOnly?:boolean;task?:string;minOutputTokens?:number;requiresTools?:boolean;role?:string;honorPaidPreferences?:boolean;unreliable?:ReadonlySet<string>} = {}): AssistanceMember[] {
  if (!plan.roles.length) return [];
  // Relaxed economy: no tighter $/M clamp than the global policy. Runaway spend
  // is owned by child circuit breakers, not per-helper price matching.
@@ -60,25 +61,41 @@ export function selectAssistanceTeam(models: ModelInfo[], config: ModelEconomyCo
  // routes, matching the single-subagent path. Automatic council/review
  // rounds opt out via honorPaidPreferences: their freeOnly bounds only the
  // autonomous fill while configured routes stay honored.
- const preferred = resolveLlmPreferenceChain(options.role ?? plan.mode, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
- for (const pick of preferred) {
-  if (team.length >= slots.length) break;
-  const model = pool.find(m=>m.fullId===pick.route);
-  if (!model || used.has(modelIdentity(model.id))) continue;
-  used.add(modelIdentity(model.id));
-  team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role:slots[team.length]!,proof:"explicit llm_preferences",explanation:pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
- }
- for (const role of slots.slice(team.length)) {
-  const candidates = pool.filter(m=>!used.has(modelIdentity(m.id)));
-  const available = (freeOnly:boolean, diverse:boolean) => selectAffordableModel(diverse ? candidates.filter(m=>!team.some(member=>member.route.startsWith(m.provider+"/"))) : candidates,cheap,
-   {freeOnly,quality:{...taskQuality(options.task),level:"advisory"},requirements:{minContextWindow:16384,minOutputTokens,reasoning:false,inputModalities:["text"],toolCalling:requiresTools}});
-  const freeOnly = options.freeOnly || team.some(m=>!m.free);
-  const pick = available(true,true) ?? available(true,false) ?? (!freeOnly ? available(false,true) ?? available(false,false) : undefined);
-  if (!pick) break;
-  const model = pool.find(m=>m.fullId===pick.model)!;
-  const free = isProvenFreeRoute(model);
-  used.add(modelIdentity(model.id));
-  team.push({route:pick.model,free,role,proof:free ? "verified free" : "known low metered price",explanation:pick.explanation});
- }
+ const resolved = resolveLlmPreferenceChain(options.role ?? plan.mode, pool, {requirements:{minContextWindow:16384,minOutputTokens,toolCalling:requiresTools},...(options.freeOnly && !options.honorPaidPreferences ? {freeOnly:true} : {})});
+ // Reliable configured routes first, then the reliable autonomous fill. A
+ // configured route whose recent automatic runs mostly failed to finish only
+ // takes a slot nothing reliable can serve: one slow leg (12 of 34 finished)
+ // otherwise emptied the aspect it held in every review and council round.
+ const unreliable = options.unreliable ?? new Set<string>();
+ const flaky = (route: string) => unreliable.has(splitKnownThinkingSuffix(route).baseModel);
+ const addPreferred = (picks: typeof resolved, note?: string) => {
+  for (const pick of picks) {
+   if (team.length >= slots.length) break;
+   const model = pool.find(m=>m.fullId===pick.route);
+   if (!model || used.has(modelIdentity(model.id))) continue;
+   used.add(modelIdentity(model.id));
+   team.push({route:withLlmThinkingSuffix(pick),free:isProvenFreeRoute(model),role:slots[team.length]!,proof:"explicit llm_preferences",explanation:note ? [...(pick.explanation ?? []), note] : pick.explanation,...(pick.providerRouting?{providerRouting:pick.providerRouting}:{})});
+  }
+ };
+ const fill = (reliableOnly: boolean) => {
+  while (team.length < slots.length) {
+   const unused = pool.filter(m=>!used.has(modelIdentity(m.id)));
+   const reliable = unused.filter(m=>!unreliable.has(m.fullId));
+   const candidates = reliableOnly || reliable.length ? reliable : unused;
+   const available = (freeOnly:boolean, diverse:boolean) => selectAffordableModel(diverse ? candidates.filter(m=>!team.some(member=>member.route.startsWith(m.provider+"/"))) : candidates,cheap,
+    {freeOnly,quality:{...taskQuality(options.task),level:"advisory"},requirements:{minContextWindow:16384,minOutputTokens,reasoning:false,inputModalities:["text"],toolCalling:requiresTools}});
+   const freeOnly = options.freeOnly || team.some(m=>!m.free);
+   const pick = available(true,true) ?? available(true,false) ?? (!freeOnly ? available(false,true) ?? available(false,false) : undefined);
+   if (!pick) return;
+   const model = pool.find(m=>m.fullId===pick.model)!;
+   const free = isProvenFreeRoute(model);
+   used.add(modelIdentity(model.id));
+   team.push({route:pick.model,free,role:slots[team.length]!,proof:free ? "verified free" : "known low metered price",explanation:pick.explanation});
+  }
+ };
+ addPreferred(resolved.filter(pick => !flaky(pick.route)));
+ fill(true);
+ addPreferred(resolved.filter(pick => flaky(pick.route)), "recent automatic runs mostly failed to finish; used only because no reliable route was available");
+ fill(false);
  return team;
 }

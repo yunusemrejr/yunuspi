@@ -107,6 +107,9 @@ try {
  const imageCall={role:'assistant',content:[{type:'toolCall',id:'picture',name:'read',arguments:{path:'shots/window.png'}}]};
  const imageRead={role:'toolResult',toolCallId:'picture',toolName:'read',isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
  for(const messages of [[imageRead,imageCall],[{...imageRead,toolName:undefined},imageCall],[imageCall,imageRead,imageCall],[imageCall,{...imageRead,toolName:'bash'}]])assert.equal(checkVisualSourceEvidence(visualTask,messages,root).status,'failed','visual receipts require unique preceding calls and matching tool names');
+ const contextTask=visualTask+'\nContext: earlier renders live in build/shots/window.png, ~/shots/window.png and https://example.test/shots/window.png; a bare path/shots/window.png is prose.';
+ assert.equal(checkVisualSourceEvidence(contextTask,[imageCall,imageRead],root).status,'passed','path tails inside relative, home and URL paths are not extra required sources');
+ assert.equal(checkVisualSourceEvidence(visualTask+' and /abs/other.png',[imageCall,imageRead],root).status,'failed','a real absolute image path still requires its own receipt');
  const pixelResult=async (params,{source=true,toolName='read'}={})=>{
   const imageStart={role:'assistant',content:[{type:'toolCall',id:'pixels',name:'read',arguments:{path:'shots/window.png'}}]};
   const imageResult={role:'toolResult',toolCallId:'pixels',toolName,isError:false,content:[{type:'image',data:'fixture',mimeType:'image/png'}]};
@@ -219,11 +222,45 @@ try {
   const straggling=fixture({result:async(params,signal,ok)=>params.model.startsWith('openrouter/free/c')?new Promise(resolve=>signal.addEventListener('abort',()=>resolve({details:{results:[{exitCode:143,stopped:true,error:'aborted'}]}}),{once:true})):ok()});
   const started=Date.now(),reports=await straggling.run({...request,aspects:aspects.slice(0,3)});
   assert.ok(Date.now()-started<REVIEW_LIMITS.deadlineMs/10,'finished peers are not held for a dead leg until the round deadline');
-  assert.equal(reports.filter(r=>r.ok).length,2);
-  assert.match(reports.find(r=>!r.ok).gap,/stopped after its peers finished/);
+  assert.equal(reports.filter(r=>r.ok).length,3,'the stalled leg is re-reviewed by a peer that already returned a validated report');
+  assert.equal(straggling.calls.filter(c=>c.params.model.startsWith('openrouter/free/c')).length,1,'the stalled route is not retried');
+  const failover=straggling.calls.at(-1);
+  assert.equal(straggling.calls.length,4,'one failover launch per stalled leg');
+  assert.ok(/^openrouter\/free\/[ab]/.test(failover.params.model),'failover uses a finished peer route');
+  assert.match(failover.params.task,/"id":"interface"/,'failover carries the stalled leg aspects');
+  const failoverLedger=straggling.entries.filter(e=>e.customType==='subagent-lifecycle-v1').map(e=>e.data.results[0]);
+  assert.ok(failoverLedger.some(r=>r.attempt===2&&r.status==='completed'),'the failover attempt is ledgered as attempt 2');
   const health=JSON.parse(fs.readFileSync(process.env.PI_PROVIDER_STATE_FILE,'utf8'));
   assert.match(JSON.stringify(health),/free\/c/,'the stalled reviewer route is recorded in provider health for the next round');
  }finally{REVIEW_LIMITS.stragglerMs=stragglerLimit;}
+ {
+  // A leg that fails before any peer finishes waits for a validated peer, then fails over once.
+  const early=fixture({result:async(params,signal,ok)=>params.model.startsWith('openrouter/free/a')?{details:{results:[{exitCode:1,error:'route failed'}]}}:(await new Promise(resolve=>setTimeout(resolve,20)),ok())});
+  const reports=await early.run({...request,aspects:aspects.slice(0,2)});
+  assert.equal(reports.filter(r=>r.ok).length,2,'an early route failure is answered by the peer once it validates');
+  assert.equal(early.calls.length,3);
+  assert.ok(early.calls.at(-1).params.model.startsWith('openrouter/free/b'));
+  // No validated peer: no failover launch, honest gaps.
+  const down=fixture({result:async()=>({details:{results:[{exitCode:1,error:'provider down'}]}})});
+  const downReports=await down.run({...request,aspects:aspects.slice(0,2)});
+  assert.equal(down.calls.length,2,'no failover without a peer that returned a validated review');
+  assert.ok(downReports.every(r=>!r.ok&&/failed or was unable to start/.test(r.gap)));
+  // A harness launch error repeats on any route: never failed over.
+  const broken=fixture({result:async(params,signal,ok)=>params.model.startsWith('openrouter/free/a')?{details:{results:[{exitCode:1,error:'launch',runtimeError:'ENOENT',diagnosticCode:'LAUNCH'}]}}:ok()});
+  await broken.run({...request,aspects:aspects.slice(0,2)});
+  assert.equal(broken.calls.length,2,'harness launch errors are not failed over');
+ }
+ {
+  // The visual audit rejects only pixels: the source-backed report survives as an explicit unknown.
+  const visualMessage='Visual review unverified: 1 of 1 named image sources have no source-correlated successful image-bearing tool receipt.';
+  const salvage=fixture({models:[{...free('free/a'),input:['text','image']}],result:async(params,signal,ok)=>{const base=ok().details.results[0];return {details:{results:[{...base,exitCode:1,error:'Acceptance rejected: '+visualMessage,acceptance:{status:'rejected',runtimeChecks:[{id:'visual-source-evidence',status:'failed',message:visualMessage}],verifyRuns:[]}}]}};}});
+  const [ui]=await salvage.run({...request,aspects:[aspects[2]],evidence:['shots/window.png']});
+  assert.equal(ui.ok,true,'the reviewer report is kept, not discarded as a failed launch');
+  const parsed=JSON.parse(ui.text);
+  assert.equal(parsed.outcome,'unknown');
+  assert.match(parsed.gap,/image-read receipts/);
+  assert.equal(salvage.calls.length,1,'a salvaged report needs no failover');
+ }
  process.env.PI_AUTONOMOUS_FREE_ASSIST='off';const disabled=fixture();assert.ok((await disabled.run()).every(r=>!r.ok && /disabled/.test(r.gap)));assert.equal(disabled.calls.length,0);
  assert.ok(activity.includes('review')&&activity.includes('ok')&&activity.includes('error'),'native reviews report named activity with truthful success and failure outcomes');
  console.log('PASS quality dispatch: native launch contracts, free/cost routing, 3 reviewers / 6 aspects, read receipts, restrictions, failure lifecycle, accounting and session isolation');

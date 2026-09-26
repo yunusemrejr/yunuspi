@@ -1286,7 +1286,10 @@ export function checkVisualSourceEvidence(task: string, messages: readonly unkno
 	const required = new Set<string>();
 	// Consume quoted spans before bare paths: a space inside a named file is
 	// significant, and a slash within that span must not become a second path.
-	for (const match of task.matchAll(/"[^"\r\n]*"|'[^'\r\n]*'|`[^`\r\n]*`|(?:\/|\.\.?\/)[^\s"'`<>]+/g)) {
+	// A bare path starts at a token boundary: the tail of a project-relative
+	// ("build/shots/a.png"), home ("~/a.png") or URL ("https://h/a.png") path
+	// is not a separate absolute source that could never carry a receipt.
+	for (const match of task.matchAll(/"[^"\r\n]*"|'[^'\r\n]*'|`[^`\r\n]*`|(?<![\w.~/:-])(?:\/|\.\.?\/)[^\s"'`<>]+/g)) {
 		const token = match[0];
 		const source = /^["'`]/.test(token) ? token.slice(1, -1) : token.replace(/[),;:]+$/, "");
 		if (/^(?:\/|\.\.?\/)/.test(source) && /\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(source)) required.add(path.resolve(cwd, source));

@@ -423,7 +423,12 @@ export function formatUnknownAgentError(name: string, context: UnknownAgentDiagn
 		return `- ${directory.source}: ${directory.path} (${state})`;
 	});
 	const suggestions = suggestAgentNames(name, context.agents);
-	const recovery = suggestions.length
+	// Agent names never contain a slash; a provider/model route in the agent
+	// slot is a misplaced model, answered with the exact corrected call.
+	const modelRoute = /^[a-z0-9][\w.-]*\/\S+$/i.test(name) && context.agents.some((agent) => agent.name === "delegate");
+	const recovery = modelRoute
+		? `'${name}' is a model route, not an agent. Pass it as model with an agent, for example { agent: "delegate", model: ${JSON.stringify(name)} }.`
+		: suggestions.length
 		? `Did you mean ${suggestions.map((suggestion) => `'${suggestion}'`).join(", ")}?`
 		: `No close match; use subagent({ action: "list" }) to inspect available agents.`;
 	const sorted = [...context.agents]

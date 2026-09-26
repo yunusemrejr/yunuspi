@@ -165,3 +165,17 @@ test('registered bg_run passes actual tool identity, abort signal and session ow
   assert.equal(fs.readFileSync(path.join(cwd, 'from-tool.txt'), 'utf8'), 'one\n');
   assert.match(first.details.task.outputPath, /actual-context-session/);
 });
+
+test('bg_run preparation keeps a declared service and infers only its unambiguous isAgent', () => {
+  const tools = new Map();
+  registerBackground({
+    events: { on: () => () => {}, emit() {} },
+    on() {}, registerTool: tool => tools.set(tool.name, tool), registerMessageRenderer() {}, registerCommand() {}, registerShortcut() {}, sendMessage() {},
+  });
+  const prepare = tools.get('bg_run').prepareArguments;
+  const service = prepare({ command: './run.sh --port 8799', name: 'app server', service: true });
+  assert.equal(service.service, true, 'an explicit service flag reaches execute and its UI-only completion policy');
+  assert.equal(service.isAgent, false, 'a declared server is never an LLM process');
+  assert.equal(prepare({ command: 'pi -p "x"', name: 'child', isAgent: true, service: false }).service, false);
+  assert.throws(() => prepare({ command: 'npm test', name: 'tests' }), /requires isAgent boolean/, 'ambiguous omissions keep the declared contract');
+});

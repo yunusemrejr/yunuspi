@@ -257,3 +257,26 @@ test('a complete brief carries no missing-choice directive',async()=>{
   const ctx=context();await lifecycle.start({prompt},ctx,'graph');
   assert.doesNotMatch(lifecycle.context(ctx),/chose nothing/);
 });
+
+test('context builds spend the bounded council wait once; the mutation gate still waits',async()=>{
+  let release;const waiting=new Promise(resolve=>release=resolve);
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>{await waiting;return result;}});
+  const ctx=context();
+  const task=lifecycle.start({prompt},ctx,'graph');
+  assert.ok(lifecycle.pending(ctx),'the council is pending while the runner hangs');
+  const firstStarted=Date.now();
+  await lifecycle.contextWait(ctx,80);
+  const firstMs=Date.now()-firstStarted;
+  assert.ok(firstMs>=60,`the first context build waits the bounded window (took ${firstMs}ms)`);
+  const secondStarted=Date.now();
+  assert.equal(await lifecycle.contextWait(ctx,80),undefined);
+  const secondMs=Date.now()-secondStarted;
+  assert.ok(secondMs<40,`later builds of the same council render at once (took ${secondMs}ms)`);
+  assert.equal(await lifecycle.contextWait(context('other'),80),undefined,'other sessions never spend this wait');
+  const gateStarted=Date.now();
+  await lifecycle.settle(ctx,50);
+  assert.ok(Date.now()-gateStarted>=40,'the first-mutation gate still waits for the brief');
+  release();await task;
+  assert.match(lifecycle.context(ctx),/Advisory, not approval/);
+  assert.equal(await lifecycle.contextWait(ctx,80),undefined,'a settled council waits no more');
+});

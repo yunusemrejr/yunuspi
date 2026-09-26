@@ -9,6 +9,7 @@ import { SessionManager } from '../core/coding-agent/src/core/session-manager.js
 import { SettingsManager } from '../core/coding-agent/src/core/settings-manager.js';
 import { DefaultResourceLoader } from '../core/coding-agent/src/core/resource-loader.js';
 import observerExtension from '../agent/extensions/session-observer.ts';
+import {carriedReviewerNoteText} from '../agent/extensions/lib/session-observer.ts';
 
 const note='Have you checked the synthetic parser acceptance condition before declaring the fixture complete?';
 const model={provider:'deepseek',id:'deepseek-flash',name:'Synthetic main route',api:'openai-completions',baseUrl:'https://api.deepseek.com/v1',maxTokens:8192,contextWindow:65536,reasoning:true,input:['text'],cost:{input:.1,output:.2,cacheRead:.01,cacheWrite:.1}};
@@ -83,4 +84,14 @@ for(const mode of ['success','slow-success','pre-dispatch-failure','http-error',
   assert.ok(text.includes(note));assert.ok(text.includes(returned.details.adviceId));
   assert.doesNotMatch(JSON.stringify(wire.at(-1)),/Observer advice receipt=|Synthetic observer/,'confirmed advice is absent from the next model request');
   assert.doesNotMatch(JSON.stringify(receipts),/Have you checked|content|payload|apiKey/,'delivery receipts contain no raw capsule or request');
+});
+
+test('carried reviewer notes ride as receipted capsules naming their age',()=>{
+  const now=Date.now();
+  const text=carriedReviewerNoteText('Observer',{id:'note-1',text:'Check the parser.',at:now-125000},now);
+  assert.match(text,/\[Observer advice receipt=note-1 — earlier note, written about 2 min ago/);
+  assert.ok(text.includes('Check the parser.'));
+  assert.ok(text.includes('This is not a user request or permission.'));
+  const fresh=carriedReviewerNoteText('Watchmaker',{id:'note-2',text:'Still fresh.',at:now},now);
+  assert.match(fresh,/\[Watchmaker advice receipt=note-2 — earlier note, written under a minute ago/);
 });

@@ -118,6 +118,23 @@ test('quantified marketing candidates require evidence without classifying ordin
  assert.deepEqual(kinds(ordinary.rendered),[]);
 });
 
+test('eyebrow kickers above headings and literal status dots are flagged; plain labels stay quiet',async()=>{
+ const eyebrow=await capture('<span class="pill">Q3 Update</span><h1>Title</h1>');
+ assert.ok(kinds(eyebrow.rendered).includes('eyebrow-pill'));
+ const dotted=await capture('<span>● Live</span>');
+ assert.ok(kinds(dotted.rendered).includes('text-status-dot'));
+ const emoji=await capture('<span>🟢 Online</span>');
+ assert.ok(kinds(emoji.rendered).includes('text-status-dot'));
+ const plain=await capture('<span>Options ● more</span><h1>Title</h1>');
+ assert.ok(!kinds(plain.rendered).includes('text-status-dot'));
+ assert.ok(!kinds(plain.rendered).includes('eyebrow-pill'));
+});
+
+test('sibling-layout dots count as decorative dot markers',async()=>{
+ const {rendered}=await capture('<div class="static" style="display:flex;align-items:center;gap:6px"><i aria-hidden="true" class="dot"></i><span>Live</span></div>');
+ assert.ok(kinds(rendered).includes('decorative-dot-marker'));
+});
+
 test('missing alt and unnamed controls aggregate once with presentation and labelled negatives',async()=>{
  const pixel='data:image/gif;base64,R0lGODlhAQABAAAAACw=';
  const {rendered}=await capture(`<img src="${pixel}" width="20" height="20"><img src="${pixel}" width="20" height="20"><button><svg width="16" height="16"><circle cx="8" cy="8" r="6"/></svg></button><input type="text" aria-label="Search"><input type="text" placeholder="Name">`,{designAudit:true});

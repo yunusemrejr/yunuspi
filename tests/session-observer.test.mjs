@@ -167,6 +167,25 @@ test('non-Latin evidence respects the UTF-8 byte ceiling and truncated replies n
   observer.close();observer.begin('reopened');observer.start();await time.advance(30000);assert.equal(notices.filter(x=>x[0]==='started').length,2);observer.close();
 });
 
+test('a truncated floor-thinking route widens its output ceiling instead of truncating forever', async () => {
+  const time=clock(),notices=[],routes=[];
+  const low={...route,thinking:'low'};
+  const observer=createSessionObserver({...time,snapshot:()=>({packet:packet(),route:low}),notice:(...x)=>notices.push(x),receipt:()=>{},dispatch:async(sent)=>{routes.push(sent);return routes.length<3?{...reply(),stopReason:'length'}:reply();}});
+  observer.begin('owner');observer.start();
+  for(let i=0;i<8&&routes.length<3;i++)await time.advance(120000);
+  assert.equal(routes[0].outputScale,undefined,'the first review uses the configured allowance');
+  assert.equal(routes[1].thinking,'low','low thinking cannot be lowered further');
+  assert.equal(routes[1].outputScale,2);assert.equal(routes[2].outputScale,4);
+  assert.match(notices.find(x=>x[0]==='unavailable')[1],/next review allows 2x output/);
+  observer.close();
+  // Dispatch applies the scale to the requested ceiling, still bounded by the model.
+  const bodies=[];
+  const registry={completeSimple:async(_model,_context,opts)=>{bodies.push(opts.maxTokens);return reply();}};
+  await observerDispatch({...low,outputScale:2,model:{...model,maxTokens:384000}},packet(),new AbortController().signal,registry,undefined,undefined,{outputTokens:4096});
+  await observerDispatch({...low,outputScale:4,model},packet(),new AbortController().signal,registry);
+  assert.deepEqual(bodies,[8192,8192]);
+});
+
 test('native transport ignores malicious model defaults and enforces pins, free caps and canonical endpoints', async () => {
   const sent=[];
   const registry={completeSimple:(selected,context,opts)=>completeSimple(selected,context,{...opts,apiKey:'synthetic-key',fetch:async(_url,init)=>{

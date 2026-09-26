@@ -24,7 +24,7 @@ function clock() {
     } };
 }
 
-test('superseded observer notes are ledgered and never pose as delivered', async (t) => {
+test('superseded observer notes are carried, ledgered, and never pose as delivered', async (t) => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-supersede-'));
   const previous = Object.fromEntries(['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_PROVIDER_STATE_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_OFFLINE', 'PI_SESSION_OBSERVER', 'PI_SUBAGENT_CHILD', 'PI_OBSERVER_TOOLS'].map((key) => [key, process.env[key]]));
   Object.assign(process.env, { PI_CODING_AGENT_DIR: cwd, PI_LLM_PREFERENCES_FILE: path.join(cwd, 'prefs.json'), PI_SUBAGENTS_ECONOMY_CONFIG: path.join(cwd, 'economy.json'), PI_PROVIDER_STATE_FILE: path.join(cwd, 'health.json'), PI_MODEL_EXCLUSIONS_PATH: path.join(cwd, 'exclusions.json') });
@@ -42,6 +42,7 @@ test('superseded observer notes are ledgered and never pose as delivered', async
     'Batch the failing checks into fixes now instead of auditing further.',
     'Retry or drop the failed child immediately; do not spawn more agents.',
     'Record the app-down baseline and start the server via background task.',
+    'Stop spawning agents and close the fixture with one verified edit.',
   ];
   let calls = 0;
   const pi = {
@@ -79,41 +80,82 @@ test('superseded observer notes are ledgered and never pose as delivered', async
   await waitForNotes(1);
   const firstId = completedIds()[0];
   // No provider request runs between the reviews, so the first note is still
-  // unprepared when the second review completes: it must be superseded loudly.
+  // unprepared when the second review completes: it is carried (not dropped)
+  // for the next context build.
   fire('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'fixture progress marker' }] } });
   await time.advance(30000);
   await waitForNotes(2);
-  const drop = receipts.find((r) => r.customType === 'session-observer-delivery-v1' && r.data.status === 'dropped:superseded');
-  assert.ok(drop, `superseded drop is receipted, got ${JSON.stringify(receipts)}`);
-  assert.equal(drop.data.adviceId, firstId);
+  const carried = receipts.find((r) => r.customType === 'session-observer-delivery-v1' && r.data.status === 'carried');
+  assert.ok(carried, `superseded carry is receipted, got ${JSON.stringify(receipts)}`);
+  assert.equal(carried.data.adviceId, firstId);
+  assert.equal(carried.data.via, 'supersede');
+  assert.ok(!receipts.some((r) => r.data.status === 'dropped:superseded'), 'carried notes are not ledgered as dropped');
   assert.ok(!packets[1].includes(notes[0]), 'unconfirmed note text never enters the next packet as history');
   assert.ok(!packets[1].includes('previous advice already delivered'), 'history label is reserved for confirmed delivery');
 
-  // Settling with an unprepared note ledgers that drop too.
-  const secondId = completedIds()[1];
-  fire('agent_settled', {});
-  const settled = receipts.find((r) => r.customType === 'session-observer-delivery-v1' && r.data.status === 'dropped:settled');
-  assert.ok(settled, `settled drop is receipted, got ${JSON.stringify(receipts)}`);
-  assert.equal(settled.data.adviceId, secondId);
+  // The next context build delivers both: the current note first, then the
+  // carried note as its own receipted capsule.
+  const dual = handlers.get('context')({ messages: [] }, ctx);
+  const capsules = dual.messages.filter((m) => m.customType === 'session-observer-context');
+  assert.equal(capsules.length, 2, `current + carried capsules, got ${dual.messages.length}`);
+  assert.ok(capsules[0].content.includes(notes[1]), 'first capsule carries the current note');
+  assert.match(capsules[0].content, /^\[Observer advice receipt=observer-advice-[0-9a-f-]{36}\b/);
+  assert.ok(capsules[1].content.includes(notes[0]), 'second capsule carries the superseded note text');
+  assert.match(capsules[1].content, /^\[Observer advice receipt=observer-advice-[0-9a-f-]{36}\b/);
+  assert.match(capsules[1].content, /before your latest message/);
 
-  // Third note with zero parent edits is restated as required reading.
-  fire('agent_start', {});
+  // Provider confirmation joins both capsules to advice history, like any
+  // delivered note; nothing is delivered twice.
+  const { createHash } = await import('node:crypto');
+  ctx.signal = new AbortController().signal;
+  const dualConfirmed = handlers.get('context')({ messages: [] }, ctx);
+  const both = dualConfirmed.messages.filter((m) => m.customType === 'session-observer-context');
+  assert.equal(both.length, 2);
+  const observerAdviceReceipts = both.map((capsule) => ({
+    id: /^\[Observer advice receipt=(observer-advice-[0-9a-f-]{36})\b/.exec(capsule.content)[1],
+    sha256: createHash('sha256').update(capsule.content).digest('hex'),
+  }));
+  fire('after_provider_response', { status: 200, provider: model.provider, model: model.id, observerAdviceReceipts });
+  const received = receipts.filter((r) => r.customType === 'session-observer-delivery-v1' && r.data.status === 'provider-received');
+  assert.equal(received.length, 2, `both capsules confirmed, got ${JSON.stringify(receipts)}`);
+  const quiet = handlers.get('context')({ messages: [] }, ctx);
+  assert.ok(!(quiet?.messages ?? []).some((m) => m.customType === 'session-observer-context'), 'confirmed notes are not re-delivered');
+
+  // Third note, then settle: the unprepared note is carried (the slot is free
+  // after the confirmation above) instead of dropped.
   fire('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'still reading fixtures' }] } });
   await time.advance(30000);
   await waitForNotes(3);
-  assert.ok(!receipts.some((r) => r.data.status === 'dropped:superseded' && r.data.adviceId === secondId), 'settled notes are not dropped twice');
+  const thirdId = completedIds()[2];
+  fire('agent_settled', {});
+  const settledCarry = receipts.find((r) => r.customType === 'session-observer-delivery-v1' && r.data.status === 'carried' && r.data.adviceId === thirdId);
+  assert.ok(settledCarry, `settled carry is receipted, got ${JSON.stringify(receipts)}`);
+  assert.equal(settledCarry.data.via, 'settle');
+  assert.ok(!receipts.some((r) => String(r.data.status).startsWith('dropped:settled')), 'settled notes are carried, not dropped');
+
+  // Fourth note with zero parent edits is restated as required reading, next
+  // to the carried third note.
+  fire('agent_start', {});
+  fire('message_end', { message: { role: 'assistant', content: [{ type: 'text', text: 'still reading fixtures' }] } });
+  await time.advance(30000);
+  await waitForNotes(4);
+  assert.ok(!receipts.some((r) => r.data.status === 'dropped:superseded' && r.data.adviceId === thirdId), 'carried notes are not dropped twice');
   const prepared = handlers.get('context')({ messages: [] }, ctx);
-  const capsule = prepared.messages.find((m) => m.customType === 'session-observer-context');
-  assert.ok(capsule, 'third note prepares a context capsule');
-  assert.match(capsule.content, /note #3 this task with 0 parent edits recorded/);
+  const found = prepared.messages.filter((m) => m.customType === 'session-observer-context');
+  assert.equal(found.length, 2, 'current + carried capsules');
+  const capsule = found[0];
+  assert.ok(capsule, 'fourth note prepares a context capsule');
+  assert.match(capsule.content, /note #4 this task with 0 parent edits recorded/);
+  assert.ok(capsule.content.includes(notes[3]), 'first capsule is still the current note');
+  assert.ok(found[1].content.includes(notes[2]), 'second capsule is the carried settled note');
 
   // One recorded parent edit lifts the escalation; prepared notes are never
   // marked dropped when the next review supersedes them.
-  const thirdId = completedIds()[2];
+  const fourthId = completedIds()[3];
   fire('tool_result', { toolName: 'edit', input: { path: 'fixture.ts' }, isError: false, content: [{ type: 'text', text: 'edited' }], toolCallId: 'edit-1' });
   await time.advance(30000);
-  await waitForNotes(4);
-  assert.ok(!receipts.some((r) => r.data.adviceId === thirdId && String(r.data.status).startsWith('dropped:')), 'prepared notes keep prepared-context as their signal');
+  await waitForNotes(5);
+  assert.ok(!receipts.some((r) => r.data.adviceId === fourthId && String(r.data.status).startsWith('dropped:')), 'prepared notes keep prepared-context as their signal');
   const calm = handlers.get('context')({ messages: [] }, ctx);
   assert.doesNotMatch(calm.messages.find((m) => m.customType === 'session-observer-context').content, /0 parent edits recorded/);
 });

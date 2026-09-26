@@ -38,6 +38,7 @@ const {
 const { planAssistance, selectAssistanceTeam } = await import(
  shared + "assistance-plan.ts"
 );
+const { unreliableRoutes } = await import(shared + "run-history.ts");
 const { artificialAnalysisEvidence, modelCardEvidence, refreshModelResearch } =
  await import(shared + "model-research.ts");
 const { loadModelEconomyConfig } = await import(shared + "model-economy.ts");
@@ -558,6 +559,45 @@ try {
    const configured = selectAssistanceTeam([...models, alias], cfg, plan, { task: "Review code" });
    assert.deepEqual(configured.map(member => member.route), [fresh.fullId, other.fullId]);
    assert.equal(configured[1].proof, "explicit llm_preferences");
+  } finally {
+   if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
+   else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;
+   clearLlmPreferencesCache();
+  }
+ });
+ check("routes that mostly fail to finish move behind reliable preferences", () => {
+  const now = Date.parse("2026-09-26T06:30:00Z"), ts = (minutesAgo) => Math.floor((now - minutesAgo * 60000) / 1000);
+  const run = (model, outcome, minutesAgo, cause) => ({ agent: "automatic-free-assistant", task: "[redacted]", ts: ts(minutesAgo), status: outcome === "completed" ? "ok" : "error", outcome, duration: 1, evidence: { version: 1, model, ...(cause ? { cause } : {}) } });
+  const history = [
+   run("orcarouter/z-ai/slow", "stopped", 1), run("orcarouter/z-ai/slow:high", "timed_out", 2), run("orcarouter/z-ai/slow", "completed", 3), run("orcarouter/z-ai/slow", "stopped", 4),
+   run("meta/fast", "completed", 1), run("meta/fast", "failed", 2, { stage: "execute", category: "acceptance" }), run("meta/fast", "failed", 3, { stage: "launch", category: "internal" }), run("meta/fast", "completed", 4), run("meta/fast", "failed", 5, { stage: "execute", category: "acceptance" }),
+   run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4), run("orcarouter/old/flaky", "stopped", 60 * 24 * 4),
+   run("other/sparse", "stopped", 1), run("other/sparse", "stopped", 2), run("other/sparse", "completed", 3),
+  ];
+  assert.deepEqual([...unreliableRoutes(history, now)], ["orcarouter/z-ai/slow"], "harness verdicts, stale runs and sparse samples demote nothing");
+  const prefsFile = path.join(root, "llm-prefs-unreliable.json");
+  fs.writeFileSync(prefsFile, JSON.stringify({ preferences: { fusion: [
+   { provider: fresh.provider, model: fresh.id }, { provider: other.provider, model: other.id }, { provider: old.provider, model: old.id },
+  ] } }));
+  const oldPrefs = process.env.PI_LLM_PREFERENCES_FILE;
+  process.env.PI_LLM_PREFERENCES_FILE = prefsFile;
+  clearLlmPreferencesCache();
+  try {
+   const plan = planAssistance("Compare two implementation approaches in this repository");
+   const configured = selectAssistanceTeam(models, cfg, plan, { task: "Review code" });
+   const demoted = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
+   assert.deepEqual(configured.map(member => member.route), [fresh.fullId, other.fullId]);
+   assert.deepEqual(demoted.map(member => member.route), [fresh.fullId, old.fullId], "the configured order stands among reliable routes");
+   const alone = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([fresh.fullId, other.fullId, old.fullId]) });
+   assert.ok(alone.length >= 1, "an all-unreliable chain still serves rather than leaving the role empty");
+   // Council shape: the flaky configured route yields its slot to a reliable autonomous pick.
+   const withoutFlaky = selectAssistanceTeam(models, cfg, plan, { task: "Review code", unreliable: new Set([old.fullId]) });
+   const flakyOnly = selectAssistanceTeam([fresh, other, old], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
+   assert.ok(!withoutFlaky.some(member => member.route === old.fullId), "a reliable route fills the slot before the flaky one");
+   assert.deepEqual(flakyOnly.map(member => member.route), [fresh.fullId, old.fullId]);
+   const lastResort = selectAssistanceTeam([fresh, other], cfg, plan, { task: "Review code", unreliable: new Set([other.fullId]) });
+   assert.deepEqual(lastResort.map(member => member.route), [fresh.fullId, other.fullId], "with nothing reliable left, the configured route still serves");
+   assert.match(lastResort[1].explanation.join(" "), /no reliable route was available/);
   } finally {
    if (oldPrefs === undefined) delete process.env.PI_LLM_PREFERENCES_FILE;
    else process.env.PI_LLM_PREFERENCES_FILE = oldPrefs;

@@ -361,6 +361,21 @@ test('skill discovery preserves configured Friendli routes through dispatch admi
   } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE,{force:true});prefs.clearLlmPreferencesCache(); }
 });
 
+test('skill discovery runs a configured :high route without its thinking suffix', async () => {
+  const prefs = await mod('runs/shared/llm-preferences.ts');
+  const thinker = { ...model, id: 'free/thinker', reasoning: true, thinkingLevelMap: { off: 'none', low: 'low', medium: 'medium', high: 'high' } };
+  fs.writeFileSync(process.env.PI_LLM_PREFERENCES_FILE, JSON.stringify({ preferences: { subagents: [{ provider: thinker.provider, model: thinker.id, thinking: 'high' }] } }));
+  prefs.clearLlmPreferencesCache();
+  try {
+    const f = fixture({ models: [thinker], launch: async () => result('{"skills":[]}') });
+    assert.equal(await f.runner({ brief: 'Select a useful installed skill from the supplied evidence.' }, f.ctx), '{"skills":[]}');
+    const [, params] = f.calls[0];
+    assert.equal(params.model, `openrouter/${thinker.id}`, 'thinking stays off for bounded selection');
+    assert.equal(params.thinking, 'off');
+    assert.deepEqual(params.modelRouteCandidates.map(c => c.route), [`openrouter/${thinker.id}`]);
+  } finally { fs.rmSync(process.env.PI_LLM_PREFERENCES_FILE, { force: true }); prefs.clearLlmPreferencesCache(); }
+});
+
 test('startup runtime failures retain identity and cause and do not retry providers', async () => {
   const {reduceChildEvents,projectTranscriptChildren}=await mod('runs/shared/child-ledger.ts');
   const f=fixture({models:[model,{...model,id:'free/text-only'}],launch:async()=>{throw new ReferenceError('fixtureBinding is not defined');}});

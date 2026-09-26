@@ -244,6 +244,12 @@ export function registerBrowserSession(pi: any) {
       const rejected = (kind: string, nextStep: string) => reply({ ok: false, failure: { stage: "validation", kind, outcome: "not-dispatched", nextStep } });
       const unknownSession = () => rejected("unknown-session", "No action was dispatched. Use a session UUID or alias returned by open in this agent; list shows its current sessions. If none exists, open with an HTTP(S) URL.");
       if (p.action !== "open" && aliases.has(p.session)) p = { ...p, session: aliases.get(p.session) };
+      // Agents shorten returned UUIDs to their first block; a unique prefix of
+      // this agent's own sessions is unambiguous and saves a failed turn.
+      else if (p.action !== "open" && typeof p.session === "string" && p.session.length >= 8 && !sessions.has(p.session)) {
+        const matches = [...sessions.keys()].filter(id => id.startsWith(p.session));
+        if (matches.length === 1) p = { ...p, session: matches[0] };
+      }
       if (p.action === "list")
         return reply({
           sessions: [...sessions.keys()],

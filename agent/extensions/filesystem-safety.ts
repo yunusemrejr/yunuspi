@@ -1609,6 +1609,21 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	pi.on("input", () => {
 		denied.clear();
 	});
+	// Confirm waits dominate this hook's measured wall time (one overnight
+	// session attributed 9.8h to 609 tool_call records with zero blocks: all
+	// user latency, amplified when parallel calls share one dialog). Record
+	// each wait so hook-health diagnostics can separate user latency from
+	// handler cost. One receipt per dialog; shared waiters share it.
+	const confirmAccounted = async (ctx: any, title: string, body: string): Promise<boolean> => {
+		const started = Date.now();
+		let allowed = false;
+		try {
+			allowed = await ctx.ui.confirm(title, body, { signal: ctx.signal }).catch(() => false);
+			return allowed;
+		} finally {
+			try { pi.appendEntry?.("fs-confirm-wait-v1", { title, waitMs: Date.now() - started, allowed }); } catch { /* diagnostics never block safety */ }
+		}
+	};
 	pi.on("tool_call", async (event, ctx) => {
 		// Only intercept shell commands: bash, background runs and commands
 		// launched into a desktop_session virtual display.
@@ -1643,13 +1658,11 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				ctx.hasUI &&
 				!ctx.signal?.aborted
 			) {
-				const allowed = await ctx.ui
-					.confirm(
-						"Review destructive operation",
-						`${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
-						{ signal: ctx.signal },
-					)
-					.catch(() => false);
+				const allowed = await confirmAccounted(
+					ctx,
+					"Review destructive operation",
+					`${reason}\n\nWorking directory: ${ctx.cwd}\n${command}`,
+				);
 				if (
 					allowed &&
 					epoch === generation &&
@@ -1763,10 +1776,10 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			) {
 				let decision = pending.get(scope);
 				if (!decision) {
-					decision = ctx.ui.confirm(
+					decision = confirmAccounted(
+						ctx,
 						"Additional write scope",
 						`Allow write/edit ${kind === "file" ? "of this file" : "under this directory"}: ${scope} for this session? This does not permit shell deletion, system paths or credentials.`,
-						{ signal: ctx.signal },
 					);
 					pending.set(scope, decision);
 				}
@@ -1819,13 +1832,11 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				const epoch = generation;
 				let accepted = false;
 				if (ctx.hasUI && !ctx.signal?.aborted)
-					accepted = await ctx.ui
-						.confirm(
-							"Review whole-file replacement",
-							`${reason}: ${target}. Allow this exact replacement?`,
-							{ signal: ctx.signal },
-						)
-						.catch(() => false);
+					accepted = await confirmAccounted(
+						ctx,
+						"Review whole-file replacement",
+						`${reason}: ${target}. Allow this exact replacement?`,
+					);
 				let unchanged = false;
 				try {
 					unchanged =

@@ -4,6 +4,7 @@ import { guardianOwnerForSession } from "@yunuspi/coding-agent";
 import { Text } from "@yunuspi/tui";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { assistanceMemberRouteCandidate, selectAssistanceTeam, type AssistanceMember, type AssistancePlan } from "../runs/shared/assistance-plan.ts";
+import { recentUnreliableRoutes } from "../runs/shared/run-history.ts";
 import { enforceAssistanceFlow } from "../runs/shared/assistance-shadow.ts";
 import { loadModelEconomyConfig } from "../runs/shared/model-economy.ts";
 import { toModelInfo } from "../shared/model-info.ts";
@@ -489,6 +490,7 @@ export function registerScopeCouncilRunner(pi: any, deps: ScopeCouncilRunnerDeps
 				task: request.task,
 				minOutputTokens: 512,
 				role: "council",
+				unreliable: recentUnreliableRoutes("automatic-free-assistant"),
 			});
 		} catch {
 			return unavailable("The economy and capability gate could not select permitted council routes safely.");

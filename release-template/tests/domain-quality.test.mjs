@@ -183,3 +183,10 @@ test('artifact snapshots recheck leaf, ancestor and workspace symlink targets',a
     finally{fs.promises.open=originalOpen;fs.unlinkSync(link);}
   }
 });
+
+test('SVG filter regions flag the default clipping window',async()=>{
+  const bare=await inspectSvg(svg('<defs><filter id="f"><feGaussianBlur stdDeviation="2"/></filter></defs><rect width="8" height="8" filter="url(#f)"/>'));
+  assert.ok(keys(bare).includes('filter-region'));
+  const explicit=await inspectSvg(svg('<defs><filter id="f" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2"/></filter></defs><rect width="8" height="8" filter="url(#f)"/>'));
+  assert.ok(!keys(explicit).includes('filter-region'));
+});

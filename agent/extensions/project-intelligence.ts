@@ -578,8 +578,12 @@ export default function projectIntelligence(pi: any) {
       };
     };
     // Bounded wait: a quick council still precedes the first inference; a
-    // slow one deliberates while the agent reads (see SCOPE_LIMITS).
-    return scope.pending(ctx) ? scope.settle(ctx, SCOPE_LIMITS.contextWaitMs).then(render) : render();
+    // slow one deliberates while the agent reads (see SCOPE_LIMITS). The wait
+    // is spent once per council (see contextWait): later context builds of a
+    // slow council had paid it again, stalling each turn up to 15s for as
+    // long as the council ran. The first mutation still waits (tool_call).
+    const waited = scope.contextWait(ctx, SCOPE_LIMITS.contextWaitMs);
+    return waited ? waited.then(render) : render();
   });
   pi.on("tool_call", async (event: any, ctx: any) => {
     // The first file mutation of a scoped request waits for the council and is

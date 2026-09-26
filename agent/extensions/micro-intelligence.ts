@@ -24,6 +24,7 @@ import {
 import { needleWarmup, needleHandle } from "./lib/needle-runtime.ts";
 import { runPromptAnalysis } from "./lib/prompt-analysis-runtime.ts";
 import { detectDesignBrief, designDirectionGuidance, designDirectionSummary } from "./lib/design-direction.ts";
+import { buildExpertBrief } from "./lib/expert-brief.ts";
 import {
   buildPromptAnalysisRequest,
   promptAnalysisEvent,
@@ -104,6 +105,9 @@ interface PendingPromptAnalysis {
   /** Design-direction guidance also injected when the analysis fell back. */
   designGuidance: string;
   designSummary: string;
+  /** Expert-domain guidance, injected under the same fallback rule. */
+  expertGuidance: string;
+  expertSummary: string;
   inputChars: number;
   excerpted: boolean;
   generation: number;
@@ -748,6 +752,14 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       // unless the follow-up itself starts new visual work.
       const designBrief = detectDesignBrief(prompt, kind === "initial" || analysis.visualDesign ? analysis : { ...analysis, source: "model", visualDesign: false, openEnded: false });
       const designGuidance = designDirectionGuidance(designBrief);
+      // Expert-director brief: same advisory boundary, own qualification.
+      // Follow-ups qualify only when they restate domain signal themselves.
+      let expertGuidance = "", expertSummary = "";
+      try {
+        const expert = buildExpertBrief({ prompt, analysis });
+        expertGuidance = expert.text;
+        expertSummary = expert.summary;
+      } catch { /* Advisory only; never breaks prompt analysis. */ }
       const pending: PendingPromptAnalysis = {
         ownerId: guardianOwnerId,
         requestId: event.requestId,
@@ -762,10 +774,12 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         status: result.status,
         attempts,
         advisory: result.status === "fallback"
-          ? designGuidance
-          : [renderPromptAnalysisContext(analysis, selected.source, result.route), designGuidance].filter(Boolean).join("\n"),
+          ? [designGuidance, expertGuidance].filter(Boolean).join("\n")
+          : [renderPromptAnalysisContext(analysis, selected.source, result.route), designGuidance, expertGuidance].filter(Boolean).join("\n"),
         designGuidance,
         designSummary: designDirectionSummary(designBrief),
+        expertGuidance,
+        expertSummary,
         inputChars: prompt.length,
         excerpted: prompt.length > (kind === "initial" ? 24_000 : 8_000),
         generation: currentGeneration,
@@ -855,7 +869,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       );
       // A deterministic fallback only restates the literal prompt with zero
       // confidence; injecting it would spend context on no new information.
-      if ((pending.status !== "fallback" || pending.designGuidance) && pending.advisory && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
+      if ((pending.status !== "fallback" || pending.designGuidance || pending.expertGuidance) && pending.advisory && !requestAlreadyPresent && activeAdvisoryRequestIds.has(request.requestId)) {
         const details = analysisDetails(pending, pending.preferenceSource);
         const content = pending.advisory;
         inserts.push({
@@ -890,16 +904,18 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome === "truncated" ? `output limit reached${attempt.reasoningTokens ? ` (${attempt.reasoningTokens} reasoning tokens)` : ""}` : attempt.outcome === "empty" ? "returned no answer" : attempt.outcome}${attempt.recovery ? "; retrying with compact response" : ""}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
         const concise = pending.status === "fallback" ? [
           `Intent analysis · ${pending.analysis.kind} · unavailable — ${reasons.join("; ") || "no eligible analysis route"}.`,
-          pending.designGuidance
-            ? "Only design-direction guidance (from local rules) was added to the main agent's context; it works from your prompt as written."
+          pending.designGuidance || pending.expertGuidance
+            ? "Only local-rule guidance (design-direction, expert-domain) was added to the main agent's context; it works from your prompt as written."
             : "Nothing was added to the main agent's context; it works from your prompt as written.",
           ...(pending.designSummary ? [pending.designSummary] : []),
+          ...(pending.expertSummary ? [pending.expertSummary] : []),
         ].join("\n") : [
           renderPromptAnalysis(pending.analysis, pending.preferenceSource, pending.route),
           ...(pending.analysis.kind === "followup" && !pending.analysis.relation ? ["Relationship: uncertain; earlier user scope remains authoritative."] : []),
           ...(reasons.length > 1 ? [`Routes: ${reasons.join("; ")}.`] : []),
           ...(pending.excerpted ? ["Long request: analysis used the beginning, end and extracted task focus; the omitted middle may contain additional constraints."] : []),
           ...(pending.designSummary ? [pending.designSummary] : []),
+          ...(pending.expertSummary ? [pending.expertSummary] : []),
           "Original user prompt preserved. This advisory informs the main agent; it does not replace the request.",
         ].join("\n");
         const details = analysisDetails(pending, pending.preferenceSource);
