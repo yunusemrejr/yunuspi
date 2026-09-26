@@ -47,7 +47,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   // Note text awaiting provider confirmation. Only confirmed-delivered notes
   // join adviceHistory; unconfirmed notes must not pose as "already delivered".
-  let pendingAdviceText: string | undefined;
+  let pendingAdvice: { text: string; note: string; picks: string[] } | undefined;
   // The newest completed note that never reached a provider request. The next
   // context build delivers it as its own capsule alongside the current note.
   let carriedAdvice: CarriedReviewerNote | undefined;
@@ -56,11 +56,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
    * Prepared notes keep their prepared-context signal; only unprepared notes
    * (never in any request) are carried. One deep; a replacement is ledgered. */
   const stashCarried = (via: string) => {
-    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdviceText) return false;
+    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdvice) return false;
     if (carriedAdvice && carriedAdvice.id !== latestAdviceId) {
       try { pi.appendEntry('session-observer-delivery-v1', { adviceId: carriedAdvice.id, status: 'dropped:replaced', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
     }
-    carriedAdvice = { id: latestAdviceId, text: pendingAdviceText, at: now() };
+    carriedAdvice = { id: latestAdviceId, ...pendingAdvice, at: now() };
     try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'carried', via, at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
     return true;
   };
@@ -235,7 +235,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdvice = undefined; carriedAdvice = undefined; preparedCarried = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
@@ -482,7 +482,6 @@ export default function sessionObserver(pi: any, testing: any = {}) {
       else if (status !== 'checked') { try { ctx?.ui?.setStatus?.(OBSERVER_MESSAGE, undefined); } catch { /* Footer status is optional. */ } }
       if (status === 'started') { if (detail === lastStartedDetail) return; lastStartedDetail = detail; }
       if (advice) {
-        publishReviewerNote(reviewerSessionKey(ctx), 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         for (const id of String(advice.note).match(/\bm\d+\b/g) ?? []) sessionMargins.add(id);
         closeNoteEdits = workFinished() ? parentEditsThisTask : -1;
         // A previous note that never reached a context build is superseded but
@@ -493,7 +492,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
         if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('supersede')) {
           try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
         }
-        latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdviceText = observerAdviceText(advice); notesThisTask++;
+        latestAdviceId = `observer-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdvice = { text: observerAdviceText(advice), note: advice.note, picks: [...(advice.tools ?? []), ...(advice.skills ?? [])] }; notesThisTask++;
       }
       const content = advice ? `Observer returned a note · snapshot ${advice.evidence.join(', ')} · ${detail}\n${observerAdviceText(advice)}` : `Observer ${status}: ${detail}`;
       const delivery = pi.sendMessage({ customType: OBSERVER_MESSAGE, content, display: true, excludeFromContext: true, details: { status, detail: displayText(detail, 240),
@@ -587,7 +586,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     // text into the next task instead of losing advice the agent never saw.
     stashCarried('input');
     runtime.stop('New user input');
-    latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+    latestAdviceId = undefined; preparedAdvice = undefined; pendingAdvice = undefined;
     const id = event.requestId;
     const abort = () => { pending.get(id)?.cleanup(); pending.delete(id); if (owns(context) && userRequest && !pending.size && context.isIdle?.() === false) runtime.start(); };
     const cleanup = () => event.signal?.removeEventListener('abort', abort);
@@ -759,18 +758,24 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     const receipts: any[] = Array.isArray(event.observerAdviceReceipts) ? event.observerAdviceReceipts : [];
     // The current note and the carried note confirm independently: each joins
     // advice history only on its own provider receipt.
-    if (preparedAdvice && preparedAdvice.id === latestAdviceId && preparedAdvice.taskEpoch === taskEpoch && preparedAdvice.signal === context.signal && runtime.context(false)
+    if (preparedAdvice && preparedAdvice.id === latestAdviceId && preparedAdvice.taskEpoch === taskEpoch && preparedAdvice.signal === context.signal
       && receipts.some((receipt: any) => receipt.id === preparedAdvice!.id && receipt.sha256 === preparedAdvice!.sha256)) {
       try { pi.appendEntry('session-observer-delivery-v1', { adviceId: preparedAdvice.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
       // Only confirmed-delivered notes join the history the next packet calls
       // "previous advice already delivered".
-      if (pendingAdviceText) { adviceHistory.push(pendingAdviceText); if (adviceHistory.length > 8) adviceHistory.shift(); }
-      runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+      if (pendingAdvice) {
+        publishReviewerNote(reviewerSessionKey(ctx), 'observer', pendingAdvice.note, pendingAdvice.picks, now());
+        adviceHistory.push(pendingAdvice.text); if (adviceHistory.length > 8) adviceHistory.shift();
+      }
+      runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined; pendingAdvice = undefined;
     }
     if (preparedCarried && preparedCarried.id === carriedAdvice?.id && preparedCarried.taskEpoch === taskEpoch && preparedCarried.signal === context.signal
       && receipts.some((receipt: any) => receipt.id === preparedCarried!.id && receipt.sha256 === preparedCarried!.sha256)) {
       try { pi.appendEntry('session-observer-delivery-v1', { adviceId: preparedCarried.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
-      if (carriedAdvice) { adviceHistory.push(carriedAdvice.text); if (adviceHistory.length > 8) adviceHistory.shift(); }
+      if (carriedAdvice) {
+        publishReviewerNote(reviewerSessionKey(ctx), 'observer', carriedAdvice.note ?? carriedAdvice.text, carriedAdvice.picks ?? [], now());
+        adviceHistory.push(carriedAdvice.text); if (adviceHistory.length > 8) adviceHistory.shift();
+      }
       carriedAdvice = undefined; preparedCarried = undefined;
     }
   });
@@ -784,7 +789,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('settle')) {
       try { pi.appendEntry('session-observer-delivery-v1', { adviceId: latestAdviceId, status: 'dropped:settled', at: now() }); } catch { /* Accounting only. */ }
     }
-    latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+    latestAdviceId = undefined; preparedAdvice = undefined; pendingAdvice = undefined;
   });
   pi.on('session_shutdown', () => { runtime.close(); clearPending(); removePlanListener?.(); removePeerListener?.(); removeHookListener?.(); closed = true; recent = []; streaming = []; request = ''; try { marginStore?.flush(); } catch { /* Statistics are advisory. */ } });
 }

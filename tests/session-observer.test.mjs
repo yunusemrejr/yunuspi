@@ -302,6 +302,24 @@ test('native accepted input lifecycle observes exposed streaming evidence and in
   h.emit('agent_settled');await h.advance(60000);assert.equal(h.packets.length,2);h.close();
 });
 
+test('peer reviewers learn advice only after its provider receipt', async () => {
+  const { peerReviewerNotes, reviewerSessionKey } = await import('../agent/extensions/lib/session-observer.ts');
+  const h = harness();
+  h.input('Fix parser validation.'); await h.advance(30000);
+  const key = reviewerSessionKey(h.ctx);
+  assert.deepEqual(peerReviewerNotes(key, 'watchmaker', h.now()), [], 'a returned note is not yet advice the agent received');
+  const capsule = h.emit('context', { messages: [] }).messages.find(message => message.customType === 'session-observer-context');
+  assert.deepEqual(peerReviewerNotes(key, 'watchmaker', h.now()), [], 'context preparation alone cannot suppress peer advice');
+  const adviceId = h.sent.find(([message]) => message.details?.status === 'completed')[0].details.adviceId;
+  h.emit('after_provider_response', { status: 200, provider: model.provider, model: model.id,
+    observerAdviceReceipts: [{ id: adviceId, sha256: createHash('sha256').update(capsule.content).digest('hex') }] });
+  const peers = peerReviewerNotes(key, 'watchmaker', h.now());
+  assert.equal(peers.length, 1);
+  assert.match(peers[0].note, /parser source/);
+  assert.deepEqual(peers[0].picks, ['read']);
+  h.close();
+});
+
 test('handled inputs resume prior active work; retries retain cadence; replaced session owners reject late usage', async () => {
   const h=harness();h.input('Fix parser validation.');
   await h.advance(20000);h.emit('agent_end');h.emit('agent_start');await h.advance(10000);assert.equal(h.packets.length,1,'internal agent_end must not reset active cadence');

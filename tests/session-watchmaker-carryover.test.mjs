@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import watchmakerExtension from '../agent/extensions/session-watchmaker.ts';
+import { peerReviewerNotes, reviewerSessionKey } from '../agent/extensions/lib/session-observer.ts';
 
 const GUARDIAN_META = Symbol.for('yunuspi.guardian.request-meta.v1');
 const model = { provider: 'deepseek', id: 'deepseek-flash', name: 'Synthetic watchmaker route', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, input: ['text'], cost: { input: 0.1, output: 0.2 } };
@@ -96,6 +98,23 @@ test('watchmaker switches scratchpad ownership and records its own usage owner',
   await h.time.advance(60000);
   await h.waitForNotes(2);
   assert.ok(!h.packets[1].text.includes(memo), 'the replacement session cannot inherit another session scratchpad');
+});
+
+for (const carried of [false, true]) test(`watchmaker peers wait for the ${carried ? 'carried' : 'current'} note receipt`, async (t) => {
+  const note = 'Repeated dependency builds dominate time: inspect the slow stage before rebuilding.';
+  const h = harness(t, [note]);
+  h.fire('session_start', {});
+  await h.beginTask('first', 'Fix the fixture.');
+  await h.time.advance(60000);
+  await h.waitForNotes(1);
+  const key = reviewerSessionKey(h.ctx);
+  assert.deepEqual(peerReviewerNotes(key, 'observer', h.time.now()), []);
+  if (carried) await h.beginTask('second', 'Continue that repair.');
+  const capsule = h.fire('context', { messages: [] }).messages.find(message => message.customType === 'session-watchmaker-context');
+  assert.deepEqual(peerReviewerNotes(key, 'observer', h.time.now()), []);
+  h.fire('after_provider_response', { status: 200, provider: model.provider, model: model.id,
+    observerAdviceReceipts: [{ id: h.completedIds()[0], sha256: createHash('sha256').update(capsule.content).digest('hex') }] });
+  assert.equal(peerReviewerNotes(key, 'observer', h.time.now())[0]?.note, note);
 });
 
 test('undelivered watchmaker notes survive new user input into the next task', async (t) => {

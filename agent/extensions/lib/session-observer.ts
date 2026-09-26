@@ -290,7 +290,7 @@ export function validateObserverAdvice(text: string, packet: ObserverPacket, ext
  * instead of) the current note; provider confirmation joins it to advice
  * history like any delivered note. One deep: a newer carried note replaces an
  * older one, ledgered as replaced. */
-export interface CarriedReviewerNote { id: string; text: string; at: number }
+export interface CarriedReviewerNote { id: string; text: string; at: number; note?: string; picks?: string[] }
 /** Capsule text for a carried note. It starts with the receipt line so core
  * emits an independent delivery receipt for it (see sdk advice capsules). */
 export function carriedReviewerNoteText(label: 'Observer' | 'Watchmaker', note: CarriedReviewerNote, now: number): string {
