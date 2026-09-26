@@ -167,7 +167,20 @@ export function sessionKind(sessionFile: string | undefined): {
 		const m = parentDir.match(/_([0-9a-fA-F-]{10,})$/);
 		return { kind: "fork", parent: m ? m[1] : undefined };
 	}
+	// Native child runs persist under <parent-session-dir>/<runId>/run-N/.
+	const run = sessionFile?.match(/[\\/][^\\/]*_([0-9a-fA-F-]{10,})[\\/][^\\/]+[\\/]run-\d+[\\/][^\\/]+\.jsonl$/);
+	if (run) return { kind: "fork", parent: run[1] };
 	return { kind: "root" };
+}
+
+/** THIS process's identity. The native child environment is authoritative
+ * over path layout: a child is a fork of its orchestrator, heartbeats as one,
+ * and never counts that orchestrator as an independent sibling. */
+function selfKind(sessionFile: string | undefined): ReturnType<typeof sessionKind> {
+	const fromPath = sessionKind(sessionFile);
+	return process.env.PI_SUBAGENT_CHILD === "1"
+		? { kind: "fork", parent: process.env.PI_SUBAGENT_ORCHESTRATOR_SESSION_ID ?? fromPath.parent }
+		: fromPath;
 }
 
 /** Sids to announce: independent roots not yet announced this session (first
@@ -428,8 +441,8 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 					pid: process.pid,
 					cwd: fs.realpathSync(cwd),
 					root: coordinationRoot(cwd),
-					kind: process.env.PI_SUBAGENT_CHILD === '1' ? 'fork' : kind,
-					parent: process.env.PI_SUBAGENT_CHILD === '1' ? process.env.PI_SUBAGENT_ORCHESTRATOR_SESSION_ID ?? parent : parent,
+					kind,
+					parent,
 					startedAt,
 					...(bridgeEpoch ? { bridgeEpoch, bridgeStartedAt } : {}),
 					ts: Date.now(),
@@ -681,7 +694,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 		} catch { /* Durable inbox is retried at the next native boundary. */ }
 	};
 	const startInbox = () => {
-		if (!currentContext || process.env.PI_SUBAGENT_CHILD === '1' || sessionKind(safeSessionFile(currentContext)).kind !== 'root') return;
+		if (!currentContext || selfKind(safeSessionFile(currentContext)).kind !== 'root') return;
 		bridgeEpoch = randomUUID(); bridgeStartedAt = Date.now();
 		try {
 			privateDirectory(DIR); privateDirectory(INBOX_DIR);
@@ -723,7 +736,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 				if (entry.type === "custom" && entry.customType === "sibling-coordination" && entry.data?.root === coordinationRoot(ctx.cwd)) { coordination = cleanCoordination(entry.data.coordination); coordination.recentWrites = []; break; }
 			}
 			updatePlan(ctx, replayFromBranch(ctx).tasks);
-			const self = sessionKind(safeSessionFile(ctx));
+			const self = selfKind(safeSessionFile(ctx));
 			heartbeat(sid, ctx.cwd, self.kind, self.parent);
 			// Baseline the board so a fresh session never re-notices history.
 			try {
@@ -742,7 +755,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 			drainInbox();
 			const sid = ctx.sessionManager.getSessionId();
 			if (!sid) return undefined;
-			const self = sessionKind(safeSessionFile(ctx));
+			const self = selfKind(safeSessionFile(ctx));
 			heartbeat(sid, ctx.cwd, self.kind, self.parent);
 			const actives = activeEntries(
 				sid,
@@ -792,11 +805,11 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 
 	const peers = (ctx: any, allProjects = false) => {
 		const sid = ctx.sessionManager.getSessionId();
-		const self = sessionKind(safeSessionFile(ctx));
+		const self = selfKind(safeSessionFile(ctx));
 		return activeEntries(sid,ctx.cwd,ownForkSids(safeSessionFile(ctx)),allProjects).filter(e=>e.kind === "root" && e.sid !== self.parent).slice(0,24);
 	};
 	const publish = (ctx: any) => {
-		const self=sessionKind(safeSessionFile(ctx));
+		const self=selfKind(safeSessionFile(ctx));
 		heartbeat(ctx.sessionManager.getSessionId(),ctx.cwd,self.kind,self.parent);
 	};
 	pi.registerTool?.({
@@ -941,7 +954,7 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 			drainInbox();
 			const sid = ctx.sessionManager.getSessionId();
 			if (!sid) return;
-			const self = sessionKind(safeSessionFile(ctx));
+			const self = selfKind(safeSessionFile(ctx));
 			heartbeat(sid, ctx.cwd, self.kind, self.parent);
 		} catch {
 			/* ignore */

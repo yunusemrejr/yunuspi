@@ -199,6 +199,10 @@ export default function (pi: any) {
           await fs.copyFile(stagedOutput, output);
           await fs.chmod(output, 0o600);
           details.output = output;
+          // Review evidence must be project-relative; this capture lives in the
+          // harness. Copying it is the zero-cost route to pixel evidence (a
+          // browser-driving child was measured at $0.10-0.30 per capture round).
+          details.reviewEvidence = `To attach this capture to quality_review evidence, copy it into the project first (for example: cp ${JSON.stringify(output)} build/verify/<view>.png) and pass that project-relative path.`;
           if (canSee) {
             const image = await fs.readFile(output);
             content.push({
@@ -208,7 +212,7 @@ export default function (pi: any) {
             });
           } else {
             details.visualInterpretation =
-              "Unavailable: current model does not advertise vision. PNG saved, not delivered as pixels. If you only need printed text from this capture, run image_ocr on the output path instead of delegating. For other visual questions, discover routes with subagent({action:'models',model:'input:image'}), then use a permitted image model explicitly for a fresh read-only child to read this output path and return observations with uncertainty. Respect delegation limits; do not claim to have seen it.";
+              "Unavailable: current model does not advertise vision. PNG saved, not delivered as pixels. If you only need printed text from this capture, run image_ocr on the output path instead of delegating. For other visual questions, discover routes with subagent({action:'models',model:'input:image'}), then use a permitted image model explicitly for a fresh read-only child to read this output path and return observations with uncertainty. Capture with render_see itself rather than delegating a browser-driving child. Respect delegation limits; do not claim to have seen it.";
           }
         }
         return {

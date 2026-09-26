@@ -89,6 +89,7 @@ interface BgToolArgumentRecord {
   readonly description?: unknown;
   readonly isAgent?: unknown;
   readonly timeoutSeconds?: unknown;
+  readonly service?: unknown;
   readonly notifyOnCompletion?: unknown;
   readonly triggerOnCompletion?: unknown;
 }
@@ -171,6 +172,44 @@ const BgKillParams = Type.Object({
 });
 
 type BgRunParamsValue = Static<typeof BgRunParams>;
+
+/** Normalize model-authored bg_run arguments before schema validation. A
+ * declared service is a server or watcher, never an LLM process, so its
+ * omitted isAgent is unambiguous; every other omission still fails with the
+ * declared contract. `service` must survive preparation: execute owns the
+ * UI-only completion policy for services the model declared explicitly. */
+export function prepareBgRunArguments(args: unknown): BgRunParamsValue {
+  if (!args || typeof args !== "object")
+    throw new Error("bg_run arguments must be an object");
+  const input = args as BgToolArgumentRecord;
+  if (typeof input.command !== "string")
+    throw new Error("bg_run requires command string");
+  const isAgent = typeof input.isAgent === "boolean" ? input.isAgent : input.service === true ? false : undefined;
+  if (isAgent === undefined) {
+    throw new Error(
+      "bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
+    );
+  }
+  const prepared: BgRunParamsValue = {
+    command: input.command,
+    name:
+      normalizeTaskName(input.name) ??
+      normalizeTaskName(input.description) ??
+      deriveTaskNameFromCommand(input.command),
+    isAgent,
+  };
+  if (typeof input.description === "string")
+    prepared.description = input.description;
+  if (typeof input.timeoutSeconds === "number")
+    prepared.timeoutSeconds = input.timeoutSeconds;
+  if (typeof input.service === "boolean")
+    prepared.service = input.service;
+  if (typeof input.notifyOnCompletion === "boolean")
+    prepared.notifyOnCompletion = input.notifyOnCompletion;
+  if (typeof input.triggerOnCompletion === "boolean")
+    prepared.triggerOnCompletion = input.triggerOnCompletion;
+  return prepared;
+}
 
 function renderPlainResult(
   result: TextToolResult,
@@ -654,35 +693,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       "Use bash for short commands; bg_run for long tests/builds/servers. Give bg_run a short name; isAgent is true only for LLM processes. Keep completion notifications enabled; finite tasks request one coalesced wake by default, while recognized persistent services stay UI/receipt-only unless triggerOnCompletion:true is explicit. Do other work or yield rather than poll. A terminal notification is authoritative; inspect its logs when needed, then report the result—not success before completion.",
     ],
     parameters: BgRunParams,
-    prepareArguments(args): BgRunParamsValue {
-      if (!args || typeof args !== "object")
-        throw new Error("bg_run arguments must be an object");
-      const input = args as BgToolArgumentRecord;
-      if (typeof input.command !== "string")
-        throw new Error("bg_run requires command string");
-      if (typeof input.isAgent !== "boolean") {
-        throw new Error(
-          "bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
-        );
-      }
-      const prepared: BgRunParamsValue = {
-        command: input.command,
-        name:
-          normalizeTaskName(input.name) ??
-          normalizeTaskName(input.description) ??
-          deriveTaskNameFromCommand(input.command),
-        isAgent: input.isAgent,
-      };
-      if (typeof input.description === "string")
-        prepared.description = input.description;
-      if (typeof input.timeoutSeconds === "number")
-        prepared.timeoutSeconds = input.timeoutSeconds;
-      if (typeof input.notifyOnCompletion === "boolean")
-        prepared.notifyOnCompletion = input.notifyOnCompletion;
-      if (typeof input.triggerOnCompletion === "boolean")
-        prepared.triggerOnCompletion = input.triggerOnCompletion;
-      return prepared;
-    },
+    prepareArguments: prepareBgRunArguments,
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       if (typeof params.isAgent !== "boolean") {
         throw new Error(

@@ -196,6 +196,30 @@ test("healthy sibling scan reports no truncation", async (t) => {
   assert.equal(res.details.truncated, false);
 });
 
+test("a native child run never lists its own orchestrator as an independent sibling", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sib-child-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "sib-child-cwd-"));
+  t.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+  const parentSid = "01a0aaaa-0000-7000-8000-000000000001";
+  const parentFile = path.join(cwd, "sessions", `2026-09-26T05-40-13-572Z_${parentSid}.jsonl`);
+  const session = (sid, file) => ({ cwd, sessionManager: { getSessionId: () => sid, getSessionFile: () => file } });
+  const parentPi = stubPi(), childPi = stubPi(), otherPi = stubPi();
+  registerSiblings(parentPi, { directory: dir });
+  registerSiblings(childPi, { directory: dir });
+  registerSiblings(otherPi, { directory: dir });
+  await parentPi.tools.get("session_coordinate").execute("p", {}, undefined, undefined, session(parentSid, parentFile));
+  await otherPi.tools.get("session_coordinate").execute("o", {}, undefined, undefined, session("01a0cccc-0000-7000-8000-000000000003", path.join(cwd, "sessions", "other.jsonl")));
+  // Native child layout: <parent-session-dir>/<runId>/run-N/session.jsonl
+  const childFile = path.join(cwd, "sessions", `2026-09-26T05-40-13-572Z_${parentSid}`, "b4067521-f6d1-421d-9b57-f976284c3cb0", "run-0", "session.jsonl");
+  const res = await childPi.tools.get("session_coordinate").execute("c", {}, undefined, undefined, session("01a0bbbb-0000-7000-8000-000000000002", childFile));
+  const peers = res.details.peers.map((peer) => peer.sid ?? peer.sessionId ?? peer);
+  assert.ok(!JSON.stringify(peers).includes(parentSid), "the orchestrator is the child's parent, not a sibling");
+  assert.ok(JSON.stringify(peers).includes("01a0cccc"), "a genuinely independent root stays visible");
+});
+
 test("checkpoint state distinguishes missing, corrupt, and round-tripped storage", () => {
   const { readState, writeState, defaultState } = checkpoints;
   const missing = readState("edge-missing-sid");

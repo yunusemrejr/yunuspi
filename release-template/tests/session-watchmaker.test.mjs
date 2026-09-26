@@ -59,7 +59,8 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
     appendEntry: (customType, data) => { receipts.push({ customType, data }); },
   };
   const sessionManager = { getSessionId: () => 'watchmaker-fixture', getSessionFile: () => path.join(cwd, 'session.jsonl'), getBranch: () => [] };
-  const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false };
+  const statuses = [];
+  const ctx = { cwd, sessionManager, modelRegistry: { getAvailable: () => [model] }, model, isIdle: () => false, ui: { setStatus: (key, text) => statuses.push([key, text]) } };
   watchmakerExtension(pi, { ...time,
     dispatch: async (_route, packet) => {
       packets.push(packet.text);
@@ -104,6 +105,9 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
   assert.ok(drop, `unprepared note is carried loudly, got ${JSON.stringify(receipts)}`);
   assert.equal(drop.data.adviceId, firstId);
   assert.equal(drop.data.via, 'supersede');
+  assert.equal(notices.filter((n) => n.details?.status === 'started').length, 1, 'an unchanged route and setting persists one start line, not one per review');
+  assert.equal(statuses.filter(([, text]) => /^Watchmaker reviewing/.test(text ?? '')).length, 2, 'every in-flight review is visible in the footer');
+  assert.equal(statuses.at(-1)[1], undefined, 'the footer status clears when the review settles');
 
   const prepared = handlers.get('context')({ messages: [] }, ctx);
   const watchmakerCapsules = prepared.messages.filter((m) => m.customType === 'session-watchmaker-context');

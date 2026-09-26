@@ -2802,22 +2802,22 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 484
+        "line": 523
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 526
+        "line": 565
       },
       {
         "name": "bg-tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 518
+        "line": 557
       },
       {
         "name": "bg-update",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 534
+        "line": 573
       },
       {
         "name": "catalog-status",
@@ -2882,12 +2882,12 @@
       {
         "name": "jobs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 564
+        "line": 603
       },
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 611
+        "line": 650
       },
       {
         "name": "lens-allow-edit",
@@ -2942,7 +2942,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 579
+        "line": 618
       },
       {
         "name": "memory-prime",
@@ -2967,7 +2967,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 479
+        "line": 487
       },
       {
         "name": "or-provider",
@@ -3102,7 +3102,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 510
+        "line": 549
       },
       {
         "name": "used",
@@ -3112,7 +3112,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 273
+        "line": 281
       },
       {
         "name": "websearch",
@@ -3136,7 +3136,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          153
+          165
         ]
       }
     ],
@@ -3226,25 +3226,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 811,
+        "line": 822,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 765,
+        "line": 776,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 647,
+        "line": 686,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 734,
+        "line": 745,
         "kind": "literal"
       },
       {
@@ -3346,7 +3346,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 253,
         "kind": "literal"
       },
       {
@@ -3576,13 +3576,13 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 618,
+        "line": 628,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 248,
+        "line": 252,
         "kind": "literal"
       },
       {
@@ -3624,7 +3624,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 802,
+        "line": 815,
         "kind": "literal"
       },
       {
@@ -3838,25 +3838,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 811,
+        "line": 822,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 765,
+        "line": 776,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 647,
+        "line": 686,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 734,
+        "line": 745,
         "kind": "literal"
       },
       {
@@ -3904,7 +3904,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 253,
         "kind": "literal"
       },
       {
@@ -4048,13 +4048,13 @@
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 618,
+        "line": 628,
         "kind": "literal"
       },
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 248,
+        "line": 252,
         "kind": "literal"
       },
       {
@@ -4084,7 +4084,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 802,
+        "line": 815,
         "kind": "literal"
       },
       {
@@ -4315,7 +4315,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          104
+          116
         ],
         "knownNames": [
           "todo"

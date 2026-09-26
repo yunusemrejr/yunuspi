@@ -26,6 +26,8 @@ export default function sessionObserver(pi: any, testing: any = {}) {
   let skills: ObserverCapability[] = [], streaming: ObserverEvidence[] = [], closed = false, revision = 0, dropped = 0, reportedDropped = 0;
   let todos: any[] = [], adviceHistory: string[] = [];
   let latestAdviceId: string | undefined;
+  // The last persisted start line; identical starts ride the footer status.
+  let lastStartedDetail: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   // Note text awaiting provider confirmation. Only confirmed-delivered notes
   // join adviceHistory; unconfirmed notes must not pose as "already delivered".
@@ -214,7 +216,7 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; streaming = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; notesThisTask = 0; parentEditsThisTask = 0; agentResponded = false; completed.clear(); failureKeys.clear(); sessionMargins.clear(); closeNoteEdits = -1; toolInputs.clear(); startedEvents.clear(); runningTools.clear(); revision++; dropped = 0; reportedDropped = 0; inputRestrictions = {}; inputBlocked = false; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined };
     profile.reset(''); bookState = createBookSelectionState(); childSummary = { total: 0, failed: 0 }; routingEpoch = -1; routingChildState = ''; lastFired = ''; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'observer', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
@@ -424,6 +426,12 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     },
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
+      // A review starts every interval with the same route and settings. Keep
+      // the in-flight state in the footer and persist a start line only when
+      // its route/settings change; the completion line still records each run.
+      if (status === 'started') { try { ctx?.ui?.setStatus?.(OBSERVER_MESSAGE, `Observer reviewing · ${displayText(detail, 80)}`); } catch { /* Footer status is optional. */ } }
+      else if (status !== 'checked') { try { ctx?.ui?.setStatus?.(OBSERVER_MESSAGE, undefined); } catch { /* Footer status is optional. */ } }
+      if (status === 'started') { if (detail === lastStartedDetail) return; lastStartedDetail = detail; }
       if (advice) {
         publishReviewerNote(reviewerSessionKey(ctx), 'observer', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         for (const id of String(advice.note).match(/\bm\d+\b/g) ?? []) sessionMargins.add(id);

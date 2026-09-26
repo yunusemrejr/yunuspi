@@ -1096,7 +1096,12 @@ function handleModels(params: ManagementParams, ctx: ManagementContext): AgentTo
 			policy: classifyModelEconomy(entry.fullId, entry, economy),
 		}));
 		const eligible = (row: typeof rows[number]) => !economy.enabled || ["affordable", "subscription"].includes(row.policy.verdict);
-		rows.sort((a, b) => Number(eligible(b)) - Number(eligible(a)) || a.entry.fullId.localeCompare(b.entry.fullId));
+		// Agents pick from the top of this list. Alphabetical order put premium
+		// routes first: a text-only main agent sent six screenshot reviews to a
+		// $2/$10 route while $0.035/$0.29 image routes sat further down. List
+		// free and subscription routes first, then the cheapest worst case.
+		const price = (row: typeof rows[number]) => row.policy.verdict === "subscription" ? 0 : row.policy.rates ? row.policy.rates.input + row.policy.rates.output : Number.POSITIVE_INFINITY;
+		rows.sort((a, b) => Number(eligible(b)) - Number(eligible(a)) || price(a) - price(b) || a.entry.fullId.localeCompare(b.entry.fullId));
 		for (const { entry, policy } of rows.slice(0, 40)) {
 			const want = modelIdentity(entry.id);
 			const benchmarks = (intelligence?.observations ?? []).filter(b=>modelIdentity(b.model)===want && b.observedAt<=evidenceNow && evidenceNow-b.observedAt<QUALITY_TTL_MS);

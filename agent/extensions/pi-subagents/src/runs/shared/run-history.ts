@@ -391,3 +391,36 @@ export function loadRunsForAgent(agent: string): RunEntry[] {
 		return [];
 	}
 }
+
+// Harness-side verdicts and cancellations say nothing about the route.
+const ROUTE_NEUTRAL_CATEGORIES = new Set(["internal", "acceptance", "interrupted", "permission", "dependency", "invalid-request", "schema-incompatible", "unsupported-field"]);
+const ROUTE_NEUTRAL_STAGES = new Set(["classify", "select", "preflight", "launch", "accept"]);
+
+/** Routes whose recent automatic runs mostly failed to finish (stalls, stops,
+ * timeouts, provider errors). Pure projection of newest-first ledger entries
+ * for team selection: at least four recent attributable runs, fewer than
+ * half completed. Measured: one review route finished 12 of 34 automatic runs
+ * (averaging 239s) and still took a reviewer slot in every round. */
+export function unreliableRoutes(entries: readonly RunEntry[], now = Date.now(), windowMs = 3 * 86_400_000, recent = 6): Set<string> {
+	const byRoute = new Map<string, RunEntry[]>();
+	for (const entry of entries) {
+		if (!Number.isFinite(entry?.ts) || now - entry.ts * 1000 > windowMs) continue;
+		const model = entry.evidence?.model;
+		if (typeof model !== "string") continue;
+		const cause = entry.evidence?.cause as { category?: string; stage?: string } | undefined;
+		if (entry.outcome !== "completed" && cause && (ROUTE_NEUTRAL_CATEGORIES.has(String(cause.category)) || ROUTE_NEUTRAL_STAGES.has(String(cause.stage)))) continue;
+		const route = splitKnownThinkingSuffix(model).baseModel;
+		const list = byRoute.get(route) ?? [];
+		if (list.length < recent) list.push(entry);
+		byRoute.set(route, list);
+	}
+	const out = new Set<string>();
+	for (const [route, list] of byRoute) if (list.length >= 4 && list.filter(entry => entry.outcome === "completed").length * 2 < list.length) out.add(route);
+	return out;
+}
+
+/** Best-effort ledger read for automatic team selection; unreadable history
+ * demotes nothing (the ledger itself reports degraded history). */
+export function recentUnreliableRoutes(agent: string): Set<string> {
+	try { return unreliableRoutes(loadRunsForAgent(agent)); } catch { return new Set(); }
+}

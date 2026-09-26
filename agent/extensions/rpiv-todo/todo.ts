@@ -71,11 +71,27 @@ export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_GUIDANCE];
  * positive id can only be an update (creates use negative aliases); otherwise a
  * subject is a create. Models also send ids as numeric strings ("2", "-1"),
  * which the numeric-id schema would reject after inference; coerce clean
- * integer strings first. Delete is never inferred; anything else still fails
+ * integer strings first. `taskId` is the other measured id spelling ("id
+ * required for update" three times in one session); it maps to `id` only when
+ * `id` is absent. Delete is never inferred; anything else still fails
  * validation with the declared-schema message. */
+function normalizeTodoId(op: any): any {
+	if (!op || typeof op !== "object" || Array.isArray(op)) return op;
+	let candidate = op;
+	if (candidate.id === undefined && (typeof candidate.taskId === "number" || typeof candidate.taskId === "string")) {
+		const { taskId, ...rest } = candidate;
+		candidate = { ...rest, id: taskId };
+	}
+	if (typeof candidate.id === "string" && /^-?\d+$/.test(candidate.id.trim())) {
+		const numeric = Number(candidate.id.trim());
+		if (Number.isSafeInteger(numeric)) candidate = { ...candidate, id: numeric };
+	}
+	return candidate;
+}
+
 export function prepareTodoArguments(args: unknown): any {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
-	let input = args as Record<string, any>;
+	let input = normalizeTodoId(args) as Record<string, any>;
 	if (input.action === undefined && typeof input.batch === "string") {
 		try {
 			const parsed = JSON.parse(input.batch);
@@ -86,11 +102,7 @@ export function prepareTodoArguments(args: unknown): any {
 	if (input.action !== "batch" || !Array.isArray(input.operations)) return input === args ? args : input;
 	const operations = input.operations.map((op: any) => {
 		if (!op || typeof op !== "object" || Array.isArray(op)) return op;
-		let candidate = op;
-		if (typeof candidate.id === "string" && /^-?\d+$/.test(candidate.id.trim())) {
-			const numeric = Number(candidate.id.trim());
-			if (Number.isSafeInteger(numeric)) candidate = { ...candidate, id: numeric };
-		}
+		const candidate = normalizeTodoId(op);
 		if (candidate.action !== undefined) return candidate;
 		if (Number.isSafeInteger(candidate.id) && candidate.id > 0) return { ...candidate, action: "update" };
 		if (typeof candidate.subject === "string" && candidate.subject.trim()) return { ...candidate, action: "create" };

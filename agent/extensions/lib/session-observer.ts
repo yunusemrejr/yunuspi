@@ -301,7 +301,7 @@ export function observerAdviceText(advice: ObserverAdvice): string {
   return [advice.uncited ? `Uncited observation (verify before acting): ${advice.note}` : advice.note, activeTools.length ? `Consider tools: ${activeTools.join(', ')}.` : '', advice.discoverableTools?.length ? `Discoverable tools (not active): ${advice.discoverableTools.join(', ')}; activate with tool_search({names:${JSON.stringify(advice.discoverableTools)}}).` : '', advice.skills.length ? `Consider skills: ${advice.skills.join(', ')}.` : '',
     advice.bookTitles?.length ? `Observer book: ${advice.bookTitles.join('; ')}.` : ''].filter(Boolean).join('\n');
 }
-export interface ObserverRoute { route: string; model: any; thinking?: string; configuredThinking?: string; providerRouting?: Record<string, unknown>; officialDefault?: boolean; requireFree?: boolean; }
+export interface ObserverRoute { route: string; model: any; thinking?: string; configuredThinking?: string; outputScale?: number; providerRouting?: Record<string, unknown>; officialDefault?: boolean; requireFree?: boolean; }
 /** Tool names in any native payload shape (OpenAI, Anthropic, Gemini, Bedrock). */
 function payloadToolNames(payload: any): string[] | undefined {
   const lists = [payload?.tools, payload?.config?.tools, payload?.toolConfig?.tools].filter(Array.isArray);
@@ -343,7 +343,7 @@ export async function observerDispatch(route: ObserverRoute, packet: ObserverPac
   const sampling = new Set(['temperature', 'top_p', 'top_k', 'min_p', 'frequency_penalty', 'presence_penalty', 'seed']);
   const model = { ...route.model, samplingParams: Object.fromEntries(Object.entries(route.model.samplingParams ?? {}).filter(([key]) => sampling.has(key))),
     ...(route.providerRouting ? { compat: { ...route.model.compat, openRouterRouting: route.providerRouting } } : {}) };
-  const ceiling = Math.min(opts?.outputTokens ?? OBSERVER_OUTPUT_TOKENS, model.maxTokens);
+  const ceiling = Math.min(Math.round((opts?.outputTokens ?? OBSERVER_OUTPUT_TOKENS) * Math.min(4, Math.max(1, route.outputScale ?? 1))), model.maxTokens);
   const toolDefs = opts?.tools ?? OBSERVER_TOOLS;
   const tools = host ? toolDefs.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters as any })) : undefined;
   const options = {
@@ -537,14 +537,26 @@ export function createSessionObserver(ports: ObserverPorts) {
   // the ceiling); three clean reviews step it back up. Measured: a high-thinking
   // route truncated 14 and timed out 104 of ~560 reviews in one day.
   const LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
-  const drops = new Map<string, { drop: number; clean: number }>();
+  const drops = new Map<string, { drop: number; clean: number; scale?: number }>();
   const lowerThinking = (key: string) => { const entry = drops.get(key) ?? { drop: 0, clean: 0 }; entry.drop = Math.min(2, entry.drop + 1); entry.clean = 0; drops.set(key, entry); };
+  // A route already at its lowest thinking level cannot trade reasoning for
+  // answer room (measured: a low-thinking route truncated four reviews in a
+  // row at its fixed allowance). Widen that route's output ceiling instead,
+  // bounded at 4x; a ceiling costs nothing unless the reply uses it.
+  const widenOutput = (key: string) => { const entry = drops.get(key) ?? { drop: 0, clean: 0 }; entry.scale = Math.min(4, (entry.scale ?? 1) * 2); drops.set(key, entry); };
   const raiseThinking = (key: string) => { const entry = drops.get(key); if (!entry?.drop) return; if (++entry.clean >= 3) { entry.drop--; entry.clean = 0; } };
   const adapted = (route: ObserverRoute): ObserverRoute => {
-    const drop = drops.get(route.route)?.drop ?? 0, at = LEVELS.indexOf(route.thinking ?? '');
-    return drop && at > 1 ? { ...route, thinking: LEVELS[Math.max(1, at - drop)], configuredThinking: route.thinking } as ObserverRoute : route;
+    const entry = drops.get(route.route), drop = entry?.drop ?? 0, at = LEVELS.indexOf(route.thinking ?? '');
+    const thought = drop && at > 1 ? { ...route, thinking: LEVELS[Math.max(1, at - drop)], configuredThinking: route.thinking } as ObserverRoute : route;
+    return (entry?.scale ?? 1) > 1 ? { ...thought, outputScale: entry!.scale } : thought;
   };
-  const thinkingNote = (route: ObserverRoute) => { const next = adapted(route); return next.thinking !== route.thinking ? `; next review uses ${next.thinking} thinking` : ''; };
+  /** Describe the adaptation the next review applies to a configured route. */
+  const thinkingNote = (route: ObserverRoute) => {
+    const next = adapted(route), parts = [];
+    if (next.thinking !== route.thinking) parts.push(`uses ${next.thinking} thinking`);
+    if ((next.outputScale ?? 1) > 1) parts.push(`allows ${next.outputScale}x output`);
+    return parts.length ? `; next review ${parts.join(' and ')}` : '';
+  };
   const delivered = new Set<string>(), recentAdvice: Set<string>[] = [], recentPicks: Set<string>[] = [];
   let current: { evidence: string; body: string; at: number; generation: number; position?: number; freshness: () => boolean | string | undefined } | undefined;
   const deliverable = (note: NonNullable<typeof current>) => {
@@ -617,8 +629,12 @@ export function createSessionObserver(ports: ObserverPorts) {
       lastReviewAt = now();
       if (!response || response.stopReason !== 'stop' || response.content?.some((p: any) => p.type === 'toolCall')) {
         failures++; current = undefined;
-        if (response?.stopReason === 'length') lowerThinking(route.route);
-        notice('unavailable', response?.stopReason === 'length' ? `${label} response was truncated; evidence retained for the next review${thinkingNote(route)}.` : `${label} did not return complete tool-free advice; evidence retained for the next review.`);
+        if (response?.stopReason === 'length') {
+          const before = adapted(snapshot.route).thinking;
+          lowerThinking(route.route);
+          if (adapted(snapshot.route).thinking === before) widenOutput(route.route);
+        }
+        notice('unavailable', response?.stopReason === 'length' ? `${label} response was truncated; evidence retained for the next review${thinkingNote(snapshot.route)}.` : `${label} did not return complete tool-free advice; evidence retained for the next review.`);
         return;
       }
       const text = response.content?.filter((p: any) => p.type === 'text' && typeof p.text === 'string').map((p: any) => p.text).join('\n') ?? '';

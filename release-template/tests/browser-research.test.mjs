@@ -153,6 +153,7 @@ test("real forum workflow preserves drafts across renewal and reconciles a timed
     assert.deepEqual(posts[0], { category: "q", answer: draft.replaceAll("\n", "\r\n"), disclosure: "on" });
     await call({ session, action: "navigate", url: url + "/history" });
     assert.match(JSON.stringify(await call({ session, action: "snapshot" })), /Pending moderation/);
+    assert.match(JSON.stringify(await call({ session: session.slice(0, 8), action: "snapshot" })), /Pending moderation/, "a unique prefix of an owned session UUID resolves");
     await call({ session, action: "navigate", url: url + "/entry/1" });
     const receipt = await call({ session, action: "verify", selector: "#submitted", text: posts[0].answer });
     assert.equal(receipt.details.verification.matches, true);

@@ -130,6 +130,12 @@ test('todo recovers only unambiguous batch operations that omit their action bef
  assert.equal(prepareTodoArguments(ambiguous),ambiguous,'no id and no subject is left for validation to reject');
  assert.equal(valid(prepareTodoArguments(ambiguous)),false);
  const correct={action:'list'};assert.equal(prepareTodoArguments(correct),correct,'valid calls pass through untouched');
+ // Recorded 2026-09-26 (three turns lost to "id required for update"): taskId spelling and string ids.
+ const taskIdUpdate=prepareTodoArguments({action:'update',status:'in_progress',taskId:1});
+ assert.deepEqual(taskIdUpdate,{action:'update',status:'in_progress',id:1});assert.equal(valid(taskIdUpdate),true);
+ assert.equal(prepareTodoArguments({action:'update',status:'completed',taskId:'2'}).id,2);
+ assert.equal(prepareTodoArguments({action:'batch',operations:[{taskId:4,status:'completed'}]}).operations[0].action,'update');
+ const both={action:'update',id:5,taskId:9};assert.equal(prepareTodoArguments(both),both,'an explicit id is never replaced by taskId');
 });
 
 test('todo dependency and child refusals name the blocking tasks',()=>{

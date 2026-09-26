@@ -49,4 +49,7 @@ test('unknown agent error leads with recovery and caps huge catalogs',()=>{
  assert.match(capped,/No close match; use subagent\({ action: "list" }\)/);
  assert.match(capped,/\.\.\. and 10 more; use subagent\({ action: "list" }\) for the full list/);
  assert.equal(capped.split('\n').filter(line=>line.startsWith('- agent-')).length,40);
+ // Recorded 2026-09-25: a model route passed as the agent name.
+ const route=formatUnknownAgentError('openrouter/~anthropic/claude-haiku-latest',typoCtx);
+ assert.match(route,/is a model route, not an agent\. Pass it as model with an agent, for example \{ agent: "delegate", model: "openrouter\/~anthropic\/claude-haiku-latest" \}/);
 });

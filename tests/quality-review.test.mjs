@@ -1049,6 +1049,39 @@ test("a review invalidated in flight retains its output as incomplete evidence i
  );
 });
 
+test("a mid-review edit invalidates only the aspects covering the moved file; the next round carries the rest", async (t) => {
+ let finish;
+ const f = await fixture(t, {
+  runner: (req) =>
+   new Promise(
+    (resolve) => (finish = () => resolve(req.aspects.map((a) => pass(a.id)))),
+   ),
+ });
+ await f.mutate();
+ await f.mutate("docs/guide.md", "# Guide\n\nUse the value.\n");
+ const pending = f.api.run(f.ctx);
+ while (!finish) await new Promise((resolve) => setImmediate(resolve));
+ await f.mutate("docs/guide.md", "# Guide\n\nUse the value carefully.\n");
+ finish();
+ await pending;
+ const inspected = await f.tool({ action: "inspect" });
+ const previous = Object.fromEntries(inspected.details.previousReview.reports.map((r) => [r.aspect, r]));
+ assert.equal(previous.correctness.outcome, "pass", "the unchanged JavaScript owner keeps its paid verdict");
+ assert.equal(previous.content.outcome, "unknown");
+ assert.match(previous.content.gap, /changed during/i);
+ assert.equal(inspected.details.reports.length, 0, "a stale revision never approves current source");
+ finish = undefined;
+ const next = f.api.run(f.ctx);
+ while (!finish) await new Promise((resolve) => setImmediate(resolve));
+ assert.deepEqual(f.calls.at(-1)[0].aspects.map((a) => a.id), ["content"], "only the touched aspect is re-reviewed");
+ finish();
+ await next;
+ const current = Object.fromEntries(f.state().reports.map((r) => [r.aspect, r]));
+ assert.equal(current.content.outcome, "pass");
+ assert.equal(current.correctness.outcome, "pass");
+ assert.match(current.correctness.evidence[0], /Carried forward/);
+});
+
 test("assessment waits for an in-flight source scan before accepting evidence", async (t) => {
  let release,
   scanning = false;

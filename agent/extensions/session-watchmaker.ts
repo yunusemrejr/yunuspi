@@ -24,6 +24,8 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   let skills: ObserverCapability[] = [], closed = false, revision = 0, salience = 0;
   let todos: any[] = [], adviceHistory: string[] = [];
   let latestAdviceId: string | undefined;
+  // The last persisted start line; identical starts ride the footer status.
+  let lastStartedDetail: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   let pendingAdviceText: string | undefined;
   // The newest completed note that never reached a provider request. The next
@@ -142,7 +144,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; lastStartedDetail = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
@@ -229,6 +231,12 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     },
     notice(status: string, detail: string, advice: any) {
       if (!owns(ctx)) return;
+      // A review starts every interval with the same route and settings. Keep
+      // the in-flight state in the footer and persist a start line only when
+      // its route/settings change; the completion line still records each run.
+      if (status === 'started') { try { ctx?.ui?.setStatus?.(WATCHMAKER_MESSAGE, `Watchmaker reviewing · ${displayText(detail, 80)}`); } catch { /* Footer status is optional. */ } }
+      else if (status !== 'checked') { try { ctx?.ui?.setStatus?.(WATCHMAKER_MESSAGE, undefined); } catch { /* Footer status is optional. */ } }
+      if (status === 'started') { if (detail === lastStartedDetail) return; lastStartedDetail = detail; }
       if (advice) {
         publishReviewerNote(reviewerSessionKey(ctx), 'watchmaker', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
         // A previous note that never reached a context build is superseded but

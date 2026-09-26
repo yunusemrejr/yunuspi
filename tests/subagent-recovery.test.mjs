@@ -154,3 +154,16 @@ test("workflow child success, failure and cancellation release their source list
 		}
 	}
 });
+
+test("model listings put the cheapest eligible routes first so explicit picks start there", () => {
+	const context = { cwd: work, modelRegistry: { getAvailable: () => [
+		{ provider: "openrouter", id: "~anthropic/premium", api: "openai-completions", input: ["text", "image"], reasoning: true, contextWindow: 200000, maxTokens: 64000, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 } },
+		{ provider: "openrouter", id: "~zz/cheap-vision", api: "openai-completions", input: ["text", "image"], reasoning: true, contextWindow: 200000, maxTokens: 64000, cost: { input: 0.05, output: 0.3, cacheRead: 0.01, cacheWrite: 0 } },
+		{ provider: "openrouter", id: "~mm/mid-vision", api: "openai-completions", input: ["text", "image"], reasoning: true, contextWindow: 200000, maxTokens: 64000, cost: { input: 0.5, output: 2, cacheRead: 0.05, cacheWrite: 0 } },
+	] } };
+	const result = handleManagementAction("models", { model: "input:image" }, context);
+	const text = result.content.filter((item) => item.type === "text").map((item) => item.text).join("\n");
+	const order = ["~zz/cheap-vision", "~mm/mid-vision", "~anthropic/premium"].map((id) => text.indexOf(`openrouter/${id}`));
+	assert.ok(order.every((index) => index > 0), text);
+	assert.deepEqual([...order].sort((a, b) => a - b), order, "cheapest worst case first, premium last");
+});
