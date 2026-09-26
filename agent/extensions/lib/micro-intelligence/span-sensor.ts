@@ -296,7 +296,9 @@ export async function scoreSpanTrace(
     if (spanCache.size >= SPAN_CACHE_MAX) spanCache.delete(spanCache.keys().next().value!);
     spanCache.set(fingerprint, { scores: structuredClone(parsed), model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, at: now() });
     const presentCount = Object.values(parsed).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length;
-    ledger(opts.pi, { model: answer.model, inputTokens: answer.inputTokens ?? 0, costUsd: answer.costUsd ?? 0, ms, cached: false, signals: Object.keys(parsed).length, present: presentCount, shadow });
+    ledger(opts.pi, { model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd,
+      ...(typeof answer.costUsd==='number'&&Number.isFinite(answer.costUsd)&&answer.costUsd>=0?{costSource:'provider-reported'}:{}),
+      ms, cached: false, signals: Object.keys(parsed).length, present: presentCount, shadow });
     const present = Object.entries(parsed).filter(([, scores]) => scores.present >= SPAN_ADVISE_THRESHOLD).map(([id]) => id);
     // Shadow evaluations stay out of the transcript activity feed (the
     // shadow flag suppresses display); the health sink still records them

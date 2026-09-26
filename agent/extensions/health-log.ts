@@ -81,7 +81,9 @@ export default function healthLog(pi:any) {
   log=createHealthLog(path.join(getAgentDir(),'logs/health'),activeSessionId??'unknown');
   sink=(kind,data={})=>{if(generation===epoch)emit(kind,data);};
   sessionObservability()[HEALTH_SINK]=sink;
-  emit('session.start');timer=setInterval(()=>{void flush();},5000);timer.unref();
+  // Background reviewers can finish after agent_end; persist dirty accounting
+  // on the existing health cadence without depending on another model turn.
+  emit('session.start');timer=setInterval(()=>{if(generation===epoch){flushHelperUsage();void flush();}},5000);timer.unref();
  };
  pi.on('session_start',start);pi.on('session_switch',start);
  for(const hook of ['agent_start','agent_end','turn_start','turn_end','session_compact','model_select'])pi.on(hook,()=>{emit('hook',{hook});if(hook==='agent_end')void flush();if(hook==='agent_end'||hook==='turn_end')flushHelperUsage();});

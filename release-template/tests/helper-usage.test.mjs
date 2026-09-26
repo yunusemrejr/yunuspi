@@ -71,6 +71,26 @@ test('Guardian cumulative snapshots use latest owner receipt across reload and e
   assert.match(harnessUsageHtml(summary),/Latest recorded snapshot/);assert.match(harnessUsageHtml(summary),/earlier branches/);assert.match(harnessUsageHtml(summary),/without an owner ID are excluded/);
 });
 
+test('shadow helper execution stays measured without claiming application or display',()=>{
+  const ledger=createHelperUsageLedger();
+  ledger.note('ml.needle.call',{op:'rank',shadow:true,durationMs:20});
+  ledger.note('ml.needle.call',{op:'rank',shadow:true,cached:true,durationMs:1});
+  ledger.note('ml.span.used',{shadow:true,durationMs:30});
+  ledger.note('ml.span.used',{disabled:true,durationMs:900});
+  const summary=collectHarnessUsage([custom(HELPER_USAGE_ENTRY,ledger.snapshot())]);
+  const needle=component(summary,'Needle3'),span=component(summary,'Span sensor');
+  assert.deepEqual([needle.executions,needle.cached,needle.results,needle.shadow,needle.applied,needle.displayed,needle.durationMs],[1,1,2,1,0,0,21]);
+  assert.deepEqual([span.executions,span.shadow,span.applied,span.durationMs],[1,1,0,30]);
+});
+
+test('older cumulative snapshots cannot replace newer persisted or live helper measurements',()=>{
+  const old={version:1,segment:'fixture-segment',startedAt:1,updatedAt:2,components:{JEV:{executions:1}}};
+  const latest={...old,updatedAt:3,components:{JEV:{executions:2}}};
+  const entries=[custom(HELPER_USAGE_ENTRY,latest),custom(HELPER_USAGE_ENTRY,old)];
+  assert.equal(component(collectHarnessUsage(entries,old),'JEV').executions,2);
+  assert.equal(component(collectHarnessUsage([custom(HELPER_USAGE_ENTRY,old)],latest),'JEV').executions,2);
+});
+
 test('observer receipts distinguish returned, prepared and provider-received advice and dedupe auxiliary requests',()=>{
   const branch=[
     notice('session-observer',{status:'completed',detail:'120 ms',adviceId:'advice-a',note:'Check the test result.',tools:['project_tests']}),
@@ -150,24 +170,30 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
     document.dispatchEvent(new Event('visibilitychange'));
   });
   assert.equal(await page.locator('#usage-snapshot-age').innerText(),'2 minutes old');
+  assert.match(await page.locator('.overview').innerText(),/1\s+Models used/);
+  assert.equal(await page.locator('.item[open]').count(),0,'model and task evidence stays collapsed until opened');
+  assert.equal(await page.locator('#usage-intelligence').getAttribute('open'),null);
+  await page.locator('#usage-intelligence > summary').click();
   assert.doesNotMatch(await page.locator('.usage-kpi strong').first().evaluate(node=>getComputedStyle(node).fontFamily),/Emoji/);
-  assert.equal(await page.locator('.usage-component').count(),13);
+  assert.equal(await page.locator('.usage-component').count(),4);
   for (const name of ['Span sensor', 'Micro worker', 'Remote rerank']) {
-    assert.equal(await page.locator('.usage-component').filter({ has: page.locator('summary b', { hasText: new RegExp(`^${name}$`) }) }).count(), 1);
+    assert.match(await page.locator('.usage-unmeasured').textContent(),new RegExp(name));
   }
+  assert.equal(await page.locator('.usage-unmeasured').getAttribute('open'),null);
   assert.equal(await page.locator('.usage-component[open]').count(),0);
   assert.equal(await page.locator('#usage-observer').getAttribute('open'),null);
   const jev=page.locator('.usage-component').filter({has:page.locator('summary b',{hasText:/^JEV$/})});
+  await page.keyboard.press('Tab');
   await jev.locator('summary').focus();assert.equal(await jev.locator('summary').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
   await page.keyboard.press('Enter');assert.notEqual(await jev.getAttribute('open'),null);assert.match(await jev.innerText(),/240 ms average/);
-  const modelGroup=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:'Main conversation models'})});
+  const modelGroup=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:/^Models$/})});
   await modelGroup.locator(':scope > summary').click();await modelGroup.locator('.item summary').click();assert.match(await modelGroup.innerText(),/Token traffic\s+not recorded/);
   if(process.env.YUNUSPI_USED_SCREENSHOT_DIR){await fs.mkdir(process.env.YUNUSPI_USED_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.YUNUSPI_USED_SCREENSHOT_DIR,'used-wide.png'),fullPage:true});}
-  await page.locator('#usage-observer > summary').click();assert.match(await page.locator('#usage-observer').innerText(),/1 provider receipts/);
+  await page.locator('#usage-observer > summary').click();assert.match(await page.locator('#usage-observer').innerText(),/1 provider receipt/);
   await page.locator('#usage-observer .item > summary').click();assert.match(await page.locator('#usage-observer').innerText(),/Provider received/);
   await page.locator('#usage-guardians > summary').click();assert.match(await page.locator('#usage-guardians').innerText(),/46/);
   const skills=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:'Skills'})});await skills.locator(':scope > summary').click();await skills.locator('.item summary').first().click();assert.match(await skills.innerText(),/Read receipts/);
-  const children=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:'Logical child tasks'})});
+  const children=page.locator('details.group').filter({has:page.locator(':scope > summary .group-title',{hasText:/^Child tasks$/})});
   await children.locator(':scope > summary').click();
   assert.match(await children.innerText(),/1 tasks · 1 attempts/);
   assert.match(await children.innerText(),/Automatic assistant/);
@@ -181,7 +207,10 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
     await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:path.join(process.env.YUNUSPI_USED_SCREENSHOT_DIR,'used-narrow-top.png')});
   }
   await page.setContent(renderPopupHtml('Empty evidence',usedSummaryHtml(buildUsedSummary([]))));
-  assert.match(await page.locator('#usage-intelligence').innerText(),/Historical coverage|No measurement/);assert.equal(await page.locator('#usage-intelligence .usage-kpi strong').first().innerText(),'—');
+  await page.locator('#usage-intelligence > summary').click();
+  assert.match(await page.locator('#usage-intelligence').innerText(),/Historical coverage|No measurement/);
+  assert.match(await page.locator('#usage-intelligence > summary').innerText(),/— recorded executions/);
+  assert.equal(await page.locator('#usage-intelligence .usage-component').count(),0);
   assert.deepEqual(errors,[]);
 });
 

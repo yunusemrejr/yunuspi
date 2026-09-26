@@ -66,6 +66,9 @@ export function latencyStats(latencies: number[]): { p50: number; p95: number; c
 }
 
 export function createMicroMetrics() {
+  // Work retaining this collector also retains its session's guarded sink.
+  // Looking up the current sink at completion would charge a replacement session.
+  const healthSink=sessionObservability()[Symbol.for("yunus-pi.health.v1")];
   const helpers: Record<MicroHelper, HelperCounters> = {
     deterministic: freshHelper(),
     needle: freshHelper(),
@@ -100,7 +103,7 @@ export function createMicroMetrics() {
       helpers[helper].accepted++;
       // Acceptance is the consumer's statement that a helper result changed
       // what the harness did; the session ledger (/used) counts it as applied.
-      try { sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.helper.applied", { helper }); } catch { /* telemetry is optional */ }
+      try { healthSink?.("ml.helper.applied", { helper }); } catch { /* telemetry is optional */ }
       if (projected) helpers[helper].projectedSavedChars += Math.max(0, Math.floor(savedChars));
       else helpers[helper].savedChars += Math.max(0, Math.floor(savedChars));
     },

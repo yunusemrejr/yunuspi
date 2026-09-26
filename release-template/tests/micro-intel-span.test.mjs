@@ -200,11 +200,37 @@ test("paid calls are ledgered for cost/metrics", async () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0][0], "span-usage-v1");
     assert.equal(entries[0][1].inputTokens, 11);
+    assert.equal(entries[0][1].costSource, 'provider-reported');
     assert.equal(entries[0][1].cached, false);
     // Cached rescores ledger like cached Jev answers: counted, unbilled.
     await scoreSpanTrace(trace, scorer, { env: { PI_SPAN_SHADOW: "0" }, pi });
     assert.equal(entries.length, 2);
     assert.equal(entries[1][1].cached, true);
+    assert.equal(entries[1][1].costUsd, 0);
+    clearSpanCache();
+    await scoreSpanTrace(trace, async () => ({ text: JSON.stringify(scoresFor([])), model: 'fixture', costUsd: 0, ms: 3 }), { pi });
+    assert.equal(entries[2][1].costUsd, 0);
+    assert.equal(entries[2][1].costSource, 'provider-reported');
+  } finally {
+    clearSpanCache();
+  }
+});
+
+test('missing provider usage stays unknown in the span receipt, while cache reuse is unbilled', async () => {
+  clearSpanCache();
+  try {
+    const entries = [];
+    const scorer = async () => ({ text: JSON.stringify(scoresFor([])), model: 'fixture', ms: 3 });
+    const trace = traceFrom(fixtures.traces[3].events);
+    const pi = { appendEntry: (type, data) => entries.push([type, data]) };
+    await scoreSpanTrace(trace, scorer, { pi });
+    assert.equal(entries[0][1].inputTokens, undefined);
+    assert.equal(entries[0][1].costUsd, undefined);
+    assert.equal(entries[0][1].costSource, undefined);
+    assert.equal(entries[0][1].cached, false);
+    await scoreSpanTrace(trace, scorer, { pi });
+    assert.equal(entries[1][1].cached, true);
+    assert.equal(entries[1][1].inputTokens, 0);
     assert.equal(entries[1][1].costUsd, 0);
   } finally {
     clearSpanCache();
