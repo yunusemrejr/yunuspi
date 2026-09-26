@@ -105,7 +105,7 @@ test('noise review abstains on hidden clones, separate regions, different action
  <h3 role="presentation">Decorative</h3><h3 role="presentation">Decorative</h3>
  <label for="first">Name</label><label for="second">Name</label>
  <pre>Lorem ipsum dolor sit amet</pre><code>Your title here</code><blockquote>Lorem ipsum dolor sit amet</blockquote>
- <p>The history of lorem ipsum is documented here.</p><input value="Placeholder text" placeholder="Your title here">
+ <p>The history of lorem ipsum is documented here.</p><input value="Placeholder text" placeholder="Your title here" aria-label="Title">
  <button>Save</button><button>Save</button>`);
  const ordinary=await renderCapture({source,output:'text'},path.join(root,'unused-intentional.png'));
  assert.equal(ordinary.noise,undefined,'clean automatic checks add no context payload');
@@ -138,9 +138,32 @@ html,body{background:#111;color:#eee;font:16px Arial;margin:0}main{padding:24px}
 <p class="tglow">Glow one</p><p class="tglow">Glow two</p><p class="tglow">Glow three</p><p class="tglow">Glow four</p></main>`);
  const rendered=await renderCapture({source,output:'text',width:800,height:600,designAudit:true},path.join(root,'unused-slop.png'));
  const d=rendered.pageState.design;assert.ok(d);assert.equal(d.version,2);
- assert.deepEqual(d.slopSignals,{pills:7,glowShadows:4,gradientText:1,glass:3,textGlow:4});
+ assert.deepEqual(d.slopSignals,{pills:7,glowShadows:4,gradientText:1,glass:3,textGlow:4,oversizedType:0,heavyRadius:1});
  const kinds=d.findings.filter(f=>f.kind.startsWith('slop-')).map(f=>f.kind).sort();
  assert.deepEqual(kinds,['slop-glass','slop-glow-shadows','slop-gradient-text','slop-pills','slop-text-glow']);
  for(const f of d.findings.filter(f=>f.kind.startsWith('slop-'))){assert.match(f.selector,/:nth-of-type\(/);assert.ok(f.count>=f.threshold);}
  assert.match(d.limitations,/not verdicts/);
+});
+
+test('oversized display type and heavy radius count without double-counting wrappers or pills',async()=>{
+ const source=path.join(root,'scale.html');
+ const tiles=Array.from({length:6},(_,i)=>`<section class="tile">Tile ${i}</section>`).join('');
+ fs.writeFileSync(source,`<!doctype html><style>
+html,body{background:white;color:black;font:16px Arial;margin:0}main{padding:24px}
+.hero{font-size:96px}.sub{font-size:84px}.body{font-size:17px}
+.tile{width:260px;height:120px;border-radius:28px;background:#f4f4f4;margin:8px;padding:16px}
+.pill{display:inline-block;padding:4px 16px;border-radius:999px;background:#eee}
+</style><main><div class="hero">Giant headline</div><h2 class="sub">Second giant</h2><p class="body">Ordinary copy.</p>${tiles}<span class="pill">Tag</span></main>`);
+ const rendered=await renderCapture({source,output:'text',width:900,height:900,designAudit:true},path.join(root,'unused-scale.png'));
+ const d=rendered.pageState.design;
+ assert.equal(d.slopSignals.oversizedType,2,'one count per text-bearing element, not per wrapper');
+ assert.equal(d.slopSignals.heavyRadius,6,'six tiles; the pill keeps its own signature');
+ const kinds=d.findings.filter(f=>f.kind.startsWith('slop-')).map(f=>f.kind).sort();
+ assert.deepEqual(kinds,['slop-heavy-radius','slop-oversized-type']);
+ const quiet=path.join(root,'scale-quiet.html');
+ fs.writeFileSync(quiet,`<!doctype html><style>html,body{background:white;color:black;font:16px Arial}h1{font-size:72px}.card{border-radius:16px}</style><main><h1>Display headline</h1><div class="card">Panel</div></main>`);
+ const calm=await renderCapture({source:quiet,output:'text',designAudit:true},path.join(root,'unused-scale-quiet.png'));
+ assert.equal(calm.pageState.design.slopSignals.oversizedType,0);
+ assert.equal(calm.pageState.design.slopSignals.heavyRadius,0);
+ assert.equal(calm.pageState.design.findings.filter(f=>f.kind.startsWith('slop-')).length,0);
 });

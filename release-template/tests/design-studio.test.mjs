@@ -11,6 +11,7 @@ const agentRoot = [path.join(root, "agent"), path.resolve(root, "..")].find(cand
 assert.ok(agentRoot, "design studio ships with the distribution");
 const studio = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/design-studio.ts")));
 const analysis = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-analysis.ts")));
+const synth = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-synth.ts")));
 const register = (await import(pathToFileURL(path.join(agentRoot, "extensions/design-studio.ts")))).default;
 
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "design-studio-"));
@@ -284,10 +285,50 @@ test("outputs stay inside the workspace and tools register with bounded schemas"
   await assert.rejects(studio.imageAnalyze({ path: mock, outputDir: os.tmpdir() }, work), /inside the current workspace/);
   const tools = new Map();
   register({ registerTool: definition => tools.set(definition.name, definition) });
-  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_crop", "image_trace", "visual_diff"]);
+  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_create", "image_crop", "image_trace", "visual_diff"]);
   for (const tool of tools.values()) assert.ok(tool.description.length > 200 && tool.description.length < 900, tool.name);
   const out = await tools.get("image_trace").execute("t", { path: mock, region: { x: 80, y: 24, width: 32, height: 32 }, colors: 1 }, undefined, undefined, { cwd: work });
   assert.equal(out.details.verdict, "good");
+});
+
+test("image_create synthesizes deterministic plates and rejects bad inputs", async () => {
+  assert.deepEqual([...synth.SYNTH_OPS], ["solid", "linear-gradient", "checker", "noise", "grid"]);
+  const pixel = (img, x, y) => [...img.data.subarray((y * img.width + x) * 4, (y * img.width + x) * 4 + 3)];
+  const solid = synth.synthSolid(8, 6, [11, 22, 33]);
+  assert.deepEqual(pixel(solid, 0, 0), [11, 22, 33]); assert.deepEqual(pixel(solid, 7, 5), [11, 22, 33]);
+  const gradient = synth.synthLinearGradient(100, 10, [{ color: [0, 0, 0], at: 0 }, { color: [255, 255, 255], at: 1 }], 0);
+  assert.ok(pixel(gradient, 0, 5)[0] <= 2 && pixel(gradient, 99, 5)[0] >= 253, "corners pin the stop range");
+  assert.ok(pixel(gradient, 49, 5)[0] >= 120 && pixel(gradient, 50, 5)[0] <= 135, "midpoint interpolates");
+  const hard = synth.synthLinearGradient(100, 4, [{ color: [255, 0, 0], at: 0 }, { color: [255, 0, 0], at: 0.5 }, { color: [0, 0, 255], at: 0.5 }, { color: [0, 0, 255], at: 1 }], 0);
+  assert.deepEqual(pixel(hard, 49, 1), [255, 0, 0]); assert.deepEqual(pixel(hard, 50, 1), [0, 0, 255]);
+  assert.deepEqual(synth.resolveStops([{ color: "#ff0000" }, { color: "#0000ff" }]).map(s => s.at), [0, 1]);
+  assert.deepEqual(synth.resolveStops([{ color: "#000000", at: 0 }, { color: "#ffffff" }, { color: "#ffffff", at: 1 }]).map(s => s.at), [0, 0.5, 1]);
+  const checker = synth.synthChecker(4, 4, 2, [255, 255, 255], [0, 0, 0]);
+  assert.deepEqual([pixel(checker, 0, 0), pixel(checker, 2, 0), pixel(checker, 0, 2), pixel(checker, 2, 2)], [[255, 255, 255], [0, 0, 0], [0, 0, 0], [255, 255, 255]]);
+  const grain = synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7);
+  assert.deepEqual(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 7).data), "same seed renders same bytes");
+  assert.notDeepEqual(Buffer.from(grain.data), Buffer.from(synth.synthNoise(32, 32, [128, 128, 128], 24, true, 8).data), "seeds diverge");
+  assert.ok(pixel(grain, 3, 9).every(v => v >= 104 && v <= 152), "mono grain stays inside base ± strength");
+  assert.equal(new Set([pixel(grain, 3, 9), pixel(grain, 20, 20)].flat()).size > 1, true, "grain varies across pixels");
+  const grid = synth.synthGrid(10, 10, 5, [255, 255, 255], [0, 0, 0], 1);
+  assert.deepEqual([pixel(grid, 0, 0), pixel(grid, 1, 1), pixel(grid, 5, 3), pixel(grid, 4, 4)], [[0, 0, 0], [255, 255, 255], [0, 0, 0], [255, 255, 255]]);
+  const created = await synth.imageCreate({ op: "checker", width: 64, height: 48, size: 8 }, work);
+  assert.equal(created.op, "checker"); assert.equal(created.format, "png"); assert.deepEqual(created.pixels, { width: 64, height: 48 });
+  const decoded = await studio.decodeImage(fs.readFileSync(path.join(work, created.file)));
+  assert.deepEqual([decoded.width, decoded.height], [64, 48]);
+  const jpg = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#112233", format: "jpg" }, work);
+  assert.ok(jpg.file.endsWith(".jpg") && jpg.bytes > 0);
+  const graded = await synth.imageCreate({ op: "linear-gradient", width: 16, height: 16, angle: 90, stops: [{ color: "#000000" }, { color: "#ffffff" }] }, work);
+  assert.deepEqual(graded.design.stops.map(s => s.at), [0, 1]);
+  await assert.rejects(synth.imageCreate({ op: "radial" }, work), /op must be/);
+  await assert.rejects(synth.imageCreate({ op: "solid", width: 4097 }, work), /width must be/);
+  await assert.rejects(synth.imageCreate({ op: "solid", color: "red" }, work), /must be #rrggbb/);
+  await assert.rejects(synth.imageCreate({ op: "linear-gradient", stops: [{ color: "#000000" }] }, work), /2\.\.8/);
+  await assert.rejects(synth.imageCreate({ op: "linear-gradient", stops: [{ color: "#000000", at: 0.8 }, { color: "#ffffff", at: 0.2 }] }, work), /ascend/);
+  await assert.rejects(synth.imageCreate({ op: "checker", colors: ["#ffffff"] }, work), /pair/);
+  await assert.rejects(synth.imageCreate({ op: "noise", mono: "yes" }, work), /boolean/);
+  await assert.rejects(synth.imageCreate({ op: "grid", format: "gif" }, work), /format must be/);
+  await assert.rejects(synth.imageCreate({ op: "solid", outputDir: os.tmpdir() }, work), /inside the current workspace/);
 });
 
 test("real renderer captures a clipped slice of a long page", { timeout: 60_000 }, async () => {

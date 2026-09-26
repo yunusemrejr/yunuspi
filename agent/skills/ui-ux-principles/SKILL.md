@@ -33,8 +33,8 @@ How to mine an example: document hero promise → nav → proof → features →
 
 ## Anti-patterns to reject
 
-Modal-on-modal, forced onboarding tours, infinite scroll for lists under 50 items, dark patterns (confirmation horror, pre-checked upsells), decorative-only animation, emoji as icon system, fake social proof, "dashboard" that's a wall of identical cards, toast spam (one toast per state change = noise).
+Modal-on-modal, forced onboarding tours, infinite scroll for lists under 50 items, dark patterns (confirmation horror, pre-checked upsells), decorative-only animation, emoji as icon system, fake social proof, "dashboard" that's a wall of identical cards, toast spam (one toast per state change = noise), pill-everything, hype-badge rows, gradient headline text, glass-by-default, fake terminal decoration, autoplaying carousels and custom cursors.
 
 ## Pre-ship checklist
 
-[ ] One obvious primary action · [ ] All 5 states exist for new flows · [ ] Tab-key walkthrough works · [ ] Contrast ≥ 4.5:1 (text) / 3:1 (controls) · [ ] 4pt spacing audit · [ ] No lorem/fake data anywhere · [ ] Narrow (360px) + wide (1440px) verified · [ ] Motion ≤ 300ms or off under reduced-motion.
+[ ] One obvious primary action · [ ] All 5 states exist for new flows · [ ] Tab-key walkthrough works · [ ] Contrast ≥ 4.5:1 (text) / 3:1 (controls) · [ ] 4pt spacing audit · [ ] No lorem/fake data anywhere · [ ] Narrow (360px) + wide (1440px) verified · [ ] Motion ≤ 300ms or off under reduced-motion · [ ] Every image has alt, every control has a name, headings run h1→h2→h3 · [ ] No pill/badge/gradient/glass/emoji/terminal ornaments.

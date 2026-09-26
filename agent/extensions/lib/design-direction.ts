@@ -76,6 +76,14 @@ export const UI_PREFLIGHT_TELLS: readonly string[] = [
   "content pinned with absolute coordinates",
   "centered body copy",
   "continuous decorative motion without reduced-motion handling",
+  "pill capsules for ordinary labels (pills mean selection, state or tags)",
+  "hype badges (NEW, BETA, AI, FAST) without meaningful state",
+  "gradient-filled headline text",
+  "glassmorphism panels without a floating layer",
+  "display type at 80px or larger for ordinary pages",
+  "emoji in headings, buttons or navigation",
+  "decorative terminal output or pseudo-telemetry",
+  "images without alt text and icon-only buttons without names",
 ];
 
 export function designDirectionGuidance(brief: DesignBrief | undefined): string {

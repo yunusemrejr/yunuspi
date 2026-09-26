@@ -69,9 +69,7 @@ export const DEFAULT_PROMPT_GUIDELINES: string[] = [PLAN_GUIDANCE];
  * 7 of 9 recorded todo validation failures were batches whose operations
  * omitted `action`, each costing a full model turn to repeat the call. A
  * positive id can only be an update (creates use negative aliases); otherwise a
- * subject is a create. Models also send ids as numeric strings ("2", "-1"),
- * which the numeric-id schema would reject after inference; coerce clean
- * integer strings first. Delete is never inferred; anything else still fails
+ * subject is a create. Delete is never inferred; anything else still fails
  * validation with the declared-schema message. */
 export function prepareTodoArguments(args: unknown): any {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
@@ -85,16 +83,10 @@ export function prepareTodoArguments(args: unknown): any {
 	if (input.action === undefined && Array.isArray(input.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, action: "batch" }; }
 	if (input.action !== "batch" || !Array.isArray(input.operations)) return input === args ? args : input;
 	const operations = input.operations.map((op: any) => {
-		if (!op || typeof op !== "object" || Array.isArray(op)) return op;
-		let candidate = op;
-		if (typeof candidate.id === "string" && /^-?\d+$/.test(candidate.id.trim())) {
-			const numeric = Number(candidate.id.trim());
-			if (Number.isSafeInteger(numeric)) candidate = { ...candidate, id: numeric };
-		}
-		if (candidate.action !== undefined) return candidate;
-		if (Number.isSafeInteger(candidate.id) && candidate.id > 0) return { ...candidate, action: "update" };
-		if (typeof candidate.subject === "string" && candidate.subject.trim()) return { ...candidate, action: "create" };
-		return candidate;
+		if (!op || typeof op !== "object" || Array.isArray(op) || op.action !== undefined) return op;
+		if (Number.isSafeInteger(op.id) && op.id > 0) return { ...op, action: "update" };
+		if (typeof op.subject === "string" && op.subject.trim()) return { ...op, action: "create" };
+		return op;
 	});
 	return operations.some((op: any, index: number) => op !== input.operations[index]) ? { ...input, operations } : input === args ? args : input;
 }

@@ -16,6 +16,12 @@ const keys=result=>result.findings.map(f=>f.key);
 test('SVG checks actual references, malformed source and bounded review cues without executing input',async()=>{
   const good=await inspectSvg(svg('<defs><linearGradient id="paint"><stop offset="0"/></linearGradient></defs><path d="M0 0 L4 4" fill="url(#paint)"/>'));
   assert.equal(good.status,'inspected');assert.deepEqual(good.findings,[]);assert.deepEqual(good.viewBox,[0,0,24,24]);assert.equal(good.counts.pathCommandLetters,2);assert.match(good.sourceHash,/^[a-f0-9]{64}$/);
+  const regioned=await inspectSvg(svg('<defs><filter id="f" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2"/></filter></defs>'));
+  assert.ok(!keys(regioned).includes('filter-region'),'explicit filter region needs no cue');
+  for(const body of ['<defs><filter id="f"><feGaussianBlur stdDeviation="2"/></filter></defs>','<defs><filter id="f" x="0" y="0"><feDropShadow stdDeviation="4"/></filter></defs>']){
+    const clipped=await inspectSvg(svg(body));
+    assert.ok(keys(clipped).includes('filter-region'),body);assert.equal(clipped.status,'inspected','region cue is advisory, not an error');
+  }
   const source=svg('<defs><filter id="f"><feGaussianBlur stdDeviation="2"/></filter></defs><g id="f"/><use href="#absent"/><image href="https://example.invalid/image.png"/><script>globalThis.domainExecuted=true</script><path onclick="work()"><animate attributeName="opacity"/></path>');
   const result=await inspectSvg(source);
   for(const key of ['duplicate-id','missing-reference','external-reference','active-content','event-handler','compositing-cost','motion'])assert.ok(keys(result).includes(key),key);

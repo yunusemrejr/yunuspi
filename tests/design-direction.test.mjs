@@ -27,7 +27,7 @@ test('a new open visual brief asks for explored directions and marks mentioned s
   assert.match(guidance, /3 genuinely distinct directions/);
   assert.match(guidance, /Context-only references: "yunusemrevurgun\.com"/);
   assert.match(guidance, /not design sources/);
-  assert.ok(guidance.length <= 1600);
+  assert.ok(guidance.length <= 2000, 'bounded by the 2000-char guidance cap even with the full tell list');
   assert.match(design.designDirectionSummary(brief), /open visual brief → explore distinct directions.*context-only: yunusemrevurgun\.com/);
 });
 
@@ -38,6 +38,7 @@ test('refinement, explicit style references and non-visual work do not trigger a
   const polishGuidance = design.designDirectionGuidance(polish);
   assert.doesNotMatch(polishGuidance, /divergence pass|distinct directions/, 'no redesign pass for refinement');
   assert.match(polishGuidance, /generated-UI tells while choosing the direction/, 'UI tells arrive before building, not after');
+  assert.match(polishGuidance, /hype badges.*gradient-filled headline text.*decorative terminal output/, 'preflight names the ornament families before building');
   const styled = design.heuristicDesignBrief('Build a dashboard that looks like linear.app with our palette: #112233');
   assert.equal(styled.openEnded, false);
   assert.deepEqual(styled.styleReferences, ['linear.app']);

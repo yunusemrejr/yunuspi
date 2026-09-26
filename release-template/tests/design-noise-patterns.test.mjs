@@ -114,6 +114,31 @@ test('quantified marketing candidates require evidence without classifying ordin
  const {rendered}=await capture('<p>Trusted by 10,000 teams</p><p>3× faster</p><p>99.99% uptime</p><p>Save 30% on operating costs</p>');
  assert.deepEqual(kinds(rendered),Array(4).fill('factual-claim-evidence'));
  for(const finding of rendered.noise.findings)assert.match(finding.reason,/does not establish.*false or unsupported/);
- const ordinary=await capture('<p>Invoice total 1200</p><p>Storage used 90%</p><table><tr><td>99.99% uptime</td></tr></table><figure><figcaption>3× faster</figcaption></figure><article><p>Trusted by 10,000 teams</p></article><div data-user-content><p>Save 30%</p></div><input value="Save 30%">');
+ const ordinary=await capture('<p>Invoice total 1200</p><p>Storage used 90%</p><table><tr><td>99.99% uptime</td></tr></table><figure><figcaption>3× faster</figcaption></figure><article><p>Trusted by 10,000 teams</p></article><div data-user-content><p>Save 30%</p></div><input value="Save 30%" aria-label="Coupon">');
  assert.deepEqual(kinds(ordinary.rendered),[]);
+});
+
+test('missing alt and unnamed controls aggregate once with presentation and labelled negatives',async()=>{
+ const pixel='data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+ const {rendered}=await capture(`<img src="${pixel}" width="20" height="20"><img src="${pixel}" width="20" height="20"><button><svg width="16" height="16"><circle cx="8" cy="8" r="6"/></svg></button><input type="text" aria-label="Search"><input type="text" placeholder="Name">`,{designAudit:true});
+ const found=kinds(rendered);
+ assert.ok(found.includes('missing-image-alt'));assert.ok(found.includes('unnamed-control'));
+ assert.equal(rendered.noise.findings.find(f=>f.kind==='missing-image-alt').images,2);
+ // The icon-only button and the placeholder-only input are unnamed; the
+ // aria-labelled input is not.
+ assert.equal(rendered.noise.findings.find(f=>f.kind==='unnamed-control').controls,2);
+ assert.equal(rendered.noise.measurements.missingImageAlt,2);
+ assert.equal(rendered.noise.measurements.unnamedControls,2);
+ const clean=await capture(`<img src="${pixel}" width="20" height="20" alt="Logo"><img src="${pixel}" width="20" height="20" alt=""><img src="${pixel}" width="20" height="20" aria-hidden="true"><img src="${pixel}" width="20" height="20" role="presentation"><button aria-label="Close"><svg width="16" height="16"></svg></button><label>Name<input type="text"></label><input type="submit" value="Save"><input type="text" placeholder="Ignored" title="Full name">`);
+ assert.deepEqual(kinds(clean.rendered),[]);
+});
+
+test('emoji chrome, hype badges and fake terminals flag with article and code-sample negatives',async()=>{
+ const badges=['NEW','Beta','AI'].map(word=>`<span class="pill static">${word}</span>`).join('');
+ const {rendered}=await capture(`<h2>Launch 🚀</h2><button>Save 💾</button>${badges}<div>&gt; initializing modules…</div><div>$ npm run deploy</div>`);
+ const found=kinds(rendered);
+ assert.ok(found.includes('emoji-in-chrome'));assert.ok(found.includes('hype-badge-cluster'));assert.ok(found.includes('fake-terminal-decoration'));
+ assert.equal(rendered.noise.findings.find(f=>f.kind==='hype-badge-cluster').badges,3);
+ const clean=await capture(`<article><h2>Party 🎉 notes</h2></article><p>Plain emoji 🎉 in prose is not chrome.</p><span class="pill static">Beta</span><span class="pill static">Invoices</span><pre>$ npm install</pre><code>&gt; connected</code>`);
+ assert.deepEqual(kinds(clean.rendered),[]);
 });

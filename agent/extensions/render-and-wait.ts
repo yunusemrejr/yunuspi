@@ -1,6 +1,5 @@
 import {registerBrowserSession, isolatedBrowserEnvironment} from "./lib/browser-session.ts";
 import {createRenderQueue} from "./lib/render-queue.ts";
-import {stripFileScheme} from "../scripts/browser-diagnostics.mjs";
 import { StringEnum } from "@yunuspi/ai";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -54,13 +53,6 @@ function runCapture(params: any, output: string, tempRoot: string, cwd: string, 
     if (signal?.aborted) abort();
   });
 }
-/** Local sources arrive as paths, @-paths or file: URLs; HTTP(S) passes
- * through untouched. file: URLs must be stripped before resolve, which would
- * otherwise mangle them onto the cwd ("<cwd>/file:/abs/path"). */
-export function resolveRenderSource(source: string, cwd: string): string {
-  if (/^https?:\/\//i.test(source)) return source;
-  return path.resolve(cwd, stripFileScheme(source.replace(/^@/, "")));
-}
 const captureQueue = createRenderQueue();
 /** One trusted capture for other bounded tools (visual_diff). The PNG is
  * copied to `destination`, which the caller owns; staging stays outside the
@@ -72,7 +64,7 @@ export async function captureToFile(params: { source: string; width: number; hei
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-render-"));
     await fs.chmod(tempRoot, 0o700);
     const staged = path.join(tempRoot, "capture.png");
-    const source = resolveRenderSource(params.source, cwd);
+    const source = /^https?:\/\//i.test(params.source) ? params.source : path.resolve(cwd, params.source.replace(/^@/, ""));
     const details = JSON.parse((await runCapture({ ...params, source, output: "image" }, staged, tempRoot, cwd, signal)).trim());
     if (!details.output) throw new Error("Render produced no image");
     const stat = await fs.lstat(staged);
@@ -101,7 +93,7 @@ export default function (pi: any) {
     }),
     async execute(_id: any, p: any, signal: any, _update: any, ctx: any) {
       if (p.kind !== "http")
-        p = { ...p, target: resolveRenderSource(p.target, ctx.cwd) };
+        p = { ...p, target: path.resolve(ctx.cwd, p.target.replace(/^@/, "")) };
       const r = await runManagedCommand(
         `${quote(process.execPath)} ${quote(path.join(scripts, "wait-condition.mjs"))} ${quote(encode(p))}`,
         ctx.cwd,
@@ -186,7 +178,7 @@ export default function (pi: any) {
         if (!/^https?:\/\//i.test(p.source))
           p = {
             ...p,
-            source: resolveRenderSource(p.source, ctx.cwd),
+            source: path.resolve(ctx.cwd, p.source.replace(/^@/, "")),
           };
         const captureResult = await runCapture(p, stagedOutput, tempRoot, ctx.cwd, signal);
         const details = JSON.parse(captureResult.trim());
@@ -251,7 +243,7 @@ export default function (pi: any) {
     name: "design_audit",
     parameters: renderTool.parameters,
     label: "Rendered design audit",
-    description: "Inspect a rendered web page for typography/spacing distributions, repeated surface effects, AI-slop signature counts (pill clusters, glow halos, gradient text, glass, text glow), overflow, running motion and solid-color text contrast. Includes bounded advice about placeholders, equivalent repeated labels/links, animated status pills, decorative dot markers, icon tiles, dense interface copy, font-family variation, accent rails (left borders or pseudo-element bars) and quantified marketing claims requiring source evidence. Findings give locations and measurements, never establish hallucination or require automatic changes. Semantic live/status regions, articles, code, quotes and marked user content are exempt from decorative-pattern checks. Uses the existing isolated browser, with screenshot pixels for vision models. Numeric evidence for accessible and anti-slop design review, not a style score or certification. Complex paint is indeterminate. Compare mobile/desktop and reduced-motion calls; use design skills and actual screenshots to judge hierarchy and originality.",
+    description: "Inspect a rendered web page for typography/spacing distributions, repeated surface effects, AI-slop signature counts (pill clusters, glow halos, gradient text, glass, text glow, oversized type, heavy radius), overflow, running motion and solid-color text contrast. Includes bounded advice about placeholders, equivalent repeated labels/links, animated status pills, decorative dot markers, icon tiles, dense interface copy, font-family variation, accent rails (left borders or pseudo-element bars), missing image alt, unnamed controls, emoji in chrome, hype badge clusters, fake terminal decoration and quantified marketing claims requiring source evidence. Findings give locations and measurements, never establish hallucination or require automatic changes. Semantic live/status regions, articles, code, quotes and marked user content are exempt from decorative-pattern checks. Uses the existing isolated browser, with screenshot pixels for vision models. Numeric evidence for accessible and anti-slop design review, not a style score or certification. Complex paint is indeterminate. Compare mobile/desktop and reduced-motion calls; use design skills and actual screenshots to judge hierarchy and originality.",
     async execute(id: any, params: any, signal: any, update: any, ctx: any) {
       if (/\.pdf$/i.test(params.source)) throw new Error("design_audit requires rendered HTML; PDF has no computed web styles");
       return renderTool.execute(id, { ...params, output: params.output === "text" ? "text" : "both", designAudit: true }, signal, update, ctx);

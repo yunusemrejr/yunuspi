@@ -3,7 +3,7 @@ id: anti-slop
 part: design
 title: The anti-slop checklist
 summary: Every element must earn its place. The condensed doctrine behind the 200-rule website checklist: necessity testing, visual cliches, fake state, copy honesty, structure at the right scale, honest motion and agent scope discipline.
-terms: slop checklist necessity template generic saas cliche badge pill glow gradient glass bento card testimonial hero faq footer newsletter chatbot scope
+terms: slop checklist necessity template generic saas cliche badge pill glow gradient glass bento card testimonial hero faq footer newsletter chatbot scope emoji terminal alt heading carousel cursor oversized radius
 tools: design_audit render_see code_quality artifact_check
 skills: anti-ai-slop frontend-design ui-ux-principles ui-antipattern-review copywriting
 ---

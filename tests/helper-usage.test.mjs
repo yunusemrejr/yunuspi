@@ -157,3 +157,15 @@ test('used popup supports compact drilldown, keyboard focus, narrow layout and h
   assert.match(await page.locator('#usage-intelligence').innerText(),/Historical coverage|No measurement/);assert.equal(await page.locator('#usage-intelligence .usage-kpi strong').first().innerText(),'—');
   assert.deepEqual(errors,[]);
 });
+
+test('helper acceptance recorded by consumers counts as applied in the session ledger', async () => {
+  const { createHelperUsageLedger } = await import('../agent/extensions/lib/helper-usage.ts');
+  const ledger = createHelperUsageLedger();
+  ledger.note('ml.helper.applied', { helper: 'needle' });
+  ledger.note('ml.helper.applied', { helper: 'jev' });
+  ledger.note('ml.helper.applied', { helper: 'llm' });
+  const components = ledger.snapshot().components;
+  assert.equal(components.Needle3.applied, 1);
+  assert.equal(components.JEV.applied, 1);
+  assert.equal(Object.keys(components).length, 2, 'remote prompt analysis is not a local helper');
+});

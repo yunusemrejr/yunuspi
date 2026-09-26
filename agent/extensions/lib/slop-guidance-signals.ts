@@ -108,6 +108,52 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       out.push({key:'ui-onboarding-nudge',skill:'ui-ux-principles',check:'A tour, walkthrough or welcome-modal surface is present. Verify the site is not self-explanatory without it; onboarding for obvious interfaces is interruption, not help. If it stays, verify dismiss, resume and reduced-motion behavior.'});
     if (AI_WIDGET.test(text))
       out.push({key:'ui-ai-widget',skill:'product-ui-verification',check:'An AI chat or assistant surface is present. Verify it answers a demonstrated user need rather than riding on availability; a chatbot on a page whose questions a paragraph could answer is insertion, not a feature. If it stays, verify empty, error, rate-limit and keyboard states like any other feature.'});
+    // Pill-everything: capsules as the default container. Tiny dot markers are
+    // counted by ui-dot-marker instead and are filtered out here.
+    const pillAttrs = classAttrs.filter(a=>/\brounded-full\b/i.test(a) && !/\b(?:size|[wh])-(?:1\.5|2|2\.5|3)\b/.test(a)).length
+      + (text.match(/\bstyle\s*=\s*"[^"]*border-radius\s*:\s*999px[^"]*"/gi) ?? []).length;
+    if (pillAttrs >= 6)
+      out.push({key:'ui-pill-cluster',skill:'ui-antipattern-review',check:`${pillAttrs} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
+    const badges = [...text.matchAll(/<(?:span|div|em|strong|small|label)\b[^>]{0,300}(?:rounded-full|\bbadge\b|\bpill\b|\bchip\b|\btag\b)[^>]*>([^<]{1,24})<\//gi)]
+      .filter(m=>/^(?:new|live|beta|ai|fast|secure|private|modern|smart|pro|featured|verified|trending|popular)$/i.test(m[1].trim()));
+    if (badges.length >= 3)
+      out.push({key:'ui-badge-spam',skill:'anti-ai-slop',check:`${badges.length} hype badges (${[...new Set(badges.map(m=>m[1].trim().toUpperCase()))].slice(0,5).join(', ')}) occur in pill/badge markup. A badge must represent meaningful state or taxonomy, not decoration; keep at most the one or two the reader acts on and cut the rest.`});
+    if (classAttrs.some(a=>/\bbg-clip-text\b/.test(a) && /\b(?:bg-gradient-to-[a-z]+|from-[a-z])/i.test(a)))
+      out.push({key:'ui-gradient-text',skill:'anti-ai-slop',check:'Gradient-filled headline text occurs (clipped gradient classes). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
+    if (classAttrs.filter(a=>/\bbackdrop-blur\b/.test(a) && /\bbg-(?:white|black|slate|gray|zinc|neutral|stone)(?:-\d+)?\/\d+/i.test(a)).length >= 2)
+      out.push({key:'ui-glass-panel',skill:'ui-antipattern-review',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
+    if (classAttrs.some(a=>/\btext-(?:8xl|9xl)\b/.test(a) || (/\btext-\[(\d+)px\]/.test(a) && Number(/\btext-\[(\d+)px\]/.exec(a)![1]) >= 80)))
+      out.push({key:'ui-oversized-type',skill:'ui-antipattern-review',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
+    if (classAttrs.filter(a=>/\brounded-(?:2xl|3xl)\b/.test(a)).length >= 6)
+      out.push({key:'ui-rounded-excess',skill:'ui-antipattern-review',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
+    if ([...text.matchAll(/<(h[1-6]|button|a)\b[^>]{0,400}>([^<]{1,120})<\//gi)].some(m=>/\p{Extended_Pictographic}/u.test(m[2])))
+      out.push({key:'ui-emoji-ui',skill:'ui-antipattern-review',check:'An emoji occurs in a heading, button or link label. Emoji is not an icon system and never substitutes for visual design; keep it only when the brand explicitly owns playful chrome.'});
+    // Terminal cosplay outside real code samples (pre/code are stripped, so a
+    // documented install command there stays quiet).
+    if (/(?:^|>)\s*(?:>\s*(?:initializing|initialising|connected|connecting|system ready|loading|deploying|compiling|building)|[$›]\s*(?:npm|yarn|pnpm|bun|git|docker|pip|npx)\s+[\w.-]+|\bSYS_\d{3}\b|\[STATUS:\s*ACTIVE\])(?![\w-])/im.test(text.replace(/<(pre|code)\b[\s\S]{0,4000}?<\/\1>/gi,' ')))
+      out.push({key:'ui-fake-terminal',skill:'anti-ai-slop',check:'Decorative terminal output (prompt lines, fake status codes, pseudo-telemetry) occurs outside code samples. Keep terminal chrome only when the terminal itself is meaningful to the product; prose and real UI states explain better than fake console output.'});
+    const images = [...text.matchAll(/<(img|Image)\b[^>]{0,500}>/gi)]
+      .filter(m=>!/\balt\s*=/i.test(m[0]) && !/aria-hidden\s*=\s*["']true["']/i.test(m[0]));
+    if (images.length)
+      out.push({key:'ui-missing-alt',skill:'ui-antipattern-review',check:`${images.length} image${images.length>1?'s':''} lack an alt attribute. Give informative images a concise text equivalent and decorative images an empty alt=""; a missing attribute is neither.`});
+    let iconButton = false;
+    for (const m of text.matchAll(/<button\b([^>]*)>([\s\S]{0,600}?)<\/button>/gi)) {
+      const attrs = m[1], inner = m[2];
+      if (/\b(?:aria-label|aria-labelledby|title)\s*=/i.test(attrs) || /\{\s*\.\.\./.test(attrs)) continue;
+      if (!/<(?:svg|Icon)\b|<i\b[^>]*\bicon/i.test(inner)) continue;
+      if (/\{[^}]*\}/.test(inner.replace(/<[^>]+>/g,' '))) continue;
+      if (inner.replace(/<[^>]+>/g,' ').trim()) continue;
+      iconButton = true; break;
+    }
+    if (iconButton)
+      out.push({key:'ui-icon-button-name',skill:'ui-antipattern-review',check:'A button contains only an icon with no accessible name. Add an aria-label or visible text; icon-only controls are silent to assistive technology and unclear to many sighted users.'});
+    const headingLevels = [...text.matchAll(/<h([1-6])\b/gi)].map(m=>Number(m[1]));
+    if (headingLevels.some((level,i)=>i>0 && level > headingLevels[i-1]+1))
+      out.push({key:'ui-heading-skip',skill:'ui-antipattern-review',check:'A heading level is skipped (for example h1 straight to h3). Keep a continuous outline — one h1, then h2, then h3; skipped levels break assistive-technology navigation.'});
+    if (/<marquee\b/i.test(text) || /auto ?play[\s\S]{0,300}(?:carousel|slider|slideshow)|(?:carousel|slider|slideshow)[\s\S]{0,300}auto ?play/i.test(text))
+      out.push({key:'ui-auto-carousel',skill:'ui-ux-principles',check:'Auto-moving content (a marquee or an autoplaying carousel/slider) occurs. Autoplay fights the reader for control; keep motion user-initiated with visible controls, or remove it.'});
+    if (/\bcursor\s*:\s*none\b/i.test(text) && /\b(?:mousemove|pointermove|touchmove)\b/i.test(text))
+      out.push({key:'ui-custom-cursor',skill:'ui-ux-principles',check:'The system cursor is hidden while pointer movement is tracked: a custom-cursor treatment. Keep the native cursor unless the replacement is central to the experience; custom cursors cost accessibility and user control.'});
     // Stylesheet cues need an authorial stylesheet; a script embedding a few
     // declarations (inline styles, CSSOM) cannot establish these patterns.
     if (!ui && !/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text)) return out.slice(0,Math.min(12,Math.max(1,Number.isInteger(limit)?limit:3)));
@@ -138,6 +184,11 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       out.push({key:'ui-decoration-cluster',skill:'ui-antipattern-review',check:'Several decorative CSS treatments occur together. Inspect the rendered hierarchy against the existing design system and real content; retain effects with a clear purpose and simplify competing emphasis. A branded treatment alone is not a defect.'});
     if ((text.match(/animation(?:-iteration-count)?\s*:[^;}\n]{0,240}\binfinite\b/gi)||[]).length >= 2)
       out.push({key:'ui-continuous-motion',skill:'ui-antipattern-review',check:'Multiple continuous animations were observed. Check attention, interruption and reduced-motion behavior in the complete component; this partial change cannot establish whether safeguards are missing.'});
+    // Stylesheet-declared display type at 80px/5rem or larger (the class-based
+    // form is checked with the markup cues above).
+    if (!out.some(s=>s.key==='ui-oversized-type') && [...text.matchAll(/\bfont-size\s*:\s*(\d+(?:\.\d+)?)(px|r?em)\b/gi)]
+      .some(m=>m[2]==='px' ? Number(m[1]) >= 80 : Number(m[1]) >= 5))
+      out.push({key:'ui-oversized-type',skill:'ui-antipattern-review',check:'Display type at 80px or larger occurs. Giant headlines must match real hierarchy on an expressive page; for ordinary pages large type reads as template luxury. Verify the scale against the content before keeping it.'});
   }
   if (ui || script) {
     if (/\b(?:brand|logo)\b[\s\S]{0,300}(?:lightbulb|light-bulb|\bbulb\b|💡)/i.test(text))
@@ -181,6 +232,28 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
       + classLists.filter(list => has(list, /\s(?:size|h)-(?:8|9|10|11|12|14)\s/) && has(list, /\srounded-(?:md|lg|xl|2xl)\s/) && has(list, /\s(?:items-center|place-items-center|justify-center)\s/) && has(list, /\s(?:bg|border)-[a-z]/)).length;
     if (tiles)
       out.push({key:'ui-icon-tile',skill:'anti-ai-slop',check:'An icon is wrapped in a tinted or bordered rounded tile (icon badge). This is a stock generated-UI ornament; show the icon plainly at text size, or drop it when the label already carries the meaning.'});
+    // Stylesheet forms of the class-based ornaments above; each key reports
+    // once no matter which form matched.
+    if (!out.some(s=>s.key==='ui-gradient-text') && blocks.some(b=>/background-clip\s*:\s*text/i.test(b.body) && /gradient\s*\(/i.test(b.body)))
+      out.push({key:'ui-gradient-text',skill:'anti-ai-slop',check:'Gradient-filled headline text occurs (a clipped gradient declaration). Gradient words inside headings are a stock generated tell; use solid type in the brand palette instead. Keep it only when the brand already owns gradient type as a deliberate system.'});
+    if (!out.some(s=>s.key==='ui-glass-panel')) {
+      const glassBlocks = blocks.filter(b=>/backdrop-filter\s*:[^;}]{0,200}blur\s*\(/i.test(b.body) && /background(?:-color)?\s*:[^;}]{0,200}rgba?\([^;}]*,\s*0?\.\d+\s*\)/i.test(b.body)).length;
+      const glassClasses = classLists.filter(list=>has(list,/\sbackdrop-blur[-\w]*\s/) && has(list,/\sbg-(?:white|black|slate|gray|zinc|neutral|stone)(?:-\d+)?\/\d+\s/i)).length;
+      if (glassBlocks + glassClasses >= 2)
+        out.push({key:'ui-glass-panel',skill:'ui-antipattern-review',check:'Multiple glassmorphism panels occur (blur plus translucent surface). Glass is a functional treatment for layered surfaces, not a default container; use solid surfaces and keep at most the panels that genuinely float above content.'});
+    }
+    if (!out.some(s=>s.key==='ui-pill-cluster')) {
+      const blockPills = blocks.filter(b=>/border-radius\s*:\s*999px/i.test(b.body) && /padding\s*:/i.test(b.body)).length;
+      const classPills = classLists.filter(list=>has(list,/\srounded-full\s/) && !has(list,/\s(?:size|[wh])-(?:1\.5|2|2\.5|3)\s/)).length;
+      if (blockPills + classPills >= 6)
+        out.push({key:'ui-pill-cluster',skill:'ui-antipattern-review',check:`${blockPills + classPills} pill-shaped capsules occur in this source. Use pills only where the shape communicates selection, state, tags or compact actions; metadata pills above every heading, CTA pills, avatar rows and pill containers around ordinary text are decoration. Genuine filter and tag lists are legitimate pills.`});
+    }
+    if (!out.some(s=>s.key==='ui-rounded-excess')) {
+      const blockRounded = blocks.filter(b=>{ const r = px(b.body, 'border-radius'); return r !== undefined && r >= 20; }).length;
+      const classRounded = classLists.filter(list=>has(list,/\srounded-(?:2xl|3xl)\s/)).length;
+      if (blockRounded + classRounded >= 6)
+        out.push({key:'ui-rounded-excess',skill:'ui-antipattern-review',check:'Six or more large-radius containers occur. Use radius intentionally and consistently; some interfaces want sharp corners, slight radius or no containers at all. Repeated giant rounded panels are the bento-template tell.'});
+    }
   }
   if (ui || prose) {
     // Order: the stock landing sequence, section by section. Headings only.
@@ -205,8 +278,18 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     const stock = [/\bin today.s (?:fast.paced|rapidly evolving|digital)\b/i,/\bunlock (?:the |your )?(?:full |true )?potential\b/i,/\bseamless(?:ly)?\b/i,/\brevolutionary\b/i,/\bcutting.edge\b/i,/\ball.in.one (?:solution|platform)\b/i];
     if (buzzHits < 4 && stock.filter(re=>re.test(text)).length >= 3)
       out.push({key:'prose-stock-cluster',skill:'natural-editorial-writing',check:'Several stock promotional phrases occur together. Replace unsupported generalities with specific behavior and reader value, preserving the requested voice and required wording. This is not evidence of AI authorship.'});
-    if (/\blorem ipsum\b/i.test(text))
+    // Placeholder people, companies, contacts and fill-in labels. Docs use
+    // example names legitimately; lorem ipsum is placeholder anywhere.
+    const placeholderExamples = /\b(?:john|jane) doe\b|\bacme(?: corp(?:oration)?)?\b|\bexample@example\.com\b|\(?555\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b(?:your (?:name|headline|title|description) here|insert (?:title|description|content) here|placeholder (?:title|text|content))\b/i;
+    if (/\blorem ipsum\b/i.test(text) || (!inDocs && placeholderExamples.test(visible)))
       out.push({key:'placeholder-copy',skill:'anti-ai-slop',check:'Placeholder copy was observed. Before delivery, confirm whether a mockup was requested; otherwise use supplied content or clearly disclose missing facts. Never invent testimonials, customers or performance numbers to fill space.'});
+    if (/\b(?:unlock|supercharge|elevate)\b[^\n]{0,40}\b(?:your|the)\s+(?:(?:full|true|real)\s+)?(?:potential|productivity|workflow|experience|insights?|possibilities|power|performance)\b/i.test(visible) || /\btake your [\w ]{2,24} to the next level\b/i.test(visible))
+      push('prose-unlock-cta','copywriting','An unlock/supercharge/elevate call to action (or take-it-to-the-next-level) occurs. Say exactly what the feature does and what the reader gets; transformation verbs without specifics read as template hype.');
+    const vagueHeadings = [...visible.matchAll(/<h[1-3]\b[^>]*>([\s\S]{0,80}?)<\/h[1-3]>|^#{1,3}\s+(.{1,80})$/gim)]
+      .map(m=>(m[1] ?? m[2] ?? '').replace(/<[^>]+>/g,' ').trim().toLowerCase())
+      .filter(h=>/^(?:discover|explore|insights?|experience|solutions?|possibilities|innovation|resources?)$/.test(h));
+    if (vagueHeadings.length >= 2)
+      push('prose-vague-heading','copywriting',`Two or more section headings are single vague words (${[...new Set(vagueHeadings)].slice(0,4).join(', ')}). Name what each section contains; generic labels force every visitor to read on to learn what lives there.`);
     if (!inDocs) {
       const weakHits = new Set(LEAK_WEAK.filter(w=>wordRe(w).test(visible))).size;
       if (LEAK_STRONG.test(visible) || DESIGN_LEAK.test(visible) || weakHits >= 2)

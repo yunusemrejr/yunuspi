@@ -48,7 +48,8 @@ Copy without content:
 - Meaningless microcopy — decorative sentences with no information. Copywriting microcopy section; every string must carry load or leave.
 - Redundant explanations — restating a heading directly beneath it. Copywriting headline rule; the subhead must add, not echo.
 - Overexplaining simple UI — narrating obvious buttons, navigation, search, filters. Reviewer check: if it needs explaining, simplify the control first.
-- Generic benefit copy — "unlock your potential", "built for everyone", "empowering creativity". `code_quality prose` patterns plus signal `prose-buzzword-stack`.
+- Generic benefit copy — "unlock your potential", "built for everyone", "empowering creativity". `code_quality prose` patterns plus signals `prose-buzzword-stack` and `prose-unlock-cta` (the latter fires on a single transformation CTA).
+- Vague headings — single-word Discover, Explore, Insights, Solutions sections. Signal `prose-vague-heading` (navigation variants trip `prose-vague-nav`).
 - Buzzword stacking — "AI-powered, intelligent, contextual, seamless, next-generation". Signal `prose-buzzword-stack`; one specific verifiable claim per adjective.
 - Fake specificity — precision with no practical relevance. Signal `prose-metric-theater` plus the `metric-without-basis` prose rule for numbers; reviewer check for the rest.
 - Metric theater — "10x faster", "99% smarter" without basis. Same mechanisms; add measured-where/on-what/against-what or cut.
@@ -81,6 +82,20 @@ Generated-UI ornaments (never produce):
 - Accent rails — colored left borders or pseudo-element bars on cards. Signal `ui-accent-rail`; rendered `repeated-heavy-left-border`.
 - Dot markers — small (often glowing) dots before labels and chips. Signal `ui-dot-marker`; rendered `decorative-dot-marker`.
 - Icon tiles — icons boxed in tinted or bordered rounded squares. Signal `ui-icon-tile`; rendered `icon-tile`.
+- Pill clusters — capsules as the default container for ordinary labels. Signal `ui-pill-cluster`; rendered `slop-pills`.
+- Hype badges — NEW, BETA, AI, FAST labels without meaningful state. Signal `ui-badge-spam`; rendered `hype-badge-cluster`.
+- Gradient text — clipped gradient words inside headings. Signal `ui-gradient-text`; rendered `slop-gradient-text`.
+- Glass panels — blur plus translucency as the default container. Signal `ui-glass-panel`; rendered `slop-glass`.
+- Oversized type — 80px+ display headlines on ordinary pages. Signal `ui-oversized-type`; rendered `slop-oversized-type`.
+- Rounded excess — giant radii on every container (the bento tell). Signal `ui-rounded-excess`; rendered `slop-heavy-radius`.
+- Emoji chrome — emoji in headings, buttons, links or tabs. Signal `ui-emoji-ui`; rendered `emoji-in-chrome`.
+- Fake terminals — prompt lines and status codes outside code samples. Signal `ui-fake-terminal`; rendered `fake-terminal-decoration`.
+
+Interface correctness (objective defects, not taste):
+- Missing alt — visible images without any alt attribute. Signal `ui-missing-alt`; rendered `missing-image-alt`.
+- Unnamed controls — buttons, links, inputs and widgets with no accessible name. Signal `ui-icon-button-name` (icon-only buttons); rendered `unnamed-control`.
+- Skipped headings — h1 straight to h3 and similar outline jumps. Signal `ui-heading-skip`.
+- Autoplay and custom cursors — marquees, autoplaying carousels, hidden native cursor. Signals `ui-auto-carousel`, `ui-custom-cursor`.
 
 Color without a system:
 - The stock AI palette — indigo or violet into purple or pink gradients on a product that does not own them. Signal `ui-stock-palette`; derive a value ramp and one accent from the brand.

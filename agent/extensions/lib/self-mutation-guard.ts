@@ -191,15 +191,6 @@ const maintenanceSkill = [
   path.join(homedir(), "skills/harness-self-maintenance/SKILL.md"),
 ].find((candidate) => fs.existsSync(candidate));
 export const SELF_MUTATION_GUIDANCE = `Harness maintenance: inspect ${maintenanceSkill ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
-/** `agent/sessions/<project>/subagent-artifacts/**`: run-scoped progress and
- * outputs the harness itself instructs children to write. Transcripts and
- * session state live beside (never under) that dir and stay protected. */
-function isSessionSubagentArtifactPath(resolved: string): boolean {
-  const sessions = path.join(HARNESS_ROOT, "agent", "sessions");
-  if (!containsPath(sessions, resolved)) return false;
-  const segments = path.relative(sessions, resolved).split(path.sep);
-  return segments.length >= 2 && segments[1] === "subagent-artifacts";
-}
 export function selfMutationDenial(
   target: string,
   cwd: string,
@@ -229,10 +220,6 @@ export function selfMutationDenial(
         // Unresolvable override falls through to the protected check.
       }
     }
-    // Session subagent artifacts are runtime data like memory: the harness
-    // instructs chain workers to maintain progress.md and write outputs
-    // there, so denying those writes fails runs the harness itself set up.
-    if (isSessionSubagentArtifactPath(resolved)) return;
     if (
       PROTECTED_MUTATION_ROOTS.some(
         (root) => containsPath(root, resolved) || containsPath(resolved, root),

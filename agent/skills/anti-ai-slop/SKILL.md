@@ -25,13 +25,15 @@ These read as machine-made at a glance; do not write them, and remove them when 
 - a colored left rail on cards, callouts or list items (thick or 2–3px `border-left`, or a pseudo-element bar);
 - small colored dots before labels, chips, nav items or headings, glowing or not (a dot is allowed only for a real, changing state with a text equivalent);
 - icons boxed in tinted or bordered rounded tiles ("icon badges"), including the app logo as a glowing tile;
-- label pills for things that are not filters or states ("● Invoices"), pill clusters, gradient text, glow halos, glassmorphism panels;
+- label pills for things that are not filters or states ("● Invoices"), pill clusters, hype badges (NEW, BETA, AI, FAST) without meaningful state, gradient text, glow halos, glassmorphism panels without a floating layer;
+- oversized display type (80px+) for ordinary pages, giant-radius containers everywhere, emoji in headings/buttons/navigation, decorative terminal output and pseudo-telemetry;
+- images without alt text, icon-only buttons and other controls without accessible names, skipped heading levels, autoplaying carousels, marquees and custom cursors;
 - the stock landing order (trusted-by, three feature cards, how-it-works, testimonials, pricing, FAQ, final CTA) and centered-everything layouts;
 - the default indigo/violet-to-pink palette on a brand that does not own it;
 - generic lightbulb logos and muddy orange/brass/brown default palettes; calling a generated palette "the product's own brand" is not evidence of user approval;
 - boilerplate copy: "Unlock", "Seamless", "Elevate", "In today's fast-paced", em-dash floods, rhythmic triads, invented metrics or testimonials.
 
-Replace ornament with structure: spacing and alignment for grouping, one clear type hierarchy, plain icons at text size only where they aid scanning, color reserved for meaning. The edit-time cues (`ui-accent-rail`, `ui-dot-marker`, `ui-icon-tile`, `ui-stock-palette`, `ui-template-sequence`, `prose-ai-tells`) and `design_audit` findings (`repeated-heavy-left-border`, `decorative-dot-marker`, `icon-tile`) flag these automatically.
+Replace ornament with structure: spacing and alignment for grouping, one clear type hierarchy, plain icons at text size only where they aid scanning, color reserved for meaning. The edit-time cues (`ui-accent-rail`, `ui-dot-marker`, `ui-icon-tile`, `ui-stock-palette`, `ui-template-sequence`, `ui-pill-cluster`, `ui-badge-spam`, `ui-gradient-text`, `ui-glass-panel`, `ui-oversized-type`, `ui-rounded-excess`, `ui-emoji-ui`, `ui-fake-terminal`, `ui-missing-alt`, `ui-icon-button-name`, `ui-heading-skip`, `ui-auto-carousel`, `ui-custom-cursor`, `prose-ai-tells`, `prose-unlock-cta`, `prose-vague-heading`) and `design_audit` findings (`repeated-heavy-left-border`, `decorative-dot-marker`, `icon-tile`, `missing-image-alt`, `unnamed-control`, `emoji-in-chrome`, `hype-badge-cluster`, `fake-terminal-decoration`, `slop-oversized-type`, `slop-heavy-radius`) flag these automatically.
 
 ## Final check
 These are standing requirements even when the current prompt omits them. Inspect each reported policy cue at its actual location; fix a violation or document a specific user-brand/state exception through the existing quality assessment. A generic visual pass cannot clear an unaddressed cue. `aria-hidden` and a live conversation region do not make visible ornaments necessary.

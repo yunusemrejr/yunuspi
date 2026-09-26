@@ -205,6 +205,71 @@ test('color, order, placement and prose-tell cues fire on stock patterns and sta
   assert.ok(!keys('site/about.md', 'We make bread every morning at five. The rye takes two days. Come early on Saturdays; it sells out by ten.').includes('prose-ai-tells'));
 });
 
+test('ornament families cue at edit time: pills, badges, gradient text, glass, scale, emoji and terminals', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  const pills = n => Array.from({length:n},(_,i)=>`<span className="px-3 py-1 rounded-full bg-gray-100">t${i}</span>`).join('');
+  assert.ok(keys('a.tsx', pills(6)).includes('ui-pill-cluster'));
+  assert.ok(!keys('a.tsx', pills(5)).includes('ui-pill-cluster'));
+  assert.ok(!keys('a.tsx', Array.from({length:8},()=>'<span className="h-2 w-2 rounded-full bg-emerald-500"/>').join('')).includes('ui-pill-cluster'),'dots are not pills');
+  assert.ok(keys('a.tsx', '<span className="rounded-full">NEW</span><span className="badge">Beta</span><span className="pill">AI</span>').includes('ui-badge-spam'));
+  assert.ok(!keys('a.tsx', '<span className="rounded-full">NEW</span><span className="badge">Beta</span>').includes('ui-badge-spam'));
+  assert.ok(keys('a.tsx', '<h1 className="bg-gradient-to-r from-indigo-500 to-pink-500 bg-clip-text text-transparent">Hi</h1>').includes('ui-gradient-text'));
+  assert.ok(keys('a.css', '.h{background:linear-gradient(red,blue);background-clip:text;color:transparent}').includes('ui-gradient-text'));
+  assert.ok(!keys('a.tsx', '<div className="bg-gradient-to-r from-indigo-500 to-pink-500">Hi</div>').includes('ui-gradient-text'),'gradient panel without clipped text stays quiet');
+  assert.ok(keys('a.tsx', '<div className="backdrop-blur-md bg-white/10">a</div><div className="backdrop-blur-md bg-black/20">b</div>').includes('ui-glass-panel'));
+  assert.ok(!keys('a.tsx', '<nav className="backdrop-blur-md bg-white/80">nav</nav>').includes('ui-glass-panel'),'one floating navbar is functional glass');
+  assert.ok(keys('a.tsx', '<h1 className="text-8xl font-bold">Hi</h1>').includes('ui-oversized-type'));
+  assert.ok(keys('a.css', '.h{font-size:96px}').includes('ui-oversized-type'));
+  assert.ok(!keys('a.tsx', '<h1 className="text-7xl font-bold">Hi</h1>').includes('ui-oversized-type'));
+  assert.ok(!keys('a.css', '.h{font-size:48px}').includes('ui-oversized-type'));
+  assert.ok(keys('a.tsx', Array.from({length:6},(_,i)=>`<div className="rounded-3xl p-4">c${i}</div>`).join('')).includes('ui-rounded-excess'));
+  assert.ok(keys('a.tsx', '<button>Save 💾</button>').includes('ui-emoji-ui'));
+  assert.ok(!keys('a.tsx', '<p>Party 🎉 time</p>').includes('ui-emoji-ui'),'prose emoji is not chrome');
+  assert.ok(keys('a.tsx', '<div>> initializing modules...</div>').includes('ui-fake-terminal'));
+  assert.ok(!keys('a.tsx', '<pre>$ npm install</pre>').includes('ui-fake-terminal'),'documented commands in code samples stay quiet');
+});
+
+test('interface correctness cues at edit time: alt, names, headings, autoplay and cursors', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  assert.ok(keys('a.html', '<img src="x.png">').includes('ui-missing-alt'));
+  assert.ok(!keys('a.html', '<img src="x.png" alt="Cat">').includes('ui-missing-alt'));
+  assert.ok(!keys('a.html', '<img src="x.png" alt="">').includes('ui-missing-alt'),'empty alt marks decorative images');
+  assert.ok(keys('a.tsx', '<button><svg viewBox="0 0 1 1"></svg></button>').includes('ui-icon-button-name'));
+  assert.ok(!keys('a.tsx', '<button aria-label="Close"><svg viewBox="0 0 1 1"></svg></button>').includes('ui-icon-button-name'));
+  assert.ok(!keys('a.tsx', '<button><svg viewBox="0 0 1 1"></svg> Save</button>').includes('ui-icon-button-name'));
+  assert.ok(!keys('a.tsx', '<button><svg viewBox="0 0 1 1"></svg>{label}</button>').includes('ui-icon-button-name'),'dynamic labels may render text');
+  assert.ok(keys('a.html', '<h1>T</h1><h3>Sub</h3>').includes('ui-heading-skip'));
+  assert.ok(!keys('a.html', '<h1>T</h1><h2>Sub</h2><h3>Deep</h3>').includes('ui-heading-skip'));
+  assert.ok(keys('a.html', '<marquee>news</marquee>').includes('ui-auto-carousel'));
+  assert.ok(keys('a.tsx', '<Carousel autoPlay interval={3000}>x</Carousel>').includes('ui-auto-carousel'));
+  assert.ok(!keys('a.tsx', '<video autoplay muted src="x.mp4"/>').includes('ui-auto-carousel'),'muted video autoplay is not a carousel');
+  assert.ok(keys('a.tsx', '.cursor{cursor:none}\nwindow.addEventListener("mousemove",follow)').includes('ui-custom-cursor'));
+  assert.ok(!keys('a.css', '.grab{cursor:none}').includes('ui-custom-cursor'),'cursor suppression alone is not a custom cursor');
+  assert.match(reviewAspects(['Page.tsx']).find(a=>a.id==='interface').rubric,/pill clusters.*hype badges.*missing image alt/);
+});
+
+test('copy cues catch transformation CTAs, vague headings and placeholder identities', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  assert.ok(keys('p.md', 'Unlock your full potential today.').includes('prose-unlock-cta'));
+  assert.ok(keys('p.md', 'Supercharge the workflow in minutes.').includes('prose-unlock-cta'));
+  assert.ok(!keys('p.md', 'Unlock the door with the key.').includes('prose-unlock-cta'));
+  assert.ok(keys('p.md', '# Discover\n\nText.\n\n## Resources\n\nMore.').includes('prose-vague-heading'));
+  assert.ok(!keys('p.md', '# Discover\n\nText.\n\n## Pricing\n\nMore.').includes('prose-vague-heading'));
+  assert.ok(keys('p.md', 'Contact John Doe for details.').includes('placeholder-copy'));
+  assert.ok(keys('p.md', 'Thanks to Acme Corp for support.').includes('placeholder-copy'));
+  assert.ok(keys('p.md', 'Call (555) 123-4567 now.').includes('placeholder-copy'));
+  assert.ok(!keys('docs/p.md', 'Contact John Doe for details.').includes('placeholder-copy'),'docs use example names legitimately');
+});
+
+test('de-slop and ornament complaints route the anti-slop workflows', () => {
+  for (const prompt of ['Fix the homepage hero and de-slop the copy','Rebuild the pricing header to unslop it','Humanize the design before launch'])
+    assert.ok(routeSkills(prompt).some(s=>s.name==='anti-ai-slop'),prompt);
+  for (const prompt of ['Fix the pill spam in the header','Remove the badge spam','Remove the gradient text','Audit the glassmorphism panels','Fix the autoplaying carousel','Add the missing alt text'])
+    assert.ok(routeSkills(prompt).some(s=>s.name==='ui-antipattern-review'),prompt);
+  for (const prompt of ['Explain what gradient text is','Do not fix the pill spam','> Fix the badge spam'])
+    assert.ok(!routeSkills(prompt).some(s=>s.name==='ui-antipattern-review'),prompt);
+});
+
 test('user-banned ornaments are cued at edit time: accent rails, dot markers and icon tiles', () => {
   const keys = (file, text) => signals(file, text, 12).map(s => s.key);
   assert.ok(keys('a.css', '.card{border-left:3px solid #4aa3ff;padding:12px}').includes('ui-accent-rail'));

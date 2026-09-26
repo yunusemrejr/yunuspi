@@ -66,6 +66,23 @@ export function inspectNoiseState(root, options = {}) {
     // every decorative marker in that content a necessary state indicator.
     return state && (state === node || state.childElementCount <= 3 && rectOf(state).height <= 64);
   };
+  const HYPE = new Set(['new','live','beta','ai','fast','secure','private','modern','smart','pro','featured','verified','trending','popular']);
+  // Interactive name check: visible text, labels, aria names and titles count.
+  // Placeholder text is not a name; submit values and image-input alt are.
+  const controlNamed = node => {
+    if ((node.getAttribute('aria-label') || '').trim() || (node.getAttribute('title') || '').trim()) return true;
+    const ids = (node.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).slice(0, 4);
+    if (ids.some(id => { const e = document.getElementById(id); return e && visible(e) && directText(e); })) return true;
+    if (node instanceof HTMLInputElement) {
+      if (/^(submit|reset|button)$/i.test(node.type)) return (node.value || '').trim().length > 0;
+      if (/^image$/i.test(node.type)) return (node.getAttribute('alt') || '').trim().length > 0;
+      if (node.type === 'hidden') return true;
+    }
+    if (node.labels && [...node.labels].some(l => visible(l))) return true;
+    if (directText(node)) return true;
+    const titled = node.querySelector('svg title');
+    return Boolean(titled && titled.textContent.trim());
+  };
   const painted = color => !['transparent','rgba(0, 0, 0, 0)'].includes(color) && !/rgba\([^)]*,\s*0\)$/.test(color);
   const animations = document.getAnimations();
   if (animations.length > 100) result.truncated = true;
@@ -83,6 +100,7 @@ export function inspectNoiseState(root, options = {}) {
     moving.set(target, list);
   }
   const fonts = new Map(), regions = new Map(), borders = [], tiles = [], animatedPills = new Set();
+  const missingAlt = [], unnamed = [], emojiChrome = [], hypeBadges = [], terminals = [];
   let dots = [];
   const pseudoStyle = (node, which) => getComputedStyle(node, which);
   const regionFor = node => {
@@ -99,9 +117,12 @@ export function inspectNoiseState(root, options = {}) {
     if (result.visited >= maxNodes || performance.now() - started >= maxMs || result.findings.length === maxFindings) {result.truncated = true; break;}
     result.visited++;
     // Form field values are excluded, but visible fields still count as controls.
+    // Fields are also invisible to visible() (they match its exclusion list),
+    // so unnamed-field detection lives here rather than in the main walk.
     if (node.matches('input,textarea,select') && node.parentElement && visible(node.parentElement) && areaInViewport(rectOf(node)) > 0 && styleOf(node).visibility === 'visible' && Number(styleOf(node).opacity) > 0) {
       const region = regionFor(node);
       if (region) regionData(region).controls++;
+      if (!node.closest('[aria-hidden="true"]') && !controlNamed(node)) unnamed.push({node});
     }
     if (visible(node)) {
       const label = text(node);
@@ -173,6 +194,29 @@ export function inspectNoiseState(root, options = {}) {
             (painted(style.backgroundColor) || parseFloat(style.borderTopWidth) >= 1 && painted(style.borderTopColor)) && parseFloat(style.borderTopLeftRadius) >= 4 &&
             !node.matches('button,a[href],input,[role="button"]') && !hasStateMeaning(node))
           tiles.push({node, sizePx: Math.round(rect.width)});
+        // Missing alt: a visible image without any alt attribute. Decorative
+        // images carry alt=""; presentation and hidden images are exempt.
+        if (node.matches('img') && !node.hasAttribute('alt') && !node.closest('[aria-hidden="true"],[role="presentation"]'))
+          missingAlt.push({node});
+        // Unnamed controls: interactive elements with no accessible name.
+        // Fields are handled in the dedicated branch above (see there).
+        if (node.matches('button,a[href],[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="switch"],[role="radio"]')
+            && !node.closest('[aria-hidden="true"]') && !controlNamed(node))
+          unnamed.push({node});
+        // Emoji in chrome: headings, buttons, links and tabs carrying emoji.
+        // Article and user-content prose is already outside this scan.
+        if (node.matches('h1,h2,h3,h4,h5,h6,button,a[href],[role="button"],[role="tab"]') && /\p{Extended_Pictographic}/u.test((node.textContent ?? '').slice(0, 200)))
+          emojiChrome.push({node});
+        // Hype badge: a capsule whose whole label is one hype word. Animated
+        // status pills are filtered at aggregation; they have their own cue.
+        if (rect.width <= 300 && rect.height <= 64 && isRounded(style, rect.height) && !hasStateMeaning(node) && !node.matches('button,a,input,[role="button"],[role="switch"],[role="checkbox"]')) {
+          const badgeLabel = (copy + ' ' + [...node.children].slice(0, 3).map(directText).join(' ')).replace(/\s+/g, ' ').trim().toLowerCase();
+          if (HYPE.has(badgeLabel)) hypeBadges.push({node});
+        }
+        // Fake terminal: prompt lines and status codes outside code samples
+        // (pre/code elements are outside this scan entirely).
+        if (/^(?:>\s*(?:initializing|initialising|connected|connecting|system ready|loading|deploying)|[$›]\s*(?:npm|yarn|pnpm|bun|git|docker)\s+\S+|SYS_\d{3}|\[STATUS:\s*ACTIVE\])/i.test(copy))
+          terminals.push({node});
         if (rect.width <= 300 && rect.height <= 64 && isRounded(style, rect.height) && !hasStateMeaning(node) && !node.matches('button,a,input,[role="button"],[role="switch"],[role="checkbox"]')) {
           // A short status label, actual capsule geometry and repeated dot motion
           // must all agree. Meaningful live regions and state controls are exempt.
@@ -216,6 +260,12 @@ export function inspectNoiseState(root, options = {}) {
   dots = dots.filter(dot => !animatedPills.has(dot.node));
   if (dots.length) add('decorative-dot-marker', dots[0].node, {reason: 'A small colored dot prefixes a short label (a stock generated-UI tell). Remove it unless it encodes a real, changing state; a label reads fine without it.', markers: dots.length, glowing: dots.filter(dot => dot.glow).length, relatedSelectors: dots.slice(1, 4).map(dot => identify(dot.node))});
   if (tiles.length) add('icon-tile', tiles[0].node, {reason: 'An icon sits inside a tinted or bordered rounded tile (a stock generated-UI badge). Show the icon plainly at text size, or drop it when the label already says it.', tiles: tiles.length, sizesPx: [...new Set(tiles.map(tile => tile.sizePx))].slice(0, 4), relatedSelectors: tiles.slice(1, 4).map(tile => identify(tile.node))});
-  if (options.detailed) result.measurements = {viewport: {width: innerWidth, height: innerHeight}, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, animationsSampled: Math.min(animations.length, 100), textBearingInterfaceFamilies: fonts.size, repeatedHeavyLeftBorders: borders.length, decorativeDots: dots.length, iconTiles: tiles.length, interfaceCopy: densities};
+  if (missingAlt.length) add('missing-image-alt', missingAlt[0].node, {reason: 'Visible images without an alt attribute. Give informative images a concise text equivalent and decorative images an empty alt=""; a missing attribute is neither.', images: missingAlt.length, relatedSelectors: missingAlt.slice(1, 4).map(data => identify(data.node))});
+  if (unnamed.length) add('unnamed-control', unnamed[0].node, {reason: 'Interactive controls with no accessible name. Add visible text, a label, or an aria-label; placeholder text is not a name.', controls: unnamed.length, relatedSelectors: unnamed.slice(1, 4).map(data => identify(data.node))});
+  if (emojiChrome.length) add('emoji-in-chrome', emojiChrome[0].node, {reason: 'Emoji inside a heading, button, link or tab label. Emoji is not an icon system; keep it only when the brand explicitly owns playful chrome.', elements: emojiChrome.length, relatedSelectors: emojiChrome.slice(1, 4).map(data => identify(data.node))});
+  const staticBadges = hypeBadges.filter(data => !animatedPills.has(data.node));
+  if (staticBadges.length >= 3) add('hype-badge-cluster', staticBadges[0].node, {reason: 'Three or more hype badges (NEW, BETA, AI…) as capsule labels. A badge must represent meaningful state or taxonomy; keep at most the one or two the reader acts on.', badges: staticBadges.length, relatedSelectors: staticBadges.slice(1, 4).map(data => identify(data.node))});
+  if (terminals.length) add('fake-terminal-decoration', terminals[0].node, {reason: 'Decorative terminal output outside code samples. Keep terminal chrome only when the terminal itself is meaningful to the product.', blocks: terminals.length, relatedSelectors: terminals.slice(1, 4).map(data => identify(data.node))});
+  if (options.detailed) result.measurements = {viewport: {width: innerWidth, height: innerHeight}, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, animationsSampled: Math.min(animations.length, 100), textBearingInterfaceFamilies: fonts.size, repeatedHeavyLeftBorders: borders.length, decorativeDots: dots.length, iconTiles: tiles.length, missingImageAlt: missingAlt.length, unnamedControls: unnamed.length, emojiChrome: emojiChrome.length, hypeBadges: staticBadges.length, terminalDecorations: terminals.length, interfaceCopy: densities};
   return result;
 }

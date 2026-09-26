@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sessionObservability } from './session-observability.ts';
-import { describeIntelligenceActivity } from './activity-indicators.ts';
+import { describeIntelligenceActivity, HELPER_LABELS } from './activity-indicators.ts';
 import { collectAuxiliaryModelUsage } from './cost-evidence.ts';
 
 export const HELPER_USAGE_VIEW = Symbol.for('yunuspi.helper-usage-view.v1');
@@ -30,6 +30,13 @@ export function createHelperUsageLedger() {
         dirty=true;state.updatedAt=Date.now();return;
       }
       if(!kind.startsWith('ml.'))return;
+      if(kind==='ml.helper.applied'){
+        // Remote prompt analysis ("llm") is auxiliary model usage, not a helper.
+        const label=HELPER_LABELS[clean(data.helper,24)];
+        if(!label)return;
+        const row=state.components[label]??={...blank(),operations:{},reasons:{}};
+        row.applied++;dirty=true;state.updatedAt=Date.now();return;
+      }
       const described=describeIntelligenceActivity(kind,data);if(!described||!names.includes(described.label))return;
       const row=state.components[described.label]??={...blank(),operations:{},reasons:{}};
       row.events++;

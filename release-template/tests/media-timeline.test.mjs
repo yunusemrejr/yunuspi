@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => syncFs.existsSync(path.join(dir, 'extensions/media-tools.ts')));
-const { audioMix, videoCompose } = await import(pathToFileURL(path.join(agent, 'extensions/lib/media-timeline.ts')));
+const { audioMix, videoCompose, VIDEO_TRANSITIONS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/media-timeline.ts')));
 const { default: register } = await import(pathToFileURL(path.join(agent, 'extensions/media-tools.ts')));
 
 test('media tools retain their existing surface and expose four focused studio operations', () => {
@@ -21,6 +21,9 @@ test('media tools retain their existing surface and expose four focused studio o
   assert.equal(tools.size, 10);
   const validate = (name, args) => validateToolArguments(tools.get(name), { type: 'toolCall', id: 'schema', name, arguments: args });
   assert.doesNotThrow(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 1 / 60 }], fps: 60 }));
+  assert.equal(VIDEO_TRANSITIONS.length, 16);
+  for (const transition of VIDEO_TRANSITIONS) assert.doesNotThrow(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 1 }], transition }), transition);
+  assert.throws(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 1 }], transition: 'zoomin' }));
   assert.doesNotThrow(() => validate('scene_create', { scene: { objects: [{ id: 'box' }], tracks: [{ target: 'box', keys: [{ time: 0, value: [0, 0, 0] }, { time: 1, value: [1, 0, 0] }] }] } }));
   for (const object of [{ id: 'box', scale: [0, 1, 1] }, { id: 'box', position: [101, 0, 0] }]) {
     assert.throws(() => validate('scene_create', { scene: { objects: [object] } }));
@@ -60,9 +63,9 @@ test('real timeline normalizes clips, overlaps transitions, mixes audio offsets 
     const frame = async time => (await exec('ffmpeg', ['-v', 'error', '-ss', String(time), '-i', video.artifact.path, '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' })).stdout;
     const red = await frame(0.1), blue = await frame(1.5);
     assert.ok(red[0] > red[2] + 100 && blue[2] > blue[0] + 40, 'decoded timeline contains both clips in order');
-    for (const transition of ['cut', 'wipeleft', 'fadeblack']) {
+    for (const transition of VIDEO_TRANSITIONS) {
       const rendered = await videoCompose({ ...params, transition, audio: [], includeClipAudio: false }, dir);
-      assert.ok(!rendered.output.streams.some(s => s.codec_type === 'audio'));
+      assert.ok(!rendered.output.streams.some(s => s.codec_type === 'audio'), transition);
     }
     const fractional = await videoCompose({ clips: Array.from({ length: 8 }, (_, i) => ({ path: i === 7 ? second : first, duration: 0.1 })), width: 160, height: 96, fps: 24, includeClipAudio: false, audio: [{ path: sound, duration: 0.8 }] }, dir);
     assert.equal(fractional.duration, 19 / 24, 'absolute boundaries keep total rounding within half a frame');
@@ -82,6 +85,7 @@ test('real timeline normalizes clips, overlaps transitions, mixes audio offsets 
     const pixel = (x,y) => aspectPixels.subarray((y * 160 + x) * 3, (y * 160 + x) * 3 + 3);
     assert.ok(pixel(80, 20)[0] < 10 && pixel(80, 140)[0] < 10, 'display aspect receives top/bottom letterboxing');
     assert.ok(pixel(10, 80)[0] > 200 && pixel(150, 80)[0] > 200, 'non-square source pixels fill the display width');
+    await assert.rejects(videoCompose({ ...params, transition: 'zoomin' }, dir), /transition must be/);
     await assert.rejects(videoCompose({ ...params, transitionDuration: 0.75 }, dir), /half/);
     await assert.rejects(videoCompose({ ...params, clips: [{ path: first, start: 0.5, duration: 1 }] }, dir), /source duration/);
     await assert.rejects(videoCompose({ ...params, width: 161 }, dir), /even/);

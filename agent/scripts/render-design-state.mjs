@@ -6,7 +6,7 @@ export function inspectDesignState(root) {
   const result={version:2,visited:0,visible:0,truncated:false,viewport:{width:innerWidth,height:innerHeight},
     horizontalOverflowPx:Math.max(0,document.documentElement.scrollWidth-document.documentElement.clientWidth),
     typography:[],spacing:[],surfacePatterns:{gradients:0,shadows:0,rounded:0},
-    slopSignals:{pills:0,glowShadows:0,gradientText:0,glass:0,textGlow:0},
+    slopSignals:{pills:0,glowShadows:0,gradientText:0,glass:0,textGlow:0,oversizedType:0,heavyRadius:0},
     contrast:{checked:0,belowThreshold:0,indeterminate:0},findings:[],
     motion:{reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,running:0,infinite:0,sampled:0,truncated:false},
     limitations:'Bounded main-document computed-style sample, not an aesthetic score or accessibility certification. No text, input values or CSS URLs returned. Contrast excludes images, opacity, filters, blending, shadows, pseudo-elements and unknown backgrounds; occlusion, focus, states, canvas, frames and shadow roots need separate inspection. Repeated surfaces may be intentional. Slop-signature counts are treatment frequencies with disclosed thresholds, not verdicts. Use screenshots and the relevant design skill to judge hierarchy, originality and composition.'};
@@ -42,7 +42,9 @@ export function inspectDesignState(root) {
       // A pill is a small control with fully rounded ends (radius reaches half
       // the short side); large rounded panels are not pills.
       const shortSide=Math.min(rect.width,rect.height);
-      if(shortSide>=8&&shortSide<=96&&rect.width>rect.height&&parseFloat(style.borderTopLeftRadius)>=shortSide/2-1)slop('pills',node);
+      const isPill=shortSide>=8&&shortSide<=96&&rect.width>rect.height&&parseFloat(style.borderTopLeftRadius)>=shortSide/2-1;
+      if(isPill)slop('pills',node);
+      let hasDirectText=false,directChildren=0;for(let child=node.firstChild;child&&directChildren++<64;child=child.nextSibling)if(child.nodeType===Node.TEXT_NODE&&child.textContent.trim()){hasDirectText=true;break;}
       // A glow halo is a soft wide shadow with a near-zero offset (not a drop
       // shadow and not an inset fill). Computed serialization puts color first.
       if(style.boxShadow!=='none'&&!/inset/.test(style.boxShadow)){
@@ -53,9 +55,13 @@ export function inspectDesignState(root) {
       if((style.backgroundClip==='text'||style.webkitBackgroundClip==='text')&&/gradient\(/.test(style.backgroundImage))slop('gradientText',node);
       if(style.backdropFilter&&style.backdropFilter!=='none'&&/blur\s*\(/.test(style.backdropFilter))slop('glass',node);
       if(style.textShadow&&style.textShadow!=='none')slop('textGlow',node);
+      // Oversized display type needs visible words on the element itself, so a
+      // sized wrapper and its headline do not count twice. Heavy radius skips
+      // pills, which already have their own signature.
+      if(hasDirectText&&font.sizePx>=80)slop('oversizedType',node);
+      if(!isPill&&parseFloat(style.borderTopLeftRadius)>=24)slop('heavyRadius',node);
       if(rect.width>innerWidth+1&&style.position!=='fixed')finding('wider-than-viewport',node,{widthPx:round(rect.width)});
-      let hasText=false,children=0;for(let child=node.firstChild;child&&children++<64;child=child.nextSibling)if(child.nodeType===Node.TEXT_NODE&&child.textContent.trim()){hasText=true;break;}
-      if(hasText&&!node.matches('script,style,template,input,textarea,select,:disabled,[aria-disabled="true"]')){
+      if(hasDirectText&&!node.matches('script,style,template,input,textarea,select,:disabled,[aria-disabled="true"]')){
         const color=rgb(style.color),bg=background(node);
         const pseudo=hasPseudo(node),alternateFill=style.webkitTextFillColor&&style.webkitTextFillColor!==style.color;
         if(!color||!bg||style.textShadow!=='none'||pseudo||alternateFill||parseFloat(style.webkitTextStrokeWidth)>0||node.namespaceURI!=='http://www.w3.org/1999/xhtml'){result.contrast.indeterminate++;}
@@ -71,7 +77,7 @@ export function inspectDesignState(root) {
   }
   // One locating finding per over-threshold signature; counts stay in
   // slopSignals for the reviewer to judge against the design system.
-  for(const [kind,threshold] of [['pills',6],['glowShadows',4],['gradientText',1],['glass',3],['textGlow',4]]){
+  for(const [kind,threshold] of [['pills',6],['glowShadows',4],['gradientText',1],['glass',3],['textGlow',4],['oversizedType',2],['heavyRadius',6]]){
     if(result.slopSignals[kind]>=threshold&&slopExample[kind])finding('slop-'+kind.replace(/[A-Z]/g,c=>'-'+c.toLowerCase()),slopExample[kind],{count:result.slopSignals[kind],threshold});
   }
   result.typography=[...fonts].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([key,count])=>({...JSON.parse(key),count}));
