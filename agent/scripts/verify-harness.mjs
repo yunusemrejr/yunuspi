@@ -252,6 +252,66 @@ function findPiPackage() {
   try { return resolveOwnedCore(); } catch { return null; }
 }
 
+/** Exercise the selected installation, never an unrelated executable on PATH. */
+async function runSmokeTest(agentDir, timeoutMs = 180_000) {
+  const target = path.resolve(agentDir);
+  return await new Promise((resolve) => {
+    const child = spawn(
+      path.join(target, "bin", "yunuspi"),
+      ["-p", "--no-session", "--mode", "text", "Reply with exactly: OK"],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PI_CODING_AGENT_DIR: target, NO_COLOR: "1" },
+        cwd: target,
+        windowsHide: true,
+        detached: process.platform !== "win32", // group leader → group kill
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (d) => { stdout = (stdout + d).slice(-65_536); });
+    child.stderr?.on("data", (d) => { stderr = (stderr + d).slice(-65_536); });
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    child.on("error", (err) =>
+      finish({
+        killed: false,
+        code: null,
+        signal: null,
+        error: err,
+        stdout,
+        stderr,
+      }),
+    );
+    child.on("close", (code, signal) =>
+      finish({ killed: false, code, signal, stdout, stderr }),
+    );
+    const timer = setTimeout(() => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }
+      finish({
+        killed: true,
+        code: child.exitCode ?? null,
+        signal: "SIGKILL",
+        stdout,
+        stderr,
+      });
+    }, timeoutMs);
+  });
+}
+
 async function main() {
   console.log("== YunusPi harness verification ==");
   const piPkg = findPiPackage();
@@ -779,70 +839,14 @@ async function main() {
   // ── 10. Optional smoke test ──────────────────────────────────────────
   if (SMOKE) {
     console.log("\n[10] Smoke test (1 tiny LLM call)");
-    // WHY spawn instead of execFile: execFile("pi", …) stalls past its timeout
-    // on this Node (v22.22.3) while the identical command exits in ~5s via a
-    // direct spawn — the smoke was effectively unusable. spawn with ignored
-    // stdin + manual output collection terminates correctly; the timeout
-    // SIGKILLs the child's process group so nothing lingers.
-    const smoke = await new Promise((resolve) => {
-      const child = spawn(
-        "pi",
-        ["-p", "--no-session", "--mode", "text", "Reply with exactly: OK"],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env, NO_COLOR: "1" },
-          windowsHide: true,
-          detached: process.platform !== "win32", // group leader → group kill
-        },
-      );
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      child.stdout?.on("data", (d) => (stdout += d.toString()));
-      child.stderr?.on("data", (d) => (stderr += d.toString()));
-      const finish = (result) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(result);
-      };
-      child.on("error", (err) =>
-        finish({
-          killed: false,
-          code: null,
-          signal: null,
-          error: err,
-          stdout,
-          stderr,
-        }),
-      );
-      child.on("close", (code, signal) =>
-        finish({ killed: false, code, signal, stdout, stderr }),
-      );
-      const timer = setTimeout(() => {
-        try {
-          if (child.pid) process.kill(-child.pid, "SIGKILL");
-        } catch {
-          try {
-            child.kill("SIGKILL");
-          } catch {}
-        }
-        finish({
-          killed: true,
-          code: child.exitCode ?? null,
-          signal: "SIGKILL",
-          stdout,
-          stderr,
-        });
-      }, 180_000);
-    });
+    const smoke = await runSmokeTest(AGENT_DIR);
     if (
       smoke.code === 0 &&
       !smoke.killed &&
       !smoke.error &&
       /(?:^|\n)OK\s*(?:\n|$)/.test(smoke.stdout)
     )
-      ok("pi -p smoke test passed (extensions load, model responds)");
+      ok("installed yunuspi smoke test passed (extensions load, model responds)");
     else if (smoke.killed) bad(`smoke test timed out after 180s (SIGKILLed)`);
     else if (smoke.error)
       bad(`smoke test failed to spawn: ${smoke.error.message}`);

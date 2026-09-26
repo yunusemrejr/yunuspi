@@ -73,3 +73,28 @@ test('TypeScript syntax checks strip types first, so Node 24 --check cannot repo
   await assert.rejects(check(bad),'a genuine syntax error is still reported');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('provider smoke executes the selected installed launcher even when PATH has a successful unrelated pi', async () => {
+ const source=fs.readFileSync(path.join(agent,'scripts/verify-harness.mjs'),'utf8');
+ const declaration=source.match(/async function runSmokeTest\(agentDir, timeoutMs = 180_000\) \{[\s\S]*?\n\}/)?.[0];assert.ok(declaration);
+ const {spawn}=await import('node:child_process');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'owned-smoke-'));
+ const target=path.join(dir,'selected-agent'),rogue=path.join(dir,'unrelated-bin');
+ fs.mkdirSync(path.join(target,'bin'),{recursive:true});fs.mkdirSync(rogue);
+ const actual=path.join(dir,'actual.json'),wrong=path.join(dir,'wrong');
+ const launcher=path.join(target,'bin/yunuspi');
+ fs.writeFileSync(launcher,`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(actual)},JSON.stringify({argv:process.argv.slice(2),cwd:process.cwd(),agentDir:process.env.PI_CODING_AGENT_DIR}));process.stdout.write('OK\\n');\n`,{mode:0o755});
+ fs.writeFileSync(path.join(rogue,'pi'),`#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(wrong)},'unrelated');process.stdout.write('OK\\n');\n`,{mode:0o755});
+ const smoke=vm.runInNewContext(`(${declaration})`,{spawn,path,process:{...process,env:{...process.env,PATH:rogue+path.delimiter+process.env.PATH,PI_CODING_AGENT_DIR:path.join(dir,'wrong-agent')}},setTimeout,clearTimeout});
+ try {
+  const success=await smoke(target,3000);
+  assert.equal(success.code,0);assert.equal(success.stdout,'OK\n');assert.equal(fs.existsSync(wrong),false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(actual,'utf8')),{argv:['-p','--no-session','--mode','text','Reply with exactly: OK'],cwd:target,agentDir:target});
+  fs.rmSync(launcher);
+  const missing=await smoke(target,3000);
+  assert.equal(missing.error.code,'ENOENT');assert.equal(fs.existsSync(wrong),false,'a missing installation cannot fall back to PATH');
+  fs.writeFileSync(launcher,`#!${process.execPath}\nprocess.stderr.write('selected install broken');process.exit(7);\n`,{mode:0o755});
+  const broken=await smoke(target,3000);
+  assert.equal(broken.code,7);assert.match(broken.stderr,/selected install broken/);assert.equal(fs.existsSync(wrong),false);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
