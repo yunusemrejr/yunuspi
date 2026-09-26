@@ -44,6 +44,11 @@ function audioFilter(track: any, input: number, label: string) {
 function mixFilter(labels: string[], duration: number) {
   return `${labels.map(label => `[${label}]`).join('')}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95:level=false:latency=true,apad,atrim=duration=${duration}[audio]`;
 }
+/** Transitions offered by video_compose. `cut` is a plain concat; the rest
+ * are FFmpeg xfade names available since FFmpeg 4.4, so the same call
+ * renders on Ubuntu LTS and current FFmpeg. One source of truth: the tool
+ * schema in media-tools.ts and the tests import this list. */
+export const VIDEO_TRANSITIONS = ['cut', 'fade', 'fadewhite', 'fadeblack', 'wipeleft', 'wiperight', 'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown', 'smoothleft', 'smoothright', 'smoothup', 'smoothdown'] as const;
 async function finish(dir: string, output: string, signal: AbortSignal | undefined, receipt: any) {
   const info = await probe(output, signal);
   await run('ffmpeg', [...FFMPEG_FLAGS, '-v', 'error', '-xerror', ...inputArgs(output, 0), '-f', 'null', '-'], signal);
@@ -74,7 +79,7 @@ export async function videoCompose(params: any, cwd: string, signal?: AbortSigna
   const width = integer(params.width, 1280, 64, 1920, 'width'), height = integer(params.height, 720, 64, 1080, 'height'), fps = integer(params.fps, 24, 1, 60, 'fps');
   if (width % 2 || height % 2) throw Error('width and height must be even');
   const transition = params.transition ?? 'cut';
-  if (!['cut', 'fade', 'wipeleft', 'fadeblack'].includes(transition)) throw Error('transition must be cut, fade, wipeleft or fadeblack');
+  if (!(VIDEO_TRANSITIONS as readonly string[]).includes(transition)) throw Error(`transition must be one of ${VIDEO_TRANSITIONS.join(', ')}`);
   const overlap = transition === 'cut' ? 0 : number(params.transitionDuration, 0.5, 1 / fps, 3, 'transitionDuration');
   if (params.includeClipAudio !== undefined && typeof params.includeClipAudio !== 'boolean') throw Error('includeClipAudio must be boolean');
   const clips = []; let requestedDuration = 0;

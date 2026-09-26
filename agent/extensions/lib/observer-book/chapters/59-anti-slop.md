@@ -47,7 +47,7 @@ AI website work fails one underlying way: it optimizes for visible completeness 
 
 **Why.** A blinking LIVE dot on a static page, invented "10x faster" claims, fictional testimonials and KPI dashboards for blogs all trade short-term impressiveness for long-term trust: the first visitor who checks finds nothing behind them. Fabricated proof is worse than missing proof, because missing proof invites the honest fix of earning it. Badges, pills and counters are taxonomy and state machinery; using them as ornament teaches readers to ignore the real ones. When the fact does not exist yet, the correct element is nothing — a short honest page beats a long performed one.
 
-**Signals.** LIVE/NEW/BETA pills with no backing state; round impressive numbers with no source; testimonial carousels; "trusted by" strips; dashboards on content sites.
+**Signals.** LIVE/NEW/BETA pills with no backing state; glowing, pulsing or blinking dots in any form (ping spans, keyframe loops, haloed dots, literal ●/emoji prefixes); eyebrow pills above headings; invented AI ACTIVE/SYSTEM ONLINE/COMING SOON labels; round impressive numbers with no source; testimonial carousels; "trusted by" strips; dashboards on content sites; first-person build narration ("I designed", "this section showcases") leaked into reader copy.
 
 **Ask.** What real fact stands behind this indicator, number or endorsement?
 

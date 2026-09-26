@@ -898,9 +898,9 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 	capability({
 		id: "design-studio",
 		group: "web_media",
-		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
-		entrypoints: ["image_analyze", "image_crop", "image_trace", "visual_diff"],
-		tools: ["image_analyze", "image_crop", "image_trace", "visual_diff", "render_see", "design_audit"],
+		summary: "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
+		entrypoints: ["image_analyze", "image_crop", "image_trace", "image_create", "visual_diff"],
+		tools: ["image_analyze", "image_crop", "image_trace", "image_create", "visual_diff", "render_see", "design_audit"],
 		options: [
 			option("path|url", "Local image, or an http(s) image downloaded once through the SSRF-guarded fetcher and kept locally."),
 			option("scale|referenceScale", "Reference pixel ratio (2 for @2x exports); inferred from common export widths."),
@@ -908,10 +908,11 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 			option("map|blocks|kinds", "Target assets by design-map block ids or kinds."),
 			option("key|trim|format", "Edge-connected background keying with de-fringing, trimming, and PNG/JPEG/WebP selection."),
 			option("source|candidate|region", "Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region."),
+			option("op", "Procedural plate to synthesize: solid, linear-gradient, checker, noise or grid.", ["solid", "linear-gradient", "checker", "noise", "grid"]),
 			option("outputDir", "Artifacts default to the git-ignored .pi/design folder in the workspace."),
 		],
 		related: ["rendered-design-review", "web-and-media", "artifact-numeric-checks"],
-		sourceFiles: ["agent/extensions/design-studio.ts", "agent/extensions/lib/design-studio.ts", "agent/extensions/lib/image-analysis.ts", "agent/scripts/render-capture.mjs", "agent/skills/mockup-to-code/SKILL.md"],
+		sourceFiles: ["agent/extensions/design-studio.ts", "agent/extensions/lib/design-studio.ts", "agent/extensions/lib/image-analysis.ts", "agent/extensions/lib/image-synth.ts", "agent/scripts/render-capture.mjs", "agent/skills/mockup-to-code/SKILL.md"],
 		doc: "agent/public-template/docs/DESIGN-STUDIO.md",
 	}),
 	capability({

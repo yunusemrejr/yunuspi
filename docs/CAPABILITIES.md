@@ -1017,11 +1017,11 @@ Produce code-first videos: Remotion projects driven by one master video.json tim
 
 #### design-studio
 
-Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
+Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.
 
-**Entrypoints:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`
+**Entrypoints:** `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`
 
-**Catalog tool pointers:** `image_analyze`, `image_crop`, `image_trace`, `visual_diff`, `render_see`, `design_audit`
+**Catalog tool pointers:** `image_analyze`, `image_crop`, `image_trace`, `image_create`, `visual_diff`, `render_see`, `design_audit`
 
 **Options:**
 
@@ -1031,11 +1031,12 @@ Turn design references into code. image_analyze maps a mockup, screenshot or ima
 - `map|blocks|kinds`: Target assets by design-map block ids or kinds.
 - `key|trim|format`: Edge-connected background keying with de-fringing, trimming, and PNG/JPEG/WebP selection.
 - `source|candidate|region`: Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region.
+- `op`: Procedural plate to synthesize: solid, linear-gradient, checker, noise or grid. Values: `solid`, `linear-gradient`, `checker`, `noise`, `grid`.
 - `outputDir`: Artifacts default to the git-ignored .pi/design folder in the workspace.
 
 **Related records:** `rendered-design-review`, `web-and-media`, `artifact-numeric-checks`
 
-**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
+**Source:** [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts), [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts), [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts), [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts), [`agent/scripts/render-capture.mjs`](../agent/scripts/render-capture.mjs), [`agent/skills/mockup-to-code/SKILL.md`](../agent/skills/mockup-to-code/SKILL.md)
 
 **Documentation:** [`docs/DESIGN-STUDIO.md`](DESIGN-STUDIO.md)
 
@@ -1182,7 +1183,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Dynamic tool owners
 
-- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 18)
+- [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 20)
 - [`agent/extensions/lib/small-tools.ts`](../agent/extensions/lib/small-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `artifact_check`, `data_query`, `math_check`, `value_convert` (lines 75)
 - [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) — registration receives the SDK createBashToolDefinition() for the active cwd; known tools: `bash`, `process` (lines 579)
 - [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_analyze`, `audio_mix`, `image_ocr`, `media_edit`, `media_info`, `music_compose`, `scene_create`, `scene_render`, `video_compose`, `video_frames` (lines 246)
@@ -1233,7 +1234,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /metrics — [`agent/extensions/lib/session-telemetry.ts`](../agent/extensions/lib/session-telemetry.ts) (line 58)
 - /models — [`agent/extensions/model-routing-config.ts`](../agent/extensions/model-routing-config.ts) (line 427)
 - /obs — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 897)
-- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 462)
+- /observer-book — [`agent/extensions/session-observer.ts`](../agent/extensions/session-observer.ts) (line 479)
 - /or-provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 654)
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 616)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 254)
@@ -1262,7 +1263,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1705)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 510)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1724)
-- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 254)
+- /watchmaker — [`agent/extensions/session-watchmaker.ts`](../agent/extensions/session-watchmaker.ts) (line 273)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3134)
 
 ### Dynamic command owners
@@ -1447,6 +1448,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/host-operation-safety.ts`](../agent/extensions/lib/host-operation-safety.ts)
 - [`agent/extensions/lib/image-analysis.ts`](../agent/extensions/lib/image-analysis.ts)
 - [`agent/extensions/lib/image-compaction.ts`](../agent/extensions/lib/image-compaction.ts)
+- [`agent/extensions/lib/image-synth.ts`](../agent/extensions/lib/image-synth.ts)
 - [`agent/extensions/lib/intent-context.ts`](../agent/extensions/lib/intent-context.ts)
 - [`agent/extensions/lib/intervention-control.ts`](../agent/extensions/lib/intervention-control.ts)
 - [`agent/extensions/lib/intervention-intents.ts`](../agent/extensions/lib/intervention-intents.ts)

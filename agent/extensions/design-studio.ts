@@ -1,8 +1,10 @@
 /** Image-to-code tools: analyze a reference (mockup, screenshot or URL),
- * cut and vectorize its assets, and compare a build against it. Discovered on
- * demand through tool_search; the mockup-to-code skill owns the workflow. */
+ * cut and vectorize its assets, compare a build against it, and synthesize
+ * deterministic procedural plates. Discovered on demand through tool_search;
+ * the mockup-to-code skill owns the image-to-code workflow. */
 import { Type } from "typebox";
 import { imageAnalyze, imageCrop, imageTrace, visualDiff } from "./lib/design-studio.ts";
+import { imageCreate, SYNTH_OPS } from "./lib/image-synth.ts";
 import { captureToFile } from "./render-and-wait.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
@@ -41,6 +43,16 @@ export default function designStudio(pi: any) {
     Type.Object({ ...source, map: Type.Optional(localPath), block: Type.Optional(Type.String({ pattern: "^b\\d{1,4}$" })), region: Type.Optional(box), name: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" })),
       colors: Type.Optional(Type.Integer({ minimum: 1, maximum: 8 })), background: Type.Optional(Type.String({ pattern: "^(auto|none|#[0-9a-fA-F]{6})$" })), epsilon: Type.Optional(Type.Number({ minimum: 0.2, maximum: 16 })), padding: Type.Optional(Type.Number({ minimum: 0, maximum: 64 })), scale, outputDir }),
     imageTrace, 120_000);
+  const hexColor = Type.String({ pattern: "^#[0-9a-fA-F]{6}$", maxLength: 7 });
+  register("image_create",
+    "Create a deterministic procedural image from explicit parameters: solid fills, multi-stop linear gradients, transparency checkerboards, seeded film grain and grid paper for backgrounds, mattes, QA plates and motion-graphics assets. Same inputs always render the same bytes; writes one PNG/JPEG/WebP (default PNG) into a fresh git-ignored folder with a receipt echoing resolved parameters. Bounded to 16M pixels. Text, logos and photographic content are out of scope: author SVG/HTML and render it with render_see instead, then verify appearance by eye.",
+    Type.Object({ op: choices([...SYNTH_OPS]), width: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })), height: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })),
+      color: Type.Optional(hexColor), stops: Type.Optional(Type.Array(Type.Object({ color: hexColor, at: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })) }), { minItems: 2, maxItems: 8 })), angle: Type.Optional(Type.Number({ minimum: 0, maximum: 360 })),
+      size: Type.Optional(Type.Integer({ minimum: 1, maximum: 512 })), colors: Type.Optional(Type.Array(hexColor, { minItems: 2, maxItems: 2 })),
+      seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 4294967295 })), strength: Type.Optional(Type.Integer({ minimum: 1, maximum: 128 })), mono: Type.Optional(Type.Boolean()),
+      step: Type.Optional(Type.Integer({ minimum: 2, maximum: 1024 })), lineWidth: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })), background: Type.Optional(hexColor), line: Type.Optional(hexColor),
+      format: Type.Optional(choices(["png", "jpg", "webp"])), quality: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })), outputDir }),
+    imageCreate, 120_000);
   register("visual_diff",
     "Compare a build with its design reference at CSS resolution. candidate is a screenshot path; or source is an HTML path or http(s) URL that is rendered at the reference's CSS width (long pages in slices). Returns a verdict, SSIM, changed share, the worst page bands, bands whose content is displaced vertically (spacing drift), hot regions with zoomed reference|build crops and the reference blocks under them (with map), and reference colors missing from the build; writes compare.png (reference | build | heat). Region limits the comparison to one part of the reference.",
     Type.Object({ reference: Type.Optional(Type.String({ minLength: 1, maxLength: 4096, description: "Reference image path or http(s) URL; defaults to the map's source" })), candidate: Type.Optional(localPath), source: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), map: Type.Optional(localPath),

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.9 — 2026-09-26
+
+Port of the remaining session-evidenced live hotfixes. Observer and Watchmaker notes that never reached a provider request are now carried into the next delivery as receipted capsules instead of expiring on a wall clock; the edit-time status-ornament family generalizes live pills to any status word, adds glow-dot, eyebrow-pill and invented-label cues plus work-thought-leak, leak-vocabulary and vague-nav prose cues, with nested markup and one-cue-per-badge refinements so reminders and review keep sharing the same signals. Prose rules flag eyebrow-style and adjective-stacked label headings, bare vanity metrics and leaked making-of narration; `video_compose` offers all sixteen transitions from one exported list; `image_create` synthesizes deterministic procedural plates; the SVG audit flags default filter regions; rendered-noise checks catch eyebrow pills, literal status dots and sibling-layout dots; and routing hears fake-badge, invented-label and glow-dot complaints. Regression tests cover each port.
+
 ## 0.10.8 — 2026-09-26
 
 Port of session-evidenced live fixes that were rejecting legitimate work. The self-mutation guard now allows harness-instructed `subagent-artifacts` writes under session directories while transcripts and session state stay protected; the child file verifier stops flagging out-of-tree helper writes and `.pi/subagents` artifact writes as out-of-scope edits; render sources accept `file:` URLs without mangling them onto the working directory; todo batch recovery coerces numeric-string ids before validation; and project test checks no longer mistake `curl`/`wget` write-out flags for watch mode. Regression tests cover each fix.

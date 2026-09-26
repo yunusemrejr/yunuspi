@@ -2320,17 +2320,19 @@
     {
       "id": "design-studio",
       "group": "web_media",
-      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
+      "summary": "Turn design references into code. image_analyze maps a mockup, screenshot or image URL into page bands with guessed roles, blocks classified as text, CSS, SVG or raster, palette roles with contrast, a named type scale, spacing, container, columns and repeated components, plus an annotated overlay and CSS tokens; image_crop cuts and keys assets at source resolution; image_trace vectorizes flat marks with a fidelity check; image_create synthesizes deterministic procedural plates (solid, gradient, checker, grain, grid); visual_diff renders a build at the reference width and reports spacing drift, hot regions and color changes. Pixel measurements and guesses, not design intent.",
       "entrypoints": [
         "image_analyze",
         "image_crop",
         "image_trace",
+        "image_create",
         "visual_diff"
       ],
       "tools": [
         "image_analyze",
         "image_crop",
         "image_trace",
+        "image_create",
         "visual_diff",
         "render_see",
         "design_audit"
@@ -2361,6 +2363,17 @@
           "summary": "Build to compare: an HTML path or URL rendered at the reference width (long pages in slices) or a screenshot; optional reference region."
         },
         {
+          "name": "op",
+          "values": [
+            "solid",
+            "linear-gradient",
+            "checker",
+            "noise",
+            "grid"
+          ],
+          "summary": "Procedural plate to synthesize: solid, linear-gradient, checker, noise or grid."
+        },
+        {
           "name": "outputDir",
           "summary": "Artifacts default to the git-ignored .pi/design folder in the workspace."
         }
@@ -2374,6 +2387,7 @@
         "agent/extensions/design-studio.ts",
         "agent/extensions/lib/design-studio.ts",
         "agent/extensions/lib/image-analysis.ts",
+        "agent/extensions/lib/image-synth.ts",
         "agent/scripts/render-capture.mjs",
         "agent/skills/mockup-to-code/SKILL.md"
       ],
@@ -2953,7 +2967,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/session-observer.ts",
-        "line": 462
+        "line": 479
       },
       {
         "name": "or-provider",
@@ -3098,7 +3112,7 @@
       {
         "name": "watchmaker",
         "source": "agent/extensions/session-watchmaker.ts",
-        "line": 254
+        "line": 273
       },
       {
         "name": "websearch",
@@ -4147,7 +4161,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          18
+          20
         ]
       },
       {
@@ -4350,7 +4364,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 636,
+      "sourceFiles": 637,
       "registrationSites": 76,
       "indirectRegistrationSites": 18,
       "stableRegistrationRows": 108,
@@ -4737,6 +4751,10 @@
       },
       {
         "path": "agent/extensions/lib/image-compaction.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/image-synth.ts",
         "exists": true
       },
       {

@@ -96,6 +96,7 @@
     "host-operation-safety.ts",
     "image-analysis.ts",
     "image-compaction.ts",
+    "image-synth.ts",
     "intent-context.ts",
     "intervention-control.ts",
     "intervention-intents.ts",

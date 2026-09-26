@@ -100,13 +100,17 @@ test('watchmaker tracks time, memos conclusions, and skips output bodies', async
   await time.advance(60000);
   await waitForNotes(2);
   assert.ok(packets[1].includes(memos[0]), 'later reviews read the scratchpad instead of re-deriving history');
-  const drop = receipts.find((r) => r.customType === 'watchmaker-delivery-v1' && r.data.status === 'dropped:superseded');
-  assert.ok(drop, `unprepared note is superseded loudly, got ${JSON.stringify(receipts)}`);
+  const drop = receipts.find((r) => r.customType === 'watchmaker-delivery-v1' && r.data.status === 'carried');
+  assert.ok(drop, `unprepared note is carried loudly, got ${JSON.stringify(receipts)}`);
   assert.equal(drop.data.adviceId, firstId);
+  assert.equal(drop.data.via, 'supersede');
 
   const prepared = handlers.get('context')({ messages: [] }, ctx);
-  const capsule = prepared.messages.find((m) => m.customType === 'session-watchmaker-context');
+  const watchmakerCapsules = prepared.messages.filter((m) => m.customType === 'session-watchmaker-context');
+  assert.equal(watchmakerCapsules.length, 2, 'current + carried capsules');
+  const capsule = watchmakerCapsules[0];
   assert.ok(capsule, 'note prepares a context capsule');
+  assert.ok(watchmakerCapsules[1].content.includes(notes[0].slice(0, 60)), 'second capsule carries the superseded note');
   assert.match(capsule.content, /^\[Watchmaker advice receipt=watchmaker-advice-[0-9a-f-]{36}/, 'receipt line starts the capsule for core matching');
   assert.ok(capsule.content.length <= 4096, 'capsule fits the core receipt window');
 

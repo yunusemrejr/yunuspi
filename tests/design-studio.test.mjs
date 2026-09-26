@@ -284,7 +284,7 @@ test("outputs stay inside the workspace and tools register with bounded schemas"
   await assert.rejects(studio.imageAnalyze({ path: mock, outputDir: os.tmpdir() }, work), /inside the current workspace/);
   const tools = new Map();
   register({ registerTool: definition => tools.set(definition.name, definition) });
-  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_crop", "image_trace", "visual_diff"]);
+  assert.deepEqual([...tools.keys()].sort(), ["image_analyze", "image_create", "image_crop", "image_trace", "visual_diff"]);
   for (const tool of tools.values()) assert.ok(tool.description.length > 200 && tool.description.length < 900, tool.name);
   const out = await tools.get("image_trace").execute("t", { path: mock, region: { x: 80, y: 24, width: 32, height: 32 }, colors: 1 }, undefined, undefined, { cwd: work });
   assert.equal(out.details.verdict, "good");
@@ -320,4 +320,19 @@ test("image-to-code prompts route to the skill and stage the studio tools; verif
   assert.ok(discovery.intentBundleTools("make the site look like this", 1).includes("visual_diff"), "an attached image is the reference");
   assert.deepEqual(discovery.intentBundleTools("what is in this picture?", 1), []);
   assert.ok(discovery.intentBundleTools("Make a 60 second explainer video about attention").includes("video_project"));
+});
+
+test("image_create synthesizes deterministic plates with bounded parameters", async () => {
+  const synth = await import(pathToFileURL(path.join(agentRoot, "extensions/lib/image-synth.ts")));
+  assert.deepEqual([...synth.SYNTH_OPS], ["solid", "linear-gradient", "checker", "noise", "grid"]);
+  const tools = new Map();
+  register({ registerTool: definition => tools.set(definition.name, definition) });
+  assert.ok(tools.has("image_create"));
+  const first = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#ff0000" }, work);
+  const second = await synth.imageCreate({ op: "solid", width: 8, height: 8, color: "#ff0000" }, work);
+  assert.equal(first.format, "png"); assert.deepEqual(first.pixels, { width: 8, height: 8 });
+  assert.deepEqual(first.design, { color: "#ff0000" });
+  assert.deepEqual(fs.readFileSync(path.join(work, first.file)), fs.readFileSync(path.join(work, second.file)), "same inputs render the same bytes");
+  await assert.rejects(synth.imageCreate({ op: "solid", width: 5000, height: 8 }, work), /width/);
+  await assert.rejects(synth.imageCreate({ op: "photo", width: 8, height: 8 }, work), /op must be one of/);
 });

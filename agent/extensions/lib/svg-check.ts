@@ -40,7 +40,7 @@ export async function inspectSvg(source: string) {
       stack.push(name);
       if(attrs.id){if(ids.has(attrs.id))note('duplicate-id','Duplicate IDs can resolve gradients, masks or accessible names to the wrong element.',offset,'error');ids.add(attrs.id);}
       if(name==='path'){counts.paths++;counts.pathCommandLetters+=(attrs.d?.match(/[AaCcHhLlMmQqSsTtVvZz]/g)??[]).length;}
-      if(name==='filter')counts.filters++;
+      if(name==='filter'){counts.filters++;if(!['x','y','width','height'].every(k=>k in attrs))note('filter-region','Filter without an explicit x/y/width/height region uses the default -10%/-10%/120%/120% window, which can clip blurs, drop shadows and lighting; set the region and verify the rendered extent at target sizes.',offset);}
       if(/^fe[A-Z]/.test(name))counts.filterPrimitives++;
       if(name==='mask')counts.masks++;
       if(name==='linearGradient'||name==='radialGradient')counts.gradients++;

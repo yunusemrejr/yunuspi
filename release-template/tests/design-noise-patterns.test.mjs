@@ -117,3 +117,20 @@ test('quantified marketing candidates require evidence without classifying ordin
  const ordinary=await capture('<p>Invoice total 1200</p><p>Storage used 90%</p><table><tr><td>99.99% uptime</td></tr></table><figure><figcaption>3× faster</figcaption></figure><article><p>Trusted by 10,000 teams</p></article><div data-user-content><p>Save 30%</p></div><input value="Save 30%">');
  assert.deepEqual(kinds(ordinary.rendered),[]);
 });
+
+test('eyebrow kickers above headings and literal status dots are flagged; plain labels stay quiet',async()=>{
+ const eyebrow=await capture('<span class="pill">Q3 Update</span><h1>Title</h1>');
+ assert.ok(kinds(eyebrow.rendered).includes('eyebrow-pill'));
+ const dotted=await capture('<span>● Live</span>');
+ assert.ok(kinds(dotted.rendered).includes('text-status-dot'));
+ const emoji=await capture('<span>🟢 Online</span>');
+ assert.ok(kinds(emoji.rendered).includes('text-status-dot'));
+ const plain=await capture('<span>Options ● more</span><h1>Title</h1>');
+ assert.ok(!kinds(plain.rendered).includes('text-status-dot'));
+ assert.ok(!kinds(plain.rendered).includes('eyebrow-pill'));
+});
+
+test('sibling-layout dots count as decorative dot markers',async()=>{
+ const {rendered}=await capture('<div class="static" style="display:flex;align-items:center;gap:6px"><i aria-hidden="true" class="dot"></i><span>Live</span></div>');
+ assert.ok(kinds(rendered).includes('decorative-dot-marker'));
+});

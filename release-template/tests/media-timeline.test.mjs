@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(dir => syncFs.existsSync(path.join(dir, 'extensions/media-tools.ts')));
-const { audioMix, videoCompose } = await import(pathToFileURL(path.join(agent, 'extensions/lib/media-timeline.ts')));
+const { audioMix, videoCompose, VIDEO_TRANSITIONS } = await import(pathToFileURL(path.join(agent, 'extensions/lib/media-timeline.ts')));
 const { default: register } = await import(pathToFileURL(path.join(agent, 'extensions/media-tools.ts')));
 
 test('media tools retain their existing surface and expose four focused studio operations', () => {
@@ -98,5 +98,19 @@ test('real timeline normalizes clips, overlaps transitions, mixes audio offsets 
     finally { watcher.close(); }
     assert.deepEqual(await fs.readdir(dir), before, 'in-flight FFmpeg cancellation cleans its fresh output');
     assert.deepEqual(await hashSources(), sourceHashes, 'all source bytes preserved');
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('video transitions share one exported list between schema and composer', async () => {
+  assert.equal(VIDEO_TRANSITIONS.length, 16);
+  assert.equal(VIDEO_TRANSITIONS[0], 'cut');
+  for (const name of ['fade', 'fadewhite', 'fadeblack', 'wipeleft', 'wiperight', 'wipeup', 'wipedown', 'slideleft', 'slideright', 'slideup', 'slidedown', 'smoothleft', 'smoothright', 'smoothup', 'smoothdown']) assert.ok(VIDEO_TRANSITIONS.includes(name), name);
+  const tools = new Map(); register({ registerTool: def => tools.set(def.name, def) });
+  const validate = (name, args) => validateToolArguments(tools.get(name), { type: 'toolCall', id: 'schema', name, arguments: args });
+  assert.doesNotThrow(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 2 }], transition: 'smoothup', transitionDuration: 0.5 }));
+  assert.throws(() => validate('video_compose', { clips: [{ path: 'clip.mp4', duration: 2 }], transition: 'dissolve' }));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'media-transition-'));
+  try {
+    await assert.rejects(videoCompose({ clips: [{ path: 'clip.mp4', duration: 2 }], transition: 'dissolve' }, dir), /transition must be one of/);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });

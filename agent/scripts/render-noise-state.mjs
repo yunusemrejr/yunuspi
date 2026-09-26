@@ -108,6 +108,8 @@ export function inspectNoiseState(root, options = {}) {
       if (label && label.length <= 320) {
         if (/^lorem ipsum dolor sit amet\b/i.test(label) || /^(?:insert (?:title|description|content) here|your (?:headline|title|description) here|placeholder (?:title|text|content))\.?$/i.test(label))
           add('placeholder-copy', node, {reason: 'Literal placeholder copy remains visible.'});
+        if (!hasStateMeaning(node) && (/^[●•]\s+\S/.test(label) || /^(?:🟢|🟡|🔴)\s+\S/.test(label)))
+          add('text-status-dot', node, {reason: 'A literal dot or status-emoji character prefixes this label (the text form of the decorative status dot). Remove it unless it encodes a real, changing state with a text equivalent.'});
         if (!node.closest('table,[role="table"],[role="grid"],figure,[role="figure"],svg,canvas') && (
           /\btrusted by\s+(?:over\s+|more than\s+)?[\d,.]+[km]?\+?\s+(?:teams|companies|businesses|customers|users|organizations)\b/i.test(label) ||
           /\b\d+(?:[.,]\d+)?\s*(?:x|×|times)\s+(?:faster|better|more productive|more efficient)\b/i.test(label) ||
@@ -157,12 +159,24 @@ export function inspectNoiseState(root, options = {}) {
           if (label && label.length <= 40) {
             const candidates = [...[...node.children].slice(0, 3).map(child => ({element: child, style: styleOf(child), rect: rectOf(child), pseudo: null})),
               ...['::before', '::after'].map(which => { const dot = pseudoStyle(node, which); return {element: node, style: dot, rect: {width: parseFloat(dot.width), height: parseFloat(dot.height)}, pseudo: which}; })];
+            let found = false;
             for (const dot of candidates) {
               if (dot.pseudo && ['none', 'normal'].includes(dot.style.content)) continue;
               if (!dot.pseudo && (directText(dot.element) || dot.element.childElementCount)) continue;
               const {width, height} = dot.rect;
               if (width >= 4 && width <= 14 && height >= 4 && height <= 14 && width / height >= .7 && width / height <= 1.4 && painted(dot.style.backgroundColor) && isRounded(dot.style, Math.min(width, height))) {
-                dots.push({node, widthPx: Math.round(width), glow: dot.style.boxShadow !== 'none', pseudo: dot.pseudo}); break;
+                dots.push({node, widthPx: Math.round(width), glow: dot.style.boxShadow !== 'none', pseudo: dot.pseudo}); found = true; break;
+              }
+            }
+            if (!found) {
+              // Sibling layout: dot and label as separate flex/grid children.
+              for (const sibling of [node.previousElementSibling, node.nextElementSibling]) {
+                if (!sibling || !visible(sibling) || directText(sibling) || sibling.childElementCount) continue;
+                const siblingRect = rectOf(sibling), siblingStyle = styleOf(sibling);
+                const width = siblingRect.width, height = siblingRect.height;
+                if (width >= 4 && width <= 14 && height >= 4 && height <= 14 && width / height >= .7 && width / height <= 1.4 && painted(siblingStyle.backgroundColor) && isRounded(siblingStyle, Math.min(width, height))) {
+                  dots.push({node, widthPx: Math.round(width), glow: siblingStyle.boxShadow !== 'none', pseudo: null, sibling: identify(sibling)}); break;
+                }
               }
             }
           }
@@ -181,7 +195,7 @@ export function inspectNoiseState(root, options = {}) {
             if (child.childElementCount || child.matches('input,textarea,select,[contenteditable]')) {safeLabel = false; break;}
             if (!child.matches('[aria-hidden="true"]') && visible(child)) badgeText += ' ' + directText(child);
           }
-          if (safeLabel && /^(?:live|active|online|connected|running|streaming|operational|available|ready|enabled|working|tracking|recording|syncing|in progress|real[ -]?time|now live|live now|system active|all systems operational)$/i.test(badgeText.trim().replace(/\s+/g, ' '))) {
+          if (safeLabel && /^(?:live|active|online|connected|running|streaming|operational|available|ready|enabled|working|tracking|recording|syncing|in progress|real[ -]?time|now live|live now|system (?:online|active|operational)|all systems operational|ai (?:online|active|live)|beta|new|v\d[.\d]* live)$/i.test(badgeText.trim().replace(/\s+/g, ' '))) {
             for (const dot of [node, ...node.children]) {
               let matched = false;
               for (const motion of moving.get(dot) ?? []) {
@@ -196,6 +210,22 @@ export function inspectNoiseState(root, options = {}) {
               }
               if (matched) break;
             }
+          }
+        }
+        // Eyebrow pill: a small capsule kicker directly above a top-level
+        // heading (the stock "Introducing X" eyebrow). Real controls exempt.
+        if (/^h[12]$/.test(node.localName)) {
+          let at = node.previousElementSibling, steps = 0;
+          while (at && steps++ < 2) {
+            const next = at.previousElementSibling;
+            if (visible(at) && !hasStateMeaning(at) && !at.matches('button,a[href],input,[role="button"]')) {
+              const erect = rectOf(at), estyle = styleOf(at), etext = text(at);
+              if (erect.height > 0 && erect.height <= 64 && erect.width > erect.height && isRounded(estyle, erect.height) && etext && etext.length <= 80) {
+                add('eyebrow-pill', at, {reason: 'A pill/badge kicker sits directly above a top-level heading (the stock eyebrow pattern). Remove it; the heading must state the point alone unless the kicker adds a version, date or scope.', heading: identify(node)});
+                break;
+              }
+            }
+            at = next;
           }
         }
       }

@@ -79,8 +79,17 @@ Structure without scale:
 
 Generated-UI ornaments (never produce):
 - Accent rails — colored left borders or pseudo-element bars on cards. Signal `ui-accent-rail`; rendered `repeated-heavy-left-border`.
-- Dot markers — small (often glowing) dots before labels and chips. Signal `ui-dot-marker`; rendered `decorative-dot-marker`.
+- Dot markers — small (often glowing) dots before labels and chips. Signal `ui-dot-marker`; rendered `decorative-dot-marker` (includes sibling-layout dots).
+- Glow dots — pulsing/blinking status dots: ping-pattern spans, blink/pulse/glow keyframe loops, haloed dots, literal ●/•/emoji prefixes. Signal `ui-glow-dot`; rendered `text-status-dot` for the text form.
+- Live pills — animated status capsules (LIVE/ONLINE/ACTIVE and variants). Signal `ui-live-pill`; rendered `animated-status-pill`.
+- Eyebrow pills — pill/badge kickers above headings ("Introducing X"), pill clusters that decorate. Signal `ui-eyebrow-pill`; rendered `eyebrow-pill`.
+- Fake status labels — static BETA/NEW/LIVE/AI POWERED/COMING SOON pills without a backing fact. Signal `ui-fake-status-label`; verify a version, date or observed data.
 - Icon tiles — icons boxed in tinted or bordered rounded squares. Signal `ui-icon-tile`; rendered `icon-tile`.
+
+Invented labels and leaked work-thoughts (never produce):
+- Made-up SaaS labels — adjective-stacked headings ("AI-Powered Analytics", "Smart Dashboard") and vague nav (Platform, Solutions, Insights, Discover). `code_quality prose` rule `slop-label` plus signal `prose-vague-nav`; name the concrete capability or destination.
+- Work-thought leaks — first-person build narration and making-of commentary in reader copy ("I designed", "this section showcases", "as an AI"). Signal `prose-work-thought-leak` plus `code_quality prose` patterns; cut the narration, keep the fact.
+- Bare vanity metrics — k/M+ user counts, 4.9/5 ratings, #1 claims without a nearby basis. Signal `prose-metric-theater` plus the `metric-without-basis` prose rule; add measured-where/on-what/against-what or cut.
 
 Color without a system:
 - The stock AI palette — indigo or violet into purple or pink gradients on a product that does not own them. Signal `ui-stock-palette`; derive a value ramp and one accent from the brand.

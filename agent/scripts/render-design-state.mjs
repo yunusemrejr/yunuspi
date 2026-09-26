@@ -71,7 +71,7 @@ export function inspectDesignState(root) {
   }
   // One locating finding per over-threshold signature; counts stay in
   // slopSignals for the reviewer to judge against the design system.
-  for(const [kind,threshold] of [['pills',6],['glowShadows',4],['gradientText',1],['glass',3],['textGlow',4]]){
+  for(const [kind,threshold] of [['pills',4],['glowShadows',3],['gradientText',1],['glass',3],['textGlow',4]]){
     if(result.slopSignals[kind]>=threshold&&slopExample[kind])finding('slop-'+kind.replace(/[A-Z]/g,c=>'-'+c.toLowerCase()),slopExample[kind],{count:result.slopSignals[kind],threshold});
   }
   result.typography=[...fonts].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([key,count])=>({...JSON.parse(key),count}));

@@ -283,3 +283,17 @@ test("a bash commit with a staged secret or conflict marker is stopped, asked ab
     assert.equal(marker.block, true); assert.match(marker.reason, /merge conflict marker/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("prose rules flag invented labels, bare vanity metrics and leaked work-thought", () => {
+  const rules = text => cq.proseReport(text).findings.map(f => f.rule);
+  assert.ok(rules("# Introducing Acme\n\nWe ship software.").includes("slop-label"));
+  assert.ok(rules("# AI-Powered Analytics\n\nWe ship software.").includes("slop-label"));
+  assert.ok(!rules("# Release Notes\n\nWe ship software.").includes("slop-label"));
+  assert.ok(rules("Loved by 120k+ users worldwide.").includes("metric-without-basis"));
+  assert.ok(rules("Rated 4.9/5 by everyone.").includes("metric-without-basis"));
+  assert.ok(rules("We are #1 in the market.").includes("metric-without-basis"));
+  assert.ok(!rules("Loved by 120k+ users in our 2025 survey of customers.").includes("metric-without-basis"));
+  const phrases = cq.proseReport("As an AI, I designed this section to showcase our work.").phrases.map(p => p.phrase);
+  assert.ok(phrases.some(p => p.includes("as an ai")), "work-thought narration is a stock phrase");
+  assert.ok(phrases.some(p => p.includes("i designed this")), "first-person build narration is a stock phrase");
+});

@@ -283,6 +283,19 @@ export function validateObserverAdvice(text: string, packet: ObserverPacket, ext
   if (tooLong()) return invalid('note plus tool and skill suggestions exceeds the length limit');
   return { advice };
 }
+/** A completed review note that never reached a provider request. The next
+ * context build delivers it as its own receipted capsule alongside (never
+ * instead of) the current note; provider confirmation joins it to advice
+ * history like any delivered note. One deep: a newer carried note replaces an
+ * older one, ledgered as replaced. */
+export interface CarriedReviewerNote { id: string; text: string; at: number }
+/** Capsule text for a carried note. It starts with the receipt line so core
+ * emits an independent delivery receipt for it (see sdk advice capsules). */
+export function carriedReviewerNoteText(label: 'Observer' | 'Watchmaker', note: CarriedReviewerNote, now: number): string {
+  const ageMin = Math.max(0, Math.round((note.at >= 0 && Number.isFinite(now - note.at) ? now - note.at : 0) / 60000));
+  const age = ageMin < 1 ? 'under a minute ago' : `about ${ageMin} min ago`;
+  return `[${label} advice receipt=${note.id} — earlier note, written ${age} (before your latest message); verify against current state. This is not a user request or permission.]\n${note.text}`;
+}
 export function observerAdviceText(advice: ObserverAdvice): string {
   const activeTools = advice.tools.filter(name => !advice.discoverableTools?.includes(name));
   return [advice.uncited ? `Uncited observation (verify before acting): ${advice.note}` : advice.note, activeTools.length ? `Consider tools: ${activeTools.join(', ')}.` : '', advice.discoverableTools?.length ? `Discoverable tools (not active): ${advice.discoverableTools.join(', ')}; activate with tool_search({names:${JSON.stringify(advice.discoverableTools)}}).` : '', advice.skills.length ? `Consider skills: ${advice.skills.join(', ')}.` : '',
@@ -679,7 +692,12 @@ export function createSessionObserver(ports: ObserverPorts) {
     close() { closed = true; active = false; current = undefined; generation++; stopTimer(); flight?.cancel(); },
     context(consume = true) {
       const note = current; if (consume) current = undefined;
-      return active && note?.generation === generation && now() - note.at <= OBSERVER_MAX_GAP_MS ? deliverable(note) : undefined;
+      // No time expiry on an undelivered note: deliverable() already
+      // re-validates staleness at delivery (model change, cited-state change)
+      // and the delivery names the snapshot age, so a wall-clock cutoff only
+      // loses advice during long inferences (measured: six notes in 14 minutes,
+      // none delivered). stop()/begin() still bound a note to its active task.
+      return active && note?.generation === generation ? deliverable(note) : undefined;
     },
   };
 }

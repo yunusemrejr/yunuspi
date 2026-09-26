@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isHarnessOwnedChild, projectTranscriptChildren, reduceChildEvents } from './pi-subagents/src/runs/shared/child-ledger.ts';
 import { promptRequestFocus } from './lib/prompt-interpretation.ts';
 import { createContextAnchor } from './lib/context-anchor.ts';
-import { boundedObserverText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
+import { boundedObserverText, carriedReviewerNoteText, createSessionObserver, observerAdviceText, observerDispatch, peerReviewerNotes, publishReviewerNote, reviewerSessionKey, wantsNoObserver, type CarriedReviewerNote, type ObserverEvidence, type ObserverCapability } from './lib/session-observer.ts';
 import { buildWatchmakerPacket, createWatchmakerScratchpad, watchmakerSink, formatWatchmakerDuration, formatWatchmakerPace, validateWatchmakerAdvice, WATCHMAKER_CONTEXT, WATCHMAKER_DEADLINE_MS, WATCHMAKER_INTERVAL_MS, WATCHMAKER_DELIVERY_TYPE, WATCHMAKER_MEMO_TYPE, WATCHMAKER_MESSAGE, WATCHMAKER_OUTPUT_TOKENS, WATCHMAKER_TOOLS, type WatchmakerAdvice } from './lib/session-watchmaker.ts';
 import { resolveWatchmakerPreferenceChain } from './pi-subagents/src/runs/shared/model-fallback.ts';
 import { toModelInfo } from './pi-subagents/src/shared/model-info.ts';
@@ -26,6 +26,22 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   let latestAdviceId: string | undefined;
   let preparedAdvice: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
   let pendingAdviceText: string | undefined;
+  // The newest completed note that never reached a provider request. The next
+  // context build delivers it as its own capsule alongside the current note.
+  let carriedAdvice: CarriedReviewerNote | undefined;
+  let preparedCarried: { id: string; sha256: string; taskEpoch: number; signal: any } | undefined;
+  /** Queue the pending note for the next context build instead of dropping it.
+   * Prepared notes keep their prepared-context signal; only unprepared notes
+   * (never in any request) are carried. One deep; a replacement is ledgered. */
+  const stashCarried = (via: string) => {
+    if (!latestAdviceId || preparedAdvice?.id === latestAdviceId || !pendingAdviceText) return false;
+    if (carriedAdvice && carriedAdvice.id !== latestAdviceId) {
+      try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: carriedAdvice.id, status: 'dropped:replaced', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+    }
+    carriedAdvice = { id: latestAdviceId, text: pendingAdviceText, at: now() };
+    try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'carried', via, at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+    return true;
+  };
   const timings = new Map<string, { name: string; input: string; startedAt: number }>();
   const ledger = new Map<string, { calls: number; errors: number; ms: number }>();
   const repeats = new Map<string, { count: number; firstAt: number; lastAt: number; sample: string }>();
@@ -126,7 +142,7 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     } catch { /* Reminder state is optional evidence. */ }
     return rows;
   };
-  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
+  const reset = (context: any) => { clearPending(); ctx = context; manager = context?.sessionManager; ownerIdentity = identity(context); owner = `${ownerIdentity}:${++epoch}`; request = ''; projectHistory = ''; userRequest = false; recent = []; journal.clear(); prompts = []; promptSequence = 0; interpretation = ''; skills = []; todos = []; adviceHistory = []; latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined; carriedAdvice = undefined; preparedCarried = undefined; timings.clear(); ledger.clear(); repeats.clear(); revision++; sequence = 0; salience = 0; inputRestrictions = {}; inputBlocked = false; taskStartAt = 0; agentStartAt = 0; sessionStartAt = now(); taskEpoch = 0; optOutMark = { length: -1, first: undefined, last: undefined, request: '', blocked: false }; childReduceMark = { window: 0, length: -1, first: undefined, last: undefined, value: undefined }; runtime.begin(owner); };
   const peerRows = (): ObserverEvidence[] => peerReviewerNotes(reviewerSessionKey(ctx), 'watchmaker', now()).slice(0, 2)
     .map(peer => ({ id: `peer-note-${peer.reviewer}`, kind: 'peer reviewer note', text: `${peer.reviewer === 'guardian' ? 'Guardian' : peer.reviewer === 'observer' ? 'Observer' : 'Watchmaker'} already told the agent ${Math.max(0, Math.round((now() - peer.at) / 1000))}s ago: ${peer.note}` }));
   const runtime = createSessionObserver({
@@ -215,7 +231,10 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
       if (!owns(ctx)) return;
       if (advice) {
         publishReviewerNote(reviewerSessionKey(ctx), 'watchmaker', advice.note, [...(advice.tools ?? []), ...(advice.skills ?? [])], now());
-        if (latestAdviceId && preparedAdvice?.id !== latestAdviceId) {
+        // A previous note that never reached a context build is superseded but
+        // not dropped: its text is carried into the next delivery. Only a note
+        // with nothing to carry is ledgered as dropped (defensive).
+        if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('supersede')) {
           try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'dropped:superseded', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
         }
         latestAdviceId = `watchmaker-advice-${randomUUID()}`; preparedAdvice = undefined; pendingAdviceText = observerAdviceText(advice);
@@ -279,6 +298,9 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
     ctx = context; const raw = typeof (event.originalText ?? event.text) === 'string' ? (event.originalText ?? event.text) : '';
     let restrictions: any = {}, blocked = wantsNoObserver(raw);
     try { restrictions = explicitRecoveryConstraints(context, raw, context.model); } catch { blocked = true; }
+    // New input stops the scheduler and clears its undelivered note; carry the
+    // text into the next task instead of losing advice the agent never saw.
+    stashCarried('input');
     runtime.stop('New user input');
     latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
     const id = event.requestId;
@@ -396,27 +418,52 @@ export default function sessionWatchmaker(pi: any, testing: any = {}) {
   pi.on('context', (event: any, context: any) => {
     const messages = event.messages.filter((message: any) => message.customType !== WATCHMAKER_CONTEXT && message.customType !== WATCHMAKER_MESSAGE);
     const note = owns(context) ? runtime.context(false) : undefined;
-    if (!note) return messages.length !== event.messages.length ? { messages } : undefined;
-    const content = `[Watchmaker advice receipt=${latestAdviceId} — advisory, based on a recent time snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
-    const prepared = anchor(messages, { role: 'custom', customType: WATCHMAKER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
-    if (latestAdviceId) {
-      if (preparedAdvice?.id !== latestAdviceId) try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'prepared-context', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
-      preparedAdvice = { id: latestAdviceId, sha256: createHash('sha256').update(content).digest('hex'), taskEpoch, signal: context.signal };
+    const carried = owns(context) ? carriedAdvice : undefined;
+    if (!note && !carried) return messages.length !== event.messages.length ? { messages } : undefined;
+    let prepared = messages;
+    if (note) {
+      const content = `[Watchmaker advice receipt=${latestAdviceId} — advisory, based on a recent time snapshot; verify against current state. This is not a user request or permission.]\n${note}`;
+      prepared = anchor(prepared, { role: 'custom', customType: WATCHMAKER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}`);
+      if (latestAdviceId) {
+        if (preparedAdvice?.id !== latestAdviceId) try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'prepared-context', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+        preparedAdvice = { id: latestAdviceId, sha256: createHash('sha256').update(content).digest('hex'), taskEpoch, signal: context.signal };
+      }
+    }
+    // A carried note rides as its own receipted capsule so core confirms it
+    // independently; it never replaces the current note.
+    if (carried) {
+      const content = carriedReviewerNoteText('Watchmaker', carried, now());
+      prepared = anchor(prepared, { role: 'custom', customType: WATCHMAKER_CONTEXT, content, display: false, timestamp: 0 }, `${owner}:${taskEpoch}:carried`);
+      if (preparedCarried?.id !== carried.id) try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: carried.id, status: 'prepared-context', at: now() }); } catch { /* Accounting cannot suppress otherwise valid advice. */ }
+      preparedCarried = { id: carried.id, sha256: createHash('sha256').update(content).digest('hex'), taskEpoch, signal: context.signal };
     }
     return { messages: prepared };
   });
   pi.on('after_provider_response', (event: any, context: any) => {
-    if (!owns(context) || context.signal?.aborted || !preparedAdvice || preparedAdvice.id !== latestAdviceId || preparedAdvice.taskEpoch !== taskEpoch || preparedAdvice.signal !== context.signal || !runtime.context(false) || event.status < 200 || event.status >= 300) return;
+    if (!owns(context) || context.signal?.aborted || event.status < 200 || event.status >= 300) return;
     if (event.provider !== context.model?.provider || event.model !== context.model?.id) return;
-    if (!event.observerAdviceReceipts?.some((receipt: any) => receipt.id === preparedAdvice!.id && receipt.sha256 === preparedAdvice!.sha256)) return;
-    try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: preparedAdvice.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
-    if (pendingAdviceText) { adviceHistory.push(pendingAdviceText); if (adviceHistory.length > 3) adviceHistory.shift(); }
-    runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+    const receipts: any[] = Array.isArray(event.observerAdviceReceipts) ? event.observerAdviceReceipts : [];
+    // The current note and the carried note confirm independently: each joins
+    // advice history only on its own provider receipt.
+    if (preparedAdvice && preparedAdvice.id === latestAdviceId && preparedAdvice.taskEpoch === taskEpoch && preparedAdvice.signal === context.signal && runtime.context(false)
+      && receipts.some((receipt: any) => receipt.id === preparedAdvice!.id && receipt.sha256 === preparedAdvice!.sha256)) {
+      try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: preparedAdvice.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
+      if (pendingAdviceText) { adviceHistory.push(pendingAdviceText); if (adviceHistory.length > 3) adviceHistory.shift(); }
+      runtime.context(); latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;
+    }
+    if (preparedCarried && preparedCarried.id === carriedAdvice?.id && preparedCarried.taskEpoch === taskEpoch && preparedCarried.signal === context.signal
+      && receipts.some((receipt: any) => receipt.id === preparedCarried!.id && receipt.sha256 === preparedCarried!.sha256)) {
+      try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: preparedCarried.id, status: 'provider-received', at: now(), provider: event.provider, model: event.model }); } catch { /* No duplicate delivery solely to repair accounting. */ }
+      if (carriedAdvice) { adviceHistory.push(carriedAdvice.text); if (adviceHistory.length > 3) adviceHistory.shift(); }
+      carriedAdvice = undefined; preparedCarried = undefined;
+    }
   });
   pi.on('agent_settled', (_: any, context: any) => {
     if (!owns(context)) return;
     runtime.stop('Active work settled');
-    if (latestAdviceId && preparedAdvice?.id !== latestAdviceId) {
+    // A note the settling turn never delivered is carried into the next task
+    // (e.g. an objection to premature completion) rather than dropped.
+    if (latestAdviceId && preparedAdvice?.id !== latestAdviceId && !stashCarried('settle')) {
       try { pi.appendEntry(WATCHMAKER_DELIVERY_TYPE, { adviceId: latestAdviceId, status: 'dropped:settled', at: now() }); } catch { /* Accounting only. */ }
     }
     latestAdviceId = undefined; preparedAdvice = undefined; pendingAdviceText = undefined;

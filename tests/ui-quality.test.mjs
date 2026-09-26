@@ -217,3 +217,54 @@ test('user-banned ornaments are cued at edit time: accent rails, dot markers and
   assert.ok(keys('a.tsx', '<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/10">').includes('ui-icon-tile'));
   assert.deepEqual(keys('a.tsx', '<button className="h-10 px-4 rounded-lg bg-black text-white">Save</button>'), []);
 });
+
+test('ported status-ornament cues fire on glow dots, eyebrow pills and invented labels, quiet on plain status', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  // Generalized live pill: any status word plus pill enclosure plus motion.
+  assert.ok(keys('a.tsx', '<span className="badge blink">Operational</span>').includes('ui-live-pill'));
+  assert.ok(keys('a.tsx', '<span className="rounded-full"><span className="animate-ping" />Live</span>').includes('ui-live-pill'));
+  assert.ok(!keys('a.tsx', '<span>Operational</span>').includes('ui-live-pill'), 'a status word alone never fires');
+  assert.ok(!keys('a.tsx', '<span aria-live="polite">Connected</span>').includes('ui-live-pill'));
+  // Glow dots: ping pattern, keyframe loops, literal dot prefixes.
+  assert.ok(keys('a.tsx', '<span className="animate-ping absolute rounded-full bg-sky-400"/>').includes('ui-glow-dot'));
+  assert.ok(keys('a.css', '.dot{width:8px;height:8px;border-radius:50%;background:red;animation:blink 1s infinite}').includes('ui-glow-dot'));
+  assert.ok(keys('a.tsx', '<span>● Live</span>').includes('ui-glow-dot'));
+  assert.ok(keys('a.tsx', '<span>🟢 Online</span>').includes('ui-glow-dot'));
+  assert.ok(!keys('a.tsx', '<span className="h-2 w-2 rounded-full bg-emerald-500"/>').includes('ui-glow-dot'), 'a static dot stays ui-dot-marker');
+  assert.ok(!keys('a.tsx', '<span>Options ● more</span>').includes('ui-glow-dot'));
+  // Eyebrow pills: kicker above a heading, emoji introductions, pill clusters.
+  assert.ok(keys('a.tsx', '<span className="badge">Q3 Update</span><h1>Report</h1>').includes('ui-eyebrow-pill'));
+  assert.ok(keys('a.tsx', '<p>✨ Introducing Acme</p><h1>Acme</h1>').includes('ui-eyebrow-pill'));
+  assert.ok(keys('a.tsx', '<span className="pill">a</span><span className="pill">b</span><span className="badge">c</span>').includes('ui-eyebrow-pill'));
+  assert.ok(!keys('a.tsx', '<span className="badge">Q3 Update</span><p>Body copy without a heading.</p>').includes('ui-eyebrow-pill'));
+  // Invented static labels need a pill or badge wrapper.
+  assert.ok(keys('a.tsx', '<span className="badge">BETA</span>').includes('ui-fake-status-label'));
+  assert.ok(!keys('a.tsx', '<p>Beta users get early access.</p>').includes('ui-fake-status-label'));
+  // Widened dot markers: larger sizes and arbitrary pixel widths.
+  assert.ok(keys('a.tsx', '<span className="h-4 w-4 rounded-full bg-emerald-500"/>').includes('ui-dot-marker'));
+  assert.ok(keys('a.tsx', '<span className="w-[12px] h-[12px] rounded-full bg-emerald-500"/>').includes('ui-dot-marker'));
+});
+
+test('ported copy cues catch work-thought leaks, vague nav and leak vocabulary, and nest hype density', () => {
+  const keys = (file, text) => signals(file, text, 12).map(s => s.key);
+  assert.ok(keys('p.md', 'I designed this page to showcase our process.').includes('prose-work-thought-leak'));
+  assert.ok(!keys('docs/guide.md', 'I designed this page to showcase our process.').includes('prose-work-thought-leak'));
+  assert.ok(keys('p.md', 'Our system prompt and context window shape every answer.').includes('prose-implementation-leak'));
+  assert.ok(keys('p.html', '<nav><a href="/p">Platform</a><a href="/f">Features</a></nav>').includes('prose-vague-nav'));
+  assert.ok(!keys('p.html', '<nav><a href="/p">Platform</a><a href="/c">Pricing</a></nav>').includes('prose-vague-nav'));
+  const stockOnly = 'In today\'s fast-paced digital world we ship an all-in-one platform with seamless onboarding.';
+  assert.ok(keys('p.md', stockOnly).includes('prose-stock-cluster'));
+  assert.ok(!keys('p.md', stockOnly).includes('prose-buzzword-stack'));
+  const dense = 'Our next-generation revolutionary cutting-edge transformative synergy engine is seamless.';
+  assert.ok(keys('p.md', dense).includes('prose-buzzword-stack'));
+  assert.ok(!keys('p.md', dense).includes('prose-stock-cluster'), 'a buzzword stack subsumes the stock cluster');
+});
+
+test('ported de-slop and ornament complaints route the anti-slop workflows', () => {
+  for (const prompt of ['Remove the fake badges from the header', 'Fix invented labels in the pricing table', 'Fix the work thought leaks in our copy', 'Fix the made-up labels'])
+    assert.ok(routeSkills(prompt).some(s => s.name === 'anti-ai-slop'), prompt);
+  for (const prompt of ['Fix the glowing dots', 'Remove the eyebrow pills', 'Kill the animate-ping badge', 'Fix the ping dots pattern'])
+    assert.ok(routeSkills(prompt).some(s => s.name === 'ui-antipattern-review'), prompt);
+  for (const prompt of ['Do not fix the glowing dots', '> Remove the eyebrow pills'])
+    assert.ok(!routeSkills(prompt).some(s => s.name === 'ui-antipattern-review'), prompt);
+});
