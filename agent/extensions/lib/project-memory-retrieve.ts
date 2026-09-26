@@ -21,6 +21,7 @@
 
 import { needleRank } from "./needle-runtime.ts";
 import { remoteRanker } from "./micro-intelligence/rerank.ts";
+import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
 import { TYPE_WEIGHTS, type MemoryEmbedder } from "./project-memory-index.ts";
 import { DEFAULT_MEMORY_EMBEDDING_MODEL, embedMemory, type MemoryEmbedding } from "./project-memory-embedder.ts";
 import { type ChunkType, type ProjectVectorStore, type StoredAtom, type StoredChunk, isChunkType } from "./project-vector-store.ts";
@@ -106,16 +107,20 @@ export function memoryRanker(local: Ranker = needleRanker(), remote: Ranker = re
     async rank(query, candidates, signal) {
       if (signal?.aborted || candidates.length < 2) return undefined;
       const head = candidates.slice(0, 24).map(candidate => ({ ...candidate }));
+      const run = (ranker: Ranker) => {
+        const pending = Promise.resolve().then(() => ranker.rank(query, head.map(candidate => ({ ...candidate })), signal));
+        return signal ? raceWithAbortSignal(pending, signal) : pending;
+      };
       const validOrder = (order: string[] | undefined) => Array.isArray(order) && order.length >= 2
         && new Set(order).size === order.length && order.every(id => head.some(candidate => candidate.id === id));
       let localOrder: string[] | undefined;
-      try { localOrder = await local.rank(query, head.map(candidate => ({ ...candidate })), signal); } catch { /* retain lexical order */ }
+      try { localOrder = await run(local); } catch { /* retain lexical order */ }
       if (signal?.aborted) return undefined;
       if (!validOrder(localOrder)) localOrder = undefined;
       const positions = new Map(localOrder?.map((id, index) => [id, index]));
       if (localOrder) head.sort((a, b) => (positions.get(a.id) ?? head.length) - (positions.get(b.id) ?? head.length));
       let remoteOrder: string[] | undefined;
-      try { remoteOrder = await remote.rank(query, head.map(candidate => ({ ...candidate })), signal); } catch { /* retain local order */ }
+      try { remoteOrder = await run(remote); } catch { /* retain local order */ }
       if (signal?.aborted) return undefined;
       return validOrder(remoteOrder) ? [...remoteOrder!, ...head.map(candidate => candidate.id).filter(id => !remoteOrder!.includes(id))] : localOrder;
     },

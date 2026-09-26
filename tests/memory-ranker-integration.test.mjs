@@ -43,3 +43,16 @@ test('cancellation never launches the next refinement stage or publishes late ra
     assert.equal(remoteCalls, during === 'remote' ? 1 : 0);
   }
 });
+
+test('cancellation stops waiting for a ranker that cannot observe its signal', { timeout: 2000 }, async () => {
+  const controller = new AbortController();
+  let rejectLate, calls = 0;
+  const ranker = memoryRanker({ rank: () => new Promise((_, reject) => { rejectLate = reject; }) }, { rank: async () => { calls++; return ['a', 'b']; } });
+  const pending = ranker.rank('query', candidates, controller.signal);
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.equal(await pending, undefined);
+  assert.equal(calls, 0);
+  rejectLate(Error('late worker rejection is still observed'));
+  await new Promise(resolve => setImmediate(resolve));
+});
