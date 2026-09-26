@@ -30,6 +30,33 @@ const auxiliary=(id,status,usage,extra={})=>({type:'custom',customType:'auxiliar
 const child=(runId,cost,extra={})=>({runId,usage:{input:100,output:20,cacheRead:0,cacheWrite:0,turns:1,cost},...extra});
 const model={provider:'openai',id:'gpt-5.6-sol',baseUrl:'https://api.openai.com/v1',cost:{input:4,output:20,cacheRead:.4,cacheWrite:5,tiers:[{inputTokensAbove:200000,input:8,output:30,cacheRead:.8,cacheWrite:10}]}};
 
+test('cache estimates count reasoning within output once and do not establish rebilling',async()=>{
+ const entries=[
+  message(.01,'fixture','reasoner',{content:[],usage:{input:4000,cacheRead:10000,cacheWrite:0,output:4000,reasoning:3500}}),
+  message(.01,'fixture','reasoner',{content:[],usage:{input:8500,cacheRead:15000,cacheWrite:4000,output:100,reasoning:0}}),
+ ];
+ const metrics=collectSessionMetrics(entries);
+ assert.equal(metrics.invalidationExcessTokens,4500,'only a later comparable request can estimate excess');
+ assert.equal(metrics.output,4100);assert.equal(metrics.reasoning,3500);
+ assert.doesNotMatch(metrics.detail.join('\n'),/was rebilled|billed assistant turns|routes without caching/);
+ const {analyzeSessionEntries}=await load('scripts/lib/token-cost-diagnostics.mjs');
+ const diagnosis=analyzeSessionEntries(entries);
+ assert.equal(diagnosis.totals.invalidationExcess,4500);
+ assert.equal(diagnosis.totals.totalTokens,45600);
+});
+
+test('Span charges join session costs while legacy missing-price zero remains unknown',()=>{
+ const span=data=>({type:'custom',customType:'span-usage-v1',data:{model:'fixture/sensor',...data}});
+ const paid=collect([span({costUsd:.02})]);
+ assert.equal(paid.reported,.02);assert.equal(paid.auxiliary.reported,.02);
+ assert.equal(paid.rows[0].route,'openrouter/fixture/sensor');
+ assert.equal(collect([span({costUsd:0})]).unknown,true,'old zero may have been missing provider cost');
+ for(const data of [{costUsd:0,costSource:'provider-reported'},{cached:true,costUsd:0}]){
+  const zero=collect([span(data)]);assert.equal(zero.total,0);assert.equal(zero.unknown,false);
+ }
+ assert.equal(collect([span({})]).unknown,true);
+});
+
 test('per-request long-context thresholds include reads/writes and use actual output once',()=>{
  for(const [tokens,expected] of [[200000,2.44],[200001,3.880008]]){
   const u={input:tokens-100000,cacheRead:100000,cacheWrite:0,output:100000,reasoning:80000};

@@ -3,19 +3,19 @@
 // WHY this exists: debugging "context/cost is rising" by reading individual
 // sessions is slow and easy to misstate. The expensive quantity is not the
 // cumulative character count a hook injects; it is the *uncached* input the
-// provider re-bills when a prompt prefix stops matching its cache. This module
-// measures that directly from the durable usage fields already stored on every
-// assistant message, and keeps injection accounting out of the hot path.
+// provider reports. This module measures that usage and estimates possible
+// prefix churn from retained messages. It cannot establish what a provider
+// re-billed or why its cache missed. Injection accounting stays off the hot path.
 //
 // Accounting rules (deliberate, documented so results are not over-read):
 //   * prompt tokens for a turn = input + cacheRead + cacheWrite.
 //   * "new content tokens" is an ESTIMATE: characters since the previous
-//     assistant message / 4, plus the previous assistant's output+reasoning.
+//     assistant message / 4, plus the previous output (reasoning included).
 //     It is a magnitude check, not a tokenizer.
 //   * invalidation = cacheRead > 0 but input exceeds newContent by a threshold.
-//     That means a cached prefix stopped matching and was re-sent at full price.
+//     This flags possible prefix churn, not a proven cache miss or extra charge.
 //   * noCacheTurn = cacheRead == 0 and cacheWrite == 0 on a non-trivial prompt;
-//     the route simply did not cache (common on some free/OpenRouter routes),
+//     no cache hit was recorded; this does not establish route capability,
 //     which is separated from harness-visible invalidation on purpose.
 //   * per-hook injected characters come from session-metrics-v1 entries, which
 //     are CUMULATIVE within a segment. They are deduplicated by segment id
@@ -107,7 +107,7 @@ function usageOf(message) {
     output: num(u.output),
     reasoning: num(u.reasoning),
     totalTokens:
-      num(u.totalTokens) || num(u.input) + num(u.cacheRead) + num(u.output),
+      num(u.totalTokens) || num(u.input) + num(u.cacheRead) + num(u.cacheWrite) + num(u.output),
   };
 }
 
@@ -317,7 +317,7 @@ export function analyzeSessionEntries(entries, options = {}) {
   Object.assign(totals, resume.totals);
 
   let pendingChars = 0;
-  let prevOutput = 0;
+  let prevOutput;
   let atBoundary = true;
 
   const dayOf = (entry) =>
@@ -397,11 +397,11 @@ export function analyzeSessionEntries(entries, options = {}) {
     // assistant
     const usage = usageOf(message);
     if (!usage) {
-      pendingChars = messageChars(message);
+      pendingChars += messageChars(message);
       continue;
     }
     const newContentTokens =
-      Math.round(pendingChars / limits.charsPerToken) + prevOutput;
+      Math.round(pendingChars / limits.charsPerToken) + (prevOutput ?? 0);
     const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
     const excess = usage.input - newContentTokens;
     const dateKey = dayOf(entry);
@@ -450,7 +450,7 @@ export function analyzeSessionEntries(entries, options = {}) {
         day.noCacheTurns++;
         day.noCacheInput += usage.input;
         model.noCacheInput += usage.input;
-      } else if (excess > limits.minExcessTokens) {
+      } else if (prevOutput !== undefined && excess > limits.minExcessTokens) {
         totals.invalidationTurns++;
         totals.invalidationExcess += excess;
         day.invalidTurns++;
@@ -479,8 +479,8 @@ export function analyzeSessionEntries(entries, options = {}) {
       model.normalInput += usage.input;
     }
 
-    pendingChars = messageChars(message);
-    prevOutput = usage.output + usage.reasoning;
+    pendingChars = 0;
+    prevOutput = usage.output;
     atBoundary = false;
   }
 
@@ -768,10 +768,10 @@ export function formatReport(report) {
     `Totals: ${integer(t.turns)} turns · ${integer(t.totalTokens)} total tokens · ${t.cacheHitRate.toFixed(1)}% cache hit`,
   );
   lines.push(
-    `Uncached input ${integer(t.input)} tokens = invalidation ${integer(t.invalidationExcess)} (${t.invalidationShareOfInput.toFixed(0)}%) + provider no-cache ${integer(t.noCacheInput)} + genuinely new ${integer(t.normalInput)}`,
+    `Uncached input ${integer(t.input)} tokens; possible prefix-churn estimate ${integer(t.invalidationExcess)} (${t.invalidationShareOfInput.toFixed(0)}%); requests without recorded cache hits ${integer(t.noCacheInput)}; other input ${integer(t.normalInput)}. These estimates do not establish invalidation or extra billing.`,
   );
   lines.push(
-    `Invalidating turns: ${integer(t.invalidationTurns)} (mid-turn ${integer(t.invalidationMidTurn)}, user-boundary ${integer(t.invalidationBoundary)}); tool activations ${integer(t.toolActivations)}; compactions ${integer(t.compactions)}`,
+    `Possible prefix-churn requests: ${integer(t.invalidationTurns)} (mid-turn ${integer(t.invalidationMidTurn)}, user-boundary ${integer(t.invalidationBoundary)}); tool activations ${integer(t.toolActivations)}; compactions ${integer(t.compactions)}`,
   );
   lines.push("");
   lines.push("By day:");
@@ -781,7 +781,7 @@ export function formatReport(report) {
         ? (100 * day.cacheRead) / (day.input + day.cacheRead)
         : 0;
     lines.push(
-      `  ${day.date}  turns=${integer(day.turns)}  total=${integer(day.totalTokens)}  hit=${hit.toFixed(0)}%  invalidation=${integer(day.invalidationExcess)} (${integer(day.invalidTurns)} turns)  noCache=${integer(day.noCacheInput)}`,
+      `  ${day.date}  turns=${integer(day.turns)}  total=${integer(day.totalTokens)}  hit=${hit.toFixed(0)}%  possibleChurn=${integer(day.invalidationExcess)} (${integer(day.invalidTurns)} turns)  noCache=${integer(day.noCacheInput)}`,
     );
   }
   if (report.byModel.length) {
@@ -789,7 +789,7 @@ export function formatReport(report) {
     lines.push("By route (top input):");
     for (const model of report.byModel.slice(0, 10)) {
       lines.push(
-        `  ${model.route}  turns=${integer(model.turns)}  input=${integer(model.input)}  invalidation=${integer(model.invalidationExcess)}  noCache=${integer(model.noCacheInput)}`,
+        `  ${model.route}  turns=${integer(model.turns)}  input=${integer(model.input)}  possibleChurn=${integer(model.invalidationExcess)}  noCache=${integer(model.noCacheInput)}`,
       );
     }
   }
@@ -806,7 +806,7 @@ export function formatReport(report) {
   }
   if (report.topTurns.length) {
     lines.push("");
-    lines.push("Largest single-turn invalidations:");
+    lines.push("Largest estimated single-request prefix changes:");
     for (const turn of report.topTurns.slice(0, 8)) {
       lines.push(
         `  excess=${integer(turn.excess)}  input=${integer(turn.input)}  ~new=${integer(turn.estimatedNewTokens)}  ${turn.scope}  ${turn.date}  ${turn.file}`,
@@ -816,7 +816,7 @@ export function formatReport(report) {
   if (report.topResumeGaps?.length) {
     lines.push("");
     lines.push(
-      `Resume gaps across consecutive requests (idle reference ${(report.thresholds?.idleReferenceMs ?? 300000) / 60000}min; same prefix + miss = provider-side, changed prefix = harness-side):`,
+      `Resume-gap hypotheses (idle reference ${(report.thresholds?.idleReferenceMs ?? 300000) / 60000}min; retained-prefix comparison cannot prove the provider's cache state or cause):`,
     );
     for (const gap of report.topResumeGaps.slice(0, 8)) {
       const age =

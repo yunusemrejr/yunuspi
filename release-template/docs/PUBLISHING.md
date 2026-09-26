@@ -44,7 +44,7 @@ npm run build:core
 PI_PUBLIC_TEST_CONCURRENCY=4 TMPDIR=/var/tmp npm test
 ```
 
-The suite runs one file at a time by default (`PI_PUBLIC_TEST_CONCURRENCY` raises it). Point the tests' temp root at a low-entry directory: the guarded-command wrapper keeps protected roots read-only by re-binding every existing sibling of each ancestor writable, so fixtures created under a busy `/tmp` produce thousands of bubblewrap arguments per sandboxed spawn (seconds each), while a root with few entries produces roughly a hundred (under a second).
+The suite runs up to four files concurrently by default (`PI_PUBLIC_TEST_CONCURRENCY` overrides it). Point the tests' temp root at a low-entry directory: the guarded-command wrapper keeps protected roots read-only by re-binding every existing sibling of each ancestor writable, so fixtures created under a busy `/tmp` produce thousands of bubblewrap arguments per sandboxed spawn (seconds each), while a root with few entries produces roughly a hundred (under a second).
 
 In the clean public checkout containing the same tested source bytes, stage explicit public paths and scan again. The scanner intentionally rejects installed dependency trees and examines the Git index and all reachable commit content, so deleting a secret later does not make its history safe.
 

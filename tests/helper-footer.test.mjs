@@ -7,7 +7,26 @@ import { AgentSession } from '@yunuspi/coding-agent';
 import { registerToolDiscovery } from '../agent/extensions/lib/tool-discovery.ts';
 import { collectSessionCost } from '../agent/extensions/lib/session-cost.ts';
 import { collectSessionMetrics } from '../agent/extensions/lib/session-metrics.ts';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadExtensions } from '../core/coding-agent/dist/core/extensions/loader.js';
 initTheme('dark', false);
+
+test('extension loader and terminal share the owned accounting exports',async()=>{
+ const shared=await import('@yunuspi/coding-agent/session-accounting');
+ assert.equal(collectSessionCost,shared.collectSessionCost);
+ assert.equal(collectSessionMetrics,shared.collectSessionMetrics);
+ const dir=await mkdtemp(join(tmpdir(),'yunuspi-accounting-loader-'));
+ try{
+  const file=join(dir,'accounting.ts');
+  await writeFile(file,`import {collectSessionCost,collectSessionMetrics} from '@yunuspi/coding-agent/session-accounting';
+   export default function(pi){pi.registerCommand('accounting-fixture',{description:'fixture',handler:async()=>({cost:collectSessionCost([]).formatted,responses:collectSessionMetrics([]).responses})});}`);
+  const result=await loadExtensions([file],dir);
+  assert.deepEqual(result.errors,[]);
+  assert.deepEqual(await result.extensions[0].commands.get('accounting-fixture').handler(),{cost:'$?',responses:0});
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test('source and built terminal footer agree with receipt collectors for retries and unknown cost',async()=>{
  const source=await import('../core/coding-agent/src/modes/interactive/components/footer.js');

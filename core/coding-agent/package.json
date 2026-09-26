@@ -18,6 +18,10 @@
     },
     "./rpc-entry": {
       "import": "./dist/rpc-entry.js"
+    },
+    "./session-accounting": {
+      "types": "./dist/core/session-accounting.d.ts",
+      "import": "./dist/core/session-accounting.js"
     }
   },
   "files": [

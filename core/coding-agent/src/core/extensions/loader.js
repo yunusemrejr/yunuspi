@@ -1,3 +1,4 @@
+import * as _bundledSessionAccounting from "../session-accounting.js";
 import { sessionObservability, withSessionObservability } from "../session-observability.js";
 /**
  * Extension loader - loads TypeScript extension modules using jiti.
@@ -48,6 +49,7 @@ const VIRTUAL_MODULES = {
     "@yunuspi/ai/oauth": _bundledPiAiOauth,
     "@yunuspi/ai/providers/all": _bundledPiAiProviders,
     "@yunuspi/ai/utils/abort": _bundledPiAiAbort,
+    "@yunuspi/coding-agent/session-accounting": _bundledSessionAccounting,
     "@yunuspi/coding-agent": _bundledPiCodingAgent,
     "@mariozechner/pi-agent-core": _bundledPiAgentCore,
     "@earendil-works/pi-agent-core": _bundledPiAgentCore,
@@ -100,6 +102,7 @@ function getAliases() {
     const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "@yunuspi/ai/providers/all");
     const piAiAbortEntry = resolveWorkspaceOrImport("ai/dist/utils/abort.js", "@yunuspi/ai/utils/abort");
     _aliases = {
+        "@yunuspi/coding-agent/session-accounting": path.resolve(__dirname, "../session-accounting.js"),
         "@yunuspi/coding-agent": piCodingAgentEntry,
         "@yunuspi/agent-core": piAgentCoreEntry,
         "@yunuspi/tui": piTuiEntry,
