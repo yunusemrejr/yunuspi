@@ -77,7 +77,10 @@ export async function verifyLocalLm(dir = localLmDir(), full = false) {
   return { ok: problems.length === 0, dir, problems, manifest: manifest ?? null };
 }
 
-function unitText(dir) {
+export function localLmServiceUnit(dir) {
+  // The pinned server defaults to an 8 GiB prompt cache and 32 recurrent
+  // checkpoints, both incompatible with this service's 2 GiB limit. Retain
+  // prefix reuse with bounded caches and leave room for weights and inference.
   return `[Unit]
 Description=YunusPi local language model (${LOCAL_LM_MODEL}, loopback only)
 StartLimitIntervalSec=300
@@ -85,7 +88,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStart=${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 6 --checkpoint-min-step 0 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
+ExecStart=${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 6 --checkpoint-min-step 0 --ctx-checkpoints 4 --cache-ram 256 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
 WorkingDirectory=${dir}
 Nice=10
 CPUQuota=600%
@@ -126,15 +129,16 @@ export async function installLocalLm(options = {}) {
   const notes = [];
   // Verified weights and runtime with a stale descriptor (for example an
   // endpoint change between releases) are refreshed in place, not re-downloaded.
-  const current = force ? undefined : await verifyLocalLm(dir, true);
+  let current = force ? undefined : await verifyLocalLm(dir, true);
   if (current && !current.ok && current.problems.every((problem) => /runtime\.json/.test(problem))) {
     let apiKey = "";
     try { apiKey = (await readFile(join(dir, "api-key"), "utf8")).trim(); } catch { /* new key below */ }
     if (!/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)) { apiKey = randomBytes(32).toString("hex"); await writeFile(join(dir, "api-key"), `${apiKey}\n`, { mode: 0o600 }); }
     await writeFile(join(dir, "runtime.json"), `${JSON.stringify({ version: 2, enabled: true, model: LOCAL_LM_MODEL, endpoint: LOCAL_LM_ENDPOINT, apiKey, execution: "background", timeoutMs: 5000 }, null, 2)}\n`, { mode: 0o600 });
     notes.push("refreshed the runtime descriptor");
+    current = await verifyLocalLm(dir, true);
   }
-  if (force || !(await verifyLocalLm(dir, true)).ok) {
+  if (force || !current?.ok) {
     await mkdir(dirname(dir), { recursive: true, mode: 0o700 });
     const stage = join(dirname(dir), `.${LOCAL_LM_DIRNAME}-stage-${process.pid}-${Date.now()}`);
     await mkdir(stage, { recursive: true, mode: 0o700 });
@@ -171,13 +175,13 @@ export async function installLocalLm(options = {}) {
     else {
       await mkdir(unitDir(), { recursive: true });
       const unitPath = join(unitDir(), LOCAL_LM_SERVICE);
-      const text = unitText(dir);
+      const text = localLmServiceUnit(dir);
       let current = "";
       try { current = await readFile(unitPath, "utf8"); } catch { /* new unit */ }
       if (current !== text) { await writeFile(unitPath, text, { mode: 0o644 }); systemctl("daemon-reload"); }
       systemctl("reset-failed", LOCAL_LM_SERVICE);
-      const started = systemctl("enable", "--now", LOCAL_LM_SERVICE);
-      if (current && current !== text) systemctl("restart", LOCAL_LM_SERVICE);
+      let started = systemctl("enable", "--now", LOCAL_LM_SERVICE);
+      if (started.status === 0 && current && current !== text) started = systemctl("restart", LOCAL_LM_SERVICE);
       notes.push(started.status === 0 ? `service ${LOCAL_LM_SERVICE} enabled` : `service start failed: ${String(started.stderr).slice(0, 160)}`);
       notes.push(...await retireSmol(agentDir));
     }

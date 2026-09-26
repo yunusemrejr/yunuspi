@@ -142,6 +142,17 @@ test('asset verification reports what is missing without touching the network', 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('local service retains prefix reuse inside its process memory budget',()=>{
+  const unit=assets.localLmServiceUnit('/fixture/model');
+  const args=unit.split('\n').find(line=>line.startsWith('ExecStart=')).split(' ');
+  const value=flag=>Number(args[args.indexOf(flag)+1]);
+  assert.ok(value('--cache-ram')>0 && value('--cache-ram')<=256,'cache remains enabled and bounded');
+  assert.ok(value('--ctx-checkpoints')>0 && value('--ctx-checkpoints')<=4,'recurrent checkpoints remain enabled and bounded');
+  assert.equal(value('--checkpoint-min-step'),0,'short reusable prefixes remain supported');
+  assert.equal(value('--ctx-size'),4096);
+  assert.match(unit,/^MemoryMax=2G$/m);
+});
+
 const choiceCandidates = [{ id: 'read', text: 'Read file contents' }, { id: 'browser', text: 'Browse websites and take screenshots' }, { id: 'sql', text: 'Run database queries' }];
 const choiceResponse = (pairs) => new Response(JSON.stringify({ tokens_evaluated: 100, completion_probabilities: [{ top_probs: pairs.map(([token, prob]) => ({ token, prob })) }] }));
 
