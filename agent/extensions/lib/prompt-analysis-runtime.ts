@@ -111,6 +111,8 @@ export async function runPromptAnalysis(input: {
   prompt: string;
   kind: PromptAnalysisKind;
   previous?: PromptAnalysisPrevious;
+  /** Tracked R# brief; keeps multi-part criteria visible past the excerpt bound. */
+  requirements?: string;
   candidates: PromptAnalysisCandidate[];
   signal?: AbortSignal;
   now?: () => number;
@@ -126,7 +128,7 @@ export async function runPromptAnalysis(input: {
   const totalBudget = input.budget?.totalMs ?? (input.kind === "initial" ? INITIAL_BUDGET_MS : FOLLOWUP_BUDGET_MS);
   const perAttempt = input.budget?.perAttemptMs ?? (input.kind === "initial" ? INITIAL_ATTEMPT_MS : FOLLOWUP_ATTEMPT_MS);
   const maxTokens = input.budget?.maxTokens ?? (input.kind === "initial" ? 768 : 320);
-  const request = buildPromptAnalysisRequest(input.prompt, input.kind, input.previous);
+  const request = buildPromptAnalysisRequest(input.prompt, input.kind, input.previous, input.requirements);
   const maxAttempts = input.budget?.maxAttempts ?? MAX_ROUTE_ATTEMPTS;
   const candidates = input.candidates.slice(0, maxAttempts).map(candidate => ({ ...candidate, repair: false }));
   let repaired = false;

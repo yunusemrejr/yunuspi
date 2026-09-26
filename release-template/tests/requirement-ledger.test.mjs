@@ -5,7 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.existsSync(path.join(p, 'extensions/lib/requirement-ledger.ts')));
-const { extractRequirements, foldRequirements, renderRequirementLedger, settleRequirements, emptyRequirementLedger } =
+const { extractRequirements, foldRequirements, renderRequirementLedger, settleRequirements, emptyRequirementLedger, readSessionLedger, packetRequirements } =
   await import(pathToFileURL(path.join(agent, 'extensions/lib/requirement-ledger.ts')));
 
 test('every part of a short multi-part demand becomes a tracked requirement', () => {
@@ -45,4 +45,29 @@ test('ids stay stable across follow-ups; reported items settle, unreported ones 
   assert.deepEqual(all.open, []);
   assert.deepEqual(all.ledger.items, []);
   assert.equal(all.ledger.next, 7);
+});
+
+test('reviewer packets read the session ledger, or a labeled packet-local extraction', () => {
+  const entries = [
+    { type: 'message', message: { role: 'user', content: 'noise' } },
+    { type: 'custom', customType: 'requirement-ledger-v1', data: { items: [{ id: 'R2', text: 'Add dark mode' }, { id: 'bogus', text: 'x' }, { id: 'R3', text: '' }], subjective: ['premium', 42], unbounded: true, next: 3 } },
+  ];
+  const ledger = readSessionLedger(entries);
+  assert.deepEqual(ledger.items, [{ id: 'R2', text: 'Add dark mode' }], 'malformed items are dropped');
+  assert.deepEqual(ledger.subjective, ['premium']);
+  assert.equal(ledger.unbounded, true);
+  const brief = packetRequirements('unrelated fallback text', entries, 1500);
+  assert.match(brief, /session R#/);
+  assert.match(brief, /R2: Add dark mode/);
+  assert.match(brief, /R\* \(subjective/);
+  assert.match(brief, /R∞ \(open-ended\)/);
+  assert.equal(readSessionLedger([{ type: 'custom', customType: 'requirement-ledger-v1', data: { items: 'nope' } }]), undefined);
+  assert.equal(readSessionLedger('nope'), undefined);
+  const local = packetRequirements('1. Fix the login redirect\n2. Add a print stylesheet', [], 1500);
+  assert.match(local, /packet-local numbers, not session R#/);
+  assert.match(local, /R1: Fix the login redirect/);
+  assert.match(local, /R2: Add a print stylesheet/);
+  assert.equal(packetRequirements('hello there', [], 1500), '');
+  const tight = packetRequirements('1. Fix the login redirect loop on staging\n2. Add a print stylesheet for invoices\n3. Rename the export button\nMake it premium.', [], 200);
+  assert.match(tight, /omitted for the packet bound/);
 });

@@ -23,6 +23,8 @@ export function qualityReviewSignals(file: string, value: unknown): CodeSignal[]
       add('quality-html-boundary','web-security','HTML insertion was observed. Trace the value to its source; if untrusted content can reach this boundary, use the existing sanitization contract or a text-only DOM API. Do not assume every intentional HTML insertion is unsafe.');
     if (/\bPromise\.all\s*\([\s\S]{0,200}\.map\s*\(/.test(code))
       add('quality-fanout','behavioral-contracts','Concurrent map fanout was observed. Check collection bounds, downstream capacity and failure/cancellation behavior; use bounded concurrency only when the workload needs it.');
+    if (/\b(?:verify|check|hash|compare)Password\b|jsonwebtoken|\bjwt\s*\.\s*(?:sign|verify)\b|\bbcrypt\b|\bargon2\b|\bscrypt\b|createSession|destroySession|requireAuth|requirePermission|checkPermission|\.authorize\s*\(|\bprocess\.env\.[A-Z0-9_]*(?:API_KEY|SECRET|TOKEN|PRIVATE_KEY)\b|createHmac|createCipheriv|publicEncrypt|privateDecrypt/.test(code))
+      add('quality-auth-content','systems-security','Authentication, session, permission-enforcement or secret-handling mechanics were observed in changed code. Trace untrusted input to the actual authorization owner; verify a denied case, identity/session expiry and secret handling as applicable. An API mention is a routing cue, not evidence of a vulnerability.');
   }
   return out.slice(0,3);
 }

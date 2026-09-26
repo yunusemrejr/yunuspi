@@ -383,6 +383,23 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     return { command: check.label, outcome: receipt?.outcome ?? ([...state.checks, ...state.evidence].some(c => c.key === check.key) ? 'stale' : 'missing'), ...(receipt ? { callId: receipt.callId } : {}) };
   }), disabled: !enabled(), need: enabled() ? projectTestNeed(state) : null, facts: facts ? { ...facts, sources: undefined, reviewSources: undefined } : { unavailable: true },
     evidenceScope: 'Observed command exits only, not a correctness or coverage verdict. Edits invalidate earlier receipts. Scan limits and unobserved commands remain explicit. Receipts are bound to the observed source tree hash; reuse across scopes requires an identical tree.' });
+  /** One unresolved-verification item shared by the rendered warning line and
+   * the structured gate receipt, so prose and identity cannot diverge. */
+  const projectTestsVerification = (): { id: string; state: string; text: string } | undefined => {
+    if (!(enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length)) return undefined;
+    if (state.assessment?.disposition === 'blocked') return { id: 'blocked', state: 'blocked', text: `Blocked: ${state.assessment.reason}` };
+    const need = projectTestNeed(state);
+    if (!need) return undefined;
+    return { id: `need:${need}`, state: 'unresolved', text: `Current checks unresolved (${need}); command exits do not establish user-visible behavior.` };
+  };
+  const projectTestsVerificationLine = (): string[] => {
+    const item = projectTestsVerification();
+    return item ? [item.text] : [];
+  };
+  const projectTestsVerificationReceipt = () => {
+    const item = projectTestsVerification();
+    return item ? [{ source: 'project-tests', id: item.id, revision: String(state.revision), state: item.state, count: state.changed.length, line: `project tests: ${item.text}` }] : [];
+  };
   const advice = () => {
     const need = projectTestNeed(state);
     if (!need || need === 'running') return '';
@@ -443,7 +460,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   const api = {
     async restore(ctx: any) {
       disposeContinuationNotice();
-      disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => enabled() && active && !options.shadow && capable() && !state.paused && !state.optedOut && state.changed.length && (projectTestNeed(state) || state.assessment?.disposition === 'blocked') ? [state.assessment?.disposition === 'blocked' ? `Blocked: ${state.assessment.reason}` : `Current checks unresolved (${projectTestNeed(state)}); command exits do not establish user-visible behavior.`] : [], pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
+      disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => projectTestsVerificationLine(), verificationReceipts: () => projectTestsVerificationReceipt(), pending: () => enabled() && active && !options.shadow && capable() && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
       epoch++; deliveryVersion++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; deliveryInFlight = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
       const ticket = epoch;
       let restoredTree: string | undefined, restoredChecks = false;

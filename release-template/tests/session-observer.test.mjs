@@ -32,6 +32,16 @@ const reply = () => ({ stopReason: 'stop', content: [{ type: 'text', text: JSON.
 const model = { provider: 'deepseek', id: 'deepseek-flash', api: 'openai-completions', baseUrl: 'https://api.deepseek.com/v1', maxTokens: 8192, contextWindow: 65536, reasoning: true, cost: { input: .1, output: .2, cacheRead: .01, cacheWrite: .1 }, input: ['text'] };
 const route = { route: 'deepseek/deepseek-flash', model, thinking: 'high', officialDefault: true };
 
+test('observer packets carry a protected tracked-requirements row beside the request excerpt', () => {
+  const p = buildObserverPacket('Fix parser validation.', [], [], [], { requirements: 'Open requirements (session R#):\nR2: Validate the required field' });
+  const row = p.evidence.find(row => row.id === 'requirements');
+  assert.equal(row.kind, 'tracked requirements');
+  assert.match(row.text, /R2: Validate the required field/);
+  assert.ok(p.text.includes('tracked requirements'));
+  const bare = buildObserverPacket('Fix parser validation.', [], [], []);
+  assert.equal(bare.evidence.some(row => row.id === 'requirements'), false);
+});
+
 test('observer packet and validated advice are bounded, cited, catalog-specific and do not copy thinking', () => {
   const p = packet(); assert.ok(p.text.length <= 10000); assert.ok(parseObserverAdvice(reply().content[0].text, p));
   // Unknown identifiers never reach the agent, but they no longer void a paid review.

@@ -296,7 +296,7 @@ export async function judgeDuplicatePair(
       return { duplicate: false, ok: false };
     }
     metrics.run("jev");
-    metrics.jevUsage("finding-duplicate", 1, judged.usage.inputTokens, judged.usage.costUsd ?? 0, judged.usage.cached);
+    metrics.jevUsage("finding-duplicate", 1, judged.usage.inputTokens, judged.usage.costUsd, judged.usage.cached);
     const score = judged.answers.duplicate?.noul ?? 0;
     if (score >= 0.75) {
       metrics.accept("jev");

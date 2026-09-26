@@ -4,7 +4,7 @@ import {hasRecordedTokenUsage, collectAuxiliaryModelUsage} from './cost-evidence
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
  entries=Array.isArray(entries)?entries.filter(e=>e&&typeof e==='object'):[];
- const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)},span:{hits:0,cached:0,tokens:0,costUsd:0,shadow:0,present:0}};
+ const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,confirmDialogs:0,confirmWaitMs:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)},span:{hits:0,cached:0,tokens:0,costUsd:0,shadow:0,present:0}}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
@@ -127,6 +127,11 @@ export function collectSessionMetrics(entries, live) {
 
  for(const [i,e] of entries.entries()) {
   const msg=e.type==='message'?e.message:undefined;
+  if(e.type==='custom'&&e.customType==='fs-confirm-wait-v1'){
+   const d=e.data??{};
+   const waiters=Number.isSafeInteger(d.waiters)&&d.waiters>0?Math.min(d.waiters,256):1;
+   m.confirmDialogs++;m.confirmWaitMs+=number(d.waitMs)*waiters;
+  }
   if(e.type==='custom'&&e.customType==='jev-usage-v1'){
    const d=e.data??{};
    m.jev.hits++;if(d.cached===true)m.jev.cached++;m.jev.tokens+=number(d.inputTokens);
@@ -238,6 +243,16 @@ export function collectSessionMetrics(entries, live) {
  for(const a of activities.values())for(const k of ['swarms','fusions','recoveries'])m[k]+=number(a[k]);
  m.legacyFusions+=new Set(legacyFusions.filter(g=>g.time<measuredSince).map(g=>g.id)).size;
  for(const h of Object.values(m.hooks)){m.hookCalls+=h.calls;m.hookChanged+=h.changed;m.hookErrors+=h.errors;m.trimmedChars+=h.removedChars;m.addedChars+=h.addedChars;}
+ // Core hook telemetry measures inclusive handler wall time, so every
+ // filesystem-safety confirmation dialog inflates its tool_call row once per
+ // waiter. Reconcile here, at the canonical telemetry owner: the row keeps
+ // its inclusive ms and gains the user-wait split, floored at zero so stale
+ // segments can never drive active time negative.
+ if(m.confirmWaitMs>0)for(const [k,h] of Object.entries(m.hooks)){
+  const cut=k.lastIndexOf(':');
+  if(String(k.slice(0,cut).split('/').pop())!=='filesystem-safety.ts'||k.slice(cut+1)!=='tool_call')continue;
+  h.confirmWaitMs=Math.min(m.confirmWaitMs,h.ms);h.activeMs=Math.max(0,h.ms-h.confirmWaitMs);h.confirmDialogs=m.confirmDialogs;
+ }
  for(const a of agents.values()){m.agents++;m.childTokens+=a.tokens;if(a.status==='failed')m.agentFailures++;else if(a.status==='completed')m.agentsCompleted++;else if(a.status==='stopped')m.agentsStopped++;else if(a.status==='paused')m.agentsPaused++;else if(['queued','running','detached'].includes(a.status))m.agentsActive++;else m.agentOutcomeUnknown++;}
  // Diagnostics consume the same identity resolution and final outcomes.
  m.agentAliases=Object.fromEntries(aliases);
@@ -285,8 +300,8 @@ export function collectSessionMetrics(entries, live) {
   `Parent skills fully read: ${m.skillsRead.join(', ')||'none recorded'}; partial reads only: ${m.skillsPartial.join(', ')||'none'}. A routed suggestion is not a read or proof of application.`,
   ...(m.span.hits?[`Span behavior sensor: ${m.span.hits} scored traces (${m.span.shadow} shadow record-only, ${m.span.cached} cached); ${m.span.present} above-bar signal readings; ${m.span.tokens.toLocaleString('en-US')} input tokens${m.span.costUsd?`, $${m.span.costUsd.toFixed(4)} reported cost`:''}. Scores are advisory and reach consumers only with deterministic corroboration.`]:[]),
   'Tools: '+Object.entries(m.tools).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(', '),
-  m.telemetry?`Hook checks: ${m.hookCalls} intervention-handler calls; ${m.hookChanged} returned results (not proof of useful changes). Excluded ${m.hookExcluded} streaming/lifecycle-observer notifications from legacy telemetry.`:'Extension hook invocations before instrumentation: unknown. Health logs contain lifecycle events only.',
-  ...Object.entries(m.hooks).sort((a,b)=>b[1].calls-a[1].calls).map(([k,v])=>`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.ms)} ms, ${v.changed} returned results`),
+  m.telemetry?`Hook checks: ${m.hookCalls} intervention-handler calls; ${m.hookChanged} returned results (not proof of useful changes). Excluded ${m.hookExcluded} streaming/lifecycle-observer notifications from legacy telemetry.${m.confirmDialogs?` User-confirm waits: ${m.confirmDialogs} dialogs holding ${Math.round(m.confirmWaitMs).toLocaleString('en-US')} ms of hook wall time, split out of the filesystem-safety row below.`:''}`:'Extension hook invocations before instrumentation: unknown. Health logs contain lifecycle events only.',
+  ...Object.entries(m.hooks).sort((a,b)=>b[1].calls-a[1].calls).map(([k,v])=>v.confirmWaitMs>0?`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.activeMs)} ms active (+${Math.round(v.confirmWaitMs)} ms user-confirm wait across ${v.confirmDialogs} dialogs), ${v.changed} returned results`:`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.ms)} ms, ${v.changed} returned results`),
  ];
  // Ordered route table for /metrics and export. perModel stays the keyed form.
  m.modelsUsed=Object.entries(m.perModel).map(([route,r])=>({route,...r})).sort((a,b)=>b.input-a.input||b.turns-a.turns);

@@ -2352,7 +2352,7 @@ export default function (pi: ExtensionAPI) {
 										says_nothing: "Evidence does not address the claim either way.",
 									},
 								},
-							}, { pi, signal });
+							}, { pi, signal, protect: ["claim"] });
 							if (!judged.ok) {
 								metrics.skip("jev", judged.skipped);
 							} else {

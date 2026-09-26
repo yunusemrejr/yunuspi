@@ -280,3 +280,23 @@ test('context builds spend the bounded council wait once; the mutation gate stil
   assert.match(lifecycle.context(ctx),/Advisory, not approval/);
   assert.equal(await lifecycle.contextWait(ctx,80),undefined,'a settled council waits no more');
 });
+
+test('the mutation wait is bounded; a late complete brief still gates the next mutation',async()=>{
+  assert.ok(SCOPE_LIMITS.mutationWaitMs > 0 && SCOPE_LIMITS.mutationWaitMs < SCOPE_LIMITS.deadlineMs, 'the mutation bound sits inside the council deadline');
+  let release;const waiting=new Promise(resolve=>release=resolve);
+  const lifecycle=createScopeDeliberation({},{history:async()=>history,runner:async()=>{await waiting;return result;}});
+  const ctx=context();
+  const task=lifecycle.start({prompt},ctx,'graph');
+  await new Promise(r=>setImmediate(r));
+  assert.ok(lifecycle.pending(ctx),'the council is pending while the runner hangs');
+  // The tool_call gate settles with SCOPE_LIMITS.mutationWaitMs; prove the
+  // mechanism with a short bound so a hanging council cannot freeze the test.
+  const started=Date.now();
+  await lifecycle.settle(ctx,60);
+  const waited=Date.now()-started;
+  assert.ok(waited<5000,`a hanging council releases the bounded wait (took ${waited}ms)`);
+  assert.ok(lifecycle.pending(ctx),'the council keeps deliberating after the bound exhausts');
+  assert.equal(lifecycle.unseen(ctx),false,'no brief yet, so the mutation proceeds');
+  release();await task;
+  assert.equal(lifecycle.unseen(ctx),true,'the late complete brief gates the following mutation');
+});

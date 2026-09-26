@@ -210,6 +210,34 @@ test('empty usage objects retain unknown cost and token evidence while reported 
 });
 
 
+test('hook telemetry splits user-confirm waits out of filesystem-safety wall time',async()=>{
+ const {collectSessionMetrics}=await import(pathToFileURL(path.join(agent,'extensions/lib/session-metrics.ts')));
+ const {buildUsedSummary}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
+ const segment={version:2,segment:'seg',startedAt:Date.now(),hooks:{'filesystem-safety.ts:tool_call':{calls:4,errors:0,ms:80000,changed:1},'other.ts:tool_call':{calls:2,errors:0,ms:120,changed:0}},events:{}};
+ const entries=[
+  {type:'custom',customType:'session-metrics-v1',data:segment},
+  {type:'custom',customType:'fs-confirm-wait-v1',data:{title:'Review destructive operation',waitMs:60000,allowed:true,waiters:1}},
+  {type:'custom',customType:'fs-confirm-wait-v1',data:{title:'Additional write scope',waitMs:5000,allowed:true,waiters:2}},
+ ];
+ const m=collectSessionMetrics(entries);
+ assert.equal(m.confirmDialogs,2);
+ assert.equal(m.confirmWaitMs,70000,'one shared dialog counts once per waiter it held');
+ const row=m.hooks['filesystem-safety.ts:tool_call'];
+ assert.equal(row.ms,80000,'inclusive wall time is preserved');
+ assert.equal(row.confirmWaitMs,70000);
+ assert.equal(row.activeMs,10000);
+ assert.equal(row.confirmDialogs,2);
+ assert.equal(m.hooks['other.ts:tool_call'].confirmWaitMs,undefined,'unrelated hooks keep no wait split');
+ assert.ok(m.detail.some(line=>line.includes('10000 ms active (+70000 ms user-confirm wait across 2 dialogs)')),'the /metrics row shows the split');
+ const used=buildUsedSummary(entries);
+ const usedRow=used.hooks.find(h=>h.name==='filesystem-safety.ts:tool_call');
+ assert.equal(usedRow.activeMs,10000);assert.equal(usedRow.confirmWaitMs,70000);assert.equal(usedRow.confirmDialogs,2);
+ const stale=collectSessionMetrics([{type:'custom',customType:'session-metrics-v1',data:{...segment,hooks:{'filesystem-safety.ts:tool_call':{calls:1,errors:0,ms:1000,changed:0}}}},entries[1]]);
+ const staleRow=stale.hooks['filesystem-safety.ts:tool_call'];
+ assert.equal(staleRow.activeMs,0,'over-subtraction floors at zero instead of going negative');
+ assert.equal(staleRow.confirmWaitMs,1000);
+});
+
 test('only an explicit native no-child launch proof permits zero accounting',async()=>{
  const {buildUsedSummary}=await import(pathToFileURL(path.join(agent,'extensions/session-signals.ts')));
  const {persistSubagentCost}=await import(pathToFileURL(path.join(agent,'extensions/pi-subagents/src/extension/session-cost.ts')));

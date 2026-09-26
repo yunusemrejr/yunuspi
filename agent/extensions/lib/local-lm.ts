@@ -40,9 +40,12 @@ export function localLmRuntimePath(env: NodeJS.ProcessEnv = process.env): string
 	return join(env.PI_LOCAL_LM_ASSETS || join(agentDir, "local-models", "qwen3.5-0.8b"), "runtime.json");
 }
 
-/** Bounded, symlink-refusing read of the runtime descriptor. */
+/** Bounded, symlink-refusing read of the runtime descriptor. Only the global
+ * PI_LOCAL_LM switch gates the runtime: feature preprocessors (Smol line
+ * selection, skill relevance, intent) own their own enable flags and must
+ * never implicitly disable unrelated local-LM consumers. */
 export async function loadLocalLmRuntime(path = localLmRuntimePath()): Promise<LocalLmRuntime | undefined> {
-	if (process.env.PI_LOCAL_LM === "off" || process.env.PI_SMOL_PREPROCESSOR === "off") return undefined;
+	if (process.env.PI_LOCAL_LM === "off") return undefined;
 	let handle;
 	try {
 		handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

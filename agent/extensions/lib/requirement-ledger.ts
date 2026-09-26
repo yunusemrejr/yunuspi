@@ -115,3 +115,71 @@ export function settleRequirements(ledger: RequirementLedger, answer: string): {
 }
 
 export const emptyRequirementLedger = (): RequirementLedger => ({ items: [], subjective: [], unbounded: false, next: 0 });
+
+const LEDGER_ENTRY = "requirement-ledger-v1";
+const R_ID = /^R\d{1,3}$/;
+
+/** Read the latest session requirement ledger from branch entries. Entries
+ * are untrusted persistence: shapes are validated and bounded here. */
+export function readSessionLedger(entries: readonly unknown[]): RequirementLedger | undefined {
+	if (!Array.isArray(entries)) return undefined;
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index] as { type?: unknown; customType?: unknown; data?: unknown } | undefined;
+		if (!entry || entry.type !== "custom" || entry.customType !== LEDGER_ENTRY) continue;
+		const data = (entry.data ?? {}) as { items?: unknown; subjective?: unknown; unbounded?: unknown; next?: unknown };
+		if (!Array.isArray(data.items)) continue;
+		const items = (data.items as unknown[])
+			.filter((item): item is RequirementItem => !!item && typeof item === "object" &&
+				typeof (item as RequirementItem).id === "string" && R_ID.test((item as RequirementItem).id) &&
+				typeof (item as RequirementItem).text === "string" && (item as RequirementItem).text.trim().length > 0)
+			.map((item) => ({ id: item.id, text: clip(item.text) }))
+			.slice(-MAX_ITEMS);
+		const subjective = Array.isArray(data.subjective)
+			? [...new Set((data.subjective as unknown[]).filter((criterion): criterion is string => typeof criterion === "string" && criterion.trim().length > 0)
+				.map((criterion) => criterion.replace(/\s+/g, " ").trim().slice(0, 80)))].slice(0, 8)
+			: [];
+		const unbounded = data.unbounded === true;
+		if (!items.length && !subjective.length && !unbounded) continue;
+		return { items, subjective, unbounded, next: Number.isSafeInteger(data.next) ? (data.next as number) : 0 };
+	}
+	return undefined;
+}
+
+const renderLedgerBrief = (ledger: RequirementLedger, maxChars: number, packetLocal: boolean): string => {
+	const lines = [
+		...ledger.items.map((item) => `${item.id}: ${item.text.slice(0, 160)}`),
+		...ledger.subjective.map((criterion) => `R* (subjective, needs an observable check): ${criterion.slice(0, 160)}`),
+		...(ledger.unbounded ? ["R∞ (open-ended): apply bounded judgment; do not reopen verified work."] : []),
+	];
+	const head = packetLocal ? "Open requirements (packet-local numbers, not session R#):" : "Open requirements (session R#):";
+	const out = [head];
+	let used = head.length;
+	let omitted = 0;
+	for (const line of lines) {
+		if (used + 1 + line.length <= maxChars) {
+			out.push(line);
+			used += 1 + line.length;
+		} else omitted++;
+	}
+	if (omitted) out.push(`… +${omitted} more requirements omitted for the packet bound.`);
+	return out.join("\n");
+};
+
+/** Compact requirements brief for reviewer packets (quality review legs,
+ * scope councils, Observer/Watchmaker, prompt analysis). The session ledger
+ * wins when one exists; otherwise the current prompt is extracted ad hoc and
+ * labeled packet-local so its numbers are never confused with session R#.
+ * Empty string when nothing requirements-shaped is available. */
+export function packetRequirements(rawText: string, entries: readonly unknown[], maxChars = 1500): string {
+	const cap = Number.isSafeInteger(maxChars) ? Math.max(200, Math.min(maxChars, 8000)) : 1500;
+	const ledger = readSessionLedger(entries);
+	if (ledger) return renderLedgerBrief(ledger, cap, false);
+	const extracted = extractRequirements(typeof rawText === "string" ? rawText : "");
+	if (!extracted.items.length && !extracted.subjective.length && !extracted.unbounded) return "";
+	return renderLedgerBrief({
+		items: extracted.items.slice(0, MAX_ITEMS).map((text, index) => ({ id: `R${index + 1}`, text })),
+		subjective: extracted.subjective,
+		unbounded: extracted.unbounded,
+		next: extracted.items.length,
+	}, cap, true);
+}

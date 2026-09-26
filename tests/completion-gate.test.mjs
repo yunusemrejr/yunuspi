@@ -5,7 +5,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const root = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.existsSync(path.join(p, 'extensions/lib/completion-gate.ts')));
-const { completesPlan, completionGate } = await import(pathToFileURL(path.join(agent, 'extensions/lib/completion-gate.ts')));
+const { completesPlan, completionGate, completionGateReceipts, gateReceiptKey } = await import(pathToFileURL(path.join(agent, 'extensions/lib/completion-gate.ts')));
+const { registerContinuationSource, collectVerificationReceipts } = await import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts')));
 
 const tasks = [{ id: 1, status: 'completed' }, { id: 2, status: 'in_progress' }, { id: 3, status: 'pending' }];
 
@@ -49,4 +50,37 @@ test('rewording the same verdict does not reset the waiver; new heads refuse afr
   const two = completionGate('plan-complete', ['subagents: 2 delegated runs have not finished. Pending results cannot support a completed or verified claim.'], runs);
   runs.add(two.key);
   assert.equal(completionGate('plan-complete', ['subagents: 1 delegated run has not finished. Pending results cannot support a completed or verified claim.'], runs).block, true, 'changed single-segment lines still refuse afresh');
+});
+
+test('structured receipts key on source/id/revision/state/count, never on prose', () => {
+  const refused = new Set();
+  const base = { source: 'quality-review', id: 'status:pending', revision: '3', state: 'unresolved', count: 2, line: 'quality review: Independent review pending: original wording' };
+  const first = completionGateReceipts('plan-complete', [base], refused);
+  assert.equal(first.block, true);
+  refused.add(first.key);
+  const reworded = { ...base, line: 'quality review: Independent review pending: totally: reworded, with: extra colons: and reordered detail' };
+  assert.equal(gateReceiptKey(reworded), gateReceiptKey(base), 'prose is not identity');
+  assert.deepEqual([completionGateReceipts('plan-complete', [reworded], refused).waived], [true]);
+  for (const patch of [{ revision: '4' }, { state: 'blocked' }, { count: 3 }, { id: 'status:unavailable' }]) {
+    assert.equal(completionGateReceipts('plan-complete', [{ ...base, ...patch }], refused).block, true, `new ${Object.keys(patch)[0]} refuses afresh`);
+  }
+  const other = { ...base, source: 'project-tests' };
+  assert.equal(completionGateReceipts('plan-complete', [other], refused).block, true, 'same id under another source is a different receipt');
+  assert.deepEqual(completionGateReceipts('deploy', [], refused), { block: false, waived: false, key: 'deploy\0' });
+});
+
+test('receipt collection prefers structured sources and fails legacy lines closed', () => {
+  const session = {};
+  const disposers = [
+    registerContinuationSource({ name: 'quality review', session, pending: () => [], verification: () => ['Independent review pending: old'], verificationReceipts: () => [{ source: 'quality-review', id: 'status:pending', revision: '3', state: 'unresolved', count: 1, line: 'quality review: Independent review pending: structured' }] }),
+    registerContinuationSource({ name: 'legacy', session, pending: () => [], verification: () => ['something: unresolved: detail here'] }),
+    registerContinuationSource({ name: 'broken', session, pending: () => [], verificationReceipts: () => [{ source: '', id: '', state: '', line: '' }] }),
+    registerContinuationSource({ name: 'other-session', session: {}, pending: () => [], verification: () => ['must not leak across sessions'] }),
+  ];
+  try {
+    const receipts = collectVerificationReceipts(8, session);
+    assert.equal(receipts.length, 2);
+    assert.deepEqual(receipts[0], { source: 'quality-review', id: 'status:pending', revision: '3', state: 'unresolved', count: 1, line: 'quality review: Independent review pending: structured' });
+    assert.deepEqual(receipts[1], { source: 'legacy', id: 'legacy: something: unresolved: detail here', state: 'unresolved', line: 'legacy: something: unresolved: detail here' });
+  } finally { disposers.forEach(dispose => dispose()); }
 });

@@ -370,7 +370,7 @@ export type UsedSummary = {
     costUnknown: boolean;
     costPending: number;
   };
-  hooks: { name: string; calls: number; errors: number; ms: number; changed: number }[];
+  hooks: { name: string; calls: number; errors: number; ms: number; changed: number; activeMs?: number; confirmWaitMs?: number; confirmDialogs?: number }[];
   swarms: number;
   fusions: number;
   recoveries: number;
@@ -732,6 +732,7 @@ export function buildUsedSummary(entries: unknown, liveModel?: UsedLiveModel, li
     },
     hooks: Object.entries(metrics.hooks ?? {}).sort((a: any, b: any) => b[1].calls - a[1].calls).slice(0, 24).map(([name, value]: [string, any]) => ({
       name: name.slice(0, 200), calls: finite(value.calls), errors: finite(value.errors), ms: finite(value.ms), changed: finite(value.changed),
+      ...(finite(value.confirmWaitMs) > 0 ? { activeMs: finite(value.activeMs), confirmWaitMs: finite(value.confirmWaitMs), confirmDialogs: finite(value.confirmDialogs) } : {}),
     })),
     swarms: metrics.swarms ?? 0,
     fusions: metrics.fusions ?? 0,
@@ -925,7 +926,7 @@ export function usedSummaryHtml(summary: UsedSummary): string {
     ["Prompt cache reuse", session.cacheRate === null ? "unknown" : `${session.cacheRate.toFixed(2)}% cumulative`],
     ["Compactions", formatCount(session.compactions)],
   ])));
-  const hookHtml = hooks.length ? `<ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${Math.round(hook.ms)} ms`, hook.errors ? "failed" : "info")).join("")}</ul>` : `<div class="empty">No hook measurement was recorded.</div>`;
+  const hookHtml = hooks.length ? `<ul>${hooks.map((hook) => usedRow(hook.name, plural(hook.calls, "call"), `${plural(hook.changed, "returned result")} · ${plural(hook.errors, "error")} · ${(hook.confirmWaitMs ?? 0) > 0 ? `${Math.round(hook.activeMs ?? hook.ms)} ms active + ${Math.round(hook.confirmWaitMs ?? 0)} ms user-confirm wait` : `${Math.round(hook.ms)} ms`}`, hook.errors ? "failed" : "info")).join("")}</ul>` : `<div class="empty">No hook measurement was recorded.</div>`;
   sections.push(group("🪝 Hooks", session.hookCalls === null ? "unknown before telemetry" : plural(session.hookCalls, "call"), factGrid([
     ["Hook checks", session.hookCalls === null ? "unknown before telemetry" : `${formatCount(session.hookCalls)} calls · ${formatCount(session.hookChanged ?? 0)} returned results · ${formatCount(session.hookErrors ?? 0)} errors`],
   ]) + hookHtml));

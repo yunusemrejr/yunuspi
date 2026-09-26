@@ -505,8 +505,16 @@ model), `PI_SKILL_GATE`, `PI_JEV`, and `PI_OUTPUT_DISTILLER` scopes.
 Jev trims oversized evidence instead of refusing it: the longest text fields
 lose their middle, with an explicit omission marker, until the request fits
 its 32 KiB input budget (health logs showed every Jev refusal was an input
-budget refusal). Oversized questions still refuse before any request, and the
+budget refusal). Callers name decisive fields that must never be trimmed
+(`protect`: the verify claim, distill task/tool); when nothing trimmable
+remains, the call abstains with input-budget instead of judging damaged
+evidence. Oversized questions still refuse before any request, and the
 caller site is now recorded with each skip.
+
+Jev cost accounting prefers provider-reported usage, then the documented Jev
+family input price, and otherwise reports unknown: Kev and discovered alias
+routes never borrow Jev's price, and /cost marks totals with unpriced
+judgments unknown rather than adding invented dollars.
 
 ## Calibration evidence (2026-09-19)
 

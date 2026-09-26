@@ -32,6 +32,9 @@ export default function (pi: any) {
 	const shown = new Set<string>();
 	/** A successful deploy stays unverified until live bytes are compared. */
 	let unverifiedDeployAt: number | undefined;
+	/** One unverified-deploy text shared by the warning line and the gate receipt. */
+	const deployVerificationText = (at: number): string =>
+		`deploy at ${new Date(at).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`;
 	let disposeDeployNotice: (() => void) | undefined;
 	const deployCalls = new Map<string, { deploy: boolean; verify: boolean }>();
 
@@ -85,9 +88,11 @@ export default function (pi: any) {
 						name: "deploy",
 						session: ctx.sessionManager,
 						pending: () => [],
-						verification: () => unverifiedDeployAt === undefined ? [] : [
-							`deploy at ${new Date(unverifiedDeployAt).toISOString().slice(11, 16)} UTC is not verified live: compare changed assets' sha256 on the production URL with the local files and check Cache-Control on replaced assets.`,
-						],
+						verification: () => unverifiedDeployAt === undefined ? [] : [deployVerificationText(unverifiedDeployAt)],
+						verificationReceipts: () => unverifiedDeployAt === undefined ? [] : [{
+							source: "deploy", id: `deploy:${unverifiedDeployAt}`, revision: String(unverifiedDeployAt),
+							state: "unverified", line: `deploy: ${deployVerificationText(unverifiedDeployAt)}`,
+						}],
 					});
 				}
 			}

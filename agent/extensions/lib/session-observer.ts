@@ -50,7 +50,7 @@ export interface ObserverAdvice {
   /** Read-only investigation performed during this review. */
   investigated?: string[];
 }
-export interface ObserverPacketOptions { book?: BookSection; preferTools?: string[]; preferSkills?: string[]; }
+export interface ObserverPacketOptions { book?: BookSection; preferTools?: string[]; preferSkills?: string[]; requirements?: string; }
 export const boundedObserverText = (value: unknown, limit: number) => typeof value === 'string'
   ? value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, '').slice(-limit) : '';
 const observerOptOutChunk = (text: string) => /\b(?:work|stay|remain|operate)\s+offline\b|\boffline[- ]only\b|\b(?:no|without)\s+(?:network|internet)\b|\b(?:do not|don't|never)\s+(?:use|access)\s+(?:the\s+)?(?:network|internet)\b|\b(?:no|disable|stop|do not use|don't use)\s+(?:(?:background|automatic|periodic)\s+)*(?:observers?|advis[oe]rs?)\b/i.test(text);
@@ -132,11 +132,12 @@ export function digestObserverEvents(rows: ObserverEvidence[], id: string): Obse
   return { id, kind: 'event digest', text };
 }
 /** Rows that describe what the user wants; never evicted for catalog space. */
-const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'design brief', 'peer reviewer note']);
+const INTENT_KINDS = new Set(['earlier user prompt', 'harness interpretation', 'user reminders', 'design brief', 'peer reviewer note', 'tracked requirements']);
 export function buildObserverPacket(request: string, recent: ObserverEvidence[], tools: ObserverCapability[], skills: ObserverCapability[], options: ObserverPacketOptions = {}): ObserverPacket {
   const focused = promptRequestFocus(request);
   const requestText = focused.length <= 1000 ? focused : `${focused.slice(0, 600)}\n[Request excerpt]\n${focused.slice(-350)}`;
   const evidence = [{ id: 'request', kind: 'user request', text: boundedObserverText(requestText, 1000) },
+    ...(options.requirements ? [{ id: 'requirements', kind: 'tracked requirements', text: boundedObserverText(options.requirements, 1600) }] : []),
     ...recent.slice(0, 24).map(row => ({ ...row, text: boundedObserverText(row.kind === 'tool result' || row.kind === 'tool error' ? `${row.text.slice(0, 150)}${row.text.length > 250 ? ' … ' : ''}${row.text.length > 150 ? row.text.slice(Math.max(150, row.text.length - 100)) : ''}` : row.text, KIND_LIMITS[row.kind] ?? 260) }))];
   const textForRanking = `${focused.slice(0, 1600)} ${recent.map(x => `${x.tool ?? ''} ${x.text.slice(-200)}`).join(' ')}`;
   const selectedTools = relevant(tools, textForRanking, 8, options.preferTools), selectedSkills = relevant(skills, textForRanking, 5, options.preferSkills);

@@ -95,3 +95,10 @@ test('Guardian event hashes raw source text and carries only the typed advisory 
 	assert.equal(event.analysisSource, 'fallback');
 	assert.deepEqual(Object.keys(event).sort(), ['analysisSource', 'confidence', 'explicitConstraints', 'inferredConstraints', 'inputSource', 'kind', 'processId', 'promptHash', 'requestId', 'sessionId', 'subtasks', 'taskLabel', 'turnId', 'version'].sort());
 });
+
+test('prompt-analysis requests carry the tracked requirements past the excerpt bound', () => {
+	const request = JSON.parse(mod.buildPromptAnalysisRequest('Fix it.', 'initial', undefined, 'Open requirements (session R#):\nR2: Preserve the title').split('\n').at(-1));
+	assert.equal(request.sessionRequirements, 'Open requirements (session R#):\nR2: Preserve the title');
+	const bare = JSON.parse(mod.buildPromptAnalysisRequest('Fix it.', 'initial').split('\n').at(-1));
+	assert.equal('sessionRequirements' in bare, false);
+});

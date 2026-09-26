@@ -33,6 +33,27 @@ export interface WorktreeCheckpoint {
 	reused: boolean;
 }
 
+/** Structured checkpoint result. `undefined` used to conflate a verified
+ * clean tree with not-a-repo, git failures, timeouts, oversized trees and
+ * snapshot errors — and the exit summary then claimed "none detected" for
+ * all of them. Only `clean` (git status established no changes) or
+ * `snapshotted` may retire the uncommitted-work question. */
+export type CheckpointStatus = "snapshotted" | "clean" | "not-git" | "skipped" | "failed";
+export interface CheckpointOutcome {
+	status: CheckpointStatus;
+	ref?: string;
+	commit?: string;
+	changedCount?: number;
+	changed?: string[];
+	reused?: boolean;
+	/** Bounded single-line reason for skipped/failed/not-git. */
+	reason?: string;
+}
+export const isSnapshotted = (outcome: CheckpointOutcome): outcome is CheckpointOutcome & WorktreeCheckpoint & { status: "snapshotted" } =>
+	outcome.status === "snapshotted" && typeof outcome.ref === "string" && typeof outcome.commit === "string";
+const isCheckpointOutcome = (value: unknown): value is CheckpointOutcome =>
+	!!value && typeof value === "object" && typeof (value as { status?: unknown }).status === "string";
+
 const IDENTITY = {
 	GIT_AUTHOR_NAME: "YunusPi checkpoint",
 	GIT_AUTHOR_EMAIL: "checkpoint@yunuspi.invalid",
@@ -72,23 +93,46 @@ export function parsePorcelainZ(output: string): string[] {
 	return paths;
 }
 
-const recent = new Map<string, { at: number; work: Promise<WorktreeCheckpoint | undefined> }>();
+const recent = new Map<string, { at: number; work: Promise<CheckpointOutcome> }>();
 
-/** Snapshot a dirty worktree into the session's private ref. Never throws. */
-export function checkpointWorktree(cwd: string, sessionId: string, reason: string): Promise<WorktreeCheckpoint | undefined> {
+const boundReason = (value: unknown, fallback: string): string => {
+	const flat = (value instanceof Error ? value.message : String(value ?? "")).replace(/\s+/g, " ").trim();
+	return (flat || fallback).slice(0, 160);
+};
+
+/** Snapshot a dirty worktree into the session's private ref. Never throws;
+ * every failure mode returns a classified outcome instead of undefined. */
+export function checkpointWorktree(cwd: string, sessionId: string, reason: string): Promise<CheckpointOutcome> {
 	const key = `${cwd}\0${sessionId}`;
 	const cached = recent.get(key);
 	if (cached && Date.now() - cached.at < REUSE_MS) return cached.work;
-	const work = snapshot(cwd, sessionId, reason).catch(() => undefined);
+	const work = snapshot(cwd, sessionId, reason).catch((error) => ({ status: "failed" as const, reason: boundReason(error, "checkpoint failed") }));
 	recent.set(key, { at: Date.now(), work });
 	return work;
 }
 
-async function snapshot(cwd: string, sessionId: string, reason: string): Promise<WorktreeCheckpoint | undefined> {
-	const top = await optional(git(cwd, ["rev-parse", "--show-toplevel"]));
-	if (!top) return undefined;
-	const changed = parsePorcelainZ(await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]));
-	if (!changed.length || changed.length > MAX_CHANGED) return undefined;
+async function snapshot(cwd: string, sessionId: string, reason: string): Promise<CheckpointOutcome> {
+	let top: string;
+	try {
+		top = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+	} catch (error) {
+		// Only git's own not-a-repository verdict classifies as not-git; a
+		// timeout, missing binary or signal is a failed inspection, not an
+		// established fact about the directory. execFile keeps stderr off
+		// the message, so classify from both.
+		const detail = `${error instanceof Error ? error.message : ""} ${(error as { stderr?: unknown })?.stderr ?? ""}`;
+		if (/not a git repository/i.test(detail)) return { status: "not-git", reason: "not a git worktree" };
+		return { status: "failed", reason: boundReason((error as { stderr?: unknown })?.stderr || error, "git rev-parse failed") };
+	}
+	if (!top) return { status: "not-git", reason: "not a git worktree" };
+	let changed: string[];
+	try {
+		changed = parsePorcelainZ(await git(top, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]));
+	} catch (error) {
+		return { status: "failed", reason: boundReason((error as { stderr?: unknown })?.stderr || error, "git status failed") };
+	}
+	if (!changed.length) return { status: "clean" };
+	if (changed.length > MAX_CHANGED) return { status: "skipped", reason: `${changed.length} changed paths exceed the ${MAX_CHANGED}-path snapshot bound` };
 	const ref = checkpointRef(sessionId);
 	const head = await optional(git(top, ["rev-parse", "-q", "--verify", "HEAD^{commit}"]));
 	const previous = await optional(git(top, ["rev-parse", "-q", "--verify", `${ref}^{commit}`]));
@@ -101,14 +145,14 @@ async function snapshot(cwd: string, sessionId: string, reason: string): Promise
 		await git(top, ["add", "-A", "--", "."], env);
 		const tree = (await git(top, ["write-tree"], env)).trim();
 		if (previous && (await optional(git(top, ["rev-parse", `${previous}^{tree}`]))) === tree) {
-			return { ref, commit: previous, changedCount: changed.length, changed: changed.slice(0, 50), reused: true };
+			return { status: "snapshotted", ref, commit: previous, changedCount: changed.length, changed: changed.slice(0, 50), reused: true };
 		}
 		const parent = previous ?? head;
 		const message = `YunusPi checkpoint (${reason.slice(0, 40)}): ${changed.length} changed path(s)`;
 		const commit = (await git(top, ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message], IDENTITY)).trim();
 		await git(top, ["update-ref", "-m", message, ref, commit]);
 		await pruneOldCheckpoints(top, ref);
-		return { ref, commit, changedCount: changed.length, changed: changed.slice(0, 50), reused: false };
+		return { status: "snapshotted", ref, commit, changedCount: changed.length, changed: changed.slice(0, 50), reused: false };
 	} finally {
 		fs.rmSync(tempIndex, { force: true });
 	}
@@ -141,7 +185,7 @@ export interface ExitFallbackInput {
 	reason: string;
 	branch: BranchEntry[];
 	todos?: { pending: number; inProgress: number };
-	checkpoint?: WorktreeCheckpoint;
+	checkpoint?: WorktreeCheckpoint | CheckpointOutcome;
 }
 
 /** Deterministic summary for a session whose model-written summary could not
@@ -157,11 +201,19 @@ export function exitFallbackSummary(input: ExitFallbackInput): string | undefine
 	];
 	if (users.length > 1) lines.push(`First demand: ${oneLine(users[0], 300)}`);
 	if (input.todos) lines.push(`Todos at exit: ${input.todos.inProgress} in progress, ${input.todos.pending} pending${input.todos.inProgress + input.todos.pending ? " — the work was NOT finished" : ""}.`);
-	if (input.checkpoint) {
-		const shown = input.checkpoint.changed.slice(0, 12).join(", ");
-		const more = input.checkpoint.changedCount > 12 ? ` (+${input.checkpoint.changedCount - 12} more)` : "";
-		lines.push(`Uncommitted work: ${input.checkpoint.changedCount} changed path(s): ${shown}${more}. Snapshot ${input.checkpoint.ref} @ ${input.checkpoint.commit.slice(0, 12)}; inspect with \`git diff HEAD ${input.checkpoint.ref}\`, restore a file with \`git checkout ${input.checkpoint.ref} -- <path>\`.`);
-	} else lines.push("Uncommitted work: none detected in a git worktree (or the directory is not a git repository).");
+	const checkpoint = input.checkpoint;
+	if (checkpoint && (isCheckpointOutcome(checkpoint) ? checkpoint.status === "snapshotted" : true)) {
+		const snap = checkpoint as WorktreeCheckpoint;
+		const shown = (snap.changed ?? []).slice(0, 12).join(", ");
+		const count = snap.changedCount ?? 0;
+		const more = count > 12 ? ` (+${count - 12} more)` : "";
+		lines.push(`Uncommitted work: ${count} changed path(s): ${shown}${more}. Snapshot ${snap.ref} @ ${String(snap.commit).slice(0, 12)}; inspect with \`git diff HEAD ${snap.ref}\`, restore a file with \`git checkout ${snap.ref} -- <path>\`.`);
+	} else if (isCheckpointOutcome(checkpoint) && checkpoint.status === "clean") {
+		lines.push("Uncommitted work: none — git status verified a clean tree.");
+	} else if (isCheckpointOutcome(checkpoint)) {
+		const what = checkpoint.status === "not-git" ? "the directory is not a git worktree" : `the worktree snapshot ${checkpoint.status}: ${checkpoint.reason ?? "no reason recorded"}`;
+		lines.push(`Uncommitted work: UNKNOWN — ${what}, so no snapshot exists. Inspect the working tree directly; do not assume it is clean.`);
+	} else lines.push("Uncommitted work: UNKNOWN — no worktree inspection ran for this session. Inspect the working tree directly; do not assume it is clean.");
 	if (lastAssistant) lines.push(`Last assistant output: ${oneLine(textOf(lastAssistant.content), 400)}`);
 	lines.push("Next session: verify the working tree against this record before continuing; do not assume the last demand was completed.");
 	// The fixed header, worktree and next-session lines alone exceed FALLBACK_SUMMARY_MIN_CHARS.

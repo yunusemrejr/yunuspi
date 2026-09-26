@@ -9,10 +9,14 @@ export const SCOPE_COUNCIL_RUNNER = Symbol.for('yunus-pi.scope-council-runner.v1
  * fast council still lands before the first model call, a slow one no longer
  * holds the whole turn (sessions measured 3.5-4 minutes of blocked, billed
  * reviewer time before the agent's first response). Reading proceeds; the
- * first file mutation waits for the brief instead. graceMs lets the runner
+ * first file mutation waits for the brief instead. mutationWaitMs bounds that
+ * mutation wait: an unbounded settle froze the first write for the whole
+ * council deadline while reads had worked normally. After the bounded wait a
+ * still-pending council no longer blocks the edit; a complete brief gates the
+ * next mutation instead, so no edit is chosen blind. graceMs lets the runner
  * return its own partial result at the shared deadline before this owner's
  * timer discards everything. */
-export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200, contextWaitMs: 15000, graceMs: 5000 });
+export const SCOPE_LIMITS = Object.freeze({ deadlineMs: 240000, contextChars: 6200, contextWaitMs: 15000, mutationWaitMs: 30000, graceMs: 5000 });
 /** One owner for the automatic-council policy so the lifecycle, the registered
  * runner and the published documentation cannot disagree about when it is
  * active. The native automatic-assistance master switch applies to this council

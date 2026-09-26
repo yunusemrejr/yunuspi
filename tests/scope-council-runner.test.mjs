@@ -190,6 +190,21 @@ test('dispatches two independent scope opinions and a synthesis peer under read-
   assert.doesNotMatch(JSON.stringify(entries),/assistant-only preference/);
 });
 
+test('advisors receive the tracked session requirements, not just the task excerpt',async()=>{
+  const calls=[];
+  registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{
+    available:()=>models,constraints:()=>({}),
+    launch:async(_id,params)=>{calls.push(params);return result('Evidence from peer');},
+  });
+  const ledgerCtx={...context(),sessionManager:{...context().sessionManager,getBranch:()=>[
+    {type:'custom',customType:'requirement-ledger-v1',data:{items:[{id:'R2',text:'Preserve the exact title Keep title'},{id:'R3',text:'Rework the widget easing'}],subjective:[],unbounded:false,next:3}},
+  ]}};
+  const output=await globalThis[SCOPE_COUNCIL_RUNNER]({task},ledgerCtx);
+  assert.equal(output.status,'complete');
+  assert.match(calls[0].task,/Open requirements \(session R#\):/);
+  assert.match(calls[0].task,/R2: Preserve the exact title Keep title/);
+});
+
 test('settled local perspective cues inform critique without replacing peer evidence',async()=>{
   const calls=[];
   registerScopeCouncilRunner({getActiveTools:()=>['subagent'],appendEntry(){}},{

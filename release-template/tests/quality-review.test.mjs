@@ -216,6 +216,34 @@ test("routing includes text, CSS/HTML, technical stack, security and delivery wi
  assert.equal(aspects[0].id, "content");
  assert.equal(REVIEW_LIMITS.rounds, 2);
 });
+
+test("aspect routing catches semantics without reviewing everything (precision/recall bench)", () => {
+ const ids = (...args) => reviewAspects(...args).map((a) => a.id).sort();
+ // Recall: the audit's miss classes.
+ assert.deepEqual(ids(["src/service.ts"], "Fix login", [], [{ key: "quality-auth-content" }]), ["correctness", "security"]);
+ assert.deepEqual(ids(["src/session.ts"], "Repair the login flow"), ["correctness", "security"]);
+ assert.deepEqual(ids(["src/worker.ts"], "Fix the request timeout", [], [{ key: "quality-fanout" }]), ["correctness", "runtime"]);
+ assert.deepEqual(ids(["src/pool.ts"], "Requests deadlock under load"), ["correctness", "runtime"]);
+ assert.deepEqual(ids(["scripts/publish.mjs"], "Update the publisher"), ["correctness", "delivery"]);
+ assert.deepEqual(ids(["app.css"], "Restyle the header"), ["interface"]);
+ // Precision: near-miss prose must not buy extra aspects.
+ assert.deepEqual(ids(["styles/login.css"], "Restyle the login page"), ["interface"]);
+ assert.deepEqual(ids(["src/api.ts"], "Redesign the API"), ["correctness"]);
+ assert.deepEqual(ids(["docs/plan.md"], "Plan the session timeout"), ["content"]);
+ assert.deepEqual(ids(["src/tokens.ts"], "Count tokens per request"), ["correctness"]);
+ assert.deepEqual(ids(["notes.md"], "Fix login docs"), ["content"]);
+ assert.deepEqual(ids(["src/worker.ts"], "Handle the login"), ["correctness", "security"]);
+});
+
+test("auth mechanics in ordinary filenames fire a content signal; comments and strings do not", async () => {
+ const { qualityReviewSignals } = await import(pathToFileURL(path.join(agent, "extensions/lib/quality-review-signals.ts")));
+ const keys = (file, code) => qualityReviewSignals(file, code).map((s) => s.key);
+ assert.ok(keys("src/service.ts", "export async function login(u, p) {\n const ok = await verifyPassword(p, u.hash);\n if (!ok) throw new Error('no');\n return jwt.sign({ sub: u.id }, process.env.API_SECRET);\n}").includes("quality-auth-content"));
+ assert.ok(keys("src/service.ts", "await requirePermission(ctx, 'billing:refund');").includes("quality-auth-content"));
+ assert.ok(!keys("src/service.ts", "// TODO: call verifyPassword here\nconst label = 'jwt.sign failed';\nconst note = \"requirePermission\";\nexport const x = 1;").includes("quality-auth-content"), "masked comments and strings are not mechanics");
+ assert.ok(!keys("src/service.ts", "export const hasPermission = true;").includes("quality-auth-content"), "a bare boolean prop is not enforcement");
+ assert.deepEqual(reviewAspects(["src/service.ts"], "", [], [{ key: "quality-auth-content" }]).map((a) => a.id).sort(), ["correctness", "security"]);
+});
 test("malformed, empty and unsupported verdicts never pass; suggestions remain nonblocking", () => {
  for (const text of [
   "",
