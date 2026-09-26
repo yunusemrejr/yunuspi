@@ -35,8 +35,9 @@ export function registerMicroTask(pi: any, options: { sessionSignal?: () => Abor
   const env = options.env ?? process.env;
   let running = false;
   let activeDispatch = false;
+  let lifecycleGeneration = 0;
   const router = createRouterShadow(256, { env });
-  for (const event of ['session_start', 'session_tree', 'session_shutdown']) pi.on?.(event, () => router.clear());
+  for (const event of ['session_start', 'session_tree', 'session_shutdown']) pi.on?.(event, () => { lifecycleGeneration++; router.clear(); });
   pi.registerTool({
     name: 'micro_task',
     label: 'Micro task',
@@ -51,6 +52,7 @@ export function registerMicroTask(pi: any, options: { sessionSignal?: () => Abor
       currentChoice: Type.Optional(Type.String({ maxLength: 256, description: 'Existing selector choice for action=route; defaults to the current session model.' })),
     }),
     async execute(_id: string, args: any, signal: AbortSignal | undefined, _update: unknown, ctx: any) {
+      const generation = lifecycleGeneration;
       const action = args.action ?? 'run', privateInput = args.privateInput !== false;
       if (!['run', 'status', 'qualify', 'route'].includes(action)) return output({ ok: false, skipped: 'invalid-action' });
       if (!microWorkerEnabled(env)) return output({ ok: false, skipped: 'disabled' });
@@ -115,6 +117,8 @@ export function registerMicroTask(pi: any, options: { sessionSignal?: () => Abor
         if (activeDispatch) throw Error('micro task busy');
         const raw = ctx.modelRegistry.find?.(model.provider, model.id) ?? model;
         const fresh = { ...raw, samplingParams: Object.fromEntries(Object.entries(raw.samplingParams ?? {}).filter(([key]) => samplingKeys.has(key))) };
+        const inputPrice = estimate(fresh, 1_000_000, 0);
+        if (inputPrice === undefined || inputPrice > MICRO_WORKER_PRICE_CAP_PER_M_USD) throw Error('micro task price budget exceeded');
         const cost = estimate(fresh, Buffer.byteLength(prompt, 'utf8') + 512, maxTokens);
         // Full output budget includes any reasoning tokens. No retries or
         // fallbacks can expand this per-invocation total above one cent.
@@ -127,7 +131,7 @@ export function registerMicroTask(pi: any, options: { sessionSignal?: () => Abor
         const started = Date.now();
         const receipt = { id: `micro-task-${randomUUID()}`, owner: 'micro-task', provider: model.provider, model: model.id };
         const account = (status: string, usage?: any) => {
-          if (sessionSignal && (sessionSignal.aborted || options.sessionSignal?.() !== sessionSignal)) return;
+          if (generation !== lifecycleGeneration || sessionSignal && (sessionSignal.aborted || options.sessionSignal?.() !== sessionSignal)) return;
           try { pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, status, ...(usage ? { usage: observerUsage(usage, model.provider) } : {}) }); } catch { /* accounting never breaks inference */ }
         };
         const abortedStatus = () => requestSignal.reason?.name === 'TimeoutError' ? 'timeout' : 'cancelled';

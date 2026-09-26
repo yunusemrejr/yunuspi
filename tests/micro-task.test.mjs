@@ -29,9 +29,9 @@ const answers = {
 function fixture(t, { candidate = model(), current = true, complete } = {}) {
   clearMicroWorkerCache();
   let tool, kind = 'source-glance';
-  const calls = [], entries = [], session = new AbortController();
+  const calls = [], entries = [], hooks = new Map(), session = new AbortController();
   const eligibilityFile = path.join(temp, `${Math.random().toString(16).slice(2)}.json`);
-  registerMicroTask({ registerTool(value) { tool = value; }, appendEntry(customType, data) { entries.push({ type: 'custom', customType, data }); } }, { env: {}, eligibilityFile, sessionSignal: () => session.signal });
+  registerMicroTask({ registerTool(value) { tool = value; }, on(event, handler) { hooks.set(event, [...(hooks.get(event) ?? []), handler]); }, appendEntry(customType, data) { entries.push({ type: 'custom', customType, data }); } }, { env: {}, eligibilityFile, sessionSignal: () => session.signal });
   const ctx = { model: current ? candidate : undefined, modelRegistry: {
     getAvailable: () => [candidate], find: () => candidate,
     async completeSimple(offered, context, options) {
@@ -49,7 +49,7 @@ function fixture(t, { candidate = model(), current = true, complete } = {}) {
     },
   } };
   t.after(() => { session.abort(); clearMicroWorkerCache(); });
-  return { tool, ctx, calls, entries, session, candidate, eligibilityFile,
+  return { tool, ctx, calls, entries, session, candidate, eligibilityFile, emit: event => { for (const handler of hooks.get(event) ?? []) handler(); },
     run: (args, signal) => { kind = args.kind ?? 'source-glance'; return tool.execute('fixture', args, signal, undefined, ctx).then(result => result.details); } };
 }
 
@@ -167,4 +167,40 @@ test('micro_task routing compares a native model suggestion without changing the
   assert.equal(result.ok, true); assert.equal(result.comparison.router, 'fixture/other');
   assert.equal(result.comparison.yunuspi, 'fixture/small'); assert.equal(f.ctx.model.id, 'small');
   assert.equal((await f.run({ action: 'status' })).router.comparisons, 1);
+});
+
+
+test('micro_task rechecks authoritative unit pricing immediately before native dispatch', async t => {
+  for (const price of [undefined, 1]) {
+    const f = fixture(t);
+    f.ctx.modelRegistry.find = () => ({ ...f.candidate, cost: { ...f.candidate.cost, input: price } });
+    assert.equal((await f.run({ action: 'qualify' })).ok, false);
+    assert.equal(f.calls.length, 0, 'stale catalog pricing cannot admit the refreshed expensive route');
+    assert.equal(f.entries.length, 0, 'no physical request was admitted');
+  }
+});
+
+test('micro_task lifecycle invalidates route receipts before clearing the router flight', async t => {
+  for (const event of ['session_start', 'session_tree', 'session_shutdown']) {
+    const f = fixture(t), alternative = { ...model(), id: 'other' };
+    f.ctx.modelRegistry.getAvailable = () => [f.candidate, alternative];
+    await f.run({ action: 'qualify' });
+    let release;
+    f.ctx.modelRegistry.completeSimple = async () => new Promise(resolve => {
+      release = () => resolve({ content: [{ type: 'text', text: '{"model":"fixture/other","effort":"low"}' }], stopReason: 'stop', usage: { input: 20, output: 10 } });
+    });
+    const pending = f.run({ action: 'route', input: 'Choose a model for source review', candidates: ['fixture/small', 'fixture/other'] });
+    for (let i = 0; i < 10 && !release; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof release, 'function');
+    const receipts = f.entries.length;
+    // The app has changed sessions before this first lifecycle listener runs;
+    // the extension's later listener has not yet aborted the old shared signal.
+    f.emit(event);
+    assert.equal(f.session.signal.aborted, false);
+    assert.equal((await pending).ok, false);
+    assert.equal(f.entries.length, receipts, 'synchronous router abort cannot append into the replacement session');
+    f.session.abort();
+    release(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.entries.length, receipts, 'late transport usage belongs to the discarded session');
+  }
 });
