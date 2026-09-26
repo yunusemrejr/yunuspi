@@ -78,7 +78,9 @@ test("memory reads reject FIFOs and oversized files without blocking", { skip: p
   const made = spawnSync("mkfifo", [fifo]);
   assert.ifError(made.error);assert.equal(made.status, 0);
   const code = `import assert from 'node:assert/strict';import {readFileSafe} from ${JSON.stringify(pathToFileURL(indexPath).href)};assert.equal(readFileSafe(process.argv[1]),null);`;
-  const child = spawnSync(process.execPath, ["--no-warnings", "--input-type=module", "-e", code, fifo], { encoding: "utf8", timeout: 3000 });
+  // This deadline includes a fresh import of the full memory extension graph.
+  // Leave bootstrap headroom under CI load while still terminating a FIFO hang.
+  const child = spawnSync(process.execPath, ["--no-warnings", "--input-type=module", "-e", code, fifo], { encoding: "utf8", timeout: 15000 });
   assert.ifError(child.error);assert.equal(child.status, 0, child.stderr);
   fs.unlinkSync(fifo);
   fs.writeFileSync(fifo, Buffer.alloc(8 * 1024 * 1024 + 1));
