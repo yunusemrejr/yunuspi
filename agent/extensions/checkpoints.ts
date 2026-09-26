@@ -46,7 +46,6 @@ import {
 } from "./lib/checkpoint-files.ts";
 import { createProjectTestLifecycle, createWorkspaceRevision } from "./lib/project-tests.ts";
 import { createQualityReviewLifecycle } from "./lib/quality-review.ts";
-import { needleRank } from "./lib/needle-runtime.ts";
 import { askJev } from "./lib/jev-client.ts";
 import { askTypedDecision } from "./lib/micro-intelligence/jev-decisions.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
@@ -680,11 +679,10 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	const quality = createQualityReviewLifecycle(pi, {
 		shadow: SHADOW, refresh: ctx => projectTests.start(ctx), tests: () => projectTests.snapshot(), revision,
 		// Provenance-preserving duplicate consolidation over multi-aspect
-		// blocking findings. Deterministic Jaccard always runs inside the
-		// lifecycle; these deps add the bounded Needle/Jev semantic passes.
+		// blocking findings. Exact duplicates collapse locally; one bounded
+		// Jev batch confirms paraphrases against their full original text.
 		dedup: {
-			rank: (query, candidates, topK) => needleRank({ query, candidates, topK }),
-			ask: (site, state, questions) => askJev(site, state, questions, { pi }),
+			ask: (site, state, questions, options) => askJev(site, state, questions, { pi, signal: options?.signal }),
 		},
 	});
 	const projectTests = createProjectTestLifecycle(pi, { shadow: SHADOW, onFacts: (facts, observe, token) => quality.observe(facts, observe, token), revision });

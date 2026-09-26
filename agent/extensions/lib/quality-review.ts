@@ -12,7 +12,7 @@ import { normalizeReviewPath, parseReviewReport, type ReviewReport } from '../pi
 export { parseReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 export type { ReviewReport } from '../pi-subagents/src/shared/quality-review-report.ts';
 import { noteQualityReviewCompleted, registerSharedQualityReview } from './quality-review-owner.ts';
-import { consolidateFindings, type ConsolidatedGroup, type JudgeFn, type RankFn } from './micro-intelligence/review.ts';
+import { consolidateFindings, type ConsolidatedGroup, type JudgeFn } from './micro-intelligence/review.ts';
 import { askTypedDecision } from './micro-intelligence/jev-decisions.ts';
 import { isTrivialChangeRequest } from './review-coordinator.ts';
 import { createInterventionSession } from './intervention-session.ts';
@@ -186,7 +186,7 @@ function verifyReviewTree(root: string, changed: string[], persisted: unknown): 
   return verified;
 }
 
-export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any; dedup?: { rank?: RankFn; ask?: JudgeFn }; revision?: { readonly current: number; advance(token: string): number; seed(value: number): void } } ) {
+export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolean; refresh(ctx: any): Promise<void>; tests(): any; runner?: any; context?: any; dedup?: { ask?: JudgeFn }; revision?: { readonly current: number; advance(token: string): number; seed(value: number): void } } ) {
   let changeSequence = 0;
   let releaseShared = () => {}, disposeContinuationNotice = () => {};
   let root = '', baseline: Record<string,string> | undefined, revision = 0, changed: string[] = [], task = '', rounds = 0, followups = 0, refunded = 0;
@@ -198,27 +198,29 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const patterns = new Map<string, ReturnType<typeof authoredReviewSignals>>();
   let policyFindings: Array<{id:string; key:string; detail:string; file?:string}> = [];
   // Provenance-preserving duplicate groups over blocking findings from all
-  // aspects. Deterministic Jaccard always runs; Needle/Jev semantic passes
-  // run only when the caller injected dedup deps. A dismissal of a group's
+  // aspects. Exact full-text duplicates collapse locally; a bounded Jev
+  // batch must confirm semantic matches before parent prose is compacted. A dismissal of a group's
   // representative covers its merged duplicates.
   let consolidation: { revision: number; groups: ConsolidatedGroup[] } | undefined;
-  const refreshConsolidation = async (): Promise<void> => {
+  const refreshConsolidation = async (signal?: AbortSignal): Promise<void> => {
+    const ticket = generation, rev = reviewed;
     try {
-      const findings: Array<{ id: string; text: string; aspect: string }> = [];
+      const findings: Array<{ id: string; text: string; aspect: string; file?: string }> = [];
       for (const report of reports) for (const finding of report.findings) {
         if (finding.severity !== 'blocking') continue;
-        findings.push({ id: finding.id, text: `${finding.file ?? ''} ${finding.detail}`.slice(0, 800), aspect: report.aspect });
+        findings.push({ id: finding.id, text: finding.detail, file: finding.file, aspect: report.aspect });
         if (findings.length >= 48) break;
       }
       if (findings.length < 2) { consolidation = undefined; return; }
       const aspectOf = new Map(findings.map((finding) => [finding.id, finding.aspect]));
       const result = await consolidateFindings(findings, {
-        rank: options.dedup?.rank, ask: options.dedup?.ask, maxJudgePairs: 3,
+        ask: options.dedup?.ask, maxJudgePairs: 12, signal,
         sourceOf: (id) => aspectOf.get(id),
       });
+      if (ticket !== generation || rev !== reviewed || signal?.aborted) return;
       consolidation = { revision: reviewed, groups: result.groups };
       if (result.groups.length) noteHealth('review.consolidated', { count: result.groups.length, merged: result.groups.reduce((n, group) => n + group.merged.length, 0) });
-    } catch { consolidation = undefined; }
+    } catch { if (ticket === generation && rev === reviewed) consolidation = undefined; }
   };
   // File -> last confirmed content hash. Shared by the discovery pass and the
   // native receipt path so one real edit is charged exactly one revision.
@@ -270,7 +272,20 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
   const status = () => !changed.length ? 'not_needed' : disposition || (dispatchGap || reviewUnavailable ? 'unavailable' : reviewed !== revision ? rounds >= REVIEW_LIMITS.rounds ? 'budget_exhausted' : 'pending' : 'awaiting_assessment');
   const patternReport = () => [...patterns].flatMap(([file,signals])=>signals.map(s=>({...s,file})))
     .sort((a,b)=>Number(UI_POLICY_KEYS.has(b.key))-Number(UI_POLICY_KEYS.has(a.key))).slice(0,12);
-  const summary = (includePrevious = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? reports : [], staleReports: reviewed !== revision && reports.length > 0,
+  const parentReports = () => {
+    if (!consolidation || consolidation.revision !== reviewed) return reports;
+    const duplicates = new Map(consolidation.groups.flatMap(group => group.merged.map(item => [item.id, group.kept] as const)));
+    // Full source reports remain in the existing ledger and action=inspect.
+    // Only repeated issue prose is replaced; every ID, severity, file and
+    // reviewer evidence citation remains available to the parent.
+    return reports.map(report => ({ ...report, findings: report.findings.map(finding => {
+      const kept = duplicates.get(finding.id);
+      if (!kept) return finding;
+      const compact = { ...finding, detail: `Same issue as ${kept}.`, duplicateOf: kept };
+      return JSON.stringify(compact).length < JSON.stringify(finding).length ? compact : finding;
+    }) }));
+  };
+  const summary = (includePrevious = false, fullReports = false) => ({ root, revision, changed, status: status(), rounds, refunded, limits: REVIEW_LIMITS, reports: reviewed === revision ? fullReports ? reports : parentReports() : [], staleReports: reviewed !== revision && reports.length > 0,
     ...(includePrevious && reviewed !== revision && reports.length ? { previousReview: { revision: reviewed, reports } } : {}),
     reason: unavailableReason() || (evidenceRejected.length ? `Outcome evidence rejected: ${evidenceRejected.join(' ').slice(0, 1000)}` : '') || (status() === 'budget_exhausted' ? `Review rounds exhausted. Changed source was not reviewed at the current revision; ${reports.length ? 'inspect previousReview for earlier evidence' : 'no earlier report is available'} and report the remaining gap.` : ''),
     ...(evidenceRejected.length ? { evidenceRejected } : {}), truncated: truncated || scopeOverflow,
@@ -278,7 +293,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
     patterns: patternReport(), policyFindings: reviewed === revision ? policyFindings : [],
     ...(reviewed === revision && consolidation && consolidation.revision === reviewed && consolidation.groups.length ? { consolidated: consolidation.groups.slice(0, 16).map((group) => ({ kept: group.kept, merged: group.merged, sources: group.sources })) } : {}),
     ...(reviewUnavailable || dispatchGap ? { nextAction: rounds >= REVIEW_LIMITS.rounds ? 'Independent review returned no usable assessment and review rounds are exhausted. Preserve completed local checks and report this verification limit; do not retry or reopen completed requested work.' : 'Independent review returned no usable assessment. Preserve completed local checks and report this verification limit. Retry only after correcting the launch/capacity cause, supplying retryReason; changing source or evidence alone does not repair the reviewer.' } : !disposition && rounds >= REVIEW_LIMITS.rounds ? { nextAction: 'Review rounds are exhausted. Assess the retained evidence now: accepted when current reports and required checks support it (an aspect whose reviewer did not return is a disclosed verification limit, not a blocker, once another aspect passed and no blocking finding remains), otherwise blocked with the precise verification gap. Do not add optional polish or repeat completed checks to compensate for unavailable independent review. A blocked review receipt records a verification limit; it does not require reopening completed requested work.' } : !disposition && reviewed === revision ? { nextAction: 'Assess the retained reports. Fix concrete blocking findings; defer improvement-only suggestions unless the user requested them. An aspect whose reviewer did not return does not prevent accepted once another aspect passed and required checks are green; it is disclosed automatically. Record blocked only for an actual blocker. A second round is for a concrete repair or newly supplied missing evidence, not a fresh polish audit.' } : {}),
-    scope: 'Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
+    scope: 'Duplicate prose references its representative; action=inspect retains full original reports. Independent advisory source reviews plus parent assessment; not certification. Retry a missing-evidence review with new outcome evidence; retry a launch failure only after correcting its cause. Tests, visual evidence and deployed behavior require their own observations.' });
   const advice = () => !changed.length || disposition ? '' : `[quality review] Revision ${revision}: ${status()}. ${reviewed === revision ? 'Review results are available; assess the retained findings. If necessary outcome evidence was missing, attach new or updated evidence paths to an explicit review call while a round remains.' : rounds >= REVIEW_LIMITS.rounds ? 'Review rounds are exhausted; assess remaining gaps without another attempt.' : 'Before declaring completion, use quality_review({action:"review"}) for bounded independent aspect reviews, then assess the evidence. For UI/behavior work attach outcome evidence (renders, test output) via evidence paths so reviewers judge the outcome, not the diff shape.'} Repair concrete blocking findings and re-review changed files; defer optional polish. Use quality_review({action:"assess",disposition:"accepted"|"blocked",reason:"..."}) with a concrete rationale. Report unavailable independent review separately from observed defects and task completion. Never claim missing evidence was verified. Use a remaining round only to verify a concrete repair or newly supplied missing evidence, never merely because budget remains. Preserve current checks and captures; report unavailable review without reopening completed work. Maximum two review rounds.`;
   const automaticAdvice = () => testsPending() || dispatchGap || reviewUnavailable ? '' : advice();
   const cancel = () => { generation++; controller?.abort(); controller = undefined; busy = undefined; };
@@ -483,7 +498,8 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         }
       }
       reports = received; reviewed = rev; reviewedHashes = reviewScopeHashes; reviewUnavailable = completed.size === 0 && carried.size === 0;
-      await refreshConsolidation();
+      await refreshConsolidation(combined);
+      if (ticket !== generation || own.signal.aborted || signal?.aborted || ctx.signal?.aborted) return summary();
       // A decisive round suppresses near-term stuck-signal review suggestions;
       // an all-unknown round stays suggestible since no review evidence exists.
       if (received.some(r => r.outcome !== 'unknown')) { try { noteQualityReviewCompleted(ctx); } catch {} }
@@ -774,7 +790,7 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         disposition = params.disposition; reason = (acceptedLimit ? `${acceptedLimit} ${params.reason.trim()}` : params.reason.trim()).slice(0,1200); save(); noteDisposition();
         if (params.dismissals?.length) pi.appendEntry?.('quality-review-adjudication-v1',{revision,dismissals:params.dismissals});
       }
-      signal?.throwIfAborted(); const data={...summary(true),...(retryRationale ? {retryRationale} : {})};return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
+      signal?.throwIfAborted(); const data={...summary(true,params.action === 'inspect'),...(retryRationale ? {retryRationale} : {})};return {content:[{type:'text',text:JSON.stringify(data)}],details:data};
     }
   });
   return api;

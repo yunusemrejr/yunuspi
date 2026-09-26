@@ -25,13 +25,13 @@ test("deterministic consolidation groups overlaps with provenance", async () => 
   try {
     const { groups, singletons } = await consolidateFindings([
       finding("a", "The login handler stores the session token in a cookie without the secure flag set on production domains."),
-      finding("b", "The login handler stores the session token in a cookie without the secure flag on production domains."),
+      finding("b", "The login handler stores the session token in a cookie without the secure flag set on production domains."),
       finding("c", "Unrelated: the invoice total ignores discount lines in the footer."),
     ], { sourceOf: (id) => (id === "c" ? "content" : "security") });
     assert.equal(groups.length, 1);
     assert.equal(groups[0].kept, "a");
     assert.deepEqual(groups[0].merged.map((m) => m.id), ["b"]);
-    assert.equal(groups[0].merged[0].method, "jaccard");
+    assert.equal(groups[0].merged[0].method, "exact");
     assert.deepEqual(groups[0].sources, ["security"]);
     assert.deepEqual(singletons, ["c"]);
   } finally {
@@ -43,16 +43,16 @@ test("ambiguous pairs earn a bounded Jev judgment", async () => {
   metricsMod.resetMicroMetrics();
   try {
     let calls = 0;
-    const ask = async () => {
+    const ask = async (_site, _state, questions) => {
       calls++;
-      return { ok: true, answers: { duplicate: { noul: 0.9 } }, usage: { inputTokens: 5, cached: false } };
+      return { ok: true, answers: Object.fromEntries(Object.keys(questions).map(key => [key, { noul: 0.9 }])), usage: { inputTokens: 5, cached: false } };
     };
     // Mid-overlap pair: same auth-cookie issue, different wording.
     const { groups } = await consolidateFindings([
       finding("a", "Session cookie for authentication lacks the HttpOnly attribute in the web login flow handler."),
       finding("b", "Web login flow handler sets an authentication session cookie missing HttpOnly protection flag."),
     ], { ask, maxJudgePairs: 2 });
-    assert.ok(calls <= 2);
+    assert.equal(calls, 1, 'ambiguous pairs share one transport request');
     assert.equal(groups.length, 1);
     assert.deepEqual(groups[0].merged.map((m) => m.method), ["jev"]);
   } finally {
@@ -91,4 +91,54 @@ test("semantic margin probe confirms paraphrases above bar", async () => {
   assert.equal(await findSemanticMarginDuplicate("short", notes, rank), undefined);
   assert.equal(await findSemanticMarginDuplicate("A long enough candidate text here.", notes, undefined), undefined);
   assert.equal(await findSemanticMarginDuplicate("A long enough candidate text here.", notes, async () => { throw Error("down"); }), undefined);
+});
+
+
+test('review grouping batches paraphrases, preserves file boundaries and avoids duplicate ranking work', async () => {
+  let calls = 0, questionsSeen = 0;
+  const findings = [
+    { id: 'a', file: 'src/cache.ts', text: 'Obsolete callback overwrites the replacement session with its outdated value.' },
+    { id: 'b', file: 'src/cache.ts', text: 'After switching contexts the earlier asynchronous response poisons fresh state.' },
+    { id: 'c', file: 'src/cache.ts', text: 'An unbounded map retains every closed connection and exhausts memory.' },
+    { id: 'd', file: 'src/other.ts', text: 'Obsolete callback overwrites the replacement session with its outdated value.' },
+  ];
+  const result = await consolidateFindings(findings, {
+    ask: async (site, state, questions) => {
+      calls++; assert.equal(site, 'finding-consolidation'); assert.ok(Object.values(questions).every(question => !question.instructions.includes('src/other.ts')));
+      questionsSeen = Object.keys(questions).length;
+      return { ok: true, answers: Object.fromEntries(Object.entries(questions).map(([key, value]) => [key, { noul: value.instructions.includes('"id":"a"') && value.instructions.includes('"id":"b"') ? .95 : .1 }])), usage: { inputTokens: 150, costUsd: .00001, cached: false } };
+    }, sourceOf: id => id === 'a' ? 'correctness' : 'runtime',
+  });
+  assert.equal(calls, 1); assert.equal(questionsSeen, 3);
+  assert.deepEqual(result.groups, [{ kept: 'a', merged: [{ id: 'b', method: 'jev' }], sources: ['correctness', 'runtime'] }]);
+  assert.deepEqual(result.singletons, ['c', 'd']);
+});
+
+test('consolidation aborts one batch without publishing late duplicate judgments', async () => {
+  const controller = new AbortController(); let release, offered;
+  const pending = consolidateFindings([
+    { id: 'a', file: 'src/owner.ts', text: 'Prior callbacks overwrite the replacement session.' },
+    { id: 'b', file: 'src/owner.ts', text: 'A stale asynchronous response contaminates fresh state.' },
+  ], { signal: controller.signal, ask: async (_site, _state, _questions, options) => { offered = options.signal; return new Promise(resolve => { release = resolve; }); } });
+  for (let i = 0; i < 10 && !release; i++) await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.deepEqual((await pending).groups, []); assert.equal(offered.aborted, true);
+  release({ ok: true, answers: { pair_0: { noul: .99 } }, usage: { inputTokens: 10, cached: false } });
+});
+
+
+test('similarity cannot erase opposite repairs, bridge file scopes or judge clipped evidence', async () => {
+  let calls = 0;
+  const a = { id: 'a', file: 'src/cache.ts', text: 'The callback writes the cache when the request is cancelled. Add a cancellation check before writing the cache.' };
+  const b = { id: 'b', file: a.file, text: 'The callback does not write the cache when the request is not cancelled. Remove the cancellation check before writing the cache.' };
+  const ask = async (_site, state, questions) => { calls++; assert.ok(Object.values(questions).some(question => question.instructions.includes(b.text))); return { ok: true, answers: Object.fromEntries(Object.keys(questions).map(key => [key, { noul: .02 }])), usage: { inputTokens: 80, cached: false } }; };
+  assert.deepEqual((await consolidateFindings([a,b], { ask })).groups, []);
+  assert.equal(calls, 1, 'high lexical similarity requires a semantic decision');
+  assert.deepEqual((await consolidateFindings([a,b])).groups, [], 'absence of a judge preserves distinct repair obligations');
+  assert.deepEqual((await consolidateFindings([a, { ...a, id: 'bridge', file: undefined }, { ...a, id: 'other', file: 'src/other.ts' }])).groups, []);
+  const full = 'Observed source evidence. '.repeat(30) + 'The final condition reverses the proposed repair.';
+  await consolidateFindings([{ ...a, text: full }, { ...b, text: full + ' Different condition.' }], { ask: async (_site,state,questions) => {
+    assert.ok(Object.values(questions).some(question => question.instructions.includes(full))); assert.ok(Object.values(questions).some(question => question.instructions.includes('Different condition.')));
+    return { ok: true, answers: Object.fromEntries(Object.keys(questions).map(key => [key,{noul:.01}])),usage:{inputTokens:10,cached:false} };
+  } });
 });

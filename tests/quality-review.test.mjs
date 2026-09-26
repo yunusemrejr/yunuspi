@@ -55,7 +55,7 @@ const pass = (aspect) => ({
   gap: "",
  }),
 });
-async function fixture(t, { runner, context, beforeRefresh } = {}) {
+async function fixture(t, { runner, context, beforeRefresh, dedup } = {}) {
  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quality-check-"));
  const tools = {},
   sent = [],
@@ -90,6 +90,7 @@ async function fixture(t, { runner, context, beforeRefresh } = {}) {
     api.observe(await projectTestFacts(dir), false);
    },
    tests: () => tests,
+   dedup,
    runner: async (...args) => {
     calls.push(args);
     return runner ? runner(...args) : args[0].aspects.map((a) => pass(a.id));
@@ -1534,4 +1535,23 @@ test('a repair round re-reviews only aspects the delta touches; clean passes car
  const carried = data.reports.find(r => r.aspect === 'interface');
  assert.equal(carried.outcome, 'pass');
  assert.match(carried.evidence[0], /Carried forward from revision/);
+});
+
+
+test('review parent receipts compact duplicate findings while inspect retains full original evidence', async t => {
+  const detail = 'The login handler persists session credentials in browser-visible cookies without HttpOnly protection, allowing injected scripts to capture the token and impersonate the authenticated user.';
+  const f = await fixture(t, { runner: async req => req.aspects.map(aspect => ({ aspect: aspect.id, ok: true, text: JSON.stringify({
+    outcome: 'changes', evidence: ['src/auth.js:1 reads and persists the authenticated session cookie.'],
+    findings: [{ severity: 'blocking', file: 'src/auth.js', detail }], gap: '',
+  }) })) });
+  await f.mutate('src/auth.js');
+  const compact = (await f.tool({ action: 'review' })).details;
+  const full = (await f.tool({ action: 'inspect' })).details;
+  assert.ok(compact.consolidated.length > 0);
+  const duplicate = compact.reports.flatMap(report => report.findings).find(finding => finding.duplicateOf);
+  assert.ok(duplicate); assert.ok(duplicate.detail.length < detail.length);
+  assert.equal(full.reports.flatMap(report => report.findings).find(finding => finding.id === duplicate.id).detail, detail);
+  assert.equal(compact.reports.flatMap(report => report.findings).length, full.reports.flatMap(report => report.findings).length);
+  assert.deepEqual(compact.reports.map(report => report.evidence), full.reports.map(report => report.evidence));
+  assert.ok(JSON.stringify(compact).length < JSON.stringify(full).length);
 });

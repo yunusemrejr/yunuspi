@@ -26,12 +26,12 @@ const answers = {
   'patch-compare': { verdict: 'changed', decisive: 'cache clone', notes: 'returns isolated data' },
   'source-glance': { summary: 'Cache ownership', flags: [] },
 };
-function fixture(t, { candidate = model(), current = true, complete } = {}) {
+function fixture(t, { candidate = model(), current = true, complete, judge } = {}) {
   clearMicroWorkerCache();
   let tool, kind = 'source-glance';
   const calls = [], entries = [], hooks = new Map(), session = new AbortController();
   const eligibilityFile = path.join(temp, `${Math.random().toString(16).slice(2)}.json`);
-  registerMicroTask({ registerTool(value) { tool = value; }, on(event, handler) { hooks.set(event, [...(hooks.get(event) ?? []), handler]); }, appendEntry(customType, data) { entries.push({ type: 'custom', customType, data }); } }, { env: {}, eligibilityFile, sessionSignal: () => session.signal });
+  registerMicroTask({ registerTool(value) { tool = value; }, on(event, handler) { hooks.set(event, [...(hooks.get(event) ?? []), handler]); }, appendEntry(customType, data) { entries.push({ type: 'custom', customType, data }); } }, { env: {}, eligibilityFile, judge, sessionSignal: () => session.signal });
   const ctx = { model: current ? candidate : undefined, modelRegistry: {
     getAvailable: () => [candidate], find: () => candidate,
     async completeSimple(offered, context, options) {
@@ -203,4 +203,51 @@ test('micro_task lifecycle invalidates route receipts before clearing the router
     release(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.entries.length, receipts, 'late transport usage belongs to the discarded session');
   }
+});
+
+
+test('micro_task analyzes a whole evidence packet once with stable IDs, categories and no source echo', async t => {
+  let calls = 0;
+  const f = fixture(t, { judge: async (site, state, questions, options) => {
+    calls++; assert.equal(site, 'item-analysis'); assert.equal(Object.keys(questions).length, 6);
+    assert.ok(questions.relevance_0.instructions.includes('The session cookie is exposed to scripts.'));
+    assert.ok(questions.category_0.instructions.includes('The session cookie is exposed to scripts.'), 'each typed judgment is grounded in its actual evidence, not an ambiguous array index');
+    assert.deepEqual(state.categories, ['security', 'performance']); assert.ok(options.signal instanceof AbortSignal);
+    return { ok: true, answers: {
+      relevance_0: { noul: .95 }, relevance_1: { noul: .1 }, relevance_2: { noul: .5 },
+      category_0: { choice: 'c0', probabilities: { c0: .9, c1: .05, unknown: .05 } },
+      category_1: { choice: 'c1', probabilities: { c0: .05, c1: .9, unknown: .05 } },
+      category_2: { choice: 'c0', probabilities: { c0: .52, c1: .48 } },
+    }, usage: { model: 'fixture/judge', inputTokens: 100, costUsd: .0000042, ms: 2, cached: false } };
+  } });
+  const args = { action: 'analyze', input: 'Prioritize authentication correctness issues', categories: ['security', 'performance'], items: [
+    { id: 'auth', text: 'The session cookie is exposed to scripts.', source: 'src/login.ts:42' },
+    { id: 'cache', text: 'The dashboard query runs twice.', source: 'src/dashboard.ts:8' },
+    { id: 'unknown', text: 'Evidence does not identify the failing component.' },
+  ] };
+  const result = await f.run(args);
+  assert.equal(result.ok, true); assert.equal(calls, 1); assert.equal(f.calls.length, 0, 'no native calibration or worker fanout');
+  assert.deepEqual(result.ranked.map(item => item.id), ['auth', 'unknown', 'cache']);
+  assert.equal(result.ranked[0].source, args.items[0].source);
+  assert.deepEqual(result.groups, [{ category: 'security', ids: ['auth'] }, { category: 'performance', ids: ['cache'] }]);
+  assert.deepEqual(result.uncertain, ['unknown']);
+  assert.ok(!JSON.stringify(result).includes(args.items[0].text), 'the main session receives references, not repeated source text');
+  for (const patch of [{ model: 'fixture/small' }, { privateInput: false }])
+    assert.equal((await f.run({ ...args, ...patch })).skipped, 'incompatible-analysis-options');
+  assert.equal((await f.run({ ...args, items: [args.items[0], args.items[0]] })).skipped, 'invalid-analysis');
+  assert.equal((await f.run({ ...args, items: Array.from({ length: 16 }, (_, i) => ({ id: String(i), text: 'a'.repeat(1200) })) })).skipped, 'input-budget');
+  assert.equal(calls, 1, 'invalid packets never reach the remote judge');
+});
+
+test('micro_task analyze cancellation keeps admission until the owned judge promise settles', async t => {
+  let release;
+  const f = fixture(t, { judge: async () => new Promise(resolve => { release = resolve; }) });
+  const args = { action: 'analyze', input: 'Rank evidence for this task', items: [{ id: 'a', text: 'First fact' }, { id: 'b', text: 'Second fact' }] };
+  const pending = f.run(args);
+  for (let i = 0; i < 10 && !release; i++) await new Promise(resolve => setImmediate(resolve));
+  f.emit('session_start');
+  assert.equal((await pending).skipped, 'aborted');
+  assert.equal((await f.run(args)).skipped, 'busy');
+  release({ ok: false, skipped: 'aborted' }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await f.run({ action: 'status' })).running, false);
 });
