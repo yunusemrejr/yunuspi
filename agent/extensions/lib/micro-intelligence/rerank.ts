@@ -13,6 +13,7 @@
  * real backend. Unconfigured, unreachable, or low-value reranking
  * degrades to undefined (caller keeps its local order).
  */
+import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
 
@@ -137,20 +138,24 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
       }
       metrics.offer("rerank");
       const transport = opts.transport ?? voyageRerankTransport({ env });
+      const controller = new AbortController();
+      const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+      const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.min(2_147_483_647, opts.timeoutMs!)) : RERANK_TIMEOUT_MS;
+      const timer = setTimeout(() => controller.abort(new DOMException("Rerank timeout", "TimeoutError")), timeoutMs);
       try {
         const docs = candidates.slice(0, RERANK_MAX_DOCUMENTS).map(candidate => ({ id: candidate?.id, text: candidate?.text }));
         if (docs.some(candidate => typeof candidate.id !== 'string' || !candidate.id || typeof candidate.text !== 'string')
           || new Set(docs.map(candidate => candidate.id)).size !== docs.length) throw Error('rerank: invalid candidates');
-        const { order } = await transport({
+        const { order } = await raceWithAbortSignal(Promise.resolve(transport({
           url,
           model,
           query: String(query ?? "").slice(0, RERANK_MAX_QUERY_CHARS),
           documents: docs.map((candidate) => String(candidate.text ?? "").slice(0, RERANK_MAX_DOC_CHARS)),
           topK: Math.max(1, Math.min(docs.length, opts.topK ?? 12)),
-          signal,
-          timeoutMs: opts.timeoutMs ?? RERANK_TIMEOUT_MS,
-        });
-        signal?.throwIfAborted();
+          signal: requestSignal,
+          timeoutMs,
+        })), requestSignal);
+        requestSignal.throwIfAborted();
         const ms = Date.now() - started;
         if (!Array.isArray(order) || order.length > docs.length || new Set(order).size !== order.length
           || order.some(index => !Number.isInteger(index) || index < 0 || index >= docs.length)) throw Error('rerank: malformed order');
@@ -166,10 +171,12 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
       } catch (error) {
         const ms = Date.now() - started;
         const message = error instanceof Error ? error.message : String(error);
-        const reason = signal?.aborted ? 'aborted' : /no API key/i.test(message) ? "no-key" : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
+        const reason = signal?.aborted ? 'aborted' : controller.signal.aborted ? 'timeout' : /no API key/i.test(message) ? "no-key" : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
         metrics.skip("rerank", reason);
         noteHealth("ml.rerank.skipped", { count: 1, reason, durationMs: ms });
         return undefined;
+      } finally {
+        clearTimeout(timer);
       }
     },
   };

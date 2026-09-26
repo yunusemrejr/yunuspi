@@ -19,6 +19,7 @@
  * call is ledgered as a `span-usage-v1` session entry (same contract as
  * `jev-usage-v1`) so cost and metrics treat Span like any other route.
  */
+import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
 import { createHash } from "node:crypto";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
@@ -270,11 +271,15 @@ export async function scoreSpanTrace(
     return { ok: false, ...base, ms: 0, cached: false, skipped: "no-scorer" };
   }
   const finish = beginHarnessActivity("span");
+  const controller = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.min(2_147_483_647, opts.timeoutMs!)) : SPAN_REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(new DOMException("Span timeout", "TimeoutError")), timeoutMs);
   let succeeded = false;
   try {
     const prompt = spanPrompt({ events });
-    const answer = await scorer(prompt, { signal: opts.signal, timeoutMs: opts.timeoutMs ?? SPAN_REQUEST_TIMEOUT_MS });
-    opts.signal?.throwIfAborted();
+    const answer = await raceWithAbortSignal(Promise.resolve(scorer(prompt, { signal, timeoutMs })), signal);
+    signal.throwIfAborted();
     const ms = Math.max(0, now() - started);
     let parsed: Record<string, SpanSignalScores> | undefined;
     try {
@@ -307,12 +312,13 @@ export async function scoreSpanTrace(
   } catch (error) {
     const ms = Math.max(0, now() - started);
     const message = error instanceof Error ? error.message : String(error);
-    const reason = opts.signal?.aborted ? 'aborted' : /invalid model|model not found|404/i.test(message) ? "route-unavailable"
+    const reason = opts.signal?.aborted ? 'aborted' : controller.signal.aborted ? 'timeout' : /invalid model|model not found|404/i.test(message) ? "route-unavailable"
       : /timeout|aborted/i.test(message) ? "timeout" : "unavailable";
     metrics.skip("span", reason);
     noteHealth("ml.span.skipped", { count: 1, reason, durationMs: ms });
     return { ok: false, ...base, ms, cached: false, skipped: reason };
   } finally {
+    clearTimeout(timer);
     try { finish(succeeded ? 'ok' : opts.signal?.aborted ? 'cancelled' : 'error'); } catch { /* display only */ }
   }
 }
