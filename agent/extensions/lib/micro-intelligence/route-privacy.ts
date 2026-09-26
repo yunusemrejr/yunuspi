@@ -21,8 +21,16 @@ export interface RoutePrivacyVerdict {
   reason: string;
 }
 
-/** Provider ids that serve from this host. Loopback transports only. */
-const LOCAL_PROVIDER_PATTERN = /^(?:lm-?studio|ollama|llama-?cpp|local(?:-.+)?|yunuspi-local)$/i;
+/** A provider label is not transport evidence. Require a literal loopback
+ * address; DNS names and redirects cannot establish on-host privacy. */
+export function isLoopbackModelUrl(value: unknown): boolean {
+  try {
+    if (typeof value !== 'string') return false;
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      && (url.hostname === '127.0.0.1' || url.hostname === '[::1]');
+  } catch { return false; }
+}
 
 /** Parse PI_PRIVATE_ROUTES="provider/model,provider/model" into exact entries. */
 export function parsePrivateRouteAllowlist(value: unknown): Set<string> {
@@ -41,11 +49,12 @@ export function routePrivacyTier(
   provider: unknown,
   model: unknown,
   env: Record<string, string | undefined> = process.env,
+  baseUrl?: string,
 ): RoutePrivacyVerdict {
   const providerText = typeof provider === "string" ? provider.trim() : "";
   const modelText = typeof model === "string" ? model.trim() : "";
-  if (LOCAL_PROVIDER_PATTERN.test(providerText)) {
-    return { tier: "local", reason: "loopback-provider" };
+  if (isLoopbackModelUrl(baseUrl)) {
+    return { tier: "local", reason: "loopback-endpoint" };
   }
   const allowlist = parsePrivateRouteAllowlist(env.PI_PRIVATE_ROUTES);
   const key = `${providerText}/${modelText}`.toLowerCase();
@@ -60,6 +69,7 @@ export function routeSafeForPrivateRepo(
   provider: unknown,
   model: unknown,
   env: Record<string, string | undefined> = process.env,
+  baseUrl?: string,
 ): boolean {
-  return routePrivacyTier(provider, model, env).tier !== "unknown";
+  return routePrivacyTier(provider, model, env, baseUrl).tier !== "unknown";
 }

@@ -106,7 +106,7 @@ test("qual battery scores deterministically and qualifies roles", async () => {
     if (prompt.includes("three colors")) return { text: "red\ngreen\nblue", latencyMs: 10 };
     if (prompt.includes("value of echo")) return { text: "55", latencyMs: 10 };
     if (prompt.includes("refresh token rotation")) return { text: "src/auth/session.ts", latencyMs: 10 };
-    if (prompt.includes("always returns 0")) return { text: "n = +1 assigns instead of adding; use n += 1.", latencyMs: 10 };
+    if (prompt.includes("should count items")) return { text: "n = +1 assigns instead of adding; use n += 1.", latencyMs: 10 };
     if (prompt.includes('"ports"')) return { text: '{"name":"ada","ports":[80,443],"enabled":true}', latencyMs: 10 };
     if (prompt.includes('"tool"')) return { text: '{"tool":"bash","args":{}}', latencyMs: 10 };
     if (prompt.includes('"name":"read"')) return { text: '{"name":"read","arguments":{"path":"src/index.ts","offset":1,"limit":50}}', latencyMs: 10 };
@@ -135,7 +135,7 @@ test("eligibility expires and persists to the private store", async () => {
   const summary = {
     route: "openrouter/mock", at: now, meanScore: 0.9, passRate: 1,
     p95LatencyMs: 10, totalCostUsd: 0, reliability: 1, privacyTier: "unknown", privacyReason: "x",
-    tasks: [{ id: "tool-selection", score: 1, latencyMs: 1, inputTokens: 0, outputTokens: 0, costUsd: 0 }],
+    tasks: labMod.MICRO_WORKER_QUAL_TASKS.map(id => ({ id, score: 1, latencyMs: 1, inputTokens: 0, outputTokens: 0, costUsd: 0 })),
   };
   const entry = store.record(summary, "micro-worker");
   assert.equal(entry.eligible, true);
@@ -146,4 +146,42 @@ test("eligibility expires and persists to the private store", async () => {
   const reopened = labMod.createEligibilityStore({ file, ttlMs: 1000, now: () => now });
   assert.equal(reopened.snapshot().length, 0);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('qualification enforces deadlines and cannot pass from an incomplete battery', async () => {
+  const timedOut = await labMod.runQualBattery('fixture/model', async () => new Promise(() => {}), {
+    tasks: [{ id: 'structured-output', prompt: 'synthetic', maxTokens: 10, timeoutMs: 10, score: () => 1 }],
+  });
+  assert.match(timedOut.tasks[0].error, /timeout/i);
+  const incomplete = await labMod.runQualBattery('fixture/model', async () => ({ text: '{}', latencyMs: 0 }), {
+    tasks: [{ id: 'structured-output', prompt: 'synthetic', maxTokens: 10, timeoutMs: 10, score: () => 1 }],
+  });
+  assert.equal(incomplete.meanScore, 1);
+  assert.equal(labMod.qualifyForRole(incomplete, 'micro-worker').eligible, false);
+  const debug = labMod.qualBattery().find(task => task.id === 'coding-debug');
+  assert.equal(debug.score('Assignment resets the accumulator. Use n++;'), 1);
+  assert.equal(debug.score('Use n += 1 to increment the count.'), 1);
+});
+
+test('persisted qualification rejects malformed or future evidence and exposes independent snapshots', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-qual-invalid-'));
+  const file = path.join(directory, 'eligibility.json'), now = 10_000;
+  const valid = { route: 'fixture/model', role: 'micro-worker', eligible: true, reason: 'battery-pass', meanScore: .9, reliability: 1, privacyTier: 'unknown', at: 9000, expiresAt: 11000 };
+  try {
+    for (const patch of [{ eligible: 'yes' }, { role: 'invented' }, { meanScore: 2 }, { reliability: null }, { at: now + 1 }, { expiresAt: 1e15 }, { reason: null }]) {
+      fs.writeFileSync(file, JSON.stringify({ entries: [{ ...valid, ...patch }] }));
+      assert.equal(labMod.createEligibilityStore({ file, now: () => now }).get(valid.route, 'micro-worker'), undefined, JSON.stringify(patch));
+    }
+    fs.writeFileSync(file, JSON.stringify({ entries: [valid] }));
+    const store = labMod.createEligibilityStore({ file, now: () => now });
+    const first = store.get(valid.route, 'micro-worker'); first.eligible = false; first.meanScore = 0;
+    store.snapshot()[0].eligible = false;
+    assert.equal(store.get(valid.route, 'micro-worker').eligible, true);
+    assert.equal(store.get(valid.route, 'micro-worker').meanScore, .9);
+    let clock = now;
+    const ticking = labMod.createEligibilityStore({ now: () => clock++, ttlMs: 100 });
+    const recorded = ticking.record({ route: valid.route, meanScore: .9, reliability: 1, privacyTier: 'unknown',
+      tasks: labMod.MICRO_WORKER_QUAL_TASKS.map(id => ({ id, score: 1 })) }, 'micro-worker');
+    assert.equal(recorded.expiresAt - recorded.at, 100, 'one timestamp defines the entire eligibility lifetime');
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

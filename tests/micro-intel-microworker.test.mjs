@@ -21,8 +21,10 @@ const { routePrivacyTier, routeSafeForPrivateRepo } = privacyMod;
 const facts = (over = {}) => ({ provider: "openrouter", model: "cheap/free", healthy: true, privateInput: false, pricePerM: .05, quality: .85, ...over });
 
 test("privacy tiers: unknown is never safe for private input", () => {
-  assert.equal(routePrivacyTier("ollama", "qwen").tier, "local");
-  assert.equal(routePrivacyTier("lm-studio", "x").tier, "local");
+  assert.equal(routePrivacyTier("ollama", "qwen", {}, 'http://127.0.0.1:11434').tier, "local");
+  assert.equal(routePrivacyTier("lm-studio", "x", {}, 'http://[::1]:1234').tier, "local");
+  for (const baseUrl of [undefined, 'https://remote.example/v1', 'file:///tmp/model', 'http://127.0.0.1.remote.example', 'http://localhost:1234'])
+    assert.equal(routePrivacyTier('local-example', 'model', {}, baseUrl).tier, 'unknown');
   assert.equal(routePrivacyTier("openrouter", "x/y").tier, "unknown");
   assert.equal(routeSafeForPrivateRepo("openrouter", "x/y"), false);
   assert.equal(routeSafeForPrivateRepo("openrouter", "x/y", { PI_PRIVATE_ROUTES: "openrouter/x/y" }), true);
@@ -42,7 +44,8 @@ test("eligibility gates health, cooldown, price, quality and privacy", () => {
   for (const quality of [NaN, Infinity, -1, 1.1]) assert.equal(microWorkerEligibility(facts({ quality })).reason, 'invalid-quality');
   assert.equal(microWorkerEligibility(facts({ quality: 0.2 })).reason, "quality-floor");
   assert.equal(microWorkerEligibility(facts({ privateInput: true })).reason, "private-input-unsafe-route");
-  assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q" })).eligible, true);
+  assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q", baseUrl: 'http://127.0.0.1:11434' })).eligible, true);
+  assert.equal(microWorkerEligibility(facts({ privateInput: true, provider: "ollama", model: "q", baseUrl: 'https://remote.example/v1' })).reason, 'private-input-unsafe-route');
 });
 
 test("runner validates JSON, enforces budgets, and caches", async () => {

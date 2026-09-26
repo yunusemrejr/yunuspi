@@ -78,9 +78,9 @@ export function qualBattery(): QualTask[] {
     },
     {
       id: "coding-debug",
-      prompt: `This function always returns 0. Say why in one sentence, then give the fixed line. function f(xs){let n=0;for(const x of xs){n=+1;}return n;}`,
+      prompt: `This function should count items but returns 1 for any nonempty input. Say why in one sentence, then give the fixed line. function f(xs){let n=0;for(const x of xs){n=+1;}return n;}`,
       maxTokens: 200, timeoutMs: 45_000,
-      score: mentionsAll("n = +1", "n += 1", "n++", "assigns"),
+      score: (response) => /\bn\s*(?:\+=\s*1|\+\+)/.test(response) && /assign|overwrite|reset|instead of|increment|add/i.test(response) ? 1 : 0,
     },
     {
       id: "repo-navigation",
@@ -154,6 +154,7 @@ export interface QualTaskResult {
 
 export interface QualSummary {
   route: string;
+  endpoint?: string;
   at: number;
   tasks: QualTaskResult[];
   meanScore: number;
@@ -166,6 +167,7 @@ export interface QualSummary {
 }
 
 export const QUAL_PASS_SCORE = 0.6;
+export const MICRO_WORKER_QUAL_TASKS = ['structured-output', 'instruction-fidelity', 'requirement-extraction'] as const;
 
 export async function runQualBattery(
   route: string,
@@ -180,8 +182,16 @@ export async function runQualBattery(
   for (const task of tasks.slice(0, 16)) {
     if (opts.signal?.aborted) break;
     const started = Date.now();
+    const controller = new AbortController();
+    const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+    const timeoutMs = Number.isFinite(task.timeoutMs) ? Math.max(1, Math.min(60_000, task.timeoutMs)) : 30_000;
+    const timer = setTimeout(() => controller.abort(new DOMException('Qualification timeout', 'TimeoutError')), timeoutMs);
+    let onAbort!: () => void;
+    const interrupted = new Promise<never>((_, reject) => { onAbort = () => reject(signal.reason); });
+    signal.addEventListener('abort', onAbort, { once: true });
     try {
-      const answer = await complete({ route, prompt: task.prompt, maxTokens: task.maxTokens, timeoutMs: task.timeoutMs, signal: opts.signal });
+      const answer = await Promise.race([complete({ route, prompt: task.prompt, maxTokens: task.maxTokens, timeoutMs, signal }), interrupted]);
+      signal.throwIfAborted();
       results.push({
         id: task.id,
         score: clamp01(task.score(answer.text ?? "")),
@@ -196,7 +206,7 @@ export async function runQualBattery(
         inputTokens: 0, outputTokens: 0, costUsd: 0,
         error: error instanceof Error ? error.message.slice(0, 120) : "failed",
       });
-    }
+    } finally { clearTimeout(timer); signal.removeEventListener('abort', onAbort); }
   }
   const latencies = [...results.map((row) => row.latencyMs)].sort((a, b) => a - b);
   const passed = results.filter((row) => row.score >= QUAL_PASS_SCORE && !row.error).length;
@@ -221,7 +231,8 @@ export function qualifyForRole(summary: QualSummary, role: QualRole): { eligible
   const score = (id: string): number => byId.get(id)?.score ?? 0;
   switch (role) {
     case "micro-worker":
-      return summary.meanScore >= 0.6 && summary.reliability >= 0.8
+      return MICRO_WORKER_QUAL_TASKS.every(id => score(id) >= 0.6 && !byId.get(id)?.error)
+        && summary.meanScore >= 0.6 && summary.reliability >= 0.8
         ? { eligible: true, reason: "battery-pass" } : { eligible: false, reason: "below-bar" };
     case "skill-router":
       return score("tool-selection") >= 0.6 && score("instruction-fidelity") >= 0.6 && summary.reliability >= 0.8
@@ -245,6 +256,7 @@ export function qualifyForRole(summary: QualSummary, role: QualRole): { eligible
 
 export interface EligibilityEntry {
   route: string;
+  endpoint?: string;
   role: QualRole;
   eligible: boolean;
   reason: string;
@@ -273,13 +285,21 @@ export function createEligibilityStore(opts: { ttlMs?: number; file?: string; no
   const file = opts.file;
   const entries = new Map<string, EligibilityEntry>();
   const keyOf = (route: string, role: QualRole): string => `${role}/${route}`;
+  const validEntry = (entry: any): entry is EligibilityEntry => Boolean(entry) && typeof entry.route === 'string' && entry.route.length <= 256 && entry.route.includes('/')
+    && (entry.endpoint === undefined || typeof entry.endpoint === 'string' && entry.endpoint.length <= 2048)
+    && QUAL_ROLES.includes(entry.role) && typeof entry.eligible === 'boolean' && typeof entry.reason === 'string' && entry.reason.length <= 120
+    && typeof entry.meanScore === 'number' && Number.isFinite(entry.meanScore) && entry.meanScore >= 0 && entry.meanScore <= 1
+    && typeof entry.reliability === 'number' && Number.isFinite(entry.reliability) && entry.reliability >= 0 && entry.reliability <= 1
+    && ['unknown', 'local', 'allowed'].includes(entry.privacyTier)
+    && Number.isSafeInteger(entry.at) && entry.at >= 0 && entry.at <= now()
+    && Number.isSafeInteger(entry.expiresAt) && entry.expiresAt > entry.at && entry.expiresAt <= entry.at + ttlMs;
   const load = (): void => {
     if (!file) return;
     try {
       const raw = JSON.parse(readFileSync(file, "utf8")) as { entries?: EligibilityEntry[] };
       if (!Array.isArray(raw.entries)) return;
       for (const entry of raw.entries.slice(0, 256)) {
-        if (entry && typeof entry.route === "string" && typeof entry.role === "string" && Number.isFinite(entry.expiresAt)) {
+        if (validEntry(entry)) {
           entries.set(keyOf(entry.route, entry.role as QualRole), entry);
         }
       }
@@ -290,9 +310,9 @@ export function createEligibilityStore(opts: { ttlMs?: number; file?: string; no
   const persist = (): void => {
     if (!file) return;
     try {
-      mkdirSync(join(file, ".."), { recursive: true });
+      mkdirSync(join(file, ".."), { recursive: true, mode: 0o700 });
       const tmp = `${file}.${randomUUID()}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ entries: [...entries.values()].slice(0, 256) }));
+      writeFileSync(tmp, JSON.stringify({ entries: [...entries.values()].slice(-256) }), { mode: 0o600, flag: 'wx' });
       renameSync(tmp, file);
     } catch {
       /* Persistence is best-effort; memory still serves this session. */
@@ -300,32 +320,36 @@ export function createEligibilityStore(opts: { ttlMs?: number; file?: string; no
   };
   load();
   const fresh = (entry: EligibilityEntry | undefined): EligibilityEntry | undefined =>
-    entry && entry.expiresAt > now() ? entry : undefined;
+    validEntry(entry) && entry.expiresAt > now() ? entry : undefined;
   return {
     record(summary, role) {
       const verdict = qualifyForRole(summary, role);
+      const at = now();
       const entry: EligibilityEntry = {
         route: summary.route,
+        ...(summary.endpoint ? { endpoint: summary.endpoint } : {}),
         role,
         eligible: verdict.eligible,
         reason: verdict.reason,
         meanScore: summary.meanScore,
         reliability: summary.reliability,
         privacyTier: summary.privacyTier,
-        at: now(),
-        expiresAt: now() + ttlMs,
+        at,
+        expiresAt: at + ttlMs,
       };
+      if (!validEntry(entry)) throw Error('Invalid qualification evidence');
       entries.set(keyOf(summary.route, role), entry);
+      if (entries.size > 256) entries.delete(entries.keys().next().value!);
       persist();
-      return entry;
+      return structuredClone(entry);
     },
     get(route, role) {
       const entry = fresh(entries.get(keyOf(route, role)));
       if (!entry) entries.delete(keyOf(route, role));
-      return entry;
+      return entry ? structuredClone(entry) : undefined;
     },
     snapshot() {
-      return [...entries.values()].filter((entry) => entry.expiresAt > now());
+      return [...entries.values()].filter(entry => fresh(entry)).map(entry => structuredClone(entry));
     },
     clear() {
       entries.clear();

@@ -14,6 +14,7 @@ import {
 } from "./lib/micro-intelligence/advisory.ts";
 import { microMetrics, resetMicroMetrics } from "./lib/micro-intelligence/metrics.ts";
 import { microStatusSnapshot } from "./lib/micro-intelligence/status.ts";
+import { registerMicroTask } from "./lib/micro-intelligence/micro-task.ts";
 import {
   createSpanTrace,
   openRouterSpanScorer,
@@ -87,6 +88,7 @@ export interface MicroRequestState {
 interface MicroDependencies {
   warmup: typeof needleWarmup;
   completePromptAnalysis?: (model: any, context: any, options: any) => Promise<any>;
+  scoreSpan?: typeof scoreSpanTrace;
 }
 
 interface PendingPromptAnalysis {
@@ -422,6 +424,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
   let activeSessionId = "";
   let activeOwnerId = "";
   let sessionController = new AbortController();
+  registerMicroTask(pi, { sessionSignal: () => sessionController.signal });
   let initialPromptSeen = false;
   /** Prior-task summary restored from the transcript on resume, so the first
    * post-resume prompt is classified with real context. */
@@ -532,6 +535,8 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
     lastRequest = undefined;
     try { spanCollector.clear(); } catch { /* hygiene only */ }
     lastSpan = undefined;
+    spanFlight = undefined;
+    spanLastAt = 0;
     const resumed = reason === "new" ? { seen: false } : priorPromptAnalysisState(ctx);
     initialPromptSeen = resumed.seen;
     resumedAnalysisContext = resumed.previous;
@@ -577,16 +582,19 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       if (!spanEnabled() || spanFlight || Date.now() - spanLastAt < SPAN_MIN_INTERVAL_MS) return;
       if (spanCollector.trace.events.length < 3) return;
       const trace = { events: [...spanCollector.trace.events] };
+      const epoch = generation, sessionSignal = sessionController.signal;
       spanLastAt = Date.now();
-      spanFlight = (async () => {
+      const flight = Promise.resolve().then(async () => {
         try {
-          lastSpan = await scoreSpanTrace(trace, openRouterSpanScorer(), { pi });
+          const result = await (deps.scoreSpan ?? scoreSpanTrace)(trace, openRouterSpanScorer(), { pi, signal: sessionSignal });
+          if (generation === epoch && !sessionSignal.aborted) lastSpan = result;
         } catch {
           /* Scoring failures degrade to no signal. */
         } finally {
-          spanFlight = undefined;
+          if (spanFlight === flight) spanFlight = undefined;
         }
-      })();
+      });
+      spanFlight = flight;
     } catch {
       /* Scoring never affects the turn. */
     }

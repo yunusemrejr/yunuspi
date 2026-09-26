@@ -44,6 +44,10 @@ export type MicroWorkerKind =
 export interface MicroWorkerFacts {
   provider: string;
   model: string;
+  baseUrl?: string;
+  /** The adapter verified this exact model and endpoint is the user's current
+   * session recipient. Recheck against the effective wire route after auth. */
+  sessionSelected?: boolean;
   /** Known prompt price USD per 1M tokens; undefined means unknown. */
   pricePerM?: number;
   /** Quality score 0..1 from benchmarks/qual-lab; undefined means unknown. */
@@ -138,7 +142,7 @@ export function microWorkerEligibility(
 ): MicroWorkerEligibility {
   if (!facts.healthy) return { eligible: false, reason: "unhealthy" };
   if (facts.cooldownUntil !== undefined && now < facts.cooldownUntil) return { eligible: false, reason: "cooldown" };
-  if (facts.privateInput && routePrivacyTier(facts.provider, facts.model, env).tier === "unknown") {
+  if (facts.privateInput && !facts.sessionSelected && routePrivacyTier(facts.provider, facts.model, env, facts.baseUrl).tier === "unknown") {
     return { eligible: false, reason: "private-input-unsafe-route" };
   }
   if (facts.pricePerM === undefined) return { eligible: false, reason: 'unknown-price' };
@@ -186,8 +190,8 @@ export function clearMicroWorkerCache(): void {
   workerCache.clear();
 }
 
-const cacheKey = (kind: string, input: string, route: string): string =>
-  createHash("sha256").update(JSON.stringify([kind, input, route])).digest("hex");
+const cacheKey = (kind: string, input: string, route: string, endpoint?: string): string =>
+  createHash("sha256").update(JSON.stringify([kind, input, route, endpoint])).digest("hex");
 
 export async function runMicroWorker(
   kind: MicroWorkerKind,
@@ -228,7 +232,7 @@ export async function runMicroWorker(
   }
   const route = `${opts.facts.provider}/${opts.facts.model}`;
   const bounded = input.slice(0, MICRO_WORKER_MAX_INPUT_CHARS);
-  const key = cacheKey(kind, bounded, route);
+  const key = cacheKey(kind, bounded, route, opts.facts.baseUrl);
   const cached = workerCache.get(key);
   if (cached && now() - cached.at < MICRO_WORKER_CACHE_TTL_MS) {
     metrics.run("microworker", 0, bounded.length);

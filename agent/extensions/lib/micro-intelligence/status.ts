@@ -125,12 +125,12 @@ export function microStatusSnapshot(request?: {
     },
     {
       layer: "microworker",
-      status: !worker.enabled ? "disabled" : worker.candidates.length ? "ready" : "unavailable",
-      detail: worker.candidates.length ? `${worker.candidates.length} candidate routes` : "no candidate routes configured",
+      status: !worker.enabled ? "disabled" : "on-demand",
+      detail: worker.candidates.length ? `micro_task · ${worker.candidates.length} configured routes; measured admission` : "micro_task · native registry/current route; measured admission",
     },
     {
       layer: "rerank",
-      status: !rerank.enabled ? "disabled" : rerank.model ? "ready" : "unavailable",
+      status: !rerank.enabled ? "disabled" : !rerank.model ? "unavailable" : !rerank.key ? "no-key" : "ready",
       detail: rerank.model ?? "unconfigured; Needle stays the default",
     },
   ];

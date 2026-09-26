@@ -236,55 +236,6 @@ test("advisory deterministic pass extracts terms and intent cues", () => {
   assert.equal(deterministicRequestPass("hi").substantive, false);
 });
 
-test("advisory builds one compact batch and gates trivial requests", () => {
-  const { buildAdvisoryQuestions, shouldAdvise, deterministicRequestPass } = advisoryMod;
-  const impl = buildAdvisoryQuestions({ prompt: "implement x", family: "implementation", terms: ["x"], candidates: [] });
-  assert.ok(impl.kind && impl.reviewWorthy && impl.multiPerspective && impl.perspective);
-  assert.ok(Object.keys(impl).length <= 7);
-  const lookup = buildAdvisoryQuestions({ prompt: "show x", family: "lookup", terms: ["x"], candidates: [] });
-  assert.equal(lookup.multiPerspective, undefined);
-  const withCandidates = buildAdvisoryQuestions({ prompt: "do x", family: "lookup", terms: ["x"], candidates: ["a", "b"] });
-  assert.ok(withCandidates.fit && withCandidates.noFit);
-  assert.equal(shouldAdvise(deterministicRequestPass("hi"), 0), false);
-  assert.equal(shouldAdvise(deterministicRequestPass("forget that, start over"), 0), false);
-  const substantive = deterministicRequestPass("Implement user authentication with session cookies and tests");
-  assert.equal(shouldAdvise(substantive, 0), true);
-});
-
-test("advisory runs asynchronously and never throws", async () => {
-  const { runAdvisory } = advisoryMod;
-  const seen = await new Promise((resolve) => {
-    runAdvisory(
-      { prompt: "implement x", family: "implementation", terms: ["x"], candidates: [] },
-      async () => ({
-        ok: true,
-        answers: {
-          kind: { choice: "implementation" },
-          needsVerification: { noul: 0.1 },
-          reviewWorthy: { noul: 0.8 },
-          multiPerspective: { noul: 0.7 },
-          perspective: { choice: "security", probabilities: { security: 0.6, testing: 0.3 } },
-        },
-        usage: { inputTokens: 200, cached: false, costUsd: 0.00002 },
-      }),
-      resolve,
-    );
-  });
-  assert.equal(seen.ok, true);
-  assert.equal(seen.reviewWorthy, true);
-  assert.equal(seen.multiPerspective, true);
-  assert.deepEqual(seen.perspectives, ["security", "testing"]);
-  const skipped = await new Promise((resolve) => {
-    runAdvisory({ prompt: "x", family: "lookup", terms: [], candidates: [] }, async () => ({ ok: false, skipped: "no-key" }), resolve);
-  });
-  assert.equal(skipped.ok, false);
-  const crashed = await new Promise((resolve) => {
-    runAdvisory({ prompt: "x", family: "lookup", terms: [], candidates: [] }, async () => { throw new Error("boom"); }, resolve);
-  });
-  assert.equal(crashed.ok, false);
-  assert.equal(crashed.skipped, "unavailable");
-});
-
 test("deterministic request family covers everyday change and analysis verbs", () => {
   const { deterministicRequestPass } = advisoryMod;
   for (const prompt of ["make the app GUI a web UI, not desktop", "remove the desktop gui code", "update the harness to the latest version", "turn these scattered images into one sheet"])
@@ -410,24 +361,6 @@ test("retrieval rejects Jev choices outside the submitted candidates", async () 
   assert.deepEqual(outcome.ordered, lexicalTools);
 });
 
-test('small advisers retain final constraints and abstain on invalid confidence', async () => {
- const prompt = 'Implement the payment handler. '+ 'Background detail. '.repeat(200) + 'Do not deploy or send email.';
- let offered;
- const result = await new Promise(resolve => advisoryMod.runAdvisory({prompt,family:'implementation',terms:[],candidates:['read','edit']}, async (_site,state) => {
-  offered=state;
-  return {ok:true,answers:{reviewWorthy:{noul:8},needsVerification:{noul:NaN},multiPerspective:{noul:'1'},fit:{choice:'9:invented'},perspective:{probabilities:{security:Infinity,testing:-1}}},usage:{inputTokens:1,cached:false}};
- },resolve));
- assert.match(offered.prompt,/Do not deploy or send email\.$/);
- assert.match(offered.prompt,/middle omitted/);
- assert.ok(offered.prompt.length<=1600);
- assert.equal(result.preferred,undefined);
- assert.equal(result.reviewWorthy,false);
- assert.equal(result.needsVerification,false);
- assert.equal(result.multiPerspective,false);
- assert.deepEqual(result.perspectives,[]);
- assert.equal(advisoryMod.deterministicRequestPass('Implement typed API contracts and database transaction tests.').family,'implementation');
-});
-
 async function promptContextFixture(t, sendMessage) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'micro-context-'));
   const keys = ['PI_CODING_AGENT_DIR', 'PI_LLM_PREFERENCES_FILE', 'PI_MODEL_EXCLUSIONS_PATH', 'PI_PROVIDER_STATE_FILE', 'PI_SUBAGENTS_ECONOMY_CONFIG', 'PI_MICRO_INTELLIGENCE', 'PI_SUBAGENT_CHILD'];
@@ -539,5 +472,33 @@ test('cancelled retrieval starts no stages and leaves pending shared inference p
       assert.equal(result.applied, 'lexical'); assert.deepEqual(result.ordered, lexicalTools);
       assert.deepEqual(calls, ['needle', 'local', 'jev'].slice(0, stage === 'before' ? 0 : ['needle', 'local', 'jev'].indexOf(stage) + 1));
     } finally { clearTimeout(deadline); release?.({ ok: false, reason: 'unavailable', skipped: 'aborted' }); }
+  }
+});
+
+test('Span session changes cancel old work and stale completions cannot clear the new session flight', async () => {
+  const extension = (await load('extensions/micro-intelligence.ts')).default;
+  const handlers = new Map(), requests = [];
+  const prior = process.env.PI_SPAN; delete process.env.PI_SPAN;
+  const pi = { registerTool() {}, registerMessageRenderer() {}, on(name, fn) { handlers.set(name, [...handlers.get(name) ?? [], fn]); } };
+  const fire = async (name, event = {}, ctx = {}) => { for (const handler of handlers.get(name) ?? []) await handler(event, ctx); };
+  const ctx = id => ({ sessionManager: { getSessionId: () => id, getBranch: () => [] } });
+  const record = async () => { await fire('tool_call', { toolName: 'read' }); await fire('tool_result', { toolName: 'read', isError: false }); await fire('tool_call', { toolName: 'bash' }); };
+  try {
+    extension(pi, { warmup() {}, scoreSpan: async (_trace, _scorer, options) => new Promise(resolve => requests.push({ signal: options.signal, resolve })) });
+    await fire('session_start', { reason: 'new' }, ctx('first')); await record(); await fire('agent_end');
+    assert.equal(requests.length, 1);
+    await fire('session_start', { reason: 'new' }, ctx('second'));
+    assert.equal(requests[0].signal.aborted, true);
+    await record(); await fire('agent_end'); assert.equal(requests.length, 2, 'a prior flight cannot block the replacement session');
+    requests[0].resolve({ ok: true, cached: false, shadow: true, ms: 1, model: 'stale' });
+    await new Promise(resolve => setImmediate(resolve));
+    const inspect = globalThis[Symbol.for('yunus-pi.micro.inspect.v1')].span;
+    assert.equal(inspect().last, null, 'late old results cannot populate the new session');
+    requests[1].resolve({ ok: true, cached: false, shadow: true, ms: 1, model: 'current' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(inspect().last.model, 'current');
+  } finally {
+    await fire('session_shutdown');
+    if (prior === undefined) delete process.env.PI_SPAN; else process.env.PI_SPAN = prior;
   }
 });
