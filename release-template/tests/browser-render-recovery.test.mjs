@@ -125,7 +125,7 @@ test("local HTML fragments reach the page while literal hashes and asset confine
   const dir = path.join(scratch, "site"); fs.mkdirSync(dir);
   const source = path.join(dir, "index.html");
   const literal = path.join(dir, "index.html#literal.html");
-  fs.writeFileSync(source, `<!doctype html><title>Fixture</title><h1 id="route">Pending</h1><script>document.querySelector('#route').textContent=location.hash==='#v=sources'?'Sources route':'Unexpected route'</script><script src="/linked.js"></script>`);
+  fs.writeFileSync(source, `<!doctype html><title>Fixture</title><h1 id="route">Pending</h1><script>document.querySelector('#route').textContent=location.hash==='#v=sources'?(location.search==='?state=idle'?'Idle sources route':'Sources route'):'Unexpected route'</script><script src="/linked.js"></script>`);
   fs.writeFileSync(literal, "<!doctype html><h1>Literal hash filename</h1>");
   fs.writeFileSync(path.join(scratch, "outside.js"), "document.title='OUTSIDE_ASSET_EXECUTED';");
   fs.symlinkSync(path.join(scratch, "outside.js"), path.join(dir, "linked.js"));
@@ -141,6 +141,10 @@ test("local HTML fragments reach the page while literal hashes and asset confine
     assert.match(JSON.stringify(exact.pageState.items), /Literal hash filename/);
     assert.equal(exact.conditions.fragmentApplied, undefined);
     await assert.rejects(resolveLocalRenderSource(path.join(dir, "missing.html#v=sources")), { code: "ENOENT" });
+    // Recorded 2026-09-26: `preview.html?state=idle` failed with a raw ENOENT; pages read their query too.
+    assert.deepEqual(await resolveLocalRenderSource(source + "?state=idle#v=sources"), { target: source, fragment: "?state=idle#v=sources" });
+    const queried = await renderCapture({ source: source + "?state=idle#v=sources", output: "text" }, path.join(scratch, "query.png"));
+    assert.match(JSON.stringify(queried.pageState.items), /Idle sources route/);
   } catch (error) { unavailableBrowser(t, error); } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 });
 
@@ -298,6 +302,6 @@ test("common argument aliases and bare expressions reach the browser and rendere
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "render-path-"));
   const file = path.join(cwd, "page one.html");
   assert.equal(localRenderPath("/elsewhere", pathToFileURL(file).href + "#hero"), file + "#hero", "file URLs decode instead of joining the cwd");
-  assert.equal(localRenderPath("/elsewhere", pathToFileURL(file).href + "?v=2"), file);
+  assert.equal(localRenderPath("/elsewhere", pathToFileURL(file).href + "?v=2#hero"), file + "?v=2#hero", "the page keeps its query");
   assert.equal(localRenderPath(cwd, "@page one.html"), file);
 });

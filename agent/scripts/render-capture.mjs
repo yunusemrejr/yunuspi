@@ -11,12 +11,13 @@ const require = createRequire(new URL("../npm/package.json", import.meta.url));
 const { chromium } = require("playwright");
 const exec = promisify(execFile);
 export async function resolveLocalRenderSource(source) {
-  // A literal '#' in an existing filename wins. Only a missing HTML path is
-  // interpreted as a route fragment; the filesystem and asset boundary never
-  // include that fragment, which belongs exclusively to the browser URL.
+  // A literal '?' or '#' in an existing filename wins. Only a missing HTML
+  // path is interpreted as a page query and/or route fragment (pages read
+  // ?state=… and #route); the filesystem and asset boundary never include
+  // that suffix, which belongs exclusively to the browser URL.
   try { return { target: await fs.realpath(source), fragment: "" }; }
   catch (error) {
-    const hash = source.indexOf("#");
+    const hash = source.search(/[?#]/);
     if (error.code !== "ENOENT" || hash < 0 || !/\.html?$/i.test(source.slice(0, hash))) throw error;
     const fragment = source.slice(hash);
     if (fragment.length > 8192) throw Error("Local HTML route fragment exceeds 8192 characters");

@@ -79,13 +79,12 @@ export async function qaFolder(value: unknown, cwd: string, area: string, prefix
 
 /** A local render source as a filesystem path. A `file:` URL is decoded
  * (measured: `file:///…/fixture.html#idle` was joined onto the cwd); its
- * fragment stays a route, and a query string is dropped because no server
- * reads it. */
+ * query and fragment stay on the page URL, where scripts read them. */
 export function localRenderPath(cwd: string, source: string): string {
   if (/^file:/i.test(source)) {
-    const url = new URL(source), hash = url.hash;
+    const url = new URL(source), suffix = url.search + url.hash;
     url.hash = ""; url.search = "";
-    return fileURLToPath(url) + hash;
+    return fileURLToPath(url) + suffix;
   }
   return path.resolve(cwd, source.replace(/^@/, ""));
 }
@@ -94,7 +93,7 @@ export function localRenderPath(cwd: string, source: string): string {
 export async function sourceRevision(source: string, cwd: string): Promise<string> {
   if (/^https?:\/\//i.test(source)) return "live";
   try {
-    const file = localRenderPath(cwd, source).replace(/#.*$/, "");
+    const file = localRenderPath(cwd, source).replace(/[?#].*$/, "");
     const stat = await fs.stat(file);
     if (!stat.isFile() || stat.size > 40 * 1024 * 1024) return `unhashed-${stat.size}`;
     return createHash("sha256").update(await fs.readFile(file)).digest("hex").slice(0, 16);
