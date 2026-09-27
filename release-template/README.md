@@ -4,17 +4,17 @@
   <img src="docs/assets/rat.gif" alt="Animated ASCII rat mascot from the YunusPi startup header" width="434">
 </p>
 
-**An independently maintained coding agent and Pi-derived core, with tools, skills, project memory and a layered intelligence stack.**
+**An independently maintained coding agent: one session, one decision stream, with a layered intelligence stack behind it.**
 
-YunusPi owns its core and provides code inspection, browser and media tools, project memory, subagents, quality checks and runtime fixes. You bring your own model provider and credentials. The agent starts with a core tool set and can discover specialized capabilities as the task develops.
+YunusPi is a full agent harness built on its own owned core, an independent lineage historically derived from Pi 0.85.1. You bring your own model provider and credentials; the harness supplies everything around the model: a large tool and skill collection that stays out of context until discovered, persistent project memory, bounded subagents for parallel work, and an advisory layer — a session observer, a timing reviewer, expert-domain guidance, scope councils, and an optional Double mode that reconciles two independent streams of your model into one decision. Safety hooks, quality reviews and unified cost accounting watch every turn, and every helper's findings return as evidence with explicit gaps: the main agent verifies, decides and owns the changes.
 
-The aim is practical: help the agent reuse what the harness already provides, spend less context on irrelevant instructions, and keep control over how it solves the task.
+The aim is practical: spend context on the task instead of on instructions, reuse what the harness already proved, and keep one agent clearly responsible for the outcome.
 
 [Install](docs/INSTALL.md) · [Capability inventory](docs/CAPABILITIES.md) · [Platform support](docs/PLATFORMS.md) · [Tools, skills and reminders](docs/GUIDANCE-AND-DIAGNOSTICS.md) · [Model routing](docs/MODEL-ROUTING.md) · [Release/versioning](docs/PUBLISHING.md) · [Security](docs/SECURITY.md)
 
 Pi 0.85.1 is the historical origin; YunusPi Core starts its own lineage at 0.1.0. Installation builds repository-owned source, and updates accept only explicitly selected YunusPi source. Use `yunuspi --core-info` to inspect the active identity. [Core ownership](docs/CORE-OWNERSHIP.md) · [Manual upstream ports](UPSTREAM-PORTING.md)
 
-Sessions combine an independent observer, timing reviewer, expert-domain guidance, project memory, local inference and bounded remote helpers. Design, browser, desktop, media and coding tools share evidence and lifecycle controls; the capability index exposes their entry points when needed. [What changed](CHANGELOG.md) · [Intelligence architecture](docs/MICRO-INTELLIGENCE.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
+Sessions combine an independent observer, timing reviewer, expert-domain guidance, project memory, local inference, bounded remote helpers and optional Double reasoning. Design, browser, desktop, media and coding tools share evidence and lifecycle controls; the capability index exposes their entry points when needed. [What changed](CHANGELOG.md) · [Intelligence architecture](docs/MICRO-INTELLIGENCE.md) · [Session observer](docs/SESSION-OBSERVER.md) · [Session coordination](docs/ACTION-PLANS.md)
 
 ## How a session works
 
@@ -65,7 +65,7 @@ The capability index explains entry points, supported options, related abilities
 | Keep code clean | Clone and DRY detection, code-slop and prose checks, complexity, pre-commit review and blame, and a commit guard for secrets and conflict markers. [Code quality](docs/CODE-QUALITY.md) |
 | Build from a design | Mockup and screenshot analysis into bands, blocks, palette, type scale and tokens; asset cutting and SVG tracing; rendered visual comparison against the reference. [Design studio](docs/DESIGN-STUDIO.md) |
 | Remember a project | Persistent project intelligence, dependency graphs, historical decisions, checkpoints and retrievable memory. [Project intelligence](docs/PROJECT-INTELLIGENCE.md) |
-| Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) |
+| Share work | Bounded subagents, parallel tasks, swarms for separate investigations, fusion for comparing approaches, Double mode for two-stream reconciled reasoning, and failure recovery. [Routing and assistance](docs/MODEL-ROUTING.md) · [Reviews and councils](docs/REVIEWS-AND-COUNCILS.md) |
 | Manage longer tasks | Background jobs, dependency-aware action plans and verification records. [Action plans](docs/ACTION-PLANS.md) |
 | Work with the web | Search, source-ranked research, rendered-page reading, isolated browser tabs, DOM references, screenshots, console JavaScript, condition waits, forms and human verification help. Both browser tools support localhost previews. [Browser workflows](docs/ISOLATION-AND-WEB.md) |
 | Drive desktop apps | Launch Electron, GTK, Qt or X11 apps in a private virtual display; screenshots, window geometry, pointer and keyboard input, logs. Linux with Xvfb and xdotool. [Desktop sessions](docs/DESKTOP-SESSIONS.md) |
