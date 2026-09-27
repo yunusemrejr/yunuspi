@@ -1501,6 +1501,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/design-studio.ts`](../agent/extensions/lib/design-studio.ts)
 - [`agent/extensions/lib/desktop-session.ts`](../agent/extensions/lib/desktop-session.ts)
 - [`agent/extensions/lib/diagnostic-provenance.ts`](../agent/extensions/lib/diagnostic-provenance.ts)
+- [`agent/extensions/lib/double.ts`](../agent/extensions/lib/double.ts)
 - [`agent/extensions/lib/effort-policy.mjs`](../agent/extensions/lib/effort-policy.mjs)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
 - [`agent/extensions/lib/expert-brief.ts`](../agent/extensions/lib/expert-brief.ts)
