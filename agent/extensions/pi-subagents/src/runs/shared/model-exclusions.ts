@@ -96,9 +96,27 @@ function readExclusions(file: string): { exists: boolean; entries: ModelExclusio
 	return { exists: true, entries: data.exclusions };
 }
 
+const DURABLE_MODEL_FAILURE = /quota|billing|credit|usage\s*limit|auth(?:entication)?|unauthori[sz]ed|forbidden|api key|token expired|invalid key|disabled|not found|unknown model|model\b.*\bunavailable/i;
+const TRANSIENT_MODEL_FAILURE = /rate\s*limit|too many requests|\b429\b|overloaded|service unavailable|temporar(?:ily)? unavailable|provider\b.*\bunavailable|connection|fetch failed|network error|socket hang up|stream ended|upstream|timed? ?out|\b50[0234]\b|internal server error|cold.?start|empty response|no output/i;
+const TRANSIENT_EXCLUSION_MS = 15 * 60_000;
+
+/** A transient failure excludes a route for its stated wait (provider-gate
+ * cooldowns, Retry-After) or 15 minutes, never the 24h default reserved for
+ * account/catalog failures: 2026-09-27 a 595s provider-gate cooldown became a
+ * day-long exclusion that failed every explicit same-route child (/double). */
+export function transientExclusionTtlMs(error: string | undefined): number | undefined {
+	if (!error || DURABLE_MODEL_FAILURE.test(error) || !TRANSIENT_MODEL_FAILURE.test(error)) return undefined;
+	const stated = /\((\d+)s; state: provider-health\.json\)/.exec(error)?.[1] ?? /retry[- ]after[:\s]+(\d+)\s*(?:s\b|sec|seconds?\b|$)/i.exec(error)?.[1];
+	const statedMs = stated ? Number(stated) * 1000 : NaN;
+	return Number.isFinite(statedMs) && statedMs > 0 ? Math.min(TRANSIENT_EXCLUSION_MS, Math.max(30_000, statedMs)) : TRANSIENT_EXCLUSION_MS;
+}
+
 function normalizeExclusions(items: ModelExclusion[]): ModelExclusion[] {
 	const now = Date.now();
-	const current = items.filter(entry => entry.expiresAt > now && !isLocalModelResolutionFailure(entry.reason)).map(entry => ({ ...entry }));
+	// Stores written before transient TTLs existed heal on load.
+	const current = items
+		.map(entry => { const ttl = transientExclusionTtlMs(entry.reason); return ttl && entry.expiresAt > entry.recordedAt + ttl ? { ...entry, expiresAt: entry.recordedAt + ttl } : { ...entry }; })
+		.filter(entry => entry.expiresAt > now && !isLocalModelResolutionFailure(entry.reason));
 	if (loadedTTLCeilingMs !== undefined) shortenExclusionsToTTL(current, loadedTTLCeilingMs, now);
 	return deduplicate(current);
 }

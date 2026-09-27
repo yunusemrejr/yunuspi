@@ -139,6 +139,11 @@ test('todo recovers only unambiguous batch operations that omit their action bef
  assert.equal(prepareTodoArguments({action:'update',status:'completed',taskId:'2'}).id,2);
  assert.equal(prepareTodoArguments({action:'batch',operations:[{taskId:4,status:'completed'}]}).operations[0].action,'update');
  const both={action:'update',id:5,taskId:9};assert.equal(prepareTodoArguments(both),both,'an explicit id is never replaced by taskId');
+ // Recorded 2026-09-24 (four turns): a single top-level create/update without its action.
+ const topCreate=prepareTodoArguments({subject:'Audit UI',acceptance:'Inventory with file:line refs',activeForm:'Auditing UI'});
+ assert.equal(topCreate.action,'create');assert.equal(valid(topCreate),true);
+ assert.equal(prepareTodoArguments({taskId:3,status:'completed',evidence:'Tests green.'}).action,'update');
+ const bare={status:'completed'};assert.equal(prepareTodoArguments(bare),bare,'nothing is inferred without an id or subject');
 });
 
 test('subagent recovers tasks and chain sent as JSON strings',async()=>{

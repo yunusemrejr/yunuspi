@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.6 — 2026-09-28
+
+**`/double` streams no longer fail on a stale model exclusion.** A 595-second provider-gate cooldown was recorded as a 24-hour model exclusion, so every explicit same-route `/double` stream failed for a day. Transient failures (rate limits, 429, 5xx, timeouts, connection errors, provider cooldowns) now exclude a route only for their stated wait, clamped between 30 seconds and 15 minutes. Durable failures (auth, quota, unknown model) keep 24 hours. Stores written before this release heal on load.
+
+**Browser handle recovery in one call.** An `unknown-session` rejection now lists the open session handles and aliases, so the agent retries with a valid handle instead of spending a turn on a separate list call.
+
+**Todo calls without an `action` are inferred.** A top-level todo call with a subject becomes a create and one with a positive task id becomes an update, matching what batch operations already did. Calls that match neither are still rejected.
+
 ## 0.13.5 — 2026-09-28
 
 **Jev/Kev review triage now defers routine reviews.** Before each Watchmaker or Observer review, a cheap Jev/Kev call (about $0.0001) asks whether anything new needs attention. In the last five days it ran 368 times for the Watchmaker and deferred nothing, while 440 of about 740 paid Watchmaker reviews returned no advice. Probing the live judge showed it separates the cases well. Routine progress scored worthwhile about 0.2 and routine about 0.75. Time sinks, repeated rereads, stalls and scope drift scored worthwhile 0.33 or more and routine 0.45 or less. The generic 0.2/0.8 acceptance bars sat outside that range. Admission now has its own bars: it defers when worthwhile is at most 0.3 and routine at least 0.7. A deferral postpones only one review, and the next review is always a full one. Tool errors, Guardian interventions and completion claims still bypass triage entirely.

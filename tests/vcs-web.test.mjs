@@ -462,7 +462,9 @@ test(
       const saved = shot.details.output;
       await call({ action: "close", session: one });
       assert.equal(fs.existsSync(saved), false);
-      assert.equal((await call({ action: "snapshot", session: one })).details.failure.kind, "unknown-session");
+      const stale = (await call({ action: "snapshot", session: one })).details;
+      assert.equal(stale.failure.kind, "unknown-session");
+      assert.deepEqual(stale.open, [two], "the reply names the live handle so recovery needs no list call");
       const controller = new AbortController();
       const pending = call(
         { action: "click", session: two, selector: "#missing" },

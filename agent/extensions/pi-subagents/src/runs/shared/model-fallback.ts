@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { clampSupportedThinkingLevel, splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo } from "../../shared/model-info.ts";
 import type { Usage } from "../../shared/types.ts";
 import { getAgentDir } from "../../shared/utils.ts";
-import { filterFallbackCandidates, findModelExclusion, parseModelKey, recordModelFailure } from "./model-exclusions.ts";
+import { filterFallbackCandidates, findModelExclusion, parseModelKey, recordModelFailure, transientExclusionTtlMs } from "./model-exclusions.ts";
+export { transientExclusionTtlMs };
 import { isLocalModelResolutionFailure } from "./local-model-failure.ts";
 import { checkModelScope, type ModelScopeCheckRule, type ModelScopeViolation, type ModelSource } from "./model-scope.ts";
 import { redactSecretValues } from "./permissions.ts";
@@ -1318,8 +1319,10 @@ export function recordRetryableModelFailure(model: string | undefined, error: st
 		return;
 	}
 	const { provider, modelId } = parseModelKey(model);
-	recordModelFailure({ modelId, reason: error, ...(provider ? { provider } : {}) });
+	const ttlMs = transientExclusionTtlMs(error);
+	recordModelFailure({ modelId, reason: error, ...(provider ? { provider } : {}), ...(ttlMs ? { ttlMs } : {}) });
 }
+
 
 const NOT_FOUND_FAILURE = /not found|unknown model/i;
 

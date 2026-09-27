@@ -265,8 +265,11 @@ export function registerBrowserSession(pi: any) {
         ...(details.ok === false ? { isError: true } : {}),
         };
       };
-      const rejected = (kind: string, nextStep: string) => reply({ ok: false, failure: { stage: "validation", kind, outcome: "not-dispatched", nextStep } });
-      const unknownSession = () => rejected("unknown-session", "No action was dispatched. Use a session UUID or alias returned by open in this agent; list shows its current sessions. If none exists, open with an HTTP(S) URL.");
+      const rejected = (kind: string, nextStep: string, extra: Record<string, unknown> = {}) => reply({ ok: false, failure: { stage: "validation", kind, outcome: "not-dispatched", nextStep }, ...extra });
+      // The live handles ride along so recovery never needs a separate list call.
+      const unknownSession = () => rejected("unknown-session", sessions.size
+        ? "No action was dispatched. Retry with one of the open sessions below (UUID or alias); handles cannot cross agents or restarts."
+        : "No action was dispatched. No browser session is open in this agent; open one with an HTTP(S) URL.", { open: [...sessions.keys()], aliases: Object.fromEntries(aliases) });
       if (p.action !== "open" && aliases.has(p.session)) p = { ...p, session: aliases.get(p.session) };
       // Agents shorten returned UUIDs to their first block; a unique prefix of
       // this agent's own sessions is unambiguous and saves a failed turn.

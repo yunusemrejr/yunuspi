@@ -89,6 +89,13 @@ function normalizeTodoId(op: any): any {
 	return candidate;
 }
 
+function inferTodoAction(candidate: any): any {
+	if (candidate.action !== undefined) return candidate;
+	if (Number.isSafeInteger(candidate.id) && candidate.id > 0) return { ...candidate, action: "update" };
+	if (typeof candidate.subject === "string" && candidate.subject.trim()) return { ...candidate, action: "create" };
+	return candidate;
+}
+
 export function prepareTodoArguments(args: unknown): any {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return args;
 	let input = normalizeTodoId(args) as Record<string, any>;
@@ -102,14 +109,12 @@ export function prepareTodoArguments(args: unknown): any {
 		try { const parsed = JSON.parse(input.operations); if (Array.isArray(parsed)) input = { ...input, operations: parsed }; } catch { /* Schema validation reports it. */ }
 	}
 	if (input.action === undefined && Array.isArray(input.operations)) { const { batch: _batch, ...rest } = input; input = { ...rest, action: "batch" }; }
+	// A single top-level operation follows the same inference as a batch entry.
+	if (input.action === undefined && input.operations === undefined) input = inferTodoAction(input);
 	if (input.action !== "batch" || !Array.isArray(input.operations)) return input === args ? args : input;
 	const operations = input.operations.map((op: any) => {
 		if (!op || typeof op !== "object" || Array.isArray(op)) return op;
-		const candidate = normalizeTodoId(op);
-		if (candidate.action !== undefined) return candidate;
-		if (Number.isSafeInteger(candidate.id) && candidate.id > 0) return { ...candidate, action: "update" };
-		if (typeof candidate.subject === "string" && candidate.subject.trim()) return { ...candidate, action: "create" };
-		return candidate;
+		return inferTodoAction(normalizeTodoId(op));
 	});
 	return operations.some((op: any, index: number) => op !== input.operations[index]) ? { ...input, operations } : input === args ? args : input;
 }

@@ -109,3 +109,28 @@ test('local child catalog failures permit unused admitted routes without excludi
   assert.equal(fs.existsSync(process.env.PI_MODEL_EXCLUSIONS_PATH), false);
   assert.equal(routing.isRetryableModelFailure('HTTP 404: model not found by upstream provider'), true, 'real provider rejection still permits bounded recovery');
 });
+
+test('transient provider failures exclude a route for their stated wait, never a day', () => {
+  const gate = '429 rate limit: provider-gate cannot safely attribute model z-ai/glm-5.3-flash; candidate orcarouter/z-ai/glm-5.3-flash is cooling (595s; state: provider-health.json)';
+  assert.equal(routing.transientExclusionTtlMs(gate), 595_000);
+  assert.equal(routing.transientExclusionTtlMs('HTTP 429 Too Many Requests; retry-after: 5'), 30_000, 'stated waits have a floor');
+  assert.equal(routing.transientExclusionTtlMs('503 service unavailable'), 15 * 60_000);
+  for (const durable of ['401 unauthorized: invalid api key', '429 quota exceeded for this billing period', 'HTTP 404: model not found by upstream provider', 'usage limit reached']) {
+    assert.equal(routing.transientExclusionTtlMs(durable), undefined, durable);
+  }
+  const before = Date.now();
+  routing.recordRetryableModelFailure('orcarouter/z-ai/glm-5.3-flash', gate);
+  const stored = JSON.parse(fs.readFileSync(process.env.PI_MODEL_EXCLUSIONS_PATH, 'utf8')).exclusions.find(entry => entry.modelId === 'z-ai/glm-5.3-flash');
+  assert.ok(stored.expiresAt - before <= 600_000 && stored.expiresAt - before >= 590_000, 'the exclusion ends with the provider cooldown');
+});
+
+test('stores written before transient TTLs heal on load', async () => {
+  const exclusions = await import('../agent/extensions/pi-subagents/src/runs/shared/model-exclusions.ts');
+  const recordedAt = Date.now() - 20 * 60_000;
+  fs.writeFileSync(process.env.PI_MODEL_EXCLUSIONS_PATH, JSON.stringify({ version: 1, exclusions: [
+    { modelId: 'z-ai/glm-5.3-flash', provider: 'orcarouter', reason: '429 rate limit: candidate orcarouter/z-ai/glm-5.3-flash is cooling (595s; state: provider-health.json)', recordedAt, expiresAt: recordedAt + 864e5 },
+    { modelId: 'vendor/gone', provider: 'orcarouter', reason: 'HTTP 404: model not found', recordedAt, expiresAt: recordedAt + 864e5 },
+  ] }));
+  assert.equal(exclusions.isExcluded('z-ai/glm-5.3-flash', 'orcarouter'), false, 'an elapsed cooldown no longer blocks the route');
+  assert.equal(exclusions.isExcluded('vendor/gone', 'orcarouter'), true, 'catalog failures keep their day-long exclusion');
+});
