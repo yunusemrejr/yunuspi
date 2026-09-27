@@ -1,5 +1,6 @@
 import { isPersistentService, servicePort, taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
+import { ownProcessGroup } from "../../../lib/process-owner.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
@@ -1058,6 +1059,7 @@ export class BackgroundTaskRegistry {
 
       task.child = child;
       task.pid = child.pid;
+      if (this.platform !== "win32") ownProcessGroup(child.pid);
 
       child.stdout?.on("data", (data) => {
         this.appendChildOutput(task, data, "stdout");

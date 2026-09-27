@@ -144,17 +144,21 @@ test('managed shell cancellation preserves descendant cleanup grace', { skip: pr
   } finally { controller.abort(); await rejection; }
 });
 
-test('an unavailable optional managed watchdog cannot crash an otherwise successful command', async () => {
+test('an unavailable optional crash reaper cannot crash an otherwise successful command', async () => {
   const { EventEmitter } = await import('node:events');
   const { runManagedCommand } = await import('../agent/extensions/managed-bash.ts');
+  const owner = await import('../agent/extensions/lib/process-owner.ts');
   const original = childProcess.spawn;
-  let watchdogs = 0;
+  const prevDir = process.env.PI_OWNER_DIR;
+  process.env.PI_OWNER_DIR = path.join(scratch, 'owners');
+  owner.resetOwnerRecordForTests();
+  let reapers = 0;
   childProcess.spawn = (binary, args, options) => {
-    if (binary === '/bin/bash' && args?.[1]?.startsWith('n=0; while kill')) {
-      watchdogs++;
+    if (binary === '/bin/bash' && args?.[0] === owner.OWNER_SCRIPT && args[1] === 'reap') {
+      reapers++;
       const child = new EventEmitter();
       child.unref = () => child;
-      queueMicrotask(() => child.emit('error', new Error('watchdog fixture unavailable')));
+      queueMicrotask(() => child.emit('error', new Error('reaper fixture unavailable')));
       return child;
     }
     return original(binary, args, options);
@@ -162,8 +166,15 @@ test('an unavailable optional managed watchdog cannot crash an otherwise success
   syncBuiltinESMExports();
   try {
     const result = await runManagedCommand('printf watchdog-safe', scratch, 1, undefined, Infinity);
-    assert.equal(watchdogs, 1);
+    assert.equal(reapers, 1);
     assert.equal(result.exitCode, 0);
     assert.equal(result.output, 'watchdog-safe');
-  } finally { childProcess.spawn = original; syncBuiltinESMExports(); }
+    const lines = fs.readFileSync(path.join(process.env.PI_OWNER_DIR, String(process.pid)), 'utf8').trim().split('\n');
+    assert.equal(lines.length, 2, 'the owner identity, then the job process group');
+    assert.match(lines[1], /^\d+ \d*$/);
+  } finally {
+    childProcess.spawn = original; syncBuiltinESMExports();
+    owner.resetOwnerRecordForTests();
+    if (prevDir === undefined) delete process.env.PI_OWNER_DIR; else process.env.PI_OWNER_DIR = prevDir;
+  }
 });

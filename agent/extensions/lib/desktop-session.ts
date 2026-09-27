@@ -12,6 +12,7 @@ import os from "node:os";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
+import { ownProcessGroup } from "./process-owner.ts";
 
 const exec = promisify(execFile);
 const MAX_SESSIONS = 2, MAX_PROCESSES = 12, IDLE_MS = 20 * 60_000, LOG_BYTES = 16_384;
@@ -77,6 +78,7 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
       xvfb = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${width}x${height}x24`, "-nolisten", "tcp", "-noreset", "-nocursor"], { stdio: ["ignore", "ignore", "ignore", "pipe"], detached: true, signal: controller.signal });
       const child = xvfb;
       child.unref();
+      ownProcessGroup(child.pid);
       const display = await new Promise<string>((resolve, reject) => {
         let receipt = "", settled = false;
         const timer = setTimeout(() => fail(new Error("The virtual display did not start within 6 seconds")), 6000);
@@ -116,6 +118,7 @@ export function createDesktopManager(options: { now?: () => number; artifactRoot
     const child = spawn("/bin/sh", ["-c", params.command], { cwd: params.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, DISPLAY: session.display, WAYLAND_DISPLAY: "", GDK_BACKEND: "x11", QT_QPA_PLATFORM: "xcb" } });
     await new Promise<void>((resolve, reject) => { child.on("error", reject); child.once("spawn", resolve); });
+    ownProcessGroup(child.pid);
     if (!sessions.has(session.id)) { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already gone */ } throw new Error("Desktop session stopped during launch"); }
     const record: Launched = { pid: child.pid!, command: params.command.slice(0, 300), child, output: "", startedAt: now() };
     const collect = (chunk: Buffer) => { record.output = (record.output + chunk.toString("utf8")).slice(-LOG_BYTES); };

@@ -2996,7 +2996,7 @@
       {
         "name": "double",
         "source": "agent/extensions/pi-subagents/src/extension/double-runner.ts",
-        "line": 296
+        "line": 300
       },
       {
         "name": "effort",
@@ -3295,7 +3295,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          165
+          168
         ]
       }
     ],
@@ -3384,7 +3384,7 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 591,
+        "line": 570,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -3421,7 +3421,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 140,
+        "line": 154,
         "kind": "literal"
       },
       {
@@ -3523,7 +3523,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 250,
+        "line": 251,
         "kind": "literal"
       },
       {
@@ -3717,7 +3717,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 619,
+        "line": 598,
         "kind": "literal"
       },
       {
@@ -3789,7 +3789,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -3988,7 +3988,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 87,
+        "line": 88,
         "kind": "literal"
       },
       {
@@ -4093,7 +4093,7 @@
       {
         "name": "browser_session",
         "source": "agent/extensions/lib/browser-session.ts",
-        "line": 140,
+        "line": 154,
         "kind": "literal"
       },
       {
@@ -4135,7 +4135,7 @@
       {
         "name": "design_audit",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 250,
+        "line": 251,
         "kind": "literal"
       },
       {
@@ -4231,7 +4231,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 619,
+        "line": 598,
         "kind": "literal"
       },
       {
@@ -4303,7 +4303,7 @@
       {
         "name": "render_see",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 249,
+        "line": 250,
         "kind": "literal"
       },
       {
@@ -4387,7 +4387,7 @@
       {
         "name": "wait_for",
         "source": "agent/extensions/render-and-wait.ts",
-        "line": 87,
+        "line": 88,
         "kind": "literal"
       },
       {
@@ -4459,7 +4459,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          594
+          573
         ],
         "knownNames": [
           "bash",
@@ -4589,7 +4589,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          116
+          119
         ],
         "knownNames": [
           "todo"
@@ -4638,7 +4638,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 669,
+      "sourceFiles": 670,
       "registrationSites": 81,
       "indirectRegistrationSites": 19,
       "stableRegistrationRows": 120,
@@ -5217,6 +5217,10 @@
       },
       {
         "path": "agent/extensions/lib/path-safety.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/process-owner.ts",
         "exists": true
       },
       {
@@ -5863,6 +5867,10 @@
       },
       {
         "path": "agent/scripts/pi-launch.sh",
+        "exists": true
+      },
+      {
+        "path": "agent/scripts/process-owner.sh",
         "exists": true
       },
       {

@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { sessionObservability } from "./session-observability.ts";
+import { ensureLocalServices, localServicesWarming } from "./process-owner.ts";
 
 export const LOCAL_LM_MODEL = "Qwen3.5-0.8B";
 export const LOCAL_LM_ENDPOINT = "http://127.0.0.1:18735/completion";
@@ -209,9 +210,12 @@ export function localChoicePrompt(task: string, candidates: readonly { id: strin
 	return `${LOCAL_CHOICE_EXAMPLES}Task: ${oneLine(task, 800)}\n${candidates.map((c, i) => `${String.fromCharCode(65 + i)}: ${oneLine(c.text, 320)}\n`).join("")}Best:`;
 }
 
-export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeof fetch; now?: () => number; queueLimit?: number } = {}) {
+/** `services` holds this process's lease on the local model and starts it on
+ * demand (see process-owner.ts); injected transports default to none. */
+export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeof fetch; now?: () => number; queueLimit?: number; services?: { ensure(): unknown; warming(): boolean } } = {}) {
 	let runtime = options.runtime, loaded = Boolean(options.runtime), loading: Promise<void> | undefined, loadedAt = 0;
 	const request = options.fetch ?? fetch, now = options.now ?? Date.now, queueLimit = options.queueLimit ?? 8;
+	const services = options.services ?? (options.fetch ? undefined : { ensure: () => ensureLocalServices(), warming: () => localServicesWarming() });
 	let failures = 0, pausedUntil = 0;
 	const stats = { answered: 0, failed: 0, busy: 0, cached: 0, totalMs: 0 };
 	const choices = new Map<string, { at: number; result: LocalChoice }>();
@@ -219,7 +223,7 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 		// A missing descriptor is re-checked at most once a minute, so a model
 		// installed while sessions run is picked up without a restart.
 		if (loaded && (runtime || now() - loadedAt < 60_000)) return;
-		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); }).finally(() => { loading = undefined; });
+		loading ??= loadLocalLmRuntime().then((value) => { runtime = value; loaded = true; loadedAt = now(); if (value) services?.ensure(); }).finally(() => { loading = undefined; });
 		await loading;
 	};
 	async function infer<T>(prompt: string, purpose: string, parse: (body: any) => T | undefined, options: { signal?: AbortSignal; prefix?: string; nProbs?: number } = {}): Promise<{ ok: true; value: T; ms: number } | Unavailable> {
@@ -256,6 +260,12 @@ export function createLocalLm(options: { runtime?: LocalLmRuntime; fetch?: typeo
 				if (error instanceof LocalLmBusyError) { stats.busy++; return { ok: false, reason: "busy" }; }
 				if (!release && controller.signal.aborted) return { ok: false, reason: signal?.aborted ? "cancelled" : "timeout" };
 				const cancelled = signal?.aborted === true, timedOut = !cancelled && controller.signal.aborted;
+				// A stopped server (idle since the last session) is started, and
+				// refusals while it loads are not failures that open the breaker.
+				if (!cancelled && !timedOut && (error as { cause?: { code?: string } })?.cause?.code === "ECONNREFUSED") {
+					services?.ensure();
+					if (services?.warming()) { note({ decision: "warming", purpose, durationMs: now() - started, count: 1 }); return { ok: false, reason: "unavailable" }; }
+				}
 				if (!cancelled && ++failures >= 3) { pausedUntil = now() + 60_000; failures = 0; }
 				stats.failed++;
 				note({ decision: cancelled ? "cancelled" : timedOut ? "timeout" : "failed", purpose, durationMs: now() - started, count: 1 });

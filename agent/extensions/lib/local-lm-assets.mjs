@@ -1,5 +1,6 @@
 /** Local language model (Qwen3.5-0.8B on llama.cpp): pinned assets, atomic
- * installation, systemd user service and retirement of the SmolLM2 selector.
+ * installation, on-demand systemd user service and retirement of the SmolLM2
+ * selector.
  *
  * Why this model (measured 2026-09-25 on harness decisions, 4 CPU threads):
  * skill-hint relevance AUC 0.88 and 0.88 accuracy for Qwen3.5-0.8B, versus
@@ -77,18 +78,25 @@ export async function verifyLocalLm(dir = localLmDir(), full = false) {
   return { ok: problems.length === 0, dir, problems, manifest: manifest ?? null };
 }
 
-export function localLmServiceUnit(dir) {
+/** Grace after the last session before the idle server stops (seconds). */
+export const LOCAL_LM_IDLE_GRACE_S = 90;
+
+export function localLmServiceUnit(dir, agentDir = needleAgentDir()) {
   // The pinned server defaults to an 8 GiB prompt cache and 32 recurrent
   // checkpoints, both incompatible with this service's 2 GiB limit. Retain
   // prefix reuse with bounded caches and leave room for weights and inference.
+  // Sessions start the unit on demand and hold owner records while they live
+  // (extensions/lib/process-owner.ts); the guard stops the server once none
+  // is left, so the unit has no boot target. Idle stops are routine starts,
+  // hence a start budget above what the grace allows in five minutes.
   return `[Unit]
 Description=YunusPi local language model (${LOCAL_LM_MODEL}, loopback only)
 StartLimitIntervalSec=300
-StartLimitBurst=3
+StartLimitBurst=8
 
 [Service]
 Type=simple
-ExecStart=${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 6 --checkpoint-min-step 0 --ctx-checkpoints 4 --cache-ram 256 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
+ExecStart=/bin/bash ${join(agentDir, "scripts", "process-owner.sh")} guard %t/yunuspi/owners ${LOCAL_LM_IDLE_GRACE_S} ${serverBinary(dir)} --model ${join(dir, LOCAL_LM_PINNED_FILES[1].local)} --host 127.0.0.1 --port ${LOCAL_LM_PORT} --api-key-file ${join(dir, "api-key")} --parallel 1 --threads 4 --threads-batch 6 --checkpoint-min-step 0 --ctx-checkpoints 4 --cache-ram 256 --ctx-size 4096 --n-predict 128 --no-webui --log-disable
 WorkingDirectory=${dir}
 Nice=10
 CPUQuota=600%
@@ -100,9 +108,6 @@ UMask=0077
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=5
-
-[Install]
-WantedBy=default.target
 `;
 }
 
@@ -175,14 +180,16 @@ export async function installLocalLm(options = {}) {
     else {
       await mkdir(unitDir(), { recursive: true });
       const unitPath = join(unitDir(), LOCAL_LM_SERVICE);
-      const text = localLmServiceUnit(dir);
+      const text = localLmServiceUnit(dir, agentDir);
       let current = "";
       try { current = await readFile(unitPath, "utf8"); } catch { /* new unit */ }
       if (current !== text) { await writeFile(unitPath, text, { mode: 0o644 }); systemctl("daemon-reload"); }
       systemctl("reset-failed", LOCAL_LM_SERVICE);
-      let started = systemctl("enable", "--now", LOCAL_LM_SERVICE);
+      // Units from earlier releases started at login and never stopped.
+      systemctl("disable", LOCAL_LM_SERVICE);
+      let started = systemctl("start", LOCAL_LM_SERVICE);
       if (started.status === 0 && current && current !== text) started = systemctl("restart", LOCAL_LM_SERVICE);
-      notes.push(started.status === 0 ? `service ${LOCAL_LM_SERVICE} enabled` : `service start failed: ${String(started.stderr).slice(0, 160)}`);
+      notes.push(started.status === 0 ? `service ${LOCAL_LM_SERVICE} installed (starts with sessions, stops ${LOCAL_LM_IDLE_GRACE_S}s after the last)` : `service start failed: ${String(started.stderr).slice(0, 160)}`);
       notes.push(...await retireSmol(agentDir));
     }
   }
@@ -194,6 +201,8 @@ export async function installLocalLm(options = {}) {
 export async function smokeLocalLm(agentDir = needleAgentDir(), timeoutMs = 60_000) {
   const dir = localLmDir(agentDir);
   const runtime = JSON.parse(await readFile(join(dir, "runtime.json"), "utf8"));
+  // The server runs only while sessions use it; its idle guard stops it again.
+  if (existsSync(join(unitDir(), LOCAL_LM_SERVICE))) systemctl("start", LOCAL_LM_SERVICE);
   const deadline = Date.now() + timeoutMs;
   let last = "";
   while (Date.now() < deadline) {

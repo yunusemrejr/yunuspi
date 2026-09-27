@@ -10,6 +10,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { FFMPEG_FLAGS, inputArgs, inputFile, probe, produced, run } from "./media-process.ts";
 import { canonicalMutationPath, containsPath, guardedCommand, selfMutationDenial } from "./self-mutation-guard.ts";
 import { createRenderQueue } from "./render-queue.ts";
+import { ownProcessGroup } from "./process-owner.ts";
 // The template's caption timing is the single source for burned-in captions
 // and sidecar subtitles; it is plain TypeScript with no Remotion imports.
 import { captionChunks, captionPace, estimateSeconds, toSrt, toVtt } from "../../skills/remotion-video/assets/template/src/captions.ts";
@@ -263,6 +264,7 @@ async function runGuarded(command: string, args: string[], options: { cwd: strin
   const target = options.guard === false ? { command, args } : guardedCommand(command, args);
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(target.command, target.args, { cwd: options.cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...options.env } });
+    ownProcessGroup(child.pid);
     let stdout = "", stderr = "", pending = "", settled = false;
     const tail = (text: string, add: string) => (text + add).slice(-200_000);
     const kill = () => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already exited */ } };

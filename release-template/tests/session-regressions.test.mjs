@@ -56,3 +56,19 @@ test('an over-long explanation is shortened with a marker instead of costing a t
   assert.throws(() => validateToolArguments(tool, { name: 'quality_review', arguments: { action: 'record', path: 'a/very/long/path/name.ts' } }), /Validation failed/, 'identifiers and paths are never trimmed');
   assert.throws(() => validateToolArguments(tool, { name: 'quality_review', arguments: { reason: 'x'.repeat(200) } }), /Validation failed/, 'a missing required field still rejects the call');
 });
+
+test('bound overflows clamp and JSON-string containers parse instead of costing a turn; unrelated numbers still reject', async () => {
+  const { validateToolArguments } = await import(pathToFileURL(path.join(root, 'core/ai/src/utils/validation.js')).href);
+  const { Type } = await import('typebox');
+  const tool = { name: 'tool_search', parameters: Type.Object({
+    query: Type.String(), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 8 })), width: Type.Optional(Type.Integer({ maximum: 4000 })),
+    operations: Type.Optional(Type.Array(Type.Object({ id: Type.String() }))),
+  }) };
+  const call = args => validateToolArguments(tool, { name: 'tool_search', arguments: args });
+  assert.equal(call({ query: 'x', limit: 10 }).limit, 8);
+  assert.equal(call({ query: 'x', limit: 0 }).limit, 1);
+  assert.deepEqual(call({ query: 'x', limit: 20, operations: '[{"id":"a"}]' }).operations, [{ id: 'a' }], 'two independent repairs land together');
+  assert.throws(() => call({ query: 'x', width: 5000 }), /Validation failed/, 'a dimension is not a result bound and is never clamped');
+  assert.throws(() => call({ query: 'x', operations: '[{"name":"a"}]' }), /Validation failed/, 'a parsed container still validates its items');
+  assert.throws(() => call({ query: 'x', operations: 'first, then second' }), /Validation failed/, 'non-JSON prose is not coerced');
+});

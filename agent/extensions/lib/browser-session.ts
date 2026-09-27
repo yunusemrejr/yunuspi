@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { createRenderQueue } from "./render-queue.ts";
+import { ownProcessGroup } from "./process-owner.ts";
 
 export const BROWSER_REQUEST_MAX_BYTES = 192 * 1024;
 
@@ -381,6 +382,7 @@ export function registerBrowserSession(pi: any) {
             stdio: ["pipe", "pipe", "pipe"],
           },
         );
+        ownProcessGroup(child.pid);
         const session = {
           child,
           dir,

@@ -19,13 +19,15 @@
  *
  * Jobs are ephemeral to the pi process (no on-disk state anywhere, so no
  * cwd-relative store litter): session_shutdown terminates them, a crashed pi
- * leaves them bounded by their deadline via a per-job watchdog that kills the
- * process group when pi dies. killProcessTree-equivalent kills the whole
- * detached process group, so child trees die with the job.
+ * leaves no orphan: detached jobs join the process's owner record, whose
+ * reaper kills their process groups when pi dies (lib/process-owner.ts).
+ * killProcessTree-equivalent kills the whole detached process group, so child
+ * trees die with the job.
  */
 
 import { spawn } from "node:child_process";
 import { guardedCommand } from "./lib/self-mutation-guard.ts";
+import { ownProcessGroup } from "./lib/process-owner.ts";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
@@ -176,27 +178,6 @@ function killJob(job: Job, force: boolean): void {
 	}, KILL_TERM_GRACE_MS).unref();
 }
 
-/** Crash backstop: if pi dies while the job runs, kill the job's process group. Bounded by deadline + 600s so it can never linger forever. */
-function spawnWatchdog(job: Job, timeoutSeconds: number): void {
-	if (process.platform === "win32") return; // no detached-group contract here; graceful shutdown still applies
-	const cap = Math.ceil((timeoutSeconds + 600) / 2);
-	const script =
-		`n=0; while kill -0 ${process.pid} 2>/dev/null && kill -0 ${job.pid} 2>/dev/null; do ` +
-		`sleep 2; n=$((n+1)); [ $n -ge ${cap} ] && exit 0; done; ` +
-		`kill -0 ${job.pid} 2>/dev/null && kill -9 -${job.pid} 2>/dev/null; exit 0`;
-	try {
-		const watchdog = spawn("/bin/bash", ["-c", script], {
-			stdio: "ignore",
-			detached: true,
-			windowsHide: true,
-		});
-		watchdog.once("error", () => { /* optional crash backstop failed to spawn */ });
-		watchdog.unref();
-	} catch {
-		/* watchdog is best-effort; graceful shutdown and the in-process deadline still apply */
-	}
-}
-
 function forgetOldestFinished(): void {
 	for (const job of jobs.values()) {
 		if (jobs.size <= MAX_FINISHED_JOBS) break;
@@ -292,9 +273,8 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			};
 			jobs.set(job.id, job);
 			forgetOldestFinished(); // WHY: insertion order doubles as recency; keeps the store bounded
-			// Internal captures remain foreground longer; start their crash backstop now.
-			if (graceMs > GRACE_MS && job.pid && timeout !== undefined)
-				spawnWatchdog(job, timeout);
+			// Internal captures remain foreground longer; record them for the crash backstop now.
+			if (graceMs > GRACE_MS) ownProcessGroup(job.pid);
 
 			let detached = false;
 			let deadlineTimer: NodeJS.Timeout | undefined;
@@ -356,8 +336,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			const detach = () => {
 				detached = true;
 				signal?.removeEventListener("abort", handleAbort);
-				if (graceMs <= GRACE_MS && job.pid && timeout !== undefined)
-					spawnWatchdog(job, timeout);
+				if (graceMs <= GRACE_MS) ownProcessGroup(job.pid);
 				const tail = (t: Tail, name: string) => {
 					const text = t.text(2048);
 					return `${name} (${t.bytes}B kept): ${text ? `\n${text}` : "(none yet)"}`;
