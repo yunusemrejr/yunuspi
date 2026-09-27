@@ -7,6 +7,7 @@ import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {microMetrics} from './micro-intelligence/metrics.ts';
+import {ensureLocalServices,MINI_PREPROCESSOR_SERVICE} from './process-owner.ts';
 export type MiniSelection = {version:1;status:'SELECT';sourceHash:string;keep:number[]};
 type Runtime = {version:1;enabled:true;endpoint:'http://127.0.0.1:18736/select';apiKey:string};
 const dependent = /^(?:This|That|These|Those|It|They|He|She|However|Therefore|Otherwise|Instead|Consequently)\b/i;
@@ -99,14 +100,19 @@ async function loadRuntime():Promise<Runtime|undefined>{
   if(v.version===1&&v.enabled===true&&v.endpoint==='http://127.0.0.1:18736/select'&&typeof v.apiKey==='string'&&/^[A-Za-z0-9_-]{32,128}$/.test(v.apiKey))return v;
  }catch{}finally{await handle?.close().catch(()=>{});}
 }
-export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof fetch;now?:()=>number}={}){
+/** `ensure` holds this process's lease on the service and starts it on demand
+ * (see process-owner.ts); injected transports default to none. */
+export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof fetch;now?:()=>number;ensure?:()=>unknown}={}){
  let runtime=options.runtime,busy=false,last=-Infinity,generation=0;const now=options.now??Date.now,request=options.fetch??fetch;let current:AbortController|undefined;
+ const ensure=options.ensure??(options.fetch||options.runtime?undefined:()=>ensureLocalServices(Date.now(),MINI_PREPROCESSOR_SERVICE));
  const cache=new Map<string,MiniSelection>();
  let failures=0;
  const stats={requests:0,cacheHits:0,accepted:0,fallbacks:0,timeouts:0,projectedSavedChars:0};
  // The shared service warms once at startup. Per-client warmups consume its
  // fleet-wide rate limit and can starve the first real selection.
- if(!runtime)void loadRuntime().then(v=>{runtime=v;});
+ // Starting it when the session starts leaves the warmup done before the first
+ // large tool result arrives.
+ if(!runtime)void loadRuntime().then(v=>{runtime=v;if(v)ensure?.();});
  // Turn boundary: validated cache and in-flight selections stay valid (keyed by
  // source+task hash), so unlike reset this neither aborts nor clears.
  const endTurn=()=>{};
@@ -166,7 +172,11 @@ export function createMiniPreprocessor(options:{runtime?:Runtime;fetch?:typeof f
     cache.set(key,{...selection,keep:[...selection.keep]});accepted=true;failures=0;stats.accepted++;stats.projectedSavedChars+=saved;
     metrics.accept('kompress',saved,true);
     return selection;
-   }catch{return;}finally{
+   }catch{
+    // A refused or failed request may mean the idle guard stopped the service.
+    if(!expired&&epoch===generation)ensure?.();
+    return;
+   }finally{
     clearTimeout(timer);
     metrics.run('kompress',performance.now()-started,raw.length);
     if(!accepted)skip(expired?'timeout':refusedUnrun?'service-refused':valid?'no-useful-selection':'invalid-selection');

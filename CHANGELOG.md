@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.4 — 2026-09-28
+
+**Kompress preprocessor on demand.** The Kompress paragraph selector (`pi-mini-preprocessor.service`) was still enabled at boot and kept its ONNX model resident with no session running. It now runs under the same owner-record guard as the local model. A session's client starts it when it loads, so the warmup finishes before the first large tool result, and again after a failed request. The guard stops it 90 seconds after the last live YunusPi process, so one session exiting never stops it under another. A request that timed out against a busy service does not trigger a restart. `ensureLocalServices` now throttles per unit.
+
 ## 0.13.3 — 2026-09-27
 
 **Session-owned processes.** A session that was killed, or whose terminal closed before its shutdown handlers ran, used to leave its processes running: detached browsers, desktops, renders, background tasks and long bash jobs. Now each YunusPi process that starts such a group writes an owner record. The record holds the owner's start identity and one `pgid identity` line per group. The owner also starts one detached reaper (`scripts/process-owner.sh reap`). Once the owner is gone, the reaper stops only the recorded groups whose leader identity still matches. Only direct children that lead their own group are recorded, so a recycled or foreign pid is never signalled. This replaces managed bash's per-job watchdog.

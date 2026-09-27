@@ -14,6 +14,7 @@ const agent = [path.join(root, 'agent'), path.resolve(root, '..')].find(p => fs.
 const load = p => import(pathToFileURL(path.join(agent, p)).href);
 const owner = await load('extensions/lib/process-owner.ts');
 const L = await load('extensions/lib/local-lm.ts');
+const mini = await load('extensions/lib/mini-preprocessor.ts');
 const linux = process.platform === 'linux';
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (check, ms = 8000) => { const end = Date.now() + ms; while (!check()) { if (Date.now() > end) return false; await new Promise(r => setTimeout(r, 50)); } return true; };
@@ -97,4 +98,25 @@ test('a refused connection while the local model warms up is unavailable, not a 
   warming = false;
   for (let i = 0; i < 3; i++) assert.equal((await lm.judge('q', 'x')).reason, 'failed');
   assert.equal((await lm.judge('q', 'x')).reason, 'paused', 'a server that stays down still opens the breaker');
+});
+
+test('the Kompress client asks for its service after a failed request, never after a timeout', async () => {
+  const filler = 'General background prose describes an ordinary workspace with assorted familiar concepts\nand broad introductory discussion for readers exploring the surrounding subject in a leisurely manner.';
+  const raw = ['Deployment remains blocked until verification.', ...Array(9).fill(filler)].join('\n\n');
+  const runtime = { version: 1, enabled: true, endpoint: 'http://127.0.0.1:18736/select', apiKey: 'TEST_MINI_PREPROCESSOR_KEY_1234567890' };
+  let ensured = 0, clock = 0;
+  const refused = async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); };
+  const helper = mini.createMiniPreprocessor({ runtime, fetch: refused, now: () => clock, ensure: () => ensured++ });
+  assert.equal(await helper.select(raw, undefined), undefined);
+  assert.equal(ensured, 1, 'a refused request restarts the stopped service (throttled by the owner module)');
+  clock += 120_000;
+  const hung = mini.createMiniPreprocessor({ runtime, fetch: (_url, options) => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))), now: () => clock, ensure: () => ensured++ });
+  assert.equal(await hung.select(raw, undefined), undefined);
+  assert.equal(ensured, 1, 'a busy service that timed out is not restarted');
+});
+
+test('the Kompress unit template runs under the idle guard with no boot target', () => {
+  const unit = fs.readFileSync(path.join(agent, 'scripts/systemd/pi-mini-preprocessor.service'), 'utf8');
+  assert.match(unit, /^ExecStart=\/bin\/bash \S+\/process-owner\.sh guard %t\/yunuspi\/owners \d+ /m);
+  assert.doesNotMatch(unit, /^\[Install\]|WantedBy=/m);
 });

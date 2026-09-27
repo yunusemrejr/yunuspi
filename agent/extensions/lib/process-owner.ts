@@ -11,10 +11,11 @@
  * (scripts/process-owner.sh reap) waits for the owner to die, stops the
  * listed groups whose leader identity still matches, and deletes the record.
  *
- * The same records are the leases on the shared local model: its unit runs
- * under `process-owner.sh guard`, which stops the server once no live owner
- * record has existed for a grace period. The model therefore never outlives
- * the last session, and one session exiting never stops it under another.
+ * The same records are the leases on the shared local services (the local
+ * model and the Kompress preprocessor): their units run under
+ * `process-owner.sh guard`, which stops a server once no live owner record has
+ * existed for a grace period. They therefore never outlive the last session,
+ * and one session exiting never stops them under another.
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -23,6 +24,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const LOCAL_LM_SERVICE = "pi-local-lm.service";
+export const MINI_PREPROCESSOR_SERVICE = "pi-mini-preprocessor.service";
 export const OWNER_SCRIPT = fileURLToPath(new URL("../../scripts/process-owner.sh", import.meta.url));
 
 export function ownerDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -64,7 +66,7 @@ export function ensureOwnerRecord(): string | undefined {
 	return record;
 }
 
-export function resetOwnerRecordForTests(): void { record = undefined; servicesRequestedAt = 0; }
+export function resetOwnerRecordForTests(): void { record = undefined; requestedAt.clear(); }
 
 /** Record a detached child's process group so it dies with this process.
  * Only a direct child that leads its own group is recorded (Linux), so an
@@ -78,17 +80,17 @@ export function ownProcessGroup(pgid: number | undefined): void {
 	try { appendFileSync(path, `${pgid} ${fields[19]}\n`); } catch { /* backstop only */ }
 }
 
-let servicesRequestedAt = 0;
+const requestedAt = new Map<string, number>();
 
-/** Hold a lease on the local model and start its unit when it is down.
- * Throttled; a no-op without a user systemd unit (manual installs). */
-export function ensureLocalServices(now = Date.now()): boolean {
-	if (process.platform !== "linux" || now - servicesRequestedAt < 30_000) return false;
-	if (!existsSync(join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user", LOCAL_LM_SERVICE))) return false;
+/** Hold a lease on a local service and start its unit when it is down.
+ * Throttled per unit; a no-op without a user systemd unit (manual installs). */
+export function ensureLocalServices(now = Date.now(), unit = LOCAL_LM_SERVICE): boolean {
+	if (process.platform !== "linux" || now - (requestedAt.get(unit) ?? -Infinity) < 30_000) return false;
+	if (!existsSync(join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user", unit))) return false;
 	if (!ensureOwnerRecord()) return false;
-	servicesRequestedAt = now;
+	requestedAt.set(unit, now);
 	try {
-		const child = spawn("systemctl", ["--user", "start", "--no-block", LOCAL_LM_SERVICE], { stdio: "ignore", detached: true });
+		const child = spawn("systemctl", ["--user", "start", "--no-block", unit], { stdio: "ignore", detached: true });
 		child.once("error", () => {});
 		child.unref();
 	} catch { return false; }
@@ -97,5 +99,6 @@ export function ensureLocalServices(now = Date.now()): boolean {
 
 /** True shortly after this process asked the local model to start. */
 export function localServicesWarming(now = Date.now(), windowMs = 20_000): boolean {
-	return servicesRequestedAt > 0 && now - servicesRequestedAt < windowMs;
+	const at = requestedAt.get(LOCAL_LM_SERVICE);
+	return at !== undefined && now - at < windowMs;
 }

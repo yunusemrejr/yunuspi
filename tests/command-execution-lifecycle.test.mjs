@@ -104,10 +104,12 @@ test('core and managed shell deadlines remain bounded when an escaped descendant
     const pidFile = path.join(scratch, `${kind}-${noisy}.pid`);
     const script = `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{${noisy ? "process.stdout.write('tick\\n')" : ''}},20)`;
     const command = `setsid ${quote(process.execPath)} -e ${quote(script)} & while [ ! -f ${quote(pidFile)} ]; do sleep 0.01; done; echo leader-done`;
-    let timer;
+    // The idle leader waits for a node start, which exceeds 0.3s under full-suite
+    // load; its deadline only has to stay below the 2s hang bound.
+    let timer, deadline = noisy ? 0.3 : 1;
     const execution = (kind === 'managed'
-      ? runManagedCommand(command, scratch, 0.3, undefined, Infinity)
-      : createLocalBashOperations().exec(command, scratch, { timeout: 0.3, onData() {} }))
+      ? runManagedCommand(command, scratch, deadline, undefined, Infinity)
+      : createLocalBashOperations().exec(command, scratch, { timeout: deadline, onData() {} }))
       .then(value => ({ value }), error => ({ error }));
     try {
       const outcome = await Promise.race([execution, new Promise(resolve => { timer = setTimeout(() => resolve({ hung: true }), 2000); })]);

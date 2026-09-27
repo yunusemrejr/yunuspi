@@ -1,11 +1,14 @@
 [Unit]
 Description=Pi bounded local paragraph preprocessor
 StartLimitIntervalSec=300
-StartLimitBurst=3
+StartLimitBurst=8
 
+# Sessions start this unit on demand and hold owner records while they live
+# (extensions/lib/process-owner.ts); the guard stops the server 90s after the
+# last one, so the unit has no boot target.
 [Service]
 Type=simple
-ExecStart=%h/.pi/agent/local-models/tinybert-reranker/venv/bin/python %h/.pi/agent/scripts/mini-preprocessor.py --model %h/.pi/agent/local-models/kompress-small/model-gather-int8.onnx --tokenizer %h/.pi/agent/local-models/kompress-small/tokenizer.json --key-file %h/.pi/agent/local-models/kompress-small/api-key
+ExecStart=/bin/bash %h/.pi/agent/scripts/process-owner.sh guard %t/yunuspi/owners 90 %h/.pi/agent/local-models/tinybert-reranker/venv/bin/python %h/.pi/agent/scripts/mini-preprocessor.py --model %h/.pi/agent/local-models/kompress-small/model-gather-int8.onnx --tokenizer %h/.pi/agent/local-models/kompress-small/tokenizer.json --key-file %h/.pi/agent/local-models/kompress-small/api-key
 WorkingDirectory=%h/.pi
 Environment=TOKENIZERS_PARALLELISM=false
 Environment=OMP_NUM_THREADS=1
@@ -23,5 +26,3 @@ TimeoutStopSec=5
 StandardOutput=journal
 StandardError=journal
 
-[Install]
-WantedBy=default.target
