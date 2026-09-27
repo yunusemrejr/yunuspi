@@ -4,7 +4,7 @@ import { estimateSeconds } from "./captions";
 import { ease } from "./motion";
 import { Captions } from "./primitives/Captions";
 import { scenes as registry } from "./scenes";
-import { ThemeProvider } from "./theme";
+import { Canvas, ThemeProvider } from "./theme";
 import { narrationWindows, spec, timeline, toFrames, type SceneSpec, type TimedScene } from "./timeline";
 
 /** Entry transition over the first `seconds` of a scene (default 0.5 s). */
@@ -45,23 +45,25 @@ export const Main: React.FC = () => {
   return (
     <ThemeProvider>
       <AbsoluteFill style={{ background: spec.theme.background }}>
-        {scenes.map((scene) => (
-          <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationInFrames} name={scene.id}>
-            <Entry transition={scene.transition}>
-              <SceneView scene={scene} />
-            </Entry>
-            {spec.captions?.enabled && scene.narration ? (
-              <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`captions:${scene.id}`}>
-                <Captions text={scene.narration} seconds={scene.narrationSeconds ?? estimateSeconds(scene.narration)} style={spec.captions.style} maxWords={spec.captions.maxWords} position={spec.captions.position} />
-              </Sequence>
-            ) : null}
-            {scene.narrationAudio ? (
-              <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`narration:${scene.id}`}>
-                <Audio src={staticFile(scene.narrationAudio)} volume={spec.audio.narrationVolume} />
-              </Sequence>
-            ) : null}
-          </Sequence>
-        ))}
+        <Canvas>
+          {scenes.map((scene) => (
+            <Sequence key={scene.id} from={scene.from} durationInFrames={scene.durationInFrames} name={scene.id}>
+              <Entry transition={scene.transition}>
+                <SceneView scene={scene} />
+              </Entry>
+              {spec.captions?.enabled && scene.narration ? (
+                <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`captions:${scene.id}`}>
+                  <Captions text={scene.narration} seconds={scene.narrationSeconds ?? estimateSeconds(scene.narration)} style={spec.captions.style} maxWords={spec.captions.maxWords} position={spec.captions.position} />
+                </Sequence>
+              ) : null}
+              {scene.narrationAudio ? (
+                <Sequence from={toFrames(scene.narrationOffset ?? 0)} name={`narration:${scene.id}`}>
+                  <Audio src={staticFile(scene.narrationAudio)} volume={spec.audio.narrationVolume} />
+                </Sequence>
+              ) : null}
+            </Sequence>
+          ))}
+        </Canvas>
         {spec.audio.music ? <Audio src={staticFile(spec.audio.music)} volume={musicVolume} endAt={durationInFrames} /> : null}
         {spec.audio.sfx.map((sfx, i) => (
           <Sequence key={`sfx-${i}`} from={toFrames(sfx.at)} name={`sfx:${sfx.src}`}>
@@ -79,7 +81,9 @@ export const SceneComposition: React.FC<{ sceneId: string }> = ({ sceneId }) => 
   if (!scene) throw new Error(`Unknown scene ${sceneId}`);
   return (
     <ThemeProvider>
-      <SceneView scene={{ ...scene, from: 0 }} />
+      <Canvas>
+        <SceneView scene={{ ...scene, from: 0 }} />
+      </Canvas>
     </ThemeProvider>
   );
 };

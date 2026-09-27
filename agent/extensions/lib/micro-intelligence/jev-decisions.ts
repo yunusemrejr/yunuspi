@@ -109,12 +109,18 @@ const acceptNoul = (score: number | undefined, pair: ReturnType<typeof NOUL_PAIR
 };
 
 /** Deferring a review requires both novelty and progress judgments. Uncertainty
- * keeps the full reviewer; positive admission never needs a routine verdict. */
+ * keeps the full reviewer; positive admission never needs a routine verdict.
+ * A deferral only postpones one review (the next is always full), so its bars
+ * sit where the served judge actually scores routine progress (worthwhile
+ * about 0.2, routine about 0.75). Measured time sinks, rereads and stalls
+ * scored worthwhile 0.33 or more and routine 0.45 or less. With the generic
+ * 0.2/0.8 bars it never deferred once in 368 calls. */
+const ADMISSION_DEFER_WORTHWHILE = 0.3, ADMISSION_DEFER_ROUTINE = 0.7;
 function interpretReviewAdmission(answers: Record<string, TypedAnswer>): TypedVerdict {
   const worthwhile = answers.worthwhile?.noul, routine = answers.routine?.noul;
   if (typeof worthwhile !== 'number' || worthwhile < 0 || worthwhile > 1) return { ok: false, reason: 'low-confidence' };
   if (worthwhile >= NOUL_HIGH) return { ok: true, verdict: { supported: true, label: 'review-worthwhile' }, confidence: worthwhile };
-  if (worthwhile <= NOUL_LOW && typeof routine === 'number' && routine >= NOUL_HIGH && routine <= 1)
+  if (worthwhile <= ADMISSION_DEFER_WORTHWHILE && typeof routine === 'number' && routine >= ADMISSION_DEFER_ROUTINE && routine <= 1)
     return { ok: true, verdict: { supported: false, label: 'review-unneeded' }, confidence: Math.min(1 - worthwhile, routine) };
   return { ok: false, reason: 'low-confidence' };
 }

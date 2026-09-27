@@ -1,4 +1,5 @@
 import React, { createContext, useContext } from "react";
+import { useVideoConfig } from "remotion";
 import { spec, type Theme } from "./timeline";
 
 const ThemeContext = createContext<Theme>(spec.theme);
@@ -12,6 +13,19 @@ export const useTheme = () => useContext(ThemeContext);
 export const type = {
   display: 132, title: 88, heading: 60, body: 40, caption: 34, label: 28, micro: 22,
 } as const;
+/** Layout units: the canvas's short side is always 1080, so every pixel size
+ * here reads the same at 720p, 1080p, 4K or vertical 1080x1920. Canvas scales
+ * the laid-out frame to the output; lay out with useCanvas(), never with
+ * useVideoConfig().width/height. */
+export function useCanvas() {
+  const { width, height } = useVideoConfig();
+  const unit = Math.min(width, height) / 1080;
+  return { width: Math.round(width / unit), height: Math.round(height / unit), unit };
+}
+export const Canvas: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { width, height, unit } = useCanvas();
+  return <div style={{ position: "absolute", left: 0, top: 0, width, height, transform: `scale(${unit})`, transformOrigin: "0 0" }}>{children}</div>;
+};
 /** Spacing on an 8px grid; the stage keeps a 120px title-safe margin. */
 export const space = (steps: number) => steps * 8;
 export const SAFE = 120;

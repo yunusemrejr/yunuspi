@@ -175,11 +175,21 @@ const MutationSchema = Type.Object({
 	),
 });
 
+// Batch items repeat the top-level fields, whose descriptions already ship in
+// the same schema; the copy drops them to keep every request smaller.
+function undescribed(schema: any): any {
+	if (Array.isArray(schema)) return schema.map(undescribed);
+	if (!schema || typeof schema !== "object") return schema;
+	const copy: any = {};
+	for (const key of Reflect.ownKeys(schema)) if (key !== "description") copy[key] = undescribed(schema[key]);
+	return copy;
+}
+
 export const TodoParamsSchema = Type.Object({
  ...MutationSchema.properties,
  action: StringEnum(["create", "update", "list", "get", "delete", "clear", "batch"] as const),
  view: Type.Optional(StringEnum(["tree", "frontier"] as const, {description:"list projection; omitted means tree"})),
- operations: Type.Optional(Type.Array(Type.Object({...MutationSchema.properties, action:StringEnum(["create", "update", "delete"] as const)}), {maxItems:32,minItems:1,description:"Atomic mutations. Create may supply a unique negative id as a local alias; later operations reference it. Errors roll back the entire batch."})),
+ operations: Type.Optional(Type.Array(Type.Object({...undescribed(MutationSchema.properties), action:StringEnum(["create", "update", "delete"] as const)}), {maxItems:32,minItems:1,description:"Atomic mutations with the top-level create/update/delete fields. Create may supply a unique negative id as a local alias; later operations reference it. Errors roll back the entire batch."})),
 });
 
 export type TodoParams = Static<typeof TodoParamsSchema>;

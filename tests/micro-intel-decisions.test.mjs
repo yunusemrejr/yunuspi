@@ -186,7 +186,7 @@ test('review admission needs both novelty and progress evidence; cancelled or un
   metricsMod.resetMicroMetrics();
   try {
     for (const id of ['observer-admission', 'watchmaker-admission']) {
-      for (const [worthwhile, routine, deferred] of [[.1, .9, true], [.1, .5, false], [.3, .9, false], [.1, undefined, false], [-1, 1, false]]) {
+      for (const [worthwhile, routine, deferred] of [[.1, .9, true], [.19, .75, true], [.3, .7, true], [.1, .5, false], [.33, .9, false], [.25, .69, false], [.63, .39, false], [.1, undefined, false], [-1, 1, false]]) {
         const result = await askTypedDecision(id, { state: { previous: [], current: [] } }, {
           judge: judgeWith({ worthwhile: { noul: worthwhile }, routine: { noul: routine } }), recordAcceptance: false,
         });

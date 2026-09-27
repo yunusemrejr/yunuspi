@@ -6,7 +6,10 @@ export const codeNoiseSupported = file => /\.(?:[cm]?[jt]sx?|py)$/i.test(file);
 export async function inspectCodeNoise(filename, source) {
   const result = {status: 'checked', findings: [], truncated: false,
     scope: 'Advisory AST facts only; intentional repetition and documented best-effort catches are allowed.',
-    limits: {bytes: 65536, nodes: 20000, findings: 3, scanMs: 20}};
+    // The node cap bounds the work. The clock is only a backstop: at 20 ms a
+    // busy CPU (builds or tests beside the session) truncated even a
+    // ten-line file and silently dropped its findings.
+    limits: {bytes: 65536, nodes: 20000, findings: 3, scanMs: 100}};
   if (!codeNoiseSupported(filename)) return {...result, status: 'unsupported'};
   if (typeof source !== 'string' || Buffer.byteLength(source) > result.limits.bytes) return {...result, status: 'incomplete', truncated: true};
   let tree;

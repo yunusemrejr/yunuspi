@@ -682,8 +682,16 @@ async function sentenceOnsets(wav: string, text: string, signal?: AbortSignal): 
 
 // ───────────────────────────── procedural audio ─────────────────────────────
 
+export const SFX_TYPES = ["whoosh", "riser", "downlifter", "impact", "tick", "pop", "chime"];
+
 export async function audioSynth(params: any, cwd: string, signal?: AbortSignal) {
   const dir = await projectDir(params.dir, cwd);
+  // A sound named after its type ("whoosh", "impact-2") is the common way to
+  // leave `type` out; anything else fails here instead of inside Python.
+  if (params.kind === "sfx" && !params.type) {
+    params = { ...params, type: SFX_TYPES.find(type => typeof params.name === "string" && (params.name === type || params.name.startsWith(`${type}-`))) };
+    if (!params.type) throw new Error(`kind sfx needs type: one of ${SFX_TYPES.join(", ")} (name only sets the file name)`);
+  }
   const name = typeof params.name === "string" && /^[a-z0-9][a-z0-9-]{0,47}$/.test(params.name) ? params.name : params.kind === "music" ? "music" : `sfx-${params.type}`;
   const spec: any = { kind: params.kind, seed: params.seed ?? 7 };
   if (params.kind === "music") {

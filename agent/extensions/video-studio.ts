@@ -1,10 +1,10 @@
 /** Code-first video tools. Discovered on demand through tool_search; the
  * code-first-video skill owns the production workflow and review discipline. */
 import { Type } from "typebox";
-import { audioSynth, narrationTts, videoProject, videoQa, videoRender } from "./lib/video-studio.ts";
+import { audioSynth, narrationTts, SFX_TYPES, videoProject, videoQa, videoRender } from "./lib/video-studio.ts";
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
-const choices = (values: string[]) => Type.Union(values.map((value) => Type.Literal(value)));
+const choices = (values: string[], description?: string) => Type.Union(values.map((value) => Type.Literal(value)), description ? { description } : {});
 
 export default function videoStudio(pi: any) {
   function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void) => Promise<any>, deadlineMs: number) {
@@ -42,6 +42,6 @@ export default function videoStudio(pi: any) {
       progression: Type.Optional(Type.Array(Type.String({ pattern: "^(?:[iI]{1,3}|[iI]?[vV]|[vV][iI]{1,2})$" }), { minItems: 1, maxItems: 16 })), barsPerChord: Type.Optional(Type.Number({ minimum: 0.5, maximum: 8 })),
       layers: Type.Optional(Type.Object({ pad: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), bass: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), pulse: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), bell: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), drums: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })) })),
       intensity: Type.Optional(Type.Array(Type.Array(Type.Number({ minimum: 0, maximum: 1800 }), { minItems: 2, maxItems: 2 }), { maxItems: 64 })),
-      type: Type.Optional(choices(["whoosh", "riser", "downlifter", "impact", "tick", "pop", "chime"])), pitch: Type.Optional(Type.Number({ minimum: 0.25, maximum: 4 })) }),
+      type: Type.Optional(choices(SFX_TYPES, "sfx sound; required for kind sfx")), pitch: Type.Optional(Type.Number({ minimum: 0.25, maximum: 4 })) }),
     audioSynth, 360_000);
 }

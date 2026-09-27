@@ -1,12 +1,12 @@
 import React, { useLayoutEffect, useRef } from "react";
-import { useCurrentFrame, useVideoConfig } from "remotion";
-import { rng } from "../theme";
+import { useCurrentFrame } from "remotion";
+import { rng, useCanvas } from "../theme";
 
 /** Quiet procedural depth: a slow dot lattice with parallax drift. Keep it
  * below ~8% contrast so it never competes with the subject. */
 export const Backdrop: React.FC<{ seed?: number; tint: string; density?: number }> = ({ seed = 7, tint, density = 1 }) => {
   const frame = useCurrentFrame();
-  const { width, height } = useVideoConfig();
+  const { width, height } = useCanvas();
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
     const ctx = ref.current?.getContext("2d");

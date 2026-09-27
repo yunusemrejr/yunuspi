@@ -135,6 +135,18 @@ test("real sandbox runs editable snapshots without host files, credentials, host
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test("system toolchains resolve through distribution alternatives", async t => {
+  if (!await available(t)) return;
+  // cc/c++ and the BLAS behind numpy are /etc/alternatives links on Debian
+  // systems; an empty /etc left make and numpy broken inside the sandbox.
+  const links = ["/usr/bin/cc", "/usr/lib/x86_64-linux-gnu/libblas.so.3"].filter(file => {
+    try { return fs.readlinkSync(file).startsWith("/etc/alternatives/"); } catch { return false; }
+  });
+  if (!links.length) { t.skip("host does not route toolchains through /etc/alternatives"); return; }
+  const result = await run({ command: `set -e\nfor f in ${links.join(" ")}; do test -e "$f"; done\ntest ! -e /etc/passwd` });
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+});
+
 test("nonzero exits, both output streams and output floods remain truthful and bounded", async t => {
   if (!await available(t)) return;
   const failure = await run({ command: "printf out; printf err >&2; exit 7" });

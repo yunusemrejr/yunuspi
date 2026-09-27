@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from "react";
-import { useCurrentFrame, useVideoConfig } from "remotion";
-import { rng } from "../theme";
+import { useCurrentFrame } from "remotion";
+import { rng, useCanvas } from "../theme";
 
 /** Seeded particles that drift, then converge onto `targets` (0..1 coords)
  * as `gather` goes 0→1. Use it to show many things becoming one structure. */
@@ -9,8 +9,8 @@ export const ParticleField: React.FC<{
   targets?: Array<[number, number]>; width?: number; height?: number; size?: number;
 }> = ({ count = 600, seed = 11, color, gather = 0, targets, width: w, height: h, size = 2.2 }) => {
   const frame = useCurrentFrame();
-  const video = useVideoConfig();
-  const width = w ?? video.width, height = h ?? video.height;
+  const canvas = useCanvas();
+  const width = w ?? canvas.width, height = h ?? canvas.height;
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
     const ctx = ref.current?.getContext("2d");

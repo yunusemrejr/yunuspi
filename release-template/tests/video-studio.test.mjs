@@ -128,6 +128,8 @@ test("video project writes reject escaping scene names and symbolic output paths
     fs.writeFileSync(specFile, JSON.stringify(spec));
     fs.symlinkSync(outside, path.join(project, "public"));
     await assert.rejects(studio.audioSynth({ dir: project, kind: "sfx", type: "tick" }, root), /Video output must stay inside the project/);
+    await assert.rejects(studio.audioSynth({ dir: project, kind: "sfx", name: "whoosh-in" }, root), /Video output must stay inside the project/, "a name that starts with a type supplies the type");
+    await assert.rejects(studio.audioSynth({ dir: project, kind: "sfx", name: "swoosh" }, root), /kind sfx needs type: one of whoosh/, "an unknown name fails before Python runs");
     await assert.rejects(studio.narrationTts({ action: "synthesize", dir: project }, root), /Video output must stay inside the project/);
     fs.unlinkSync(path.join(project, "public"));
     fs.symlinkSync(outside, path.join(project, "out"));

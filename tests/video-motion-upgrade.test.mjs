@@ -171,4 +171,15 @@ test("template wires vertical transitions, timing helpers and new primitives", (
   }
 });
 
+test("template lays out in 1080 units at any output size", () => {
+  const src = path.join(template, "src");
+  const main = fs.readFileSync(path.join(src, "Main.tsx"), "utf8");
+  assert.equal(main.match(/<Canvas>/g)?.length, 2, "the full video and single-scene compositions both render inside the canvas");
+  assert.match(fs.readFileSync(path.join(src, "theme.tsx"), "utf8"), /Math\.min\(width, height\) \/ 1080/);
+  for (const dir of ["primitives", "scenes"]) for (const file of fs.readdirSync(path.join(src, dir))) {
+    const source = fs.readFileSync(path.join(src, dir, file), "utf8");
+    assert.doesNotMatch(source, /\{[^}]*\b(width|height)\b[^}]*\} = useVideoConfig\(\)|video\.(width|height)/, `${file} sizes from useCanvas, not the output resolution`);
+  }
+});
+
 console.log("PASS video-motion-upgrade: timing, captions, lexicon, drums, score, hooks and primitives");

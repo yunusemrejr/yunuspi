@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.13.5 — 2026-09-28
+
+**Jev/Kev review triage now defers routine reviews.** Before each Watchmaker or Observer review, a cheap Jev/Kev call (about $0.0001) asks whether anything new needs attention. In the last five days it ran 368 times for the Watchmaker and deferred nothing, while 440 of about 740 paid Watchmaker reviews returned no advice. Probing the live judge showed it separates the cases well. Routine progress scored worthwhile about 0.2 and routine about 0.75. Time sinks, repeated rereads, stalls and scope drift scored worthwhile 0.33 or more and routine 0.45 or less. The generic 0.2/0.8 acceptance bars sat outside that range. Admission now has its own bars: it defers when worthwhile is at most 0.3 and routine at least 0.7. A deferral postpones only one review, and the next review is always a full one. Tool errors, Guardian interventions and completion claims still bypass triage entirely.
+
+**Sandbox toolchains work.** `sandbox_run` mounted an empty `/etc`, so every Debian alternatives link was left dangling. `cc` and `c++`, which `make` uses by default, were missing, and numpy failed to import because its BLAS and LAPACK libraries are alternatives links. `/etc/alternatives` (package symlinks only) and `/etc/fonts` are now bound read-only. Everything else under `/etc`, including `passwd`, stays absent. Verified in the sandbox: a C build through `make`, a raw x86-64 assembly program, and numpy 2.3 linear algebra. A live test covers it and skips on hosts that do not use alternatives.
+
+**Post-edit code-noise check no longer drops findings under load.** The WASM AST scan that flags restated-return comments and undocumented empty catches had a 20 ms clock cap. When the CPU was busy with builds or tests, it truncated even a ten-line file and returned no findings. The 20,000-node cap already bounds the work, so the clock is now a 100 ms backstop. Under CPU stress the old cap missed findings in 2 of 6 runs; the new one missed none in 6.
+
+**SEO audit in `web_probe`.** `seo: true` reads up to 1 MiB of the page, still behind the SSRF-guarded fetch, and returns structured signals. These are:
+- title and description with their true lengths;
+- canonical, meta robots and `X-Robots-Tag`;
+- `lang` and hreflang;
+- Open Graph and Twitter cards;
+- JSON-LD types, including `@graph` and invalid blocks;
+- h1 and heading order;
+- images missing alt text;
+- robots.txt, matched with RFC 9309 longest-match rules, plus its sitemaps.
+
+Findings flag problems such as length issues, a missing or foreign canonical, `noindex`, h1 count, skipped heading levels, a missing viewport or lang, and a missing `og:image`. The h1 checks are skipped on a truncated page instead of reporting 0. An empty `href` counts as absent rather than resolving to the page itself. A robots.txt 4xx means allowed, and a 5xx means disallowed with a note. Without `seo`, the probe makes the same single 64 KiB request as before. The search-discoverability skill now starts from this tool.
+
+**Video template scales to any output size.** The Remotion template laid out in pixels from `useVideoConfig()`. At 1280x720, a caption covered a diagram label and a particle network ran edge to edge. Now layout uses `useCanvas()` units, where the short side is always 1080, and one `Canvas` wrapper scales scenes, captions and narration. Music and effects audio stay outside it. The skill documents the rule, and a test keeps primitives and scenes from reading raw output dimensions.
+
+**`audio_synth` sound effects.** `kind: "sfx"` without a `type` used to fail inside Python. A name such as `whoosh` or `impact-2` now implies the type. Any other name fails at once and lists the valid types. The schema offers the types as an enum.
+
+**Smaller todo schema.** The batch `operations` items no longer repeat every field description from the top-level fields. That cuts characters from every request that carries the todo tool.
+
 ## 0.13.4 — 2026-09-28
 
 **Kompress preprocessor on demand.** The Kompress paragraph selector (`pi-mini-preprocessor.service`) was still enabled at boot and kept its ONNX model resident with no session running. It now runs under the same owner-record guard as the local model. A session's client starts it when it loads, so the warmup finishes before the first large tool result, and again after a failed request. The guard stops it 90 seconds after the last live YunusPi process, so one session exiting never stops it under another. A request that timed out against a busy service does not trigger a restart. `ensureLocalServices` now throttles per unit.

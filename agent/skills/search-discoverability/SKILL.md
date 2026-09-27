@@ -10,7 +10,7 @@ Use for indexable websites, metadata audits and content discovery. Ranking and c
 ## Working method
 
 - Establish canonical host, locales, public/private routes and the intended audience.
-- Inspect HTTP status, rendered content, crawl controls and links before tweaking keywords.
+- Inspect HTTP status, rendered content, crawl controls and links before tweaking keywords. `web_probe` with `seo:true` measures a public URL in one call: title and description length, canonical, robots meta and X-Robots-Tag, hreflang, Open Graph, JSON-LD validity and types, h1 and heading outline, image alt, and the robots.txt verdict with sitemaps. Its findings are checks to fix, not ranking predictions. For a local build, read the built HTML and robots.txt directly.
 - Make titles, headings, descriptions and structured data describe the actual page.
 - Validate representative pages and measure indexed coverage and useful visits over time.
 

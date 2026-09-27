@@ -182,6 +182,12 @@ def worker(payload):
             args += ['--ro-bind', payload['nodeBinary'], '/runtime/node']
         if os.path.isfile('/etc/ld.so.cache'):
             args += ['--ro-bind', '/etc/ld.so.cache', '/etc/ld.so.cache']
+        # Package symlinks and font configuration only. Without alternatives,
+        # cc/c++ (make's default compiler) and the BLAS/LAPACK behind numpy
+        # dangle; without fonts, fontconfig renders nothing.
+        for directory in ('/etc/alternatives', '/etc/fonts'):
+            if os.path.isdir(directory):
+                args += ['--ro-bind', directory, directory]
         for directory in ('/workspace', '/tmp', '/home/sandbox'):
             args += ['--size', str(SCRATCH), '--tmpfs', directory]
         for entry in payload['files']:
